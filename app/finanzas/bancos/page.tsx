@@ -1,4 +1,3 @@
-export const dynamic = 'force-dynamic'
 "use client"
 
 import { Card, CardContent } from "@/components/ui/card"
@@ -35,4 +34,5 @@ export default function BancosPage() {
         </div>
     )
 }
+
 

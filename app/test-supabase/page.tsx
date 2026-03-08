@@ -1,5 +1,4 @@
-export const dynamic = 'force-dynamic'
-'use client';
+"use client";
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
@@ -83,4 +82,5 @@ export default function TestSupabasePage() {
         </div>
     );
 }
+
 
