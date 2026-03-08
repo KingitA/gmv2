@@ -7,7 +7,11 @@ import { updateSession } from '@/lib/supabase/middleware'
  * Redirige a /auth/login si el usuario no está autenticado.
  */
 export async function middleware(request: NextRequest) {
-    return await updateSession(request)
+    try {
+        return await updateSession(request)
+    } catch (e: any) {
+        return new Response(`Middleware Error: ${e.message}\nStack: ${e.stack}\nEnv Supabase: ${process.env.NEXT_PUBLIC_SUPABASE_URL}`, { status: 500 })
+    }
 }
 
 export const config = {
