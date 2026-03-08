@@ -1,0 +1,66 @@
+﻿node.exe : Fetching 
+deployment "gm-68b4dahs
+l-juancruzrossi072-9851
+s-projects.vercel.app" 
+in juancruzrossi072-985
+1s-projects
+En línea: 1 Carácter: 1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (Fetching depl   
+ oy...-9851s-projec    
+ts:String) [], Rem    
+oteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+> Fetched deployment "g
+m-68b4dahsl-juancruzros
+si072-9851s-projects.ve
+rcel.app" in juancruzro
+ssi072-9851s-projects 
+[427ms]
+
+  General
+
+    id		dpl_juu676oEGhZ
+HpXRQEjtgy4mwWDwj
+    name	gm
+    target	production
+    status	ÔùÅ Error
+    url		https://gm-68b
+4dahsl-juancruzrossi072
+-9851s-projects.vercel.
+app
+    created	Sun Mar 08 
+2026 17:10:33 GMT-0300 
+(hora est├índar de 
+Argentina) [3m ago]
+
+
+  Aliases
+
+    ÔòÂ https://gm-juan
+cruzrossi072-9851s-proj
+ects.vercel.app
+    ÔòÂ https://gm-juan
+cruzrossi072-9851-juanc
+ruzrossi072-9851s-proje
+cts.vercel.app
+    
+
+  Builds
+
+    ÔòÂ .        [0ms]
+    
+

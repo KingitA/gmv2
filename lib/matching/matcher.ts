@@ -3,12 +3,9 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { normalizeText, extractFeatures } from './normalizer';
 import { MatchCandidate, MatchResult, ImportItemRaw, MatchSignal } from './types';
 
-// Initialize clients (ensure env vars are set)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; // Use Service Role for matching engine to see all
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Initialize clients lazily to prevent Vercel build crashes
+const getSupabase = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+const getGenAI = () => new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy');
 
 export class MatchingEngine {
 
@@ -88,7 +85,7 @@ export class MatchingEngine {
         if (item.code) {
             // ... existing logic ...
             // (We assume DB query handles strings fine, Supabase client serializes correctly)
-            const { data } = await supabase
+            const { data } = await getSupabase()
                 .from('articulos_proveedores')
                 .select(`
                   articulo_id,
@@ -114,7 +111,7 @@ export class MatchingEngine {
 
         // 2. Check by EAN (Global check, ignoring provider)
         if (item.ean) {
-            const { data } = await supabase
+            const { data } = await getSupabase()
                 .from('articulos')
                 .select('id, descripcion, codigo_interno')
                 .eq('codigo_barras', item.ean)
@@ -135,7 +132,7 @@ export class MatchingEngine {
 
         // 3. Check by Normalized Description (Mapped previously)
         if (normDesc) {
-            const { data } = await supabase
+            const { data } = await getSupabase()
                 .from('articulos_proveedores')
                 .select(`
                   articulo_id,
@@ -167,7 +164,7 @@ export class MatchingEngine {
             const str = String(text || ""); // Force string
             if (!str.trim()) return [];
 
-            const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
+            const model = getGenAI().getGenerativeModel({ model: "text-embedding-004" });
             const result = await model.embedContent(str.replace(/\n/g, " "));
             return result.embedding.values;
         } catch (e) {
@@ -192,7 +189,7 @@ export class MatchingEngine {
         // For now, I'll assume we can't easily add the RPC function from here without another migration step.
         // I will write the code assuming 'match_articulos' exists, and I will ADD A MIGRATION STEP shortly to create it.
 
-        const { data: candidates, error } = await supabase.rpc('match_articulos', {
+        const { data: candidates, error } = await getSupabase().rpc('match_articulos', {
             query_embedding: embedding,
             match_threshold: 0.5, // Pre-filter
             match_count: 10

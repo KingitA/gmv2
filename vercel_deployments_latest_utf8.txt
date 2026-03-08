@@ -1,0 +1,147 @@
+﻿node.exe : Fetching 
+deployments in juancruz
+rossi072-9851s-projects
+En línea: 1 Carácter: 1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (Fetching depl   
+ oy...-9851s-projec    
+ts:String) [], Rem    
+oteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+> Deployments for juanc
+ruzrossi072-9851s-proje
+cts/gm [266ms]
+
+  Age     Project      
+                       
+   Deployment          
+                       
+                       
+  Status      
+Environment     
+Duration     Username  
+                
+  2m      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-68b4dahsl
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      1m     
+      
+juancruzrossi072-9851  
+   
+  34m     juancruzrossi
+072-9851s-projects/gm  
+   https://gm-2n3v1cy2z
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      1m     
+      
+juancruzrossi072-9851  
+   
+  2d      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-4n47lj0nc
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      1m     
+      
+juancruzrossi072-9851  
+   
+  2d      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-nxa0wgtyu
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      1m     
+      
+juancruzrossi072-9851  
+   
+https://gm-68b4dahsl-juancruzrossi072-9851s-projects.vercel.app
+https://gm-2n3v1cy2z-juancruzrossi072-9851s-projects.vercel.app
+https://gm-4n47lj0nc-juancruzrossi072-9851s-projects.vercel.app
+https://gm-nxa0wgtyu-juancruzrossi072-9851s-projects.vercel.app
+https://gm-f3di4rtd6-juancruzrossi072-9851s-projects.vercel.app
+https://gm-gsefhr0mg-juancruzrossi072-9851s-projects.vercel.app
+https://gm-b8qdljtn0-juancruzrossi072-9851s-projects.vercel.app
+https://gm-gt56z0y55-juancruzrossi072-9851s-projects.vercel.app
+https://gm-1qiwore0v-juancruzrossi072-9851s-projects.vercel.app
+  2d      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-f3di4rtd6
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      1m     
+      
+juancruzrossi072-9851  
+   
+  2d      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-gsefhr0mg
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      1m     
+      
+juancruzrossi072-9851  
+   
+  2d      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-b8qdljtn0
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      1m     
+      
+juancruzrossi072-9851  
+   
+  2d      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-gt56z0y55
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      2m     
+      
+juancruzrossi072-9851  
+   
+  2d      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-1qiwore0v
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      2m     
+      
+juancruzrossi072-9851  
+   
+  2d      juancruzrossi
+072-9851s-projects/gm  
+   https://gm-q86zmynid
+-juancruzrossi072-9851s
+-projects.vercel.app   
+  ÔùÅ Error     
+Production      2m     
+      
+juancruzrossi072-9851  
+   
+
+https://gm-q86zmynid-juancruzrossi072-9851s-projects.vercel.app
