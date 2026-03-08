@@ -171,7 +171,7 @@ export default async function HomePage() {
                     <DollarSign className="h-5 w-5 text-amber-600" />
                   </div>
                   <div>
-                    <CardTitle className="text-sm font-semibold">$PRECIOS</CardTitle>
+                    <CardTitle className="text-sm font-semibold">PRECIOS</CardTitle>
                     <CardDescription className="text-xs">Consultar precios</CardDescription>
                   </div>
                 </div>
