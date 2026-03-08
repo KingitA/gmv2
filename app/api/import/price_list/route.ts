@@ -5,13 +5,9 @@ import { MatchingEngine } from '@/lib/matching/matcher';
 import { ImportItemRaw } from '@/lib/matching/types';
 import { requireAuth } from '@/lib/auth'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-const engine = new MatchingEngine();
-
 export async function POST(req: NextRequest) {
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const engine = new MatchingEngine();
     const auth = await requireAuth()
     if (auth.error) return auth.error
     try {
