@@ -63,7 +63,7 @@ export default async function HomePage() {
     <div className="container mx-auto px-6 py-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-neutral-900 mb-2">PANEL DE CONTROL</h1>
-        <p className="text-neutral-600">Gestiona tu inventario, compras y ventas desde un solo lugar</p>
+        <p className="text-neutral-600">Tu inventario, compras y ventas desde un solo lugar</p>
       </div>
 
       {/* Tarjetas principales: Proveedores, Clientes, Artículos, Tablas */}
