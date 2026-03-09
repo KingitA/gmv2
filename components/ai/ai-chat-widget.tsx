@@ -601,20 +601,29 @@ export function AiChatWidget() {
                                         Gmail
                                     </h4>
                                     {gmailStatus && gmailStatus.connectedAccounts.length > 0 ? (
-                                        <div className="bg-green-50 border border-green-200 rounded-xl p-3">
-                                            <div className="flex items-center gap-2 text-green-700 text-sm font-medium">
-                                                <Mail className="h-4 w-4" />
-                                                Conectado
+                                        <div className="space-y-2">
+                                            <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                                                <div className="flex items-center gap-2 text-green-700 text-sm font-medium">
+                                                    <Mail className="h-4 w-4" />
+                                                    Conectado
+                                                </div>
+                                                {gmailStatus.connectedAccounts.map((acc) => (
+                                                    <p key={acc} className="text-xs text-green-600 mt-1">
+                                                        📧 {acc}
+                                                    </p>
+                                                ))}
+                                                <div className="mt-2 flex gap-3 text-xs text-green-600">
+                                                    <span>{gmailStatus.totalEmailsSynced} emails</span>
+                                                    <span>{gmailStatus.totalEvents} eventos</span>
+                                                </div>
                                             </div>
-                                            {gmailStatus.connectedAccounts.map((acc) => (
-                                                <p key={acc} className="text-xs text-green-600 mt-1">
-                                                    📧 {acc}
-                                                </p>
-                                            ))}
-                                            <div className="mt-2 flex gap-3 text-xs text-green-600">
-                                                <span>{gmailStatus.totalEmailsSynced} emails</span>
-                                                <span>{gmailStatus.totalEvents} eventos</span>
-                                            </div>
+                                            <a
+                                                href="/api/auth/google"
+                                                className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 text-xs font-medium rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-200"
+                                            >
+                                                <Plus className="h-3 w-3" />
+                                                Agregar otro email
+                                            </a>
                                         </div>
                                     ) : (
                                         <div className="space-y-2">

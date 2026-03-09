@@ -439,12 +439,26 @@ export async function downloadDriveFileAndExport(
  */
 export async function getConnectedAccounts(userId?: string): Promise<string[]> {
     const db = getSupabaseAdmin()
-    let query = db.from('google_tokens').select('email')
-    if (userId) {
-        query = query.eq('user_id', userId)
-    }
-    const { data, error } = await query
 
+    if (userId) {
+        // Adopt orphaned tokens (created before user_id was added)
+        await db
+            .from('google_tokens')
+            .update({ user_id: userId })
+            .is('user_id', null)
+
+        // Fetch this user's accounts
+        const { data, error } = await db
+            .from('google_tokens')
+            .select('email')
+            .eq('user_id', userId)
+
+        if (error || !data) return []
+        return data.map((t) => t.email)
+    }
+
+    // No userId — return all (for webhooks)
+    const { data, error } = await db.from('google_tokens').select('email')
     if (error || !data) return []
     return data.map((t) => t.email)
 }
