@@ -1,0 +1,12 @@
+{
+    "crons": [
+        {
+            "path": "/api/cron/gmail-sync",
+            "schedule": "*/2 * * * *"
+        },
+        {
+            "path": "/api/cron/purge-deleted-orders",
+            "schedule": "0 3 * * *"
+        }
+    ]
+}
