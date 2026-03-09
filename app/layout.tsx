@@ -7,6 +7,7 @@ import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 import Link from "next/link"
 import { Package, Users, ShoppingBag } from "lucide-react"
+import { LogoutButton } from "@/components/auth/logout-button"
 import { AiChatWidget } from "@/components/ai/ai-chat-widget"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" })
@@ -59,6 +60,8 @@ export default function RootLayout({
                   <Package className="h-4 w-4" />
                   ARTÍCULOS
                 </Link>
+                <div className="w-px h-6 bg-neutral-200 mx-1" />
+                <LogoutButton />
               </div>
             </div>
           </div>
