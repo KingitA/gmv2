@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
         // Determine which email to sync
         let targetEmail = email
         if (!targetEmail) {
-            const accounts = await getConnectedAccounts()
+            const accounts = await getConnectedAccounts(auth.user.id)
             if (accounts.length === 0) {
                 return NextResponse.json(
                     { error: 'No hay cuentas de Gmail conectadas. Conectá tu cuenta primero.' },
@@ -88,7 +88,7 @@ export async function GET() {
     const auth = await requireAuth()
     if (auth.error) return auth.error
     try {
-        const accounts = await getConnectedAccounts()
+        const accounts = await getConnectedAccounts(auth.user.id)
         const { getSupabaseAdmin } = await import('@/lib/ai/supabase-admin')
         const db = getSupabaseAdmin()
 

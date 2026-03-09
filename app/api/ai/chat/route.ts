@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
         // Build ERP context from Supabase
         let dbContext = ''
         try {
-            dbContext = await buildERPContext(db, message)
+            dbContext = await buildERPContext(db, message, auth.user.id)
         } catch (err) {
             console.error('Error building ERP context:', err)
         }
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
  * Siempre incluye un estado básico del sistema, y agrega datos
  * específicos según lo que pregunte el usuario.
  */
-async function buildERPContext(db: ReturnType<typeof getSupabaseAdmin>, userMessage: string): Promise<string> {
+async function buildERPContext(db: ReturnType<typeof getSupabaseAdmin>, userMessage: string, userId: string): Promise<string> {
     const contextParts: string[] = []
     const lowerMsg = userMessage.toLowerCase()
 
@@ -127,6 +127,7 @@ async function buildERPContext(db: ReturnType<typeof getSupabaseAdmin>, userMess
         const { data: accounts } = await db
             .from('google_tokens')
             .select('email')
+            .eq('user_id', userId)
 
         const connectedEmails = accounts?.map((a) => a.email) || []
 

@@ -33,20 +33,23 @@ function getOAuth2Client() {
 
 /**
  * Genera la URL de autorización de Google OAuth
+ * @param userId - ID del usuario del sistema que está conectando Gmail
  */
-export function getAuthUrl(): string {
+export function getAuthUrl(userId: string): string {
     const oauth2Client = getOAuth2Client()
     return oauth2Client.generateAuthUrl({
         access_type: 'offline',
         scope: SCOPES,
         prompt: 'consent',
+        state: userId,
     })
 }
 
 /**
  * Intercambia el código de autorización por tokens y los guarda en Supabase
+ * @param userId - ID del usuario del sistema que está conectando Gmail
  */
-export async function exchangeCodeForTokens(code: string): Promise<{ email: string }> {
+export async function exchangeCodeForTokens(code: string, userId: string): Promise<{ email: string }> {
     const oauth2Client = getOAuth2Client()
 
     console.log('[Gmail OAuth] Exchanging code for tokens...')
@@ -82,10 +85,11 @@ export async function exchangeCodeForTokens(code: string): Promise<{ email: stri
         throw new Error('No se pudo obtener el email de la cuenta de Google')
     }
 
-    // Save tokens to Supabase
+    // Save tokens to Supabase — now with user_id
     const db = getSupabaseAdmin()
     const { error: dbError } = await db.from('google_tokens').upsert(
         {
+            user_id: userId,
             email,
             access_token: tokens.access_token!,
             refresh_token: tokens.refresh_token!,
@@ -94,7 +98,7 @@ export async function exchangeCodeForTokens(code: string): Promise<{ email: stri
             scopes: SCOPES,
             updated_at: nowArgentina(),
         },
-        { onConflict: 'email' }
+        { onConflict: 'user_id,email' }
     )
 
     if (dbError) {
@@ -102,7 +106,7 @@ export async function exchangeCodeForTokens(code: string): Promise<{ email: stri
         throw new Error('Error guardando tokens en la base de datos')
     }
 
-    console.log(`[Gmail OAuth] ✅ Conexión completa para: ${email}`)
+    console.log(`[Gmail OAuth] ✅ Conexión completa para: ${email} (usuario: ${userId})`)
     return { email }
 }
 
@@ -430,13 +434,16 @@ export async function downloadDriveFileAndExport(
 }
 
 /**
- * Verifica si hay una cuenta de Gmail conectada
+ * Verifica si hay cuentas de Gmail conectadas para un usuario
+ * @param userId - ID del usuario del sistema (si no se pasa, devuelve todas — backward compat para webhooks)
  */
-export async function getConnectedAccounts(): Promise<string[]> {
+export async function getConnectedAccounts(userId?: string): Promise<string[]> {
     const db = getSupabaseAdmin()
-    const { data, error } = await db
-        .from('google_tokens')
-        .select('email')
+    let query = db.from('google_tokens').select('email')
+    if (userId) {
+        query = query.eq('user_id', userId)
+    }
+    const { data, error } = await query
 
     if (error || !data) return []
     return data.map((t) => t.email)

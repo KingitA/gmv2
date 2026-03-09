@@ -33,7 +33,7 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Rutas publicas que no requieren autenticacion
-  const publicRoutes = ["/auth/login", "/auth/sign-up", "/auth/error", "/auth/sign-up-success", "/auth/pendiente", "/"]
+  const publicRoutes = ["/auth/login", "/auth/sign-up", "/auth/error", "/auth/sign-up-success", "/auth/pendiente"]
   const isPublicRoute = publicRoutes.some((route) => request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(route + "/"))
 
   // Las rutas de API manejan su propia autenticación con requireAuth()

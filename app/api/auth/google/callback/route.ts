@@ -6,6 +6,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const code = searchParams.get('code')
     const error = searchParams.get('error')
+    const userId = searchParams.get('state') // user_id passed via OAuth state
 
     if (error) {
         console.error('Google OAuth error:', error)
@@ -20,12 +21,18 @@ export async function GET(request: NextRequest) {
         )
     }
 
+    if (!userId) {
+        console.error('Google OAuth callback: no user_id in state')
+        return NextResponse.redirect(
+            new URL('/?gmail_error=no_user', request.url)
+        )
+    }
+
     try {
-        const { email } = await exchangeCodeForTokens(code)
-        console.log(`Google OAuth completo para: ${email}`)
+        const { email } = await exchangeCodeForTokens(code, userId)
+        console.log(`Google OAuth completo para: ${email} (usuario: ${userId})`)
 
         // Set up Gmail Push Notifications (Pub/Sub) automatically
-        // This is fire-and-forget — if GMAIL_PUBSUB_TOPIC is not configured, it skips gracefully
         setupGmailWatch(email).catch(err => {
             console.error('[Gmail OAuth Callback] Error setting up watch:', err)
         })
