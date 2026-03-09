@@ -111,15 +111,20 @@ export async function exchangeCodeForTokens(code: string, userId: string): Promi
 }
 
 /**
- * Obtiene un cliente de Gmail autenticado para un email dado
+ * Obtiene un cliente de Gmail autenticado para un email dado.
+ * Usa .limit(1) en vez de .single() para manejar duplicados
+ * (tokens huérfanos sin user_id que coexisten con tokens vinculados).
  */
 async function getGmailClient(email: string): Promise<gmail_v1.Gmail> {
     const db = getSupabaseAdmin()
-    const { data: tokenData, error } = await db
+    const { data: rows, error } = await db
         .from('google_tokens')
         .select('*')
         .eq('email', email)
-        .single()
+        .order('user_id', { ascending: false, nullsFirst: false })
+        .limit(1)
+
+    const tokenData = rows?.[0]
 
     if (error || !tokenData) {
         throw new Error(`No hay tokens de Google para ${email}. Conectá tu cuenta primero.`)
@@ -145,7 +150,7 @@ async function getGmailClient(email: string): Promise<gmail_v1.Gmail> {
         await db
             .from('google_tokens')
             .update(updateData)
-            .eq('email', email)
+            .eq('id', tokenData.id)
     })
 
     return google.gmail({ version: 'v1', auth: oauth2Client })
@@ -441,10 +446,11 @@ export async function getConnectedAccounts(userId?: string): Promise<string[]> {
     const db = getSupabaseAdmin()
 
     if (userId) {
-        // Adopt orphaned tokens (created before user_id was added)
+        // Clean up orphaned tokens (created before user_id migration)
+        // These cause .single() failures when duplicate rows exist
         await db
             .from('google_tokens')
-            .update({ user_id: userId })
+            .delete()
             .is('user_id', null)
 
         // Fetch this user's accounts

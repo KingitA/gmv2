@@ -27,11 +27,14 @@ export async function GET() {
         const email = accounts[0]
 
         // Step 2: Check token exists and has refresh_token
-        const { data: token, error: tokenError } = await db
+        const { data: tokenRows, error: tokenError } = await db
             .from('google_tokens')
-            .select('email, user_id, access_token, refresh_token, expiry_date, updated_at')
+            .select('id, email, user_id, access_token, refresh_token, expiry_date, updated_at')
             .eq('email', email)
-            .single()
+            .order('user_id', { ascending: false, nullsFirst: false })
+            .limit(1)
+
+        const token = tokenRows?.[0]
 
         if (tokenError || !token) {
             steps.push({
