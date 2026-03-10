@@ -310,8 +310,33 @@ export async function processEmailAsInvoice(
     }
 
     if (!proveedorId) {
-        const errorMsg = `No se encontró el proveedor. Búsqueda: CUIT=${invoiceData.cuit_emisor || 'N/A'}, Razón Social=${invoiceData.razon_social_emisor || 'N/A'}, Subject="${emailData.subject || 'N/A'}", Email=${emailData.from || 'N/A'}`
+        const errorMsg = `No se encontró el proveedor. Búsqueda: CUIT=${invoiceData.cuit_emisor || 'N/A'}, Razón Social=${invoiceData.razon_social_emisor || 'N/A'}, Email=${emailData.from || 'N/A'}`
         console.log(`[InvoiceProcessor] ❌ ${errorMsg}`)
+
+        try {
+            // Create a general task in the agenda so the user manually loads this invoice
+            await db.from('ai_agenda_events').insert({
+                title: `Factura pendiente de ${invoiceData.razon_social_emisor || emailData.fromName || emailData.from}`,
+                description: `Se detectó una factura pero no se pudo identificar de qué proveedor es.\n\n` +
+                    `Monto: $${invoiceData.total || 'N/A'}\n` +
+                    `Comprobante: ${invoiceData.tipo_comprobante || ''} ${invoiceData.numero_comprobante || 'N/A'}\n` +
+                    `CUIT Extraído: ${invoiceData.cuit_emisor || 'N/A'}\n\n` +
+                    `Por favor, buscala en tu correo ("${emailData.subject}") y cargala manualmente.`,
+                event_type: 'tarea_general',
+                priority: 'alta',
+                status: 'pendiente',
+                source: 'gmail',
+                source_ref_id: savedEmailId,
+                metadata: {
+                    error: 'proveedor_not_found',
+                    invoiceData
+                }
+            })
+            console.log(`[InvoiceProcessor] 📝 Created agenda event for unmatched invoice.`)
+        } catch (agendaErr) {
+            console.error('[InvoiceProcessor] Failed to create agenda event for unmatched invoice', agendaErr)
+        }
+
         return {
             processed: true,
             comprobanteCreated: false,

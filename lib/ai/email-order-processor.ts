@@ -378,10 +378,10 @@ export async function processEmailAsOrder(
         if (clienteId) clienteFound = true
 
         // ── 4b. Decide: auto-create or send to review ────
-        // Auto-create if we have a client AND at least 1 matched article
+        // Auto-create if we have a client AND ALL articles are fully matched
         const matchedItems = parseResult.items.filter(i => i.matchedProduct)
         const unmatchedItems = parseResult.items.filter(i => !i.matchedProduct)
-        const canAutoCreate = clienteId && matchedItems.length > 0
+        const canAutoCreate = clienteId && matchedItems.length > 0 && unmatchedItems.length === 0
 
         console.log(`[EmailOrderProcessor] "${fileName}": ${matchedItems.length} matched, ${unmatchedItems.length} unmatched, clienteId=${clienteId || 'none'}, canAutoCreate=${canAutoCreate}`)
 
@@ -389,7 +389,7 @@ export async function processEmailAsOrder(
             try {
                 const pedidoId = await createOrderFromEmail(db, clienteId!, parseResult.items, emailData, fechaHoy)
                 pedidoIds.push(pedidoId)
-                console.log(`[EmailOrderProcessor] ✅ Auto-created order from "${fileName}": ${pedidoId} (${matchedItems.length} items${unmatchedItems.length > 0 ? `, ${unmatchedItems.length} not matched` : ''})`)
+                console.log(`[EmailOrderProcessor] ✅ Auto-created order from "${fileName}": ${pedidoId} (ALL ${matchedItems.length} items perfectly matched)`)
             } catch (err) {
                 const msg = err instanceof Error ? err.message : 'Error auto-creating'
                 console.error(`[EmailOrderProcessor] Error auto-creating from "${fileName}":`, msg)
@@ -405,8 +405,10 @@ export async function processEmailAsOrder(
         } else {
             if (!clienteId) {
                 console.log(`[EmailOrderProcessor] ⚠️ No client found — sending to review: "${fileName}"`)
+            } else if (unmatchedItems.length > 0) {
+                console.log(`[EmailOrderProcessor] ⚠️ ${unmatchedItems.length} articles NOT matched perfectly — sending to review: "${fileName}"`)
             } else {
-                console.log(`[EmailOrderProcessor] ⚠️ No articles matched — sending to review: "${fileName}"`)
+                console.log(`[EmailOrderProcessor] ⚠️ Sending to review: "${fileName}"`)
             }
             try {
                 const importId = await saveEmailToImports(db, emailData, clienteId, parseResult, fileName)

@@ -540,7 +540,7 @@ export async function renewWatchIfNeeded(email: string): Promise<boolean> {
     const now = new Date()
     const hoursRemaining = (expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60)
 
-    if (hoursRemaining < 24) {
+    if (hoursRemaining < 48) {
         console.log(`[Gmail Watch] Watch expiring in ${hoursRemaining.toFixed(1)}h — renewing...`)
         const result = await setupGmailWatch(email)
         return result !== null
