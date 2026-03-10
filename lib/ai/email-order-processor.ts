@@ -463,17 +463,31 @@ async function createOrderFromEmail(
     const matchedItems = items.filter(item => item.matchedProduct)
     const unmatchedItems = items.filter(item => !item.matchedProduct)
 
+    // Fetch authoritative prices from DB to avoid null fields and 0 prices from vector searches
+    const matchedIds = matchedItems.map(i => i.matchedProduct.id).filter(Boolean)
+    const { data: fullArticles } = await db
+        .from('articulos')
+        .select('id, precio_compra, ultimo_costo, precio_venta')
+        .in('id', matchedIds)
+
+    const articlesMap = new Map(fullArticles?.map(a => [a.id, a]) || [])
+
     const processedItems = matchedItems.map(item => {
         const p = item.matchedProduct
-        const itemSubtotal = item.quantity * (p.precio_compra || p.precio_venta || 0)
+        const dbArt = articlesMap.get(p.id) || {}
+
+        const actPrecioBase = dbArt.precio_compra ?? dbArt.precio_venta ?? p.precio_compra ?? p.precio_venta ?? 0
+        const actPrecioCosto = dbArt.ultimo_costo ?? dbArt.precio_compra ?? p.ultimo_costo ?? p.precio_compra ?? 0
+
+        const itemSubtotal = item.quantity * actPrecioBase
         subtotal += itemSubtotal
         return {
             producto_id: p.id,
             cantidad: item.quantity,
-            precio_base: p.precio_compra || p.precio_venta || 0,
-            precio_final: p.precio_compra || p.precio_venta || 0,
+            precio_base: actPrecioBase,
+            precio_final: actPrecioBase,
             subtotal: itemSubtotal,
-            precio_costo: p.ultimo_costo || p.precio_compra || 0,
+            precio_costo: actPrecioCosto,
         }
     })
 

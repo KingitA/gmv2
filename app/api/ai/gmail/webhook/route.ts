@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
             const urlSecret = request.nextUrl.searchParams.get('secret')
 
             if (authHeader !== `Bearer ${webhookSecret}` && urlSecret !== webhookSecret) {
-                console.warn('[Gmail Webhook] Unauthorized request — invalid secret')
+                console.warn('[Gmail Webhook] Unauthorized request — invalid secret. Ensure your Pub/Sub push endpoint URL ends with ?secret=YOUR_SECRET')
                 return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
             }
         }
