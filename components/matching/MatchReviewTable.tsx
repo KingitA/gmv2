@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { getSupabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import { CandidateCard } from './CandidateCard';
 import { ImportItemRaw, MatchCandidate } from '@/lib/matching/types';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ export function MatchReviewTable({ importId, providerId }: { importId: string, p
     const [items, setItems] = useState<ImportItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<'all' | 'pending' | 'high_confidence'>('pending');
-    const supabase = getSupabase();
+    const supabase = createClient();
 
     useEffect(() => {
         loadItems();

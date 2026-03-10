@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { getSupabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import { Loader2, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -19,7 +19,7 @@ export function ManualMatchDialog({ open, onOpenChange, onSelect, itemName, prov
     const [term, setTerm] = useState('');
     const [results, setResults] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
-    const supabase = getSupabase();
+    const supabase = createClient();
 
     useEffect(() => {
         if (open && itemName) {
