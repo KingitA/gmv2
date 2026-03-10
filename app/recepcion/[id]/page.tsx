@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,6 +16,7 @@ import { Separator } from "@/components/ui/separator"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 
 export default function RecepcionPage() {
+  const supabase = createClient()
   const params = useParams()
   const router = useRouter()
   const comprobanteId = params.id as string

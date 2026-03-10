@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 
 export default function CargarComprobantesPage() {
+  const supabase = createClient()
   const params = useParams()
   const router = useRouter()
   const ordenId = params.id as string

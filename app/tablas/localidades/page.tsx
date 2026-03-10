@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label"
 import { Plus, Pencil, Trash2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
-import { getSupabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface Localidad {
@@ -46,7 +46,7 @@ export default function LocalidadesPage() {
   }, [])
 
   async function loadLocalidades() {
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { data, error } = await supabase.from("localidades").select("*, zonas(nombre)").order("provincia, nombre")
 
     if (error) {
@@ -58,7 +58,7 @@ export default function LocalidadesPage() {
   }
 
   async function loadZonas() {
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { data, error } = await supabase.from("zonas").select("id, nombre").order("nombre")
 
     if (error) {
@@ -71,7 +71,7 @@ export default function LocalidadesPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const supabase = getSupabase()
+    const supabase = createClient()
 
     const dataToSave = {
       ...formData,
@@ -102,7 +102,7 @@ export default function LocalidadesPage() {
   async function handleDelete(id: string) {
     if (!confirm("¿Eliminar esta localidad?")) return
 
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { error } = await supabase.from("localidades").delete().eq("id", id)
 
     if (error) {

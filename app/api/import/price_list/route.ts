@@ -1,12 +1,12 @@
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { MatchingEngine } from '@/lib/matching/matcher';
 import { ImportItemRaw } from '@/lib/matching/types';
 import { requireAuth } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
-    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const supabase = createAdminClient();
     const engine = new MatchingEngine();
     const auth = await requireAuth()
     if (auth.error) return auth.error

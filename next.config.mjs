@@ -1,19 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   productionBrowserSourceMaps: false,
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
-    // INFO: Ignorando errores de TS para permitir el despliegue rápido
+    // TODO: Fase 0 - Activar validación de tipos una vez corregidos los errores
     ignoreBuildErrors: true,
   },
   images: {
     unoptimized: true,
   },
-  swcMinify: false,
   experimental: {
-    webpackBuildWorker: true,
     serverActions: {
       bodySizeLimit: '10mb',
     },
@@ -21,4 +16,3 @@ const nextConfig = {
 }
 
 export default nextConfig
-

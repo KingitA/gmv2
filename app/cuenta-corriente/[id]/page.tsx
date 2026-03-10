@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ArrowLeft, Plus, DollarSign, X } from "lucide-react"
 import Link from "next/link"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -53,6 +53,7 @@ interface PagoAnticipado {
 }
 
 export default function CuentaCorrientePage() {
+  const supabase = createClient()
   const params = useParams()
   const proveedorId = params.id as string
   const [proveedor, setProveedor] = useState<Proveedor | null>(null)

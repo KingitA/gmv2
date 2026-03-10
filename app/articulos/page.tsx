@@ -14,7 +14,7 @@ import { Plus, Pencil, ArrowLeft, Upload, Download, DollarSign, Search, Filter, 
 import Link from "next/link"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
-import { getSupabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import type { Articulo, Proveedor } from "@/lib/types"
 import * as XLSX from "xlsx"
 import { ArticuloProveedoresDialog } from "@/components/articulos/articulo-proveedores-dialog"
@@ -63,7 +63,7 @@ export default function ArticulosPage() {
   }, [paginaActual, busqueda, filtroProveedor, filtroRubro, filtroCategoria])
 
   async function loadProveedores() {
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { data, error } = await supabase.from("proveedores").select("*").eq("activo", true).order("nombre")
 
     if (error) {
@@ -76,7 +76,7 @@ export default function ArticulosPage() {
 
   async function loadArticulos() {
     setIsLoading(true)
-    const supabase = getSupabase()
+    const supabase = createClient()
 
     let query = supabase
       .from("articulos")
@@ -119,7 +119,7 @@ export default function ArticulosPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const supabase = getSupabase()
+    const supabase = createClient()
 
     const dataToSave = {
       ...formData,
@@ -156,7 +156,7 @@ export default function ArticulosPage() {
   async function handleDelete(id: string) {
     if (!confirm("¿Está seguro de eliminar este artículo?")) return
 
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { error } = await supabase.from("articulos").update({ activo: false }).eq("id", id)
 
     if (error) {
@@ -278,7 +278,7 @@ export default function ArticulosPage() {
         importTipo = "Actualización de Stock"
       }
 
-      const supabase = getSupabase()
+      const supabase = createClient()
 
       const proveedorCodigos = [...new Set(jsonData.map((row) => row.proveedor_codigo).filter(Boolean))]
       let proveedorMap: Record<string, string> = {}
@@ -508,7 +508,7 @@ export default function ArticulosPage() {
 
   async function loadHistorialImportaciones() {
     setIsLoadingHistorial(true)
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { data, error } = await supabase
       .from("importaciones_articulos")
       .select("*, proveedores:proveedor_id(id, nombre)")
@@ -538,7 +538,7 @@ export default function ArticulosPage() {
   // Load pending count on mount
   useEffect(() => {
     async function loadPendingCount() {
-      const supabase = getSupabase()
+      const supabase = createClient()
       const { count } = await supabase
         .from('importaciones_articulos')
         .select('*', { count: 'exact', head: true })

@@ -1,15 +1,38 @@
 // Sistema completo de cálculo de precios (Server Side)
-// Orquesta la obtención de datos y delega el cálculo matemático a `pricing-calc.ts`
+// NOTA: Este módulo está en desuso temporalmente (Fase 0).
+// Se va a reemplazar por el sistema de precios real en Fase 2.
 
 import { createClient } from "@/lib/supabase/server"
-import {
-  calcularPrecioVentaOffline,
-  calcularPrecioFinalOffline,
-} from "@/lib/pricing-calc"
 
-// Importar interfaces viejas y re-exportarlas o mapearlas para compatibilidad
-// Por simplicidad, re-definimos las interfaces del servidor aqui extendiendo o usando las de sync
-import { ClienteCalc, ArticuloCalc, ConfigCalc } from "@/lib/types/sync"
+// Tipos inline (antes estaban en tipos eliminados)
+export interface ClienteCalc {
+  nivel_puntaje: string | null
+  porcentaje_ajuste: number | null
+  exento_iva: boolean
+  retira_en_deposito?: boolean
+  zona_flete?: number
+}
+
+export interface ArticuloCalc {
+  precio_compra: number
+  descuento1: number
+  descuento2: number
+  descuento3: number
+  descuento4: number
+  porcentaje_ganancia: number
+  iva_compras: string
+  iva_ventas: string
+  categoria: string
+  tipo_descuento: string
+}
+
+export interface ConfigCalc {
+  porcentaje_gastos_operativos: number
+  iva_ventas_porcentaje: number
+  iva_mixto_porcentaje: number
+  comision_perfumeria: number
+  comision_bazar_limpieza: number
+}
 
 // Interfaces Legadas (Server Side Full Data)
 export interface ArticuloPrecio {

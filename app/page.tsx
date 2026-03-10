@@ -13,18 +13,12 @@ import {
   CreditCard,
   RotateCcw,
 } from "lucide-react"
-import { createClient } from "@supabase/supabase-js"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 
 // Función para obtener datos del resumen
 async function getResumenData() {
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.warn("Supabase credentials not found. Using mock data.")
-    const { mockDashboardData } = await import("@/lib/mock-data")
-    return mockDashboardData
-  }
-
-  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+  const supabase = createAdminClient()
 
   const fechaHoy = todayArgentina()
   const fecha7Dias = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]

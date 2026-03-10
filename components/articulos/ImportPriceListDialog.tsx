@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { AlertCircle, Loader2, Upload, ArrowRight, Search, Save, FileText } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { getSupabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { parsePriceList } from "@/lib/parsing/price_list_parser"
 
 interface ImportPriceListDialogProps {
@@ -124,7 +124,7 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
     const searchArticles = async (term: string) => {
         if (!term || term.length < 2) return
         setIsSearching(true)
-        const supabase = getSupabase()
+        const supabase = createClient()
         const { data } = await supabase
             .from("articulos")
             .select("id, descripcion, sku")

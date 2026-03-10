@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -319,6 +319,7 @@ function DetalleOrdenDialog({ orden, onClose }: { orden: OrdenCompra; onClose: (
 }
 
 export default function OrdenesCompraPage() {
+  const supabase = createClient()
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([])
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [searchTerm, setSearchTerm] = useState("")

@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -30,6 +30,7 @@ const TIPOS_COMPROBANTE = [
 ]
 
 export default function ComprobantesPage() {
+  const supabase = createClient()
   const [comprobantes, setComprobantes] = useState<any[]>([])
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([])
   const [proveedores, setProveedores] = useState<Proveedor[]>([])

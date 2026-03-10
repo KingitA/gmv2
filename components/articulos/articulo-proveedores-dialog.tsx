@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Trash2, Link as LinkIcon, AlertTriangle } from "lucide-react"
-import { getSupabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner" // Assuming you use sonner or similar for toasts
 
 interface ArticuloProveedoresDialogProps {
@@ -40,7 +40,7 @@ export function ArticuloProveedoresDialog({ articulo, trigger }: ArticuloProveed
 
     async function loadMappings() {
         setLoading(true)
-        const supabase = getSupabase()
+        const supabase = createClient()
 
         const { data, error } = await supabase
             .from("articulos_proveedores")
@@ -75,7 +75,7 @@ export function ArticuloProveedoresDialog({ articulo, trigger }: ArticuloProveed
     }
 
     async function updateMapping(proveedorId: string, updates: Partial<Mapping>) {
-        const supabase = getSupabase()
+        const supabase = createClient()
 
         // Prepare update object
         const dbUpdates: any = {}
@@ -99,7 +99,7 @@ export function ArticuloProveedoresDialog({ articulo, trigger }: ArticuloProveed
     async function deleteMapping(proveedorId: string) {
         if (!confirm("¿Desvincular este artículo del proveedor? El sistema dejará de reconocerlo automáticamente.")) return
 
-        const supabase = getSupabase()
+        const supabase = createClient()
         const { error } = await supabase
             .from("articulos_proveedores")
             .delete()

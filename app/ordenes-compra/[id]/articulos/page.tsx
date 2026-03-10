@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/alert-dialog"
 
 export default function CargarArticulosPage() {
+  const supabase = createClient()
   const params = useParams()
   const router = useRouter()
   const ordenId = params.id as string

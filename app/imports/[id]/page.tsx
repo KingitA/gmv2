@@ -1,15 +1,11 @@
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { MatchReviewTable } from '@/components/matching/MatchReviewTable';
 import { notFound } from 'next/navigation';
 
 export default async function ImportReviewPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
 
-    // Initialize server-side safe client
-    const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const supabase = createAdminClient();
 
     const { data: importHeader } = await supabase
         .from('imports')

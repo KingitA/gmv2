@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label"
 import { Plus, Pencil, Trash2, ArrowLeft, Upload, Download, ShoppingCart, FileText, Search } from "lucide-react"
 import Link from "next/link"
-import { getSupabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import type { Proveedor } from "@/lib/types"
 import * as XLSX from "xlsx"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -61,7 +61,7 @@ export default function ProveedoresPage() {
   }, [])
 
   async function loadProveedores() {
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { data, error } = await supabase.from("proveedores").select("*").eq("activo", true).order("nombre")
 
     if (error) {
@@ -74,7 +74,7 @@ export default function ProveedoresPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const supabase = getSupabase()
+    const supabase = createClient()
 
     if (editingProveedor) {
       const { error } = await supabase.from("proveedores").update(formData).eq("id", editingProveedor.id)
@@ -100,7 +100,7 @@ export default function ProveedoresPage() {
   async function handleDelete(id: string) {
     if (!confirm("¿Está seguro de eliminar este proveedor?")) return
 
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { error } = await supabase.from("proveedores").update({ activo: false }).eq("id", id)
 
     if (error) {
@@ -248,7 +248,7 @@ export default function ProveedoresPage() {
       const worksheet = workbook.Sheets[workbook.SheetNames[0]]
       const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
 
-      const supabase = getSupabase()
+      const supabase = createClient()
       const proveedoresData = jsonData.map((row) => ({
         nombre: row.nombre,
         sigla: row.sigla || null,

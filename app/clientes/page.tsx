@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label"
 import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search } from "lucide-react"
 import Link from "next/link"
-import { getSupabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface Cliente {
@@ -92,7 +92,7 @@ export default function ClientesPage() {
   }, [])
 
   async function loadClientes() {
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { data, error } = await supabase
       .from("clientes")
       .select("*, localidades(nombre, zonas(nombre))")
@@ -108,7 +108,7 @@ export default function ClientesPage() {
   }
 
   async function loadVendedores() {
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { data, error } = await supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre")
 
     if (error) {
@@ -120,7 +120,7 @@ export default function ClientesPage() {
   }
 
   async function loadLocalidades() {
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { data, error } = await supabase.from("localidades").select("*, zonas(nombre)").order("provincia, nombre")
 
     if (error) {
@@ -133,7 +133,7 @@ export default function ClientesPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const supabase = getSupabase()
+    const supabase = createClient()
 
     const dataToSave = {
       ...formData,
@@ -202,7 +202,7 @@ export default function ClientesPage() {
   async function handleDelete(id: string) {
     if (!confirm("¿Está seguro de eliminar este cliente?")) return
 
-    const supabase = getSupabase()
+    const supabase = createClient()
     const { error } = await supabase.from("clientes").update({ activo: false }).eq("id", id)
 
     if (error) {

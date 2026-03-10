@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useParams } from 'next/navigation'
-import { createBrowserClient } from "@/lib/supabase-browser"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -52,7 +52,7 @@ export default function ViajeDetallePage() {
     total: 0
   })
 
-  const supabase = createBrowserClient()
+  const supabase = createClient()
 
   useEffect(() => {
     loadViajeDetalle()

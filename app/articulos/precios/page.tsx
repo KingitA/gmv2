@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,6 +13,7 @@ import type { Articulo, Proveedor } from "@/lib/types"
 import { ImportPriceListDialog } from "@/components/articulos/ImportPriceListDialog"
 
 export default function PreciosArticulosPage() {
+  const supabase = createClient()
   const [articulos, setArticulos] = useState<Articulo[]>([])
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [searchTerm, setSearchTerm] = useState("")
