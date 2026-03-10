@@ -460,11 +460,16 @@ async function createOrderFromEmail(
 
     // 3. Process items and totals
     let subtotal = 0
-    const matchedItems = items.filter(item => item.matchedProduct)
-    const unmatchedItems = items.filter(item => !item.matchedProduct)
+    const matchedItems = items.filter(item => item.matchedProduct && item.matchedProduct.id)
+    const unmatchedItems = items.filter(item => !item.matchedProduct || !item.matchedProduct.id)
+
+    if (matchedItems.length === 0) {
+        throw new Error(`No hay artículos válidos — ${unmatchedItems.length} artículo(s) no pudieron ser identificados en la base de datos`)
+    }
 
     // Fetch authoritative prices from DB to avoid null fields and 0 prices from vector searches
-    const matchedIds = matchedItems.map(i => i.matchedProduct.id).filter(Boolean)
+    const matchedIds = matchedItems.map(i => i.matchedProduct.id)
+    console.log(`[createOrderFromEmail] Fetching prices for ${matchedIds.length} matched articles:`, matchedIds)
     const { data: fullArticles } = await db
         .from('articulos')
         .select('id, precio_compra, ultimo_costo, precio_venta')

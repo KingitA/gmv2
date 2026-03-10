@@ -503,6 +503,13 @@ async function processMatches(parsedData: any): Promise<ParseResult> {
                 console.error(`Error matching item '${item.description}':`, e.message || e)
             }
 
+            // Log match result for debugging
+            if (match) {
+                console.log(`[processMatches] ✅ "${originalTextForFrontend}" → matched to id=${match.id}, desc="${match.descripcion || match.sku || '?'}", confidence=${confidence}`)
+            } else {
+                console.log(`[processMatches] ❌ "${originalTextForFrontend}" → NO MATCH FOUND`)
+            }
+
             return {
                 originalText: originalTextForFrontend,
                 quantity: parseFloat(item.quantity) || 0,

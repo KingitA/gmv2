@@ -93,8 +93,8 @@ export async function searchProductsByVector(query: string, matchThreshold = 0.3
         const embedding = await generateEmbedding(query)
         const supabase = createAdminClient()
 
-        // Call RPC - ensure match_documents expects vector(3072)
-        const { data: products, error } = await supabase.rpc("match_documents", {
+        // Call RPC — function name is match_articulos (768 dimensions, Gemini embeddings)
+        const { data: products, error } = await supabase.rpc("match_articulos", {
             query_embedding: embedding,
             match_threshold: matchThreshold,
             match_count: matchCount,
