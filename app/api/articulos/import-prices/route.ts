@@ -19,13 +19,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "File is required" }, { status: 400 });
         }
 
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!,
-            {
-                auth: { persistSession: false, autoRefreshToken: false },
-            }
-        );
+        const supabase = createAdminClient();
 
         let items: any[] = [];
         let metadata: any = {};

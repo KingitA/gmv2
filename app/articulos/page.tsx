@@ -267,6 +267,7 @@ export default function ArticulosPage() {
         porcentaje_ganancia?: number
         iva_compras?: "factura" | "adquisicion_stock" | "mixto"
         iva_ventas?: "factura" | "presupuesto"
+        orden_deposito?: number
       }>
 
       // Determine what columns came in the file
@@ -340,6 +341,9 @@ export default function ArticulosPage() {
           }
           if (row.iva_ventas !== undefined && row.iva_ventas !== null) {
             articulo.iva_ventas = row.iva_ventas
+          }
+          if (row.orden_deposito !== undefined && row.orden_deposito !== null) {
+            articulo.orden_deposito = Number(row.orden_deposito)
           }
 
           return articulo
