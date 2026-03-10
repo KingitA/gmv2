@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 interface Cliente {
   id: string
+  codigo_cliente?: string | null
   nombre_razon_social: string
   direccion: string | null
   cuit: string | null
@@ -64,6 +65,7 @@ export default function ClientesPage() {
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [formData, setFormData] = useState({
+    codigo_cliente: "",
     nombre_razon_social: "",
     direccion: "",
     cuit: "",
@@ -214,6 +216,7 @@ export default function ClientesPage() {
 
   function resetForm() {
     setFormData({
+      codigo_cliente: "",
       nombre_razon_social: "",
       direccion: "",
       cuit: "",
@@ -238,6 +241,7 @@ export default function ClientesPage() {
   function openEditDialog(cliente: Cliente) {
     setEditingCliente(cliente)
     setFormData({
+      codigo_cliente: cliente.codigo_cliente || "",
       nombre_razon_social: cliente.nombre_razon_social,
       direccion: cliente.direccion || "",
       cuit: cliente.cuit || "",
@@ -269,10 +273,16 @@ export default function ClientesPage() {
   }
 
   const filteredClientes = clientes.filter(
-    (cliente) =>
-      cliente.nombre_razon_social.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      cliente.localidades?.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      cliente.cuit?.includes(searchTerm),
+    (cliente) => {
+      const searchLower = searchTerm.toLowerCase()
+      return (
+        cliente.nombre_razon_social.toLowerCase().includes(searchLower) ||
+        cliente.localidades?.nombre?.toLowerCase().includes(searchLower) ||
+        cliente.cuit?.includes(searchLower) ||
+        cliente.codigo_cliente?.toLowerCase().includes(searchLower) ||
+        cliente.direccion?.toLowerCase().includes(searchLower)
+      )
+    }
   )
 
   const selectedLocalidad = localidades.find((l) => l.id === formData.localidad_id)
@@ -428,7 +438,16 @@ export default function ClientesPage() {
                       <div className="space-y-4">
                         <h3 className="font-semibold text-lg">Datos Básicos</h3>
                         <div className="grid grid-cols-2 gap-4">
-                          <div className="col-span-2">
+                          <div>
+                            <Label htmlFor="codigo_cliente">Código de Cliente</Label>
+                            <Input
+                              id="codigo_cliente"
+                              value={formData.codigo_cliente}
+                              onChange={(e) => setFormData({ ...formData, codigo_cliente: e.target.value })}
+                              placeholder="Ej: CL-001"
+                            />
+                          </div>
+                          <div className="col-span-1">
                             <Label htmlFor="nombre_razon_social">Nombre / Razón Social *</Label>
                             <Input
                               id="nombre_razon_social"
@@ -685,6 +704,7 @@ export default function ClientesPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50">
+                    <TableHead className="font-semibold">Código</TableHead>
                     <TableHead className="font-semibold">Nombre</TableHead>
                     <TableHead className="font-semibold">Dirección</TableHead>
                     <TableHead className="font-semibold">Localidad</TableHead>
@@ -704,6 +724,7 @@ export default function ClientesPage() {
                   ) : (
                     filteredClientes.map((cliente) => (
                       <TableRow key={cliente.id} className="hover:bg-muted/50 transition-colors">
+                        <TableCell className="font-medium">{cliente.codigo_cliente || "-"}</TableCell>
                         <TableCell className="font-medium">{cliente.nombre_razon_social}</TableCell>
                         <TableCell className="text-muted-foreground">{cliente.direccion || "-"}</TableCell>
                         <TableCell className="text-muted-foreground">{cliente.localidades?.nombre || "-"}</TableCell>

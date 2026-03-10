@@ -44,6 +44,7 @@ export interface Vendedor {
 // Clientes (Customers)
 export interface Cliente {
   id: string
+  codigo_cliente?: string | null
   nombre: string
   razon_social: string | null
   nombre_razon_social: string | null
