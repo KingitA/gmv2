@@ -14,7 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Search,
   Truck,
-  GripVertical,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   Loader2,
   FileText,
   MoreHorizontal,
@@ -138,7 +140,8 @@ export default function ClientesPedidosPage() {
   const [detallesPedido, setDetallesPedido] = useState<PedidoDetalle[]>([])
   const [viajeAsignado, setViajeAsignado] = useState<string>("")
   const [cargando, setCargando] = useState(true)
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+  const [sortColumn, setSortColumn] = useState<string>("numero_pedido")
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   const [guardandoCambios, setGuardandoCambios] = useState(false)
   const [generandoComprobante, setGenerandoComprobante] = useState<string | null>(null)
   const [comprobantesGenerados, setComprobantesGenerados] = useState<{ [pedidoId: string]: Comprobante[] }>({})
@@ -575,49 +578,41 @@ export default function ClientesPedidosPage() {
     return <Badge className={`${estadoConfig?.color} text-white`}>{estadoConfig?.label || estado}</Badge>
   }
 
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    setDraggedIndex(index)
-    e.dataTransfer.effectAllowed = "move"
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = "move"
-  }
-
-  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault()
-
-    if (draggedIndex === null || draggedIndex === dropIndex) {
-      setDraggedIndex(null)
-      return
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(prev => prev === "asc" ? "desc" : "asc")
+    } else {
+      setSortColumn(column)
+      setSortDirection("asc")
     }
+  }
 
-    const reordenados = [...pedidosFiltrados]
-    const [pedidoArrastrado] = reordenados.splice(draggedIndex, 1)
-    reordenados.splice(dropIndex, 0, pedidoArrastrado)
+  const getSortIcon = (column: string) => {
+    if (sortColumn !== column) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />
+    return sortDirection === "asc"
+      ? <ArrowUp className="h-3 w-3 ml-1" />
+      : <ArrowDown className="h-3 w-3 ml-1" />
+  }
 
-    try {
-      const updates = reordenados.map((pedido, index) => ({
-        id: pedido.id,
-        prioridad: index + 1,
-      }))
-
-      for (const update of updates) {
-        await supabase.from("pedidos").update({ prioridad: update.prioridad }).eq("id", update.id)
-      }
-
-      await cargarPedidos()
-    } catch (error) {
-      console.error("Error actualizando prioridades:", error)
+  const pedidosOrdenados = [...pedidosFiltrados].sort((a, b) => {
+    const dir = sortDirection === "asc" ? 1 : -1
+    switch (sortColumn) {
+      case "numero_pedido":
+        return (a.numero_pedido || "").localeCompare(b.numero_pedido || "") * dir
+      case "fecha":
+        return ((a.fecha || "").localeCompare(b.fecha || "")) * dir
+      case "cliente":
+        return ((a.clientes?.nombre_razon_social || "").localeCompare(b.clientes?.nombre_razon_social || "")) * dir
+      case "vendedor":
+        return ((a.vendedores?.nombre || "").localeCompare(b.vendedores?.nombre || "")) * dir
+      case "estado":
+        return (a.estado || "").localeCompare(b.estado || "") * dir
+      case "total":
+        return ((a.total || 0) - (b.total || 0)) * dir
+      default:
+        return 0
     }
-
-    setDraggedIndex(null)
-  }
-
-  const handleDragEnd = () => {
-    setDraggedIndex(null)
-  }
+  })
 
   const tieneComprobantes = (pedidoId: string) => {
     return comprobantesGenerados[pedidoId]?.length > 0
@@ -683,15 +678,27 @@ export default function ClientesPedidosPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[50px]">Orden</TableHead>
-                <TableHead>Nº Pedido</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Vendedor</TableHead>
-                <TableHead>Estado</TableHead>
+                <TableHead className="w-[40px]">#</TableHead>
+                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("numero_pedido")}>
+                  <div className="flex items-center">Nº Pedido{getSortIcon("numero_pedido")}</div>
+                </TableHead>
+                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("fecha")}>
+                  <div className="flex items-center">Fecha{getSortIcon("fecha")}</div>
+                </TableHead>
+                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("cliente")}>
+                  <div className="flex items-center">Cliente{getSortIcon("cliente")}</div>
+                </TableHead>
+                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("vendedor")}>
+                  <div className="flex items-center">Vendedor{getSortIcon("vendedor")}</div>
+                </TableHead>
+                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("estado")}>
+                  <div className="flex items-center">Estado{getSortIcon("estado")}</div>
+                </TableHead>
                 <TableHead>Viaje</TableHead>
                 <TableHead>Comprobantes</TableHead>
-                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("total")}>
+                  <div className="flex items-center justify-end">Total{getSortIcon("total")}</div>
+                </TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
@@ -709,21 +716,13 @@ export default function ClientesPedidosPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                pedidosFiltrados.map((pedido, index) => (
+                pedidosOrdenados.map((pedido, index) => (
                   <TableRow
                     key={pedido.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, index)}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, index)}
-                    onDragEnd={handleDragEnd}
-                    className={`cursor-move ${draggedIndex === index ? "opacity-50" : ""}`}
+                    className="hover:bg-muted/50"
                   >
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <GripVertical className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground font-medium">{index + 1}</span>
-                      </div>
+                      <span className="text-sm text-muted-foreground">{index + 1}</span>
                     </TableCell>
                     <TableCell className="font-medium">{pedido.numero_pedido}</TableCell>
                     <TableCell>{formatDateAR(pedido.fecha)}</TableCell>

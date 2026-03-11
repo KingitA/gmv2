@@ -93,6 +93,14 @@ export async function POST(req: NextRequest) {
             if (headers.includes("exento_iibb")) clienteData.exento_iibb = parseBool(getHeaderVal("exento_iibb"))
             if (headers.includes("exento_iva")) clienteData.exento_iva = parseBool(getHeaderVal("exento_iva"))
             if (headers.includes("percepcion_iibb")) clienteData.percepcion_iibb = parseFloatSafe(getHeaderVal("percepcion_iibb"))
+            if (headers.includes("vendedor_id")) clienteData.vendedor_id = getHeaderVal("vendedor_id")
+            if (headers.includes("localidad")) clienteData.localidad = getHeaderVal("localidad")
+            if (headers.includes("localidad_id")) clienteData.localidad_id = getHeaderVal("localidad_id")
+            if (headers.includes("observaciones")) clienteData.observaciones = getHeaderVal("observaciones")
+            if (headers.includes("dias_credito")) clienteData.dias_credito = getHeaderVal("dias_credito") ? parseInt(getHeaderVal("dias_credito")!) : null
+            if (headers.includes("limite_credito")) clienteData.limite_credito = parseFloatSafe(getHeaderVal("limite_credito")) || null
+            if (headers.includes("descuento_especial")) clienteData.descuento_especial = parseFloatSafe(getHeaderVal("descuento_especial")) || null
+            if (headers.includes("zona")) clienteData.zona = getHeaderVal("zona")
             if (headers.includes("puntaje")) {
                 clienteData.puntaje = puntaje
                 clienteData.nivel_puntaje = nivel_puntaje
