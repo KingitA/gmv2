@@ -30,10 +30,12 @@ export async function POST(req: NextRequest) {
 
         const headers = rawData[0] as string[]
 
-        // We expect the headers to be from our template
-        const nameIndex = headers.indexOf("nombre_razon_social")
-        if (nameIndex === -1 && headers.indexOf("codigo_cliente") === -1 && headers.indexOf("cuit") === -1) {
-            return NextResponse.json({ error: "Falta columna clave: 'codigo_cliente', 'cuit' o 'nombre_razon_social'." }, { status: 400 })
+        // We expect at least one identifier column
+        const hasName = headers.includes("nombre_razon_social") || headers.includes("nombre") || headers.includes("razon_social")
+        const hasCode = headers.includes("codigo_cliente")
+        const hasCuit = headers.includes("cuit")
+        if (!hasName && !hasCode && !hasCuit) {
+            return NextResponse.json({ error: "Falta columna clave: 'codigo_cliente', 'cuit', 'nombre' o 'nombre_razon_social'." }, { status: 400 })
         }
 
         const rows = rawData.slice(2)
@@ -52,7 +54,8 @@ export async function POST(req: NextRequest) {
             // Debe tener al menos uno de los tres identificadores
             const codigo_cliente = getHeaderVal("codigo_cliente")
             const cuit = getHeaderVal("cuit")
-            const nombre = getHeaderVal("nombre_razon_social")
+            // Aceptar "nombre_razon_social", "nombre" o "razon_social" como columna de nombre
+            const nombre = getHeaderVal("nombre_razon_social") || getHeaderVal("nombre") || getHeaderVal("razon_social")
 
             if (!codigo_cliente && !cuit && !nombre) {
                 continue
@@ -76,9 +79,12 @@ export async function POST(req: NextRequest) {
 
             const clienteData: any = {
                 codigo_cliente,
-                nombre_razon_social: nombre,
                 cuit,
-                // Solo insertaremos campos presentes en el Excel (Upsert style)
+            }
+            // Llenar AMBOS campos de nombre en la DB si tenemos el dato
+            if (nombre) {
+                clienteData.nombre_razon_social = nombre
+                clienteData.nombre = nombre
             }
 
             if (headers.includes("direccion")) clienteData.direccion = getHeaderVal("direccion")
@@ -170,15 +176,23 @@ export async function POST(req: NextRequest) {
             }
 
             if (existing) {
-                toUpdate.push({ ...existing, ...cliente }) // Mezclamos para no perder ID ni otros campos no presentes
+                // Asegurar que nombre siempre esté presente al actualizar
+                const updateData = { ...existing, ...cliente }
+                if (!updateData.nombre && updateData.nombre_razon_social) {
+                    updateData.nombre = updateData.nombre_razon_social
+                }
+                toUpdate.push(updateData)
             } else {
                 // Nuevo cliente: Aplicamos defaults
-                if (!cliente.nombre_razon_social) {
+                if (!cliente.nombre_razon_social && !cliente.nombre) {
                     // require nombre
                     continue
                 }
+                const nombreFinal = cliente.nombre_razon_social || cliente.nombre
                 const newCliente = {
                     ...cliente,
+                    nombre: nombreFinal,
+                    nombre_razon_social: nombreFinal,
                     condicion_iva: cliente.condicion_iva || "Consumidor Final",
                     metodo_facturacion: cliente.metodo_facturacion || "Factura",
                     condicion_pago: cliente.condicion_pago || "Efectivo",
