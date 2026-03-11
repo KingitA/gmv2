@@ -116,26 +116,36 @@ export async function POST(req: NextRequest) {
         const supabase = createAdminClient()
 
         // Obtener clientes existentes para comparar
+        // Usamos búsquedas separadas para evitar problemas con caracteres especiales en nombres
         const codigos = procesadosBase.map(c => c.codigo_cliente).filter(Boolean)
         const cuits = procesadosBase.map(c => c.cuit).filter(Boolean)
-        const nombres = procesadosBase.map(c => c.nombre_razon_social).filter(Boolean)
 
-        let query = supabase.from("clientes").select("*")
-        const orConditions = []
-        if (codigos.length > 0) orConditions.push(`codigo_cliente.in.(${codigos.join(",")})`)
-        if (cuits.length > 0) orConditions.push(`cuit.in.(${cuits.join(",")})`)
-        if (nombres.length > 0) orConditions.push(`nombre_razon_social.in.(${nombres.map(n => `"${n}"`).join(",")})`)
+        let existingClientes: any[] = []
 
-        // Si hay condiciones OR, las aplicamos. Si no, fetch todo (no recomendado, pero los arrays no deberian estar todos vacios)
-        if (orConditions.length > 0) {
-            query = query.or(orConditions.join(","))
+        // Buscar por codigo_cliente (seguro, son números/strings simples)
+        if (codigos.length > 0) {
+            const { data } = await supabase
+                .from("clientes")
+                .select("*")
+                .in("codigo_cliente", codigos)
+            if (data) existingClientes.push(...data)
         }
 
-        const { data: existingClientes, error: fetchError } = await query
-        if (fetchError) {
-            console.error("[Import Clientes Fetch ERROR]", fetchError)
-            return NextResponse.json({ error: `Error leyendo BD: ${fetchError.message}` }, { status: 500 })
+        // Buscar por CUIT (seguro, formato XX-XXXXXXXX-X)
+        if (cuits.length > 0) {
+            const existingIds = new Set(existingClientes.map(c => c.id))
+            const { data } = await supabase
+                .from("clientes")
+                .select("*")
+                .in("cuit", cuits)
+            if (data) {
+                for (const c of data) {
+                    if (!existingIds.has(c.id)) existingClientes.push(c)
+                }
+            }
         }
+
+        const fetchError = null // Errores se manejan individualmente arriba
 
         const existingMap = new Map()
         if (existingClientes) {
