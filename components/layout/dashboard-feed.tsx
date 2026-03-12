@@ -70,7 +70,7 @@ export function DashboardFeed() {
             description: `${clienteNombre}`,
             status: p.estado === 'pendiente' ? 'pendiente' : 'procesado',
             time: p.created_at,
-            href: '/clientes-pedidos',
+            href: `/clientes-pedidos?pedido=${p.numero_pedido}`,
           })
         }
       }

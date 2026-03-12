@@ -107,6 +107,7 @@ export async function POST(req: NextRequest) {
             if (headers.includes("limite_credito")) clienteData.limite_credito = parseFloatSafe(getHeaderVal("limite_credito")) || null
             if (headers.includes("descuento_especial")) clienteData.descuento_especial = parseFloatSafe(getHeaderVal("descuento_especial")) || null
             if (headers.includes("zona")) clienteData.zona = getHeaderVal("zona")
+            if (headers.includes("condicion_entrega")) clienteData.condicion_entrega = getHeaderVal("condicion_entrega")
             if (headers.includes("puntaje")) {
                 clienteData.puntaje = puntaje
                 clienteData.nivel_puntaje = nivel_puntaje

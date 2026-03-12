@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { formatDateAR } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -150,6 +151,15 @@ export default function ClientesPedidosPage() {
   const [eliminando, setEliminando] = useState(false)
 
   const supabase = createClient()
+  const searchParams = useSearchParams()
+
+  // Si viene ?pedido=000055 desde el dashboard, auto-buscar ese pedido
+  useEffect(() => {
+    const pedidoParam = searchParams.get('pedido')
+    if (pedidoParam) {
+      setBusqueda(pedidoParam)
+    }
+  }, [searchParams])
 
   useEffect(() => {
     cargarPedidos()
