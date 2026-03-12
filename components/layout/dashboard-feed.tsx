@@ -7,10 +7,11 @@ import Link from 'next/link'
 
 type FeedItem = {
   id: string
-  type: 'pedido' | 'email' | 'pago' | 'alerta' | 'precio'
+  type: 'pedido' | 'email' | 'pago' | 'alerta' | 'precio' | 'spam' | 'factura'
   title: string
   description: string
-  status: 'pendiente' | 'procesado' | 'urgente' | 'revisar'
+  account?: string  // a qué email llegó
+  status: 'pendiente' | 'procesado' | 'urgente' | 'revisar' | 'spam'
   time: string
   href?: string
 }
@@ -20,6 +21,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }>
   procesado: { bg: 'bg-emerald-100', text: 'text-emerald-800', label: 'Procesado' },
   urgente: { bg: 'bg-red-100', text: 'text-red-800', label: 'Urgente' },
   revisar: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Revisar' },
+  spam: { bg: 'bg-neutral-200', text: 'text-neutral-500', label: 'Spam' },
 }
 
 const TYPE_ICONS: Record<string, { icon: string; bg: string }> = {
@@ -28,6 +30,21 @@ const TYPE_ICONS: Record<string, { icon: string; bg: string }> = {
   pago: { icon: '💳', bg: 'bg-emerald-50' },
   alerta: { icon: '⚠️', bg: 'bg-red-50' },
   precio: { icon: '💰', bg: 'bg-amber-50' },
+  spam: { icon: '🗑️', bg: 'bg-neutral-100' },
+  factura: { icon: '📄', bg: 'bg-orange-50' },
+}
+
+// Mapeo de clasificación de email → tipo de feed item
+const CLASSIFICATION_MAP: Record<string, { type: FeedItem['type']; label: string }> = {
+  pedido: { type: 'pedido', label: 'Pedido' },
+  orden_compra: { type: 'pedido', label: 'Orden de Compra' },
+  factura_proveedor: { type: 'factura', label: 'Factura' },
+  pago: { type: 'pago', label: 'Pago' },
+  cambio_precio: { type: 'precio', label: 'Cambio Precio' },
+  reclamo: { type: 'alerta', label: 'Reclamo' },
+  consulta: { type: 'email', label: 'Consulta' },
+  spam: { type: 'spam', label: 'Spam' },
+  otro: { type: 'email', label: 'Email' },
 }
 
 const TABS = [
@@ -36,6 +53,7 @@ const TABS = [
   { id: 'email', label: 'Emails' },
   { id: 'pago', label: 'Pagos' },
   { id: 'alerta', label: 'Alertas' },
+  { id: 'spam', label: 'Spam' },
 ]
 
 export function DashboardFeed() {
@@ -52,7 +70,7 @@ export function DashboardFeed() {
     const feedItems: FeedItem[] = []
 
     try {
-      // 1. Recent pedidos (last 20)
+      // 1. Recent pedidos
       const { data: pedidos } = await supabase
         .from('pedidos')
         .select('id, numero_pedido, fecha, estado, created_at, clientes(nombre_razon_social), observaciones')
@@ -67,7 +85,7 @@ export function DashboardFeed() {
             id: `ped-${p.id}`,
             type: 'pedido',
             title: `Pedido #${p.numero_pedido || '?'}${esAuto ? ' (automático)' : ''}`,
-            description: `${clienteNombre}`,
+            description: clienteNombre,
             status: p.estado === 'pendiente' ? 'pendiente' : 'procesado',
             time: p.created_at,
             href: `/clientes-pedidos?pedido=${p.numero_pedido}`,
@@ -75,29 +93,30 @@ export function DashboardFeed() {
         }
       }
 
-      // 2. Recent emails processed
+      // 2. Recent emails — traer to_email y classification
       const { data: emails } = await supabase
         .from('ai_emails')
-        .select('id, subject, from_name, classification, ai_summary, created_at, is_processed')
+        .select('id, subject, from_name, from_email, to_email, classification, ai_summary, created_at, is_processed')
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(25)
 
       if (emails) {
         for (const e of emails) {
-          const classLabel = e.classification === 'pedido' ? 'Pedido' :
-            e.classification === 'factura_proveedor' ? 'Factura' :
-            e.classification === 'pago' ? 'Pago' :
-            e.classification === 'cambio_precio' ? 'Cambio precio' :
-            e.classification === 'reclamo' ? 'Reclamo' :
-            e.classification || 'Email'
+          const classConfig = CLASSIFICATION_MAP[e.classification || ''] || CLASSIFICATION_MAP.otro
+          
+          // Extraer nombre corto del email destino (antes del @)
+          const accountShort = e.to_email
+            ? e.to_email.split('@')[0]
+            : null
 
           feedItems.push({
             id: `email-${e.id}`,
-            type: e.classification === 'reclamo' ? 'alerta' :
-                  e.classification === 'cambio_precio' ? 'precio' : 'email',
-            title: `${classLabel} — ${e.from_name || 'Desconocido'}`,
+            type: classConfig.type,
+            title: `${classConfig.label} — ${e.from_name || e.from_email || 'Desconocido'}`,
             description: e.ai_summary || e.subject || 'Sin asunto',
-            status: e.is_processed ? 'procesado' : 'revisar',
+            account: accountShort || undefined,
+            status: classConfig.type === 'spam' ? 'spam' :
+                    e.is_processed ? 'procesado' : 'revisar',
             time: e.created_at,
           })
         }
@@ -117,7 +136,7 @@ export function DashboardFeed() {
             id: `ev-${ev.id}`,
             type: ev.event_type?.includes('pago') ? 'pago' :
                   ev.event_type?.includes('reclamo') ? 'alerta' :
-                  ev.event_type?.includes('precio') ? 'precio' : 'pedido',
+                  ev.event_type?.includes('precio') ? 'precio' : 'email',
             title: ev.title,
             description: ev.description || '',
             status: ev.priority === 'urgente' ? 'urgente' :
@@ -136,7 +155,18 @@ export function DashboardFeed() {
     setLoading(false)
   }
 
-  const filtered = activeTab === 'todo' ? items : items.filter(i => i.type === activeTab)
+  // Filtrado:
+  // - "todo" muestra TODO excepto spam
+  // - "spam" muestra SOLO spam
+  // - otros tabs filtran por tipo Y excluyen spam
+  const filtered = activeTab === 'spam'
+    ? items.filter(i => i.type === 'spam')
+    : activeTab === 'todo'
+      ? items.filter(i => i.type !== 'spam')
+      : items.filter(i => i.type === activeTab && i.type !== 'spam')
+
+  // Contar spam para el badge
+  const spamCount = items.filter(i => i.type === 'spam').length
 
   return (
     <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
@@ -148,12 +178,17 @@ export function DashboardFeed() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors relative
                 ${activeTab === tab.id
-                  ? 'bg-neutral-100 text-neutral-900'
+                  ? tab.id === 'spam' ? 'bg-neutral-200 text-neutral-700' : 'bg-neutral-100 text-neutral-900'
                   : 'text-neutral-400 hover:text-neutral-600'}`}
             >
               {tab.label}
+              {tab.id === 'spam' && spamCount > 0 && (
+                <span className="ml-1 text-[9px] bg-neutral-400 text-white px-1.5 py-0.5 rounded-full font-bold">
+                  {spamCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -167,17 +202,18 @@ export function DashboardFeed() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-neutral-400">
-            No hay actividad reciente
+            {activeTab === 'spam' ? 'No hay spam' : 'No hay actividad reciente'}
           </div>
         ) : (
-          filtered.slice(0, 20).map(item => {
-            const typeConfig = TYPE_ICONS[item.type] || TYPE_ICONS.pedido
+          filtered.slice(0, 30).map(item => {
+            const typeConfig = TYPE_ICONS[item.type] || TYPE_ICONS.email
             const statusConfig = STATUS_STYLES[item.status] || STATUS_STYLES.pendiente
 
             const content = (
               <div
                 key={item.id}
-                className="flex gap-3 px-5 py-3 border-b border-neutral-50 hover:bg-neutral-50/50 transition-colors items-start"
+                className={`flex gap-3 px-5 py-3 border-b border-neutral-50 hover:bg-neutral-50/50 transition-colors items-start
+                  ${item.type === 'spam' ? 'opacity-60' : ''}`}
               >
                 <div className={`w-8 h-8 rounded-lg ${typeConfig.bg} flex items-center justify-center text-sm flex-shrink-0 mt-0.5`}>
                   {typeConfig.icon}
@@ -185,6 +221,11 @@ export function DashboardFeed() {
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-semibold leading-snug">{item.title}</div>
                   <div className="text-[12px] text-neutral-500 truncate">{item.description}</div>
+                  {item.account && (
+                    <div className="text-[10px] text-neutral-400 mt-0.5">
+                      📬 {item.account}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-col items-end flex-shrink-0">
                   <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${statusConfig.bg} ${statusConfig.text}`}>
