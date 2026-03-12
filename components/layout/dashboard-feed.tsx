@@ -10,7 +10,7 @@ type FeedItem = {
   type: 'pedido' | 'email' | 'pago' | 'alerta' | 'precio' | 'spam' | 'factura'
   title: string
   description: string
-  account?: string  // a qué email llegó
+  account?: string
   status: 'pendiente' | 'procesado' | 'urgente' | 'revisar' | 'spam'
   time: string
   href?: string
@@ -34,7 +34,6 @@ const TYPE_ICONS: Record<string, { icon: string; bg: string }> = {
   factura: { icon: '📄', bg: 'bg-orange-50' },
 }
 
-// Mapeo de clasificación de email → tipo de feed item
 const CLASSIFICATION_MAP: Record<string, { type: FeedItem['type']; label: string }> = {
   pedido: { type: 'pedido', label: 'Pedido' },
   orden_compra: { type: 'pedido', label: 'Orden de Compra' },
@@ -45,6 +44,48 @@ const CLASSIFICATION_MAP: Record<string, { type: FeedItem['type']; label: string
   consulta: { type: 'email', label: 'Consulta' },
   spam: { type: 'spam', label: 'Spam' },
   otro: { type: 'email', label: 'Email' },
+}
+
+// Determinar a dónde lleva cada tipo de email según clasificación
+function getEmailHref(classification: string | null, _metadata?: any): string | undefined {
+  switch (classification) {
+    case 'pedido':
+    case 'orden_compra':
+      return '/clientes-pedidos'
+    case 'factura_proveedor':
+      return '/comprobantes'
+    case 'pago':
+      return '/revision-pagos'
+    case 'cambio_precio':
+      return '/articulos/precios'
+    case 'reclamo':
+      return '/revision-devoluciones'
+    default:
+      return undefined
+  }
+}
+
+// Determinar href para eventos de agenda según su tipo y metadata
+function getEventHref(eventType: string | null, metadata: any): string | undefined {
+  if (!eventType) return undefined
+
+  // Si tiene pedido_ids, ir al pedido
+  if (metadata?.pedido_ids?.length > 0) {
+    return '/clientes-pedidos'
+  }
+  // Si necesita revisión de import
+  if (metadata?.needs_review || metadata?.import_id) {
+    return '/clientes-pedidos'
+  }
+
+  if (eventType.includes('pedido')) return '/clientes-pedidos'
+  if (eventType.includes('pago')) return '/revision-pagos'
+  if (eventType.includes('reclamo')) return '/revision-devoluciones'
+  if (eventType.includes('precio')) return '/articulos/precios'
+  if (eventType.includes('vencimiento')) return '/comprobantes'
+  if (eventType.includes('mercaderia')) return '/ordenes-compra'
+
+  return undefined
 }
 
 const TABS = [
@@ -61,9 +102,7 @@ export function DashboardFeed() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('todo')
 
-  useEffect(() => {
-    loadFeed()
-  }, [])
+  useEffect(() => { loadFeed() }, [])
 
   const loadFeed = async () => {
     const supabase = createClient()
@@ -93,7 +132,7 @@ export function DashboardFeed() {
         }
       }
 
-      // 2. Recent emails — traer to_email y classification
+      // 2. Recent emails — excluir spam de aquí para no duplicar
       const { data: emails } = await supabase
         .from('ai_emails')
         .select('id, subject, from_name, from_email, to_email, classification, ai_summary, created_at, is_processed')
@@ -103,11 +142,7 @@ export function DashboardFeed() {
       if (emails) {
         for (const e of emails) {
           const classConfig = CLASSIFICATION_MAP[e.classification || ''] || CLASSIFICATION_MAP.otro
-          
-          // Extraer nombre corto del email destino (antes del @)
-          const accountShort = e.to_email
-            ? e.to_email.split('@')[0]
-            : null
+          const accountShort = e.to_email ? e.to_email.split('@')[0] : null
 
           feedItems.push({
             id: `email-${e.id}`,
@@ -118,30 +153,35 @@ export function DashboardFeed() {
             status: classConfig.type === 'spam' ? 'spam' :
                     e.is_processed ? 'procesado' : 'revisar',
             time: e.created_at,
+            href: getEmailHref(e.classification),
           })
         }
       }
 
-      // 3. Recent agenda events
+      // 3. Recent agenda events — estos son los más accionables
       const { data: events } = await supabase
         .from('ai_agenda_events')
-        .select('id, title, description, event_type, priority, status, created_at')
+        .select('id, title, description, event_type, priority, status, metadata, created_at')
         .in('status', ['pendiente', 'en_progreso'])
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(15)
 
       if (events) {
         for (const ev of events) {
+          const meta = (ev.metadata || {}) as any
+
           feedItems.push({
             id: `ev-${ev.id}`,
             type: ev.event_type?.includes('pago') ? 'pago' :
                   ev.event_type?.includes('reclamo') ? 'alerta' :
-                  ev.event_type?.includes('precio') ? 'precio' : 'email',
+                  ev.event_type?.includes('precio') ? 'precio' :
+                  ev.event_type?.includes('pedido') ? 'pedido' : 'email',
             title: ev.title,
             description: ev.description || '',
             status: ev.priority === 'urgente' ? 'urgente' :
                     ev.priority === 'alta' ? 'revisar' : 'pendiente',
             time: ev.created_at,
+            href: getEventHref(ev.event_type, meta),
           })
         }
       }
@@ -149,28 +189,21 @@ export function DashboardFeed() {
       console.error('[DashboardFeed] Error loading feed:', err)
     }
 
-    // Sort by time descending
     feedItems.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
     setItems(feedItems)
     setLoading(false)
   }
 
-  // Filtrado:
-  // - "todo" muestra TODO excepto spam
-  // - "spam" muestra SOLO spam
-  // - otros tabs filtran por tipo Y excluyen spam
   const filtered = activeTab === 'spam'
     ? items.filter(i => i.type === 'spam')
     : activeTab === 'todo'
       ? items.filter(i => i.type !== 'spam')
       : items.filter(i => i.type === activeTab && i.type !== 'spam')
 
-  // Contar spam para el badge
   const spamCount = items.filter(i => i.type === 'spam').length
 
   return (
     <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
-      {/* Header with tabs */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
         <h3 className="font-bold text-sm">Actividad Reciente</h3>
         <div className="flex gap-1">
@@ -194,12 +227,9 @@ export function DashboardFeed() {
         </div>
       </div>
 
-      {/* Feed */}
       <div className="max-h-[520px] overflow-y-auto">
         {loading ? (
-          <div className="px-5 py-12 text-center text-sm text-neutral-400">
-            Cargando actividad...
-          </div>
+          <div className="px-5 py-12 text-center text-sm text-neutral-400">Cargando actividad...</div>
         ) : filtered.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-neutral-400">
             {activeTab === 'spam' ? 'No hay spam' : 'No hay actividad reciente'}
@@ -209,11 +239,11 @@ export function DashboardFeed() {
             const typeConfig = TYPE_ICONS[item.type] || TYPE_ICONS.email
             const statusConfig = STATUS_STYLES[item.status] || STATUS_STYLES.pendiente
 
-            const content = (
+            const inner = (
               <div
-                key={item.id}
                 className={`flex gap-3 px-5 py-3 border-b border-neutral-50 hover:bg-neutral-50/50 transition-colors items-start
-                  ${item.type === 'spam' ? 'opacity-60' : ''}`}
+                  ${item.type === 'spam' ? 'opacity-60' : ''}
+                  ${item.href ? 'cursor-pointer' : ''}`}
               >
                 <div className={`w-8 h-8 rounded-lg ${typeConfig.bg} flex items-center justify-center text-sm flex-shrink-0 mt-0.5`}>
                   {typeConfig.icon}
@@ -222,9 +252,7 @@ export function DashboardFeed() {
                   <div className="text-[13px] font-semibold leading-snug">{item.title}</div>
                   <div className="text-[12px] text-neutral-500 truncate">{item.description}</div>
                   {item.account && (
-                    <div className="text-[10px] text-neutral-400 mt-0.5">
-                      📬 {item.account}
-                    </div>
+                    <div className="text-[10px] text-neutral-400 mt-0.5">📬 {item.account}</div>
                   )}
                 </div>
                 <div className="flex flex-col items-end flex-shrink-0">
@@ -238,10 +266,9 @@ export function DashboardFeed() {
               </div>
             )
 
-            if (item.href) {
-              return <Link key={item.id} href={item.href} className="block">{content}</Link>
-            }
-            return <div key={item.id}>{content}</div>
+            return item.href
+              ? <Link key={item.id} href={item.href} className="block">{inner}</Link>
+              : <div key={item.id}>{inner}</div>
           })
         )}
       </div>
@@ -254,7 +281,6 @@ function timeAgo(dateStr: string): string {
   const date = new Date(dateStr)
   const diffMs = now.getTime() - date.getTime()
   const diffMin = Math.floor(diffMs / 60000)
-
   if (diffMin < 1) return 'Ahora'
   if (diffMin < 60) return `Hace ${diffMin} min`
   const diffHours = Math.floor(diffMin / 60)

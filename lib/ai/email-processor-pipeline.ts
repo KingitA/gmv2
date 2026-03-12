@@ -99,12 +99,13 @@ export async function processIncomingEmail(
         reclamosProcessed: 0,
     }
 
-    // 1. Dedup check
+    // 1. Dedup check — usar maybeSingle para no fallar si hay 0 o duplicados
     const { data: existing } = await db
         .from('ai_emails')
         .select('id')
         .eq('gmail_id', emailData.gmailId)
-        .single()
+        .limit(1)
+        .maybeSingle()
 
     if (existing) {
         return result // Already processed — skip
