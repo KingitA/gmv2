@@ -62,6 +62,12 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Usuarios', href: '/usuarios-crm', icon: '👤' },
     ],
   },
+  {
+    title: 'Apps',
+    items: [
+      { label: 'App Depósito', href: '/deposito', icon: '🏭' },
+    ],
+  },
 ]
 
 export function Sidebar() {
