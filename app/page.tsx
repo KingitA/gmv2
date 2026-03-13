@@ -104,6 +104,7 @@ export default async function HomePage() {
           label="Por Revisar (IA)"
           value={data.importsPendientes}
           color="purple"
+          href="/clientes-pedidos/import-review"
         />
       </div>
 

@@ -1,17 +1,16 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
-import { createBrowserClient } from "@supabase/ssr"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Pencil, Trash2, ArrowLeft } from "lucide-react"
-import Link from "next/link"
+import { Badge } from "@/components/ui/badge"
+import { Plus, Pencil, Trash2, X, Search } from "lucide-react"
 
 type Transporte = {
   id: string
@@ -20,7 +19,24 @@ type Transporte = {
   telefono: string | null
   email: string | null
   porcentaje_flete: number
+  precio_bulto: number | null
+  precio_pallet: number | null
+  porcentaje_seguro: number | null
+  notas: string | null
   activo: boolean
+}
+
+type Localidad = {
+  id: string
+  nombre: string
+  provincia: string | null
+}
+
+type DestinoAsignado = {
+  id: string
+  localidad_id: string
+  localidad_nombre: string
+  localidad_provincia: string | null
 }
 
 export default function TransportesPage() {
@@ -28,243 +44,310 @@ export default function TransportesPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editando, setEditando] = useState<Transporte | null>(null)
   const [formData, setFormData] = useState({
-    nombre: "",
-    cuit: "",
-    telefono: "",
-    email: "",
-    porcentaje_flete: "",
+    nombre: "", cuit: "", telefono: "", email: "",
+    porcentaje_flete: "", precio_bulto: "", precio_pallet: "",
+    porcentaje_seguro: "", notas: "",
   })
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  )
+  // Destinos
+  const [destinos, setDestinos] = useState<DestinoAsignado[]>([])
+  const [localidades, setLocalidades] = useState<Localidad[]>([])
+  const [busquedaLoc, setBusquedaLoc] = useState("")
+  const [locResults, setLocResults] = useState<Localidad[]>([])
 
-  useEffect(() => {
-    loadTransportes()
-  }, [])
+  const supabase = createClient()
+
+  useEffect(() => { loadTransportes() }, [])
 
   const loadTransportes = async () => {
-    const { data, error } = await supabase.from("transportes").select("*").order("nombre")
-
-    if (error) {
-      console.error("[v0] Error loading transportes:", error)
-      return
-    }
-
+    const { data } = await supabase.from("transportes").select("*").order("nombre")
     setTransportes(data || [])
+  }
+
+  const loadDestinos = async (transporteId: string) => {
+    const { data } = await supabase
+      .from("transportes_destinos")
+      .select("id, localidad_id, localidades(nombre, provincia)")
+      .eq("transporte_id", transporteId)
+      .order("created_at")
+    
+    const mapped: DestinoAsignado[] = (data || []).map((d: any) => ({
+      id: d.id,
+      localidad_id: d.localidad_id,
+      localidad_nombre: d.localidades?.nombre || "?",
+      localidad_provincia: d.localidades?.provincia || null,
+    }))
+    setDestinos(mapped)
+  }
+
+  const searchLocalidades = async (term: string) => {
+    setBusquedaLoc(term)
+    if (term.length < 2) { setLocResults([]); return }
+    const { data } = await supabase
+      .from("localidades")
+      .select("id, nombre, provincia")
+      .ilike("nombre", `%${term}%`)
+      .limit(10)
+    // Filtrar las que ya están asignadas
+    const assignedIds = new Set(destinos.map(d => d.localidad_id))
+    setLocResults((data || []).filter(l => !assignedIds.has(l.id)))
+  }
+
+  const addDestino = async (localidad: Localidad) => {
+    if (!editando) return
+    const { error } = await supabase.from("transportes_destinos").insert({
+      transporte_id: editando.id,
+      localidad_id: localidad.id,
+    })
+    if (error) { alert(`Error: ${error.message}`); return }
+    setBusquedaLoc("")
+    setLocResults([])
+    await loadDestinos(editando.id)
+  }
+
+  const removeDestino = async (destinoId: string) => {
+    const { error } = await supabase.from("transportes_destinos").delete().eq("id", destinoId)
+    if (error) { alert(`Error: ${error.message}`); return }
+    if (editando) await loadDestinos(editando.id)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    const transporteData = {
+    const payload = {
       nombre: formData.nombre,
       cuit: formData.cuit || null,
       telefono: formData.telefono || null,
       email: formData.email || null,
-      porcentaje_flete: Number.parseFloat(formData.porcentaje_flete),
+      porcentaje_flete: parseFloat(formData.porcentaje_flete) || 0,
+      precio_bulto: formData.precio_bulto ? parseFloat(formData.precio_bulto) : null,
+      precio_pallet: formData.precio_pallet ? parseFloat(formData.precio_pallet) : null,
+      porcentaje_seguro: formData.porcentaje_seguro ? parseFloat(formData.porcentaje_seguro) : null,
+      notas: formData.notas || null,
       activo: true,
     }
-
     if (editando) {
-      const { error } = await supabase.from("transportes").update(transporteData).eq("id", editando.id)
-
-      if (error) {
-        alert(`Error al actualizar: ${error.message}`)
-        return
-      }
+      const { error } = await supabase.from("transportes").update(payload).eq("id", editando.id)
+      if (error) { alert(`Error: ${error.message}`); return }
     } else {
-      const { error } = await supabase.from("transportes").insert([transporteData])
-
-      if (error) {
-        alert(`Error al crear: ${error.message}`)
-        return
-      }
+      const { error } = await supabase.from("transportes").insert([payload])
+      if (error) { alert(`Error: ${error.message}`); return }
     }
-
     setDialogOpen(false)
     resetForm()
     loadTransportes()
   }
 
-  const handleEdit = (transporte: Transporte) => {
-    setEditando(transporte)
+  const handleEdit = async (t: Transporte) => {
+    setEditando(t)
     setFormData({
-      nombre: transporte.nombre,
-      cuit: transporte.cuit || "",
-      telefono: transporte.telefono || "",
-      email: transporte.email || "",
-      porcentaje_flete: transporte.porcentaje_flete.toString(),
+      nombre: t.nombre, cuit: t.cuit || "", telefono: t.telefono || "",
+      email: t.email || "", porcentaje_flete: t.porcentaje_flete.toString(),
+      precio_bulto: t.precio_bulto?.toString() || "",
+      precio_pallet: t.precio_pallet?.toString() || "",
+      porcentaje_seguro: t.porcentaje_seguro?.toString() || "",
+      notas: t.notas || "",
     })
+    await loadDestinos(t.id)
+    setDialogOpen(true)
+  }
+
+  const handleNew = () => {
+    resetForm()
+    setDestinos([])
     setDialogOpen(true)
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar este transporte?")) return
-
     const { error } = await supabase.from("transportes").delete().eq("id", id)
-
-    if (error) {
-      alert(`Error al eliminar: ${error.message}`)
-      return
-    }
-
+    if (error) { alert(`Error: ${error.message}`); return }
     loadTransportes()
   }
 
   const resetForm = () => {
     setEditando(null)
-    setFormData({
-      nombre: "",
-      cuit: "",
-      telefono: "",
-      email: "",
-      porcentaje_flete: "",
-    })
+    setFormData({ nombre: "", cuit: "", telefono: "", email: "", porcentaje_flete: "", precio_bulto: "", precio_pallet: "", porcentaje_seguro: "", notas: "" })
+    setDestinos([])
+    setBusquedaLoc("")
+    setLocResults([])
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link href="/tablas">
-                <Button variant="ghost" size="icon">
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-              </Link>
-              <h1 className="text-2xl font-bold">Transportes</h1>
-            </div>
-            <Dialog
-              open={dialogOpen}
-              onOpenChange={(open) => {
-                setDialogOpen(open)
-                if (!open) resetForm()
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Nuevo Transporte
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>{editando ? "Editar Transporte" : "Nuevo Transporte"}</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div>
-                    <Label htmlFor="nombre">Nombre *</Label>
-                    <Input
-                      id="nombre"
-                      value={formData.nombre}
-                      onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="cuit">CUIT</Label>
-                    <Input
-                      id="cuit"
-                      value={formData.cuit}
-                      onChange={(e) => setFormData({ ...formData, cuit: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="telefono">Teléfono</Label>
-                    <Input
-                      id="telefono"
-                      value={formData.telefono}
-                      onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="email">Email</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="porcentaje_flete">Porcentaje Flete (%) *</Label>
-                    <Input
-                      id="porcentaje_flete"
-                      type="number"
-                      step="0.01"
-                      value={formData.porcentaje_flete}
-                      onChange={(e) => setFormData({ ...formData, porcentaje_flete: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                      Cancelar
-                    </Button>
-                    <Button type="submit">Guardar</Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
-          </div>
-        </div>
-      </header>
+  const fmt = (v: number | null, suffix = "") => v !== null && v !== undefined ? `${v}${suffix}` : "—"
 
-      <main className="container mx-auto px-4 py-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Lista de Transportes</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>CUIT</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>% Flete</TableHead>
-                  <TableHead>Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transportes.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      No hay transportes registrados
-                    </TableCell>
-                  </TableRow>
+  return (
+    <div className="p-6 lg:p-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">Transportes</h1>
+          <p className="text-sm text-muted-foreground">Empresas de transporte, tarifas y destinos</p>
+        </div>
+        <Button onClick={handleNew} size="sm"><Plus className="h-4 w-4 mr-1" /> Nuevo</Button>
+      </div>
+
+      {/* Tabla */}
+      <div className="bg-white border rounded-xl overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead>CUIT</TableHead>
+              <TableHead>Teléfono</TableHead>
+              <TableHead>% Flete</TableHead>
+              <TableHead>$/Bulto</TableHead>
+              <TableHead>$/Pallet</TableHead>
+              <TableHead>% Seguro</TableHead>
+              <TableHead className="w-[80px] text-right">Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {transportes.length === 0 ? (
+              <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No hay transportes</TableCell></TableRow>
+            ) : transportes.map(t => (
+              <TableRow key={t.id}>
+                <TableCell className="font-medium">{t.nombre}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{t.cuit || "—"}</TableCell>
+                <TableCell className="text-sm">{t.telefono || "—"}</TableCell>
+                <TableCell>{fmt(t.porcentaje_flete, "%")}</TableCell>
+                <TableCell>{t.precio_bulto ? `$${t.precio_bulto}` : "—"}</TableCell>
+                <TableCell>{t.precio_pallet ? `$${t.precio_pallet}` : "—"}</TableCell>
+                <TableCell>{fmt(t.porcentaje_seguro, "%")}</TableCell>
+                <TableCell className="text-right">
+                  <div className="flex gap-1 justify-end">
+                    <Button variant="ghost" size="icon" onClick={() => handleEdit(t)}><Pencil className="h-3.5 w-3.5" /></Button>
+                    <Button variant="ghost" size="icon" onClick={() => handleDelete(t.id)} className="text-red-500 hover:text-red-700"><Trash2 className="h-3.5 w-3.5" /></Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Dialog edición */}
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm() }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editando ? "Editar Transporte" : "Nuevo Transporte"}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Datos básicos */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Nombre *</Label>
+                <Input value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} required />
+              </div>
+              <div>
+                <Label>CUIT</Label>
+                <Input value={formData.cuit} onChange={e => setFormData({...formData, cuit: e.target.value})} />
+              </div>
+              <div>
+                <Label>Teléfono</Label>
+                <Input value={formData.telefono} onChange={e => setFormData({...formData, telefono: e.target.value})} />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+              </div>
+            </div>
+
+            {/* Tarifas */}
+            <div>
+              <h3 className="font-semibold text-sm mb-3 text-neutral-700 uppercase tracking-wide">Tarifas</h3>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <Label>% Flete (valor declarado)</Label>
+                  <Input type="number" step="0.01" value={formData.porcentaje_flete} onChange={e => setFormData({...formData, porcentaje_flete: e.target.value})} placeholder="0" />
+                </div>
+                <div>
+                  <Label>$ por Bulto</Label>
+                  <Input type="number" step="0.01" value={formData.precio_bulto} onChange={e => setFormData({...formData, precio_bulto: e.target.value})} placeholder="—" />
+                </div>
+                <div>
+                  <Label>$ por Pallet</Label>
+                  <Input type="number" step="0.01" value={formData.precio_pallet} onChange={e => setFormData({...formData, precio_pallet: e.target.value})} placeholder="—" />
+                </div>
+                <div>
+                  <Label>% Seguro</Label>
+                  <Input type="number" step="0.01" value={formData.porcentaje_seguro} onChange={e => setFormData({...formData, porcentaje_seguro: e.target.value})} placeholder="—" />
+                </div>
+              </div>
+            </div>
+
+            {/* Notas */}
+            <div>
+              <Label>Notas</Label>
+              <Textarea
+                value={formData.notas}
+                onChange={e => setFormData({...formData, notas: e.target.value})}
+                placeholder="Anotaciones, horarios de retiro, condiciones especiales..."
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+
+            {/* Destinos — solo cuando se edita (necesita ID) */}
+            {editando && (
+              <div>
+                <h3 className="font-semibold text-sm mb-3 text-neutral-700 uppercase tracking-wide">
+                  Destinos ({destinos.length} localidades)
+                </h3>
+
+                {/* Buscador */}
+                <div className="relative mb-3">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+                  <Input
+                    value={busquedaLoc}
+                    onChange={e => searchLocalidades(e.target.value)}
+                    placeholder="Buscar localidad para agregar..."
+                    className="pl-9"
+                  />
+                  {locResults.length > 0 && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {locResults.map(loc => (
+                        <button
+                          key={loc.id}
+                          type="button"
+                          onClick={() => addDestino(loc)}
+                          className="w-full text-left px-4 py-2 text-sm hover:bg-blue-50 flex justify-between items-center"
+                        >
+                          <span className="font-medium">{loc.nombre}</span>
+                          <span className="text-xs text-neutral-400">{loc.provincia}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Lista de destinos asignados */}
+                {destinos.length === 0 ? (
+                  <p className="text-sm text-neutral-400 py-3">No hay destinos asignados. Buscá localidades arriba para agregar.</p>
                 ) : (
-                  transportes.map((transporte) => (
-                    <TableRow key={transporte.id}>
-                      <TableCell className="font-medium">{transporte.nombre}</TableCell>
-                      <TableCell>{transporte.cuit || "-"}</TableCell>
-                      <TableCell>{transporte.telefono || "-"}</TableCell>
-                      <TableCell>{transporte.email || "-"}</TableCell>
-                      <TableCell>{transporte.porcentaje_flete}%</TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleEdit(transporte)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(transporte.id)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  <div className="flex flex-wrap gap-2">
+                    {destinos.map(d => (
+                      <Badge key={d.id} variant="secondary" className="pl-3 pr-1 py-1.5 gap-1 text-sm">
+                        {d.localidad_nombre}
+                        {d.localidad_provincia && <span className="text-neutral-400 text-xs ml-1">({d.localidad_provincia})</span>}
+                        <button
+                          type="button"
+                          onClick={() => removeDestino(d.id)}
+                          className="ml-1 p-0.5 rounded-full hover:bg-neutral-300 transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
                 )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </main>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+              <Button type="submit">Guardar</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
-
-
