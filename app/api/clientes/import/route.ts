@@ -41,6 +41,30 @@ export async function POST(req: NextRequest) {
         const rows = rawData.slice(2)
         const procesadosBase = []
 
+        // Pre-cargar vendedores si la columna es por nombre (no UUID)
+        let vendedorMap: Record<string, string> = {} // nombre normalizado → id
+        const hasVendedorNombre = headers.includes("vendedor") && !headers.includes("vendedor_id")
+        if (hasVendedorNombre) {
+            const supabasePreload = createAdminClient()
+            const { data: vendedores } = await supabasePreload.from("vendedores_info").select("usuario_id, nombre")
+            if (vendedores) {
+                for (const v of vendedores) {
+                    if (v.nombre && v.usuario_id) {
+                        vendedorMap[v.nombre.toUpperCase().trim()] = v.usuario_id
+                    }
+                }
+            }
+            // También buscar en tabla vendedores por si acaso
+            const { data: vendedoresOld } = await supabasePreload.from("vendedores").select("id, nombre")
+            if (vendedoresOld) {
+                for (const v of vendedoresOld) {
+                    if (v.nombre && v.id) {
+                        vendedorMap[v.nombre.toUpperCase().trim()] = v.id
+                    }
+                }
+            }
+        }
+
         for (const row of rows) {
             if (!row || row.length === 0) continue
 
@@ -99,7 +123,27 @@ export async function POST(req: NextRequest) {
             if (headers.includes("exento_iibb")) clienteData.exento_iibb = parseBool(getHeaderVal("exento_iibb"))
             if (headers.includes("exento_iva")) clienteData.exento_iva = parseBool(getHeaderVal("exento_iva"))
             if (headers.includes("percepcion_iibb")) clienteData.percepcion_iibb = parseFloatSafe(getHeaderVal("percepcion_iibb"))
-            if (headers.includes("vendedor_id")) clienteData.vendedor_id = getHeaderVal("vendedor_id")
+            // Vendedor: aceptar "vendedor" (nombre) o "vendedor_id" (UUID)
+            if (headers.includes("vendedor_id")) {
+                const vid = getHeaderVal("vendedor_id")
+                if (vid) clienteData.vendedor_id = vid
+            } else if (headers.includes("vendedor")) {
+                const vendedorNombre = getHeaderVal("vendedor")
+                if (vendedorNombre) {
+                    const normalizado = vendedorNombre.toUpperCase().trim()
+                    // Buscar exacto
+                    let vendedorId = vendedorMap[normalizado]
+                    // Si no, buscar parcial (primer apellido)
+                    if (!vendedorId) {
+                        const primerPalabra = normalizado.split(" ")[0]
+                        if (primerPalabra.length >= 3) {
+                            const match = Object.entries(vendedorMap).find(([k]) => k.includes(primerPalabra))
+                            if (match) vendedorId = match[1]
+                        }
+                    }
+                    if (vendedorId) clienteData.vendedor_id = vendedorId
+                }
+            }
             if (headers.includes("localidad")) clienteData.localidad = getHeaderVal("localidad")
             if (headers.includes("localidad_id")) clienteData.localidad_id = getHeaderVal("localidad_id")
             if (headers.includes("observaciones")) clienteData.observaciones = getHeaderVal("observaciones")
