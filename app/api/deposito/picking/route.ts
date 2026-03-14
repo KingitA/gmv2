@@ -65,11 +65,24 @@ export async function POST(request: NextRequest) {
 
     // Obtener usuario actual
     const { data: { user } } = await supabase.auth.getUser()
+    let usuarioNombre = user?.email?.split("@")[0] || "operario"
+    if (user?.id) {
+      const { data: u } = await supabase.from("usuarios").select("nombre").eq("id", user.id).single()
+      if (u?.nombre) usuarioNombre = u.nombre
+    }
 
-    // Crear nueva sesión
+    // Crear nueva sesión — incluir todos los campos posibles de usuario
+    const sesionData: any = {
+      pedido_id,
+      estado: "en_progreso",
+      usuario_id: user?.id ?? null,
+      usuario_nombre: usuarioNombre,
+      usuario_email: user?.email ?? null,
+    }
+
     const { data: nuevaSesion, error: sesionError } = await supabase
       .from("picking_sesiones")
-      .insert({ pedido_id, estado: "en_progreso", usuario_id: user?.id ?? null })
+      .insert(sesionData)
       .select("id, estado, pedido_id")
       .single()
 
