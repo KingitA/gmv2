@@ -20,8 +20,6 @@ import {
   ArrowDown,
   Loader2,
   FileText,
-  MoreHorizontal,
-  Pencil,
   Receipt,
   ExternalLink,
   Printer,
@@ -29,13 +27,6 @@ import {
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { ImportOrderDialog } from "@/components/pedidos/ImportOrderDialog"
 import {
   AlertDialog,
@@ -82,6 +73,8 @@ type PedidoDetalle = {
   id: string
   articulo_id: string
   cantidad: number
+  cantidad_preparada?: number
+  estado_item?: string
   precio_base: number
   precio_final: number
   subtotal: number
@@ -152,6 +145,7 @@ export default function ClientesPedidosPage() {
   const [pickingStatus, setPickingStatus] = useState<Record<string, any>>({})
   const [expandedPriorities, setExpandedPriorities] = useState<Record<string, boolean>>({ "1": true, "2": true, "3": true })
   const [dragPedidoId, setDragPedidoId] = useState<string | null>(null)
+  const [expandedArticulosGroups, setExpandedArticulosGroups] = useState<Record<string, boolean>>({ pendientes: true, preparados: true, faltantes: false })
 
   const supabase = createClient()
   const searchParams = useSearchParams()
@@ -168,6 +162,25 @@ export default function ClientesPedidosPage() {
     cargarPedidos()
     cargarViajes()
     cargarPickingStatus()
+
+    // Realtime: recargar detalles del pedido abierto cuando el depósito escanea
+    const channel = supabase
+      .channel("erp-picking-realtime")
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "pedidos_detalle",
+      }, () => {
+        // Si hay un pedido abierto en el modal, recargamos sus detalles
+        setPedidoSeleccionado(prev => {
+          if (prev) cargarDetallesPedido(prev.id)
+          return prev
+        })
+        cargarPickingStatus()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   useEffect(() => {
@@ -289,6 +302,8 @@ export default function ClientesPedidosPage() {
         .from("pedidos_detalle")
         .select(`
           *,
+          estado_item,
+          cantidad_preparada,
           articulos (
             sku, 
             descripcion, 
@@ -768,7 +783,12 @@ export default function ClientesPedidosPage() {
                         draggable
                         onDragStart={() => setDragPedidoId(pedido.id)}
                         onDragEnd={() => setDragPedidoId(null)}
-                        className={`bg-white border rounded-lg p-4 cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow
+                        onClick={() => {
+                          setPedidoSeleccionado(pedido)
+                          cargarDetallesPedido(pedido.id)
+                          setModalDetalleAbierto(true)
+                        }}
+                        className={`bg-white border rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-gray-300 transition-all
                           ${dragPedidoId === pedido.id ? "opacity-40" : ""}`}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -814,55 +834,19 @@ export default function ClientesPedidosPage() {
                               </div>
                             )}
                           </div>
-                          {/* Acciones */}
-                          <div className="flex items-center gap-1 flex-shrink-0">
+                          {/* Solo eliminar — sin 3 puntitos */}
+                          <div className="flex items-center gap-2 flex-shrink-0">
                             {pedido.total > 0 && (
-                              <span className="text-sm font-bold mr-2">${pedido.total.toLocaleString("es-AR")}</span>
+                              <span className="text-sm font-bold text-gray-700">${pedido.total.toLocaleString("es-AR")}</span>
                             )}
                             {pedido.estado !== "eliminado" && (
                               <Button
-                                variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => setPedidoAEliminar(pedido)}
+                                variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50"
+                                onClick={(e) => { e.stopPropagation(); setPedidoAEliminar(pedido) }}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             )}
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => {
-                                  setPedidoSeleccionado(pedido)
-                                  cargarDetallesPedido(pedido.id)
-                                  setModalDetalleAbierto(true)
-                                }}>
-                                  <Pencil className="h-4 w-4 mr-2" /> Ver Detalle
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                {!tieneComprobantes(pedido.id) ? (
-                                  <DropdownMenuItem
-                                    onClick={() => generarComprobantes(pedido.id)}
-                                    disabled={generandoComprobante === pedido.id}
-                                  >
-                                    <Receipt className="h-4 w-4 mr-2" />
-                                    {generandoComprobante === pedido.id ? "Generando..." : "Generar Comprobantes"}
-                                  </DropdownMenuItem>
-                                ) : (
-                                  comprobantesGenerados[pedido.id]?.map(comp => (
-                                    <DropdownMenuItem key={comp.id} onClick={() => verComprobante(comp.id)}>
-                                      <ExternalLink className="h-4 w-4 mr-2" /> Ver {getTipoComprobanteLabel(comp.tipo_comprobante)}
-                                    </DropdownMenuItem>
-                                  ))
-                                )}
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => imprimirPedido(pedido)}>
-                                  <Printer className="h-4 w-4 mr-2" /> Imprimir
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
                           </div>
                         </div>
                       </div>
@@ -1000,33 +984,85 @@ export default function ClientesPedidosPage() {
                 </Card>
               )}
 
+              {/* Artículos agrupados por estado de preparación — tiempo real */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-sm">Artículos del Pedido</CardTitle>
+                  <CardTitle className="text-sm flex items-center justify-between">
+                    <span>Artículos del Pedido</span>
+                    <span className="text-xs font-normal text-muted-foreground">{detallesPedido.length} artículos</span>
+                  </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>SKU</TableHead>
-                        <TableHead>Descripción</TableHead>
-                        <TableHead className="text-right">Cantidad</TableHead>
-                        <TableHead className="text-right">Precio Unit.</TableHead>
-                        <TableHead className="text-right">Subtotal</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {detallesPedido.map((detalle) => (
-                        <TableRow key={detalle.id}>
-                          <TableCell className="font-mono text-sm">{detalle.articulos?.sku}</TableCell>
-                          <TableCell>{detalle.articulos?.descripcion}</TableCell>
-                          <TableCell className="text-right">{detalle.cantidad}</TableCell>
-                          <TableCell className="text-right">${detalle.precio_final?.toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-medium">${detalle.subtotal?.toFixed(2)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <CardContent className="p-0">
+                  {(() => {
+                    const pendientes = detallesPedido.filter(d => !d.estado_item || d.estado_item === "PENDIENTE")
+                    const preparados = detallesPedido.filter(d => d.estado_item === "COMPLETO" || d.estado_item === "PARCIAL")
+                    const faltantes = detallesPedido.filter(d => d.estado_item === "FALTANTE")
+
+                    const grupos = [
+                      { key: "pendientes", label: "Pendientes", count: pendientes.length, items: pendientes, dot: "bg-yellow-400", badge: "bg-yellow-50 text-yellow-700 border-yellow-200" },
+                      { key: "preparados", label: "Preparados", count: preparados.length, items: preparados, dot: "bg-green-500", badge: "bg-green-50 text-green-700 border-green-200" },
+                      { key: "faltantes", label: "Faltantes", count: faltantes.length, items: faltantes, dot: "bg-red-500", badge: "bg-red-50 text-red-700 border-red-200" },
+                    ]
+
+                    return (
+                      <div className="divide-y">
+                        {grupos.map(grupo => (
+                          <div key={grupo.key}>
+                            <button
+                              onClick={() => setExpandedArticulosGroups(prev => ({ ...prev, [grupo.key]: !prev[grupo.key] }))}
+                              className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/40 transition-colors text-left"
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <div className={`w-2.5 h-2.5 rounded-full ${grupo.dot}`} />
+                                <span className="font-semibold text-sm">{grupo.label}</span>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${grupo.badge}`}>{grupo.count}</span>
+                              </div>
+                              <span className={`text-sm transition-transform ${expandedArticulosGroups[grupo.key] ? "rotate-180" : ""}`}>▾</span>
+                            </button>
+                            {expandedArticulosGroups[grupo.key] && grupo.items.length > 0 && (
+                              <div className="bg-muted/20">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="text-xs">
+                                      <TableHead className="py-1.5 text-xs">SKU</TableHead>
+                                      <TableHead className="py-1.5 text-xs">Descripción</TableHead>
+                                      <TableHead className="py-1.5 text-xs">Proveedor</TableHead>
+                                      <TableHead className="text-right py-1.5 text-xs">Pedido</TableHead>
+                                      <TableHead className="text-right py-1.5 text-xs">Preparado</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {grupo.items.map((detalle) => (
+                                      <TableRow key={detalle.id} className="text-sm">
+                                        <TableCell className="font-mono text-xs py-2">{detalle.articulos?.sku}</TableCell>
+                                        <TableCell className="py-2">{detalle.articulos?.descripcion}</TableCell>
+                                        <TableCell className="py-2 text-xs text-muted-foreground">{detalle.articulos?.proveedores?.nombre || "—"}</TableCell>
+                                        <TableCell className="text-right py-2 font-medium">{detalle.cantidad}</TableCell>
+                                        <TableCell className="text-right py-2">
+                                          {detalle.estado_item === "FALTANTE" ? (
+                                            <span className="text-red-600 font-semibold text-xs">FALTANTE</span>
+                                          ) : detalle.cantidad_preparada != null && detalle.cantidad_preparada > 0 ? (
+                                            <span className={detalle.cantidad_preparada >= detalle.cantidad ? "text-green-600 font-semibold" : "text-orange-600 font-semibold"}>
+                                              {detalle.cantidad_preparada}
+                                            </span>
+                                          ) : (
+                                            <span className="text-muted-foreground">—</span>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            )}
+                            {expandedArticulosGroups[grupo.key] && grupo.items.length === 0 && (
+                              <div className="px-4 py-3 text-xs text-muted-foreground">Sin artículos en este estado</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </CardContent>
               </Card>
 
