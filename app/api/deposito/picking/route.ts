@@ -15,7 +15,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "pedido_id requerido" }, { status: 400 })
     }
 
-    // Verificar que el pedido existe y está en estado válido
     const { data: pedido, error: pedidoError } = await supabase
       .from("pedidos")
       .select(`
@@ -34,7 +33,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Pedido no encontrado o no disponible para picking" }, { status: 404 })
     }
 
-    // Buscar sesión existente o crear nueva
+    // Buscar sesión existente
     const { data: sesionExistente } = await supabase
       .from("picking_sesiones")
       .select(`
@@ -61,11 +60,13 @@ export async function POST(request: NextRequest) {
 
     if (sesionError) {
       console.error("[picking] Error creando sesión:", sesionError)
-      return NextResponse.json({ error: "Error al crear sesión. Verificá que la migración 092 fue ejecutada en Supabase." }, { status: 500 })
+      return NextResponse.json(
+        { error: "Error al crear sesión. Verificá que la migración 092 fue ejecutada en Supabase." },
+        { status: 500 }
+      )
     }
 
-    // Crear items de picking para cada detalle del pedido
-    const pickingItems = pedido.pedidos_detalle.map((det: any) => ({
+    const pickingItems = (pedido.pedidos_detalle as any[]).map((det) => ({
       sesion_id: nuevaSesion.id,
       pedido_detalle_id: det.id,
       articulo_id: det.articulo_id,
@@ -74,22 +75,16 @@ export async function POST(request: NextRequest) {
       estado: "pendiente",
     }))
 
-    const { error: itemsError } = await supabase
-      .from("picking_items")
-      .insert(pickingItems)
-
-    if (itemsError) {
-      console.error("[picking] Error creando items:", itemsError)
-      return NextResponse.json({ error: "Error al crear items de picking" }, { status: 500 })
+    if (pickingItems.length > 0) {
+      const { error: itemsError } = await supabase.from("picking_items").insert(pickingItems)
+      if (itemsError) {
+        console.error("[picking] Error creando items:", itemsError)
+        return NextResponse.json({ error: "Error al crear items de picking" }, { status: 500 })
+      }
     }
 
-    // Marcar pedido como en_preparacion
-    await supabase
-      .from("pedidos")
-      .update({ estado: "en_preparacion" })
-      .eq("id", pedido_id)
+    await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
 
-    // Reload sesión con items
     const { data: sesionFull } = await supabase
       .from("picking_sesiones")
       .select(`
@@ -106,7 +101,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ pedido, sesion: sesionFull })
   } catch (error: any) {
     console.error("[deposito] Error POST picking:", error)
-    return NextResponse.json({ error: "Error al iniciar picking: " + (error?.message || "desconocido") }, { status: 500 })
+    return NextResponse.json(
+      { error: "Error al iniciar picking: " + (error?.message || "desconocido") },
+      { status: 500 }
+    )
   }
 }
 
@@ -124,7 +122,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([])
     }
 
-    // Buscar por EAN13 exacto primero, luego SKU exacto, luego descripción parcial
+    // EAN13 exacto primero
     const { data: porEan } = await supabase
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
@@ -140,96 +138,6 @@ export async function GET(request: NextRequest) {
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
       .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
-      .eq("activo", true)
-      .limit(20)
-
-    if (error) throw error
-
-    return NextResponse.json(articulos || [])
-  } catch (error: any) {
-    return NextResponse.json({ error: "Error en búsqueda" }, { status: 500 })
-  }
-}
-
-    if (pedidoError || !pedido) {
-      return NextResponse.json({ error: "Pedido no encontrado o no disponible" }, { status: 404 })
-    }
-
-    // Buscar sesión existente o crear nueva
-    let { data: sesion } = await supabase
-      .from("picking_sesiones")
-      .select(`*, picking_items(*)`)
-      .eq("pedido_id", pedido_id)
-      .single()
-
-    if (!sesion) {
-      // Crear nueva sesión
-      const { data: nuevaSesion, error: sesionError } = await supabase
-        .from("picking_sesiones")
-        .insert({ pedido_id, estado: "en_progreso" })
-        .select()
-        .single()
-
-      if (sesionError) throw sesionError
-
-      // Crear items de picking para cada detalle del pedido
-      const pickingItems = pedido.pedidos_detalle.map((det: any) => ({
-        sesion_id: nuevaSesion.id,
-        pedido_detalle_id: det.id,
-        articulo_id: det.articulo_id,
-        cantidad_pedida: det.cantidad,
-        cantidad_preparada: 0,
-        estado: "pendiente",
-      }))
-
-      const { error: itemsError } = await supabase
-        .from("picking_items")
-        .insert(pickingItems)
-
-      if (itemsError) throw itemsError
-
-      // Marcar pedido como en_preparacion
-      await supabase
-        .from("pedidos")
-        .update({ estado: "en_preparacion" })
-        .eq("id", pedido_id)
-
-      // Reload sesión con items
-      const { data: sesionFull } = await supabase
-        .from("picking_sesiones")
-        .select(`*, picking_items(*)`)
-        .eq("id", nuevaSesion.id)
-        .single()
-
-      sesion = sesionFull
-    }
-
-    return NextResponse.json({ pedido, sesion })
-  } catch (error: any) {
-    console.error("[deposito] Error POST picking:", error)
-    return NextResponse.json({ error: "Error al iniciar picking" }, { status: 500 })
-  }
-}
-
-// GET: Buscar artículo por EAN13, SKU o descripción
-export async function GET(request: NextRequest) {
-  const auth = await requireAuth()
-  if (auth.error) return auth.error
-
-  try {
-    const supabase = await createClient()
-    const { searchParams } = new URL(request.url)
-    const q = searchParams.get("q")?.trim()
-
-    if (!q || q.length < 2) {
-      return NextResponse.json([])
-    }
-
-    // Buscar por EAN13 exacto, SKU exacto, o descripción parcial
-    const { data: articulos, error } = await supabase
-      .from("articulos")
-      .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
-      .or(`ean13.eq.${q},sku.ilike.${q},descripcion.ilike.%${q}%`)
       .eq("activo", true)
       .limit(20)
 
