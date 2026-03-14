@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation"
 interface DetallePedido {
   id: string; articulo_id: string; cantidad: number
   cantidad_preparada: number; estado_item: string
-  articulos: { id: string; sku: string; descripcion: string; ean13?: string; unidades_por_bulto?: number }
+  articulos: { id: string; sku: string; descripcion: string; ean13?: string; unidades_por_bulto?: number; proveedores?: { nombre: string } }
 }
 interface ArticuloFound { id: string; sku: string; descripcion: string; ean13?: string; stock_actual: number }
 
@@ -73,8 +73,13 @@ function SwipeItem({ item, onConfirmFaltante, saving, bgReveal, colorReveal, lab
         style={{ position: "relative", background: bg, border: `1.5px solid ${border}`, borderRadius: 16, padding: "15px 16px", display: "flex", alignItems: "center", gap: 14, transform: `translateX(-${translateX}px)`, transition: dx === 0 ? "transform 0.25s cubic-bezier(.25,.46,.45,.94)" : "none", userSelect: "none" }}>
         <div style={{ width: 10, height: 10, borderRadius: "50%", background: dot, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: C.text, fontWeight: 700, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.articulos?.descripcion}</div>
-          <div style={{ color: C.light, fontSize: 12, fontFamily: "monospace", marginTop: 3 }}>{item.articulos?.sku}</div>
+          <div style={{ color: C.text, fontWeight: 700, fontSize: 17, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.articulos?.descripcion}</div>
+          <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:4, flexWrap:"wrap" }}>
+            <span style={{ color:C.light, fontSize:12, fontFamily:"monospace" }}>{item.articulos?.sku}</span>
+            {item.articulos?.proveedores?.nombre && (
+              <span style={{ color:C.orange, fontSize:12, fontWeight:600 }}>{item.articulos.proveedores.nombre}</span>
+            )}
+          </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           {ok ? <>
@@ -333,9 +338,12 @@ export default function PickingPage() {
       {Toast}
       <div style={{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:"16px 18px" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-          <div>
-            <div style={{ fontSize:19, fontWeight:800, color:C.text }}>{pedido?.numero_pedido}</div>
-            <div style={{ color:C.sub, fontSize:14, marginTop:3 }}>{pedido?.clientes?.razon_social || pedido?.clientes?.nombre}</div>
+          <div style={{ flex:1, minWidth:0, marginRight:12 }}>
+            <div style={{ fontSize:20, fontWeight:800, color:C.text, lineHeight:1.2 }}>{pedido?.clientes?.razon_social || pedido?.clientes?.nombre}</div>
+            <div style={{ color:C.sub, fontSize:13, marginTop:4, lineHeight:1.4 }}>
+              {[pedido?.clientes?.direccion, pedido?.clientes?.localidad].filter(Boolean).join(" · ")}
+            </div>
+            <div style={{ color:C.light, fontSize:12, marginTop:2, fontFamily:"monospace" }}>{pedido?.numero_pedido}</div>
           </div>
           {faltantesList.length > 0 && (
             <button onClick={() => setVistaFaltantes(true)}

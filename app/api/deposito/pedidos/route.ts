@@ -13,10 +13,10 @@ export async function GET() {
       .from("pedidos")
       .select(`
         id, numero_pedido, estado, fecha, observaciones, created_at,
-        clientes(id, nombre, razon_social),
+        clientes(id, nombre, razon_social, direccion, localidad),
         pedidos_detalle(
           id, cantidad, articulo_id, cantidad_preparada, estado_item,
-          articulos(id, sku, descripcion, ean13)
+          articulos(id, sku, descripcion, ean13, proveedores(nombre))
         )
       `)
       .in("estado", ["pendiente", "en_preparacion"])

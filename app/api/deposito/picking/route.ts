@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
         pedidos_detalle(
           id, cantidad, articulo_id,
           cantidad_preparada, estado_item,
-          articulos(id, sku, descripcion, ean13, unidades_por_bulto)
+          articulos(id, sku, descripcion, ean13, unidades_por_bulto, proveedores(nombre))
         )
       `)
       .eq("id", pedido_id)
