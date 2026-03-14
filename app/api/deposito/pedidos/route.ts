@@ -12,7 +12,7 @@ export async function GET() {
     const { data: pedidos, error } = await supabase
       .from("pedidos")
       .select(`
-        id, numero_pedido, estado, fecha, observaciones, created_at,
+        id, numero_pedido, estado, fecha, prioridad, observaciones, created_at,
         clientes(id, nombre, razon_social, direccion, localidad),
         pedidos_detalle(
           id, cantidad, articulo_id, cantidad_preparada, estado_item,
