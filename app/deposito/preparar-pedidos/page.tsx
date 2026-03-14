@@ -3,122 +3,70 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 
-interface Pedido {
-  id: string
-  numero_pedido: string
-  estado: string
-  fecha: string
-  clientes: { nombre: string; razon_social?: string } | null
-  pedidos_detalle: any[]
-  sesion: any
-  progreso: { total: number; completados: number }
-}
+const C = { bg:"#f4f6f9",white:"#ffffff",border:"#e5e7eb",text:"#111827",textSub:"#6b7280",textLight:"#9ca3af",orange:"#ea580c",orangeLight:"#fff7ed",orangeBorder:"#fed7aa",green:"#16a34a",greenLight:"#f0fdf4",greenBorder:"#bbf7d0",yellow:"#d97706",yellowLight:"#fffbeb" }
 
 export default function PrepararPedidosPage() {
-  const [pedidos, setPedidos] = useState<Pedido[]>([])
+  const [pedidos, setPedidos] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
   useEffect(() => {
-    fetch("/api/deposito/pedidos")
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) setPedidos(data)
-        else setError("Error al cargar pedidos")
-      })
-      .catch(() => setError("Error de conexión"))
-      .finally(() => setLoading(false))
+    fetch("/api/deposito/pedidos").then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setPedidos(data); else setError("Error al cargar") })
+      .catch(() => setError("Error de conexión")).finally(() => setLoading(false))
   }, [])
 
-  const getEstadoBadge = (pedido: Pedido) => {
-    const { total, completados } = pedido.progreso
-    if (completados === 0) return { label: "Pendiente", cls: "bg-gray-700 text-gray-200" }
-    if (completados === total) return { label: "Listo p/ facturar", cls: "bg-green-700 text-green-100" }
-    return { label: `${completados}/${total} artículos`, cls: "bg-blue-700 text-blue-100" }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-400 text-lg animate-pulse">Cargando pedidos...</div>
-      </div>
-    )
-  }
+  if (loading) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"60vh",color:C.textLight }}>Cargando pedidos...</div>
 
   return (
-    <div className="p-4">
-      <div className="mb-4 flex items-center justify-between">
+    <div style={{ padding: 16, background: C.bg, minHeight: "calc(100dvh - 64px)" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div>
-          <h2 className="text-xl font-bold text-white">Pedidos para preparar</h2>
-          <p className="text-gray-400 text-sm">{pedidos.length} pedido{pedidos.length !== 1 ? "s" : ""} pendiente{pedidos.length !== 1 ? "s" : ""}</p>
+          <div style={{ fontSize:17,fontWeight:700,color:C.text }}>{pedidos.length} pedido{pedidos.length!==1?"s":""} pendiente{pedidos.length!==1?"s":""}</div>
+          <div style={{ fontSize:13,color:C.textSub }}>Tocá un pedido para empezar</div>
         </div>
-        <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-gray-800 text-gray-300 text-sm active:bg-gray-700">
-          ↻ Actualizar
-        </button>
+        <button onClick={() => window.location.reload()} style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"8px 14px",fontSize:13,color:C.textSub,cursor:"pointer" }}>↻</button>
       </div>
 
-      {error && (
-        <div className="bg-red-900/50 border border-red-700 rounded-xl p-4 mb-4 text-red-300">{error}</div>
-      )}
+      {error && <div style={{ background:"#fef2f2",border:"1px solid #fecaca",borderRadius:14,padding:14,color:"#dc2626",marginBottom:12 }}>{error}</div>}
 
       {pedidos.length === 0 && !error && (
-        <div className="text-center py-16">
-          <div className="text-5xl mb-4">✅</div>
-          <div className="text-gray-400 text-lg">No hay pedidos pendientes</div>
-          <div className="text-gray-500 text-sm mt-1">Todos los pedidos están preparados</div>
+        <div style={{ textAlign:"center",padding:"60px 0" }}>
+          <div style={{ fontSize:48,marginBottom:12 }}>✅</div>
+          <div style={{ color:C.textSub,fontSize:16,fontWeight:600 }}>No hay pedidos pendientes</div>
         </div>
       )}
 
-      <div className="flex flex-col gap-3">
-        {pedidos.map((pedido) => {
-          const badge = getEstadoBadge(pedido)
-          const pct = pedido.progreso.total > 0
-            ? Math.round((pedido.progreso.resueltos / pedido.progreso.total) * 100)
-            : 0
-          const enProgreso = pedido.sesion && pedido.progreso.resueltos > 0
-
+      <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+        {pedidos.map(pedido => {
+          const { total=0, resueltos=0 } = pedido.progreso || {}
+          const pct = total > 0 ? Math.round((resueltos/total)*100) : 0
+          const enProgreso = resueltos > 0 && resueltos < total
+          const listo = total > 0 && resueltos === total
           return (
-            <Link
-              key={pedido.id}
-              href={`/deposito/preparar-pedidos/${pedido.id}`}
-              className="bg-gray-900 border border-gray-800 rounded-2xl p-4 active:bg-gray-800 block"
-            >
-              <div className="flex items-start justify-between mb-3">
+            <Link key={pedido.id} href={`/deposito/preparar-pedidos/${pedido.id}`} style={{ textDecoration:"none", background:C.white, border:`1px solid ${listo ? C.greenBorder : enProgreso ? C.orangeBorder : C.border}`, borderRadius:18, padding:16, display:"block", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10 }}>
                 <div>
-                  <div className="text-white font-bold text-lg">{pedido.numero_pedido}</div>
-                  <div className="text-gray-300 text-sm">
-                    {pedido.clientes?.razon_social || pedido.clientes?.nombre || "Sin cliente"}
-                  </div>
+                  <div style={{ fontSize:17,fontWeight:700,color:C.text }}>{pedido.numero_pedido}</div>
+                  <div style={{ color:C.textSub,fontSize:13,marginTop:2 }}>{pedido.clientes?.razon_social||pedido.clientes?.nombre}</div>
                 </div>
-                <span className={`text-xs font-semibold px-3 py-1 rounded-full ${badge.cls}`}>
-                  {badge.label}
+                <span style={{ fontSize:11,fontWeight:700,padding:"5px 12px",borderRadius:999,background:listo?C.greenLight:enProgreso?C.orangeLight:C.bg,color:listo?C.green:enProgreso?C.orange:C.textSub,border:`1px solid ${listo?C.greenBorder:enProgreso?C.orangeBorder:C.border}` }}>
+                  {listo?"Listo":enProgreso?"En progreso":"Pendiente"}
                 </span>
               </div>
-
-              <div className="flex items-center gap-3 text-sm text-gray-400 mb-3">
-                <span>📦 {pedido.pedidos_detalle?.length || 0} artículos</span>
-                <span>•</span>
+              <div style={{ display:"flex",gap:16,fontSize:13,color:C.textSub,marginBottom:enProgreso||listo?10:0 }}>
+                <span>📦 {total} artículos</span>
                 <span>📅 {new Date(pedido.fecha).toLocaleDateString("es-AR")}</span>
-                {enProgreso && <span className="text-blue-400">• En progreso</span>}
               </div>
-
-              {enProgreso && (
+              {(enProgreso||listo) && (
                 <div>
-                  <div className="w-full bg-gray-700 rounded-full h-2">
-                    <div
-                      className="bg-blue-500 h-2 rounded-full transition-all"
-                      style={{ width: `${pct}%` }}
-                    />
+                  <div style={{ background:C.border,borderRadius:999,height:6,overflow:"hidden" }}>
+                    <div style={{ height:"100%",background:listo?C.green:C.orange,borderRadius:999,width:`${pct}%`,transition:"width 0.3s" }} />
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">{pct}% completado</div>
+                  <div style={{ fontSize:12,color:listo?C.green:C.orange,fontWeight:600,marginTop:4 }}>{pct}% completado</div>
                 </div>
               )}
-
-              <div className="mt-3 text-right">
-                <span className="text-blue-400 font-semibold text-sm">
-                  {enProgreso ? "Continuar →" : "Empezar →"}
-                </span>
-              </div>
+              <div style={{ textAlign:"right",marginTop:8,fontSize:13,color:C.orange,fontWeight:700 }}>{enProgreso?"Continuar →":"Empezar →"}</div>
             </Link>
           )
         })}

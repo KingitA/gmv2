@@ -3,40 +3,25 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 
-interface OrdenCompra {
-  id: string
-  numero_orden: string
-  estado: string
-  fecha_orden: string
-  observaciones?: string
-  proveedores: { nombre: string } | null
-  ordenes_compra_detalle: any[]
-  recepcion: any
-}
+const C = { bg:"#f4f6f9",white:"#ffffff",border:"#e5e7eb",text:"#111827",textSub:"#6b7280",textLight:"#9ca3af",green:"#16a34a",greenLight:"#f0fdf4",greenBorder:"#bbf7d0",orange:"#ea580c",orangeLight:"#fff7ed",orangeBorder:"#fed7aa" }
 
 export default function RecibirMercaderiaPage() {
-  const [ordenes, setOrdenes] = useState<OrdenCompra[]>([])
+  const [ordenes, setOrdenes] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [iniciando, setIniciando] = useState<string|null>(null)
   const [error, setError] = useState("")
-  const [iniciando, setIniciando] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
-    fetch("/api/deposito/recepciones")
-      .then((r) => r.json())
-      .then((data) => { if (Array.isArray(data)) setOrdenes(data); else setError("Error al cargar") })
-      .catch(() => setError("Error de conexión"))
-      .finally(() => setLoading(false))
+    fetch("/api/deposito/recepciones").then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setOrdenes(data) })
+      .catch(() => setError("Error de conexión")).finally(() => setLoading(false))
   }, [])
 
-  const iniciarRecepcion = async (orden: OrdenCompra) => {
+  const iniciar = async (orden: any) => {
     setIniciando(orden.id)
     try {
-      const r = await fetch("/api/deposito/recepciones", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orden_compra_id: orden.id }),
-      })
+      const r = await fetch("/api/deposito/recepciones", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ orden_compra_id: orden.id }) })
       const data = await r.json()
       if (data.error) { setError(data.error); return }
       router.push(`/deposito/recibir-mercaderia/${orden.id}`)
@@ -44,69 +29,60 @@ export default function RecibirMercaderiaPage() {
     finally { setIniciando(null) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="text-gray-400 animate-pulse text-lg">Cargando órdenes...</div></div>
+  if (loading) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"60vh",color:C.textLight }}>Cargando órdenes...</div>
 
   return (
-    <div className="p-4">
-      <div className="mb-4 flex items-center justify-between">
+    <div style={{ padding:16, background:C.bg, minHeight:"calc(100dvh - 64px)" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div>
-          <h2 className="text-xl font-bold text-white">Recibir Mercadería</h2>
-          <p className="text-gray-400 text-sm">{ordenes.length} orden{ordenes.length !== 1 ? "es" : ""} pendiente{ordenes.length !== 1 ? "s" : ""}</p>
+          <div style={{ fontSize:17,fontWeight:700,color:C.text }}>{ordenes.length} orden{ordenes.length!==1?"es":""} pendiente{ordenes.length!==1?"s":""}</div>
+          <div style={{ fontSize:13,color:C.textSub }}>Seleccioná una orden para recibir</div>
         </div>
-        <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-gray-800 text-gray-300 text-sm">↻</button>
+        <button onClick={() => window.location.reload()} style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"8px 14px",fontSize:13,color:C.textSub,cursor:"pointer" }}>↻</button>
       </div>
 
-      {error && <div className="bg-red-900/50 border border-red-700 rounded-xl p-4 mb-4 text-red-300">{error}</div>}
+      {error && <div style={{ background:"#fef2f2",border:"1px solid #fecaca",borderRadius:14,padding:14,color:"#dc2626",marginBottom:12 }}>{error}</div>}
 
       {ordenes.length === 0 && !error && (
-        <div className="text-center py-16">
-          <div className="text-5xl mb-4">🚚</div>
-          <div className="text-gray-400 text-lg">No hay órdenes pendientes</div>
+        <div style={{ textAlign:"center",padding:"60px 0" }}>
+          <div style={{ fontSize:48,marginBottom:12 }}>🚚</div>
+          <div style={{ color:C.textSub,fontSize:16,fontWeight:600 }}>No hay órdenes pendientes</div>
         </div>
       )}
 
-      <div className="flex flex-col gap-3">
-        {ordenes.map((orden) => {
-          const enProgreso = orden.recepcion && orden.recepcion.estado === "en_proceso"
+      <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+        {ordenes.map(orden => {
+          const enProgreso = orden.recepcion?.estado === "en_proceso"
           const items = orden.recepcion?.recepciones_items || []
-          const recibidos = items.filter((i: any) => i.estado_linea === "ok" || i.estado_linea === "diferencia_cantidad").length
-          const totalItems = orden.ordenes_compra_detalle?.length || 0
-
+          const recibidos = items.filter((i:any) => i.estado_linea === "ok").length
+          const total = orden.ordenes_compra_detalle?.length || 0
+          const pct = total > 0 ? Math.round((recibidos/total)*100) : 0
           return (
-            <div key={orden.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-              <div className="flex items-start justify-between mb-3">
+            <div key={orden.id} style={{ background:C.white,border:`1px solid ${enProgreso?C.orangeBorder:C.border}`,borderRadius:18,padding:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10 }}>
                 <div>
-                  <div className="text-white font-bold text-lg">{orden.numero_orden}</div>
-                  <div className="text-emerald-400 text-sm font-semibold">
-                    🏭 {orden.proveedores?.nombre || "Sin proveedor"}
-                  </div>
+                  <div style={{ fontSize:17,fontWeight:700,color:C.text }}>{orden.numero_orden}</div>
+                  <div style={{ color:C.green,fontWeight:600,fontSize:14,marginTop:2 }}>🏭 {orden.proveedores?.nombre}</div>
                 </div>
-                <span className={`text-xs font-semibold px-3 py-1 rounded-full ${enProgreso ? "bg-blue-700 text-blue-100" : "bg-gray-700 text-gray-200"}`}>
-                  {enProgreso ? "En progreso" : "Pendiente"}
+                <span style={{ fontSize:11,fontWeight:700,padding:"5px 12px",borderRadius:999,background:enProgreso?C.orangeLight:C.bg,color:enProgreso?C.orange:C.textSub,border:`1px solid ${enProgreso?C.orangeBorder:C.border}` }}>
+                  {enProgreso?"En progreso":"Pendiente"}
                 </span>
               </div>
-
-              <div className="flex gap-3 text-sm text-gray-400 mb-3">
-                <span>📦 {totalItems} artículos</span>
-                <span>•</span>
+              <div style={{ display:"flex",gap:16,fontSize:13,color:C.textSub,marginBottom:enProgreso?10:14 }}>
+                <span>📦 {total} artículos</span>
                 <span>📅 {new Date(orden.fecha_orden).toLocaleDateString("es-AR")}</span>
               </div>
-
               {enProgreso && (
-                <div className="mb-3">
-                  <div className="w-full bg-gray-700 rounded-full h-2">
-                    <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${(recibidos / Math.max(totalItems, 1)) * 100}%` }} />
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ background:C.border,borderRadius:999,height:6,overflow:"hidden" }}>
+                    <div style={{ height:"100%",background:C.green,borderRadius:999,width:`${pct}%` }} />
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">{recibidos}/{totalItems} artículos recibidos</div>
+                  <div style={{ fontSize:12,color:C.textSub,marginTop:4 }}>{recibidos}/{total} artículos recibidos</div>
                 </div>
               )}
-
-              <button
-                onClick={() => iniciarRecepcion(orden)}
-                disabled={iniciando === orden.id}
-                className="w-full bg-emerald-600 active:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm disabled:opacity-50"
-              >
-                {iniciando === orden.id ? "Cargando..." : enProgreso ? "Continuar recepción →" : "Iniciar recepción →"}
+              <button onClick={() => iniciar(orden)} disabled={iniciando===orden.id}
+                style={{ width:"100%",background:C.green,color:"#fff",fontWeight:700,fontSize:15,padding:"14px",borderRadius:14,border:"none",cursor:"pointer",opacity:iniciando===orden.id?0.6:1 }}>
+                {iniciando===orden.id?"Cargando...":enProgreso?"Continuar recepción →":"Iniciar recepción →"}
               </button>
             </div>
           )

@@ -135,7 +135,10 @@ export default function RecibirMercaderiaDetallePage() {
 
   const finalizarRecepcion = async () => {
     const pend = items.filter(i => i.estado_linea === "pendiente").length
-    if (pend > 0 && !confirm(`${pend} artículos sin recibir. ¿Finalizar igual?`)) return
+    if (pend > 0) {
+      showSuccess(`❌ Faltan ${pend} artículos por recibir o marcar como faltante. No podés finalizar.`)
+      return
+    }
     setFinalizando(true)
     try {
       const r = await fetch("/api/deposito/recepciones", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recepcion_id: recepcion.id, finalizar: true }) })
