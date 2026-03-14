@@ -149,6 +149,9 @@ export default function ClientesPedidosPage() {
   const [modalDetalleAbierto, setModalDetalleAbierto] = useState(false)
   const [pedidoAEliminar, setPedidoAEliminar] = useState<Pedido | null>(null)
   const [eliminando, setEliminando] = useState(false)
+  const [pickingStatus, setPickingStatus] = useState<Record<string, any>>({})
+  const [expandedPriorities, setExpandedPriorities] = useState<Record<string, boolean>>({ "1": true, "2": true, "3": true })
+  const [dragPedidoId, setDragPedidoId] = useState<string | null>(null)
 
   const supabase = createClient()
   const searchParams = useSearchParams()
@@ -164,6 +167,7 @@ export default function ClientesPedidosPage() {
   useEffect(() => {
     cargarPedidos()
     cargarViajes()
+    cargarPickingStatus()
   }, [])
 
   useEffect(() => {
@@ -230,6 +234,38 @@ export default function ClientesPedidosPage() {
     } catch (error) {
       console.error("Error cargando comprobantes:", error)
     }
+  }
+
+  const cargarPickingStatus = async () => {
+    try {
+      const res = await fetch("/api/pedidos/picking-status")
+      if (res.ok) setPickingStatus(await res.json())
+    } catch (e) { console.error("Error cargando picking status:", e) }
+  }
+
+  const cambiarPrioridad = async (pedidoId: string, nuevaPrioridad: number) => {
+    try {
+      const res = await fetch("/api/pedidos/prioridad", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pedido_id: pedidoId, prioridad: nuevaPrioridad }),
+      })
+      if (res.ok) {
+        setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, prioridad: nuevaPrioridad } : p))
+      }
+    } catch (e) { console.error("Error cambiando prioridad:", e) }
+  }
+
+  const PRIORIDADES = [
+    { nivel: 1, label: "🔴 Urgente", color: "bg-red-500", bgLight: "bg-red-50 border-red-200", textColor: "text-red-700" },
+    { nivel: 2, label: "🟠 Alta", color: "bg-orange-500", bgLight: "bg-orange-50 border-orange-200", textColor: "text-orange-700" },
+    { nivel: 3, label: "🟢 Normal", color: "bg-green-500", bgLight: "bg-green-50 border-green-200", textColor: "text-green-700" },
+  ]
+
+  const getPrioridadLabel = (p: number) => {
+    if (p === 1) return "🔴 Urgente"
+    if (p === 2) return "🟠 Alta"
+    return "🟢 Normal"
   }
 
   const cargarViajes = async () => {
@@ -683,177 +719,161 @@ export default function ClientesPedidosPage() {
         </Select>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[40px]">#</TableHead>
-                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("numero_pedido")}>
-                  <div className="flex items-center">Nº Pedido{getSortIcon("numero_pedido")}</div>
-                </TableHead>
-                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("fecha")}>
-                  <div className="flex items-center">Fecha{getSortIcon("fecha")}</div>
-                </TableHead>
-                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("cliente")}>
-                  <div className="flex items-center">Cliente{getSortIcon("cliente")}</div>
-                </TableHead>
-                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("vendedor")}>
-                  <div className="flex items-center">Vendedor{getSortIcon("vendedor")}</div>
-                </TableHead>
-                <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("estado")}>
-                  <div className="flex items-center">Estado{getSortIcon("estado")}</div>
-                </TableHead>
-                <TableHead>Viaje</TableHead>
-                <TableHead>Comprobantes</TableHead>
-                <TableHead className="text-right cursor-pointer select-none hover:bg-muted/50" onClick={() => handleSort("total")}>
-                  <div className="flex items-center justify-end">Total{getSortIcon("total")}</div>
-                </TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {cargando ? (
-                <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8">
-                    Cargando pedidos...
-                  </TableCell>
-                </TableRow>
-              ) : pedidosFiltrados.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8">
-                    No se encontraron pedidos
-                  </TableCell>
-                </TableRow>
-              ) : (
-                pedidosOrdenados.map((pedido, index) => (
-                  <TableRow
-                    key={pedido.id}
-                    className="hover:bg-muted/50"
-                  >
-                    <TableCell>
-                      <span className="text-sm text-muted-foreground">{index + 1}</span>
-                    </TableCell>
-                    <TableCell className="font-medium">{pedido.numero_pedido}</TableCell>
-                    <TableCell>{formatDateAR(pedido.fecha)}</TableCell>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{pedido.clientes?.nombre_razon_social}</div>
-                        <div className="text-sm text-muted-foreground">{pedido.clientes?.cuit}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>{pedido.vendedores?.nombre}</TableCell>
-                    <TableCell>{getEstadoBadge(pedido.estado)}</TableCell>
-                    <TableCell>
-                      {pedido.viajes ? (
-                        <div className="text-sm">
-                          <div className="font-medium">{pedido.viajes.nombre}</div>
-                          <div className="text-muted-foreground">
-                            {formatDateAR(pedido.viajes.fecha)}
+      {/* ═══ ACORDEÓN POR PRIORIDAD ═══ */}
+      <div className="space-y-4">
+        {PRIORIDADES.map(prio => {
+          const pedidosDeEstaPrioridad = pedidosFiltrados
+            .filter(p => (p.prioridad || 3) === prio.nivel)
+            .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""))
+          const isExpanded = expandedPriorities[String(prio.nivel)] !== false
+          const count = pedidosDeEstaPrioridad.length
+
+          return (
+            <div
+              key={prio.nivel}
+              className={`border rounded-xl overflow-hidden ${prio.bgLight}`}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move" }}
+              onDrop={async (e) => {
+                e.preventDefault()
+                if (dragPedidoId && prio.nivel) {
+                  await cambiarPrioridad(dragPedidoId, prio.nivel)
+                  setDragPedidoId(null)
+                }
+              }}
+            >
+              {/* Header del acordeón */}
+              <button
+                onClick={() => setExpandedPriorities(prev => ({ ...prev, [String(prio.nivel)]: !prev[String(prio.nivel)] }))}
+                className="w-full flex items-center justify-between px-5 py-3 hover:opacity-80 transition-opacity"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-base font-bold">{prio.label}</span>
+                  <Badge variant="secondary" className="text-xs">{count}</Badge>
+                </div>
+                <span className={`text-lg transition-transform ${isExpanded ? "rotate-180" : ""}`}>▾</span>
+              </button>
+
+              {/* Contenido */}
+              {isExpanded && (
+                <div className="px-3 pb-3 space-y-2">
+                  {count === 0 ? (
+                    <div className="text-center py-6 text-sm text-muted-foreground opacity-60">
+                      {dragPedidoId ? "Soltá acá para cambiar prioridad" : "Sin pedidos"}
+                    </div>
+                  ) : pedidosDeEstaPrioridad.map(pedido => {
+                    const picking = pickingStatus[pedido.id]
+                    return (
+                      <div
+                        key={pedido.id}
+                        draggable
+                        onDragStart={() => setDragPedidoId(pedido.id)}
+                        onDragEnd={() => setDragPedidoId(null)}
+                        className={`bg-white border rounded-lg p-4 cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow
+                          ${dragPedidoId === pedido.id ? "opacity-40" : ""}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            {/* Línea 1: número + cliente */}
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-bold text-sm">{pedido.numero_pedido}</span>
+                              <span className="text-xs text-muted-foreground">·</span>
+                              <span className="text-sm font-medium truncate">{pedido.clientes?.nombre_razon_social}</span>
+                              {pedido.clientes?.cuit && <span className="text-xs text-muted-foreground hidden lg:inline">{pedido.clientes.cuit}</span>}
+                            </div>
+                            {/* Línea 2: fecha + vendedor + estado */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs text-muted-foreground">{formatDateAR(pedido.fecha)}</span>
+                              {pedido.vendedores?.nombre && (
+                                <span className="text-xs text-muted-foreground">· {pedido.vendedores.nombre}</span>
+                              )}
+                              {getEstadoBadge(pedido.estado)}
+                              {pedido.viajes?.nombre && (
+                                <Badge variant="outline" className="text-xs">🚚 {pedido.viajes.nombre}</Badge>
+                              )}
+                            </div>
+                            {/* Línea 3: picking info si alguien lo prepara */}
+                            {picking && (
+                              <div className="mt-2 flex items-center gap-3">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                                  <span className="text-xs font-semibold text-green-700">
+                                    Preparando: {picking.operario}
+                                  </span>
+                                </div>
+                                <div className="flex-1 max-w-[200px]">
+                                  <div className="bg-neutral-200 rounded-full h-1.5 overflow-hidden">
+                                    <div
+                                      className="h-full bg-green-500 rounded-full transition-all"
+                                      style={{ width: `${picking.progreso.total > 0 ? Math.round(((picking.progreso.preparados + picking.progreso.faltantes) / picking.progreso.total) * 100) : 0}%` }}
+                                    />
+                                  </div>
+                                </div>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {picking.progreso.preparados}✓ {picking.progreso.faltantes > 0 ? `${picking.progreso.faltantes}✕ ` : ""}{picking.progreso.pendientes}⏳
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          {/* Acciones */}
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {pedido.total > 0 && (
+                              <span className="text-sm font-bold mr-2">${pedido.total.toLocaleString("es-AR")}</span>
+                            )}
+                            {pedido.estado !== "eliminado" && (
+                              <Button
+                                variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => setPedidoAEliminar(pedido)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => {
+                                  setPedidoSeleccionado(pedido)
+                                  cargarDetallesPedido(pedido.id)
+                                  setModalDetalleAbierto(true)
+                                }}>
+                                  <Pencil className="h-4 w-4 mr-2" /> Ver Detalle
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                {!tieneComprobantes(pedido.id) ? (
+                                  <DropdownMenuItem
+                                    onClick={() => generarComprobantes(pedido.id)}
+                                    disabled={generandoComprobante === pedido.id}
+                                  >
+                                    <Receipt className="h-4 w-4 mr-2" />
+                                    {generandoComprobante === pedido.id ? "Generando..." : "Generar Comprobantes"}
+                                  </DropdownMenuItem>
+                                ) : (
+                                  comprobantesGenerados[pedido.id]?.map(comp => (
+                                    <DropdownMenuItem key={comp.id} onClick={() => verComprobante(comp.id)}>
+                                      <ExternalLink className="h-4 w-4 mr-2" /> Ver {getTipoComprobanteLabel(comp.tipo_comprobante)}
+                                    </DropdownMenuItem>
+                                  ))
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => imprimirPedido(pedido)}>
+                                  <Printer className="h-4 w-4 mr-2" /> Imprimir
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
-                      ) : (
-                        <span className="text-muted-foreground">Sin asignar</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {comprobantesGenerados[pedido.id]?.length > 0 ? (
-                        <div className="space-y-1">
-                          {comprobantesGenerados[pedido.id].map((comp) => (
-                            <button
-                              key={comp.id}
-                              onClick={() => verComprobante(comp.id)}
-                              className="flex items-center gap-1 text-xs text-primary hover:underline"
-                            >
-                              <FileText className="h-3 w-3" />
-                              {comp.numero_comprobante}
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">${pedido.total?.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {pedido.estado === "pendiente" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => setPedidoAEliminar(pedido)}
-                            title="Eliminar pedido"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {pedido.estado === "eliminado" && (pedido as any).eliminado_at && (
-                          <span className="text-xs text-muted-foreground mr-2" title="Días restantes antes de la purga definitiva">
-                            {getDiasRestantes((pedido as any).eliminado_at)}d
-                          </span>
-                        )}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setPedidoSeleccionado(pedido)
-                                cargarDetallesPedido(pedido.id)
-                                setModalDetalleAbierto(true)
-                              }}
-                            >
-                              <Pencil className="h-4 w-4 mr-2" />
-                              Editar / Ver Detalle
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            {!tieneComprobantes(pedido.id) ? (
-                              <DropdownMenuItem
-                                onClick={() => generarComprobantes(pedido.id)}
-                                disabled={generandoComprobante === pedido.id}
-                              >
-                                {generandoComprobante === pedido.id ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    Generando...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Receipt className="h-4 w-4 mr-2" />
-                                    Generar Comprobantes
-                                  </>
-                                )}
-                              </DropdownMenuItem>
-                            ) : (
-                              <>
-                                {comprobantesGenerados[pedido.id]?.map((comp) => (
-                                  <DropdownMenuItem key={comp.id} onClick={() => verComprobante(comp.id)}>
-                                    <ExternalLink className="h-4 w-4 mr-2" />
-                                    Ver {getTipoComprobanteLabel(comp.tipo_comprobante)}
-                                  </DropdownMenuItem>
-                                ))}
-                              </>
-                            )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => imprimirPedido(pedido)}>
-                              <Printer className="h-4 w-4 mr-2" />
-                              Imprimir Pedido
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                    )
+                  })}
+                </div>
               )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </div>
+          )
+        })}
+      </div>
 
       <Dialog
         open={modalDetalleAbierto}
