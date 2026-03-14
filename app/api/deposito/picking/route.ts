@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "pedido_id requerido" }, { status: 400 })
     }
 
-    // Buscar pedido — incluye estados en_preparacion para retomar
+    // Buscar pedido
     const { data: pedido, error: pedidoError } = await supabase
       .from("pedidos")
       .select(`
@@ -31,24 +31,17 @@ export async function POST(request: NextRequest) {
 
     if (pedidoError || !pedido) {
       return NextResponse.json(
-        { error: `Pedido no encontrado. Estado requerido: pendiente o en_preparacion. DB error: ${pedidoError?.message}` },
+        { error: `Pedido no encontrado: ${pedidoError?.message}` },
         { status: 404 }
       )
     }
 
-    // Buscar sesión existente — si ya existe, retomar
+    // Buscar sesión existente — solo columnas seguras
     const { data: sesionExistente, error: sesionBusqError } = await supabase
       .from("picking_sesiones")
-      .select(`
-        id, estado, fecha_inicio,
-        picking_items(
-          id, pedido_detalle_id, articulo_id,
-          cantidad_pedida, cantidad_preparada,
-          estado, usuario_nombre, fecha_escaneo
-        )
-      `)
+      .select("id, estado, pedido_id")
       .eq("pedido_id", pedido_id)
-      .maybeSingle()  // maybeSingle en lugar de single para no lanzar error si no existe
+      .maybeSingle()
 
     if (sesionBusqError) {
       return NextResponse.json(
@@ -58,26 +51,34 @@ export async function POST(request: NextRequest) {
     }
 
     if (sesionExistente) {
-      return NextResponse.json({ pedido, sesion: sesionExistente })
+      // Cargar items de la sesión existente
+      const { data: pickingItems } = await supabase
+        .from("picking_items")
+        .select("id, pedido_detalle_id, articulo_id, cantidad_pedida, cantidad_preparada, estado, usuario_nombre, fecha_escaneo")
+        .eq("sesion_id", sesionExistente.id)
+
+      return NextResponse.json({
+        pedido,
+        sesion: { ...sesionExistente, picking_items: pickingItems || [] }
+      })
     }
 
     // Crear nueva sesión
     const { data: nuevaSesion, error: sesionError } = await supabase
       .from("picking_sesiones")
       .insert({ pedido_id, estado: "en_progreso" })
-      .select()
+      .select("id, estado, pedido_id")
       .single()
 
     if (sesionError) {
       return NextResponse.json(
-        { error: `Error creando sesión de picking: ${sesionError.message} (code: ${sesionError.code})` },
+        { error: `Error creando sesión: ${sesionError.message} (${sesionError.code})` },
         { status: 500 }
       )
     }
 
-    // Crear items — uno por cada línea del pedido
+    // Crear items
     const detalles = pedido.pedidos_detalle as any[]
-    
     if (detalles && detalles.length > 0) {
       const pickingItems = detalles.map((det) => ({
         sesion_id: nuevaSesion.id,
@@ -93,10 +94,9 @@ export async function POST(request: NextRequest) {
         .insert(pickingItems)
 
       if (itemsError) {
-        // Limpiar sesión huérfana
         await supabase.from("picking_sesiones").delete().eq("id", nuevaSesion.id)
         return NextResponse.json(
-          { error: `Error creando items de picking: ${itemsError.message} (code: ${itemsError.code})` },
+          { error: `Error creando items: ${itemsError.message} (${itemsError.code})` },
           { status: 500 }
         )
       }
@@ -105,26 +105,20 @@ export async function POST(request: NextRequest) {
     // Marcar pedido en_preparacion
     await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
 
-    // Recargar sesión con items
-    const { data: sesionFull } = await supabase
-      .from("picking_sesiones")
-      .select(`
-        id, estado, fecha_inicio,
-        picking_items(
-          id, pedido_detalle_id, articulo_id,
-          cantidad_pedida, cantidad_preparada,
-          estado, usuario_nombre, fecha_escaneo
-        )
-      `)
-      .eq("id", nuevaSesion.id)
-      .single()
+    // Recargar items
+    const { data: itemsCreados } = await supabase
+      .from("picking_items")
+      .select("id, pedido_detalle_id, articulo_id, cantidad_pedida, cantidad_preparada, estado, usuario_nombre, fecha_escaneo")
+      .eq("sesion_id", nuevaSesion.id)
 
-    return NextResponse.json({ pedido, sesion: sesionFull })
+    return NextResponse.json({
+      pedido,
+      sesion: { ...nuevaSesion, picking_items: itemsCreados || [] }
+    })
 
   } catch (error: any) {
-    console.error("[deposito] Error POST picking:", error)
     return NextResponse.json(
-      { error: `Error inesperado: ${error?.message || "desconocido"}` },
+      { error: `Error inesperado: ${error?.message}` },
       { status: 500 }
     )
   }
@@ -141,7 +135,7 @@ export async function GET(request: NextRequest) {
 
     if (!q || q.length < 2) return NextResponse.json([])
 
-    // EAN13 exacto primero (para scanner de código de barras)
+    // EAN13 exacto primero
     const { data: porEan } = await supabase
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
@@ -151,7 +145,6 @@ export async function GET(request: NextRequest) {
 
     if (porEan && porEan.length > 0) return NextResponse.json(porEan)
 
-    // SKU o descripción parcial
     const { data: articulos, error } = await supabase
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
