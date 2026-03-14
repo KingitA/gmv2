@@ -2,7 +2,6 @@
 -- Script 092: Módulo Depósito — Picking y Preparación
 -- =====================================================
 
--- Tabla de sesiones de picking (una por pedido, puede haber varios usuarios)
 CREATE TABLE IF NOT EXISTS picking_sesiones (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   pedido_id UUID NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
@@ -11,10 +10,9 @@ CREATE TABLE IF NOT EXISTS picking_sesiones (
   fecha_fin TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(pedido_id) -- Un pedido = una sesión de picking
+  UNIQUE(pedido_id)
 );
 
--- Tabla de items de picking (progreso por artículo)
 CREATE TABLE IF NOT EXISTS picking_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   sesion_id UUID NOT NULL REFERENCES picking_sesiones(id) ON DELETE CASCADE,
@@ -23,7 +21,7 @@ CREATE TABLE IF NOT EXISTS picking_items (
   cantidad_pedida DECIMAL(10,2) NOT NULL,
   cantidad_preparada DECIMAL(10,2) DEFAULT 0,
   estado VARCHAR(20) DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'preparado', 'faltante', 'parcial')),
-  usuario_id UUID, -- quien escaneó este item
+  usuario_id UUID,
   usuario_nombre VARCHAR(255),
   fecha_escaneo TIMESTAMP WITH TIME ZONE,
   observaciones TEXT,
@@ -32,7 +30,6 @@ CREATE TABLE IF NOT EXISTS picking_items (
   UNIQUE(sesion_id, pedido_detalle_id)
 );
 
--- Tabla de ajustes de stock desde depósito
 CREATE TABLE IF NOT EXISTS deposito_ajustes_stock (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   articulo_id UUID NOT NULL REFERENCES articulos(id) ON DELETE RESTRICT,
@@ -49,7 +46,6 @@ CREATE TABLE IF NOT EXISTS deposito_ajustes_stock (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Índices
 CREATE INDEX IF NOT EXISTS idx_picking_sesiones_pedido ON picking_sesiones(pedido_id);
 CREATE INDEX IF NOT EXISTS idx_picking_sesiones_estado ON picking_sesiones(estado);
 CREATE INDEX IF NOT EXISTS idx_picking_items_sesion ON picking_items(sesion_id);
@@ -57,16 +53,15 @@ CREATE INDEX IF NOT EXISTS idx_picking_items_articulo ON picking_items(articulo_
 CREATE INDEX IF NOT EXISTS idx_deposito_ajustes_articulo ON deposito_ajustes_stock(articulo_id);
 CREATE INDEX IF NOT EXISTS idx_deposito_ajustes_estado ON deposito_ajustes_stock(estado);
 
--- Trigger updated_at
-CREATE TRIGGER update_picking_sesiones_updated_at 
+-- Triggers con OR REPLACE para no fallar si ya existen
+CREATE OR REPLACE TRIGGER update_picking_sesiones_updated_at 
   BEFORE UPDATE ON picking_sesiones
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_picking_items_updated_at 
+CREATE OR REPLACE TRIGGER update_picking_items_updated_at 
   BEFORE UPDATE ON picking_items
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Comentarios
-COMMENT ON TABLE picking_sesiones IS 'Sesiones de preparación de pedidos en depósito. Un pedido = una sesión, múltiples usuarios pueden participar.';
+COMMENT ON TABLE picking_sesiones IS 'Sesiones de preparación de pedidos en depósito.';
 COMMENT ON TABLE picking_items IS 'Estado de cada artículo dentro de una sesión de picking.';
-COMMENT ON TABLE deposito_ajustes_stock IS 'Ajustes de stock iniciados desde la app depósito, requieren confirmación en ERP.';
+COMMENT ON TABLE deposito_ajustes_stock IS 'Ajustes de stock desde depósito, requieren confirmación en ERP.';

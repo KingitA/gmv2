@@ -74,9 +74,10 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // No mostrar sidebar en rutas de auth
+  // No mostrar sidebar en rutas de auth ni en app depósito
   const isAuthRoute = pathname?.startsWith('/auth')
-  if (isAuthRoute) return null
+  const isDepositoRoute = pathname?.startsWith('/deposito')
+  if (isAuthRoute || isDepositoRoute) return null
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/'

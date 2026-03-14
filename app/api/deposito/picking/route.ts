@@ -2,7 +2,6 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 
-// POST: Crear o retomar sesión de picking para un pedido
 export async function POST(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -15,6 +14,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "pedido_id requerido" }, { status: 400 })
     }
 
+    // Buscar pedido — incluye estados en_preparacion para retomar
     const { data: pedido, error: pedidoError } = await supabase
       .from("pedidos")
       .select(`
@@ -30,11 +30,14 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (pedidoError || !pedido) {
-      return NextResponse.json({ error: "Pedido no encontrado o no disponible para picking" }, { status: 404 })
+      return NextResponse.json(
+        { error: `Pedido no encontrado. Estado requerido: pendiente o en_preparacion. DB error: ${pedidoError?.message}` },
+        { status: 404 }
+      )
     }
 
-    // Buscar sesión existente
-    const { data: sesionExistente } = await supabase
+    // Buscar sesión existente — si ya existe, retomar
+    const { data: sesionExistente, error: sesionBusqError } = await supabase
       .from("picking_sesiones")
       .select(`
         id, estado, fecha_inicio,
@@ -45,7 +48,14 @@ export async function POST(request: NextRequest) {
         )
       `)
       .eq("pedido_id", pedido_id)
-      .single()
+      .maybeSingle()  // maybeSingle en lugar de single para no lanzar error si no existe
+
+    if (sesionBusqError) {
+      return NextResponse.json(
+        { error: `Error buscando sesión: ${sesionBusqError.message}` },
+        { status: 500 }
+      )
+    }
 
     if (sesionExistente) {
       return NextResponse.json({ pedido, sesion: sesionExistente })
@@ -59,32 +69,43 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (sesionError) {
-      console.error("[picking] Error creando sesión:", sesionError)
       return NextResponse.json(
-        { error: "Error al crear sesión. Verificá que la migración 092 fue ejecutada en Supabase." },
+        { error: `Error creando sesión de picking: ${sesionError.message} (code: ${sesionError.code})` },
         { status: 500 }
       )
     }
 
-    const pickingItems = (pedido.pedidos_detalle as any[]).map((det) => ({
-      sesion_id: nuevaSesion.id,
-      pedido_detalle_id: det.id,
-      articulo_id: det.articulo_id,
-      cantidad_pedida: det.cantidad,
-      cantidad_preparada: 0,
-      estado: "pendiente",
-    }))
+    // Crear items — uno por cada línea del pedido
+    const detalles = pedido.pedidos_detalle as any[]
+    
+    if (detalles && detalles.length > 0) {
+      const pickingItems = detalles.map((det) => ({
+        sesion_id: nuevaSesion.id,
+        pedido_detalle_id: det.id,
+        articulo_id: det.articulo_id,
+        cantidad_pedida: det.cantidad,
+        cantidad_preparada: 0,
+        estado: "pendiente",
+      }))
 
-    if (pickingItems.length > 0) {
-      const { error: itemsError } = await supabase.from("picking_items").insert(pickingItems)
+      const { error: itemsError } = await supabase
+        .from("picking_items")
+        .insert(pickingItems)
+
       if (itemsError) {
-        console.error("[picking] Error creando items:", itemsError)
-        return NextResponse.json({ error: "Error al crear items de picking" }, { status: 500 })
+        // Limpiar sesión huérfana
+        await supabase.from("picking_sesiones").delete().eq("id", nuevaSesion.id)
+        return NextResponse.json(
+          { error: `Error creando items de picking: ${itemsError.message} (code: ${itemsError.code})` },
+          { status: 500 }
+        )
       }
     }
 
+    // Marcar pedido en_preparacion
     await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
 
+    // Recargar sesión con items
     const { data: sesionFull } = await supabase
       .from("picking_sesiones")
       .select(`
@@ -99,16 +120,16 @@ export async function POST(request: NextRequest) {
       .single()
 
     return NextResponse.json({ pedido, sesion: sesionFull })
+
   } catch (error: any) {
     console.error("[deposito] Error POST picking:", error)
     return NextResponse.json(
-      { error: "Error al iniciar picking: " + (error?.message || "desconocido") },
+      { error: `Error inesperado: ${error?.message || "desconocido"}` },
       { status: 500 }
     )
   }
 }
 
-// GET: Buscar artículo por EAN13, SKU o descripción
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -118,11 +139,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const q = searchParams.get("q")?.trim()
 
-    if (!q || q.length < 2) {
-      return NextResponse.json([])
-    }
+    if (!q || q.length < 2) return NextResponse.json([])
 
-    // EAN13 exacto primero
+    // EAN13 exacto primero (para scanner de código de barras)
     const { data: porEan } = await supabase
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
@@ -130,10 +149,9 @@ export async function GET(request: NextRequest) {
       .eq("activo", true)
       .limit(5)
 
-    if (porEan && porEan.length > 0) {
-      return NextResponse.json(porEan)
-    }
+    if (porEan && porEan.length > 0) return NextResponse.json(porEan)
 
+    // SKU o descripción parcial
     const { data: articulos, error } = await supabase
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
@@ -142,8 +160,8 @@ export async function GET(request: NextRequest) {
       .limit(20)
 
     if (error) throw error
-
     return NextResponse.json(articulos || [])
+
   } catch (error: any) {
     return NextResponse.json({ error: "Error en búsqueda" }, { status: 500 })
   }
