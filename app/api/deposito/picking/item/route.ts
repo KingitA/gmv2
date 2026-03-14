@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     // Finalizar sesión
     await supabase
       .from("picking_sesiones")
-      .update({ estado: "finalizado", fecha_fin: new Date().toISOString() })
+      .update({ estado: "FINALIZADO", fecha_fin: new Date().toISOString() })
       .eq("id", sesion_id)
 
     // Actualizar estado del pedido

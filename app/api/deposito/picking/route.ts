@@ -36,10 +36,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Buscar sesión existente — solo columnas seguras
+    // Obtener usuario actual
+    const { data: { user } } = await supabase.auth.getUser()
+    const usuarioEmail = user?.email || "sistema@deposito"
+    let usuarioNombre = usuarioEmail.split("@")[0]
+    if (user?.id) {
+      const { data: u } = await supabase.from("usuarios").select("nombre").eq("id", user.id).single()
+      if (u?.nombre) usuarioNombre = u.nombre
+    }
+
+    // Buscar sesión existente
     const { data: sesionExistente, error: sesionBusqError } = await supabase
       .from("picking_sesiones")
-      .select("id, estado, pedido_id")
+      .select("id, estado, pedido_id, usuario_email")
       .eq("pedido_id", pedido_id)
       .maybeSingle()
 
@@ -51,7 +60,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (sesionExistente) {
-      // Cargar items de la sesión existente
       const { data: pickingItems } = await supabase
         .from("picking_items")
         .select("id, pedido_detalle_id, articulo_id, cantidad_pedida, cantidad_preparada, estado, usuario_nombre, fecha_escaneo")
@@ -63,26 +71,15 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Obtener usuario actual
-    const { data: { user } } = await supabase.auth.getUser()
-    let usuarioNombre = user?.email?.split("@")[0] || "operario"
-    if (user?.id) {
-      const { data: u } = await supabase.from("usuarios").select("nombre").eq("id", user.id).single()
-      if (u?.nombre) usuarioNombre = u.nombre
-    }
-
-    // Crear nueva sesión — incluir todos los campos posibles de usuario
-    const sesionData: any = {
-      pedido_id,
-      estado: "en_progreso",
-      usuario_id: user?.id ?? null,
-      usuario_nombre: usuarioNombre,
-      usuario_email: user?.email ?? null,
-    }
-
+    // Crear nueva sesión — usando la estructura REAL de la tabla
     const { data: nuevaSesion, error: sesionError } = await supabase
       .from("picking_sesiones")
-      .insert(sesionData)
+      .insert({
+        pedido_id,
+        estado: "EN_PROGRESO",        // mayúsculas según el default real de la DB
+        usuario_id: user?.id ?? null,
+        usuario_email: usuarioEmail,   // NOT NULL en la DB real
+      })
       .select("id, estado, pedido_id")
       .single()
 
@@ -93,7 +90,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Crear items
+    // Crear items de picking
     const detalles = pedido.pedidos_detalle as any[]
     if (detalles && detalles.length > 0) {
       const pickingItems = detalles.map((det) => ({
@@ -103,6 +100,7 @@ export async function POST(request: NextRequest) {
         cantidad_pedida: det.cantidad,
         cantidad_preparada: 0,
         estado: "pendiente",
+        usuario_nombre: usuarioNombre,
       }))
 
       const { error: itemsError } = await supabase
@@ -118,10 +116,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Marcar pedido en_preparacion
+    // Marcar pedido en preparación
     await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
 
-    // Recargar items
+    // Devolver sesión con items
     const { data: itemsCreados } = await supabase
       .from("picking_items")
       .select("id, pedido_detalle_id, articulo_id, cantidad_pedida, cantidad_preparada, estado, usuario_nombre, fecha_escaneo")
@@ -151,7 +149,7 @@ export async function GET(request: NextRequest) {
 
     if (!q || q.length < 2) return NextResponse.json([])
 
-    // EAN13 exacto primero
+    // EAN13 exacto primero (scanner)
     const { data: porEan } = await supabase
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
@@ -161,6 +159,7 @@ export async function GET(request: NextRequest) {
 
     if (porEan && porEan.length > 0) return NextResponse.json(porEan)
 
+    // SKU o descripción
     const { data: articulos, error } = await supabase
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
