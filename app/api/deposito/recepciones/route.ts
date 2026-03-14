@@ -195,11 +195,22 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    // Update single item
-    const estadoLinea = cantidad_fisica > 0 ? "ok" : "pendiente"
+    // Update single item — cantidad_fisica = -1 means "return to pendiente"
+    let estadoLinea: string
+    let cantidadReal: number
+    if (cantidad_fisica === -1) {
+      estadoLinea = "pendiente"
+      cantidadReal = 0
+    } else if (cantidad_fisica === 0) {
+      estadoLinea = "faltante"
+      cantidadReal = 0
+    } else {
+      estadoLinea = "ok"
+      cantidadReal = cantidad_fisica
+    }
     const { data: item, error } = await supabase
       .from("recepciones_items")
-      .update({ cantidad_fisica, estado_linea: estadoLinea })
+      .update({ cantidad_fisica: cantidadReal, estado_linea: estadoLinea })
       .eq("recepcion_id", recepcion_id)
       .eq("articulo_id", articulo_id)
       .select()
