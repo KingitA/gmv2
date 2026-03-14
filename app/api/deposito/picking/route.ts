@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 
+// POST: Iniciar o retomar sesión de picking para un pedido
 export async function POST(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "pedido_id requerido" }, { status: 400 })
     }
 
-    // Buscar pedido
+    // Obtener pedido con sus detalles (usando campos reales de pedidos_detalle)
     const { data: pedido, error: pedidoError } = await supabase
       .from("pedidos")
       .select(`
@@ -22,7 +23,8 @@ export async function POST(request: NextRequest) {
         clientes(id, nombre, razon_social),
         pedidos_detalle(
           id, cantidad, articulo_id,
-          articulos(id, sku, descripcion, ean13, stock_actual, unidades_por_bulto)
+          cantidad_preparada, estado_item,
+          articulos(id, sku, descripcion, ean13, unidades_por_bulto)
         )
       `)
       .eq("id", pedido_id)
@@ -36,108 +38,49 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Obtener usuario actual
+    // Obtener usuario
     const { data: { user } } = await supabase.auth.getUser()
-    const usuarioEmail = user?.email || "sistema@deposito"
-    let usuarioNombre = usuarioEmail.split("@")[0]
-    if (user?.id) {
-      const { data: u } = await supabase.from("usuarios").select("nombre").eq("id", user.id).single()
-      if (u?.nombre) usuarioNombre = u.nombre
-    }
+    const usuarioEmail = user?.email || "deposito@sistema"
+    const usuarioId = user?.id || null
 
-    // Buscar sesión existente
-    const { data: sesionExistente, error: sesionBusqError } = await supabase
+    // Buscar sesión existente para este pedido
+    const { data: sesionExistente } = await supabase
       .from("picking_sesiones")
-      .select("id, estado, pedido_id, usuario_email")
+      .select("id, estado, usuario_email")
       .eq("pedido_id", pedido_id)
+      .eq("estado", "EN_PROGRESO")
       .maybeSingle()
 
-    if (sesionBusqError) {
-      return NextResponse.json(
-        { error: `Error buscando sesión: ${sesionBusqError.message}` },
-        { status: 500 }
-      )
-    }
+    if (!sesionExistente) {
+      // Crear nueva sesión usando estructura real de la tabla
+      const { error: sesionError } = await supabase
+        .from("picking_sesiones")
+        .insert({
+          pedido_id,
+          usuario_id: usuarioId,
+          usuario_email: usuarioEmail,
+          estado: "EN_PROGRESO",
+        })
 
-    if (sesionExistente) {
-      const { data: pickingItems } = await supabase
-        .from("picking_items")
-        .select("id, pedido_detalle_id, articulo_id, cantidad_pedida, cantidad_preparada, estado, usuario_nombre, fecha_escaneo")
-        .eq("sesion_id", sesionExistente.id)
-
-      return NextResponse.json({
-        pedido,
-        sesion: { ...sesionExistente, picking_items: pickingItems || [] }
-      })
-    }
-
-    // Crear nueva sesión — usando la estructura REAL de la tabla
-    const { data: nuevaSesion, error: sesionError } = await supabase
-      .from("picking_sesiones")
-      .insert({
-        pedido_id,
-        estado: "EN_PROGRESO",        // mayúsculas según el default real de la DB
-        usuario_id: user?.id ?? null,
-        usuario_email: usuarioEmail,   // NOT NULL en la DB real
-      })
-      .select("id, estado, pedido_id")
-      .single()
-
-    if (sesionError) {
-      return NextResponse.json(
-        { error: `Error creando sesión: ${sesionError.message} (${sesionError.code})` },
-        { status: 500 }
-      )
-    }
-
-    // Crear items de picking
-    const detalles = pedido.pedidos_detalle as any[]
-    if (detalles && detalles.length > 0) {
-      const pickingItems = detalles.map((det) => ({
-        sesion_id: nuevaSesion.id,
-        pedido_detalle_id: det.id,
-        articulo_id: det.articulo_id,
-        cantidad_pedida: det.cantidad,
-        cantidad_preparada: 0,
-        estado: "pendiente",
-        usuario_nombre: usuarioNombre,
-      }))
-
-      const { error: itemsError } = await supabase
-        .from("picking_items")
-        .insert(pickingItems)
-
-      if (itemsError) {
-        await supabase.from("picking_sesiones").delete().eq("id", nuevaSesion.id)
+      if (sesionError) {
         return NextResponse.json(
-          { error: `Error creando items: ${itemsError.message} (${itemsError.code})` },
+          { error: `Error creando sesión: ${sesionError.message}` },
           { status: 500 }
         )
       }
+
+      // Marcar pedido como en_preparacion
+      await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
     }
 
-    // Marcar pedido en preparación
-    await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
-
-    // Devolver sesión con items
-    const { data: itemsCreados } = await supabase
-      .from("picking_items")
-      .select("id, pedido_detalle_id, articulo_id, cantidad_pedida, cantidad_preparada, estado, usuario_nombre, fecha_escaneo")
-      .eq("sesion_id", nuevaSesion.id)
-
-    return NextResponse.json({
-      pedido,
-      sesion: { ...nuevaSesion, picking_items: itemsCreados || [] }
-    })
+    return NextResponse.json({ pedido })
 
   } catch (error: any) {
-    return NextResponse.json(
-      { error: `Error inesperado: ${error?.message}` },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: `Error: ${error?.message}` }, { status: 500 })
   }
 }
 
+// GET: Buscar artículo por EAN13, SKU o descripción
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -159,7 +102,6 @@ export async function GET(request: NextRequest) {
 
     if (porEan && porEan.length > 0) return NextResponse.json(porEan)
 
-    // SKU o descripción
     const { data: articulos, error } = await supabase
       .from("articulos")
       .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")

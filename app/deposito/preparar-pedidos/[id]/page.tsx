@@ -3,24 +3,17 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 
-interface PickingItem {
+interface DetallePedido {
   id: string
-  pedido_detalle_id: string
   articulo_id: string
-  cantidad_pedida: number
+  cantidad: number
   cantidad_preparada: number
-  estado: "pendiente" | "preparado" | "faltante" | "parcial"
-  usuario_nombre?: string
-  articulos?: { sku: string; descripcion: string; ean13?: string; unidades_por_bulto?: number }
+  estado_item: string // PENDIENTE | COMPLETO | PARCIAL | FALTANTE
+  articulos: { id: string; sku: string; descripcion: string; ean13?: string; unidades_por_bulto?: number }
 }
 
 interface ArticuloFound {
-  id: string
-  sku: string
-  descripcion: string
-  ean13?: string
-  stock_actual: number
-  unidades_por_bulto?: number
+  id: string; sku: string; descripcion: string; ean13?: string; stock_actual: number
 }
 
 type Vista = "lista" | "scanner" | "cantidad"
@@ -32,49 +25,43 @@ export default function PickingPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
-
   const [pedido, setPedido] = useState<any>(null)
-  const [sesion, setSesion] = useState<any>(null)
-  const [items, setItems] = useState<PickingItem[]>([])
-
+  const [items, setItems] = useState<DetallePedido[]>([])
   const [vista, setVista] = useState<Vista>("lista")
   const [busqueda, setBusqueda] = useState("")
   const [resultados, setResultados] = useState<ArticuloFound[]>([])
   const [buscando, setBuscando] = useState(false)
-  const [articuloSeleccionado, setArticuloSeleccionado] = useState<ArticuloFound | null>(null)
+  const [itemActivo, setItemActivo] = useState<DetallePedido | null>(null)
+  const [articuloSel, setArticuloSel] = useState<ArticuloFound | null>(null)
   const [cantidadInput, setCantidadInput] = useState("")
-  const [pickingItemActivo, setPickingItemActivo] = useState<PickingItem | null>(null)
-
-  const [filtro, setFiltro] = useState<"todos" | "pendientes" | "listos">("pendientes")
+  const [filtro, setFiltro] = useState<"pendientes" | "todos" | "listos">("pendientes")
   const [finalizando, setFinalizando] = useState(false)
+  const [successMsg, setSuccessMsg] = useState("")
 
   const inputRef = useRef<HTMLInputElement>(null)
   const searchTimeout = useRef<NodeJS.Timeout>()
 
-  // Load pedido and session
   useEffect(() => {
-    fetch(`/api/deposito/picking`, {
+    // Iniciar sesión y cargar pedido
+    fetch("/api/deposito/picking", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pedido_id: pedidoId }),
     })
-      .then((r) => r.json())
-      .then((data) => {
+      .then(r => r.json())
+      .then(data => {
         if (data.error) { setError(data.error); return }
         setPedido(data.pedido)
-        setSesion(data.sesion)
-        // Merge picking_items con articulos del pedido
-        const merged = (data.sesion?.picking_items || []).map((pi: any) => {
-          const det = data.pedido.pedidos_detalle?.find((d: any) => d.id === pi.pedido_detalle_id)
-          return { ...pi, articulos: det?.articulos }
-        })
-        setItems(merged)
+        setItems(data.pedido.pedidos_detalle || [])
       })
       .catch(() => setError("Error de conexión"))
       .finally(() => setLoading(false))
   }, [pedidoId])
 
-  // Search articles
+  useEffect(() => {
+    if (vista === "scanner") setTimeout(() => inputRef.current?.focus(), 100)
+  }, [vista])
+
   const buscarArticulo = useCallback((q: string) => {
     if (!q || q.length < 2) { setResultados([]); return }
     clearTimeout(searchTimeout.current)
@@ -82,91 +69,81 @@ export default function PickingPage() {
       setBuscando(true)
       try {
         const r = await fetch(`/api/deposito/picking?q=${encodeURIComponent(q)}`)
-        const data = await r.json()
-        setResultados(Array.isArray(data) ? data : [])
+        setResultados(await r.json())
       } finally { setBuscando(false) }
     }, 300)
   }, [])
 
-  useEffect(() => {
-    if (vista === "scanner") {
-      setTimeout(() => inputRef.current?.focus(), 100)
-    }
-  }, [vista])
-
   const seleccionarArticulo = (art: ArticuloFound) => {
-    // Find matching picking item
-    const pi = items.find((i) => i.articulo_id === art.id && i.estado !== "preparado" && i.estado !== "faltante")
-    if (!pi) {
-      // Article not in this order
-      setError(`"${art.descripcion}" no está en este pedido`)
-      setTimeout(() => setError(""), 3000)
-      setBusqueda("")
-      setResultados([])
-      return
+    // Buscar en los items del pedido
+    const item = items.find(i => i.articulo_id === art.id && i.estado_item !== "COMPLETO" && i.estado_item !== "FALTANTE")
+    if (!item) {
+      // Puede ser que ya está completo o no pertenece al pedido
+      const enPedido = items.find(i => i.articulo_id === art.id)
+      if (!enPedido) {
+        showError(`"${art.descripcion}" no está en este pedido`)
+        setBusqueda(""); setResultados([])
+        return
+      }
+      if (enPedido.estado_item === "COMPLETO") {
+        showError(`"${art.descripcion}" ya está completo`)
+        setBusqueda(""); setResultados([])
+        return
+      }
     }
-    setArticuloSeleccionado(art)
-    setPickingItemActivo(pi)
-    setCantidadInput(String(pi.cantidad_pedida))
-    setBusqueda("")
-    setResultados([])
+    setItemActivo(item || null)
+    setArticuloSel(art)
+    setCantidadInput(String(item?.cantidad || ""))
+    setBusqueda(""); setResultados([])
     setVista("cantidad")
   }
 
   const confirmarCantidad = async (esFaltante = false) => {
-    if (!pickingItemActivo || !sesion) return
+    if (!itemActivo) return
     setSaving(true)
     try {
       const cantidad = esFaltante ? 0 : parseFloat(cantidadInput) || 0
-      const estado = esFaltante ? "faltante" : cantidad < pickingItemActivo.cantidad_pedida ? "parcial" : "preparado"
-
       const r = await fetch("/api/deposito/picking/item", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sesion_id: sesion.id,
-          picking_item_id: pickingItemActivo.id,
+          pedido_detalle_id: itemActivo.id,
           cantidad_preparada: cantidad,
-          estado,
+          es_faltante: esFaltante,
+          cantidad_pedida: itemActivo.cantidad,
         }),
       })
-      if (!r.ok) throw new Error()
+      const data = await r.json()
+      if (data.error) { showError(data.error); return }
 
-      // Update local state
-      setItems((prev) =>
-        prev.map((i) =>
-          i.id === pickingItemActivo.id ? { ...i, cantidad_preparada: cantidad, estado } : i
-        )
-      )
+      // Actualizar estado local
+      setItems(prev => prev.map(i =>
+        i.id === itemActivo.id
+          ? { ...i, cantidad_preparada: cantidad, estado_item: data.estado_item }
+          : i
+      ))
+      showSuccess(esFaltante ? "Marcado como faltante" : "✓ Guardado")
       setVista("scanner")
-      setArticuloSeleccionado(null)
-      setPickingItemActivo(null)
-      setCantidadInput("")
-    } catch {
-      setError("Error al guardar")
-    } finally {
-      setSaving(false)
-    }
+      setItemActivo(null); setArticuloSel(null); setCantidadInput("")
+    } catch { showError("Error al guardar") }
+    finally { setSaving(false) }
   }
 
   const finalizarPicking = async () => {
-    const pendientes = items.filter((i) => i.estado === "pendiente").length
+    const pendientes = items.filter(i => !i.estado_item || i.estado_item === "PENDIENTE").length
+    if (pendientes > 0 && !confirm(`Quedan ${pendientes} artículos sin escanear. ¿Marcarlos como FALTANTE y finalizar?`)) return
+
+    // Marcar pendientes como faltantes
     if (pendientes > 0) {
-      if (!confirm(`Hay ${pendientes} artículos sin escanear. ¿Marcarlos como faltantes y finalizar?`)) return
-      // Mark remaining as faltante
       setSaving(true)
-      for (const item of items.filter((i) => i.estado === "pendiente")) {
+      for (const item of items.filter(i => !i.estado_item || i.estado_item === "PENDIENTE")) {
         await fetch("/api/deposito/picking/item", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sesion_id: sesion.id,
-            picking_item_id: item.id,
-            cantidad_preparada: 0,
-            estado: "faltante",
-          }),
+          body: JSON.stringify({ pedido_detalle_id: item.id, cantidad_preparada: 0, es_faltante: true, cantidad_pedida: item.cantidad }),
         })
       }
+      setSaving(false)
     }
 
     setFinalizando(true)
@@ -174,196 +151,146 @@ export default function PickingPage() {
       const r = await fetch("/api/deposito/picking/item", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sesion_id: sesion.id, pedido_id: pedidoId }),
+        body: JSON.stringify({ pedido_id: pedidoId }),
       })
       const data = await r.json()
-      if (data.ok) {
-        router.push("/deposito/preparar-pedidos")
-      } else {
-        setError(data.error || "Error al finalizar")
-      }
-    } catch {
-      setError("Error de conexión")
-    } finally {
-      setFinalizando(false)
-      setSaving(false)
-    }
+      if (data.ok) router.push("/deposito/preparar-pedidos")
+      else showError(data.error || "Error al finalizar")
+    } catch { showError("Error de conexión") }
+    finally { setFinalizando(false) }
   }
 
-  // Stats
-  const totalItems = items.length
-  const preparados = items.filter((i) => i.estado === "preparado" || i.estado === "parcial").length
-  const faltantes = items.filter((i) => i.estado === "faltante").length
-  const pendientes = items.filter((i) => i.estado === "pendiente").length
+  const showError = (msg: string) => { setError(msg); setTimeout(() => setError(""), 3000) }
+  const showSuccess = (msg: string) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(""), 2000) }
 
-  const itemsFiltrados = items.filter((i) => {
-    if (filtro === "pendientes") return i.estado === "pendiente"
-    if (filtro === "listos") return i.estado !== "pendiente"
+  const completos = items.filter(i => i.estado_item === "COMPLETO" || i.estado_item === "PARCIAL").length
+  const faltantes = items.filter(i => i.estado_item === "FALTANTE").length
+  const pendientes = items.filter(i => !i.estado_item || i.estado_item === "PENDIENTE").length
+  const total = items.length
+  const pct = total > 0 ? Math.round(((completos + faltantes) / total) * 100) : 0
+
+  const itemsFiltrados = items.filter(i => {
+    if (filtro === "pendientes") return !i.estado_item || i.estado_item === "PENDIENTE"
+    if (filtro === "listos") return i.estado_item && i.estado_item !== "PENDIENTE"
     return true
   })
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-64"><div className="text-gray-400 animate-pulse text-lg">Cargando pedido...</div></div>
-  }
+  if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", color: "#9ca3af" }}>Cargando pedido...</div>
 
-  if (error && !pedido) {
-    return (
-      <div className="p-4">
-        <div className="bg-red-900/50 border border-red-700 rounded-xl p-6 text-red-300 text-center">
-          <div className="text-3xl mb-2">⚠️</div>
-          {error}
-        </div>
+  if (error && !pedido) return (
+    <div style={{ padding: 16 }}>
+      <div style={{ background: "#450a0a", border: "1px solid #7f1d1d", borderRadius: 14, padding: 20, color: "#fca5a5", textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
+        {error}
       </div>
-    )
-  }
+    </div>
+  )
 
-  // ─── VISTA CANTIDAD ───
-  if (vista === "cantidad" && articuloSeleccionado && pickingItemActivo) {
+  // ── MODAL CANTIDAD ──
+  if (vista === "cantidad" && articuloSel && itemActivo) {
     return (
-      <div className="p-4 flex flex-col gap-4">
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-          <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Artículo encontrado</div>
-          <div className="text-white font-bold text-lg leading-tight">{articuloSeleccionado.descripcion}</div>
-          <div className="flex gap-3 mt-2 text-sm text-gray-400">
-            <span>SKU: <span className="text-gray-200 font-mono">{articuloSeleccionado.sku}</span></span>
-            {articuloSeleccionado.ean13 && <span>EAN: <span className="text-gray-200 font-mono">{articuloSeleccionado.ean13}</span></span>}
-          </div>
+      <div style={{ position: "fixed", inset: 0, background: "#030712", zIndex: 100, display: "flex", flexDirection: "column", padding: 16, gap: 12 }}>
+        <div style={{ background: "#111827", border: "1px solid #1f2937", borderRadius: 20, padding: 20 }}>
+          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Artículo encontrado</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#f9fafb", lineHeight: 1.3 }}>{articuloSel.descripcion}</div>
+          <div style={{ fontSize: 13, color: "#9ca3af", fontFamily: "monospace", marginTop: 6 }}>{articuloSel.sku}{articuloSel.ean13 && ` · ${articuloSel.ean13}`}</div>
         </div>
 
-        <div className="bg-blue-900/30 border border-blue-700/50 rounded-2xl p-4 text-center">
-          <div className="text-blue-300 text-sm">Cantidad pedida</div>
-          <div className="text-blue-100 font-bold text-4xl">{pickingItemActivo.cantidad_pedida}</div>
-          {articuloSeleccionado.unidades_por_bulto && (
-            <div className="text-blue-400 text-sm mt-1">({articuloSeleccionado.unidades_por_bulto} u/bulto)</div>
+        <div style={{ background: "#1e3a5f", border: "1px solid #1d4ed8", borderRadius: 16, padding: "14px 20px", textAlign: "center" }}>
+          <div style={{ color: "#93c5fd", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.1em" }}>Cantidad pedida</div>
+          <div style={{ color: "#eff6ff", fontWeight: 700, fontSize: 40 }}>{itemActivo.cantidad}</div>
+          {itemActivo.cantidad_preparada > 0 && (
+            <div style={{ color: "#60a5fa", fontSize: 12 }}>Ya preparado: {itemActivo.cantidad_preparada}</div>
           )}
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          <label className="text-gray-400 text-sm block mb-2">Cantidad que separaste físicamente:</label>
+        <div style={{ background: "#111827", border: "1px solid #1f2937", borderRadius: 20, padding: 16 }}>
+          <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 8 }}>Cantidad que separaste:</div>
           <input
-            type="number"
-            inputMode="decimal"
-            value={cantidadInput}
-            onChange={(e) => setCantidadInput(e.target.value)}
-            className="w-full bg-gray-800 text-white text-3xl font-bold text-center rounded-xl px-4 py-4 border border-gray-700 focus:border-blue-500 outline-none"
-            autoFocus
+            type="number" inputMode="decimal" value={cantidadInput}
+            onChange={e => setCantidadInput(e.target.value)} autoFocus
+            style={{ width: "100%", background: "#1f2937", color: "#f9fafb", fontSize: 40, fontWeight: 700, textAlign: "center", borderRadius: 14, padding: "14px", border: "2px solid #374151", outline: "none", boxSizing: "border-box" }}
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => confirmarCantidad(false)}
-            disabled={saving}
-            className="bg-green-600 active:bg-green-700 text-white font-bold py-4 rounded-2xl text-lg disabled:opacity-50"
-          >
-            {saving ? "Guardando..." : "✓ Confirmar"}
+        {error && <div style={{ background: "#450a0a", border: "1px solid #7f1d1d", borderRadius: 12, padding: 12, color: "#fca5a5", textAlign: "center", fontSize: 13 }}>{error}</div>}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button onClick={() => confirmarCantidad(false)} disabled={saving}
+            style={{ background: "#059669", color: "#fff", fontWeight: 700, fontSize: 18, padding: 18, borderRadius: 18, border: "none", cursor: "pointer", opacity: saving ? 0.5 : 1 }}>
+            {saving ? "..." : "✓ Confirmar"}
           </button>
-          <button
-            onClick={() => confirmarCantidad(true)}
-            disabled={saving}
-            className="bg-red-700 active:bg-red-800 text-white font-bold py-4 rounded-2xl text-lg disabled:opacity-50"
-          >
+          <button onClick={() => confirmarCantidad(true)} disabled={saving}
+            style={{ background: "#dc2626", color: "#fff", fontWeight: 700, fontSize: 18, padding: 18, borderRadius: 18, border: "none", cursor: "pointer", opacity: saving ? 0.5 : 1 }}>
             ✗ Faltante
           </button>
         </div>
-
-        <button
-          onClick={() => { setVista("scanner"); setArticuloSeleccionado(null) }}
-          className="bg-gray-800 text-gray-300 font-semibold py-3 rounded-2xl active:bg-gray-700"
-        >
+        <button onClick={() => { setVista("scanner"); setItemActivo(null); setArticuloSel(null) }}
+          style={{ background: "#1f2937", color: "#9ca3af", fontWeight: 600, padding: 14, borderRadius: 18, border: "none", cursor: "pointer" }}>
           ← Volver
         </button>
-
-        {error && <div className="bg-red-900/50 border border-red-700 rounded-xl p-3 text-red-300 text-sm text-center">{error}</div>}
       </div>
     )
   }
 
-  // ─── VISTA SCANNER / BÚSQUEDA ───
+  // ── SCANNER ──
   if (vista === "scanner") {
     return (
-      <div className="flex flex-col h-full">
-        {/* Header stats */}
-        <div className="p-4 bg-gray-900 border-b border-gray-800">
-          <div className="text-gray-400 text-sm mb-1">{pedido?.numero_pedido} — {pedido?.clientes?.razon_social || pedido?.clientes?.nombre}</div>
-          <div className="flex gap-3 text-sm">
-            <span className="text-yellow-400">⏳ {pendientes}</span>
-            <span className="text-green-400">✓ {preparados}</span>
-            <span className="text-red-400">✗ {faltantes}</span>
-            <span className="text-gray-500">/ {totalItems} total</span>
+      <div style={{ display: "flex", flexDirection: "column", height: "calc(100dvh - 64px)", background: "#030712" }}>
+        <div style={{ background: "#111827", borderBottom: "1px solid #1f2937", padding: "12px 16px" }}>
+          <div style={{ fontSize: 13, color: "#9ca3af" }}>{pedido?.numero_pedido} · {pedido?.clientes?.razon_social || pedido?.clientes?.nombre}</div>
+          <div style={{ display: "flex", gap: 16, marginTop: 4, fontSize: 13 }}>
+            <span style={{ color: "#f59e0b" }}>⏳ {pendientes}</span>
+            <span style={{ color: "#34d399" }}>✓ {completos}</span>
+            <span style={{ color: "#f87171" }}>✗ {faltantes}</span>
+            <span style={{ color: "#6b7280" }}>/ {total}</span>
           </div>
         </div>
 
-        {/* Search bar */}
-        <div className="p-4 bg-gray-950">
-          <input
-            ref={inputRef}
-            type="text"
-            inputMode="search"
-            placeholder="Escanear EAN o buscar por SKU / descripción..."
-            value={busqueda}
-            onChange={(e) => { setBusqueda(e.target.value); buscarArticulo(e.target.value) }}
-            className="w-full bg-gray-800 text-white text-lg rounded-2xl px-5 py-4 border border-gray-700 focus:border-blue-500 outline-none placeholder-gray-500"
-            autoFocus
-          />
+        <div style={{ padding: "12px 16px" }}>
+          <input ref={inputRef} type="text" inputMode="search"
+            placeholder="Escanear EAN o buscar artículo..." value={busqueda}
+            onChange={e => { setBusqueda(e.target.value); buscarArticulo(e.target.value) }} autoFocus
+            style={{ width: "100%", background: "#1f2937", color: "#f9fafb", fontSize: 17, borderRadius: 16, padding: "14px 16px", border: "2px solid #374151", outline: "none", boxSizing: "border-box" }} />
         </div>
 
-        {/* Results */}
-        {buscando && (
-          <div className="px-4 text-gray-400 text-sm animate-pulse">Buscando...</div>
-        )}
-        {resultados.length > 0 && (
-          <div className="flex-1 overflow-auto px-4 pb-4 flex flex-col gap-2">
-            {resultados.map((art) => {
-              const inOrder = items.find((i) => i.articulo_id === art.id)
-              return (
-                <button
-                  key={art.id}
-                  onClick={() => seleccionarArticulo(art)}
-                  className={`text-left w-full rounded-2xl p-4 border transition-all active:scale-95 ${
-                    inOrder ? "bg-blue-900/30 border-blue-700/50" : "bg-gray-900 border-gray-700 opacity-60"
-                  }`}
-                >
-                  <div className="text-white font-semibold">{art.descripcion}</div>
-                  <div className="flex gap-3 text-sm mt-1">
-                    <span className="text-gray-400 font-mono">{art.sku}</span>
-                    {art.ean13 && <span className="text-gray-500 font-mono">{art.ean13}</span>}
-                    {!inOrder && <span className="text-red-400 text-xs">No está en este pedido</span>}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        )}
+        {buscando && <div style={{ padding: "0 16px", color: "#9ca3af", fontSize: 13 }}>Buscando...</div>}
 
-        {!busqueda && (
-          <div className="flex-1 flex items-center justify-center text-gray-600 text-center px-8">
-            <div>
-              <div className="text-4xl mb-3">📱</div>
-              <div>Escaneá el código de barras<br />o escribí para buscar</div>
+        <div style={{ flex: 1, overflow: "auto", padding: "0 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {resultados.map(art => {
+            const enPedido = items.find(i => i.articulo_id === art.id)
+            return (
+              <button key={art.id} onClick={() => seleccionarArticulo(art)}
+                style={{ textAlign: "left", width: "100%", background: enPedido ? "#1e3a5f" : "#111827", border: `1px solid ${enPedido ? "#1d4ed8" : "#1f2937"}`, borderRadius: 14, padding: 14, cursor: "pointer" }}>
+                <div style={{ color: "#f9fafb", fontWeight: 600, fontSize: 15 }}>{art.descripcion}</div>
+                <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "monospace", marginTop: 4 }}>{art.sku}{art.ean13 && ` · ${art.ean13}`}</div>
+                {enPedido && <div style={{ fontSize: 12, color: "#60a5fa", marginTop: 4 }}>En pedido: {enPedido.cantidad} u · Estado: {enPedido.estado_item || "PENDIENTE"}</div>}
+              </button>
+            )
+          })}
+          {!busqueda && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, flexDirection: "column", gap: 12, color: "#4b5563" }}>
+              <div style={{ fontSize: 40 }}>📱</div>
+              <div style={{ textAlign: "center", fontSize: 14 }}>Escaneá el código de barras<br />o escribí para buscar</div>
             </div>
+          )}
+        </div>
+
+        {(error || successMsg) && (
+          <div style={{ margin: "0 16px", background: error ? "#450a0a" : "#064e3b", border: `1px solid ${error ? "#7f1d1d" : "#065f46"}`, borderRadius: 12, padding: 12, color: error ? "#fca5a5" : "#6ee7b7", textAlign: "center", fontSize: 13 }}>
+            {error || successMsg}
           </div>
         )}
 
-        {error && (
-          <div className="mx-4 bg-red-900/50 border border-red-700 rounded-xl p-3 text-red-300 text-sm text-center">{error}</div>
-        )}
-
-        {/* Bottom actions */}
-        <div className="p-4 bg-gray-900 border-t border-gray-800 flex gap-3">
-          <button
-            onClick={() => setVista("lista")}
-            className="flex-1 bg-gray-800 text-gray-300 font-semibold py-3 rounded-xl active:bg-gray-700"
-          >
+        <div style={{ background: "#111827", borderTop: "1px solid #1f2937", padding: "12px 16px", display: "flex", gap: 10 }}>
+          <button onClick={() => setVista("lista")}
+            style={{ flex: 1, background: "#1f2937", color: "#d1d5db", fontWeight: 600, padding: "16px 0", borderRadius: 16, border: "none", cursor: "pointer" }}>
             📋 Ver lista
           </button>
           {pendientes === 0 && (
-            <button
-              onClick={finalizarPicking}
-              disabled={finalizando}
-              className="flex-1 bg-green-600 text-white font-bold py-3 rounded-xl active:bg-green-700 disabled:opacity-50"
-            >
-              {finalizando ? "Finalizando..." : "✅ Finalizar"}
+            <button onClick={finalizarPicking} disabled={finalizando}
+              style={{ flex: 1, background: "#059669", color: "#fff", fontWeight: 700, padding: "16px 0", borderRadius: 16, border: "none", cursor: "pointer", opacity: finalizando ? 0.5 : 1 }}>
+              {finalizando ? "..." : "✅ Finalizar"}
             </button>
           )}
         </div>
@@ -371,89 +298,78 @@ export default function PickingPage() {
     )
   }
 
-  // ─── VISTA LISTA ───
+  // ── LISTA ──
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)]">
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100dvh - 64px)", background: "#030712" }}>
       {/* Header */}
-      <div className="p-4 bg-gray-900 border-b border-gray-800">
-        <div className="text-white font-bold text-lg">{pedido?.numero_pedido}</div>
-        <div className="text-gray-400 text-sm">{pedido?.clientes?.razon_social || pedido?.clientes?.nombre}</div>
-        {/* Progress bar */}
-        <div className="mt-3">
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>{preparados + faltantes} de {totalItems} resueltos</span>
-            <span>{Math.round(((preparados + faltantes) / Math.max(totalItems, 1)) * 100)}%</span>
+      <div style={{ background: "#111827", borderBottom: "1px solid #1f2937", padding: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#f9fafb" }}>{pedido?.numero_pedido}</div>
+        <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 2 }}>{pedido?.clientes?.razon_social || pedido?.clientes?.nombre}</div>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#9ca3af", marginBottom: 5 }}>
+            <span><span style={{ color: "#34d399", fontWeight: 600 }}>{completos + faltantes}</span> de {total} resueltos</span>
+            <span style={{ fontWeight: 700, color: pct === 100 ? "#34d399" : "#f9fafb" }}>{pct}%</span>
           </div>
-          <div className="w-full bg-gray-700 rounded-full h-2">
-            <div className="h-2 rounded-full bg-green-500 transition-all" style={{ width: `${((preparados + faltantes) / Math.max(totalItems, 1)) * 100}%` }} />
+          <div style={{ background: "#1f2937", borderRadius: 999, height: 8, overflow: "hidden" }}>
+            <div style={{ height: "100%", background: pct === 100 ? "#059669" : "#3b82f6", borderRadius: 999, width: `${pct}%`, transition: "width 0.3s" }} />
+          </div>
+          <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12 }}>
+            <span style={{ color: "#f59e0b" }}>⏳ {pendientes} pendientes</span>
+            <span style={{ color: "#34d399" }}>✓ {completos} completos</span>
+            <span style={{ color: "#f87171" }}>✗ {faltantes} faltantes</span>
           </div>
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex border-b border-gray-800 bg-gray-900">
-        {(["todos", "pendientes", "listos"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFiltro(f)}
-            className={`flex-1 py-3 text-sm font-semibold capitalize transition-colors ${filtro === f ? "text-blue-400 border-b-2 border-blue-400" : "text-gray-500"}`}
-          >
-            {f === "todos" ? `Todos (${totalItems})` : f === "pendientes" ? `Pendientes (${pendientes})` : `Listos (${preparados + faltantes})`}
+      {/* Filtros */}
+      <div style={{ display: "flex", background: "#111827", borderBottom: "1px solid #1f2937" }}>
+        {(["pendientes", "todos", "listos"] as const).map(f => (
+          <button key={f} onClick={() => setFiltro(f)}
+            style={{ flex: 1, padding: "12px 0", fontSize: 13, fontWeight: 600, background: "none", border: "none", cursor: "pointer", color: filtro === f ? "#3b82f6" : "#6b7280", borderBottom: filtro === f ? "2px solid #3b82f6" : "2px solid transparent" }}>
+            {f === "pendientes" ? `Pendientes (${pendientes})` : f === "todos" ? `Todos (${total})` : `Listos (${completos + faltantes})`}
           </button>
         ))}
       </div>
 
-      {/* Item list */}
-      <div className="flex-1 overflow-auto px-3 py-3 flex flex-col gap-2">
-        {itemsFiltrados.map((item) => {
-          const estadoIcon = { pendiente: "⬜", preparado: "✅", faltante: "❌", parcial: "⚠️" }[item.estado]
-          const estadoCls = {
-            pendiente: "border-gray-700 bg-gray-900",
-            preparado: "border-green-700/50 bg-green-900/20",
-            faltante: "border-red-700/50 bg-red-900/20",
-            parcial: "border-yellow-700/50 bg-yellow-900/20",
-          }[item.estado]
-
-          return (
-            <div key={item.id} className={`rounded-xl border p-3 ${estadoCls}`}>
-              <div className="flex items-start gap-3">
-                <span className="text-xl mt-0.5 flex-shrink-0">{estadoIcon}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-white font-semibold text-sm leading-tight truncate">
-                    {item.articulos?.descripcion || "Artículo desconocido"}
+      {/* Lista */}
+      <div style={{ flex: 1, overflow: "auto", padding: "10px 12px 0" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingBottom: 10 }}>
+          {itemsFiltrados.map(item => {
+            const estado = item.estado_item || "PENDIENTE"
+            const bg = estado === "COMPLETO" ? "#052e16" : estado === "FALTANTE" ? "#450a0a" : estado === "PARCIAL" ? "#422006" : "#111827"
+            const border = estado === "COMPLETO" ? "#14532d" : estado === "FALTANTE" ? "#7f1d1d" : estado === "PARCIAL" ? "#78350f" : "#1f2937"
+            const icon = estado === "COMPLETO" ? "✅" : estado === "FALTANTE" ? "❌" : estado === "PARCIAL" ? "⚠️" : "⬜"
+            return (
+              <div key={item.id} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: "#f9fafb", fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item.articulos?.descripcion}
                   </div>
-                  <div className="text-gray-500 text-xs font-mono mt-0.5">{item.articulos?.sku}</div>
+                  <div style={{ color: "#6b7280", fontSize: 12, fontFamily: "monospace", marginTop: 2 }}>{item.articulos?.sku}</div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <div className="text-white font-bold">
-                    {item.estado === "pendiente" ? item.cantidad_pedida : item.cantidad_preparada}
-                    <span className="text-gray-500 font-normal"> / {item.cantidad_pedida}</span>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ color: "#f9fafb", fontWeight: 700, fontSize: 15 }}>
+                    {estado !== "PENDIENTE" ? item.cantidad_preparada : "—"}
+                    <span style={{ color: "#6b7280", fontWeight: 400 }}> / {item.cantidad}</span>
                   </div>
-                  {item.usuario_nombre && (
-                    <div className="text-gray-500 text-xs">{item.usuario_nombre}</div>
-                  )}
                 </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
 
-      {/* Bottom */}
-      <div className="p-4 bg-gray-900 border-t border-gray-800 flex gap-3">
-        <button
-          onClick={() => setVista("scanner")}
-          className="flex-1 bg-blue-600 text-white font-bold py-4 rounded-2xl text-lg active:bg-blue-700"
-        >
-          📱 Escanear artículo
+      {/* Barra inferior */}
+      <div style={{ background: "#111827", borderTop: "1px solid #1f2937", padding: "12px 16px", display: "flex", gap: 10 }}>
+        <button onClick={() => setVista("scanner")}
+          style={{ flex: 2, background: "#1e40af", color: "#fff", fontWeight: 700, fontSize: 18, padding: "18px 0", borderRadius: 18, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <span style={{ fontSize: 22 }}>📱</span> Escanear
         </button>
         {pendientes === 0 && (
-          <button
-            onClick={finalizarPicking}
-            disabled={finalizando}
-            className="bg-green-600 text-white font-bold px-5 py-4 rounded-2xl active:bg-green-700 disabled:opacity-50"
-          >
-            {finalizando ? "..." : "✅"}
+          <button onClick={finalizarPicking} disabled={finalizando || saving}
+            style={{ flex: 1, background: "#059669", color: "#fff", fontWeight: 700, fontSize: 15, padding: "18px 0", borderRadius: 18, border: "none", cursor: "pointer", opacity: finalizando ? 0.5 : 1 }}>
+            {finalizando ? "..." : "✅ Finalizar"}
           </button>
         )}
       </div>

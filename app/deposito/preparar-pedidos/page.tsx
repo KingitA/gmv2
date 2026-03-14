@@ -73,9 +73,9 @@ export default function PrepararPedidosPage() {
         {pedidos.map((pedido) => {
           const badge = getEstadoBadge(pedido)
           const pct = pedido.progreso.total > 0
-            ? Math.round((pedido.progreso.completados / pedido.progreso.total) * 100)
+            ? Math.round((pedido.progreso.resueltos / pedido.progreso.total) * 100)
             : 0
-          const enProgreso = pedido.sesion && pedido.progreso.completados > 0
+          const enProgreso = pedido.sesion && pedido.progreso.resueltos > 0
 
           return (
             <Link
