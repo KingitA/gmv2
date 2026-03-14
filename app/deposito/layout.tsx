@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import Link from "next/link"
+import { UrgentOrderNotification } from "@/components/deposito/urgent-notification"
 
 const MODULES = [
   { href: "/deposito/preparar-pedidos", label: "Preparar Pedidos", icon: "📦", desc: "Picking de órdenes de venta", bg: "#fff7ed", accent: "#ea580c", border: "#fed7aa" },
@@ -112,6 +113,7 @@ export default function DepositoLayout({ children }: { children: React.ReactNode
           </div>
         ) : children}
       </main>
+      <UrgentOrderNotification />
     </div>
   )
 }
