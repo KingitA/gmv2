@@ -63,10 +63,13 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Obtener usuario actual
+    const { data: { user } } = await supabase.auth.getUser()
+
     // Crear nueva sesión
     const { data: nuevaSesion, error: sesionError } = await supabase
       .from("picking_sesiones")
-      .insert({ pedido_id, estado: "en_progreso" })
+      .insert({ pedido_id, estado: "en_progreso", usuario_id: user?.id ?? null })
       .select("id, estado, pedido_id")
       .single()
 
