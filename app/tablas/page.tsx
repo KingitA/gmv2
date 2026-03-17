@@ -9,6 +9,7 @@ import {
   CreditCard,
   Tags,
   PackageCheck,
+  DollarSign,
 } from "lucide-react"
 
 const TABLAS = [
@@ -61,6 +62,13 @@ const TABLAS = [
     title: "Condiciones de Entrega",
     desc: "Retira, Transporte, Entregamos",
   },
+  {
+    href: "/tablas/listas-precio",
+    icon: DollarSign,
+    color: "emerald",
+    title: "Listas de Precio",
+    desc: "Bahía, Neco, Viajante — recargos por categoría",
+  },
 ]
 
 const colorMap: Record<string, { border: string; bg: string; text: string }> = {
@@ -71,6 +79,7 @@ const colorMap: Record<string, { border: string; bg: string; text: string }> = {
   teal: { border: "border-l-teal-500", bg: "bg-teal-50 group-hover:bg-teal-100", text: "text-teal-600" },
   amber: { border: "border-l-amber-500", bg: "bg-amber-50 group-hover:bg-amber-100", text: "text-amber-600" },
   rose: { border: "border-l-rose-500", bg: "bg-rose-50 group-hover:bg-rose-100", text: "text-rose-600" },
+  emerald: { border: "border-l-emerald-500", bg: "bg-emerald-50 group-hover:bg-emerald-100", text: "text-emerald-600" },
 }
 
 export default function TablasPage() {

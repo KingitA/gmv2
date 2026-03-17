@@ -58,6 +58,7 @@ export default function ClientesPage() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [vendedores, setVendedores] = useState<Vendedor[]>([])
   const [localidades, setLocalidades] = useState<Localidad[]>([])
+  const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -83,12 +84,15 @@ export default function ClientesPage() {
     tipo_canal: "Minorista",
     vendedor_id: "",
     condicion_entrega: "entregamos_nosotros",
+    lista_precio_id: "",
+    descuento_especial: 0,
   })
 
   useEffect(() => {
     loadClientes()
     loadVendedores()
     loadLocalidades()
+    loadListasPrecio()
   }, [])
 
   async function loadClientes() {
@@ -131,6 +135,12 @@ export default function ClientesPage() {
     setLocalidades(data || [])
   }
 
+  async function loadListasPrecio() {
+    const supabase = createClient()
+    const { data } = await supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre")
+    setListasPrecio(data || [])
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const supabase = createClient()
@@ -141,6 +151,8 @@ export default function ClientesPage() {
       razon_social: formData.nombre_razon_social,
       vendedor_id: formData.vendedor_id && formData.vendedor_id !== "none" ? formData.vendedor_id : null,
       localidad_id: formData.localidad_id || null,
+      lista_precio_id: formData.lista_precio_id && formData.lista_precio_id !== "none" ? formData.lista_precio_id : null,
+      descuento_especial: formData.descuento_especial || 0,
     }
 
     if (editingCliente) {
@@ -234,6 +246,8 @@ export default function ClientesPage() {
       tipo_canal: "Minorista",
       vendedor_id: "",
       condicion_entrega: "entregamos_nosotros",
+      lista_precio_id: "",
+      descuento_especial: 0,
     })
     setEditingCliente(null)
   }
@@ -259,6 +273,8 @@ export default function ClientesPage() {
       tipo_canal: cliente.tipo_canal,
       vendedor_id: cliente.vendedor_id || "",
       condicion_entrega: cliente.condicion_entrega || "entregamos_nosotros",
+      lista_precio_id: (cliente as any).lista_precio_id || "",
+      descuento_especial: (cliente as any).descuento_especial || 0,
     })
     setIsDialogOpen(true)
   }
@@ -667,6 +683,38 @@ export default function ClientesPage() {
                                 ))}
                               </SelectContent>
                             </Select>
+                          </div>
+                          <div>
+                            <Label htmlFor="lista_precio_id">Lista de Precio</Label>
+                            <Select
+                              value={formData.lista_precio_id}
+                              onValueChange={(value) => setFormData({ ...formData, lista_precio_id: value })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Seleccionar lista" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Sin lista</SelectItem>
+                                {listasPrecio.map((lp) => (
+                                  <SelectItem key={lp.id} value={lp.id}>
+                                    {lp.nombre}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label htmlFor="descuento_especial">Descuento Especial (%)</Label>
+                            <Input
+                              id="descuento_especial"
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max="100"
+                              value={formData.descuento_especial}
+                              onChange={(e) => setFormData({ ...formData, descuento_especial: parseFloat(e.target.value) || 0 })}
+                              placeholder="0"
+                            />
                           </div>
                           <div className="col-span-2">
                             <Label htmlFor="condicion_entrega">Condición de Entrega *</Label>
