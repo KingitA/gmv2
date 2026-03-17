@@ -1,48 +1,40 @@
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
-import { requireAuth } from '@/lib/auth'
+import { requireAuth } from "@/lib/auth"
+import {
+  calcularPrecioFinal,
+  type DatosArticulo,
+  type DatosLista,
+  type MetodoFacturacion,
+} from "@/lib/pricing/calculator"
 
 export async function POST(request: Request) {
   try {
     const auth = await requireAuth()
     if (auth.error) return auth.error
-    const cookieStore = await cookies()
-    const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        },
-      },
-    })
 
+    const supabase = createAdminClient()
     const body = await request.json()
     const { pedido_id } = body
 
+    // ─── 1. Obtener pedido con cliente, detalles y artículos ───
     const { data: pedido, error: pedidoError } = await supabase
       .from("pedidos")
       .select(`
         *,
         cliente:clientes!pedidos_cliente_id_fkey(
-          id,
-          nombre_razon_social,
-          condicion_iva,
-          metodo_facturacion,
-          cuit,
-          direccion,
-          exento_iva
+          id, nombre_razon_social, condicion_iva, metodo_facturacion,
+          cuit, direccion, exento_iva, lista_precio_id, descuento_especial
         ),
         detalle:pedidos_detalle(
-          id,
-          articulo_id,
-          cantidad,
-          precio_final,
-          subtotal,
+          id, articulo_id, cantidad,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
-            id,
-            descripcion,
-            iva_ventas
+            id, descripcion, sku, precio_compra,
+            descuento1, descuento2, descuento3, descuento4,
+            porcentaje_ganancia, categoria, rubro,
+            iva_compras, iva_ventas,
+            proveedor:proveedores!articulos_proveedor_id_fkey(tipo_descuento)
           )
         )
       `)
@@ -53,59 +45,165 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 })
     }
 
-    const itemsFactura = pedido.detalle.filter((item: any) => item.articulo.iva_ventas === "factura")
-    const itemsPresupuesto = pedido.detalle.filter((item: any) => item.articulo.iva_ventas === "presupuesto")
-    const itemsRemito = pedido.detalle.filter((item: any) => item.articulo.iva_ventas === "remito")
+    // ─── 2. Obtener lista de precio del cliente ───
+    let listaDatos: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }
+    if (pedido.cliente.lista_precio_id) {
+      const { data: lista } = await supabase
+        .from("listas_precio")
+        .select("*")
+        .eq("id", pedido.cliente.lista_precio_id)
+        .single()
+      if (lista) {
+        listaDatos = {
+          recargo_limpieza_bazar: lista.recargo_limpieza_bazar || 0,
+          recargo_perfumeria_negro: lista.recargo_perfumeria_negro || 0,
+          recargo_perfumeria_blanco: lista.recargo_perfumeria_blanco || 0,
+        }
+      }
+    }
+
+    // ─── 3. Determinar método de facturación ───
+    // Prioridad: override del pedido > default del cliente
+    const metodoRaw = pedido.metodo_facturacion_pedido || pedido.cliente.metodo_facturacion || "Final"
+    const metodoFacturacion: MetodoFacturacion =
+      metodoRaw === "Factura" ? "Factura" :
+      metodoRaw === "Presupuesto" ? "Presupuesto" : "Final"
+
+    const descuentoCliente = pedido.cliente.descuento_especial || 0
+
+    // ─── 4. Calcular precios para cada item ───
+    type ItemCalculado = {
+      detalle_id: string
+      articulo_id: string
+      descripcion: string
+      sku: string
+      cantidad: number
+      precioUnitario: number       // precio que se muestra al cliente
+      precioAntesIva: number       // neto antes de IVA
+      ivaUnitario: number          // IVA por unidad (discriminado, 0 si incluido)
+      ivaIncluido: boolean
+      subtotalNeto: number
+      subtotalIva: number
+      subtotalFinal: number
+      descNegroAplicado: boolean
+      vaEnComprobante: "factura" | "presupuesto"
+    }
+
+    const itemsCalculados: ItemCalculado[] = []
+
+    for (const det of pedido.detalle) {
+      const art = det.articulo
+      if (!art) continue
+
+      const datosArticulo: DatosArticulo = {
+        precio_compra: art.precio_compra || 0,
+        descuento1: art.descuento1 || 0,
+        descuento2: art.descuento2 || 0,
+        descuento3: art.descuento3 || 0,
+        descuento4: art.descuento4 || 0,
+        tipo_descuento: art.proveedor?.tipo_descuento || "cascada",
+        porcentaje_ganancia: art.porcentaje_ganancia || 0,
+        categoria: art.categoria || art.rubro || "",
+        iva_compras: art.iva_compras || "factura",
+        iva_ventas: art.iva_ventas || "factura",
+      }
+
+      const resultado = calcularPrecioFinal(datosArticulo, listaDatos, metodoFacturacion, descuentoCliente)
+
+      itemsCalculados.push({
+        detalle_id: det.id,
+        articulo_id: det.articulo_id,
+        descripcion: art.descripcion || "",
+        sku: art.sku || "",
+        cantidad: det.cantidad,
+        precioUnitario: resultado.precioUnitarioFinal,
+        precioAntesIva: resultado.precioAntesIva,
+        ivaUnitario: resultado.montoIvaDiscriminado,
+        ivaIncluido: resultado.ivaIncluido,
+        subtotalNeto: round2(resultado.precioUnitarioFinal * det.cantidad),
+        subtotalIva: round2(resultado.montoIvaDiscriminado * det.cantidad),
+        subtotalFinal: round2(
+          resultado.ivaIncluido
+            ? resultado.precioUnitarioFinal * det.cantidad
+            : (resultado.precioUnitarioFinal + resultado.montoIvaDiscriminado) * det.cantidad
+        ),
+        descNegroAplicado: resultado.descuentoNegroEnFacturaPct > 0,
+        vaEnComprobante: resultado.vaEnComprobante,
+      })
+    }
+
+    // ─── 5. Agrupar items por tipo de comprobante ───
+    const itemsFactura = itemsCalculados.filter(i => i.vaEnComprobante === "factura")
+    const itemsPresupuesto = itemsCalculados.filter(i => i.vaEnComprobante === "presupuesto")
 
     const comprobantesGenerados = []
-
     const tipoFactura = determinarTipoFactura(pedido.cliente.condicion_iva)
 
+    // ─── 6. Generar comprobantes ───
     if (itemsFactura.length > 0) {
-      const factura = await generarComprobante(supabase, pedido, itemsFactura, tipoFactura, false)
-      comprobantesGenerados.push(factura)
+      const resultado = await generarComprobante(supabase, pedido, itemsFactura, tipoFactura)
+      comprobantesGenerados.push(resultado)
     }
 
     if (itemsPresupuesto.length > 0) {
-      const presupuesto = await generarComprobante(supabase, pedido, itemsPresupuesto, "PRES", false)
-      comprobantesGenerados.push(presupuesto)
+      const resultado = await generarComprobante(supabase, pedido, itemsPresupuesto, "PRES")
+      comprobantesGenerados.push(resultado)
     }
 
-    if (itemsRemito.length > 0) {
-      const remito = await generarRemito(supabase, pedido, itemsRemito)
-      comprobantesGenerados.push(remito)
+    // ─── 7. Actualizar pedidos_detalle con los precios calculados ───
+    for (const item of itemsCalculados) {
+      await supabase
+        .from("pedidos_detalle")
+        .update({
+          precio_final: item.precioUnitario,
+          precio_base: item.precioAntesIva,
+          subtotal: item.subtotalNeto,
+        })
+        .eq("id", item.detalle_id)
     }
+
+    // Actualizar total del pedido
+    const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
+    await supabase.from("pedidos").update({ total: round2(totalPedido) }).eq("id", pedido_id)
 
     return NextResponse.json({
       success: true,
       comprobantes: comprobantesGenerados,
+      metodo_facturacion: metodoFacturacion,
+      total_pedido: round2(totalPedido),
     })
   } catch (error: any) {
-    console.error("[v0] Error generando comprobantes:", error)
+    console.error("[Generar Comprobantes] Error:", error)
     return NextResponse.json({ error: error.message || "Error generando comprobantes" }, { status: 500 })
   }
 }
 
-function determinarTipoFactura(condicionIva: string): string {
-  const condicion = condicionIva?.toLowerCase() || ""
+// ─── Helpers ───────────────────────────────────────────
 
-  if (condicion.includes("responsable inscripto") || condicion.includes("responsable inscrito")) {
-    return "FA" // Factura A
-  } else if (condicion.includes("monotributo")) {
-    return "FB" // Factura B
-  } else {
-    return "FC" // Factura C (consumidor final, exento, etc)
-  }
+function determinarTipoFactura(condicionIva: string): string {
+  const c = (condicionIva || "").toLowerCase()
+  if (c.includes("responsable inscri")) return "FA"
+  if (c.includes("monotributo")) return "FB"
+  return "FC"
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
 }
 
 async function generarComprobante(
   supabase: any,
   pedido: any,
-  items: any[],
+  items: Array<{
+    articulo_id: string; descripcion: string; sku: string
+    cantidad: number; precioUnitario: number; precioAntesIva: number
+    ivaUnitario: number; ivaIncluido: boolean
+    subtotalNeto: number; subtotalIva: number; subtotalFinal: number
+    descNegroAplicado: boolean
+  }>,
   tipoComprobante: string,
-  esNotaCredito = false,
 ) {
-  // Obtener próximo número
+  // Obtener numeración
   const { data: numeracion, error: numError } = await supabase
     .from("numeracion_comprobantes")
     .select("*")
@@ -113,37 +211,35 @@ async function generarComprobante(
     .eq("punto_venta", "0001")
     .single()
 
-  if (numError) {
-    throw new Error("Error obteniendo numeración")
-  }
+  if (numError) throw new Error(`Numeración no encontrada para ${tipoComprobante}. Verificá la tabla numeracion_comprobantes.`)
 
   const nuevoNumero = numeracion.ultimo_numero + 1
   const numeroComprobante = `${numeracion.punto_venta}-${nuevoNumero.toString().padStart(8, "0")}`
 
-  // Calcular totales
+  // Calcular totales del comprobante
+  const esPresupuesto = tipoComprobante === "PRES"
+
   let totalNeto = 0
   let totalIva = 0
 
-  items.forEach((item: any) => {
-    const subtotal = item.subtotal || item.cantidad * item.precio_final
-
-    // Si es factura A o B y el artículo tiene IVA
-    if ((tipoComprobante === "FA" || tipoComprobante === "FB") && !pedido.cliente.exento_iva) {
-      // El precio ya incluye IVA, extraer el neto e IVA
-      const neto = subtotal / 1.21
-      const iva = subtotal - neto
-      totalNeto += neto
-      totalIva += iva
+  for (const item of items) {
+    if (esPresupuesto) {
+      // En presupuesto: si tiene IVA incluido (blanco en presupuesto), el total ya lo incluye
+      totalNeto += item.subtotalNeto
+      // No discriminamos IVA en presupuesto
     } else {
-      // Para factura C o presupuesto, el total es directo
-      totalNeto += subtotal
+      // En factura: neto + IVA discriminado
+      totalNeto += round2(item.precioAntesIva * item.cantidad)
+      totalIva += item.subtotalIva
     }
-  })
+  }
 
-  const totalFactura = totalNeto + totalIva
+  totalNeto = round2(totalNeto)
+  totalIva = round2(totalIva)
+  const totalFactura = round2(totalNeto + totalIva)
 
   // Crear comprobante
-  const { data: comprobante, error: comprobanteError } = await supabase
+  const { data: comprobante, error: compError } = await supabase
     .from("comprobantes_venta")
     .insert({
       tipo_comprobante: tipoComprobante,
@@ -161,46 +257,33 @@ async function generarComprobante(
     .select()
     .single()
 
-  if (comprobanteError) {
-    throw new Error("Error creando comprobante: " + comprobanteError.message)
-  }
+  if (compError) throw new Error("Error creando comprobante: " + compError.message)
 
-  // Crear detalle del comprobante
-  const detalleInserts = items.map((item: any) => ({
+  // Crear detalle
+  const detalleInserts = items.map(item => ({
     comprobante_id: comprobante.id,
     articulo_id: item.articulo_id,
-    descripcion: item.articulo.descripcion,
+    descripcion: item.descripcion,
     cantidad: item.cantidad,
-    precio_unitario: item.precio_final,
-    precio_total: item.subtotal || item.cantidad * item.precio_final,
+    precio_unitario: item.precioUnitario,
+    precio_total: item.subtotalNeto,
   }))
 
-  const { error: detalleError } = await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
+  const { error: detError } = await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
+  if (detError) throw new Error("Error creando detalle: " + detError.message)
 
-  if (detalleError) {
-    throw new Error("Error creando detalle del comprobante")
-  }
-
-  // NUEVO: Descontar stock_actual, liberar stock_reservado y registrar en Kardex
+  // Descontar stock y registrar movimiento
   for (const item of items) {
-    // 1. Descontar stock_actual (usamos valor negativo)
     await supabase.rpc("increment_stock_actual", {
       p_articulo_id: item.articulo_id,
       p_cantidad: -item.cantidad,
-    })
+    }).then(() => {})  // Ignorar error si la función no existe
 
-    // 2. Liberar stock_reservado (usamos valor negativo)
-    await supabase.rpc("increment_stock_reservado", {
-      p_articulo_id: item.articulo_id,
-      p_cantidad: -item.cantidad,
-    })
-
-    // 3. Registrar movimiento en Kardex
     await supabase.from("movimientos_stock").insert({
       articulo_id: item.articulo_id,
       tipo_movimiento: "salida",
       cantidad: item.cantidad,
-      precio_unitario: item.precio_final,
+      precio_unitario: item.precioUnitario,
       fecha_movimiento: nowArgentina(),
       observaciones: `Venta - ${tipoComprobante} ${numeroComprobante}`,
     })
@@ -218,70 +301,8 @@ async function generarComprobante(
     id: comprobante.id,
     tipo_comprobante: tipoComprobante,
     numero: numeroComprobante,
+    total_neto: totalNeto,
+    total_iva: totalIva,
     total: totalFactura,
-  }
-}
-
-async function generarRemito(supabase: any, pedido: any, items: any[]) {
-  // Obtener próximo número de remito
-  const { data: numeracion, error: numError } = await supabase
-    .from("numeracion_comprobantes")
-    .select("*")
-    .eq("tipo_comprobante", "REM")
-    .eq("punto_venta", "0001")
-    .single()
-
-  if (numError) {
-    throw new Error("Error obteniendo numeración de remito")
-  }
-
-  const nuevoNumero = numeracion.ultimo_numero + 1
-  const numeroRemito = `${numeracion.punto_venta}-${nuevoNumero.toString().padStart(8, "0")}`
-
-  // Crear remito
-  const { data: remito, error: remitoError } = await supabase
-    .from("remitos")
-    .insert({
-      numero_remito: numeroRemito,
-      punto_venta: numeracion.punto_venta,
-      fecha: todayArgentina(),
-      cliente_id: pedido.cliente_id,
-      pedido_id: pedido.id,
-      valor_declarado: 0, // Editable después
-      bultos: pedido.bultos || 0,
-      estado: "activo",
-    })
-    .select()
-    .single()
-
-  if (remitoError) {
-    throw new Error("Error creando remito: " + remitoError.message)
-  }
-
-  // Crear detalle del remito
-  const detalleInserts = items.map((item: any) => ({
-    remito_id: remito.id,
-    articulo_id: item.articulo_id,
-    descripcion: item.articulo.descripcion,
-    cantidad: item.cantidad,
-  }))
-
-  const { error: detalleError } = await supabase.from("remitos_detalle").insert(detalleInserts)
-
-  if (detalleError) {
-    throw new Error("Error creando detalle del remito")
-  }
-
-  // Actualizar numeración
-  await supabase
-    .from("numeracion_comprobantes")
-    .update({ ultimo_numero: nuevoNumero })
-    .eq("tipo_comprobante", "REM")
-    .eq("punto_venta", numeracion.punto_venta)
-
-  return {
-    tipo: "remito",
-    id: remito.id,
-    numero: numeroRemito,
   }
 }
