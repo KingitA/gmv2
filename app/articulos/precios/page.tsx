@@ -1,35 +1,44 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Search, Save, ChevronLeft, ChevronRight } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { Search, Save, ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react"
 import { ImportPriceListDialog } from "@/components/articulos/ImportPriceListDialog"
 import {
   calcularPrecioBase,
   calcularPrecioFinal,
-  type DatosArticulo,
+  articuloToDatosArticulo,
+  resumirDescuentos,
   type DatosLista,
   type MetodoFacturacion,
+  type DescuentoTipado,
 } from "@/lib/pricing/calculator"
 
 interface ListaPrecio {
   id: string; nombre: string; codigo: string
   recargo_limpieza_bazar: number; recargo_perfumeria_negro: number; recargo_perfumeria_blanco: number
 }
-
 interface ColumnaActiva {
   id: string; lista: ListaPrecio; facturacion: MetodoFacturacion; label: string
 }
 
 const PAGE_SIZE = 50
+const TIPO_COLORS: Record<string, { bg: string; text: string; label: string }> = {
+  comercial: { bg: "bg-blue-100", text: "text-blue-700", label: "COM" },
+  financiero: { bg: "bg-green-100", text: "text-green-700", label: "FIN" },
+  promocional: { bg: "bg-purple-100", text: "text-purple-700", label: "PRO" },
+}
 
 export default function PreciosArticulosPage() {
   const supabase = createClient()
   const [articulos, setArticulos] = useState<any[]>([])
+  const [descuentosMap, setDescuentosMap] = useState<Record<string, DescuentoTipado[]>>({})
   const [totalCount, setTotalCount] = useState(0)
   const [page, setPage] = useState(0)
   const [proveedores, setProveedores] = useState<any[]>([])
@@ -42,13 +51,16 @@ export default function PreciosArticulosPage() {
   const [editados, setEditados] = useState<Map<string, Record<string, number>>>(new Map())
   const [guardando, setGuardando] = useState(false)
 
-  // Debounce search
+  // Modal descuentos
+  const [descModalArt, setDescModalArt] = useState<any>(null)
+  const [descModalItems, setDescModalItems] = useState<DescuentoTipado[]>([])
+  const [descModalSaving, setDescModalSaving] = useState(false)
+
   useEffect(() => {
     const t = setTimeout(() => { setSearchDebounced(searchTerm); setPage(0) }, 400)
     return () => clearTimeout(t)
   }, [searchTerm])
 
-  // Load proveedores y listas una vez
   useEffect(() => {
     (async () => {
       const [{ data: provs }, { data: lists }] = await Promise.all([
@@ -64,98 +76,115 @@ export default function PreciosArticulosPage() {
     })()
   }, [])
 
-  // Load articulos con paginación
   useEffect(() => { loadArticulos() }, [proveedorFiltro, searchDebounced, page])
 
   const loadArticulos = async () => {
     setLoading(true)
-    let query = supabase
-      .from("articulos")
+    let query = supabase.from("articulos")
       .select("*, proveedor:proveedores(nombre, tipo_descuento)", { count: "exact" })
       .eq("activo", true)
-
     if (proveedorFiltro !== "todos") query = query.eq("proveedor_id", proveedorFiltro)
-    if (searchDebounced.trim()) {
-      const term = searchDebounced.trim()
-      query = query.or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%,ean13.ilike.%${term}%`)
-    }
+    if (searchDebounced.trim()) query = query.or(`descripcion.ilike.%${searchDebounced.trim()}%,sku.ilike.%${searchDebounced.trim()}%,ean13.ilike.%${searchDebounced.trim()}%`)
 
-    const { data, count } = await query
-      .order("descripcion")
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-
-    setArticulos(data || [])
+    const { data, count } = await query.order("descripcion").range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+    const arts = data || []
+    setArticulos(arts)
     setTotalCount(count || 0)
+
+    // Cargar descuentos para estos artículos
+    if (arts.length > 0) {
+      const ids = arts.map((a: any) => a.id)
+      const { data: descs } = await supabase.from("articulos_descuentos").select("*").in("articulo_id", ids).order("orden")
+      const map: Record<string, DescuentoTipado[]> = {}
+      for (const d of (descs || [])) {
+        if (!map[d.articulo_id]) map[d.articulo_id] = []
+        map[d.articulo_id].push({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden })
+      }
+      setDescuentosMap(map)
+    }
     setLoading(false)
   }
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
-  // Editar campo de un artículo
   const editarCampo = (artId: string, campo: string, valor: number) => {
-    setEditados(prev => {
-      const next = new Map(prev)
-      const existing = next.get(artId) || {}
-      next.set(artId, { ...existing, [campo]: valor })
-      return next
-    })
+    setEditados(prev => { const n = new Map(prev); n.set(artId, { ...(n.get(artId) || {}), [campo]: valor }); return n })
     setArticulos(prev => prev.map(a => a.id === artId ? { ...a, [campo]: valor } : a))
   }
 
-  // Guardar cambios
   const guardarCambios = async () => {
     if (editados.size === 0) return
     setGuardando(true)
-    let errores = 0
+    let ok = 0
     for (const [artId, campos] of editados.entries()) {
       const { error } = await supabase.from("articulos").update(campos).eq("id", artId)
-      if (error) errores++
+      if (!error) ok++
     }
     setGuardando(false)
-    if (errores > 0) alert(`${errores} error(es) al guardar`)
-    else {
-      setEditados(new Map())
-      alert(`${editados.size} artículo(s) actualizados`)
+    setEditados(new Map())
+    alert(`${ok} artículo(s) actualizados`)
+  }
+
+  // ─── Modal descuentos ───
+  const openDescModal = (art: any) => {
+    setDescModalArt(art)
+    setDescModalItems([...(descuentosMap[art.id] || [])])
+  }
+
+  const addDescuento = (tipo: "comercial" | "financiero" | "promocional") => {
+    const maxOrden = descModalItems.length > 0 ? Math.max(...descModalItems.map(d => d.orden)) : 0
+    setDescModalItems(prev => [...prev, { tipo, porcentaje: 0, orden: maxOrden + 1 }])
+  }
+
+  const removeDescuento = (idx: number) => {
+    setDescModalItems(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const updateDescuento = (idx: number, porcentaje: number) => {
+    setDescModalItems(prev => prev.map((d, i) => i === idx ? { ...d, porcentaje } : d))
+  }
+
+  const saveDescuentos = async () => {
+    if (!descModalArt) return
+    setDescModalSaving(true)
+    // Borrar existentes
+    await supabase.from("articulos_descuentos").delete().eq("articulo_id", descModalArt.id)
+    // Insertar nuevos
+    const validItems = descModalItems.filter(d => d.porcentaje > 0)
+    if (validItems.length > 0) {
+      await supabase.from("articulos_descuentos").insert(
+        validItems.map((d, i) => ({ articulo_id: descModalArt.id, tipo: d.tipo, porcentaje: d.porcentaje, orden: i + 1 }))
+      )
     }
+    // Actualizar mapa local
+    setDescuentosMap(prev => ({ ...prev, [descModalArt.id]: validItems.map((d, i) => ({ ...d, orden: i + 1 })) }))
+    setDescModalSaving(false)
+    setDescModalArt(null)
   }
 
-  const toggleColumna = (lista: ListaPrecio, facturacion: MetodoFacturacion) => {
-    const id = `${lista.codigo}_${facturacion}`
-    setColumnasActivas(prev => prev.find(c => c.id === id)
-      ? prev.filter(c => c.id !== id)
-      : [...prev, { id, lista, facturacion, label: `${lista.nombre} - ${facturacion}` }])
+  const toggleColumna = (lista: ListaPrecio, fac: MetodoFacturacion) => {
+    const id = `${lista.codigo}_${fac}`
+    setColumnasActivas(prev => prev.find(c => c.id === id) ? prev.filter(c => c.id !== id) : [...prev, { id, lista, facturacion: fac, label: `${lista.nombre} - ${fac}` }])
   }
-
-  const isColumnaActiva = (codigo: string, fac: MetodoFacturacion) => columnasActivas.some(c => c.id === `${codigo}_${fac}`)
-
-  const getDatosArticulo = (art: any): DatosArticulo => ({
-    precio_compra: art.precio_compra || 0,
-    descuento1: art.descuento1 || 0, descuento2: art.descuento2 || 0,
-    descuento3: art.descuento3 || 0, descuento4: art.descuento4 || 0,
-    tipo_descuento: art.proveedor?.tipo_descuento || "cascada",
-    porcentaje_ganancia: art.porcentaje_ganancia || 0,
-    categoria: art.categoria || art.rubro || "",
-    iva_compras: art.iva_compras || "factura",
-    iva_ventas: art.iva_ventas || "factura",
-  })
+  const isColumnaActiva = (cod: string, fac: MetodoFacturacion) => columnasActivas.some(c => c.id === `${cod}_${fac}`)
 
   const fmt = (n: number) => n > 0 ? `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"
   const facturaciones: MetodoFacturacion[] = ["Presupuesto", "Factura", "Final"]
+  const ivaIcon = (v: string) => v === "factura" ? "+" : v === "adquisicion_stock" ? "0" : "½"
+  const ivaColor = (v: string) => v === "factura" ? "bg-blue-100 text-blue-700" : v === "adquisicion_stock" ? "bg-neutral-200 text-neutral-600" : "bg-amber-100 text-amber-700"
 
   return (
     <div className="p-6 lg:p-8">
-      {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-2xl font-bold">Lista de Precios</h1>
-          <p className="text-sm text-muted-foreground">{totalCount} artículos · Página {page + 1} de {totalPages || 1}</p>
+          <p className="text-sm text-muted-foreground">{totalCount} artículos · Página {page + 1}/{totalPages || 1}</p>
         </div>
         <div className="flex gap-2">
           <ImportPriceListDialog proveedores={proveedores} onImportSuccess={loadArticulos} />
           {editados.size > 0 && (
             <Button onClick={guardarCambios} disabled={guardando} className="gap-2 bg-green-600 hover:bg-green-700">
-              <Save className="h-4 w-4" />
-              Guardar ({editados.size})
+              <Save className="h-4 w-4" /> Guardar ({editados.size})
             </Button>
           )}
         </div>
@@ -164,17 +193,17 @@ export default function PreciosArticulosPage() {
       {/* Filtros */}
       <div className="bg-white border rounded-xl p-4 mb-4 flex gap-4 items-end flex-wrap">
         <div className="w-[220px]">
-          <div className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">Proveedor</div>
+          <div className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase">Proveedor</div>
           <Select value={proveedorFiltro} onValueChange={v => { setProveedorFiltro(v); setPage(0) }}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="todos">Todos los proveedores</SelectItem>
+              <SelectItem value="todos">Todos</SelectItem>
               {proveedores.map(p => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
         <div className="flex-1 min-w-[250px]">
-          <div className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">Buscar</div>
+          <div className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase">Buscar</div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Descripción, SKU o EAN13..." className="pl-9" />
@@ -184,15 +213,15 @@ export default function PreciosArticulosPage() {
 
       {/* Selector listas */}
       <div className="bg-white border rounded-xl p-4 mb-4">
-        <div className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">Listas a comparar</div>
+        <div className="text-xs font-semibold text-muted-foreground mb-3 uppercase">Listas a comparar</div>
         <div className="flex gap-4 flex-wrap">
-          {listas.map(lista => (
-            <div key={lista.id} className="space-y-1.5">
-              <div className="text-xs font-bold text-center">{lista.nombre}</div>
+          {listas.map(l => (
+            <div key={l.id} className="space-y-1.5">
+              <div className="text-xs font-bold text-center">{l.nombre}</div>
               <div className="flex gap-1.5">
                 {facturaciones.map(fac => (
-                  <button key={`${lista.codigo}_${fac}`} onClick={() => toggleColumna(lista, fac)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isColumnaActiva(lista.codigo, fac) ? "bg-blue-600 text-white border-blue-600" : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"}`}>
+                  <button key={`${l.codigo}_${fac}`} onClick={() => toggleColumna(l, fac)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isColumnaActiva(l.codigo, fac) ? "bg-blue-600 text-white border-blue-600" : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"}`}>
                     {fac === "Presupuesto" ? "Presup." : fac}
                   </button>
                 ))}
@@ -208,14 +237,17 @@ export default function PreciosArticulosPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-neutral-50">
-                <th className="text-left px-4 py-3 font-semibold text-xs uppercase tracking-wide sticky left-0 bg-neutral-50 z-10 min-w-[220px]">Artículo</th>
-                <th className="text-left px-2 py-3 font-semibold text-xs uppercase tracking-wide min-w-[100px]">Proveedor</th>
-                <th className="text-right px-2 py-3 font-semibold text-xs uppercase tracking-wide min-w-[110px]">Precio Lista</th>
-                <th className="text-center px-2 py-3 font-semibold text-xs uppercase tracking-wide min-w-[180px]">Descuentos</th>
-                <th className="text-center px-2 py-3 font-semibold text-xs uppercase tracking-wide min-w-[80px]">Margen</th>
-                <th className="text-right px-2 py-3 font-semibold text-xs uppercase tracking-wide min-w-[100px] border-r-2 border-neutral-300">Precio Base</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold uppercase sticky left-0 bg-neutral-50 z-10 min-w-[200px]">Artículo</th>
+                <th className="text-left px-2 py-3 text-xs font-semibold uppercase min-w-[90px]">Proveedor</th>
+                <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[50px]">IVA C.</th>
+                <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[50px]">IVA V.</th>
+                <th className="text-right px-2 py-3 text-xs font-semibold uppercase min-w-[100px]">P. Lista</th>
+                <th className="text-center px-2 py-3 text-xs font-semibold uppercase min-w-[80px]">Descuentos</th>
+                <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[70px]">Margen</th>
+                <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[80px]">Bonif/Rec</th>
+                <th className="text-right px-2 py-3 text-xs font-semibold uppercase min-w-[100px] border-r-2 border-neutral-300">P. Base</th>
                 {columnasActivas.map(col => (
-                  <th key={col.id} className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide min-w-[110px] bg-blue-50">
+                  <th key={col.id} className="text-right px-3 py-3 text-xs font-semibold uppercase min-w-[110px] bg-blue-50">
                     <div className="leading-tight"><div>{col.lista.nombre}</div><div className="text-[10px] font-normal text-blue-600 normal-case">{col.facturacion}</div></div>
                   </th>
                 ))}
@@ -223,62 +255,88 @@ export default function PreciosArticulosPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6 + columnasActivas.length} className="text-center py-12 text-muted-foreground">Cargando...</td></tr>
+                <tr><td colSpan={9 + columnasActivas.length} className="text-center py-12 text-muted-foreground">Cargando...</td></tr>
               ) : articulos.length === 0 ? (
-                <tr><td colSpan={6 + columnasActivas.length} className="text-center py-12 text-muted-foreground">No se encontraron artículos</td></tr>
+                <tr><td colSpan={9 + columnasActivas.length} className="text-center py-12 text-muted-foreground">No se encontraron artículos</td></tr>
               ) : articulos.map(art => {
-                const datos = getDatosArticulo(art)
+                const descs = descuentosMap[art.id] || []
+                const datos = articuloToDatosArticulo(art, descs)
                 const base = calcularPrecioBase(datos)
+                const resumen = resumirDescuentos(descs)
+                const totalDesc = resumen.totalComercial + resumen.totalFinanciero + resumen.totalPromocional
                 const isEdited = editados.has(art.id)
 
                 return (
-                  <tr key={art.id} className={`border-b border-neutral-100 hover:bg-neutral-50/50 ${isEdited ? "bg-yellow-50/50" : ""}`}>
+                  <tr key={art.id} className={`border-b border-neutral-100 hover:bg-neutral-50/50 ${isEdited ? "bg-yellow-50/40" : ""}`}>
+                    {/* Artículo */}
                     <td className="px-4 py-2 sticky left-0 bg-white z-10">
                       <div className="font-medium text-[13px] leading-tight">{art.descripcion}</div>
-                      <div className="flex gap-1.5 mt-0.5">
-                        <span className="text-[11px] text-muted-foreground font-mono">{art.sku}</span>
-                        <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${art.iva_ventas === "presupuesto" ? "bg-neutral-100 text-neutral-500" : "bg-blue-50 text-blue-600"}`}>
-                          {art.iva_ventas === "presupuesto" ? "NEG" : "BLA"}
-                        </span>
-                      </div>
+                      <span className="text-[11px] text-muted-foreground font-mono">{art.sku}</span>
                     </td>
+                    {/* Proveedor */}
                     <td className="px-2 py-2 text-xs text-muted-foreground">{art.proveedor?.nombre || "—"}</td>
+                    {/* IVA Compras */}
+                    <td className="px-2 py-2 text-center">
+                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${ivaColor(art.iva_compras || "factura")}`}>
+                        {ivaIcon(art.iva_compras || "factura")}
+                      </span>
+                    </td>
+                    {/* IVA Ventas */}
+                    <td className="px-2 py-2 text-center">
+                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${ivaColor(art.iva_ventas || "factura")}`}>
+                        {ivaIcon(art.iva_ventas || "factura")}
+                      </span>
+                    </td>
                     {/* Precio Lista — editable */}
                     <td className="px-2 py-2">
                       <input type="number" step="0.01"
                         className="w-full text-right text-sm font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 px-1 rounded"
-                        value={art.precio_compra || ""}
-                        onChange={e => editarCampo(art.id, "precio_compra", parseFloat(e.target.value) || 0)}
-                      />
+                        value={art.precio_compra || ""} onChange={e => editarCampo(art.id, "precio_compra", parseFloat(e.target.value) || 0)} />
                     </td>
-                    {/* Descuentos — editables */}
-                    <td className="px-1 py-2">
-                      <div className="flex gap-0.5 justify-center">
-                        {["descuento1", "descuento2", "descuento3", "descuento4"].map(d => (
-                          <input key={d} type="number" step="0.1"
-                            className="w-[42px] text-center text-xs font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded"
-                            value={(art as any)[d] || ""}
-                            placeholder="—"
-                            onChange={e => editarCampo(art.id, d, parseFloat(e.target.value) || 0)}
-                          />
-                        ))}
-                      </div>
+                    {/* Descuentos — clickeable, muestra dados */}
+                    <td className="px-2 py-2 text-center">
+                      <button onClick={() => openDescModal(art)} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-neutral-100 transition-colors group" title="Click para editar descuentos">
+                        {descs.length === 0 ? (
+                          <span className="text-xs text-muted-foreground group-hover:text-blue-600">+</span>
+                        ) : (
+                          <div className="flex gap-0.5">
+                            {resumen.totalComercial > 0 && (
+                              <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.comercial.bg} ${TIPO_COLORS.comercial.text}`}>
+                                {resumen.totalComercial}
+                              </span>
+                            )}
+                            {resumen.totalFinanciero > 0 && (
+                              <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.financiero.bg} ${TIPO_COLORS.financiero.text}`}>
+                                {resumen.totalFinanciero}
+                              </span>
+                            )}
+                            {resumen.totalPromocional > 0 && (
+                              <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.promocional.bg} ${TIPO_COLORS.promocional.text}`}>
+                                {resumen.totalPromocional}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </button>
                     </td>
                     {/* Margen — editable */}
                     <td className="px-2 py-2">
                       <input type="number" step="0.1"
                         className="w-full text-center text-xs font-semibold text-green-700 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded"
-                        value={art.porcentaje_ganancia || ""}
-                        placeholder="—"
-                        onChange={e => editarCampo(art.id, "porcentaje_ganancia", parseFloat(e.target.value) || 0)}
-                      />
+                        value={art.porcentaje_ganancia || ""} placeholder="—" onChange={e => editarCampo(art.id, "porcentaje_ganancia", parseFloat(e.target.value) || 0)} />
                     </td>
-                    {/* Precio Base — calculado */}
+                    {/* Bonif/Recargo — editable */}
+                    <td className="px-2 py-2">
+                      <input type="number" step="0.1"
+                        className={`w-full text-center text-xs font-semibold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${(art.bonif_recargo || 0) < 0 ? "text-red-600" : (art.bonif_recargo || 0) > 0 ? "text-amber-600" : "text-neutral-400"}`}
+                        value={art.bonif_recargo || ""} placeholder="—" onChange={e => editarCampo(art.id, "bonif_recargo", parseFloat(e.target.value) || 0)} />
+                    </td>
+                    {/* Precio Base */}
                     <td className="px-2 py-2 text-right font-bold font-mono text-sm border-r-2 border-neutral-300">{fmt(base.precioBase)}</td>
                     {/* Columnas dinámicas */}
                     {columnasActivas.map(col => {
-                      const listaDatos: DatosLista = { recargo_limpieza_bazar: col.lista.recargo_limpieza_bazar, recargo_perfumeria_negro: col.lista.recargo_perfumeria_negro, recargo_perfumeria_blanco: col.lista.recargo_perfumeria_blanco }
-                      const r = calcularPrecioFinal(datos, listaDatos, col.facturacion, 0)
+                      const ld: DatosLista = { recargo_limpieza_bazar: col.lista.recargo_limpieza_bazar, recargo_perfumeria_negro: col.lista.recargo_perfumeria_negro, recargo_perfumeria_blanco: col.lista.recargo_perfumeria_blanco }
+                      const r = calcularPrecioFinal(datos, ld, col.facturacion, 0)
                       return (
                         <td key={col.id} className="px-3 py-2 text-right bg-blue-50/30">
                           <div className="font-bold font-mono text-sm">{fmt(r.precioUnitarioFinal)}</div>
@@ -294,37 +352,76 @@ export default function PreciosArticulosPage() {
             </tbody>
           </table>
         </div>
-
         {/* Paginación */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t bg-neutral-50">
-            <div className="text-xs text-muted-foreground">
-              Mostrando {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount)} de {totalCount}
-            </div>
+            <div className="text-xs text-muted-foreground">Mostrando {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount)} de {totalCount}</div>
             <div className="flex gap-1.5">
-              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}><ChevronLeft className="h-4 w-4" /></Button>
               {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                let pageNum: number
-                if (totalPages <= 7) pageNum = i
-                else if (page < 3) pageNum = i
-                else if (page > totalPages - 4) pageNum = totalPages - 7 + i
-                else pageNum = page - 3 + i
-                return (
-                  <Button key={pageNum} variant={pageNum === page ? "default" : "outline"} size="sm"
-                    className="w-8 h-8 p-0 text-xs" onClick={() => setPage(pageNum)}>
-                    {pageNum + 1}
-                  </Button>
-                )
+                let pn = totalPages <= 7 ? i : page < 3 ? i : page > totalPages - 4 ? totalPages - 7 + i : page - 3 + i
+                return <Button key={pn} variant={pn === page ? "default" : "outline"} size="sm" className="w-8 h-8 p-0 text-xs" onClick={() => setPage(pn)}>{pn + 1}</Button>
               })}
-              <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+              <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}><ChevronRight className="h-4 w-4" /></Button>
             </div>
           </div>
         )}
       </div>
+
+      {/* ─── Modal Descuentos ─── */}
+      <Dialog open={!!descModalArt} onOpenChange={open => { if (!open) setDescModalArt(null) }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Descuentos — {descModalArt?.descripcion}</DialogTitle>
+          </DialogHeader>
+          <div className="text-xs text-muted-foreground mb-2 font-mono">{descModalArt?.sku}</div>
+
+          <div className="space-y-3 max-h-[400px] overflow-y-auto">
+            {descModalItems.length === 0 && (
+              <p className="text-sm text-muted-foreground py-4 text-center">No hay descuentos. Agregá uno abajo.</p>
+            )}
+            {descModalItems.map((d, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${TIPO_COLORS[d.tipo]?.bg} ${TIPO_COLORS[d.tipo]?.text}`}>
+                  {d.tipo.slice(0, 3)}
+                </span>
+                <span className="text-xs text-muted-foreground w-[80px]">{d.tipo}</span>
+                <Input
+                  type="number" step="0.1" className="w-[100px] text-center"
+                  value={d.porcentaje || ""} onChange={e => updateDescuento(idx, parseFloat(e.target.value) || 0)}
+                />
+                <span className="text-xs text-muted-foreground">%</span>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => removeDescuento(idx)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          {/* Agregar descuento */}
+          <div className="border-t pt-3 mt-3">
+            <div className="text-xs text-muted-foreground mb-2">Agregar descuento:</div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => addDescuento("comercial")} className="gap-1">
+                <span className="w-2 h-2 rounded-full bg-blue-500" /> Comercial
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => addDescuento("financiero")} className="gap-1">
+                <span className="w-2 h-2 rounded-full bg-green-500" /> Financiero
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => addDescuento("promocional")} className="gap-1">
+                <span className="w-2 h-2 rounded-full bg-purple-500" /> Promocional
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDescModalArt(null)}>Cancelar</Button>
+            <Button onClick={saveDescuentos} disabled={descModalSaving}>
+              {descModalSaving ? "Guardando..." : "Guardar Descuentos"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

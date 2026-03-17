@@ -4,9 +4,10 @@ import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from "@/lib/auth"
 import {
   calcularPrecioFinal,
-  type DatosArticulo,
+  articuloToDatosArticulo,
   type DatosLista,
   type MetodoFacturacion,
+  type DescuentoTipado,
 } from "@/lib/pricing/calculator"
 
 export async function POST(request: Request) {
@@ -43,6 +44,20 @@ export async function POST(request: Request) {
 
     if (pedidoError || !pedido) {
       return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 })
+    }
+
+    // Obtener descuentos tipados para todos los artículos del pedido
+    const articuloIds = pedido.detalle.map((d: any) => d.articulo_id).filter(Boolean)
+    const { data: descuentosDB } = await supabase
+      .from("articulos_descuentos")
+      .select("articulo_id, tipo, porcentaje, orden")
+      .in("articulo_id", articuloIds)
+      .order("orden")
+
+    const descuentosPorArticulo: Record<string, DescuentoTipado[]> = {}
+    for (const d of (descuentosDB || [])) {
+      if (!descuentosPorArticulo[d.articulo_id]) descuentosPorArticulo[d.articulo_id] = []
+      descuentosPorArticulo[d.articulo_id].push({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden })
     }
 
     // ─── 2. Obtener lista de precio del cliente ───
@@ -95,18 +110,7 @@ export async function POST(request: Request) {
       const art = det.articulo
       if (!art) continue
 
-      const datosArticulo: DatosArticulo = {
-        precio_compra: art.precio_compra || 0,
-        descuento1: art.descuento1 || 0,
-        descuento2: art.descuento2 || 0,
-        descuento3: art.descuento3 || 0,
-        descuento4: art.descuento4 || 0,
-        tipo_descuento: art.proveedor?.tipo_descuento || "cascada",
-        porcentaje_ganancia: art.porcentaje_ganancia || 0,
-        categoria: art.categoria || art.rubro || "",
-        iva_compras: art.iva_compras || "factura",
-        iva_ventas: art.iva_ventas || "factura",
-      }
+      const datosArticulo = articuloToDatosArticulo(art, descuentosPorArticulo[det.articulo_id])
 
       const resultado = calcularPrecioFinal(datosArticulo, listaDatos, metodoFacturacion, descuentoCliente)
 
