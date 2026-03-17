@@ -56,6 +56,17 @@ export default function PreciosArticulosPage() {
   const [descModalItems, setDescModalItems] = useState<DescuentoTipado[]>([])
   const [descModalSaving, setDescModalSaving] = useState(false)
 
+  // Modal ficha artículo
+  const [fichaArt, setFichaArt] = useState<any>(null)
+  const [fichaForm, setFichaForm] = useState<Record<string, any>>({})
+  const [fichaSaving, setFichaSaving] = useState(false)
+
+  // Columnas visibles
+  const [colsVisibles, setColsVisibles] = useState<Record<string, boolean>>({
+    proveedor: true, iva_c: true, iva_v: true, precio_lista: true,
+    descuentos: true, margen: true, bonif_rec: true, precio_base: true,
+  })
+
   useEffect(() => {
     const t = setTimeout(() => { setSearchDebounced(searchTerm); setPage(0) }, 400)
     return () => clearTimeout(t)
@@ -162,6 +173,38 @@ export default function PreciosArticulosPage() {
     setDescModalArt(null)
   }
 
+  // Ficha artículo
+  const openFicha = (art: any) => {
+    setFichaArt(art)
+    setFichaForm({
+      descripcion: art.descripcion || "",
+      sku: art.sku || "",
+      precio_compra: art.precio_compra || 0,
+      porcentaje_ganancia: art.porcentaje_ganancia || 0,
+      bonif_recargo: art.bonif_recargo || 0,
+      iva_compras: art.iva_compras || "factura",
+      iva_ventas: art.iva_ventas || "factura",
+      categoria: art.categoria || "",
+    })
+  }
+
+  const saveFicha = async () => {
+    if (!fichaArt) return
+    setFichaSaving(true)
+    const { error } = await supabase.from("articulos").update(fichaForm).eq("id", fichaArt.id)
+    if (error) alert(`Error: ${error.message}`)
+    else {
+      setArticulos(prev => prev.map(a => a.id === fichaArt.id ? { ...a, ...fichaForm } : a))
+      setFichaArt(null)
+    }
+    setFichaSaving(false)
+  }
+
+  const COL_NAMES: Record<string, string> = {
+    proveedor: "Proveedor", iva_c: "IVA C.", iva_v: "IVA V.", precio_lista: "P. Lista",
+    descuentos: "Descuentos", margen: "Margen", bonif_rec: "Bonif/Rec", precio_base: "P. Base",
+  }
+
   const toggleColumna = (lista: ListaPrecio, fac: MetodoFacturacion) => {
     const id = `${lista.codigo}_${fac}`
     setColumnasActivas(prev => prev.find(c => c.id === id) ? prev.filter(c => c.id !== id) : [...prev, { id, lista, facturacion: fac, label: `${lista.nombre} - ${fac}` }])
@@ -170,8 +213,10 @@ export default function PreciosArticulosPage() {
 
   const fmt = (n: number) => n > 0 ? `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"
   const facturaciones: MetodoFacturacion[] = ["Presupuesto", "Factura", "Final"]
-  const ivaIcon = (v: string) => v === "factura" ? "+" : v === "adquisicion_stock" ? "0" : "½"
-  const ivaColor = (v: string) => v === "factura" ? "bg-blue-100 text-blue-700" : v === "adquisicion_stock" ? "bg-neutral-200 text-neutral-600" : "bg-amber-100 text-amber-700"
+  const ivaIconCompras = (v: string) => v === "factura" ? "+" : v === "adquisicion_stock" ? "0" : v === "mixto" ? "½" : "0"
+  const ivaIconVentas = (v: string) => v === "factura" ? "+" : "0"
+  const ivaColorCompras = (v: string) => v === "factura" ? "bg-blue-100 text-blue-700" : v === "adquisicion_stock" ? "bg-neutral-200 text-neutral-600" : v === "mixto" ? "bg-amber-100 text-amber-700" : "bg-neutral-200 text-neutral-600"
+  const ivaColorVentas = (v: string) => v === "factura" ? "bg-blue-100 text-blue-700" : "bg-neutral-200 text-neutral-600"
 
   return (
     <div className="p-6 lg:p-8">
@@ -211,23 +256,38 @@ export default function PreciosArticulosPage() {
         </div>
       </div>
 
-      {/* Selector listas */}
+      {/* Selector listas + columnas visibles */}
       <div className="bg-white border rounded-xl p-4 mb-4">
-        <div className="text-xs font-semibold text-muted-foreground mb-3 uppercase">Listas a comparar</div>
-        <div className="flex gap-4 flex-wrap">
-          {listas.map(l => (
-            <div key={l.id} className="space-y-1.5">
-              <div className="text-xs font-bold text-center">{l.nombre}</div>
-              <div className="flex gap-1.5">
-                {facturaciones.map(fac => (
-                  <button key={`${l.codigo}_${fac}`} onClick={() => toggleColumna(l, fac)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isColumnaActiva(l.codigo, fac) ? "bg-blue-600 text-white border-blue-600" : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"}`}>
-                    {fac === "Presupuesto" ? "Presup." : fac}
-                  </button>
-                ))}
-              </div>
+        <div className="flex gap-6 flex-wrap">
+          <div className="flex-1">
+            <div className="text-xs font-semibold text-muted-foreground mb-3 uppercase">Listas a comparar</div>
+            <div className="flex gap-4 flex-wrap">
+              {listas.map(l => (
+                <div key={l.id} className="space-y-1.5">
+                  <div className="text-xs font-bold text-center">{l.nombre}</div>
+                  <div className="flex gap-1.5">
+                    {facturaciones.map(fac => (
+                      <button key={`${l.codigo}_${fac}`} onClick={() => toggleColumna(l, fac)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isColumnaActiva(l.codigo, fac) ? "bg-blue-600 text-white border-blue-600" : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"}`}>
+                        {fac === "Presupuesto" ? "Presup." : fac}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-muted-foreground mb-3 uppercase">Columnas</div>
+            <div className="flex gap-1.5 flex-wrap">
+              {Object.entries(COL_NAMES).map(([key, label]) => (
+                <button key={key} onClick={() => setColsVisibles(prev => ({ ...prev, [key]: !prev[key] }))}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-all ${colsVisibles[key] ? "bg-neutral-800 text-white border-neutral-800" : "bg-white text-neutral-400 border-neutral-200 line-through"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -238,14 +298,14 @@ export default function PreciosArticulosPage() {
             <thead>
               <tr className="border-b bg-neutral-50">
                 <th className="text-left px-4 py-3 text-xs font-semibold uppercase sticky left-0 bg-neutral-50 z-10 min-w-[200px]">Artículo</th>
-                <th className="text-left px-2 py-3 text-xs font-semibold uppercase min-w-[90px]">Proveedor</th>
-                <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[50px]">IVA C.</th>
-                <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[50px]">IVA V.</th>
-                <th className="text-right px-2 py-3 text-xs font-semibold uppercase min-w-[100px]">P. Lista</th>
-                <th className="text-center px-2 py-3 text-xs font-semibold uppercase min-w-[80px]">Descuentos</th>
-                <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[70px]">Margen</th>
-                <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[80px]">Bonif/Rec</th>
-                <th className="text-right px-2 py-3 text-xs font-semibold uppercase min-w-[100px] border-r-2 border-neutral-300">P. Base</th>
+                {colsVisibles.proveedor && <th className="text-left px-2 py-3 text-xs font-semibold uppercase min-w-[90px]">Proveedor</th>}
+                {colsVisibles.iva_c && <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[50px]">IVA C.</th>}
+                {colsVisibles.iva_v && <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[50px]">IVA V.</th>}
+                {colsVisibles.precio_lista && <th className="text-right px-2 py-3 text-xs font-semibold uppercase min-w-[100px]">P. Lista</th>}
+                {colsVisibles.descuentos && <th className="text-center px-2 py-3 text-xs font-semibold uppercase min-w-[80px]">Descuentos</th>}
+                {colsVisibles.margen && <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[70px]">Margen</th>}
+                {colsVisibles.bonif_rec && <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[80px]">Bonif/Rec</th>}
+                {colsVisibles.precio_base && <th className="text-right px-2 py-3 text-xs font-semibold uppercase min-w-[100px] border-r-2 border-neutral-300">P. Base</th>}
                 {columnasActivas.map(col => (
                   <th key={col.id} className="text-right px-3 py-3 text-xs font-semibold uppercase min-w-[110px] bg-blue-50">
                     <div className="leading-tight"><div>{col.lista.nombre}</div><div className="text-[10px] font-normal text-blue-600 normal-case">{col.facturacion}</div></div>
@@ -255,9 +315,9 @@ export default function PreciosArticulosPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9 + columnasActivas.length} className="text-center py-12 text-muted-foreground">Cargando...</td></tr>
+                <tr><td colSpan={99} className="text-center py-12 text-muted-foreground">Cargando...</td></tr>
               ) : articulos.length === 0 ? (
-                <tr><td colSpan={9 + columnasActivas.length} className="text-center py-12 text-muted-foreground">No se encontraron artículos</td></tr>
+                <tr><td colSpan={99} className="text-center py-12 text-muted-foreground">No se encontraron artículos</td></tr>
               ) : articulos.map(art => {
                 const descs = descuentosMap[art.id] || []
                 const datos = articuloToDatosArticulo(art, descs)
@@ -268,71 +328,77 @@ export default function PreciosArticulosPage() {
 
                 return (
                   <tr key={art.id} className={`border-b border-neutral-100 hover:bg-neutral-50/50 ${isEdited ? "bg-yellow-50/40" : ""}`}>
-                    {/* Artículo */}
+                    {/* Artículo — click abre ficha */}
                     <td className="px-4 py-2 sticky left-0 bg-white z-10">
-                      <div className="font-medium text-[13px] leading-tight">{art.descripcion}</div>
-                      <span className="text-[11px] text-muted-foreground font-mono">{art.sku}</span>
-                    </td>
-                    {/* Proveedor */}
-                    <td className="px-2 py-2 text-xs text-muted-foreground">{art.proveedor?.nombre || "—"}</td>
-                    {/* IVA Compras */}
-                    <td className="px-2 py-2 text-center">
-                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${ivaColor(art.iva_compras || "factura")}`}>
-                        {ivaIcon(art.iva_compras || "factura")}
-                      </span>
-                    </td>
-                    {/* IVA Ventas */}
-                    <td className="px-2 py-2 text-center">
-                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${ivaColor(art.iva_ventas || "factura")}`}>
-                        {ivaIcon(art.iva_ventas || "factura")}
-                      </span>
-                    </td>
-                    {/* Precio Lista — editable */}
-                    <td className="px-2 py-2">
-                      <input type="number" step="0.01"
-                        className="w-full text-right text-sm font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 px-1 rounded"
-                        value={art.precio_compra || ""} onChange={e => editarCampo(art.id, "precio_compra", parseFloat(e.target.value) || 0)} />
-                    </td>
-                    {/* Descuentos — clickeable, muestra dados */}
-                    <td className="px-2 py-2 text-center">
-                      <button onClick={() => openDescModal(art)} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-neutral-100 transition-colors group" title="Click para editar descuentos">
-                        {descs.length === 0 ? (
-                          <span className="text-xs text-muted-foreground group-hover:text-blue-600">+</span>
-                        ) : (
-                          <div className="flex gap-0.5">
-                            {resumen.totalComercial > 0 && (
-                              <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.comercial.bg} ${TIPO_COLORS.comercial.text}`}>
-                                {resumen.totalComercial}
-                              </span>
-                            )}
-                            {resumen.totalFinanciero > 0 && (
-                              <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.financiero.bg} ${TIPO_COLORS.financiero.text}`}>
-                                {resumen.totalFinanciero}
-                              </span>
-                            )}
-                            {resumen.totalPromocional > 0 && (
-                              <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.promocional.bg} ${TIPO_COLORS.promocional.text}`}>
-                                {resumen.totalPromocional}
-                              </span>
-                            )}
-                          </div>
-                        )}
+                      <button onClick={() => openFicha(art)} className="text-left hover:text-blue-600 transition-colors">
+                        <div className="font-medium text-[13px] leading-tight">{art.descripcion}</div>
+                        <span className="text-[11px] text-muted-foreground font-mono">{art.sku}</span>
                       </button>
                     </td>
+                    {/* Proveedor — click abre ficha */}
+                    {colsVisibles.proveedor && (
+                      <td className="px-2 py-2">
+                        <button onClick={() => openFicha(art)} className="text-xs text-muted-foreground hover:text-blue-600 transition-colors">{art.proveedor?.nombre || "—"}</button>
+                      </td>
+                    )}
+                    {/* IVA Compras */}
+                    {colsVisibles.iva_c && (
+                      <td className="px-2 py-2 text-center">
+                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${ivaColorCompras(art.iva_compras || "factura")}`}>
+                          {ivaIconCompras(art.iva_compras || "factura")}
+                        </span>
+                      </td>
+                    )}
+                    {/* IVA Ventas */}
+                    {colsVisibles.iva_v && (
+                      <td className="px-2 py-2 text-center">
+                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${ivaColorVentas(art.iva_ventas || "factura")}`}>
+                          {ivaIconVentas(art.iva_ventas || "factura")}
+                        </span>
+                      </td>
+                    )}
+                    {/* Precio Lista — editable */}
+                    {colsVisibles.precio_lista && (
+                      <td className="px-2 py-2">
+                        <input type="number" step="0.01"
+                          className="w-full text-right text-sm font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 px-1 rounded"
+                          value={art.precio_compra || ""} onChange={e => editarCampo(art.id, "precio_compra", parseFloat(e.target.value) || 0)} />
+                      </td>
+                    )}
+                    {/* Descuentos — clickeable */}
+                    {colsVisibles.descuentos && (
+                      <td className="px-2 py-2 text-center">
+                        <button onClick={() => openDescModal(art)} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-neutral-100 transition-colors group" title="Click para editar descuentos">
+                          {descs.length === 0 ? (
+                            <span className="text-xs text-muted-foreground group-hover:text-blue-600">+</span>
+                          ) : (
+                            <div className="flex gap-0.5">
+                              {resumen.totalComercial > 0 && <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.comercial.bg} ${TIPO_COLORS.comercial.text}`}>{resumen.totalComercial}</span>}
+                              {resumen.totalFinanciero > 0 && <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.financiero.bg} ${TIPO_COLORS.financiero.text}`}>{resumen.totalFinanciero}</span>}
+                              {resumen.totalPromocional > 0 && <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.promocional.bg} ${TIPO_COLORS.promocional.text}`}>{resumen.totalPromocional}</span>}
+                            </div>
+                          )}
+                        </button>
+                      </td>
+                    )}
                     {/* Margen — editable */}
-                    <td className="px-2 py-2">
-                      <input type="number" step="0.1"
-                        className="w-full text-center text-xs font-semibold text-green-700 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded"
-                        value={art.porcentaje_ganancia || ""} placeholder="—" onChange={e => editarCampo(art.id, "porcentaje_ganancia", parseFloat(e.target.value) || 0)} />
-                    </td>
+                    {colsVisibles.margen && (
+                      <td className="px-2 py-2">
+                        <input type="number" step="0.1"
+                          className="w-full text-center text-xs font-semibold text-green-700 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded"
+                          value={art.porcentaje_ganancia || ""} placeholder="—" onChange={e => editarCampo(art.id, "porcentaje_ganancia", parseFloat(e.target.value) || 0)} />
+                      </td>
+                    )}
                     {/* Bonif/Recargo — editable */}
-                    <td className="px-2 py-2">
-                      <input type="number" step="0.1"
-                        className={`w-full text-center text-xs font-semibold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${(art.bonif_recargo || 0) < 0 ? "text-red-600" : (art.bonif_recargo || 0) > 0 ? "text-amber-600" : "text-neutral-400"}`}
-                        value={art.bonif_recargo || ""} placeholder="—" onChange={e => editarCampo(art.id, "bonif_recargo", parseFloat(e.target.value) || 0)} />
-                    </td>
+                    {colsVisibles.bonif_rec && (
+                      <td className="px-2 py-2">
+                        <input type="number" step="0.1"
+                          className={`w-full text-center text-xs font-semibold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${(art.bonif_recargo || 0) < 0 ? "text-red-600" : (art.bonif_recargo || 0) > 0 ? "text-amber-600" : "text-neutral-400"}`}
+                          value={art.bonif_recargo || ""} placeholder="—" onChange={e => editarCampo(art.id, "bonif_recargo", parseFloat(e.target.value) || 0)} />
+                      </td>
+                    )}
                     {/* Precio Base */}
-                    <td className="px-2 py-2 text-right font-bold font-mono text-sm border-r-2 border-neutral-300">{fmt(base.precioBase)}</td>
+                    {colsVisibles.precio_base && <td className="px-2 py-2 text-right font-bold font-mono text-sm border-r-2 border-neutral-300">{fmt(base.precioBase)}</td>}
                     {/* Columnas dinámicas */}
                     {columnasActivas.map(col => {
                       const ld: DatosLista = { recargo_limpieza_bazar: col.lista.recargo_limpieza_bazar, recargo_perfumeria_negro: col.lista.recargo_perfumeria_negro, recargo_perfumeria_blanco: col.lista.recargo_perfumeria_blanco }
@@ -420,6 +486,75 @@ export default function PreciosArticulosPage() {
               {descModalSaving ? "Guardando..." : "Guardar Descuentos"}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Modal Ficha Artículo ─── */}
+      <Dialog open={!!fichaArt} onOpenChange={open => { if (!open) setFichaArt(null) }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Ficha del Artículo</DialogTitle>
+          </DialogHeader>
+          {fichaArt && (
+            <div className="space-y-4">
+              <div>
+                <Label>Descripción</Label>
+                <Input value={fichaForm.descripcion} onChange={e => setFichaForm(p => ({ ...p, descripcion: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>SKU</Label>
+                  <Input value={fichaForm.sku} onChange={e => setFichaForm(p => ({ ...p, sku: e.target.value }))} />
+                </div>
+                <div>
+                  <Label>Categoría</Label>
+                  <Input value={fichaForm.categoria} onChange={e => setFichaForm(p => ({ ...p, categoria: e.target.value }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>IVA Compras</Label>
+                  <Select value={fichaForm.iva_compras} onValueChange={v => setFichaForm(p => ({ ...p, iva_compras: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="factura">Blanco (factura)</SelectItem>
+                      <SelectItem value="adquisicion_stock">Negro (adquisición)</SelectItem>
+                      <SelectItem value="mixto">Mixto</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>IVA Ventas</Label>
+                  <Select value={fichaForm.iva_ventas} onValueChange={v => setFichaForm(p => ({ ...p, iva_ventas: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="factura">Blanco (factura)</SelectItem>
+                      <SelectItem value="presupuesto">Negro (presupuesto)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <Label>Precio Compra</Label>
+                  <Input type="number" step="0.01" value={fichaForm.precio_compra} onChange={e => setFichaForm(p => ({ ...p, precio_compra: parseFloat(e.target.value) || 0 }))} />
+                </div>
+                <div>
+                  <Label>Margen %</Label>
+                  <Input type="number" step="0.1" value={fichaForm.porcentaje_ganancia} onChange={e => setFichaForm(p => ({ ...p, porcentaje_ganancia: parseFloat(e.target.value) || 0 }))} />
+                </div>
+                <div>
+                  <Label>Bonif/Recargo %</Label>
+                  <Input type="number" step="0.1" value={fichaForm.bonif_recargo} onChange={e => setFichaForm(p => ({ ...p, bonif_recargo: parseFloat(e.target.value) || 0 }))} />
+                </div>
+              </div>
+              <div className="text-xs text-muted-foreground">Proveedor: {fichaArt.proveedor?.nombre || "—"}</div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setFichaArt(null)}>Cancelar</Button>
+                <Button onClick={saveFicha} disabled={fichaSaving}>{fichaSaving ? "Guardando..." : "Guardar"}</Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
