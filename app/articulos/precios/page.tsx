@@ -1,562 +1,305 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Search, Save, ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react"
+import { Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical, Plus, Upload } from "lucide-react"
 import { ImportPriceListDialog } from "@/components/articulos/ImportPriceListDialog"
-import {
-  calcularPrecioBase,
-  calcularPrecioFinal,
-  articuloToDatosArticulo,
-  resumirDescuentos,
-  type DatosLista,
-  type MetodoFacturacion,
-  type DescuentoTipado,
-} from "@/lib/pricing/calculator"
+import * as XLSX from "xlsx"
+import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
 
-interface ListaPrecio {
-  id: string; nombre: string; codigo: string
-  recargo_limpieza_bazar: number; recargo_perfumeria_negro: number; recargo_perfumeria_blanco: number
-}
-interface ColumnaActiva {
-  id: string; lista: ListaPrecio; facturacion: MetodoFacturacion; label: string
-}
+interface LP { id:string; nombre:string; codigo:string; recargo_limpieza_bazar:number; recargo_perfumeria_negro:number; recargo_perfumeria_blanco:number }
+interface ColLista { id:string; lista:LP; fac:MetodoFacturacion; label:string }
 
-const PAGE_SIZE = 50
-const TIPO_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-  comercial: { bg: "bg-blue-100", text: "text-blue-700", label: "COM" },
-  financiero: { bg: "bg-green-100", text: "text-green-700", label: "FIN" },
-  promocional: { bg: "bg-purple-100", text: "text-purple-700", label: "PRO" },
-}
+const PS = 50
+const TC: Record<string,{bg:string;text:string}> = { comercial:{bg:"bg-blue-100",text:"text-blue-700"}, financiero:{bg:"bg-green-100",text:"text-green-700"}, promocional:{bg:"bg-purple-100",text:"text-purple-700"} }
 
-export default function PreciosArticulosPage() {
-  const supabase = createClient()
-  const [articulos, setArticulos] = useState<any[]>([])
-  const [descuentosMap, setDescuentosMap] = useState<Record<string, DescuentoTipado[]>>({})
-  const [totalCount, setTotalCount] = useState(0)
-  const [page, setPage] = useState(0)
-  const [proveedores, setProveedores] = useState<any[]>([])
-  const [listas, setListas] = useState<ListaPrecio[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [searchDebounced, setSearchDebounced] = useState("")
-  const [proveedorFiltro, setProveedorFiltro] = useState("todos")
-  const [loading, setLoading] = useState(true)
-  const [columnasActivas, setColumnasActivas] = useState<ColumnaActiva[]>([])
-  const [editados, setEditados] = useState<Map<string, Record<string, number>>>(new Map())
-  const [guardando, setGuardando] = useState(false)
+type FColId = "prov"|"ivac"|"ivav"|"plista"|"desc"|"marg"|"br"|"pbase"
+const FCOLS:{id:FColId;label:string;dw:number;mw:number}[] = [
+  {id:"prov",label:"Proveedor",dw:100,mw:60},{id:"ivac",label:"IVA C.",dw:45,mw:35},{id:"ivav",label:"IVA V.",dw:45,mw:35},
+  {id:"plista",label:"P. Lista",dw:100,mw:70},{id:"desc",label:"Desc.",dw:80,mw:50},{id:"marg",label:"Margen",dw:65,mw:45},
+  {id:"br",label:"B/R",dw:55,mw:40},{id:"pbase",label:"P. Base",dw:95,mw:60},
+]
 
-  // Modal descuentos
-  const [descModalArt, setDescModalArt] = useState<any>(null)
-  const [descModalItems, setDescModalItems] = useState<DescuentoTipado[]>([])
-  const [descModalSaving, setDescModalSaving] = useState(false)
+export default function ArticulosUnificadoPage() {
+  const sb = createClient()
+  const [arts,setArts]=useState<any[]>([])
+  const [dm,setDm]=useState<Record<string,DescuentoTipado[]>>({})
+  const [tc,setTc]=useState(0)
+  const [pg,setPg]=useState(0)
+  const [provs,setProvs]=useState<any[]>([])
+  const [listas,setListas]=useState<LP[]>([])
+  const [st,setSt]=useState("")
+  const [sd,setSd]=useState("")
+  const [pf,setPf]=useState("todos")
+  const [ld,setLd]=useState(true)
+  const [ed,setEd]=useState<Map<string,Record<string,number>>>(new Map())
+  const [sav,setSav]=useState(false)
+  const [cls,setCls]=useState<ColLista[]>([])
+  const [dli,setDli]=useState<number|null>(null)
+  const [cw,setCw]=useState<Record<string,number>>(Object.fromEntries(FCOLS.map(c=>[c.id,c.dw])))
+  const [ch,setCh]=useState<Record<string,boolean>>({})
+  const [rc,setRc]=useState<string|null>(null)
+  const rsx=useRef(0);const rsw=useRef(0)
+  const [dma,setDma]=useState<any>(null)
+  const [dmi,setDmi]=useState<DescuentoTipado[]>([])
+  const [dms,setDms]=useState(false)
+  const [fa,setFa]=useState<any>(null)
+  const [ff,setFf]=useState<Record<string,any>>({})
+  const [fs,setFs]=useState(false)
 
-  // Modal ficha artículo
-  const [fichaArt, setFichaArt] = useState<any>(null)
-  const [fichaForm, setFichaForm] = useState<Record<string, any>>({})
-  const [fichaSaving, setFichaSaving] = useState(false)
+  useEffect(()=>{const t=setTimeout(()=>{setSd(st);setPg(0)},400);return()=>clearTimeout(t)},[st])
+  useEffect(()=>{(async()=>{
+    const [{data:p},{data:l}]=await Promise.all([sb.from("proveedores").select("id,nombre").eq("activo",true).order("nombre"),sb.from("listas_precio").select("*").eq("activo",true).order("nombre")])
+    if(p)setProvs(p);if(l){setListas(l);const b=l.find((x:any)=>x.codigo==="bahia");if(b&&cls.length===0)setCls([{id:`${b.codigo}_Presupuesto`,lista:b,fac:"Presupuesto",label:`${b.nombre}·Presup.`}])}
+  })()},[])
+  useEffect(()=>{load()},[pf,sd,pg])
 
-  // Columnas visibles
-  const [colsVisibles, setColsVisibles] = useState<Record<string, boolean>>({
-    proveedor: true, iva_c: true, iva_v: true, precio_lista: true,
-    descuentos: true, margen: true, bonif_rec: true, precio_base: true,
-  })
+  const load=async()=>{
+    setLd(true)
+    let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento)",{count:"exact"}).eq("activo",true)
+    if(pf!=="todos")q=q.eq("proveedor_id",pf)
+    if(sd.trim())q=q.or(`descripcion.ilike.%${sd.trim()}%,sku.ilike.%${sd.trim()}%,ean13.ilike.%${sd.trim()}%`)
+    const{data,count}=await q.order("descripcion").range(pg*PS,(pg+1)*PS-1)
+    const a=data||[];setArts(a);setTc(count||0)
+    if(a.length>0){const ids=a.map((x:any)=>x.id);const{data:d}=await sb.from("articulos_descuentos").select("*").in("articulo_id",ids).order("orden");const m:Record<string,DescuentoTipado[]>={};for(const x of(d||[])){if(!m[x.articulo_id])m[x.articulo_id]=[];m[x.articulo_id].push({tipo:x.tipo,porcentaje:x.porcentaje,orden:x.orden})};setDm(m)}
+    setLd(false)
+  }
+  const tp=Math.ceil(tc/PS)
+  const edt=(id:string,c:string,v:number)=>{setEd(p=>{const n=new Map(p);n.set(id,{...(n.get(id)||{}),[c]:v});return n});setArts(p=>p.map(a=>a.id===id?{...a,[c]:v}:a))}
+  const gsv=async()=>{if(ed.size===0)return;setSav(true);let ok=0;for(const[id,c]of ed.entries()){const{error}=await sb.from("articulos").update(c).eq("id",id);if(!error)ok++};setSav(false);setEd(new Map());alert(`${ok} artículo(s) actualizados`)}
 
-  useEffect(() => {
-    const t = setTimeout(() => { setSearchDebounced(searchTerm); setPage(0) }, 400)
-    return () => clearTimeout(t)
-  }, [searchTerm])
+  // Resize
+  const sr=(id:string,e:React.MouseEvent)=>{e.preventDefault();setRc(id);rsx.current=e.clientX;rsw.current=cw[id]||100}
+  useEffect(()=>{if(!rc)return;const mm=(e:MouseEvent)=>{const d=e.clientX-rsx.current;const col=FCOLS.find(c=>c.id===rc);setCw(p=>({...p,[rc]:Math.max(col?.mw||35,rsw.current+d)}))};const mu=()=>setRc(null);document.addEventListener("mousemove",mm);document.addEventListener("mouseup",mu);return()=>{document.removeEventListener("mousemove",mm);document.removeEventListener("mouseup",mu)}},[rc])
 
-  useEffect(() => {
-    (async () => {
-      const [{ data: provs }, { data: lists }] = await Promise.all([
-        supabase.from("proveedores").select("id, nombre").eq("activo", true).order("nombre"),
-        supabase.from("listas_precio").select("*").eq("activo", true).order("nombre"),
-      ])
-      if (provs) setProveedores(provs)
-      if (lists) {
-        setListas(lists)
-        const bahia = lists.find((l: any) => l.codigo === "bahia")
-        if (bahia) setColumnasActivas([{ id: `${bahia.codigo}_Presupuesto`, lista: bahia, facturacion: "Presupuesto", label: `${bahia.nombre} - Presupuesto` }])
+  // Hide col on double-click header
+  const toggleHide=(id:string)=>setCh(p=>({...p,[id]:!p[id]}))
+
+  // Lista columns
+  const tgl=(l:LP,f:MetodoFacturacion)=>{const id=`${l.codigo}_${f}`;setCls(p=>p.find(c=>c.id===id)?p.filter(c=>c.id!==id):[...p,{id,lista:l,fac:f,label:`${l.nombre}·${f==="Presupuesto"?"P":f==="Factura"?"F":"Fi"}`}])}
+  const ila=(c:string,f:MetodoFacturacion)=>cls.some(x=>x.id===`${c}_${f}`)
+  const dds=(i:number)=>setDli(i)
+  const ddo=(e:React.DragEvent,i:number)=>{e.preventDefault();if(dli===null||dli===i)return;setCls(p=>{const n=[...p];const[m]=n.splice(dli,1);n.splice(i,0,m);return n});setDli(i)}
+  const dde=()=>setDli(null)
+
+  // Descuentos
+  const odm=(a:any)=>{setDma(a);setDmi([...(dm[a.id]||[])])}
+  const sdm=async()=>{if(!dma)return;setDms(true);await sb.from("articulos_descuentos").delete().eq("articulo_id",dma.id);const v=dmi.filter(d=>d.porcentaje>0);if(v.length>0)await sb.from("articulos_descuentos").insert(v.map((d,i)=>({articulo_id:dma.id,tipo:d.tipo,porcentaje:d.porcentaje,orden:i+1})));setDm(p=>({...p,[dma.id]:v.map((d,i)=>({...d,orden:i+1}))}));setDms(false);setDma(null)}
+
+  // Ficha
+  const ofa=(a:any)=>{setFa(a);setFf({descripcion:a.descripcion||"",sku:a.sku||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:a.iva_compras||"factura",iva_ventas:a.iva_ventas||"factura",categoria:a.categoria||"",rubro:a.rubro||""})}
+  const sfa=async()=>{if(!fa)return;setFs(true);const{error}=await sb.from("articulos").update(ff).eq("id",fa.id);if(!error){setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff}:a));setFa(null)}else alert(`Error: ${error.message}`);setFs(false)}
+
+  const dpl=()=>{const t=[{sku:"123456",descripcion:"Ejemplo",proveedor_codigo:"PROV01",rubro:"limpieza",categoria:"Limpieza",precio_compra:100,porcentaje_ganancia:20,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",descuento_comercial:"10+5",descuento_financiero:"3",descuento_promocional:""}];const ws=XLSX.utils.json_to_sheet(t);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Articulos");const wo=XLSX.write(wb,{bookType:"xlsx",type:"array"});const b=new Blob([wo],{type:"application/octet-stream"});const u=URL.createObjectURL(b);const l=document.createElement("a");l.href=u;l.download="plantilla_articulos.xlsx";l.click();URL.revokeObjectURL(u)}
+
+  // Import handler with typed discounts support
+  const [importing,setImporting]=useState(false)
+  const [importResult,setImportResult]=useState<{show:boolean;inserted:number;updated:number;descs:number}|null>(null)
+  const [showNewArt,setShowNewArt]=useState(false)
+  const [newArtForm,setNewArtForm]=useState({sku:"",descripcion:"",categoria:"",rubro:"",iva_compras:"factura",iva_ventas:"factura",precio_compra:0,porcentaje_ganancia:0})
+
+  const handleImport=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+    const file=e.target.files?.[0];if(!file)return;setImporting(true)
+    try{
+      const data=await file.arrayBuffer();const wb=XLSX.read(data);const ws=wb.Sheets[wb.SheetNames[0]]
+      const rows=XLSX.utils.sheet_to_json(ws) as any[];const headers=rows.length>0?Object.keys(rows[0]):[]
+      const hasDescs=headers.some(h=>h.startsWith("descuento_"))
+
+      // Map proveedores
+      const provCodes=[...new Set(rows.map(r=>r.proveedor_codigo).filter(Boolean))]
+      let provMap:Record<string,string>={}
+      if(provCodes.length>0){const{data:pd}=await sb.from("proveedores").select("id,codigo_proveedor").in("codigo_proveedor",provCodes);if(pd)provMap=Object.fromEntries(pd.map((p:any)=>[p.codigo_proveedor,p.id]))}
+
+      // Parse rows
+      const parsed=rows.filter(r=>r.sku&&String(r.sku).trim()).map(r=>{
+        const art:any={sku:String(r.sku).trim()}
+        if(r.descripcion)art.descripcion=r.descripcion
+        if(r.proveedor_codigo&&provMap[r.proveedor_codigo])art.proveedor_id=provMap[r.proveedor_codigo]
+        if(r.rubro)art.rubro=r.rubro
+        if(r.categoria)art.categoria=r.categoria
+        if(r.precio_compra!==undefined)art.precio_compra=Number(r.precio_compra)||0
+        if(r.porcentaje_ganancia!==undefined)art.porcentaje_ganancia=Number(r.porcentaje_ganancia)||0
+        if(r.bonif_recargo!==undefined)art.bonif_recargo=Number(r.bonif_recargo)||0
+        if(r.iva_compras)art.iva_compras=r.iva_compras
+        if(r.iva_ventas)art.iva_ventas=r.iva_ventas
+        if(r.unidades_por_bulto)art.unidades_por_bulto=Number(r.unidades_por_bulto)
+        // Extract typed discounts for later
+        const descs:DescuentoTipado[]=[]
+        for(const tipo of["comercial","financiero","promocional"]){
+          const val=r[`descuento_${tipo}`]
+          if(val){String(val).split("+").forEach((v,i)=>{const n=parseFloat(v);if(n>0)descs.push({tipo:tipo as any,porcentaje:n,orden:descs.length+1})})}
+        }
+        return{art,descs}
+      })
+
+      // Dedup by SKU
+      const skuMap=new Map<string,typeof parsed[0]>();parsed.forEach(p=>skuMap.set(p.art.sku,p))
+      const uniq=Array.from(skuMap.values())
+
+      // Fetch existing
+      const skus=uniq.map(u=>u.art.sku);let existing:any[]=[]
+      for(let i=0;i<skus.length;i+=500){const chunk=skus.slice(i,i+500);const{data:d}=await sb.from("articulos").select("*").in("sku",chunk);if(d)existing=[...existing,...d]}
+      const exMap=new Map(existing.map(a=>[a.sku,a]))
+
+      const toInsert:any[]=[];const toUpdate:any[]=[];const descInserts:{sku:string;descs:DescuentoTipado[]}[]=[]
+      uniq.forEach(({art,descs})=>{
+        const ex=exMap.get(art.sku)
+        if(ex)toUpdate.push({...ex,...art})
+        else if(art.descripcion)toInsert.push(art)
+        if(descs.length>0)descInserts.push({sku:art.sku,descs})
+      })
+
+      let ins=0,upd=0
+      if(toInsert.length>0){const keys=new Set<string>();toInsert.forEach(i=>Object.keys(i).forEach(k=>keys.add(k)));const norm=toInsert.map(i=>{const n:any={};keys.forEach(k=>{n[k]=i[k]!==undefined?i[k]:null});return n});const{error}=await sb.from("articulos").insert(norm);if(error)throw new Error(error.message);ins=norm.length}
+      if(toUpdate.length>0){for(let i=0;i<toUpdate.length;i+=500){const batch=toUpdate.slice(i,i+500);const{error}=await sb.from("articulos").upsert(batch,{onConflict:"sku"});if(error)throw new Error(error.message);upd+=batch.length}}
+
+      // Handle typed discounts
+      let descCount=0
+      if(descInserts.length>0){
+        // Get article IDs for the SKUs
+        const descSkus=descInserts.map(d=>d.sku)
+        const{data:artIds}=await sb.from("articulos").select("id,sku").in("sku",descSkus)
+        const skuToId=new Map((artIds||[]).map((a:any)=>[a.sku,a.id]))
+        for(const{sku,descs}of descInserts){
+          const artId=skuToId.get(sku);if(!artId)continue
+          await sb.from("articulos_descuentos").delete().eq("articulo_id",artId)
+          const inserts=descs.map((d,i)=>({articulo_id:artId,tipo:d.tipo,porcentaje:d.porcentaje,orden:i+1}))
+          await sb.from("articulos_descuentos").insert(inserts)
+          descCount+=inserts.length
+        }
       }
-    })()
-  }, [])
 
-  useEffect(() => { loadArticulos() }, [proveedorFiltro, searchDebounced, page])
-
-  const loadArticulos = async () => {
-    setLoading(true)
-    let query = supabase.from("articulos")
-      .select("*, proveedor:proveedores(nombre, tipo_descuento)", { count: "exact" })
-      .eq("activo", true)
-    if (proveedorFiltro !== "todos") query = query.eq("proveedor_id", proveedorFiltro)
-    if (searchDebounced.trim()) query = query.or(`descripcion.ilike.%${searchDebounced.trim()}%,sku.ilike.%${searchDebounced.trim()}%,ean13.ilike.%${searchDebounced.trim()}%`)
-
-    const { data, count } = await query.order("descripcion").range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-    const arts = data || []
-    setArticulos(arts)
-    setTotalCount(count || 0)
-
-    // Cargar descuentos para estos artículos
-    if (arts.length > 0) {
-      const ids = arts.map((a: any) => a.id)
-      const { data: descs } = await supabase.from("articulos_descuentos").select("*").in("articulo_id", ids).order("orden")
-      const map: Record<string, DescuentoTipado[]> = {}
-      for (const d of (descs || [])) {
-        if (!map[d.articulo_id]) map[d.articulo_id] = []
-        map[d.articulo_id].push({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden })
-      }
-      setDescuentosMap(map)
-    }
-    setLoading(false)
+      setImportResult({show:true,inserted:ins,updated:upd,descs:descCount})
+      load()
+    }catch(err:any){alert(`Error: ${err.message}`)}
+    finally{setImporting(false);e.target.value=""}
   }
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
-
-  const editarCampo = (artId: string, campo: string, valor: number) => {
-    setEditados(prev => { const n = new Map(prev); n.set(artId, { ...(n.get(artId) || {}), [campo]: valor }); return n })
-    setArticulos(prev => prev.map(a => a.id === artId ? { ...a, [campo]: valor } : a))
+  const createNewArticle=async()=>{
+    if(!newArtForm.sku.trim()||!newArtForm.descripcion.trim()){alert("SKU y Descripción son obligatorios");return}
+    const{error}=await sb.from("articulos").insert({...newArtForm,activo:true})
+    if(error){alert(`Error: ${error.message}`);return}
+    setShowNewArt(false);setNewArtForm({sku:"",descripcion:"",categoria:"",rubro:"",iva_compras:"factura",iva_ventas:"factura",precio_compra:0,porcentaje_ganancia:0})
+    load()
   }
 
-  const guardarCambios = async () => {
-    if (editados.size === 0) return
-    setGuardando(true)
-    let ok = 0
-    for (const [artId, campos] of editados.entries()) {
-      const { error } = await supabase.from("articulos").update(campos).eq("id", artId)
-      if (!error) ok++
-    }
-    setGuardando(false)
-    setEditados(new Map())
-    alert(`${ok} artículo(s) actualizados`)
-  }
-
-  // ─── Modal descuentos ───
-  const openDescModal = (art: any) => {
-    setDescModalArt(art)
-    setDescModalItems([...(descuentosMap[art.id] || [])])
-  }
-
-  const addDescuento = (tipo: "comercial" | "financiero" | "promocional") => {
-    const maxOrden = descModalItems.length > 0 ? Math.max(...descModalItems.map(d => d.orden)) : 0
-    setDescModalItems(prev => [...prev, { tipo, porcentaje: 0, orden: maxOrden + 1 }])
-  }
-
-  const removeDescuento = (idx: number) => {
-    setDescModalItems(prev => prev.filter((_, i) => i !== idx))
-  }
-
-  const updateDescuento = (idx: number, porcentaje: number) => {
-    setDescModalItems(prev => prev.map((d, i) => i === idx ? { ...d, porcentaje } : d))
-  }
-
-  const saveDescuentos = async () => {
-    if (!descModalArt) return
-    setDescModalSaving(true)
-    // Borrar existentes
-    await supabase.from("articulos_descuentos").delete().eq("articulo_id", descModalArt.id)
-    // Insertar nuevos
-    const validItems = descModalItems.filter(d => d.porcentaje > 0)
-    if (validItems.length > 0) {
-      await supabase.from("articulos_descuentos").insert(
-        validItems.map((d, i) => ({ articulo_id: descModalArt.id, tipo: d.tipo, porcentaje: d.porcentaje, orden: i + 1 }))
-      )
-    }
-    // Actualizar mapa local
-    setDescuentosMap(prev => ({ ...prev, [descModalArt.id]: validItems.map((d, i) => ({ ...d, orden: i + 1 })) }))
-    setDescModalSaving(false)
-    setDescModalArt(null)
-  }
-
-  // Ficha artículo
-  const openFicha = (art: any) => {
-    setFichaArt(art)
-    setFichaForm({
-      descripcion: art.descripcion || "",
-      sku: art.sku || "",
-      precio_compra: art.precio_compra || 0,
-      porcentaje_ganancia: art.porcentaje_ganancia || 0,
-      bonif_recargo: art.bonif_recargo || 0,
-      iva_compras: art.iva_compras || "factura",
-      iva_ventas: art.iva_ventas || "factura",
-      categoria: art.categoria || "",
-    })
-  }
-
-  const saveFicha = async () => {
-    if (!fichaArt) return
-    setFichaSaving(true)
-    const { error } = await supabase.from("articulos").update(fichaForm).eq("id", fichaArt.id)
-    if (error) alert(`Error: ${error.message}`)
-    else {
-      setArticulos(prev => prev.map(a => a.id === fichaArt.id ? { ...a, ...fichaForm } : a))
-      setFichaArt(null)
-    }
-    setFichaSaving(false)
-  }
-
-  const COL_NAMES: Record<string, string> = {
-    proveedor: "Proveedor", iva_c: "IVA C.", iva_v: "IVA V.", precio_lista: "P. Lista",
-    descuentos: "Descuentos", margen: "Margen", bonif_rec: "Bonif/Rec", precio_base: "P. Base",
-  }
-
-  const toggleColumna = (lista: ListaPrecio, fac: MetodoFacturacion) => {
-    const id = `${lista.codigo}_${fac}`
-    setColumnasActivas(prev => prev.find(c => c.id === id) ? prev.filter(c => c.id !== id) : [...prev, { id, lista, facturacion: fac, label: `${lista.nombre} - ${fac}` }])
-  }
-  const isColumnaActiva = (cod: string, fac: MetodoFacturacion) => columnasActivas.some(c => c.id === `${cod}_${fac}`)
-
-  const fmt = (n: number) => n > 0 ? `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"
-  const facturaciones: MetodoFacturacion[] = ["Presupuesto", "Factura", "Final"]
-  const ivaIconCompras = (v: string) => v === "factura" ? "+" : v === "adquisicion_stock" ? "0" : v === "mixto" ? "½" : "0"
-  const ivaIconVentas = (v: string) => v === "factura" ? "+" : "0"
-  const ivaColorCompras = (v: string) => v === "factura" ? "bg-blue-100 text-blue-700" : v === "adquisicion_stock" ? "bg-neutral-200 text-neutral-600" : v === "mixto" ? "bg-amber-100 text-amber-700" : "bg-neutral-200 text-neutral-600"
-  const ivaColorVentas = (v: string) => v === "factura" ? "bg-blue-100 text-blue-700" : "bg-neutral-200 text-neutral-600"
+  const fmt=(n:number)=>n>0?`$${n.toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"
+  const icC=(v:string)=>v==="factura"?"+":v==="mixto"?"½":"0"
+  const icV=(v:string)=>v==="factura"?"+":"0"
+  const ccC=(v:string)=>v==="factura"?"bg-blue-100 text-blue-700":v==="mixto"?"bg-amber-100 text-amber-700":"bg-neutral-200 text-neutral-600"
+  const ccV=(v:string)=>v==="factura"?"bg-blue-100 text-blue-700":"bg-neutral-200 text-neutral-600"
+  const facs:MetodoFacturacion[]=["Presupuesto","Factura","Final"]
+  const vc=FCOLS.filter(c=>!ch[c.id])
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-2xl font-bold">Lista de Precios</h1>
-          <p className="text-sm text-muted-foreground">{totalCount} artículos · Página {page + 1}/{totalPages || 1}</p>
-        </div>
-        <div className="flex gap-2">
-          <ImportPriceListDialog proveedores={proveedores} onImportSuccess={loadArticulos} />
-          {editados.size > 0 && (
-            <Button onClick={guardarCambios} disabled={guardando} className="gap-2 bg-green-600 hover:bg-green-700">
-              <Save className="h-4 w-4" /> Guardar ({editados.size})
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Filtros */}
-      <div className="bg-white border rounded-xl p-4 mb-4 flex gap-4 items-end flex-wrap">
-        <div className="w-[220px]">
-          <div className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase">Proveedor</div>
-          <Select value={proveedorFiltro} onValueChange={v => { setProveedorFiltro(v); setPage(0) }}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos</SelectItem>
-              {proveedores.map(p => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex-1 min-w-[250px]">
-          <div className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase">Buscar</div>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Descripción, SKU o EAN13..." className="pl-9" />
-          </div>
+    <div className="p-4 lg:p-6">
+      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+        <div><h1 className="text-xl font-bold">Artículos</h1><p className="text-xs text-muted-foreground">{tc} artículos · Pág {pg+1}/{tp||1}</p></div>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={()=>setShowNewArt(true)}><Plus className="h-3 w-3 mr-1"/>Nuevo</Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={dpl}><Download className="h-3 w-3 mr-1"/>Plantilla</Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs relative" disabled={importing}>
+            <Upload className="h-3 w-3 mr-1"/>{importing?"Importando...":"Importar"}
+            <input type="file" accept=".xlsx,.xls,.csv" onChange={handleImport} className="absolute inset-0 opacity-0 cursor-pointer" disabled={importing}/>
+          </Button>
+          <ImportPriceListDialog proveedores={provs} onImportSuccess={load}/>
+          {ed.size>0&&<Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={gsv} disabled={sav}><Save className="h-3 w-3 mr-1"/>Guardar ({ed.size})</Button>}
         </div>
       </div>
 
-      {/* Selector listas + columnas visibles */}
-      <div className="bg-white border rounded-xl p-4 mb-4">
-        <div className="flex gap-6 flex-wrap">
-          <div className="flex-1">
-            <div className="text-xs font-semibold text-muted-foreground mb-3 uppercase">Listas a comparar</div>
-            <div className="flex gap-4 flex-wrap">
-              {listas.map(l => (
-                <div key={l.id} className="space-y-1.5">
-                  <div className="text-xs font-bold text-center">{l.nombre}</div>
-                  <div className="flex gap-1.5">
-                    {facturaciones.map(fac => (
-                      <button key={`${l.codigo}_${fac}`} onClick={() => toggleColumna(l, fac)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${isColumnaActiva(l.codigo, fac) ? "bg-blue-600 text-white border-blue-600" : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"}`}>
-                        {fac === "Presupuesto" ? "Presup." : fac}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-muted-foreground mb-3 uppercase">Columnas</div>
-            <div className="flex gap-1.5 flex-wrap">
-              {Object.entries(COL_NAMES).map(([key, label]) => (
-                <button key={key} onClick={() => setColsVisibles(prev => ({ ...prev, [key]: !prev[key] }))}
-                  className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-all ${colsVisibles[key] ? "bg-neutral-800 text-white border-neutral-800" : "bg-white text-neutral-400 border-neutral-200 line-through"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="bg-white border rounded-lg p-2.5 mb-3 flex gap-2 items-end flex-wrap text-xs">
+        <div className="w-[160px]">
+          <div className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase">Proveedor</div>
+          <Select value={pf} onValueChange={v=>{setPf(v);setPg(0)}}><SelectTrigger className="h-7 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="todos">Todos</SelectItem>{provs.map(p=><SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}</SelectContent></Select>
+        </div>
+        <div className="flex-1 min-w-[180px]">
+          <div className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase">Buscar</div>
+          <div className="relative"><Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground"/><Input value={st} onChange={e=>setSt(e.target.value)} placeholder="Descripción, SKU, EAN..." className="pl-7 h-7 text-xs"/></div>
+        </div>
+        <div className="border-l pl-2 flex gap-1.5 flex-wrap items-center">
+          <span className="text-[9px] font-bold text-muted-foreground uppercase">Listas:</span>
+          {listas.map(l=><div key={l.id} className="flex gap-px">{facs.map(f=><button key={`${l.codigo}_${f}`} onClick={()=>tgl(l,f)} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${ila(l.codigo,f)?"bg-blue-600 text-white border-blue-600":"bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400"}`}>{l.nombre.slice(0,3)}·{f==="Presupuesto"?"P":f==="Factura"?"F":"Fi"}</button>)}</div>)}
         </div>
       </div>
 
-      {/* Tabla */}
-      <div className="bg-white border rounded-xl overflow-hidden">
+      <div className="bg-white border rounded-lg overflow-hidden" style={{userSelect:rc?"none":undefined}}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-neutral-50">
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase sticky left-0 bg-neutral-50 z-10 min-w-[200px]">Artículo</th>
-                {colsVisibles.proveedor && <th className="text-left px-2 py-3 text-xs font-semibold uppercase min-w-[90px]">Proveedor</th>}
-                {colsVisibles.iva_c && <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[50px]">IVA C.</th>}
-                {colsVisibles.iva_v && <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[50px]">IVA V.</th>}
-                {colsVisibles.precio_lista && <th className="text-right px-2 py-3 text-xs font-semibold uppercase min-w-[100px]">P. Lista</th>}
-                {colsVisibles.descuentos && <th className="text-center px-2 py-3 text-xs font-semibold uppercase min-w-[80px]">Descuentos</th>}
-                {colsVisibles.margen && <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[70px]">Margen</th>}
-                {colsVisibles.bonif_rec && <th className="text-center px-2 py-3 text-xs font-semibold uppercase w-[80px]">Bonif/Rec</th>}
-                {colsVisibles.precio_base && <th className="text-right px-2 py-3 text-xs font-semibold uppercase min-w-[100px] border-r-2 border-neutral-300">P. Base</th>}
-                {columnasActivas.map(col => (
-                  <th key={col.id} className="text-right px-3 py-3 text-xs font-semibold uppercase min-w-[110px] bg-blue-50">
-                    <div className="leading-tight"><div>{col.lista.nombre}</div><div className="text-[10px] font-normal text-blue-600 normal-case">{col.facturacion}</div></div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
+          <table className="w-full text-xs border-collapse">
+            <thead><tr className="bg-neutral-50 border-b">
+              <th className="text-left px-3 py-2 font-semibold uppercase text-[10px] sticky left-0 bg-neutral-50 z-10 min-w-[180px]">Artículo</th>
+              {vc.map(c=><th key={c.id} className="relative text-center px-1 py-2 font-semibold uppercase text-[10px] border-r border-neutral-100" style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}} onDoubleClick={()=>toggleHide(c.id)}>{c.label}<div className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400" onMouseDown={e=>sr(c.id,e)}/></th>)}
+              {cls.map((c,i)=><th key={c.id} className={`text-right px-2 py-2 font-semibold text-[10px] bg-blue-50 min-w-[90px] border-l border-blue-100 cursor-grab ${dli===i?"opacity-30":""}`} draggable onDragStart={()=>dds(i)} onDragOver={e=>ddo(e,i)} onDragEnd={dde}><div className="flex items-center justify-end gap-0.5"><GripVertical className="h-2.5 w-2.5 text-blue-300"/><span>{c.label}</span><button onClick={()=>tgl(c.lista,c.fac)} className="text-blue-300 hover:text-red-500 ml-0.5">×</button></div></th>)}
+            </tr></thead>
             <tbody>
-              {loading ? (
-                <tr><td colSpan={99} className="text-center py-12 text-muted-foreground">Cargando...</td></tr>
-              ) : articulos.length === 0 ? (
-                <tr><td colSpan={99} className="text-center py-12 text-muted-foreground">No se encontraron artículos</td></tr>
-              ) : articulos.map(art => {
-                const descs = descuentosMap[art.id] || []
-                const datos = articuloToDatosArticulo(art, descs)
-                const base = calcularPrecioBase(datos)
-                const resumen = resumirDescuentos(descs)
-                const totalDesc = resumen.totalComercial + resumen.totalFinanciero + resumen.totalPromocional
-                const isEdited = editados.has(art.id)
-
-                return (
-                  <tr key={art.id} className={`border-b border-neutral-100 hover:bg-neutral-50/50 ${isEdited ? "bg-yellow-50/40" : ""}`}>
-                    {/* Artículo — click abre ficha */}
-                    <td className="px-4 py-2 sticky left-0 bg-white z-10">
-                      <button onClick={() => openFicha(art)} className="text-left hover:text-blue-600 transition-colors">
-                        <div className="font-medium text-[13px] leading-tight">{art.descripcion}</div>
-                        <span className="text-[11px] text-muted-foreground font-mono">{art.sku}</span>
-                      </button>
-                    </td>
-                    {/* Proveedor — click abre ficha */}
-                    {colsVisibles.proveedor && (
-                      <td className="px-2 py-2">
-                        <button onClick={() => openFicha(art)} className="text-xs text-muted-foreground hover:text-blue-600 transition-colors">{art.proveedor?.nombre || "—"}</button>
-                      </td>
-                    )}
-                    {/* IVA Compras */}
-                    {colsVisibles.iva_c && (
-                      <td className="px-2 py-2 text-center">
-                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${ivaColorCompras(art.iva_compras || "factura")}`}>
-                          {ivaIconCompras(art.iva_compras || "factura")}
-                        </span>
-                      </td>
-                    )}
-                    {/* IVA Ventas */}
-                    {colsVisibles.iva_v && (
-                      <td className="px-2 py-2 text-center">
-                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold ${ivaColorVentas(art.iva_ventas || "factura")}`}>
-                          {ivaIconVentas(art.iva_ventas || "factura")}
-                        </span>
-                      </td>
-                    )}
-                    {/* Precio Lista — editable */}
-                    {colsVisibles.precio_lista && (
-                      <td className="px-2 py-2">
-                        <input type="number" step="0.01"
-                          className="w-full text-right text-sm font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 px-1 rounded"
-                          value={art.precio_compra || ""} onChange={e => editarCampo(art.id, "precio_compra", parseFloat(e.target.value) || 0)} />
-                      </td>
-                    )}
-                    {/* Descuentos — clickeable */}
-                    {colsVisibles.descuentos && (
-                      <td className="px-2 py-2 text-center">
-                        <button onClick={() => openDescModal(art)} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-neutral-100 transition-colors group" title="Click para editar descuentos">
-                          {descs.length === 0 ? (
-                            <span className="text-xs text-muted-foreground group-hover:text-blue-600">+</span>
-                          ) : (
-                            <div className="flex gap-0.5">
-                              {resumen.totalComercial > 0 && <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.comercial.bg} ${TIPO_COLORS.comercial.text}`}>{resumen.totalComercial}</span>}
-                              {resumen.totalFinanciero > 0 && <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.financiero.bg} ${TIPO_COLORS.financiero.text}`}>{resumen.totalFinanciero}</span>}
-                              {resumen.totalPromocional > 0 && <span className={`inline-flex items-center justify-center min-w-[22px] h-[22px] rounded text-[10px] font-bold ${TIPO_COLORS.promocional.bg} ${TIPO_COLORS.promocional.text}`}>{resumen.totalPromocional}</span>}
-                            </div>
-                          )}
-                        </button>
-                      </td>
-                    )}
-                    {/* Margen — editable */}
-                    {colsVisibles.margen && (
-                      <td className="px-2 py-2">
-                        <input type="number" step="0.1"
-                          className="w-full text-center text-xs font-semibold text-green-700 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded"
-                          value={art.porcentaje_ganancia || ""} placeholder="—" onChange={e => editarCampo(art.id, "porcentaje_ganancia", parseFloat(e.target.value) || 0)} />
-                      </td>
-                    )}
-                    {/* Bonif/Recargo — editable */}
-                    {colsVisibles.bonif_rec && (
-                      <td className="px-2 py-2">
-                        <input type="number" step="0.1"
-                          className={`w-full text-center text-xs font-semibold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${(art.bonif_recargo || 0) < 0 ? "text-red-600" : (art.bonif_recargo || 0) > 0 ? "text-amber-600" : "text-neutral-400"}`}
-                          value={art.bonif_recargo || ""} placeholder="—" onChange={e => editarCampo(art.id, "bonif_recargo", parseFloat(e.target.value) || 0)} />
-                      </td>
-                    )}
-                    {/* Precio Base */}
-                    {colsVisibles.precio_base && <td className="px-2 py-2 text-right font-bold font-mono text-sm border-r-2 border-neutral-300">{fmt(base.precioBase)}</td>}
-                    {/* Columnas dinámicas */}
-                    {columnasActivas.map(col => {
-                      const ld: DatosLista = { recargo_limpieza_bazar: col.lista.recargo_limpieza_bazar, recargo_perfumeria_negro: col.lista.recargo_perfumeria_negro, recargo_perfumeria_blanco: col.lista.recargo_perfumeria_blanco }
-                      const r = calcularPrecioFinal(datos, ld, col.facturacion, 0)
-                      return (
-                        <td key={col.id} className="px-3 py-2 text-right bg-blue-50/30">
-                          <div className="font-bold font-mono text-sm">{fmt(r.precioUnitarioFinal)}</div>
-                          {r.montoIvaDiscriminado > 0 && <div className="text-[10px] text-blue-600">+IVA {fmt(r.montoIvaDiscriminado)}</div>}
-                          {r.ivaIncluido && <div className="text-[10px] text-neutral-400">IVA incl.</div>}
-                          {r.descuentoNegroEnFacturaPct > 0 && <div className="text-[10px] text-red-500">-10%</div>}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                )
-              })}
+              {ld?<tr><td colSpan={99} className="text-center py-10 text-muted-foreground">Cargando...</td></tr>
+              :arts.length===0?<tr><td colSpan={99} className="text-center py-10 text-muted-foreground">Sin artículos</td></tr>
+              :arts.map(a=>{
+                const ds=dm[a.id]||[];const dt=articuloToDatosArticulo(a,ds);const bs=calcularPrecioBase(dt);const rs=resumirDescuentos(ds);const ie=ed.has(a.id)
+                return(<tr key={a.id} className={`border-b border-neutral-50 hover:bg-neutral-50/50 ${ie?"bg-yellow-50/30":""}`}>
+                  <td className="px-3 py-1 sticky left-0 bg-white z-10"><button onClick={()=>ofa(a)} className="text-left hover:text-blue-600"><div className="font-medium text-[11px] leading-tight truncate max-w-[200px]">{a.descripcion}</div><span className="text-[10px] text-muted-foreground font-mono">{a.sku}</span></button></td>
+                  {!ch.prov&&<td className="px-1 py-1 text-center border-r border-neutral-50" style={{width:cw.prov}}><span className="text-[10px] text-muted-foreground truncate block">{a.proveedor?.nombre||"—"}</span></td>}
+                  {!ch.ivac&&<td className="px-1 py-1 text-center border-r border-neutral-50" style={{width:cw.ivac}}><span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${ccC(a.iva_compras||"factura")}`}>{icC(a.iva_compras||"factura")}</span></td>}
+                  {!ch.ivav&&<td className="px-1 py-1 text-center border-r border-neutral-50" style={{width:cw.ivav}}><span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${ccV(a.iva_ventas||"factura")}`}>{icV(a.iva_ventas||"factura")}</span></td>}
+                  {!ch.plista&&<td className="px-1 py-1 border-r border-neutral-50" style={{width:cw.plista}}><input type="number" step="0.01" className="w-full text-right text-[11px] font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded" value={a.precio_compra||""} onChange={e=>edt(a.id,"precio_compra",parseFloat(e.target.value)||0)}/></td>}
+                  {!ch.desc&&<td className="px-1 py-1 text-center border-r border-neutral-50" style={{width:cw.desc}}><button onClick={()=>odm(a)} className="inline-flex gap-px px-1 py-0.5 rounded hover:bg-neutral-100">{ds.length===0?<span className="text-[10px] text-neutral-300">+</span>:<>{rs.totalComercial>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-blue-100 text-blue-700">{rs.totalComercial}</span>}{rs.totalFinanciero>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-green-100 text-green-700">{rs.totalFinanciero}</span>}{rs.totalPromocional>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-purple-100 text-purple-700">{rs.totalPromocional}</span>}</>}</button></td>}
+                  {!ch.marg&&<td className="px-1 py-1 border-r border-neutral-50" style={{width:cw.marg}}><input type="number" step="0.1" className="w-full text-center text-[11px] font-semibold text-green-700 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded" value={a.porcentaje_ganancia||""} placeholder="—" onChange={e=>edt(a.id,"porcentaje_ganancia",parseFloat(e.target.value)||0)}/></td>}
+                  {!ch.br&&<td className="px-1 py-1 border-r border-neutral-50" style={{width:cw.br}}><input type="number" step="0.1" className={`w-full text-center text-[11px] font-semibold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${(a.bonif_recargo||0)<0?"text-red-600":(a.bonif_recargo||0)>0?"text-amber-600":"text-neutral-300"}`} value={a.bonif_recargo||""} placeholder="—" onChange={e=>edt(a.id,"bonif_recargo",parseFloat(e.target.value)||0)}/></td>}
+                  {!ch.pbase&&<td className="px-2 py-1 text-right font-bold font-mono text-[11px] border-r-2 border-neutral-200" style={{width:cw.pbase}}>{fmt(bs.precioBase)}</td>}
+                  {cls.map(c=>{const ld2:DatosLista={recargo_limpieza_bazar:c.lista.recargo_limpieza_bazar,recargo_perfumeria_negro:c.lista.recargo_perfumeria_negro,recargo_perfumeria_blanco:c.lista.recargo_perfumeria_blanco};const r=calcularPrecioFinal(dt,ld2,c.fac,0);const pf2=r.ivaIncluido?r.precioUnitarioFinal:r.precioUnitarioFinal+r.montoIvaDiscriminado;return(<td key={c.id} className="px-2 py-1 text-right bg-blue-50/20 border-l border-blue-50"><div className="font-bold font-mono text-[11px]">{fmt(pf2)}</div></td>)})}
+                </tr>)})}
             </tbody>
           </table>
         </div>
-        {/* Paginación */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t bg-neutral-50">
-            <div className="text-xs text-muted-foreground">Mostrando {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount)} de {totalCount}</div>
-            <div className="flex gap-1.5">
-              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}><ChevronLeft className="h-4 w-4" /></Button>
-              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                let pn = totalPages <= 7 ? i : page < 3 ? i : page > totalPages - 4 ? totalPages - 7 + i : page - 3 + i
-                return <Button key={pn} variant={pn === page ? "default" : "outline"} size="sm" className="w-8 h-8 p-0 text-xs" onClick={() => setPage(pn)}>{pn + 1}</Button>
-              })}
-              <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}><ChevronRight className="h-4 w-4" /></Button>
-            </div>
-          </div>
-        )}
+        {tp>1&&<div className="flex items-center justify-between px-3 py-2 border-t bg-neutral-50 text-xs"><span className="text-muted-foreground">{pg*PS+1}–{Math.min((pg+1)*PS,tc)} de {tc}</span><div className="flex gap-1"><Button variant="outline" size="sm" className="h-6 w-6 p-0" disabled={pg===0} onClick={()=>setPg(p=>p-1)}><ChevronLeft className="h-3 w-3"/></Button>{Array.from({length:Math.min(tp,7)},(_,i)=>{let pn=tp<=7?i:pg<3?i:pg>tp-4?tp-7+i:pg-3+i;return<Button key={pn} variant={pn===pg?"default":"outline"} size="sm" className="h-6 w-6 p-0 text-[10px]" onClick={()=>setPg(pn)}>{pn+1}</Button>})}<Button variant="outline" size="sm" className="h-6 w-6 p-0" disabled={pg>=tp-1} onClick={()=>setPg(p=>p+1)}><ChevronRight className="h-3 w-3"/></Button></div></div>}
       </div>
 
-      {/* ─── Modal Descuentos ─── */}
-      <Dialog open={!!descModalArt} onOpenChange={open => { if (!open) setDescModalArt(null) }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Descuentos — {descModalArt?.descripcion}</DialogTitle>
-          </DialogHeader>
-          <div className="text-xs text-muted-foreground mb-2 font-mono">{descModalArt?.sku}</div>
+      {/* Descuentos Modal */}
+      <Dialog open={!!dma} onOpenChange={o=>{if(!o)setDma(null)}}><DialogContent className="max-w-md"><DialogHeader><DialogTitle className="text-sm">Descuentos — {dma?.descripcion}</DialogTitle></DialogHeader>
+        <div className="space-y-2 max-h-[300px] overflow-y-auto">{dmi.length===0&&<p className="text-xs text-muted-foreground py-3 text-center">Sin descuentos</p>}{dmi.map((d,i)=><div key={i} className="flex items-center gap-2"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${TC[d.tipo]?.bg} ${TC[d.tipo]?.text}`}>{d.tipo.slice(0,3)}</span><Input type="number" step="0.1" className="w-[80px] h-7 text-xs text-center" value={d.porcentaje||""} onChange={e=>setDmi(p=>p.map((x,j)=>j===i?{...x,porcentaje:parseFloat(e.target.value)||0}:x))}/><span className="text-[10px]">%</span><Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={()=>setDmi(p=>p.filter((_,j)=>j!==i))}><Trash2 className="h-3 w-3"/></Button></div>)}</div>
+        <div className="flex gap-1.5 pt-2">{(["comercial","financiero","promocional"] as const).map(t=><Button key={t} size="sm" variant="outline" className="text-[10px] h-6" onClick={()=>setDmi(p=>[...p,{tipo:t,porcentaje:0,orden:p.length+1}])}>+{t.slice(0,3).toUpperCase()}</Button>)}</div>
+        <div className="flex justify-end gap-2 mt-2"><Button variant="outline" size="sm" onClick={()=>setDma(null)}>Cancelar</Button><Button size="sm" onClick={sdm} disabled={dms}>{dms?"...":"Guardar"}</Button></div>
+      </DialogContent></Dialog>
 
-          <div className="space-y-3 max-h-[400px] overflow-y-auto">
-            {descModalItems.length === 0 && (
-              <p className="text-sm text-muted-foreground py-4 text-center">No hay descuentos. Agregá uno abajo.</p>
-            )}
-            {descModalItems.map((d, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${TIPO_COLORS[d.tipo]?.bg} ${TIPO_COLORS[d.tipo]?.text}`}>
-                  {d.tipo.slice(0, 3)}
-                </span>
-                <span className="text-xs text-muted-foreground w-[80px]">{d.tipo}</span>
-                <Input
-                  type="number" step="0.1" className="w-[100px] text-center"
-                  value={d.porcentaje || ""} onChange={e => updateDescuento(idx, parseFloat(e.target.value) || 0)}
-                />
-                <span className="text-xs text-muted-foreground">%</span>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => removeDescuento(idx)}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
+      {/* Ficha Modal */}
+      <Dialog open={!!fa} onOpenChange={o=>{if(!o)setFa(null)}}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle className="text-sm">Ficha — {fa?.sku}</DialogTitle></DialogHeader>
+        {fa&&<div className="space-y-3">
+          <div><Label className="text-xs">Descripción</Label><Input className="h-8 text-xs" value={ff.descripcion} onChange={e=>setFf(p=>({...p,descripcion:e.target.value}))}/></div>
+          <div className="grid grid-cols-3 gap-3"><div><Label className="text-xs">SKU</Label><Input className="h-8 text-xs" value={ff.sku} onChange={e=>setFf(p=>({...p,sku:e.target.value}))}/></div><div><Label className="text-xs">Categoría</Label><Input className="h-8 text-xs" value={ff.categoria} onChange={e=>setFf(p=>({...p,categoria:e.target.value}))}/></div><div><Label className="text-xs">Rubro</Label><Input className="h-8 text-xs" value={ff.rubro} onChange={e=>setFf(p=>({...p,rubro:e.target.value}))}/></div></div>
+          <div className="grid grid-cols-2 gap-3"><div><Label className="text-xs">IVA Compras</Label><Select value={ff.iva_compras} onValueChange={v=>setFf(p=>({...p,iva_compras:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="factura">Blanco</SelectItem><SelectItem value="adquisicion_stock">Negro</SelectItem><SelectItem value="mixto">Mixto</SelectItem></SelectContent></Select></div><div><Label className="text-xs">IVA Ventas</Label><Select value={ff.iva_ventas} onValueChange={v=>setFf(p=>({...p,iva_ventas:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="factura">Blanco</SelectItem><SelectItem value="presupuesto">Negro</SelectItem></SelectContent></Select></div></div>
+          <div className="grid grid-cols-3 gap-3"><div><Label className="text-xs">P. Compra</Label><Input type="number" step="0.01" className="h-8 text-xs" value={ff.precio_compra} onChange={e=>setFf(p=>({...p,precio_compra:parseFloat(e.target.value)||0}))}/></div><div><Label className="text-xs">Margen %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.porcentaje_ganancia} onChange={e=>setFf(p=>({...p,porcentaje_ganancia:parseFloat(e.target.value)||0}))}/></div><div><Label className="text-xs">B/R %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.bonif_recargo} onChange={e=>setFf(p=>({...p,bonif_recargo:parseFloat(e.target.value)||0}))}/></div></div>
+          <div className="text-[10px] text-muted-foreground">Proveedor: {fa.proveedor?.nombre||"—"}</div>
+          <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={()=>setFa(null)}>Cancelar</Button><Button size="sm" onClick={sfa} disabled={fs}>{fs?"...":"Guardar"}</Button></div>
+        </div>}
+      </DialogContent></Dialog>
+
+      {/* New Article Modal */}
+      <Dialog open={showNewArt} onOpenChange={setShowNewArt}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle className="text-sm">Nuevo Artículo</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3"><div><Label className="text-xs">SKU *</Label><Input className="h-8 text-xs" value={newArtForm.sku} onChange={e=>setNewArtForm(p=>({...p,sku:e.target.value}))}/></div><div><Label className="text-xs">Descripción *</Label><Input className="h-8 text-xs" value={newArtForm.descripcion} onChange={e=>setNewArtForm(p=>({...p,descripcion:e.target.value}))}/></div></div>
+          <div className="grid grid-cols-2 gap-3"><div><Label className="text-xs">Categoría</Label><Input className="h-8 text-xs" value={newArtForm.categoria} onChange={e=>setNewArtForm(p=>({...p,categoria:e.target.value}))}/></div><div><Label className="text-xs">Rubro</Label><Input className="h-8 text-xs" value={newArtForm.rubro} onChange={e=>setNewArtForm(p=>({...p,rubro:e.target.value}))}/></div></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label className="text-xs">IVA Compras</Label><Select value={newArtForm.iva_compras} onValueChange={v=>setNewArtForm(p=>({...p,iva_compras:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="factura">Blanco</SelectItem><SelectItem value="adquisicion_stock">Negro</SelectItem><SelectItem value="mixto">Mixto</SelectItem></SelectContent></Select></div>
+            <div><Label className="text-xs">IVA Ventas</Label><Select value={newArtForm.iva_ventas} onValueChange={v=>setNewArtForm(p=>({...p,iva_ventas:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="factura">Blanco</SelectItem><SelectItem value="presupuesto">Negro</SelectItem></SelectContent></Select></div>
           </div>
+          <div className="grid grid-cols-2 gap-3"><div><Label className="text-xs">Precio Compra</Label><Input type="number" step="0.01" className="h-8 text-xs" value={newArtForm.precio_compra||""} onChange={e=>setNewArtForm(p=>({...p,precio_compra:parseFloat(e.target.value)||0}))}/></div><div><Label className="text-xs">Margen %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={newArtForm.porcentaje_ganancia||""} onChange={e=>setNewArtForm(p=>({...p,porcentaje_ganancia:parseFloat(e.target.value)||0}))}/></div></div>
+          <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={()=>setShowNewArt(false)}>Cancelar</Button><Button size="sm" onClick={createNewArticle}>Crear</Button></div>
+        </div>
+      </DialogContent></Dialog>
 
-          {/* Agregar descuento */}
-          <div className="border-t pt-3 mt-3">
-            <div className="text-xs text-muted-foreground mb-2">Agregar descuento:</div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => addDescuento("comercial")} className="gap-1">
-                <span className="w-2 h-2 rounded-full bg-blue-500" /> Comercial
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => addDescuento("financiero")} className="gap-1">
-                <span className="w-2 h-2 rounded-full bg-green-500" /> Financiero
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => addDescuento("promocional")} className="gap-1">
-                <span className="w-2 h-2 rounded-full bg-purple-500" /> Promocional
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setDescModalArt(null)}>Cancelar</Button>
-            <Button onClick={saveDescuentos} disabled={descModalSaving}>
-              {descModalSaving ? "Guardando..." : "Guardar Descuentos"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── Modal Ficha Artículo ─── */}
-      <Dialog open={!!fichaArt} onOpenChange={open => { if (!open) setFichaArt(null) }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Ficha del Artículo</DialogTitle>
-          </DialogHeader>
-          {fichaArt && (
-            <div className="space-y-4">
-              <div>
-                <Label>Descripción</Label>
-                <Input value={fichaForm.descripcion} onChange={e => setFichaForm(p => ({ ...p, descripcion: e.target.value }))} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>SKU</Label>
-                  <Input value={fichaForm.sku} onChange={e => setFichaForm(p => ({ ...p, sku: e.target.value }))} />
-                </div>
-                <div>
-                  <Label>Categoría</Label>
-                  <Input value={fichaForm.categoria} onChange={e => setFichaForm(p => ({ ...p, categoria: e.target.value }))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>IVA Compras</Label>
-                  <Select value={fichaForm.iva_compras} onValueChange={v => setFichaForm(p => ({ ...p, iva_compras: v }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="factura">Blanco (factura)</SelectItem>
-                      <SelectItem value="adquisicion_stock">Negro (adquisición)</SelectItem>
-                      <SelectItem value="mixto">Mixto</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>IVA Ventas</Label>
-                  <Select value={fichaForm.iva_ventas} onValueChange={v => setFichaForm(p => ({ ...p, iva_ventas: v }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="factura">Blanco (factura)</SelectItem>
-                      <SelectItem value="presupuesto">Negro (presupuesto)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <Label>Precio Compra</Label>
-                  <Input type="number" step="0.01" value={fichaForm.precio_compra} onChange={e => setFichaForm(p => ({ ...p, precio_compra: parseFloat(e.target.value) || 0 }))} />
-                </div>
-                <div>
-                  <Label>Margen %</Label>
-                  <Input type="number" step="0.1" value={fichaForm.porcentaje_ganancia} onChange={e => setFichaForm(p => ({ ...p, porcentaje_ganancia: parseFloat(e.target.value) || 0 }))} />
-                </div>
-                <div>
-                  <Label>Bonif/Recargo %</Label>
-                  <Input type="number" step="0.1" value={fichaForm.bonif_recargo} onChange={e => setFichaForm(p => ({ ...p, bonif_recargo: parseFloat(e.target.value) || 0 }))} />
-                </div>
-              </div>
-              <div className="text-xs text-muted-foreground">Proveedor: {fichaArt.proveedor?.nombre || "—"}</div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setFichaArt(null)}>Cancelar</Button>
-                <Button onClick={saveFicha} disabled={fichaSaving}>{fichaSaving ? "Guardando..." : "Guardar"}</Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Import Result */}
+      <Dialog open={!!importResult?.show} onOpenChange={()=>setImportResult(null)}><DialogContent className="max-w-sm"><DialogHeader><DialogTitle className="text-sm">Importación Completa</DialogTitle></DialogHeader>
+        {importResult&&<div className="space-y-2 text-sm">
+          <div className="flex justify-between"><span className="text-muted-foreground">Nuevos:</span><span className="font-bold">{importResult.inserted}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Actualizados:</span><span className="font-bold">{importResult.updated}</span></div>
+          {importResult.descs>0&&<div className="flex justify-between"><span className="text-muted-foreground">Descuentos procesados:</span><span className="font-bold">{importResult.descs}</span></div>}
+          <Button size="sm" className="w-full mt-3" onClick={()=>setImportResult(null)}>Cerrar</Button>
+        </div>}
+      </DialogContent></Dialog>
     </div>
   )
 }
