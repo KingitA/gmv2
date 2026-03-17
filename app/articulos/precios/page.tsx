@@ -173,7 +173,7 @@ export default function PreciosArticulosPage() {
             {articulosFiltrados.length} artículos · {columnasActivas.length} lista{columnasActivas.length !== 1 ? "s" : ""} seleccionada{columnasActivas.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <ImportPriceListDialog />
+        <ImportPriceListDialog proveedores={proveedores} onImportSuccess={loadData} />
       </div>
 
       {/* Filtros */}
