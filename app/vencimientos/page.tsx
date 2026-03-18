@@ -28,7 +28,7 @@ const TIPOS_VENCIMIENTO = [
 ]
 
 const RECURRENCIAS = [
-    { value: "", label: "Sin recurrencia (pago único)" },
+    { value: "none", label: "Sin recurrencia (pago único)" },
     { value: "mensual", label: "Mensual" },
     { value: "bimestral", label: "Bimestral" },
     { value: "trimestral", label: "Trimestral" },
@@ -281,10 +281,10 @@ export default function VencimientosPage() {
                                         <form onSubmit={handleSubmit} className="space-y-4">
                                             <div>
                                                 <Label>Proveedor (opcional)</Label>
-                                                <Select value={formData.proveedor_id} onValueChange={(v) => setFormData({ ...formData, proveedor_id: v })}>
+                                                <Select value={formData.proveedor_id || "none"} onValueChange={(v) => setFormData({ ...formData, proveedor_id: v === "none" ? "" : v })}>
                                                     <SelectTrigger><SelectValue placeholder="Sin proveedor" /></SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="">Sin proveedor</SelectItem>
+                                                        <SelectItem value="none">Sin proveedor</SelectItem>
                                                         {proveedores.map(p => (
                                                             <SelectItem key={p.id} value={p.id}>
                                                                 {p.sigla ? `${p.sigla} - ${p.nombre}` : p.nombre}
@@ -332,7 +332,7 @@ export default function VencimientosPage() {
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div>
                                                     <Label>Recurrencia</Label>
-                                                    <Select value={formData.recurrencia} onValueChange={(v) => setFormData({ ...formData, recurrencia: v })}>
+                                                    <Select value={formData.recurrencia || "none"} onValueChange={(v) => setFormData({ ...formData, recurrencia: v === "none" ? "" : v })}>
                                                         <SelectTrigger><SelectValue placeholder="Sin recurrencia" /></SelectTrigger>
                                                         <SelectContent>
                                                             {RECURRENCIAS.map(r => (

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
@@ -43,6 +43,14 @@ interface Imputacion {
 }
 
 export default function NuevaOrdenPagoPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">Cargando...</div>}>
+            <NuevaOrdenPagoContent />
+        </Suspense>
+    )
+}
+
+function NuevaOrdenPagoContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
 
