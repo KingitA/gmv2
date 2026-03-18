@@ -91,7 +91,8 @@ export async function processEmailAsInvoice(
         }
     }
 
-    // Priority 3: Fall back to Gemini OCR for images/PDFs
+    // Priority 3: Fall back to Gemini OCR for images/PDFs — process ALL attachments
+    const parsedInvoices: ParsedInvoiceData[] = []
     if (!invoiceData && emailData.attachments.length > 0) {
         for (const att of emailData.attachments) {
             const validTypes = [
@@ -112,15 +113,19 @@ export async function processEmailAsInvoice(
                     att.attachmentId
                 )
 
-                invoiceData = await parseInvoiceWithGemini(buffer, att.filename, att.mimeType)
+                const parsed = await parseInvoiceWithGemini(buffer, att.filename, att.mimeType)
 
-                if (invoiceData && (invoiceData.total || invoiceData.numero_comprobante)) {
-                    console.log(`[InvoiceProcessor] ✅ Parsed invoice from ${att.filename}: ${invoiceData.tipo_comprobante} ${invoiceData.numero_comprobante} — $${invoiceData.total}`)
-                    break
+                if (parsed && (parsed.total || parsed.numero_comprobante)) {
+                    console.log(`[InvoiceProcessor] ✅ Parsed invoice from ${att.filename}: ${parsed.tipo_comprobante} ${parsed.numero_comprobante} — $${parsed.total}`)
+                    parsedInvoices.push(parsed)
                 }
             } catch (err) {
                 console.error(`[InvoiceProcessor] Error processing ${att.filename}:`, err instanceof Error ? err.message : err)
             }
+        }
+        // Use the first one as the main invoiceData
+        if (parsedInvoices.length > 0) {
+            invoiceData = parsedInvoices[0]
         }
     }
 
@@ -388,6 +393,11 @@ export async function processEmailAsInvoice(
 
             console.log(`[InvoiceProcessor] ✅ Created comprobante ${comprobante.id} linked to OC ${pendingOC.numero_orden}`)
 
+            // Process additional attachments from same email
+            if (parsedInvoices.length > 1) {
+                await processAdditionalInvoices(db, parsedInvoices, proveedorId, fechaHoy)
+            }
+
             return {
                 processed: true,
                 comprobanteCreated: true,
@@ -424,6 +434,11 @@ export async function processEmailAsInvoice(
 
             console.log(`[InvoiceProcessor] ✅ Created CC movement for service invoice: ${ccResult?.id}`)
 
+            // Process additional attachments from same email (e.g. factura + adquisicion de stock)
+            if (parsedInvoices.length > 1) {
+                await processAdditionalInvoices(db, parsedInvoices, proveedorId, fechaHoy)
+            }
+
             return {
                 processed: true,
                 comprobanteCreated: false,
@@ -451,9 +466,31 @@ export async function processEmailAsInvoice(
             }
         }
     }
+
+    // ── Process additional attachments (if email had multiple PDFs) ──
+    // This runs only for the service/no-OC branch since OC branch already returned
+    // For the OC branch, additional invoices would need manual handling
 }
 
-// ── Parse invoice with Gemini ──────────────────────────
+// Process extra invoices from multi-attachment emails
+async function processAdditionalInvoices(
+    db: ReturnType<typeof getSupabaseAdmin>,
+    parsedInvoices: ParsedInvoiceData[],
+    proveedorId: string,
+    fechaHoy: string
+) {
+    // Skip index 0 (already processed as main invoice)
+    for (let i = 1; i < parsedInvoices.length; i++) {
+        const inv = parsedInvoices[i]
+        const tipoComp = mapTipoComprobante(inv.tipo_comprobante)
+        try {
+            console.log(`[InvoiceProcessor] Processing additional attachment #${i + 1}: ${tipoComp} ${inv.numero_comprobante}`)
+            await createCCMovement(db, proveedorId, inv, tipoComp, fechaHoy)
+        } catch (err) {
+            console.error(`[InvoiceProcessor] Error processing additional invoice #${i + 1}:`, err)
+        }
+    }
+}
 async function parseInvoiceWithGemini(
     buffer: Buffer,
     filename: string,
@@ -637,7 +674,18 @@ async function createCCMovement(
 // ── Helper: Map invoice type ───────────────────────────
 function mapTipoComprobante(tipo: string | null): string {
     if (!tipo) return 'FA'
-    const upper = tipo.toUpperCase().replace(/[^A-Z]/g, '')
-    const valid = ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC']
+    const upper = tipo.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    // Map common names
+    if (upper.includes('PRESUPUESTO') || upper.includes('ADQUISICION') || upper === 'ADQ') return 'ADQ'
+    if (upper.includes('NOTA') && upper.includes('CRED')) {
+        if (upper.includes('A') || upper.endsWith('A')) return 'NCA'
+        if (upper.includes('B') || upper.endsWith('B')) return 'NCB'
+        return 'NCA'
+    }
+    if (upper.includes('NOTA') && upper.includes('DEB')) {
+        if (upper.includes('A') || upper.endsWith('A')) return 'NDA'
+        return 'NDA'
+    }
+    const valid = ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC', 'ADQ', 'REV']
     return valid.includes(upper) ? upper : 'FA'
 }

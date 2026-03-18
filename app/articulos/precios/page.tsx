@@ -100,7 +100,7 @@ export default function ArticulosUnificadoPage() {
 
   // Ficha
   const ofa=(a:any)=>{setFa(a);setFf({descripcion:a.descripcion||"",sku:a.sku||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:a.iva_compras||"factura",iva_ventas:a.iva_ventas||"factura",categoria:a.categoria||"",rubro:a.rubro||"",proveedor_id:a.proveedor_id||null})}
-  const sfa=async()=>{if(!fa)return;setFs(true);const{error}=await sb.from("articulos").update(ff).eq("id",fa.id);if(!error){setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff}:a));setFa(null)}else alert(`Error: ${error.message}`);setFs(false)}
+  const sfa=async()=>{if(!fa)return;setFs(true);const{error}=await sb.from("articulos").update(ff).eq("id",fa.id);if(!error){const prov=provs.find((p:any)=>p.id===ff.proveedor_id);setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff,proveedor:prov?{nombre:prov.nombre}:null}:a));setFa(null)}else alert(`Error: ${error.message}`);setFs(false)}
 
   const dpl=()=>{const t=[{sku:"123456",descripcion:"Ejemplo",proveedor_codigo:"PROV01",rubro:"limpieza",categoria:"Limpieza",precio_compra:100,porcentaje_ganancia:20,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",descuento_comercial:"10+5",descuento_financiero:"3",descuento_promocional:""}];const ws=XLSX.utils.json_to_sheet(t);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Articulos");const wo=XLSX.write(wb,{bookType:"xlsx",type:"array"});const b=new Blob([wo],{type:"application/octet-stream"});const u=URL.createObjectURL(b);const l=document.createElement("a");l.href=u;l.download="plantilla_articulos.xlsx";l.click();URL.revokeObjectURL(u)}
 

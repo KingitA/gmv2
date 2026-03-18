@@ -75,7 +75,9 @@ export async function GET(
                 vencimiento: mov.fecha_vencimiento || null,
                 total: amount,
                 saldo_pendiente: saldo_item,
-                estado: (Math.abs(saldo_item) < 0.01) ? 'pagado' : 'pendiente'
+                estado: (Math.abs(saldo_item) < 0.01) ? 'pagado' : 'pendiente',
+                referencia_id: mov.referencia_id || null,
+                referencia_tipo: mov.referencia_tipo || null
             };
         });
 
