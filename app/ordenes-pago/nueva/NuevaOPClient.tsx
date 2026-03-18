@@ -328,7 +328,7 @@ function NuevaOrdenPagoContent() {
                         <CardContent className="space-y-4">
                             {comprobantesCC.length > 0 && (
                                 <div>
-                                    <h4 className="font-medium text-sm mb-2">Comprobantes pendientes en Cuenta Corriente</h4>
+                                    <h4 className="font-medium text-sm mb-2">Comprobantes pendientes</h4>
                                     <div className="space-y-2">
                                         {comprobantesCC.map((c: any) => (
                                             <div key={c.id} className="flex items-center gap-3 p-2 rounded-lg border hover:bg-muted/50 cursor-pointer"
@@ -337,28 +337,13 @@ function NuevaOrdenPagoContent() {
                                                 <div className="flex-1">
                                                     <span className="text-sm font-medium">{c.tipo}</span>
                                                     <span className="text-sm text-muted-foreground ml-2">{c.numero}</span>
+                                                    {c.vencimiento && (
+                                                        <span className="text-xs text-muted-foreground ml-2">
+                                                            Vence: {new Date(c.vencimiento + "T00:00:00").toLocaleDateString("es-AR")}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <span className="text-sm font-medium">{formatCurrency(c.saldo_pendiente)}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {vencimientosProv.length > 0 && (
-                                <div>
-                                    <h4 className="font-medium text-sm mb-2">Vencimientos pendientes</h4>
-                                    <div className="space-y-2">
-                                        {vencimientosProv.map((v: any) => (
-                                            <div key={v.id} className="flex items-center gap-3 p-2 rounded-lg border hover:bg-muted/50 cursor-pointer"
-                                                onClick={() => toggleImputacionVenc(v)}>
-                                                <Checkbox checked={!!imputaciones.find(i => i.vencimiento_id === v.id)} />
-                                                <div className="flex-1">
-                                                    <span className="text-sm font-medium">{v.concepto}</span>
-                                                    <span className="text-sm text-muted-foreground ml-2">
-                                                        Vence: {new Date(v.fecha_vencimiento + "T00:00:00").toLocaleDateString("es-AR")}
-                                                    </span>
-                                                </div>
-                                                <span className="text-sm font-medium">{formatCurrency(v.monto)}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -370,9 +355,9 @@ function NuevaOrdenPagoContent() {
                                     <span className="text-sm font-bold">{formatCurrency(totalImputado)}</span>
                                 </div>
                             )}
-                            {comprobantesCC.length === 0 && vencimientosProv.length === 0 && (
+                            {comprobantesCC.length === 0 && (
                                 <p className="text-sm text-muted-foreground py-4 text-center">
-                                    No hay comprobantes ni vencimientos pendientes para este proveedor.
+                                    No hay comprobantes pendientes para este proveedor.
                                     Podés crear la orden sin imputar.
                                 </p>
                             )}

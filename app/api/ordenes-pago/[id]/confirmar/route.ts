@@ -123,17 +123,20 @@ export async function POST(
             }
         }
 
-        // 5. Update vencimientos that were covered
+        // 5. Update vencimientos linked to the paid CC movements
         if (op.ordenes_pago_imputaciones?.length > 0) {
-            const vencimientoIds = op.ordenes_pago_imputaciones
-                .filter((imp: any) => imp.vencimiento_id)
-                .map((imp: any) => imp.vencimiento_id)
+            const ccMovIds = op.ordenes_pago_imputaciones
+                .filter((imp: any) => imp.movimiento_cc_id)
+                .map((imp: any) => imp.movimiento_cc_id)
 
-            if (vencimientoIds.length > 0) {
+            if (ccMovIds.length > 0) {
+                // Mark vencimientos that reference these CC movements as paid
                 await supabase
                     .from('vencimientos')
                     .update({ estado: 'pagado', orden_pago_id: op.id, updated_at: nowArgentina() })
-                    .in('id', vencimientoIds)
+                    .in('referencia_id', ccMovIds)
+                    .eq('referencia_tipo', 'cuenta_corriente')
+                    .eq('estado', 'pendiente')
             }
         }
 

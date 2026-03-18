@@ -568,6 +568,20 @@ async function createCCMovement(
         invoiceData.razon_social_emisor,
     ].filter(Boolean).join(' — ')
 
+    // DEDUP: Check if this exact comprobante already exists in CC
+    if (invoiceData.numero_comprobante) {
+        const { data: existing } = await db.from('cuenta_corriente_proveedores')
+            .select('id')
+            .eq('proveedor_id', proveedorId)
+            .ilike('descripcion', `%${invoiceData.numero_comprobante}%`)
+            .limit(1)
+
+        if (existing && existing.length > 0) {
+            console.log(`[InvoiceProcessor] DEDUP: Comprobante ${invoiceData.numero_comprobante} ya existe en CC (${existing[0].id}), skipping`)
+            return existing[0]
+        }
+    }
+
     const { data, error } = await db.from('cuenta_corriente_proveedores').insert({
         proveedor_id: proveedorId,
         fecha: invoiceData.fecha_comprobante || fechaHoy,
