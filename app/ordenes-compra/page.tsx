@@ -1101,14 +1101,6 @@ export default function OrdenesCompraPage() {
                           </>
                         )}
 
-                        {/* SIEMPRE: ver artículos (solo lectura si no es pendiente) */}
-                        {orden.estado !== "pendiente" && orden.estado !== "cancelada" && (
-                          <Button variant="ghost" size="sm"
-                            onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/articulos`)}>
-                            <Plus className="h-4 w-4 mr-1" /> Artículos
-                          </Button>
-                        )}
-
                         {/* Eliminar solo si pendiente */}
                         {orden.estado === "pendiente" && (
                           <Button variant="outline" size="sm"

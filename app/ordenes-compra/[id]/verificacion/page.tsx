@@ -83,6 +83,8 @@ export default function VerificacionOCPage() {
         }
 
         // Build verification rows
+        const tieneFactura = (comps || []).length > 0
+
         const verRows: VerificationRow[] = (ocItems || []).map((item: any) => {
             const artId = item.articulo_id
             const upb = item.articulo?.unidades_por_bulto || 1
@@ -96,22 +98,40 @@ export default function VerificacionOCPage() {
             const recItem = recItems.find(ri => ri.articulo_id === artId)
             const cantRecibida = recItem ? Number(recItem.cantidad_fisica) : 0
 
-            // Factura (documented)
-            const cantFacturada = recItem ? Number(recItem.cantidad_documentada || 0) : 0
-
+            // Factura (documented) — solo si hay comprobantes vinculados
+            const cantFacturada = (tieneFactura && recItem) ? Number(recItem.cantidad_documentada || 0) : 0
             const precioOC = Number(item.precio_unitario) || 0
-            const precioFactura = recItem ? Number(recItem.precio_documentado || 0) : 0
+            const precioFactura = (tieneFactura && recItem) ? Number(recItem.precio_documentado || 0) : 0
 
-            const diffCant = cantFacturada > 0 ? cantFacturada - cantRecibida : cantOC - cantRecibida
-            const diffPrecio = precioFactura > 0 ? precioFactura - precioOC : 0
+            // Diferencias: solo calcular si hay datos reales
+            let diffCant = 0
+            let diffPrecio = 0
+
+            if (tieneFactura && cantFacturada > 0) {
+                diffCant = cantFacturada - cantRecibida
+            } else {
+                // Sin factura: comparar OC vs recibida para ver faltantes
+                diffCant = cantOC - cantRecibida
+            }
+
+            if (tieneFactura && precioFactura > 0) {
+                diffPrecio = precioFactura - precioOC
+            }
 
             let status: VerificationRow["status"] = "ok"
             const hasDiffCant = Math.abs(diffCant) > 0.01
             const hasDiffPrecio = Math.abs(diffPrecio) > 0.01
-            if (hasDiffCant && hasDiffPrecio) status = "ambas"
-            else if (hasDiffCant) status = "diferencia_cantidad"
-            else if (hasDiffPrecio) status = "diferencia_precio"
-            else if (cantRecibida === 0 && cantOC > 0) status = "faltante"
+
+            if (!tieneFactura) {
+                // Sin factura: solo verificar OC vs recepción
+                if (hasDiffCant) status = "diferencia_cantidad"
+                else if (cantRecibida === 0 && cantOC > 0) status = "faltante"
+            } else {
+                if (hasDiffCant && hasDiffPrecio) status = "ambas"
+                else if (hasDiffCant) status = "diferencia_cantidad"
+                else if (hasDiffPrecio) status = "diferencia_precio"
+                else if (cantRecibida === 0 && cantOC > 0) status = "faltante"
+            }
 
             return {
                 articulo_id: artId,
@@ -119,8 +139,8 @@ export default function VerificacionOCPage() {
                 descripcion: item.articulo?.descripcion || "",
                 cant_oc: cantOC,
                 precio_oc: precioOC,
-                cant_facturada: cantFacturada || cantOC,
-                precio_factura: precioFactura || precioOC,
+                cant_facturada: cantFacturada,
+                precio_factura: precioFactura,
                 cant_recibida: cantRecibida,
                 diff_cantidad: diffCant,
                 diff_precio: diffPrecio,
@@ -169,10 +189,11 @@ export default function VerificacionOCPage() {
     }
 
     const totalOC = rows.reduce((s, r) => s + r.precio_oc * r.cant_oc, 0)
-    const totalFacturado = rows.reduce((s, r) => s + r.precio_factura * r.cant_facturada, 0)
+    const totalFacturado = comprobantes.reduce((s: number, c: any) => s + Number(c.total_factura_declarado || 0), 0)
+    const tieneFactura = comprobantes.length > 0
     const itemsOK = rows.filter(r => r.status === "ok").length
     const itemsDiff = rows.filter(r => r.status !== "ok").length
-    const allOK = itemsDiff === 0 && rows.length > 0
+    const allOK = itemsDiff === 0 && rows.length > 0 && tieneFactura
 
     const statusIcon = (s: VerificationRow["status"]) => {
         switch (s) {
@@ -211,7 +232,7 @@ export default function VerificacionOCPage() {
                 </Card>
                 <Card className="border-l-4 border-l-purple-500">
                     <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Facturado</CardTitle></CardHeader>
-                    <CardContent><div className="text-xl font-bold">{formatCurrency(totalFacturado)}</div></CardContent>
+                    <CardContent><div className="text-xl font-bold">{tieneFactura ? formatCurrency(totalFacturado) : <span className="text-muted-foreground">Sin factura</span>}</div></CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-green-500">
                     <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Artículos OK</CardTitle></CardHeader>
@@ -222,6 +243,26 @@ export default function VerificacionOCPage() {
                     <CardContent><div className={`text-xl font-bold ${itemsDiff > 0 ? "text-orange-600" : "text-green-600"}`}>{itemsDiff}</div></CardContent>
                 </Card>
             </div>
+
+            {/* No factura warning */}
+            {!tieneFactura && (
+                <Card className="mb-6 border-orange-200 bg-orange-50">
+                    <CardContent className="py-4 flex items-center gap-3">
+                        <AlertTriangle className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                        <div>
+                            <p className="text-sm font-medium text-orange-800">Sin factura vinculada</p>
+                            <p className="text-xs text-orange-600">
+                                Esta OC no tiene comprobantes cargados. Cargá la factura desde "Comprobantes" para completar la verificación triple.
+                                Solo se compara OC vs Depósito.
+                            </p>
+                        </div>
+                        <Button variant="outline" size="sm" className="ml-auto"
+                            onClick={() => router.push(`/ordenes-compra/${ordenId}/comprobantes`)}>
+                            <FileText className="h-4 w-4 mr-1" /> Cargar comprobante
+                        </Button>
+                    </CardContent>
+                </Card>
+            )}
 
             {/* Comprobantes */}
             {comprobantes.length > 0 && (
@@ -279,10 +320,12 @@ export default function VerificacionOCPage() {
                                         <TableCell className={`text-right font-mono ${hasQtyDiff ? "text-orange-600 font-bold" : ""}`}>
                                             {row.cant_recibida}
                                         </TableCell>
-                                        <TableCell className="text-right font-mono">{row.cant_facturada}</TableCell>
+                                        <TableCell className="text-right font-mono">
+                                            {row.cant_facturada > 0 ? row.cant_facturada : <span className="text-muted-foreground">—</span>}
+                                        </TableCell>
                                         <TableCell className="text-right font-mono">{formatCurrency(row.precio_oc)}</TableCell>
                                         <TableCell className={`text-right font-mono ${hasPriceDiff ? "text-orange-600 font-bold" : ""}`}>
-                                            {formatCurrency(row.precio_factura)}
+                                            {row.precio_factura > 0 ? formatCurrency(row.precio_factura) : <span className="text-muted-foreground">—</span>}
                                             {hasPriceDiff && (
                                                 <div className="text-[10px] text-orange-500">
                                                     {row.diff_precio > 0 ? "+" : ""}{formatCurrency(row.diff_precio)}
