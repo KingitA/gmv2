@@ -4,56 +4,55 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateTimeAR } from '@/lib/utils'
 import Link from 'next/link'
+import { Paperclip } from 'lucide-react'
 
+// ─── Types ─────────────────────────────────────────────
 type FeedItem = {
   id: string
+  dbId: string  // real DB id for updates
   type: 'pedido' | 'email' | 'pago' | 'alerta' | 'precio' | 'spam' | 'factura'
   title: string
   description: string
-  account?: string
+  account?: string       // to_email
+  accountFull?: string   // full email
   status: 'pendiente' | 'procesado' | 'urgente' | 'revisar' | 'spam'
   time: string
   href?: string
+  hasAttachments?: boolean
+  attachmentCount?: number
+  classification?: string
+  source: 'email' | 'pedido' | 'event'
+}
+
+// ─── Classification config ─────────────────────────────
+const CLASS_CONFIG: Record<string, { type: FeedItem['type']; label: string; icon: string; bg: string }> = {
+  pedido:             { type: 'pedido',  label: 'Pedido',        icon: '📦', bg: 'bg-blue-50' },
+  orden_compra:       { type: 'pedido',  label: 'Orden Compra',  icon: '📋', bg: 'bg-blue-50' },
+  factura_proveedor:  { type: 'factura', label: 'Factura',       icon: '📄', bg: 'bg-orange-50' },
+  pago:               { type: 'pago',    label: 'Pago',          icon: '💳', bg: 'bg-emerald-50' },
+  cambio_precio:      { type: 'precio',  label: 'Lista Precios', icon: '💰', bg: 'bg-amber-50' },
+  reclamo:            { type: 'alerta',  label: 'Reclamo',       icon: '⚠️', bg: 'bg-red-50' },
+  consulta:           { type: 'email',   label: 'Consulta',      icon: '💬', bg: 'bg-violet-50' },
+  spam:               { type: 'spam',    label: 'Spam',          icon: '🗑️', bg: 'bg-neutral-100' },
+  otro:               { type: 'email',   label: 'Email',         icon: '📧', bg: 'bg-violet-50' },
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   pendiente: { bg: 'bg-amber-100', text: 'text-amber-800', label: 'Pendiente' },
   procesado: { bg: 'bg-emerald-100', text: 'text-emerald-800', label: 'Procesado' },
-  urgente: { bg: 'bg-red-100', text: 'text-red-800', label: 'Urgente' },
-  revisar: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Revisar' },
-  spam: { bg: 'bg-neutral-200', text: 'text-neutral-500', label: 'Spam' },
+  urgente:   { bg: 'bg-red-100', text: 'text-red-800', label: 'Urgente' },
+  revisar:   { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Revisar' },
+  spam:      { bg: 'bg-neutral-200', text: 'text-neutral-500', label: 'Spam' },
 }
 
-const TYPE_ICONS: Record<string, { icon: string; bg: string }> = {
-  pedido: { icon: '📦', bg: 'bg-blue-50' },
-  email: { icon: '📧', bg: 'bg-violet-50' },
-  pago: { icon: '💳', bg: 'bg-emerald-50' },
-  alerta: { icon: '⚠️', bg: 'bg-red-50' },
-  precio: { icon: '💰', bg: 'bg-amber-50' },
-  spam: { icon: '🗑️', bg: 'bg-neutral-100' },
-  factura: { icon: '📄', bg: 'bg-orange-50' },
-}
-
-const CLASSIFICATION_MAP: Record<string, { type: FeedItem['type']; label: string }> = {
-  pedido: { type: 'pedido', label: 'Pedido' },
-  orden_compra: { type: 'pedido', label: 'Orden de Compra' },
-  factura_proveedor: { type: 'factura', label: 'Factura' },
-  pago: { type: 'pago', label: 'Pago' },
-  cambio_precio: { type: 'precio', label: 'Cambio Precio' },
-  reclamo: { type: 'alerta', label: 'Reclamo' },
-  consulta: { type: 'email', label: 'Consulta' },
-  spam: { type: 'spam', label: 'Spam' },
-  otro: { type: 'email', label: 'Email' },
-}
-
-// Determinar a dónde lleva cada tipo de email según clasificación
-function getEmailHref(classification: string | null, _metadata?: any): string | undefined {
+function getHref(classification: string | null, processing_status?: string): string | undefined {
   switch (classification) {
     case 'pedido':
     case 'orden_compra':
-      return '/clientes-pedidos'
+      // Si requiere revisión va a import-review, si ya se creó va a pedidos
+      return processing_status === 'REVIEW_NEEDED' ? '/clientes-pedidos/import-review' : '/clientes-pedidos'
     case 'factura_proveedor':
-      return '/comprobantes'
+      return '/comprobantes-compra'
     case 'pago':
       return '/revision-pagos'
     case 'cambio_precio':
@@ -65,100 +64,57 @@ function getEmailHref(classification: string | null, _metadata?: any): string | 
   }
 }
 
-// Determinar href para eventos de agenda según su tipo y metadata
-function getEventHref(eventType: string | null, metadata: any): string | undefined {
-  if (!eventType) return undefined
-
-  // Si tiene pedido_ids, ir al pedido
-  if (metadata?.pedido_ids?.length > 0) {
-    return '/clientes-pedidos'
-  }
-  // Si necesita revisión de import
-  if (metadata?.needs_review || metadata?.import_id) {
-    return '/clientes-pedidos'
-  }
-
-  if (eventType.includes('pedido')) return '/clientes-pedidos'
-  if (eventType.includes('pago')) return '/revision-pagos'
-  if (eventType.includes('reclamo')) return '/revision-devoluciones'
-  if (eventType.includes('precio')) return '/articulos/precios'
-  if (eventType.includes('vencimiento')) return '/comprobantes'
-  if (eventType.includes('mercaderia')) return '/ordenes-compra'
-
-  return undefined
-}
-
-const TABS = [
-  { id: 'todo', label: 'Todo' },
-  { id: 'pedido', label: 'Pedidos' },
-  { id: 'email', label: 'Emails' },
-  { id: 'pago', label: 'Pagos' },
-  { id: 'alerta', label: 'Alertas' },
-  { id: 'spam', label: 'Spam' },
-]
-
 export function DashboardFeed() {
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('todo')
+  const [accounts, setAccounts] = useState<string[]>([])
+  const [activeAccount, setActiveAccount] = useState<string>('todos')
+  const [activeFilter, setActiveFilter] = useState<string>('todos')
+  const [dragItemId, setDragItemId] = useState<string | null>(null)
 
   useEffect(() => { loadFeed() }, [])
 
   const loadFeed = async () => {
     const supabase = createClient()
     const feedItems: FeedItem[] = []
+    const accountSet = new Set<string>()
 
     try {
-      // 1. Recent pedidos
-      const { data: pedidos } = await supabase
-        .from('pedidos')
-        .select('id, numero_pedido, fecha, estado, created_at, clientes(nombre_razon_social), observaciones')
-        .order('created_at', { ascending: false })
-        .limit(15)
-
-      if (pedidos) {
-        for (const p of pedidos) {
-          const clienteNombre = (p as any).clientes?.nombre_razon_social || 'Sin cliente'
-          const esAuto = p.observaciones?.includes('Gmail') || p.observaciones?.includes('automáticamente')
-          feedItems.push({
-            id: `ped-${p.id}`,
-            type: 'pedido',
-            title: `Pedido #${p.numero_pedido || '?'}${esAuto ? ' (automático)' : ''}`,
-            description: clienteNombre,
-            status: p.estado === 'pendiente' ? 'pendiente' : 'procesado',
-            time: p.created_at,
-            href: `/clientes-pedidos?pedido=${p.numero_pedido}`,
-          })
-        }
-      }
-
-      // 2. Recent emails — excluir spam de aquí para no duplicar
+      // 1. Emails with attachment count
       const { data: emails } = await supabase
         .from('ai_emails')
-        .select('id, subject, from_name, from_email, to_email, classification, ai_summary, created_at, is_processed')
+        .select('id, subject, from_name, from_email, to_email, classification, ai_summary, created_at, is_processed, processing_status, ai_email_attachments(id)')
         .order('created_at', { ascending: false })
-        .limit(25)
+        .limit(50)
 
       if (emails) {
         for (const e of emails) {
-          const classConfig = CLASSIFICATION_MAP[e.classification || ''] || CLASSIFICATION_MAP.otro
-          const accountShort = e.to_email ? e.to_email.split('@')[0] : null
+          const cls = CLASS_CONFIG[e.classification || ''] || CLASS_CONFIG.otro
+          const toEmail = e.to_email || ''
+          const accountShort = toEmail.split('@')[0]
+          if (toEmail) accountSet.add(toEmail)
+          const attCount = Array.isArray((e as any).ai_email_attachments) ? (e as any).ai_email_attachments.length : 0
 
           feedItems.push({
             id: `email-${e.id}`,
-            type: classConfig.type,
-            title: `${classConfig.label} — ${e.from_name || e.from_email || 'Desconocido'}`,
+            dbId: e.id,
+            type: cls.type,
+            title: `${cls.label} — ${e.from_name || e.from_email || 'Desconocido'}`,
             description: e.ai_summary || e.subject || 'Sin asunto',
-            account: accountShort || undefined,
-            status: classConfig.type === 'spam' ? 'spam' :
-                    e.is_processed ? 'procesado' : 'revisar',
+            account: accountShort,
+            accountFull: toEmail,
+            status: cls.type === 'spam' ? 'spam' : e.is_processed ? 'procesado' : 'revisar',
             time: e.created_at,
-            href: getEmailHref(e.classification),
+            href: getHref(e.classification, e.processing_status),
+            hasAttachments: attCount > 0,
+            attachmentCount: attCount,
+            classification: e.classification,
+            source: 'email',
           })
         }
       }
 
-      // 3. Recent agenda events — estos son los más accionables
+      // 2. Agenda events
       const { data: events } = await supabase
         .from('ai_agenda_events')
         .select('id, title, description, event_type, priority, status, metadata, created_at')
@@ -169,99 +125,183 @@ export function DashboardFeed() {
       if (events) {
         for (const ev of events) {
           const meta = (ev.metadata || {}) as any
+          let evType: FeedItem['type'] = 'email'
+          if (ev.event_type?.includes('pago')) evType = 'pago'
+          else if (ev.event_type?.includes('reclamo')) evType = 'alerta'
+          else if (ev.event_type?.includes('precio')) evType = 'precio'
+          else if (ev.event_type?.includes('pedido')) evType = 'pedido'
+          else if (ev.event_type?.includes('factura')) evType = 'factura'
+
+          let evHref: string | undefined
+          if (meta?.pedido_ids?.length > 0 || meta?.needs_review) evHref = '/clientes-pedidos'
+          else if (ev.event_type?.includes('pago')) evHref = '/revision-pagos'
+          else if (ev.event_type?.includes('reclamo')) evHref = '/revision-devoluciones'
+          else if (ev.event_type?.includes('precio')) evHref = '/articulos/precios'
+          else if (ev.event_type?.includes('factura') || ev.event_type?.includes('vencimiento')) evHref = '/comprobantes-compra'
 
           feedItems.push({
             id: `ev-${ev.id}`,
-            type: ev.event_type?.includes('pago') ? 'pago' :
-                  ev.event_type?.includes('reclamo') ? 'alerta' :
-                  ev.event_type?.includes('precio') ? 'precio' :
-                  ev.event_type?.includes('pedido') ? 'pedido' : 'email',
+            dbId: ev.id,
+            type: evType,
             title: ev.title,
             description: ev.description || '',
-            status: ev.priority === 'urgente' ? 'urgente' :
-                    ev.priority === 'alta' ? 'revisar' : 'pendiente',
+            status: ev.priority === 'urgente' ? 'urgente' : ev.priority === 'alta' ? 'revisar' : 'pendiente',
             time: ev.created_at,
-            href: getEventHref(ev.event_type, meta),
+            href: evHref,
+            source: 'event',
           })
         }
       }
     } catch (err) {
-      console.error('[DashboardFeed] Error loading feed:', err)
+      console.error('[DashboardFeed] Error:', err)
     }
 
     feedItems.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
     setItems(feedItems)
+    setAccounts(Array.from(accountSet))
     setLoading(false)
   }
 
-  const filtered = activeTab === 'spam'
-    ? items.filter(i => i.type === 'spam')
-    : activeTab === 'todo'
-      ? items.filter(i => i.type !== 'spam')
-      : items.filter(i => i.type === activeTab && i.type !== 'spam')
+  // Drag to spam
+  const markAsSpam = async (itemId: string) => {
+    const item = items.find(i => i.id === itemId)
+    if (!item || item.source !== 'email') return
+    const supabase = createClient()
+    await supabase.from('ai_emails').update({ classification: 'spam' }).eq('id', item.dbId)
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, type: 'spam', status: 'spam' as const, classification: 'spam' } : i))
+  }
 
-  const spamCount = items.filter(i => i.type === 'spam').length
+  // Filter logic
+  const filtered = items.filter(i => {
+    // Account filter
+    if (activeAccount !== 'todos' && i.accountFull !== activeAccount) return false
+    // Type filter
+    if (activeFilter === 'spam') return i.type === 'spam'
+    if (activeFilter === 'todos') return i.type !== 'spam'
+    return i.type === activeFilter && i.type !== 'spam'
+  })
+
+  const spamCount = items.filter(i => i.type === 'spam' && (activeAccount === 'todos' || i.accountFull === activeAccount)).length
+
+  // Account display names
+  const getAccountLabel = (email: string) => {
+    const name = email.split('@')[0]
+    if (name.includes('cliente')) return '👥 Clientes'
+    if (name.includes('proveedor')) return '🏭 Proveedores'
+    return `📧 ${name}`
+  }
+
+  const FILTERS = [
+    { id: 'todos', label: 'Todo' },
+    { id: 'pedido', label: 'Pedidos' },
+    { id: 'factura', label: 'Facturas' },
+    { id: 'precio', label: 'Precios' },
+    { id: 'pago', label: 'Pagos' },
+    { id: 'alerta', label: 'Alertas' },
+    { id: 'email', label: 'Otros' },
+    { id: 'spam', label: 'Spam' },
+  ]
 
   return (
     <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
-        <h3 className="font-bold text-sm">Actividad Reciente</h3>
-        <div className="flex gap-1">
-          {TABS.map(tab => (
+      {/* ═══ Account tabs (Chrome-style) ═══ */}
+      {accounts.length > 0 && (
+        <div className="flex border-b border-neutral-100 bg-neutral-50/50">
+          <button
+            onClick={() => setActiveAccount('todos')}
+            className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors ${activeAccount === 'todos' ? 'border-blue-500 text-blue-700 bg-white' : 'border-transparent text-neutral-400 hover:text-neutral-600'}`}
+          >
+            📬 Todos
+          </button>
+          {accounts.map(acc => (
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors relative
-                ${activeTab === tab.id
-                  ? tab.id === 'spam' ? 'bg-neutral-200 text-neutral-700' : 'bg-neutral-100 text-neutral-900'
-                  : 'text-neutral-400 hover:text-neutral-600'}`}
+              key={acc}
+              onClick={() => setActiveAccount(acc)}
+              className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors ${activeAccount === acc ? 'border-blue-500 text-blue-700 bg-white' : 'border-transparent text-neutral-400 hover:text-neutral-600'}`}
             >
-              {tab.label}
-              {tab.id === 'spam' && spamCount > 0 && (
-                <span className="ml-1 text-[9px] bg-neutral-400 text-white px-1.5 py-0.5 rounded-full font-bold">
-                  {spamCount}
-                </span>
+              {getAccountLabel(acc)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ═══ Type filter tabs ═══ */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-neutral-100">
+        <div className="flex gap-0.5 overflow-x-auto">
+          {FILTERS.map(f => (
+            <button
+              key={f.id}
+              onClick={() => setActiveFilter(f.id)}
+              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap
+                ${activeFilter === f.id ? (f.id === 'spam' ? 'bg-neutral-200 text-neutral-700' : 'bg-neutral-100 text-neutral-900') : 'text-neutral-400 hover:text-neutral-600'}`}
+            >
+              {f.label}
+              {f.id === 'spam' && spamCount > 0 && (
+                <span className="ml-1 text-[9px] bg-neutral-400 text-white px-1 py-0.5 rounded-full font-bold">{spamCount}</span>
               )}
             </button>
           ))}
         </div>
       </div>
 
+      {/* ═══ Spam drop zone (visible when dragging) ═══ */}
+      {dragItemId && activeFilter !== 'spam' && (
+        <div
+          className="mx-4 my-2 border-2 border-dashed border-neutral-300 rounded-lg p-3 text-center text-xs text-neutral-400 bg-neutral-50 transition-colors"
+          onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('border-red-400', 'bg-red-50', 'text-red-500') }}
+          onDragLeave={e => { e.currentTarget.classList.remove('border-red-400', 'bg-red-50', 'text-red-500') }}
+          onDrop={e => { e.preventDefault(); if (dragItemId) markAsSpam(dragItemId); setDragItemId(null) }}
+        >
+          🗑️ Soltar aquí para marcar como spam
+        </div>
+      )}
+
+      {/* ═══ Feed list ═══ */}
       <div className="max-h-[520px] overflow-y-auto">
         {loading ? (
-          <div className="px-5 py-12 text-center text-sm text-neutral-400">Cargando actividad...</div>
+          <div className="px-5 py-12 text-center text-sm text-neutral-400">Cargando...</div>
         ) : filtered.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-neutral-400">
-            {activeTab === 'spam' ? 'No hay spam' : 'No hay actividad reciente'}
+            {activeFilter === 'spam' ? 'No hay spam' : 'No hay actividad'}
           </div>
         ) : (
-          filtered.slice(0, 30).map(item => {
-            const typeConfig = TYPE_ICONS[item.type] || TYPE_ICONS.email
+          filtered.slice(0, 40).map(item => {
+            const cls = CLASS_CONFIG[item.classification || ''] || CLASS_CONFIG.otro
             const statusConfig = STATUS_STYLES[item.status] || STATUS_STYLES.pendiente
 
             const inner = (
               <div
-                className={`flex gap-3 px-5 py-3 border-b border-neutral-50 hover:bg-neutral-50/50 transition-colors items-start
-                  ${item.type === 'spam' ? 'opacity-60' : ''}
-                  ${item.href ? 'cursor-pointer' : ''}`}
+                className={`flex gap-3 px-4 py-2.5 border-b border-neutral-50 hover:bg-neutral-50/50 transition-colors items-start
+                  ${item.type === 'spam' ? 'opacity-50' : ''}
+                  ${item.href ? 'cursor-pointer' : ''}
+                  ${dragItemId === item.id ? 'opacity-30' : ''}`}
+                draggable={item.source === 'email' && item.type !== 'spam'}
+                onDragStart={() => setDragItemId(item.id)}
+                onDragEnd={() => setDragItemId(null)}
               >
-                <div className={`w-8 h-8 rounded-lg ${typeConfig.bg} flex items-center justify-center text-sm flex-shrink-0 mt-0.5`}>
-                  {typeConfig.icon}
+                {/* Icon */}
+                <div className={`w-7 h-7 rounded-lg ${cls.bg} flex items-center justify-center text-sm flex-shrink-0 mt-0.5`}>
+                  {cls.icon}
                 </div>
+                {/* Content */}
                 <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-semibold leading-snug">{item.title}</div>
-                  <div className="text-[12px] text-neutral-500 truncate">{item.description}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[12px] font-semibold leading-snug truncate">{item.title}</span>
+                    {item.hasAttachments && (
+                      <Paperclip className="h-3 w-3 text-neutral-400 flex-shrink-0" />
+                    )}
+                  </div>
+                  <div className="text-[11px] text-neutral-500 truncate">{item.description}</div>
                   {item.account && (
                     <div className="text-[10px] text-neutral-400 mt-0.5">📬 {item.account}</div>
                   )}
                 </div>
-                <div className="flex flex-col items-end flex-shrink-0">
-                  <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${statusConfig.bg} ${statusConfig.text}`}>
+                {/* Status + time */}
+                <div className="flex flex-col items-end flex-shrink-0 gap-1">
+                  <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide ${statusConfig.bg} ${statusConfig.text}`}>
                     {statusConfig.label}
                   </span>
-                  <span className="text-[10px] text-neutral-400 mt-1 whitespace-nowrap">
-                    {timeAgo(item.time)}
-                  </span>
+                  <span className="text-[10px] text-neutral-400 whitespace-nowrap">{timeAgo(item.time)}</span>
                 </div>
               </div>
             )
