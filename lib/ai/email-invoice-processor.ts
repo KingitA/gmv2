@@ -95,6 +95,7 @@ export async function processEmailAsInvoice(
     // ALWAYS run this even if we got data from Priority 1, because the email
     // may contain multiple invoices (e.g. factura + adquisicion de stock)
     const parsedInvoices: ParsedInvoiceData[] = []
+    const attachmentBuffers: Map<string, { buffer: Buffer, filename: string, mimeType: string }> = new Map()
     if (emailData.attachments.length > 0) {
         for (const att of emailData.attachments) {
             const validTypes = [
@@ -115,10 +116,15 @@ export async function processEmailAsInvoice(
                     att.attachmentId
                 )
 
+                // Store buffer for article-level OCR later
+                attachmentBuffers.set(att.filename, { buffer, filename: att.filename, mimeType: att.mimeType })
+
                 const parsed = await parseInvoiceWithGemini(buffer, att.filename, att.mimeType)
 
                 if (parsed && (parsed.total || parsed.numero_comprobante)) {
                     console.log(`[InvoiceProcessor] ✅ Parsed invoice from ${att.filename}: ${parsed.tipo_comprobante} ${parsed.numero_comprobante} — $${parsed.total}`)
+                    // Store the filename so we can find the buffer later
+                    ;(parsed as any)._sourceFilename = att.filename
                     parsedInvoices.push(parsed)
                 }
             } catch (err) {
@@ -482,6 +488,27 @@ export async function processEmailAsInvoice(
 
             console.log(`[InvoiceProcessor] ✅ Created comprobante ${comprobante.id} linked to OC ${pendingOC.numero_orden}`)
 
+            // ── 5. Article-level OCR: extract items from PDF and update recepciones_items
+            // Find the recepcion for this OC
+            const { data: recepcion } = await db.from('recepciones')
+                .select('id')
+                .eq('orden_compra_id', pendingOC.id)
+                .limit(1)
+                .maybeSingle()
+
+            if (recepcion) {
+                // Run OCR for the main invoice attachment
+                const sourceFile = (invoiceData as any)?._sourceFilename
+                const attData = sourceFile ? attachmentBuffers.get(sourceFile) : null
+                if (attData) {
+                    try {
+                        await runArticleLevelOCR(db, recepcion.id, proveedorId, attData.buffer, attData.filename, attData.mimeType, tipoComp)
+                    } catch (ocrErr) {
+                        console.error('[InvoiceProcessor] Article OCR error (main):', ocrErr)
+                    }
+                }
+            }
+
             // Process additional attachments from same email
             // Filter out the one that matches the main invoice (by numero_comprobante)
             const additionalInvoices = parsedInvoices.filter(pi =>
@@ -507,6 +534,18 @@ export async function processEmailAsInvoice(
                         })
                         // Create CC movement
                         await createCCMovement(db, proveedorId, addInv, addTipo, fechaHoy)
+                        // Article-level OCR for additional
+                        if (recepcion) {
+                            const addFile = (addInv as any)?._sourceFilename
+                            const addAtt = addFile ? attachmentBuffers.get(addFile) : null
+                            if (addAtt) {
+                                try {
+                                    await runArticleLevelOCR(db, recepcion.id, proveedorId, addAtt.buffer, addAtt.filename, addAtt.mimeType, addTipo)
+                                } catch (ocrErr) {
+                                    console.error('[InvoiceProcessor] Article OCR error (additional):', ocrErr)
+                                }
+                            }
+                        }
                     } catch (err) {
                         console.error(`[InvoiceProcessor] Error processing additional invoice:`, err)
                     }
@@ -814,4 +853,139 @@ function mapTipoComprobante(tipo: string | null): string {
     }
     const valid = ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC', 'ADQ', 'REV']
     return valid.includes(upper) ? upper : 'FA'
+}
+
+// ── Article-level OCR for invoices linked to OC ───────────
+// Uses Gemini to extract items from the PDF and updates recepciones_items
+async function runArticleLevelOCR(
+    db: ReturnType<typeof getSupabaseAdmin>,
+    recepcionId: string,
+    proveedorId: string,
+    buffer: Buffer,
+    filename: string,
+    mimeType: string,
+    tipoDocumento: string
+) {
+    console.log(`[InvoiceProcessor] 🔍 Running article-level OCR on ${filename} for recepcion ${recepcionId}`)
+
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
+    if (!apiKey) {
+        console.warn('[InvoiceProcessor] No Gemini API key for article OCR')
+        return
+    }
+
+    const { GoogleGenerativeAI } = await import('@google/generative-ai')
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+    // Get proveedor name for context
+    const { data: prov } = await db.from('proveedores').select('nombre').eq('id', proveedorId).single()
+
+    const base64 = buffer.toString('base64')
+    const geminiMime = mimeType.startsWith('image/') ? mimeType : 'application/pdf'
+
+    const prompt = `Sos un asistente experto en procesamiento de documentos comerciales.
+        
+CONTEXTO:
+- Proveedor: ${prov?.nombre || "Desconocido"}
+- Tipo de documento: ${tipoDocumento}
+
+TAREA:
+Extraé los ítems de este documento en formato JSON.
+Priorizá la exactitud de los códigos y descripciones.
+
+FORMATO JSON ESPERADO:
+{
+    "items": [
+        {
+            "codigo": "SKU o código del artículo",
+            "descripcion": "Nombre del producto",
+            "cantidad": 10,
+            "precio_unitario": 150.50,
+            "unidad_medida": "UNIDAD o BULTO"
+        }
+    ],
+    "total": 99999.99,
+    "numero_comprobante": "0001-00012345",
+    "tipo_comprobante": "FA"
+}
+
+REGLAS:
+- Si no ves un código, poné null
+- cantidad debe ser numérico
+- precio_unitario es el precio por unidad (no por bulto)
+- Respondé SOLO con JSON válido, sin comentarios`
+
+    try {
+        const result = await model.generateContent([
+            { inlineData: { mimeType: geminiMime, data: base64 } },
+            { text: prompt }
+        ])
+
+        const text = result.response.text()
+        const jsonMatch = text.match(/\{[\s\S]*\}/)
+        if (!jsonMatch) {
+            console.log('[InvoiceProcessor] Article OCR: no JSON found in response')
+            return
+        }
+
+        const ocrData = JSON.parse(jsonMatch[0])
+        if (!ocrData.items || ocrData.items.length === 0) {
+            console.log('[InvoiceProcessor] Article OCR: no items found')
+            return
+        }
+
+        console.log(`[InvoiceProcessor] 📋 Article OCR found ${ocrData.items.length} items`)
+
+        // Get current recepciones_items
+        const { data: recItems } = await db.from('recepciones_items')
+            .select('*, articulo:articulos(id, descripcion, sku, unidades_por_bulto, precio_compra)')
+            .eq('recepcion_id', recepcionId)
+
+        if (!recItems) return
+
+        // Match OCR items to recepciones_items by SKU/code
+        let matched = 0
+        for (const ocrItem of ocrData.items) {
+            const code = String(ocrItem.codigo || '').trim()
+            const desc = String(ocrItem.descripcion || '').toLowerCase()
+            const qty = Number(ocrItem.cantidad) || 0
+            const price = Number(ocrItem.precio_unitario) || 0
+
+            // Try to match by SKU
+            let recItem = recItems.find((ri: any) =>
+                ri.articulo?.sku === code
+            )
+
+            // Try by description similarity if no SKU match
+            if (!recItem && desc) {
+                recItem = recItems.find((ri: any) => {
+                    const artDesc = (ri.articulo?.descripcion || '').toLowerCase()
+                    return artDesc.includes(desc) || desc.includes(artDesc)
+                })
+            }
+
+            if (recItem) {
+                // Accumulate: a single article can appear in multiple comprobantes
+                const newDocQty = Number(recItem.cantidad_documentada || 0) + qty
+                await db.from('recepciones_items')
+                    .update({
+                        cantidad_documentada: newDocQty,
+                        precio_documentado: price || recItem.precio_documentado || 0,
+                        precio_real: price || recItem.precio_real || 0,
+                    })
+                    .eq('id', recItem.id)
+
+                // Update the local object so next comprobante accumulates correctly
+                recItem.cantidad_documentada = newDocQty
+                recItem.precio_documentado = price || recItem.precio_documentado
+                matched++
+            }
+        }
+
+        console.log(`[InvoiceProcessor] ✅ Article OCR matched ${matched}/${ocrData.items.length} items`)
+
+    } catch (err) {
+        console.error('[InvoiceProcessor] Article OCR error:', err)
+    }
 }
