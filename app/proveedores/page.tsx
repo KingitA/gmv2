@@ -326,7 +326,7 @@ export default function ProveedoresPage() {
       </header>
 
       <main className="container mx-auto px-6 py-8 space-y-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Link href="/ordenes-compra" className="group">
             <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-blue-500 hover:border-l-blue-600">
               <CardContent className="p-6">
@@ -336,7 +336,7 @@ export default function ProveedoresPage() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-lg">Órdenes de Compra</h3>
-                    <p className="text-sm text-muted-foreground">Gestionar pedidos a proveedores</p>
+                    <p className="text-sm text-muted-foreground">Pedidos a proveedores</p>
                   </div>
                 </div>
               </CardContent>
@@ -351,7 +351,37 @@ export default function ProveedoresPage() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-lg">Comprobantes</h3>
-                    <p className="text-sm text-muted-foreground">Ver facturas y comprobantes</p>
+                    <p className="text-sm text-muted-foreground">Facturas y comprobantes</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/ordenes-pago" className="group">
+            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-purple-500 hover:border-l-purple-600">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-purple-50 rounded-lg group-hover:bg-purple-100 transition-colors">
+                    <Search className="h-6 w-6 text-purple-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg">Órdenes de Pago</h3>
+                    <p className="text-sm text-muted-foreground">Pagos a proveedores</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/vencimientos" className="group">
+            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-orange-50 rounded-lg group-hover:bg-orange-100 transition-colors">
+                    <Search className="h-6 w-6 text-orange-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg">Vencimientos</h3>
+                    <p className="text-sm text-muted-foreground">Agenda de pagos</p>
                   </div>
                 </div>
               </CardContent>

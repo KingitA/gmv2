@@ -70,8 +70,9 @@ export async function GET(
                 id: mov.id,
                 fecha: mov.fecha,
                 tipo: tipo.replace('_', ' ').toUpperCase(),
-                numero: mov.descripcion,
-                vencimiento: null,
+                numero: mov.numero_comprobante || mov.descripcion,
+                tipo_comprobante: mov.tipo_comprobante || null,
+                vencimiento: mov.fecha_vencimiento || null,
                 total: amount,
                 saldo_pendiente: saldo_item,
                 estado: (Math.abs(saldo_item) < 0.01) ? 'pagado' : 'pendiente'
