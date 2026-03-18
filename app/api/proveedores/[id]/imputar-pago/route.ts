@@ -17,13 +17,7 @@ export async function POST(
         // body: { fecha, monto_total, observaciones, imputaciones: [ { documento_id, monto_imputado } ] }
         const { fecha, monto_total, observaciones, imputaciones } = body;
 
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!,
-            {
-                auth: { persistSession: false, autoRefreshToken: false },
-            }
-        );
+        const supabase = createAdminClient();
 
         // 2. Create the PAGO movement in CC
         const { data: pagoMov, error: pagoError } = await supabase

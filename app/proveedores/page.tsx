@@ -41,7 +41,7 @@ export default function ProveedoresPage() {
     condicion_pago_tipo: "cuenta_corriente" as "cuenta_corriente" | "contado" | "anticipado",
     plazo_dias: 30,
     plazo_desde: "fecha_factura" as "fecha_factura" | "fecha_recepcion",
-    tipo_proveedor: "mercaderia_general" as "mercaderia_general" | "servicios",
+    tipo_proveedor: "mercaderia_general" as "mercaderia_general" | "servicios" | "transporte",
     banco_nombre: "",
     banco_cuenta: "",
     banco_numero_cuenta: "",
@@ -668,7 +668,7 @@ export default function ProveedoresPage() {
                             <Label htmlFor="tipo_proveedor">Tipo de Proveedor</Label>
                             <Select
                               value={formData.tipo_proveedor}
-                              onValueChange={(value: "mercaderia_general" | "servicios") =>
+                              onValueChange={(value: "mercaderia_general" | "servicios" | "transporte") =>
                                 setFormData({ ...formData, tipo_proveedor: value })
                               }
                             >
@@ -678,6 +678,7 @@ export default function ProveedoresPage() {
                               <SelectContent>
                                 <SelectItem value="mercaderia_general">Mercadería General</SelectItem>
                                 <SelectItem value="servicios">Servicios</SelectItem>
+                                <SelectItem value="transporte">Transporte</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>

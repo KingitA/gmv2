@@ -177,7 +177,7 @@ export interface Proveedor {
   condicion_pago_tipo?: "cuenta_corriente" | "contado" | "anticipado"
   plazo_dias?: number
   plazo_desde?: "fecha_factura" | "fecha_recepcion"
-  tipo_proveedor?: "mercaderia_general" | "servicios"
+  tipo_proveedor?: "mercaderia_general" | "servicios" | "transporte"
   banco_nombre?: string
   banco_cuenta?: string
   banco_numero_cuenta?: string

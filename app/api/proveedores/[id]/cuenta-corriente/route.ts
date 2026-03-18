@@ -10,16 +10,7 @@ export async function GET(
     if (auth.error) return auth.error
     const { id: proveedorId } = await params;
 
-    const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        {
-            auth: {
-                persistSession: false,
-                autoRefreshToken: false,
-            },
-        }
-    );
+    const supabase = createAdminClient();
 
     try {
         // 1. Fetch Movements
