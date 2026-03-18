@@ -388,8 +388,93 @@ export async function processEmailAsInvoice(
 
             if (error) throw error
 
-            // Also create CC movement for the debt
-            const ccResult = await createCCMovement(db, proveedorId, invoiceData, tipoComp, fechaHoy)
+            // Update the existing OC movement in CC to become the factura
+            // (instead of creating a new one, which would duplicate the debt)
+            const isCredit = ['NCA', 'NCB', 'NCC'].includes(tipoComp)
+            const monto = invoiceData.total || 0
+            const montoFinal = isCredit ? -Math.abs(monto) : Math.abs(monto)
+            const descripcion = [tipoComp, invoiceData.numero_comprobante, invoiceData.razon_social_emisor].filter(Boolean).join(' — ')
+
+            // Find existing OC movement in CC
+            const { data: existingCC } = await db.from('cuenta_corriente_proveedores')
+                .select('id')
+                .eq('proveedor_id', proveedorId)
+                .eq('referencia_tipo', 'orden_compra')
+                .eq('referencia_id', pendingOC.id)
+                .limit(1)
+                .maybeSingle()
+
+            let ccResult: any = null
+            if (existingCC) {
+                // Update the OC movement → becomes the factura
+                const { data: updated } = await db.from('cuenta_corriente_proveedores')
+                    .update({
+                        tipo_movimiento: isCredit ? 'nota_credito' : 'factura',
+                        monto: montoFinal,
+                        descripcion,
+                        numero_comprobante: invoiceData.numero_comprobante || null,
+                        tipo_comprobante: tipoComp,
+                        fecha: invoiceData.fecha_comprobante || fechaHoy,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', existingCC.id)
+                    .select()
+                    .single()
+                ccResult = updated
+                console.log(`[InvoiceProcessor] ✅ Updated CC movement ${existingCC.id} from OC to ${tipoComp}`)
+            } else {
+                // No existing OC movement found, create new one
+                ccResult = await createCCMovement(db, proveedorId, invoiceData, tipoComp, fechaHoy)
+            }
+
+            // Calculate and set vencimiento on the CC movement
+            if (ccResult && !isCredit) {
+                try {
+                    const { data: prov } = await db.from('proveedores')
+                        .select('plazo_dias, plazo_desde, nombre')
+                        .eq('id', proveedorId)
+                        .single()
+
+                    const plazoDias = prov?.plazo_dias || 30
+                    const plazoDesde = prov?.plazo_desde || 'fecha_factura'
+
+                    let fechaBase = invoiceData.fecha_comprobante || fechaHoy
+                    // If plazo is from recepcion, check if there's a finished recepcion
+                    if (plazoDesde === 'fecha_recepcion') {
+                        const { data: rec } = await db.from('recepciones')
+                            .select('fecha_fin')
+                            .eq('orden_compra_id', pendingOC.id)
+                            .eq('estado', 'finalizada')
+                            .limit(1)
+                            .maybeSingle()
+                        if (rec?.fecha_fin) fechaBase = rec.fecha_fin.split('T')[0]
+                    }
+
+                    const fechaVenc = new Date(fechaBase + 'T00:00:00')
+                    fechaVenc.setDate(fechaVenc.getDate() + plazoDias)
+                    const fechaVencStr = invoiceData.fecha_vencimiento || fechaVenc.toISOString().split('T')[0]
+
+                    // Update CC with vencimiento
+                    await db.from('cuenta_corriente_proveedores')
+                        .update({ fecha_vencimiento: fechaVencStr })
+                        .eq('id', ccResult.id)
+
+                    // Create vencimiento entry
+                    await db.from('vencimientos').insert({
+                        proveedor_id: proveedorId,
+                        tipo: 'factura',
+                        concepto: descripcion,
+                        monto: montoFinal,
+                        fecha_vencimiento: fechaVencStr,
+                        estado: 'pendiente',
+                        referencia_id: ccResult.id,
+                        referencia_tipo: 'cuenta_corriente',
+                        dias_alerta: 3,
+                    })
+                } catch (vErr) {
+                    console.error('[InvoiceProcessor] Error creating vencimiento for OC invoice:', vErr)
+                }
+            }
 
             console.log(`[InvoiceProcessor] ✅ Created comprobante ${comprobante.id} linked to OC ${pendingOC.numero_orden}`)
 

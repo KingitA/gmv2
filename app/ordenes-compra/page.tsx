@@ -1020,6 +1020,7 @@ export default function OrdenesCompraPage() {
                 <TableHead>Proveedor</TableHead>
                 <TableHead>Fecha</TableHead>
                 <TableHead>Estado</TableHead>
+                <TableHead>N° Orden</TableHead>
                 <TableHead>Acciones</TableHead>
               </TableRow>
             </TableHeader>
@@ -1034,48 +1035,88 @@ export default function OrdenesCompraPage() {
                     <TableCell className="font-medium">{orden.proveedor?.nombre}</TableCell>
                     <TableCell>{new Date(orden.fecha_orden ?? orden.fecha_emision).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</TableCell>
                     <TableCell>
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs ${orden.estado === "pendiente" ? "bg-yellow-100 text-yellow-800" : "bg-green-100 text-green-800"
-                          }`}
-                      >
-                        {orden.estado === "pendiente" ? "Pendiente" : "Finalizado"}
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        orden.estado === "pendiente" ? "bg-yellow-100 text-yellow-800" 
+                        : orden.estado === "enviada" || orden.estado === "confirmada" ? "bg-blue-100 text-blue-800"
+                        : orden.estado === "en_camino" ? "bg-purple-100 text-purple-800"
+                        : orden.estado === "recibida" || orden.estado === "recibida_completa" ? "bg-orange-100 text-orange-800"
+                        : orden.estado === "recibida_parcial" ? "bg-orange-100 text-orange-700"
+                        : orden.estado === "finalizada" ? "bg-green-100 text-green-800"
+                        : orden.estado === "cancelada" ? "bg-red-100 text-red-800"
+                        : "bg-gray-100 text-gray-800"
+                      }`}>
+                        {orden.estado === "pendiente" ? "Pendiente"
+                          : orden.estado === "enviada" ? "Enviada"
+                          : orden.estado === "confirmada" ? "Confirmada"
+                          : orden.estado === "en_camino" ? "En camino"
+                          : orden.estado === "recibida" || orden.estado === "recibida_completa" ? "Recibida"
+                          : orden.estado === "recibida_parcial" ? "Recibida parcial"
+                          : orden.estado === "finalizada" ? "Finalizada"
+                          : orden.estado === "cancelada" ? "Cancelada"
+                          : orden.estado}
                       </span>
                     </TableCell>
                     <TableCell>
+                      <div className="flex gap-2">
+                        {orden.numero_orden && (
+                          <span className="text-xs font-mono text-muted-foreground self-center mr-2">{orden.numero_orden}</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
                       <div className="flex gap-2 flex-wrap">
-                        <Button variant="outline" size="sm" onClick={() => abrirEditarOrden(orden)}>
-                          <Pencil className="h-4 w-4 mr-2" />
-                          Editar
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => enviarPorEmail(orden)}>
-                          <Send className="h-4 w-4 mr-2" />
-                          Enviar por mail
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/comprobantes`)}
-                        >
-                          <FileText className="h-4 w-4 mr-2" />
-                          Cargar comprobantes
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/articulos`)}
-                        >
-                          <Plus className="h-4 w-4 mr-2" />
-                          Cargar artículos
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setOrdenParaEliminar(orden)}
-                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Eliminar
-                        </Button>
+                        {/* PENDIENTE: editar artículos + enviar */}
+                        {orden.estado === "pendiente" && (
+                          <>
+                            <Button variant="outline" size="sm" onClick={() => abrirEditarOrden(orden)}>
+                              <Pencil className="h-4 w-4 mr-1" /> Editar
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => enviarPorEmail(orden)}>
+                              <Send className="h-4 w-4 mr-1" /> Enviar
+                            </Button>
+                          </>
+                        )}
+
+                        {/* ENVIADA / EN CAMINO: cargar comprobantes */}
+                        {(orden.estado === "enviada" || orden.estado === "confirmada" || orden.estado === "en_camino") && (
+                          <>
+                            <Button variant="outline" size="sm"
+                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/comprobantes`)}>
+                              <FileText className="h-4 w-4 mr-1" /> Cargar comprobante
+                            </Button>
+                          </>
+                        )}
+
+                        {/* RECIBIDA: ver verificación triple (artículos vs factura vs depósito) */}
+                        {(orden.estado === "recibida" || orden.estado === "recibida_completa" || orden.estado === "recibida_parcial") && (
+                          <>
+                            <Button variant="default" size="sm"
+                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/verificacion`)}>
+                              <CheckCircle2 className="h-4 w-4 mr-1" /> Verificar
+                            </Button>
+                            <Button variant="outline" size="sm"
+                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/comprobantes`)}>
+                              <FileText className="h-4 w-4 mr-1" /> Comprobantes
+                            </Button>
+                          </>
+                        )}
+
+                        {/* SIEMPRE: ver artículos (solo lectura si no es pendiente) */}
+                        {orden.estado !== "pendiente" && orden.estado !== "cancelada" && (
+                          <Button variant="ghost" size="sm"
+                            onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/articulos`)}>
+                            <Plus className="h-4 w-4 mr-1" /> Artículos
+                          </Button>
+                        )}
+
+                        {/* Eliminar solo si pendiente */}
+                        {orden.estado === "pendiente" && (
+                          <Button variant="outline" size="sm"
+                            onClick={() => setOrdenParaEliminar(orden)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
