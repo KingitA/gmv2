@@ -54,6 +54,7 @@ export default function CargarArticulosPage() {
   useEffect(() => {
     loadOrden()
     loadComprobantes()
+    loadArticulosExistentes()
   }, [ordenId])
 
   useEffect(() => {
@@ -83,6 +84,29 @@ export default function CargarArticulosPage() {
 
     if (data) {
       setComprobantes(data)
+    }
+  }
+
+  const loadArticulosExistentes = async () => {
+    const { data } = await supabase
+      .from("ordenes_compra_detalle")
+      .select("*, articulo:articulos(id, sku, ean13, descripcion, precio_compra, unidades_por_bulto)")
+      .eq("orden_compra_id", ordenId)
+
+    if (data && data.length > 0) {
+      setArticulosIngresados(data.map((item: any) => ({
+        id: item.id,
+        articulo_id: item.articulo_id,
+        articulo: item.articulo || { descripcion: "—", sku: "—" },
+        cantidad: item.cantidad_pedida,
+        cantidad_pedida: item.cantidad_pedida,
+        tipo_cantidad: item.tipo_cantidad || "bulto",
+        precio_unitario: item.precio_unitario || 0,
+        descuento1: item.descuento1 || 0,
+        descuento2: item.descuento2 || 0,
+        descuento3: item.descuento3 || 0,
+        descuento4: item.descuento4 || 0,
+      })))
     }
   }
 
@@ -288,6 +312,73 @@ export default function CargarArticulosPage() {
   }
 
   if (!orden) return <div>Cargando...</div>
+
+  // Solo se pueden agregar artículos si la OC está pendiente o enviada (aún no recibida)
+  const esEditable = ['pendiente', 'enviada', 'confirmada', 'borrador'].includes(orden.estado)
+
+  // Si la OC ya fue recibida/finalizada, redirigir a verificación
+  if (!esEditable && (orden.estado === 'recibida' || orden.estado === 'recibida_completa' || orden.estado === 'recibida_parcial' || orden.estado === 'finalizada')) {
+    return (
+      <div className="container mx-auto p-6 space-y-6">
+        <div className="flex items-center gap-4 mb-6">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold">Artículos — {orden.numero_orden}</h1>
+            <p className="text-muted-foreground">
+              {orden.proveedor?.nombre} — Estado: {orden.estado}
+            </p>
+          </div>
+          <div className="ml-auto">
+            <Button onClick={() => router.push(`/ordenes-compra/${ordenId}/verificacion`)}>
+              <AlertTriangle className="h-4 w-4 mr-2" /> Ir a Verificación
+            </Button>
+          </div>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Artículos de la Orden ({articulosIngresados.length})</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Esta orden ya fue recibida. No se pueden agregar ni modificar artículos.
+              Usá la pantalla de verificación para comparar con la factura y recepción.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Artículo</TableHead>
+                  <TableHead>Cantidad</TableHead>
+                  <TableHead>Precio Unit.</TableHead>
+                  <TableHead>D1%</TableHead>
+                  <TableHead>D2%</TableHead>
+                  <TableHead>D3%</TableHead>
+                  <TableHead>D4%</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {articulosIngresados.map((item) => (
+                  <TableRow key={item.id || item.articulo_id}>
+                    <TableCell>
+                      <div className="font-medium">{item.articulo?.descripcion || "—"}</div>
+                      <div className="text-xs text-muted-foreground">SKU: {item.articulo?.sku}</div>
+                    </TableCell>
+                    <TableCell>{item.cantidad_pedida || item.cantidad} {item.tipo_cantidad}</TableCell>
+                    <TableCell>${(item.precio_unitario || 0).toFixed(2)}</TableCell>
+                    <TableCell>{item.descuento1 || 0}%</TableCell>
+                    <TableCell>{item.descuento2 || 0}%</TableCell>
+                    <TableCell>{item.descuento3 || 0}%</TableCell>
+                    <TableCell>{item.descuento4 || 0}%</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="container mx-auto p-6 space-y-6">
