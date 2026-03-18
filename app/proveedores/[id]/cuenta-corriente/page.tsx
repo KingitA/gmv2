@@ -3,7 +3,7 @@
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 
 import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
@@ -19,6 +19,7 @@ import { toast } from "@/hooks/use-toast"
 
 export default function CuentaCorrienteProveedorPage() {
     const params = useParams()
+    const router = useRouter()
     const id = params?.id as string
 
     const [movimientos, setMovimientos] = useState<any[]>([])
@@ -193,14 +194,18 @@ export default function CuentaCorrienteProveedorPage() {
                             )}
                             <Button
                                 onClick={() => {
-                                    setPaymentData(prev => ({ ...prev, monto: totalSelected }))
-                                    setShowPaymentDialog(true)
+                                    // Build query params with selected comprobante IDs and amounts
+                                    const selectedItems = movimientos.filter(m => selectedMovs.has(m.id))
+                                    const movIds = selectedItems.map(m => m.id).join(',')
+                                    const montos = selectedItems.map(m => m.saldo_pendiente).join(',')
+                                    const descripciones = selectedItems.map(m => encodeURIComponent(m.numero || m.tipo)).join(',')
+                                    router.push(`/ordenes-pago/nueva?proveedor_id=${id}&mov_cc_ids=${movIds}&mov_montos=${montos}&mov_desc=${descripciones}&monto=${totalSelected}`)
                                 }}
                                 disabled={selectedMovs.size === 0}
                                 className="gap-2"
                             >
                                 <DollarSign className="h-4 w-4" />
-                                Imputar Pago ({selectedMovs.size})
+                                Crear Orden de Pago ({selectedMovs.size})
                             </Button>
                         </div>
                     </div>

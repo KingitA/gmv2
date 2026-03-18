@@ -68,7 +68,7 @@ function getHref(classification: string | null, toEmail?: string): string | unde
     case 'orden_compra':
       return '/clientes-pedidos'
     case 'factura_proveedor':
-      return '/comprobantes-compra'
+      return '/comprobantes'
     case 'pago':
       return '/revision-pagos'
     case 'cambio_precio':
@@ -161,7 +161,7 @@ export function DashboardFeed() {
           else if (ev.event_type?.includes('pago')) evHref = '/revision-pagos'
           else if (ev.event_type?.includes('reclamo')) evHref = '/revision-devoluciones'
           else if (ev.event_type?.includes('precio')) evHref = '/articulos/precios'
-          else if (ev.event_type?.includes('factura') || ev.event_type?.includes('vencimiento')) evHref = '/comprobantes-compra'
+          else if (ev.event_type?.includes('factura') || ev.event_type?.includes('vencimiento')) evHref = '/comprobantes'
 
           feedItems.push({
             id: `ev-${ev.id}`,

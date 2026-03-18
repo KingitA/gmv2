@@ -107,6 +107,31 @@ function NuevaOrdenPagoContent() {
         }
     }, [vencimientosProv])
 
+    // Si vienen mov_cc_ids por URL (desde CC proveedor), pre-seleccionarlos
+    useEffect(() => {
+        const movCcIds = searchParams.get("mov_cc_ids")
+        const movMontos = searchParams.get("mov_montos")
+        const movDesc = searchParams.get("mov_desc")
+        if (movCcIds && movMontos) {
+            const ids = movCcIds.split(",")
+            const montos = movMontos.split(",")
+            const descs = movDesc ? movDesc.split(",").map(d => decodeURIComponent(d)) : ids.map(() => "Comprobante")
+            const newImps: Imputacion[] = []
+            ids.forEach((ccId, i) => {
+                if (!imputaciones.some(imp => imp.movimiento_cc_id === ccId)) {
+                    newImps.push({
+                        movimiento_cc_id: ccId,
+                        monto_imputado: parseFloat(montos[i]) || 0,
+                        descripcion: descs[i] || "Comprobante"
+                    })
+                }
+            })
+            if (newImps.length > 0) {
+                setImputaciones(prev => [...prev, ...newImps])
+            }
+        }
+    }, [])
+
     async function loadProveedores() {
         const supabase = createClient()
         const { data } = await supabase.from("proveedores").select("id, nombre, sigla, cuit, banco_nombre, banco_cuenta, banco_numero_cuenta, banco_tipo_cuenta, retencion_ganancias, retencion_iibb, percepcion_iva").eq("activo", true).order("nombre")

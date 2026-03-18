@@ -575,9 +575,48 @@ async function createCCMovement(
         monto: montoFinal,
         descripcion: descripcion || 'Factura importada desde Gmail',
         referencia_tipo: 'gmail',
+        numero_comprobante: invoiceData.numero_comprobante || null,
+        tipo_comprobante: tipoComp,
     }).select().single()
 
     if (error) throw error
+
+    // Create vencimiento automatically for facturas (not credit notes)
+    if (!isCredit && data && montoFinal > 0) {
+        try {
+            // Get proveedor payment terms
+            const { data: prov } = await db.from('proveedores')
+                .select('plazo_dias, plazo_desde, nombre, sigla')
+                .eq('id', proveedorId)
+                .single()
+
+            const plazoDias = prov?.plazo_dias || 30
+            const fechaBase = invoiceData.fecha_comprobante || fechaHoy
+            const fechaVenc = new Date(fechaBase + 'T00:00:00')
+            fechaVenc.setDate(fechaVenc.getDate() + plazoDias)
+
+            // Use fecha_vencimiento from invoice if available, otherwise calculate
+            const fechaVencFinal = invoiceData.fecha_vencimiento || fechaVenc.toISOString().split('T')[0]
+
+            const conceptoVenc = `${tipoComp} ${invoiceData.numero_comprobante || ''} — ${invoiceData.razon_social_emisor || prov?.nombre || ''}`.trim()
+
+            await db.from('vencimientos').insert({
+                proveedor_id: proveedorId,
+                tipo: 'factura',
+                concepto: conceptoVenc,
+                monto: montoFinal,
+                fecha_vencimiento: fechaVencFinal,
+                estado: 'pendiente',
+                referencia_id: data.id,
+                referencia_tipo: 'cuenta_corriente',
+                dias_alerta: 3,
+            })
+        } catch (vencError) {
+            console.error('[InvoiceProcessor] Error creating vencimiento:', vencError)
+            // Don't throw - vencimiento creation is secondary
+        }
+    }
+
     return data
 }
 
