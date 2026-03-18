@@ -91,9 +91,11 @@ export async function processEmailAsInvoice(
         }
     }
 
-    // Priority 3: Fall back to Gemini OCR for images/PDFs — process ALL attachments
+    // Priority 3: Parse ALL PDF/image attachments with Gemini OCR
+    // ALWAYS run this even if we got data from Priority 1, because the email
+    // may contain multiple invoices (e.g. factura + adquisicion de stock)
     const parsedInvoices: ParsedInvoiceData[] = []
-    if (!invoiceData && emailData.attachments.length > 0) {
+    if (emailData.attachments.length > 0) {
         for (const att of emailData.attachments) {
             const validTypes = [
                 'application/pdf',
@@ -123,8 +125,8 @@ export async function processEmailAsInvoice(
                 console.error(`[InvoiceProcessor] Error processing ${att.filename}:`, err instanceof Error ? err.message : err)
             }
         }
-        // Use the first one as the main invoiceData
-        if (parsedInvoices.length > 0) {
+        // Use the first parsed attachment as main invoiceData only if we don't have one yet
+        if (!invoiceData && parsedInvoices.length > 0) {
             invoiceData = parsedInvoices[0]
         }
     }
@@ -355,12 +357,14 @@ export async function processEmailAsInvoice(
 
     console.log(`[InvoiceProcessor] Found supplier: ${proveedorName} (${proveedorId})`)
 
-    // ── 3. Check for pending purchase orders ──────────
+    // ── 3. Check for purchase orders that need invoices ──────────
+    // A factura can arrive AFTER the merchandise was received.
+    // Look for any OC that is not finalized/cancelled.
     const { data: pendingOC } = await db
         .from('ordenes_compra')
         .select('id, numero_orden, estado')
         .eq('proveedor_id', proveedorId)
-        .in('estado', ['pendiente', 'recibida_parcial'])
+        .not('estado', 'in', '("finalizada","cancelada")')
         .order('fecha_orden', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -479,8 +483,34 @@ export async function processEmailAsInvoice(
             console.log(`[InvoiceProcessor] ✅ Created comprobante ${comprobante.id} linked to OC ${pendingOC.numero_orden}`)
 
             // Process additional attachments from same email
-            if (parsedInvoices.length > 1) {
-                await processAdditionalInvoices(db, parsedInvoices, proveedorId, fechaHoy)
+            // Filter out the one that matches the main invoice (by numero_comprobante)
+            const additionalInvoices = parsedInvoices.filter(pi =>
+                pi.numero_comprobante !== invoiceData?.numero_comprobante
+            )
+            if (additionalInvoices.length > 0) {
+                for (const addInv of additionalInvoices) {
+                    const addTipo = mapTipoComprobante(addInv.tipo_comprobante)
+                    try {
+                        console.log(`[InvoiceProcessor] Processing additional: ${addTipo} ${addInv.numero_comprobante}`)
+                        // Create comprobante_compra for the additional invoice too
+                        await db.from('comprobantes_compra').insert({
+                            orden_compra_id: pendingOC.id,
+                            tipo_comprobante: addTipo,
+                            numero_comprobante: addInv.numero_comprobante || `GMAIL-ADD-${Date.now()}`,
+                            fecha_comprobante: addInv.fecha_comprobante || fechaHoy,
+                            proveedor_id: proveedorId,
+                            total_factura_declarado: addInv.total || 0,
+                            total_calculado: 0,
+                            descuento_fuera_factura: 0,
+                            estado: 'pendiente_recepcion',
+                            diferencia_centavos: 0,
+                        })
+                        // Create CC movement
+                        await createCCMovement(db, proveedorId, addInv, addTipo, fechaHoy)
+                    } catch (err) {
+                        console.error(`[InvoiceProcessor] Error processing additional invoice:`, err)
+                    }
+                }
             }
 
             return {
@@ -519,9 +549,20 @@ export async function processEmailAsInvoice(
 
             console.log(`[InvoiceProcessor] ✅ Created CC movement for service invoice: ${ccResult?.id}`)
 
-            // Process additional attachments from same email (e.g. factura + adquisicion de stock)
-            if (parsedInvoices.length > 1) {
-                await processAdditionalInvoices(db, parsedInvoices, proveedorId, fechaHoy)
+            // Process additional attachments from same email
+            const additionalInvoices = parsedInvoices.filter(pi =>
+                pi.numero_comprobante !== invoiceData?.numero_comprobante
+            )
+            if (additionalInvoices.length > 0) {
+                for (const addInv of additionalInvoices) {
+                    const addTipo = mapTipoComprobante(addInv.tipo_comprobante)
+                    try {
+                        console.log(`[InvoiceProcessor] Processing additional service invoice: ${addTipo} ${addInv.numero_comprobante}`)
+                        await createCCMovement(db, proveedorId, addInv, addTipo, fechaHoy)
+                    } catch (err) {
+                        console.error(`[InvoiceProcessor] Error processing additional:`, err)
+                    }
+                }
             }
 
             return {
