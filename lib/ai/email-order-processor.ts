@@ -342,120 +342,95 @@ export async function processEmailAsOrder(
                 }
             }
 
-            // Priority 3: nombre/razon_social match
+            // Priority 3: unified search across nombre + direccion + localidad
+            // Longer words are more specific and weigh more
+            // More matching words = exponentially better
             if (!clienteId) {
                 const searchParts = customerClean.split(/\s+/).filter((p: string) => p.length >= 3)
                 let bestMatch: any = null
                 let bestScore = 0
+                let bestMatchCount = 0
 
                 for (const c of vendedorClientes) {
                     const normNombre = (c.nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    const normRazon = (c.razon_social || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    let score = 0
-                    for (const p of searchParts) {
-                        if (normNombre.includes(p)) score += 2
-                        if (normRazon.includes(p)) score += 2
-                    }
-                    if (score > bestScore) { bestScore = score; bestMatch = c }
-                }
-                if (bestMatch && bestScore >= 2) {
-                    clienteId = bestMatch.id
-                    console.log(`[EmailOrderProcessor] ✅ Matched by nombre in vendedor's clients: ${bestMatch.nombre} (score: ${bestScore})`)
-                }
-            }
-
-            // Priority 4: direccion + localidad match (the "chino sarmiento" / "chino av 25 de mayo pringles" case)
-            if (!clienteId) {
-                const searchParts = customerClean.split(/\s+/).filter((p: string) => p.length >= 3)
-                let bestMatch: any = null
-                let bestScore = 0
-
-                for (const c of vendedorClientes) {
                     const normDir = (c.direccion || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                     const normLoc = (c.localidad || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    const normNombre = (c.nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    const allText = `${normNombre} ${normDir} ${normLoc}`
+
                     let score = 0
+                    let matchCount = 0
+
                     for (const p of searchParts) {
-                        if (normDir.includes(p)) score += 2
-                        if (normLoc.includes(p)) score += 3 // localidad weighs more
-                        if (normNombre.includes(p)) score += 1
+                        // Longer words are more specific → weigh more
+                        const wordWeight = Math.max(1, p.length - 2)
+
+                        if (normNombre.includes(p)) {
+                            score += wordWeight * 3  // nombre is strongest signal
+                            matchCount++
+                        } else if (normDir.includes(p)) {
+                            score += wordWeight * 2
+                            matchCount++
+                        } else if (normLoc.includes(p)) {
+                            score += wordWeight * 3  // localidad is very strong
+                            matchCount++
+                        }
                     }
-                    if (score > bestScore) { bestScore = score; bestMatch = c }
+
+                    // Bonus for matching multiple words (exponential: 2 words >> 1 word)
+                    if (matchCount > 1) score *= matchCount
+
+                    if (score > bestScore || (score === bestScore && matchCount > bestMatchCount)) {
+                        bestScore = score
+                        bestMatch = c
+                        bestMatchCount = matchCount
+                    }
                 }
-                if (bestMatch && bestScore >= 3) {
+
+                if (bestMatch && bestScore >= 4 && bestMatchCount >= 1) {
                     clienteId = bestMatch.id
-                    console.log(`[EmailOrderProcessor] ✅ Matched by direccion/localidad in vendedor's clients: ${bestMatch.nombre} (dir: ${bestMatch.direccion}, loc: ${bestMatch.localidad}, score: ${bestScore})`)
+                    console.log(`[EmailOrderProcessor] ✅ Matched in vendedor's clients: ${bestMatch.nombre} (dir: ${bestMatch.direccion}, loc: ${bestMatch.localidad}, score: ${bestScore}, words: ${bestMatchCount})`)
                 }
             }
         }
 
         // If not found via vendedor (or no vendedor), fall back to general search
-        if (!clienteId && parseResult.candidateCustomerData) {
-            clienteId = parseResult.candidateCustomerData.id
-        }
-
-        if (!clienteId && customerClean) {
-            // Search in all clients by nombre/razon_social
-            const { data: clienteByName } = await db
-                .from('clientes')
-                .select('id')
-                .or(`razon_social.ilike.%${customerClean}%,nombre.ilike.%${customerClean}%`)
-                .limit(1)
-                .maybeSingle()
-            if (clienteByName) clienteId = clienteByName.id
-        }
-
-        if (!clienteId && emailData.from) {
-            const { data: clienteByMail } = await db
-                .from('clientes')
-                .select('id')
-                .eq('mail', emailData.from)
-                .maybeSingle()
-            if (clienteByMail) clienteId = clienteByMail.id
-        }
-
-        if (!clienteId && emailData.fromName) {
-            const { data: clienteByFromName } = await db
-                .from('clientes')
-                .select('id')
-                .or(`razon_social.ilike.%${emailData.fromName}%,nombre.ilike.%${emailData.fromName}%`)
-                .limit(1)
-                .maybeSingle()
-            if (clienteByFromName) clienteId = clienteByFromName.id
-        }
-
-        // Search by direccion/localidad in ALL clients (if customer string has address-like words)
-        if (!clienteId && customerClean) {
-            const searchParts = customerClean.split(/\s+/).filter((p: string) => p.length >= 3)
-            if (searchParts.length > 0) {
-                const orParts = searchParts.map(p => `direccion.ilike.%${p}%,localidad.ilike.%${p}%`).join(',')
-                const { data: clientesByAddr } = await db
-                    .from('clientes')
-                    .select('id, nombre, direccion, localidad')
-                    .or(orParts)
-                    .eq('activo', true)
-                    .limit(10)
-
-                if (clientesByAddr && clientesByAddr.length > 0) {
-                    // Score each by how many search parts match
-                    let best: any = null
-                    let bestScore = 0
-                    for (const c of clientesByAddr) {
-                        const normDir = (c.direccion || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                        const normLoc = (c.localidad || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                        let score = 0
-                        for (const p of searchParts) {
-                            if (normDir.includes(p)) score += 2
-                            if (normLoc.includes(p)) score += 3
-                        }
-                        if (score > bestScore) { bestScore = score; best = c }
-                    }
-                    if (best && bestScore >= 3) {
-                        clienteId = best.id
-                        console.log(`[EmailOrderProcessor] ✅ Matched by address in all clients: ${best.nombre}`)
-                    }
-                }
+        // BUT: if the sender IS a vendedor and we didn't find the client in their list,
+        // don't search broadly — it's better to go to review than assign to a wrong client
+        if (!clienteId && !vendedorId) {
+            if (parseResult.candidateCustomerData) {
+                clienteId = parseResult.candidateCustomerData.id
             }
+
+            if (!clienteId && customerClean) {
+                const { data: clienteByName } = await db
+                    .from('clientes')
+                    .select('id')
+                    .or(`razon_social.ilike.%${customerClean}%,nombre.ilike.%${customerClean}%`)
+                    .limit(1)
+                    .maybeSingle()
+                if (clienteByName) clienteId = clienteByName.id
+            }
+
+            if (!clienteId && emailData.from) {
+                const { data: clienteByMail } = await db
+                    .from('clientes')
+                    .select('id')
+                    .eq('mail', emailData.from)
+                    .maybeSingle()
+                if (clienteByMail) clienteId = clienteByMail.id
+            }
+
+            if (!clienteId && emailData.fromName) {
+                const { data: clienteByFromName } = await db
+                    .from('clientes')
+                    .select('id')
+                    .or(`razon_social.ilike.%${emailData.fromName}%,nombre.ilike.%${emailData.fromName}%`)
+                    .limit(1)
+                    .maybeSingle()
+                if (clienteByFromName) clienteId = clienteByFromName.id
+            }
+        } else if (!clienteId && vendedorId) {
+            console.log(`[EmailOrderProcessor] ⚠️ Vendedor identified but client not found in their list — sending to review`)
         }
 
         if (clienteId) clienteFound = true
