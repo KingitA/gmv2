@@ -65,6 +65,20 @@ export async function POST(req: NextRequest) {
             }
         }
 
+        // Pre-cargar localidades para resolver texto → localidad_id
+        let localidadMap: Record<string, { id: string; provincia: string }> = {}
+        if (headers.includes("localidad")) {
+            const supabasePreload = createAdminClient()
+            const { data: localidades } = await supabasePreload.from("localidades").select("id, nombre, provincia")
+            if (localidades) {
+                for (const l of localidades) {
+                    if (l.nombre) {
+                        localidadMap[l.nombre.toUpperCase().trim()] = { id: l.id, provincia: l.provincia || '' }
+                    }
+                }
+            }
+        }
+
         for (const row of rows) {
             if (!row || row.length === 0) continue
 
@@ -144,7 +158,32 @@ export async function POST(req: NextRequest) {
                     if (vendedorId) clienteData.vendedor_id = vendedorId
                 }
             }
-            if (headers.includes("localidad")) clienteData.localidad = getHeaderVal("localidad")
+            if (headers.includes("localidad")) {
+                const locText = getHeaderVal("localidad")
+                if (locText) {
+                    clienteData.localidad = locText
+                    // Resolve to localidad_id
+                    const normalized = locText.toUpperCase().trim()
+                    const locMatch = localidadMap[normalized]
+                    if (locMatch) {
+                        clienteData.localidad_id = locMatch.id
+                        if (!clienteData.provincia && locMatch.provincia) {
+                            clienteData.provincia = locMatch.provincia
+                        }
+                    } else {
+                        // Try partial match (e.g. "CORONEL PRINGLES" vs "PRINGLES")
+                        const partialMatch = Object.entries(localidadMap).find(([k]) =>
+                            k.includes(normalized) || normalized.includes(k)
+                        )
+                        if (partialMatch) {
+                            clienteData.localidad_id = partialMatch[1].id
+                            if (!clienteData.provincia && partialMatch[1].provincia) {
+                                clienteData.provincia = partialMatch[1].provincia
+                            }
+                        }
+                    }
+                }
+            }
             if (headers.includes("localidad_id")) clienteData.localidad_id = getHeaderVal("localidad_id")
             if (headers.includes("observaciones")) clienteData.observaciones = getHeaderVal("observaciones")
             if (headers.includes("dias_credito")) clienteData.dias_credito = getHeaderVal("dias_credito") ? parseInt(getHeaderVal("dias_credito")!) : null
