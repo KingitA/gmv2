@@ -279,97 +279,180 @@ export async function processEmailAsOrder(
     const errors: string[] = []
     let clienteFound = false
 
+    // ── STEP 0: Detect if sender is a vendedor ──────────
+    let vendedorId: string | null = null
+    let vendedorClientes: any[] = []
+
+    if (emailData.from) {
+        const senderEmail = emailData.from.toLowerCase().trim()
+        const { data: vendedor } = await db
+            .from('vendedores')
+            .select('id, nombre, email')
+            .ilike('email', senderEmail)
+            .limit(1)
+            .maybeSingle()
+
+        if (vendedor) {
+            vendedorId = vendedor.id
+            console.log(`[EmailOrderProcessor] 🧑‍💼 Sender is vendedor: ${vendedor.nombre} (${vendedor.email})`)
+
+            // Load all clients of this vendedor
+            const { data: clientes } = await db
+                .from('clientes')
+                .select('id, nombre, razon_social, direccion, localidad, mail, codigo_cliente')
+                .eq('vendedor_id', vendedor.id)
+                .eq('activo', true)
+
+            vendedorClientes = clientes || []
+            console.log(`[EmailOrderProcessor] 📋 Vendedor has ${vendedorClientes.length} clients`)
+        }
+    }
+
     for (const { result: parseResult, fileName, customerOverride } of allParseResults) {
         console.log(`[EmailOrderProcessor] Processing "${fileName}" (${parseResult.items.length} items)...`)
 
         // ── 4a. Identify client ──────────────────────────
         let clienteId: string | null = null
 
-        // First try: customer override from body hint (highest priority)
-        if (customerOverride) {
-            console.log(`[EmailOrderProcessor] Trying customer override: "${customerOverride}"`)
-            const { data: clienteByOverride } = await db
-                .from('clientes')
-                .select('id')
-                .or(`razon_social.ilike.%${customerOverride}%,nombre.ilike.%${customerOverride}%`)
-                .limit(1)
-                .maybeSingle()
+        // The customer string from parsing (xlsx header, Gemini, body override)
+        const customerStr = customerOverride || parseResult.candidateCustomer || ''
+        const customerClean = customerStr.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/cliente:?\s*/i, '')
 
-            if (clienteByOverride) {
-                clienteId = clienteByOverride.id
-                console.log(`[EmailOrderProcessor] ✅ Client matched from body override: ${clienteId}`)
+        console.log(`[EmailOrderProcessor] Customer string: "${customerClean}" (vendedor: ${vendedorId ? 'yes' : 'no'})`)
+
+        // If sender is a vendedor, search ONLY in their clients first
+        if (vendedorId && vendedorClientes.length > 0 && customerClean) {
+            // Priority 1: codigo_cliente exact match
+            const byCode = vendedorClientes.find(c =>
+                c.codigo_cliente && c.codigo_cliente === customerClean
+            )
+            if (byCode) {
+                clienteId = byCode.id
+                console.log(`[EmailOrderProcessor] ✅ Matched by codigo_cliente in vendedor's clients: ${byCode.nombre}`)
+            }
+
+            // Priority 2: mail match
+            if (!clienteId) {
+                const byMail = vendedorClientes.find(c =>
+                    c.mail && c.mail.toLowerCase().includes(customerClean)
+                )
+                if (byMail) {
+                    clienteId = byMail.id
+                    console.log(`[EmailOrderProcessor] ✅ Matched by mail in vendedor's clients: ${byMail.nombre}`)
+                }
+            }
+
+            // Priority 3: nombre/razon_social match
+            if (!clienteId) {
+                const searchParts = customerClean.split(/\s+/).filter((p: string) => p.length >= 3)
+                let bestMatch: any = null
+                let bestScore = 0
+
+                for (const c of vendedorClientes) {
+                    const normNombre = (c.nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    const normRazon = (c.razon_social || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    let score = 0
+                    for (const p of searchParts) {
+                        if (normNombre.includes(p)) score += 2
+                        if (normRazon.includes(p)) score += 2
+                    }
+                    if (score > bestScore) { bestScore = score; bestMatch = c }
+                }
+                if (bestMatch && bestScore >= 2) {
+                    clienteId = bestMatch.id
+                    console.log(`[EmailOrderProcessor] ✅ Matched by nombre in vendedor's clients: ${bestMatch.nombre} (score: ${bestScore})`)
+                }
+            }
+
+            // Priority 4: direccion + localidad match (the "chino sarmiento" / "chino av 25 de mayo pringles" case)
+            if (!clienteId) {
+                const searchParts = customerClean.split(/\s+/).filter((p: string) => p.length >= 3)
+                let bestMatch: any = null
+                let bestScore = 0
+
+                for (const c of vendedorClientes) {
+                    const normDir = (c.direccion || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    const normLoc = (c.localidad || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    const normNombre = (c.nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    let score = 0
+                    for (const p of searchParts) {
+                        if (normDir.includes(p)) score += 2
+                        if (normLoc.includes(p)) score += 3 // localidad weighs more
+                        if (normNombre.includes(p)) score += 1
+                    }
+                    if (score > bestScore) { bestScore = score; bestMatch = c }
+                }
+                if (bestMatch && bestScore >= 3) {
+                    clienteId = bestMatch.id
+                    console.log(`[EmailOrderProcessor] ✅ Matched by direccion/localidad in vendedor's clients: ${bestMatch.nombre} (dir: ${bestMatch.direccion}, loc: ${bestMatch.localidad}, score: ${bestScore})`)
+                }
             }
         }
 
-        // Second: candidateCustomerData from parsing
+        // If not found via vendedor (or no vendedor), fall back to general search
         if (!clienteId && parseResult.candidateCustomerData) {
             clienteId = parseResult.candidateCustomerData.id
         }
 
-        // Third: candidateCustomer string (fuzzy search)
-        if (!clienteId && parseResult.candidateCustomer) {
+        if (!clienteId && customerClean) {
+            // Search in all clients by nombre/razon_social
             const { data: clienteByName } = await db
                 .from('clientes')
                 .select('id')
-                .ilike('razon_social', `%${parseResult.candidateCustomer}%`)
+                .or(`razon_social.ilike.%${customerClean}%,nombre.ilike.%${customerClean}%`)
                 .limit(1)
                 .maybeSingle()
-
             if (clienteByName) clienteId = clienteByName.id
         }
 
-        // Fourth: by sender email
         if (!clienteId && emailData.from) {
             const { data: clienteByMail } = await db
                 .from('clientes')
                 .select('id')
                 .eq('mail', emailData.from)
                 .maybeSingle()
-
-            if (clienteByMail) {
-                clienteId = clienteByMail.id
-            }
+            if (clienteByMail) clienteId = clienteByMail.id
         }
 
-        // Fifth: by sender name
         if (!clienteId && emailData.fromName) {
             const { data: clienteByFromName } = await db
                 .from('clientes')
                 .select('id')
-                .ilike('razon_social', `%${emailData.fromName}%`)
+                .or(`razon_social.ilike.%${emailData.fromName}%,nombre.ilike.%${emailData.fromName}%`)
                 .limit(1)
                 .maybeSingle()
-
             if (clienteByFromName) clienteId = clienteByFromName.id
         }
 
-        // Sixth: try to extract client name from email subject
-        if (!clienteId && emailData.subject) {
-            const subjectPatterns = [
-                /pedido\s+(.+)/i,
-                /orden\s+(.+)/i,
-                /ped\.?\s+(.+)/i,
-            ]
-            for (const pattern of subjectPatterns) {
-                const match = emailData.subject.match(pattern)
-                if (match) {
-                    let subjectClientName = match[1].trim()
-                        .replace(/[-–—]\s*\d+.*$/, '') // Remove trailing numbers/dates
-                        .replace(/\s*#\d+.*$/, '')     // Remove order numbers like #123
-                        .trim()
-                    if (subjectClientName.length >= 3) {
-                        console.log(`[EmailOrderProcessor] Trying client from subject: "${subjectClientName}"`)
-                        const { data: clienteBySubject } = await db
-                            .from('clientes')
-                            .select('id')
-                            .or(`razon_social.ilike.%${subjectClientName}%,nombre.ilike.%${subjectClientName}%`)
-                            .limit(1)
-                            .maybeSingle()
-                        if (clienteBySubject) {
-                            clienteId = clienteBySubject.id
-                            console.log(`[EmailOrderProcessor] ✅ Client matched from subject: ${clienteId}`)
-                            break
+        // Search by direccion/localidad in ALL clients (if customer string has address-like words)
+        if (!clienteId && customerClean) {
+            const searchParts = customerClean.split(/\s+/).filter((p: string) => p.length >= 3)
+            if (searchParts.length > 0) {
+                const orParts = searchParts.map(p => `direccion.ilike.%${p}%,localidad.ilike.%${p}%`).join(',')
+                const { data: clientesByAddr } = await db
+                    .from('clientes')
+                    .select('id, nombre, direccion, localidad')
+                    .or(orParts)
+                    .eq('activo', true)
+                    .limit(10)
+
+                if (clientesByAddr && clientesByAddr.length > 0) {
+                    // Score each by how many search parts match
+                    let best: any = null
+                    let bestScore = 0
+                    for (const c of clientesByAddr) {
+                        const normDir = (c.direccion || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                        const normLoc = (c.localidad || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                        let score = 0
+                        for (const p of searchParts) {
+                            if (normDir.includes(p)) score += 2
+                            if (normLoc.includes(p)) score += 3
                         }
+                        if (score > bestScore) { bestScore = score; best = c }
+                    }
+                    if (best && bestScore >= 3) {
+                        clienteId = best.id
+                        console.log(`[EmailOrderProcessor] ✅ Matched by address in all clients: ${best.nombre}`)
                     }
                 }
             }
@@ -377,8 +460,19 @@ export async function processEmailAsOrder(
 
         if (clienteId) clienteFound = true
 
-        // ── 4b. Decide: auto-create or send to review ────
-        // Auto-create if we have a client AND ALL articles are fully matched
+        // ── 4b. Detect forma de facturación override ────
+        let facturacionOverride: string | null = null
+        const fullText = (customerClean + ' ' + (emailData.subject || '') + ' ' + (emailData.bodyText || '')).toLowerCase()
+
+        if (fullText.includes('presupuesto') || fullText.includes('remito') || fullText.includes('negro') || fullText.includes('sin iva')) {
+            facturacionOverride = 'Presupuesto'
+            console.log(`[EmailOrderProcessor] 📋 Facturación override: Presupuesto`)
+        } else if (fullText.includes('con iva') || fullText.match(/factura\s*a\b/) || fullText.includes('responsable inscripto')) {
+            facturacionOverride = 'Factura'
+            console.log(`[EmailOrderProcessor] 📋 Facturación override: Factura A`)
+        }
+
+        // ── 4c. Decide: auto-create, accumulate, or send to review ────
         const matchedItems = parseResult.items.filter(i => i.matchedProduct)
         const unmatchedItems = parseResult.items.filter(i => !i.matchedProduct)
         const canAutoCreate = clienteId && matchedItems.length > 0 && unmatchedItems.length === 0
@@ -387,9 +481,28 @@ export async function processEmailAsOrder(
 
         if (canAutoCreate) {
             try {
-                const pedidoId = await createOrderFromEmail(db, clienteId!, parseResult.items, emailData, fechaHoy)
-                pedidoIds.push(pedidoId)
-                console.log(`[EmailOrderProcessor] ✅ Auto-created order from "${fileName}": ${pedidoId} (ALL ${matchedItems.length} items perfectly matched)`)
+                // Check if this client has a pending order → accumulate instead of creating new
+                const { data: existingPendiente } = await db
+                    .from('pedidos')
+                    .select('id, numero_pedido')
+                    .eq('cliente_id', clienteId)
+                    .eq('estado', 'pendiente')
+                    .is('eliminado_at', null)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle()
+
+                if (existingPendiente) {
+                    // Accumulate items into existing pending order
+                    console.log(`[EmailOrderProcessor] 📦 Found pending order ${existingPendiente.numero_pedido} for this client — accumulating`)
+                    await accumulateIntoOrder(db, existingPendiente.id, matchedItems, facturacionOverride)
+                    pedidoIds.push(existingPendiente.id)
+                    console.log(`[EmailOrderProcessor] ✅ Accumulated ${matchedItems.length} items into order ${existingPendiente.numero_pedido}`)
+                } else {
+                    const pedidoId = await createOrderFromEmail(db, clienteId!, parseResult.items, emailData, fechaHoy, vendedorId, facturacionOverride)
+                    pedidoIds.push(pedidoId)
+                    console.log(`[EmailOrderProcessor] ✅ Auto-created order from "${fileName}": ${pedidoId}`)
+                }
             } catch (err) {
                 const msg = err instanceof Error ? err.message : 'Error auto-creating'
                 console.error(`[EmailOrderProcessor] Error auto-creating from "${fileName}":`, msg)
@@ -441,7 +554,9 @@ async function createOrderFromEmail(
     clienteId: string,
     items: ParseResult['items'],
     emailData: ParsedEmail,
-    fechaHoy: string
+    fechaHoy: string,
+    vendedorId?: string | null,
+    facturacionOverride?: string | null
 ) {
     // 1. Generate order number (numeric-only)
     const { getNextOrderNumber } = await import('@/lib/utils/next-order-number')
@@ -515,7 +630,7 @@ async function createOrderFromEmail(
     const { data: pedido, error: pedidoError } = await db.from('pedidos').insert({
         numero_pedido: numeroPedido,
         cliente_id: clienteId,
-        vendedor_id: cliente.vendedor_id,
+        vendedor_id: vendedorId || cliente.vendedor_id,
         fecha: fechaHoy,
         estado: 'pendiente',
         subtotal,
@@ -523,6 +638,7 @@ async function createOrderFromEmail(
         total_flete: 0,
         total_impuestos: iva + percepciones,
         total,
+        metodo_facturacion_pedido: facturacionOverride || null,
         observaciones: `Importado automáticamente desde Gmail — Asunto: "${emailData.subject}" — De: ${emailData.from}${unmatchedNote}`,
     }).select().single()
 
@@ -543,6 +659,85 @@ async function createOrderFromEmail(
     if (detailsError) throw detailsError
 
     return pedido.id
+}
+
+// ── Helper: Accumulate items into an existing pending order ──
+async function accumulateIntoOrder(
+    db: ReturnType<typeof getSupabaseAdmin>,
+    pedidoId: string,
+    items: ParseResult['items'],
+    facturacionOverride?: string | null
+) {
+    const matchedItems = items.filter(i => i.matchedProduct && i.matchedProduct.id)
+    if (matchedItems.length === 0) return
+
+    // Fetch current items in the order
+    const { data: existingItems } = await db
+        .from('pedidos_detalle')
+        .select('id, articulo_id, cantidad, precio_base, precio_final, subtotal, precio_costo')
+        .eq('pedido_id', pedidoId)
+
+    // Fetch authoritative prices
+    const matchedIds = matchedItems.map(i => i.matchedProduct.id)
+    const { data: fullArticles } = await db
+        .from('articulos')
+        .select('id, precio_compra, ultimo_costo, precio_venta')
+        .in('id', matchedIds)
+    const articlesMap = new Map(fullArticles?.map(a => [a.id, a]) || [])
+
+    let addedSubtotal = 0
+
+    for (const item of matchedItems) {
+        const p = item.matchedProduct
+        const dbArt = articlesMap.get(p.id) || {} as any
+        const actPrecioBase = dbArt.precio_compra ?? dbArt.precio_venta ?? p.precio_compra ?? 0
+        const actPrecioCosto = dbArt.ultimo_costo ?? dbArt.precio_compra ?? p.ultimo_costo ?? 0
+
+        // Check if this article already exists in the order
+        const existing = (existingItems || []).find((e: any) => e.articulo_id === p.id)
+
+        if (existing) {
+            // Update quantity (accumulate)
+            const newCantidad = existing.cantidad + item.quantity
+            const newSubtotal = newCantidad * actPrecioBase
+            await db.from('pedidos_detalle').update({
+                cantidad: newCantidad,
+                precio_base: actPrecioBase,
+                precio_final: actPrecioBase,
+                subtotal: newSubtotal,
+                precio_costo: actPrecioCosto,
+            }).eq('id', existing.id)
+            addedSubtotal += item.quantity * actPrecioBase
+            console.log(`[AccumulateOrder] Updated ${p.descripcion || p.id}: ${existing.cantidad} → ${newCantidad}`)
+        } else {
+            // Insert new item
+            const itemSubtotal = item.quantity * actPrecioBase
+            await db.from('pedidos_detalle').insert({
+                pedido_id: pedidoId,
+                articulo_id: p.id,
+                cantidad: item.quantity,
+                precio_base: actPrecioBase,
+                precio_final: actPrecioBase,
+                subtotal: itemSubtotal,
+                precio_costo: actPrecioCosto,
+            })
+            addedSubtotal += itemSubtotal
+            console.log(`[AccumulateOrder] Added new: ${p.descripcion || p.id} x${item.quantity}`)
+        }
+    }
+
+    // Recalculate order totals
+    const { data: allItems } = await db
+        .from('pedidos_detalle')
+        .select('subtotal')
+        .eq('pedido_id', pedidoId)
+
+    const newSubtotal = (allItems || []).reduce((s: number, i: any) => s + (Number(i.subtotal) || 0), 0)
+    const updateData: any = { subtotal: newSubtotal, total: newSubtotal }
+    if (facturacionOverride) {
+        updateData.metodo_facturacion_pedido = facturacionOverride
+    }
+    await db.from('pedidos').update(updateData).eq('id', pedidoId)
 }
 
 // ── Helper: Save to imports for manual review ──────────
