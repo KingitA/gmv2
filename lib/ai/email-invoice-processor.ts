@@ -8,6 +8,7 @@ import { analyzeXlsxInvoice } from './claude-xlsx-analyzer'
 import type { AttachmentContent } from './attachment-content-extractor'
 import { getSupabaseAdmin } from './supabase-admin'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { MatchingEngine } from '@/lib/matching/matcher'
 
 const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
 const genAI = new GoogleGenerativeAI(apiKey)
@@ -929,8 +930,6 @@ REGLAS:
         console.log(`[InvoiceProcessor] 📋 Article OCR found ${ocrData.items.length} items`)
 
         // Use the existing MatchingEngine (vectors + embeddings + exact match)
-        const { MatchingEngine } = await import('@/lib/matching/matcher')
-        const { ImportItemRaw } = await import('@/lib/matching/types')
         const engine = new MatchingEngine()
 
         const inserts = []
