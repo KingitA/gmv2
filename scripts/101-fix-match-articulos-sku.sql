@@ -1,4 +1,4 @@
--- Fix: column articulos.codigo_interno does not exist, use sku instead
+-- Fix: column type mismatch - descripcion is varchar(500), not text
 DROP FUNCTION IF EXISTS match_articulos;
 
 CREATE OR REPLACE FUNCTION match_articulos (
@@ -8,8 +8,8 @@ CREATE OR REPLACE FUNCTION match_articulos (
 )
 RETURNS TABLE (
   id uuid,
-  descripcion text,
-  codigo_interno text,
+  descripcion varchar(500),
+  codigo_interno varchar(500),
   similarity float
 )
 LANGUAGE plpgsql
