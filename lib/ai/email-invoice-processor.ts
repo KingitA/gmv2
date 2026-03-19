@@ -870,16 +870,15 @@ async function runArticleLevelOCR(
     console.log(`[InvoiceProcessor] 🔍 Running article-level OCR on ${filename} for recepcion ${recepcionId}`)
 
     const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
-    if (!apiKey) {
-        console.warn('[InvoiceProcessor] No Gemini API key for article OCR')
+    if (!apiKey || !comprobanteId) {
+        console.warn('[InvoiceProcessor] No Gemini API key or comprobanteId for article OCR')
         return
     }
 
     const { GoogleGenerativeAI } = await import('@google/generative-ai')
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const localGenAI = new GoogleGenerativeAI(apiKey)
+    const model = localGenAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
-    // Get proveedor name for context
     const { data: prov } = await db.from('proveedores').select('nombre').eq('id', proveedorId).single()
 
     const base64 = buffer.toString('base64')
@@ -905,10 +904,7 @@ FORMATO JSON ESPERADO:
             "precio_unitario": 150.50,
             "unidad_medida": "UNIDAD o BULTO"
         }
-    ],
-    "total": 99999.99,
-    "numero_comprobante": "0001-00012345",
-    "tipo_comprobante": "FA"
+    ]
 }
 
 REGLAS:
@@ -925,74 +921,85 @@ REGLAS:
 
         const text = result.response.text()
         const jsonMatch = text.match(/\{[\s\S]*\}/)
-        if (!jsonMatch) {
-            console.log('[InvoiceProcessor] Article OCR: no JSON found in response')
-            return
-        }
+        if (!jsonMatch) return
 
         const ocrData = JSON.parse(jsonMatch[0])
-        if (!ocrData.items || ocrData.items.length === 0) {
-            console.log('[InvoiceProcessor] Article OCR: no items found')
-            return
-        }
+        if (!ocrData.items || ocrData.items.length === 0) return
 
         console.log(`[InvoiceProcessor] 📋 Article OCR found ${ocrData.items.length} items`)
 
-        // Save OCR data to the comprobante
-        if (comprobanteId) {
-            await db.from('comprobantes_compra')
-                .update({ datos_ocr: ocrData })
-                .eq('id', comprobanteId)
-            console.log(`[InvoiceProcessor] 💾 Saved OCR data to comprobante ${comprobanteId}`)
-        }
+        // Get OC articles to match against
+        const { data: ocDetalle } = await db.from('ordenes_compra_detalle')
+            .select('articulo_id, articulo:articulos(id, sku, descripcion)')
+            .eq('orden_compra_id', (await db.from('recepciones').select('orden_compra_id').eq('id', recepcionId).single()).data?.orden_compra_id)
 
-        // Get current recepciones_items
-        const { data: recItems } = await db.from('recepciones_items')
-            .select('*, articulo:articulos(id, descripcion, sku, unidades_por_bulto, precio_compra)')
-            .eq('recepcion_id', recepcionId)
+        if (!ocDetalle) return
 
-        if (!recItems) return
-
-        // Match OCR items to recepciones_items by SKU/code
+        // Match OCR items and insert into comprobantes_compra_detalle
+        const inserts = []
         let matched = 0
+
         for (const ocrItem of ocrData.items) {
             const code = String(ocrItem.codigo || '').trim()
             const desc = String(ocrItem.descripcion || '').toLowerCase()
             const qty = Number(ocrItem.cantidad) || 0
             const price = Number(ocrItem.precio_unitario) || 0
 
-            // Try to match by SKU
-            let recItem = recItems.find((ri: any) =>
-                ri.articulo?.sku === code
-            )
+            // Match by SKU first
+            let match = ocDetalle.find((d: any) => d.articulo?.sku === code)
 
-            // Try by description similarity if no SKU match
-            if (!recItem && desc) {
-                recItem = recItems.find((ri: any) => {
-                    const artDesc = (ri.articulo?.descripcion || '').toLowerCase()
+            // Then by description
+            if (!match && desc) {
+                match = ocDetalle.find((d: any) => {
+                    const artDesc = (d.articulo?.descripcion || '').toLowerCase()
                     return artDesc.includes(desc) || desc.includes(artDesc)
                 })
             }
 
-            if (recItem) {
-                // Accumulate: a single article can appear in multiple comprobantes
-                const newDocQty = Number(recItem.cantidad_documentada || 0) + qty
-                await db.from('recepciones_items')
-                    .update({
-                        cantidad_documentada: newDocQty,
-                        precio_documentado: price || recItem.precio_documentado || 0,
-                        precio_real: price || recItem.precio_real || 0,
-                    })
-                    .eq('id', recItem.id)
-
-                // Update the local object so next comprobante accumulates correctly
-                recItem.cantidad_documentada = newDocQty
-                recItem.precio_documentado = price || recItem.precio_documentado
+            if (match) {
+                inserts.push({
+                    comprobante_id: comprobanteId,
+                    articulo_id: match.articulo_id,
+                    cantidad_facturada: qty,
+                    precio_unitario: price,
+                    iva_porcentaje: tipoDocumento === 'ADQ' ? 0 : 21,
+                    tipo_cantidad: ocrItem.unidad_medida?.toLowerCase() === 'bulto' ? 'bulto' : 'unidad',
+                    descripcion_proveedor: ocrItem.descripcion || null,
+                    codigo_proveedor: ocrItem.codigo || null,
+                })
                 matched++
             }
         }
 
-        console.log(`[InvoiceProcessor] ✅ Article OCR matched ${matched}/${ocrData.items.length} items`)
+        if (inserts.length > 0) {
+            const { error } = await db.from('comprobantes_compra_detalle').insert(inserts)
+            if (error) {
+                console.error('[InvoiceProcessor] Error inserting comprobante detalle:', error)
+            } else {
+                console.log(`[InvoiceProcessor] ✅ Saved ${inserts.length} items to comprobantes_compra_detalle`)
+            }
+        }
+
+        // Also update recepciones_items for backward compatibility
+        const { data: recItems } = await db.from('recepciones_items')
+            .select('*, articulo:articulos(id, sku)')
+            .eq('recepcion_id', recepcionId)
+
+        if (recItems) {
+            for (const ins of inserts) {
+                const ri = recItems.find((r: any) => r.articulo_id === ins.articulo_id)
+                if (ri) {
+                    const newDocQty = Number(ri.cantidad_documentada || 0) + ins.cantidad_facturada
+                    await db.from('recepciones_items').update({
+                        cantidad_documentada: newDocQty,
+                        precio_documentado: ins.precio_unitario || ri.precio_documentado || 0,
+                    }).eq('id', ri.id)
+                    ri.cantidad_documentada = newDocQty
+                }
+            }
+        }
+
+        console.log(`[InvoiceProcessor] ✅ Article OCR: matched ${matched}/${ocrData.items.length}`)
 
     } catch (err) {
         console.error('[InvoiceProcessor] Article OCR error:', err)

@@ -61,8 +61,19 @@ export default function VerificacionOCPage() {
 
         const { data: comps } = await supabase
             .from("comprobantes_compra")
-            .select("id, tipo_comprobante, numero_comprobante, total_factura_declarado, datos_ocr")
+            .select("id, tipo_comprobante, numero_comprobante, total_factura_declarado")
             .eq("orden_compra_id", ordenId)
+
+        // Load article-level detail from comprobantes_compra_detalle
+        const compIds = (comps || []).map((c: any) => c.id)
+        let compDetalle: any[] = []
+        if (compIds.length > 0) {
+            const { data: det } = await supabase
+                .from("comprobantes_compra_detalle")
+                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, tipo_cantidad")
+                .in("comprobante_id", compIds)
+            compDetalle = det || []
+        }
 
         const { data: recepciones } = await supabase
             .from("recepciones").select("id").eq("orden_compra_id", ordenId)
@@ -75,33 +86,19 @@ export default function VerificacionOCPage() {
             recItems = data || []
         }
 
-        // Build comprobantes data with article-level info from OCR
+        // Build comprobantes data with article-level info from detalle table
         const compDataList: CompData[] = (comps || []).map((c: any) => {
             const items: Record<string, { cantidad: number; precio: number }> = {}
-            const ocrItems = c.datos_ocr?.items || []
+            const detalleRows = compDetalle.filter((d: any) => d.comprobante_id === c.id)
 
-            // Match OCR items to OC articles by SKU
-            for (const ocrItem of ocrItems) {
-                const code = String(ocrItem.codigo || "").trim()
-                const desc = String(ocrItem.descripcion || "").toLowerCase()
-
-                const match = (ocItems || []).find((oci: any) => {
-                    if (code && oci.articulo?.sku === code) return true
-                    if (desc) {
-                        const artDesc = (oci.articulo?.descripcion || "").toLowerCase()
-                        return artDesc.includes(desc) || desc.includes(artDesc)
-                    }
-                    return false
-                })
-
-                if (match) {
-                    const artId = match.articulo_id
-                    if (items[artId]) {
-                        items[artId].cantidad += Number(ocrItem.cantidad) || 0
+            for (const det of detalleRows) {
+                if (det.articulo_id) {
+                    if (items[det.articulo_id]) {
+                        items[det.articulo_id].cantidad += Number(det.cantidad_facturada) || 0
                     } else {
-                        items[artId] = {
-                            cantidad: Number(ocrItem.cantidad) || 0,
-                            precio: Number(ocrItem.precio_unitario) || 0
+                        items[det.articulo_id] = {
+                            cantidad: Number(det.cantidad_facturada) || 0,
+                            precio: Number(det.precio_unitario) || 0
                         }
                     }
                 }
@@ -269,7 +266,7 @@ export default function VerificacionOCPage() {
                             {comprobantes.map(c => (
                                 <Badge key={c.id} variant="outline" className="text-xs py-1 px-3">
                                     {c.tipo} {c.numero} — {formatCurrency(c.total)}
-                                    {Object.keys(c.items).length > 0 && <span className="ml-1 text-green-600">✓ OCR</span>}
+                                    {Object.keys(c.items).length > 0 && <span className="ml-1 text-green-600">✓ detalle</span>}
                                 </Badge>
                             ))}
                         </div>
