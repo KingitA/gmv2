@@ -95,7 +95,15 @@ export async function POST(request: NextRequest) {
     } catch (error) {
         console.error('[Gmail Webhook] Error processing notification:', error)
         const message = error instanceof Error ? error.message : 'Unknown error'
-        // Return 500 so Pub/Sub retries
+
+        // Auth errors (invalid_grant, token expired) should NOT be retried
+        // Return 200 to stop Pub/Sub from retrying infinitely
+        if (message.includes('invalid_grant') || message.includes('token') || message.includes('401') || message.includes('403')) {
+            console.warn(`[Gmail Webhook] Auth error — not retrying: ${message}`)
+            return NextResponse.json({ error: message, retryable: false }, { status: 200 })
+        }
+
+        // Other errors: return 500 so Pub/Sub retries
         return NextResponse.json({ error: message }, { status: 500 })
     }
 }
