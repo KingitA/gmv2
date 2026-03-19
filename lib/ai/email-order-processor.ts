@@ -462,7 +462,7 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
 
         // ── 4b. Detect forma de facturación override ────
         let facturacionOverride: string | null = null
-        const fullText = (customerClean + ' ' + (emailData.subject || '') + ' ' + (emailData.bodyText || '')).toLowerCase()
+        const fullText = (customerStr + ' ' + (emailData.subject || '') + ' ' + (emailData.bodyText || '')).toLowerCase()
 
         if (fullText.includes('presupuesto') || fullText.includes('remito') || fullText.includes('negro') || fullText.includes('sin iva')) {
             facturacionOverride = 'Presupuesto'
