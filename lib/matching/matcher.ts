@@ -89,7 +89,7 @@ export class MatchingEngine {
                 .from('articulos_proveedores')
                 .select(`
                   articulo_id,
-                  articulos ( id, descripcion, codigo_interno )
+                  articulos ( id, descripcion, sku )
                 `)
                 .eq('proveedor_id', providerId)
                 .eq('codigo_proveedor', item.code)
@@ -99,7 +99,7 @@ export class MatchingEngine {
                 const art = Array.isArray(data.articulos) ? data.articulos[0] : data.articulos;
                 return {
                     sku_id: data.articulo_id,
-                    sku_code: art.codigo_interno,
+                    sku_code: art.sku,
                     sku_name: art.descripcion,
                     score: 1.0,
                     method: 'exact_code',
@@ -113,14 +113,14 @@ export class MatchingEngine {
         if (item.ean) {
             const { data } = await getSupabase()
                 .from('articulos')
-                .select('id, descripcion, codigo_interno')
+                .select('id, descripcion, sku')
                 .eq('codigo_barras', item.ean)
                 .maybeSingle();
 
             if (data) {
                 return {
                     sku_id: data.id,
-                    sku_code: data.codigo_interno,
+                    sku_code: data.sku,
                     sku_name: data.descripcion,
                     score: 1.0,
                     method: 'exact_ean',
@@ -136,7 +136,7 @@ export class MatchingEngine {
                 .from('articulos_proveedores')
                 .select(`
                   articulo_id,
-                  articulos ( id, descripcion, codigo_interno )
+                  articulos ( id, descripcion, sku )
                 `)
                 .eq('proveedor_id', providerId)
                 .eq('descripcion_proveedor_norm', normDesc)
@@ -146,7 +146,7 @@ export class MatchingEngine {
                 const art = Array.isArray(data.articulos) ? data.articulos[0] : data.articulos;
                 return {
                     sku_id: data.articulo_id,
-                    sku_code: art.codigo_interno,
+                    sku_code: art.sku,
                     sku_name: art.descripcion,
                     score: 1.0,
                     method: 'exact_name',
