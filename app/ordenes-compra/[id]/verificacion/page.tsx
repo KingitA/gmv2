@@ -11,21 +11,24 @@ import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, FileText } from "lucid
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 
-interface VerificationRow {
+interface CompData {
+    id: string
+    tipo: string // FA, ADQ, NCA, etc
+    numero: string
+    total: number
+    items: Record<string, { cantidad: number; precio: number }> // keyed by articulo_id
+}
+
+interface VerRow {
     articulo_id: string
     sku: string
     descripcion: string
-    // OC
     cant_oc: number
     precio_oc: number
-    // Factura (documentado)
-    cant_facturada: number
-    precio_factura: number
-    // Depósito (recibido físico)
     cant_recibida: number
-    // Diffs
-    diff_cantidad: number // facturada - recibida
-    diff_precio: number   // precio_factura - precio_oc
+    // Per-comprobante data filled dynamically
+    comp_data: Record<string, { cantidad: number; precio: number }> // keyed by comprobante id
+    cant_total_facturada: number
     status: "ok" | "diferencia_cantidad" | "diferencia_precio" | "faltante" | "ambas"
 }
 
@@ -36,8 +39,8 @@ export default function VerificacionOCPage() {
     const ordenId = params.id as string
 
     const [orden, setOrden] = useState<any>(null)
-    const [rows, setRows] = useState<VerificationRow[]>([])
-    const [comprobantes, setComprobantes] = useState<any[]>([])
+    const [rows, setRows] = useState<VerRow[]>([])
+    const [comprobantes, setComprobantes] = useState<CompData[]>([])
     const [loading, setLoading] = useState(true)
 
     useEffect(() => { if (ordenId) loadAll() }, [ordenId])
@@ -45,93 +48,109 @@ export default function VerificacionOCPage() {
     async function loadAll() {
         setLoading(true)
 
-        // Load OC with proveedor
         const { data: oc } = await supabase
             .from("ordenes_compra")
             .select("*, proveedor:proveedores(nombre, sigla)")
-            .eq("id", ordenId)
-            .single()
+            .eq("id", ordenId).single()
         setOrden(oc)
 
-        // Load OC detail
         const { data: ocItems } = await supabase
             .from("ordenes_compra_detalle")
             .select("*, articulo:articulos(sku, descripcion, unidades_por_bulto)")
             .eq("orden_compra_id", ordenId)
 
-        // Load comprobantes
         const { data: comps } = await supabase
             .from("comprobantes_compra")
-            .select("*")
+            .select("id, tipo_comprobante, numero_comprobante, total_factura_declarado, datos_ocr")
             .eq("orden_compra_id", ordenId)
-        setComprobantes(comps || [])
 
-        // Load recepciones + items for this OC
         const { data: recepciones } = await supabase
-            .from("recepciones")
-            .select("id")
-            .eq("orden_compra_id", ordenId)
+            .from("recepciones").select("id").eq("orden_compra_id", ordenId)
 
         let recItems: any[] = []
         if (recepciones && recepciones.length > 0) {
-            const recIds = recepciones.map(r => r.id)
-            const { data: items } = await supabase
-                .from("recepciones_items")
-                .select("*")
-                .in("recepcion_id", recIds)
-            recItems = items || []
+            const { data } = await supabase
+                .from("recepciones_items").select("*")
+                .in("recepcion_id", recepciones.map(r => r.id))
+            recItems = data || []
         }
 
-        // Build verification rows
-        const tieneFactura = (comps || []).length > 0
+        // Build comprobantes data with article-level info from OCR
+        const compDataList: CompData[] = (comps || []).map((c: any) => {
+            const items: Record<string, { cantidad: number; precio: number }> = {}
+            const ocrItems = c.datos_ocr?.items || []
 
-        const verRows: VerificationRow[] = (ocItems || []).map((item: any) => {
+            // Match OCR items to OC articles by SKU
+            for (const ocrItem of ocrItems) {
+                const code = String(ocrItem.codigo || "").trim()
+                const desc = String(ocrItem.descripcion || "").toLowerCase()
+
+                const match = (ocItems || []).find((oci: any) => {
+                    if (code && oci.articulo?.sku === code) return true
+                    if (desc) {
+                        const artDesc = (oci.articulo?.descripcion || "").toLowerCase()
+                        return artDesc.includes(desc) || desc.includes(artDesc)
+                    }
+                    return false
+                })
+
+                if (match) {
+                    const artId = match.articulo_id
+                    if (items[artId]) {
+                        items[artId].cantidad += Number(ocrItem.cantidad) || 0
+                    } else {
+                        items[artId] = {
+                            cantidad: Number(ocrItem.cantidad) || 0,
+                            precio: Number(ocrItem.precio_unitario) || 0
+                        }
+                    }
+                }
+            }
+
+            return {
+                id: c.id,
+                tipo: c.tipo_comprobante,
+                numero: c.numero_comprobante,
+                total: c.total_factura_declarado,
+                items
+            }
+        })
+        setComprobantes(compDataList)
+
+        // Build rows
+        const verRows: VerRow[] = (ocItems || []).map((item: any) => {
             const artId = item.articulo_id
             const upb = item.articulo?.unidades_por_bulto || 1
+            const cantOC = item.tipo_cantidad === "bulto" ? item.cantidad_pedida * upb : item.cantidad_pedida
+            const precioOC = Number(item.precio_unitario) || 0
 
-            // OC quantities (in units)
-            const cantOC = item.tipo_cantidad === "bulto"
-                ? item.cantidad_pedida * upb
-                : item.cantidad_pedida
-
-            // Reception (physical count)
             const recItem = recItems.find(ri => ri.articulo_id === artId)
             const cantRecibida = recItem ? Number(recItem.cantidad_fisica) : 0
 
-            // Factura (documented) — solo si hay comprobantes vinculados
-            const cantFacturada = (tieneFactura && recItem) ? Number(recItem.cantidad_documentada || 0) : 0
-            const precioOC = Number(item.precio_unitario) || 0
-            const precioFactura = (tieneFactura && recItem) ? Number(recItem.precio_documentado || 0) : 0
+            // Collect per-comprobante data
+            const compDataForArt: Record<string, { cantidad: number; precio: number }> = {}
+            let cantTotalFacturada = 0
 
-            // Diferencias: solo calcular si hay datos reales
-            let diffCant = 0
-            let diffPrecio = 0
-
-            if (tieneFactura && cantFacturada > 0) {
-                diffCant = cantFacturada - cantRecibida
-            } else {
-                // Sin factura: comparar OC vs recibida para ver faltantes
-                diffCant = cantOC - cantRecibida
+            for (const cd of compDataList) {
+                const artData = cd.items[artId]
+                if (artData) {
+                    compDataForArt[cd.id] = artData
+                    // NC/NDA subtract
+                    if (cd.tipo.startsWith("NC") || cd.tipo.startsWith("ND")) {
+                        cantTotalFacturada -= artData.cantidad
+                    } else {
+                        cantTotalFacturada += artData.cantidad
+                    }
+                }
             }
 
-            if (tieneFactura && precioFactura > 0) {
-                diffPrecio = precioFactura - precioOC
-            }
+            const hasComps = compDataList.length > 0
+            const hasOCRData = Object.keys(compDataForArt).length > 0
 
-            let status: VerificationRow["status"] = "ok"
-            const hasDiffCant = Math.abs(diffCant) > 0.01
-            const hasDiffPrecio = Math.abs(diffPrecio) > 0.01
-
-            if (!tieneFactura) {
-                // Sin factura: solo verificar OC vs recepción
-                if (hasDiffCant) status = "diferencia_cantidad"
-                else if (cantRecibida === 0 && cantOC > 0) status = "faltante"
-            } else {
-                if (hasDiffCant && hasDiffPrecio) status = "ambas"
-                else if (hasDiffCant) status = "diferencia_cantidad"
-                else if (hasDiffPrecio) status = "diferencia_precio"
-                else if (cantRecibida === 0 && cantOC > 0) status = "faltante"
-            }
+            let diffCant = hasOCRData ? cantTotalFacturada - cantRecibida : cantOC - cantRecibida
+            let status: VerRow["status"] = "ok"
+            if (Math.abs(diffCant) > 0.01) status = "diferencia_cantidad"
+            if (cantRecibida === 0 && cantOC > 0) status = "faltante"
 
             return {
                 articulo_id: artId,
@@ -139,11 +158,9 @@ export default function VerificacionOCPage() {
                 descripcion: item.articulo?.descripcion || "",
                 cant_oc: cantOC,
                 precio_oc: precioOC,
-                cant_facturada: cantFacturada,
-                precio_factura: precioFactura,
                 cant_recibida: cantRecibida,
-                diff_cantidad: diffCant,
-                diff_precio: diffPrecio,
+                comp_data: compDataForArt,
+                cant_total_facturada: cantTotalFacturada,
                 status
             }
         })
@@ -152,56 +169,41 @@ export default function VerificacionOCPage() {
         setLoading(false)
     }
 
-    async function ajustarPrecioArticulo(articuloId: string, nuevoPrecio: number) {
-        const { error } = await supabase
-            .from("articulos")
-            .update({ precio_compra: nuevoPrecio })
-            .eq("id", articuloId)
-
-        if (!error) {
-            setRows(prev => prev.map(r =>
-                r.articulo_id === articuloId
-                    ? { ...r, precio_oc: nuevoPrecio, diff_precio: 0, status: r.diff_cantidad !== 0 ? "diferencia_cantidad" : "ok" }
-                    : r
-            ))
-        }
+    async function ajustarPrecio(articuloId: string, precio: number) {
+        await supabase.from("articulos").update({ precio_compra: precio }).eq("id", articuloId)
+        alert("Precio actualizado")
     }
 
-    async function enviarDiferenciaCC(row: VerificationRow) {
+    async function enviarDifCC(row: VerRow) {
         if (!orden) return
-        const monto = row.diff_precio * row.cant_recibida
+        const diff = row.cant_total_facturada - row.cant_recibida
+        const monto = diff * row.precio_oc
         await supabase.from("cuenta_corriente_proveedores").insert({
             proveedor_id: orden.proveedor_id,
             tipo_movimiento: "ajuste_precio",
-            monto: monto,
-            descripcion: `Ajuste diferencia precio ${row.sku} — OC ${orden.numero_orden}`,
-            referencia_id: ordenId,
-            referencia_tipo: "orden_compra",
+            monto, descripcion: `Ajuste ${row.sku} — OC ${orden.numero_orden}`,
+            referencia_id: ordenId, referencia_tipo: "orden_compra",
             fecha: new Date().toISOString(),
         })
-        alert(`Ajuste de ${formatCurrency(monto)} enviado a cuenta corriente`)
+        alert(`Ajuste de ${formatCurrency(monto)} enviado a CC`)
     }
 
     async function finalizarOC() {
-        if (!confirm("¿Finalizar esta orden de compra? Verificá que todas las diferencias estén resueltas.")) return
+        if (!confirm("¿Finalizar esta OC?")) return
         await supabase.from("ordenes_compra").update({ estado: "finalizada" }).eq("id", ordenId)
         router.push("/ordenes-compra")
     }
 
+    const tieneComps = comprobantes.length > 0
+    const tieneOCR = comprobantes.some(c => Object.keys(c.items).length > 0)
     const totalOC = rows.reduce((s, r) => s + r.precio_oc * r.cant_oc, 0)
-    const totalFacturado = comprobantes.reduce((s: number, c: any) => s + Number(c.total_factura_declarado || 0), 0)
-    const tieneFactura = comprobantes.length > 0
+    const totalFacturado = comprobantes.reduce((s, c) => s + c.total, 0)
     const itemsOK = rows.filter(r => r.status === "ok").length
     const itemsDiff = rows.filter(r => r.status !== "ok").length
-    const allOK = itemsDiff === 0 && rows.length > 0 && tieneFactura
+    const allOK = itemsDiff === 0 && rows.length > 0 && tieneComps
 
-    const statusIcon = (s: VerificationRow["status"]) => {
-        switch (s) {
-            case "ok": return <CheckCircle2 className="h-4 w-4 text-green-500" />
-            case "faltante": return <XCircle className="h-4 w-4 text-red-500" />
-            default: return <AlertTriangle className="h-4 w-4 text-orange-500" />
-        }
-    }
+    // How many unique comp types (for dynamic columns)
+    const showMultipleComps = comprobantes.length > 1
 
     return (
         <div className="min-h-screen bg-background p-6">
@@ -210,11 +212,9 @@ export default function VerificacionOCPage() {
                     <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
                 </Link>
                 <div className="flex-1">
-                    <h1 className="text-2xl font-bold">
-                        Verificación — {orden?.numero_orden}
-                    </h1>
+                    <h1 className="text-2xl font-bold">Verificación — {orden?.numero_orden}</h1>
                     <p className="text-muted-foreground">
-                        {orden?.proveedor?.sigla || orden?.proveedor?.nombre} — Triple verificación: OC vs Factura vs Depósito
+                        {orden?.proveedor?.sigla || orden?.proveedor?.nombre} — Triple verificación
                     </p>
                 </div>
                 {allOK && (
@@ -224,7 +224,6 @@ export default function VerificacionOCPage() {
                 )}
             </div>
 
-            {/* Summary cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <Card className="border-l-4 border-l-blue-500">
                     <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total OC</CardTitle></CardHeader>
@@ -232,7 +231,7 @@ export default function VerificacionOCPage() {
                 </Card>
                 <Card className="border-l-4 border-l-purple-500">
                     <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Facturado</CardTitle></CardHeader>
-                    <CardContent><div className="text-xl font-bold">{tieneFactura ? formatCurrency(totalFacturado) : <span className="text-muted-foreground">Sin factura</span>}</div></CardContent>
+                    <CardContent><div className="text-xl font-bold">{tieneComps ? formatCurrency(totalFacturado) : <span className="text-muted-foreground">Sin comprobantes</span>}</div></CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-green-500">
                     <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Artículos OK</CardTitle></CardHeader>
@@ -244,17 +243,13 @@ export default function VerificacionOCPage() {
                 </Card>
             </div>
 
-            {/* No factura warning */}
-            {!tieneFactura && (
+            {!tieneComps && (
                 <Card className="mb-6 border-orange-200 bg-orange-50">
                     <CardContent className="py-4 flex items-center gap-3">
-                        <AlertTriangle className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                        <AlertTriangle className="h-5 w-5 text-orange-500" />
                         <div>
-                            <p className="text-sm font-medium text-orange-800">Sin factura vinculada</p>
-                            <p className="text-xs text-orange-600">
-                                Esta OC no tiene comprobantes cargados. Cargá la factura desde "Comprobantes" para completar la verificación triple.
-                                Solo se compara OC vs Depósito.
-                            </p>
+                            <p className="text-sm font-medium text-orange-800">Sin comprobantes vinculados</p>
+                            <p className="text-xs text-orange-600">Cargá la factura para completar la verificación.</p>
                         </div>
                         <Button variant="outline" size="sm" className="ml-auto"
                             onClick={() => router.push(`/ordenes-compra/${ordenId}/comprobantes`)}>
@@ -264,19 +259,17 @@ export default function VerificacionOCPage() {
                 </Card>
             )}
 
-            {/* Comprobantes */}
-            {comprobantes.length > 0 && (
+            {tieneComps && (
                 <Card className="mb-6">
                     <CardHeader className="py-3">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                            <FileText className="h-4 w-4" /> Comprobantes vinculados
-                        </CardTitle>
+                        <CardTitle className="text-sm flex items-center gap-2"><FileText className="h-4 w-4" /> Comprobantes vinculados</CardTitle>
                     </CardHeader>
                     <CardContent className="py-2">
                         <div className="flex gap-3 flex-wrap">
                             {comprobantes.map(c => (
                                 <Badge key={c.id} variant="outline" className="text-xs py-1 px-3">
-                                    {c.tipo_comprobante} {c.numero_comprobante} — {formatCurrency(c.total_factura_declarado)}
+                                    {c.tipo} {c.numero} — {formatCurrency(c.total)}
+                                    {Object.keys(c.items).length > 0 && <span className="ml-1 text-green-600">✓ OCR</span>}
                                 </Badge>
                             ))}
                         </div>
@@ -284,78 +277,91 @@ export default function VerificacionOCPage() {
                 </Card>
             )}
 
-            {/* Verification table */}
             <Card>
-                <CardContent className="p-0">
+                <CardContent className="p-0 overflow-x-auto">
                     <Table>
                         <TableHeader>
                             <TableRow className="bg-muted/30">
-                                <TableHead className="w-[40px]"></TableHead>
+                                <TableHead className="w-[30px]"></TableHead>
                                 <TableHead>SKU</TableHead>
                                 <TableHead>Descripción</TableHead>
                                 <TableHead className="text-right">Cant. OC</TableHead>
                                 <TableHead className="text-right">Cant. Recibida</TableHead>
-                                <TableHead className="text-right">Cant. Facturada</TableHead>
+                                {/* Dynamic columns per comprobante */}
+                                {comprobantes.map(c => (
+                                    <TableHead key={`h-cant-${c.id}`} className="text-right text-xs">
+                                        Cant. {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
+                                    </TableHead>
+                                ))}
+                                {showMultipleComps && (
+                                    <TableHead className="text-right font-bold">Total Fact.</TableHead>
+                                )}
                                 <TableHead className="text-right">Precio OC</TableHead>
-                                <TableHead className="text-right">Precio Factura</TableHead>
+                                {comprobantes.map(c => (
+                                    <TableHead key={`h-pre-${c.id}`} className="text-right text-xs">
+                                        Precio {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
+                                    </TableHead>
+                                ))}
                                 <TableHead className="text-center">Estado</TableHead>
                                 <TableHead className="text-right">Acciones</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {loading ? (
-                                <TableRow><TableCell colSpan={10} className="text-center h-20">Cargando...</TableCell></TableRow>
+                                <TableRow><TableCell colSpan={20} className="text-center h-20">Cargando...</TableCell></TableRow>
                             ) : rows.length === 0 ? (
-                                <TableRow><TableCell colSpan={10} className="text-center h-20 text-muted-foreground">Sin artículos en esta OC</TableCell></TableRow>
+                                <TableRow><TableCell colSpan={20} className="text-center h-20 text-muted-foreground">Sin artículos</TableCell></TableRow>
                             ) : rows.map(row => {
-                                const hasPriceDiff = Math.abs(row.diff_precio) > 0.01
-                                const hasQtyDiff = Math.abs(row.diff_cantidad) > 0.01
+                                const hasDiff = row.status !== "ok"
 
                                 return (
-                                    <TableRow key={row.articulo_id} className={row.status !== "ok" ? "bg-orange-50/50" : ""}>
-                                        <TableCell>{statusIcon(row.status)}</TableCell>
+                                    <TableRow key={row.articulo_id} className={hasDiff ? "bg-orange-50/50" : ""}>
+                                        <TableCell>
+                                            {row.status === "ok" ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                                : row.status === "faltante" ? <XCircle className="h-4 w-4 text-red-500" />
+                                                    : <AlertTriangle className="h-4 w-4 text-orange-500" />}
+                                        </TableCell>
                                         <TableCell className="font-mono text-xs">{row.sku}</TableCell>
-                                        <TableCell className="text-sm max-w-[200px] truncate">{row.descripcion}</TableCell>
+                                        <TableCell className="text-sm max-w-[180px] truncate">{row.descripcion}</TableCell>
                                         <TableCell className="text-right font-mono">{row.cant_oc}</TableCell>
-                                        <TableCell className={`text-right font-mono ${hasQtyDiff ? "text-orange-600 font-bold" : ""}`}>
+                                        <TableCell className={`text-right font-mono ${hasDiff ? "text-orange-600 font-bold" : ""}`}>
                                             {row.cant_recibida}
                                         </TableCell>
-                                        <TableCell className="text-right font-mono">
-                                            {row.cant_facturada > 0 ? row.cant_facturada : <span className="text-muted-foreground">—</span>}
-                                        </TableCell>
+                                        {/* Cant per comprobante */}
+                                        {comprobantes.map(c => {
+                                            const d = row.comp_data[c.id]
+                                            return (
+                                                <TableCell key={`c-${c.id}`} className="text-right font-mono text-sm">
+                                                    {d ? d.cantidad : <span className="text-muted-foreground">—</span>}
+                                                </TableCell>
+                                            )
+                                        })}
+                                        {showMultipleComps && (
+                                            <TableCell className="text-right font-mono font-bold">
+                                                {row.cant_total_facturada > 0 ? row.cant_total_facturada : <span className="text-muted-foreground">—</span>}
+                                            </TableCell>
+                                        )}
                                         <TableCell className="text-right font-mono">{formatCurrency(row.precio_oc)}</TableCell>
-                                        <TableCell className={`text-right font-mono ${hasPriceDiff ? "text-orange-600 font-bold" : ""}`}>
-                                            {row.precio_factura > 0 ? formatCurrency(row.precio_factura) : <span className="text-muted-foreground">—</span>}
-                                            {hasPriceDiff && (
-                                                <div className="text-[10px] text-orange-500">
-                                                    {row.diff_precio > 0 ? "+" : ""}{formatCurrency(row.diff_precio)}
-                                                </div>
-                                            )}
-                                        </TableCell>
+                                        {/* Precio per comprobante */}
+                                        {comprobantes.map(c => {
+                                            const d = row.comp_data[c.id]
+                                            return (
+                                                <TableCell key={`p-${c.id}`} className="text-right font-mono text-sm">
+                                                    {d && d.precio > 0 ? formatCurrency(d.precio) : <span className="text-muted-foreground">—</span>}
+                                                </TableCell>
+                                            )
+                                        })}
                                         <TableCell className="text-center">
-                                            <Badge variant={row.status === "ok" ? "default" : "destructive"}
-                                                className={row.status === "ok" ? "bg-green-500 text-xs" : "bg-orange-500 text-xs"}>
-                                                {row.status === "ok" ? "OK"
-                                                    : row.status === "faltante" ? "Faltante"
-                                                        : row.status === "diferencia_precio" ? "Δ Precio"
-                                                            : row.status === "diferencia_cantidad" ? "Δ Cant."
-                                                                : "Δ Ambas"}
+                                            <Badge className={`text-xs ${row.status === "ok" ? "bg-green-500" : "bg-orange-500"}`}>
+                                                {row.status === "ok" ? "OK" : row.status === "faltante" ? "Faltante" : "Δ Cant."}
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            {hasPriceDiff && (
-                                                <div className="flex gap-1 justify-end">
-                                                    <Button variant="outline" size="sm" className="text-xs h-7"
-                                                        onClick={() => ajustarPrecioArticulo(row.articulo_id, row.precio_factura)}
-                                                        title="Actualizar precio del artículo al precio de factura">
-                                                        Ajustar precio
-                                                    </Button>
-                                                    <Button variant="outline" size="sm" className="text-xs h-7 text-orange-600"
-                                                        onClick={() => enviarDiferenciaCC(row)}
-                                                        title="Enviar diferencia a cuenta corriente">
-                                                        Dif. a CC
-                                                    </Button>
-                                                </div>
+                                            {hasDiff && (
+                                                <Button variant="outline" size="sm" className="text-xs h-7 text-orange-600"
+                                                    onClick={() => enviarDifCC(row)}>
+                                                    Dif. a CC
+                                                </Button>
                                             )}
                                         </TableCell>
                                     </TableRow>

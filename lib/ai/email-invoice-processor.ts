@@ -502,7 +502,7 @@ export async function processEmailAsInvoice(
                 const attData = sourceFile ? attachmentBuffers.get(sourceFile) : null
                 if (attData) {
                     try {
-                        await runArticleLevelOCR(db, recepcion.id, proveedorId, attData.buffer, attData.filename, attData.mimeType, tipoComp)
+                        await runArticleLevelOCR(db, recepcion.id, proveedorId, attData.buffer, attData.filename, attData.mimeType, tipoComp, comprobante.id)
                     } catch (ocrErr) {
                         console.error('[InvoiceProcessor] Article OCR error (main):', ocrErr)
                     }
@@ -520,7 +520,7 @@ export async function processEmailAsInvoice(
                     try {
                         console.log(`[InvoiceProcessor] Processing additional: ${addTipo} ${addInv.numero_comprobante}`)
                         // Create comprobante_compra for the additional invoice too
-                        await db.from('comprobantes_compra').insert({
+                        const { data: addComp } = await db.from('comprobantes_compra').insert({
                             orden_compra_id: pendingOC.id,
                             tipo_comprobante: addTipo,
                             numero_comprobante: addInv.numero_comprobante || `GMAIL-ADD-${Date.now()}`,
@@ -531,16 +531,16 @@ export async function processEmailAsInvoice(
                             descuento_fuera_factura: 0,
                             estado: 'pendiente_recepcion',
                             diferencia_centavos: 0,
-                        })
+                        }).select('id').single()
                         // Create CC movement
                         await createCCMovement(db, proveedorId, addInv, addTipo, fechaHoy)
                         // Article-level OCR for additional
-                        if (recepcion) {
+                        if (recepcion && addComp) {
                             const addFile = (addInv as any)?._sourceFilename
                             const addAtt = addFile ? attachmentBuffers.get(addFile) : null
                             if (addAtt) {
                                 try {
-                                    await runArticleLevelOCR(db, recepcion.id, proveedorId, addAtt.buffer, addAtt.filename, addAtt.mimeType, addTipo)
+                                    await runArticleLevelOCR(db, recepcion.id, proveedorId, addAtt.buffer, addAtt.filename, addAtt.mimeType, addTipo, addComp.id)
                                 } catch (ocrErr) {
                                     console.error('[InvoiceProcessor] Article OCR error (additional):', ocrErr)
                                 }
@@ -864,7 +864,8 @@ async function runArticleLevelOCR(
     buffer: Buffer,
     filename: string,
     mimeType: string,
-    tipoDocumento: string
+    tipoDocumento: string,
+    comprobanteId?: string
 ) {
     console.log(`[InvoiceProcessor] 🔍 Running article-level OCR on ${filename} for recepcion ${recepcionId}`)
 
@@ -936,6 +937,14 @@ REGLAS:
         }
 
         console.log(`[InvoiceProcessor] 📋 Article OCR found ${ocrData.items.length} items`)
+
+        // Save OCR data to the comprobante
+        if (comprobanteId) {
+            await db.from('comprobantes_compra')
+                .update({ datos_ocr: ocrData })
+                .eq('id', comprobanteId)
+            console.log(`[InvoiceProcessor] 💾 Saved OCR data to comprobante ${comprobanteId}`)
+        }
 
         // Get current recepciones_items
         const { data: recItems } = await db.from('recepciones_items')
