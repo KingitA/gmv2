@@ -6,6 +6,16 @@
 import { downloadAttachment, downloadDriveFileAndExport, type ParsedEmail } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
 import { processOrder, processOrderText, processOrderTextMulti, type ParseResult } from '@/lib/actions/ai-order-import'
+import Anthropic from '@anthropic-ai/sdk'
+
+// Lazy singleton for Claude
+let _anthropic: Anthropic | null = null
+function getAnthropicClient(): Anthropic {
+    if (!_anthropic) {
+        _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+    }
+    return _anthropic
+}
 
 export interface OrderProcessingResult {
     processed: boolean
@@ -346,126 +356,106 @@ export async function processEmailAsOrder(
     for (const { result: parseResult, fileName, customerOverride } of allParseResults) {
         console.log(`[EmailOrderProcessor] Processing "${fileName}" (${parseResult.items.length} items)...`)
 
-        // ── 4a. Identify client ──────────────────────────
+        // ── 4a. Identify client using AI ──────────────────
         let clienteId: string | null = null
 
-        // The customer string from parsing (xlsx header, Gemini, body override)
         const customerStr = customerOverride || parseResult.candidateCustomer || ''
-        const customerClean = customerStr.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/cliente:?\s*/i, '')
 
-        console.log(`[EmailOrderProcessor] Customer string: "${customerClean}" (vendedor: ${vendedorId ? 'yes' : 'no'})`)
+        console.log(`[EmailOrderProcessor] Customer hint: "${customerStr}" (vendedor: ${vendedorId ? 'yes' : 'no'})`)
 
-        // If sender is a vendedor, search ONLY in their clients first
-        if (vendedorId && vendedorClientes.length > 0 && customerClean) {
-            // Priority 1: codigo_cliente exact match
-            const byCode = vendedorClientes.find(c =>
-                c.codigo_cliente && c.codigo_cliente === customerClean
-            )
-            if (byCode) {
-                clienteId = byCode.id
-                console.log(`[EmailOrderProcessor] ✅ Matched by codigo_cliente in vendedor's clients: ${byCode.nombre}`)
-            }
-
-            // Priority 2: mail match
-            if (!clienteId) {
-                const byMail = vendedorClientes.find(c =>
-                    c.mail && c.mail.toLowerCase().includes(customerClean)
-                )
-                if (byMail) {
-                    clienteId = byMail.id
-                    console.log(`[EmailOrderProcessor] ✅ Matched by mail in vendedor's clients: ${byMail.nombre}`)
-                }
-            }
-
-            // Priority 3: unified search across nombre + direccion + localidad
-            // Longer words are more specific and weigh more
-            // More matching words = exponentially better
-            if (!clienteId) {
-                const searchParts = customerClean.split(/\s+/).filter((p: string) => p.length >= 3)
-                let bestMatch: any = null
-                let bestScore = 0
-                let bestMatchCount = 0
-
-                for (const c of vendedorClientes) {
-                    const normNombre = (c.nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    const normDir = (c.direccion || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    const normLoc = (c.localidad || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                    const allText = `${normNombre} ${normDir} ${normLoc}`
-
-                    let score = 0
-                    let matchCount = 0
-
-                    for (const p of searchParts) {
-                        // Longer words are more specific → weigh more
-                        const wordWeight = Math.max(1, p.length - 2)
-
-                        if (normNombre.includes(p)) {
-                            score += wordWeight * 3  // nombre is strongest signal
-                            matchCount++
-                        } else if (normDir.includes(p)) {
-                            score += wordWeight * 2
-                            matchCount++
-                        } else if (normLoc.includes(p)) {
-                            score += wordWeight * 3  // localidad is very strong
-                            matchCount++
-                        }
-                    }
-
-                    // Bonus for matching multiple words (exponential: 2 words >> 1 word)
-                    if (matchCount > 1) score *= matchCount
-
-                    if (score > bestScore || (score === bestScore && matchCount > bestMatchCount)) {
-                        bestScore = score
-                        bestMatch = c
-                        bestMatchCount = matchCount
-                    }
-                }
-
-                if (bestMatch && bestScore >= 4 && bestMatchCount >= 1) {
-                    clienteId = bestMatch.id
-                    console.log(`[EmailOrderProcessor] ✅ Matched in vendedor's clients: ${bestMatch.nombre} (dir: ${bestMatch.direccion}, loc: ${bestMatch.localidad}, score: ${bestScore}, words: ${bestMatchCount})`)
+        // FAST PATH: Try exact email match first (no AI needed)
+        if (!clienteId && emailData.from) {
+            const senderEmail = emailData.from.toLowerCase().trim()
+            // Only match if sender is NOT our own company accounts
+            if (!senderEmail.includes('megasur.clientes') && !senderEmail.includes('megasur.proveedores')) {
+                const { data: clienteByMail } = await db
+                    .from('clientes')
+                    .select('id, nombre')
+                    .ilike('mail', senderEmail)
+                    .eq('activo', true)
+                    .limit(1)
+                    .maybeSingle()
+                if (clienteByMail) {
+                    clienteId = clienteByMail.id
+                    console.log(`[EmailOrderProcessor] ✅ Client matched by email: ${clienteByMail.nombre}`)
                 }
             }
         }
 
-        // If not found via vendedor (or no vendedor), fall back to general search
-        // BUT: if the sender IS a vendedor and we didn't find the client in their list,
-        // don't search broadly — it's better to go to review than assign to a wrong client
-        if (!clienteId && !vendedorId) {
-            if (parseResult.candidateCustomerData) {
-                clienteId = parseResult.candidateCustomerData.id
-            }
+        // AI PATH: Use Claude to identify the client
+        if (!clienteId && customerStr) {
+            try {
+                // Build the list of candidate clients
+                let candidateClients: any[] = []
 
-            if (!clienteId && customerClean) {
-                const { data: clienteByName } = await db
-                    .from('clientes')
-                    .select('id')
-                    .or(`razon_social.ilike.%${customerClean}%,nombre.ilike.%${customerClean}%`)
-                    .limit(1)
-                    .maybeSingle()
-                if (clienteByName) clienteId = clienteByName.id
-            }
+                if (vendedorId && vendedorClientes.length > 0) {
+                    // Vendedor: search only in their clients
+                    candidateClients = vendedorClientes
+                } else {
+                    // No vendedor: load all active clients (limited fields to keep prompt small)
+                    const { data: allClients } = await db
+                        .from('clientes')
+                        .select('id, nombre, codigo_cliente, direccion, localidad, mail')
+                        .eq('activo', true)
+                        .limit(500)
+                    candidateClients = allClients || []
+                }
 
-            if (!clienteId && emailData.from) {
-                const { data: clienteByMail } = await db
-                    .from('clientes')
-                    .select('id')
-                    .eq('mail', emailData.from)
-                    .maybeSingle()
-                if (clienteByMail) clienteId = clienteByMail.id
-            }
+                if (candidateClients.length > 0) {
+                    // Format client list for Claude
+                    const clientList = candidateClients.map(c =>
+                        `ID:${c.id} | Código:${c.codigo_cliente || '-'} | Nombre:${c.nombre || '-'} | Dirección:${c.direccion || '-'} | Localidad:${c.localidad || '-'} | Mail:${c.mail || '-'}`
+                    ).join('\n')
 
-            if (!clienteId && emailData.fromName) {
-                const { data: clienteByFromName } = await db
-                    .from('clientes')
-                    .select('id')
-                    .or(`razon_social.ilike.%${emailData.fromName}%,nombre.ilike.%${emailData.fromName}%`)
-                    .limit(1)
-                    .maybeSingle()
-                if (clienteByFromName) clienteId = clienteByFromName.id
+                    const prompt = `Sos un asistente de una distribuidora. Necesito que identifiques a qué cliente se refiere un pedido.
+
+TEXTO DEL PEDIDO/CLIENTE: "${customerStr}"
+ASUNTO DEL EMAIL: "${emailData.subject || ''}"
+${vendedorId ? 'NOTA: Este pedido viene de un vendedor/viajante, los clientes listados son SOLO los de ese vendedor.' : ''}
+
+LISTA DE CLIENTES:
+${clientList}
+
+INSTRUCCIONES:
+- Analizá el texto y pensá como una persona: si dice "chino av 25 de mayo pringles" se refiere a un cliente que tiene una dirección en "25 de mayo" y está en la localidad "pringles" o "coronel pringles"
+- Si dice un apellido como "chinchurreta jorge", buscá un cliente que tenga ese apellido
+- Si dice un nombre de calle o localidad, fijate en la dirección y localidad de los clientes
+- Si dice un código numérico, fijate en el código de cliente
+- Si no estás seguro de cuál es, respondé "NONE"
+
+Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificarlo. Nada más.`
+
+                    const client = getAnthropicClient()
+                    const response = await client.messages.create({
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 100,
+                        messages: [{ role: 'user', content: prompt }],
+                    })
+
+                    const aiResponse = (response.content[0] as any).text?.trim() || ''
+                    console.log(`[EmailOrderProcessor] 🧠 Claude identified client: "${aiResponse}"`)
+
+                    // Validate the response is a valid UUID from our list
+                    if (aiResponse && aiResponse !== 'NONE') {
+                        const cleanId = aiResponse.replace(/[^a-f0-9-]/g, '').trim()
+                        const found = candidateClients.find(c => c.id === cleanId)
+                        if (found) {
+                            clienteId = found.id
+                            console.log(`[EmailOrderProcessor] ✅ AI matched client: ${found.nombre} (${found.direccion}, ${found.localidad})`)
+                        } else {
+                            console.log(`[EmailOrderProcessor] ⚠️ AI returned ID not in candidate list: ${aiResponse}`)
+                        }
+                    }
+                }
+            } catch (aiErr) {
+                console.error(`[EmailOrderProcessor] AI client identification error:`, aiErr)
             }
-        } else if (!clienteId && vendedorId) {
-            console.log(`[EmailOrderProcessor] ⚠️ Vendedor identified but client not found in their list — sending to review`)
+        }
+
+        // Also try candidateCustomerData from the parsing phase (backup)
+        if (!clienteId && parseResult.candidateCustomerData) {
+            clienteId = parseResult.candidateCustomerData.id
+            console.log(`[EmailOrderProcessor] ✅ Using candidateCustomerData from parsing: ${parseResult.candidateCustomerData.razon_social}`)
         }
 
         if (clienteId) clienteFound = true
