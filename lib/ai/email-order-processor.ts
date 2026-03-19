@@ -283,6 +283,7 @@ export async function processEmailAsOrder(
     let vendedorId: string | null = null
     let vendedorClientes: any[] = []
 
+    // Try direct sender first
     if (emailData.from) {
         const senderEmail = emailData.from.toLowerCase().trim()
         const { data: vendedor } = await db
@@ -295,17 +296,51 @@ export async function processEmailAsOrder(
         if (vendedor) {
             vendedorId = vendedor.id
             console.log(`[EmailOrderProcessor] 🧑‍💼 Sender is vendedor: ${vendedor.nombre} (${vendedor.email})`)
-
-            // Load all clients of this vendedor
-            const { data: clientes } = await db
-                .from('clientes')
-                .select('id, nombre, razon_social, direccion, localidad, mail, codigo_cliente')
-                .eq('vendedor_id', vendedor.id)
-                .eq('activo', true)
-
-            vendedorClientes = clientes || []
-            console.log(`[EmailOrderProcessor] 📋 Vendedor has ${vendedorClientes.length} clients`)
         }
+    }
+
+    // If sender is the company account (forward), look for original sender in body
+    if (!vendedorId && emailData.bodyText) {
+        // Extract forwarded sender email from patterns like:
+        // "De: momarsilva@gmail.com" or "From: Name <email>" or "---------- Forwarded message ----------\nDe: Name <email>"
+        const forwardPatterns = [
+            /(?:De|From)\s*:\s*(?:[^<]*<)?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?/i,
+            /(?:forwarded|reenviado)[\s\S]*?(?:De|From)\s*:\s*(?:[^<]*<)?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?/i,
+        ]
+
+        for (const pattern of forwardPatterns) {
+            const match = emailData.bodyText.match(pattern)
+            if (match && match[1]) {
+                const forwardedEmail = match[1].toLowerCase().trim()
+                // Don't match our own accounts
+                if (forwardedEmail.includes('megasur.clientes') || forwardedEmail.includes('megasur.proveedores')) continue
+
+                const { data: vendedor } = await db
+                    .from('vendedores')
+                    .select('id, nombre, email')
+                    .ilike('email', forwardedEmail)
+                    .limit(1)
+                    .maybeSingle()
+
+                if (vendedor) {
+                    vendedorId = vendedor.id
+                    console.log(`[EmailOrderProcessor] 🧑‍💼 Forwarded sender is vendedor: ${vendedor.nombre} (${vendedor.email}) — extracted from body`)
+                    break
+                }
+            }
+        }
+    }
+
+    // Load vendedor's clients
+    if (vendedorId) {
+        const { data: clientes } = await db
+            .from('clientes')
+            .select('id, nombre, razon_social, direccion, localidad, mail, codigo_cliente')
+            .eq('vendedor_id', vendedorId)
+            .eq('activo', true)
+
+        vendedorClientes = clientes || []
+        console.log(`[EmailOrderProcessor] 📋 Vendedor has ${vendedorClientes.length} clients`)
     }
 
     for (const { result: parseResult, fileName, customerOverride } of allParseResults) {
