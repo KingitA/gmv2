@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
-import { Paperclip } from 'lucide-react'
+import { Paperclip, Trash2 } from 'lucide-react'
 
 // ── Hardcoded accounts ─────────────────────────────
 const ACCOUNT_CLIENTES = 'megasur.clientes@gmail.com'
@@ -45,6 +45,7 @@ const CLIENTES_FILTERS = [
   { id: 'pedido', label: 'Pedidos' },
   { id: 'pago', label: 'Pagos' },
   { id: 'reclamo', label: 'Reclamos / Consultas' },
+  { id: 'trash', label: '🗑️ Papelera' },
 ]
 
 const PROVEEDORES_FILTERS = [
@@ -52,6 +53,7 @@ const PROVEEDORES_FILTERS = [
   { id: 'cambio_precio', label: 'Cambios de Precios' },
   { id: 'factura', label: 'Facturas' },
   { id: 'reclamo', label: 'Reclamos / Consultas' },
+  { id: 'trash', label: '🗑️ Papelera' },
 ]
 
 function classMatchesFilter(classification: string, filter: string): boolean {
@@ -96,9 +98,33 @@ const CLS_ICON: Record<string, string> = {
 
 export function DashboardFeed() {
   const [emails, setEmails] = useState<EmailItem[]>([])
+  const [trashedEmails, setTrashedEmails] = useState<EmailItem[]>([])
   const [loading, setLoading] = useState(true)
   const [activeBandeja, setActiveBandeja] = useState<Bandeja>('proveedores')
   const [activeFilter, setActiveFilter] = useState('todos')
+
+  useEffect(() => { loadEmails() }, [])
+
+  const moveToTrash = async (emailId: string) => {
+    const supabase = createClient()
+    await supabase.from('ai_emails').update({ classification: 'trash' }).eq('id', emailId)
+    const item = emails.find(e => e.id === emailId)
+    if (item) {
+      setTrashedEmails(prev => [item, ...prev])
+      setEmails(prev => prev.filter(e => e.id !== emailId))
+    }
+  }
+
+  const restoreFromTrash = async (emailId: string) => {
+    const supabase = createClient()
+    // Restore to 'otro' classification
+    await supabase.from('ai_emails').update({ classification: 'otro' }).eq('id', emailId)
+    const item = trashedEmails.find(e => e.id === emailId)
+    if (item) {
+      setEmails(prev => [item, ...prev].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()))
+      setTrashedEmails(prev => prev.filter(e => e.id !== emailId))
+    }
+  }
 
   useEffect(() => { loadEmails() }, [])
 
@@ -110,7 +136,7 @@ export function DashboardFeed() {
     const { data } = await supabase
       .from('ai_emails')
       .select('id, subject, from_name, from_email, to_email, classification, ai_summary, created_at, ai_email_attachments(id)')
-      .neq('classification', 'spam')
+      .not('classification', 'in', '("spam","trash")')
       .order('created_at', { ascending: false })
       .limit(100)
 
@@ -134,6 +160,29 @@ export function DashboardFeed() {
     }
 
     setEmails(items)
+
+    // Load trashed emails
+    const { data: trashed } = await supabase
+      .from('ai_emails')
+      .select('id, subject, from_name, from_email, to_email, classification, ai_summary, created_at, ai_email_attachments(id)')
+      .eq('classification', 'trash')
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    if (trashed) {
+      const trashItems: EmailItem[] = trashed.map((e: any) => ({
+        id: e.id,
+        subject: e.subject || 'Sin asunto',
+        fromName: e.from_name || e.from_email || 'Desconocido',
+        classification: 'trash',
+        summary: e.ai_summary || '',
+        time: e.created_at,
+        hasAttachments: Array.isArray(e.ai_email_attachments) ? e.ai_email_attachments.length > 0 : false,
+        bandeja: detectBandeja(e.to_email),
+      }))
+      setTrashedEmails(trashItems)
+    }
+
     setLoading(false)
   }
 
@@ -141,11 +190,15 @@ export function DashboardFeed() {
     : activeBandeja === 'proveedores' ? PROVEEDORES_FILTERS
     : []
 
-  const filtered = emails.filter(e => {
-    if (e.bandeja !== activeBandeja) return false
-    if (activeBandeja === 'personal') return true
-    return classMatchesFilter(e.classification, activeFilter)
-  })
+  const filtered = activeFilter === 'trash'
+    ? trashedEmails.filter(e => e.bandeja === activeBandeja)
+    : emails.filter(e => {
+        if (e.bandeja !== activeBandeja) return false
+        if (activeBandeja === 'personal') return true
+        return classMatchesFilter(e.classification, activeFilter)
+      })
+
+  const trashCount = trashedEmails.filter(e => e.bandeja === activeBandeja).length
 
   const counts = {
     proveedores: emails.filter(e => e.bandeja === 'proveedores').length,
@@ -209,11 +262,12 @@ export function DashboardFeed() {
           filtered.map(email => {
             const icon = CLS_ICON[email.classification] || CLS_ICON.otro
             const isPersonal = email.bandeja === 'personal'
+            const isTrashView = activeFilter === 'trash'
 
             const inner = (
-              <div className={`flex gap-3 px-4 py-2.5 border-b border-neutral-50 hover:bg-neutral-50/50 transition-colors items-start ${email.href ? 'cursor-pointer' : ''}`}>
+              <div className={`flex gap-3 px-4 py-2.5 border-b border-neutral-50 hover:bg-neutral-50/50 transition-colors items-start ${email.href && !isTrashView ? 'cursor-pointer' : ''}`}>
                 <div className="w-7 h-7 rounded-lg bg-neutral-100 flex items-center justify-center text-sm flex-shrink-0 mt-0.5">
-                  {isPersonal ? '📧' : icon}
+                  {isPersonal ? '📧' : isTrashView ? '🗑️' : icon}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -225,13 +279,32 @@ export function DashboardFeed() {
                     <div className="text-[11px] text-neutral-400 truncate">{email.summary}</div>
                   )}
                 </div>
-                <span className="text-[10px] text-neutral-400 whitespace-nowrap flex-shrink-0 mt-0.5">{timeAgo(email.time)}</span>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <span className="text-[10px] text-neutral-400 whitespace-nowrap">{timeAgo(email.time)}</span>
+                  {isTrashView ? (
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); restoreFromTrash(email.id) }}
+                      className="ml-1 p-1 rounded hover:bg-blue-50 text-blue-400 hover:text-blue-600 transition-colors"
+                      title="Restaurar"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4" /></svg>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveToTrash(email.id) }}
+                      className="ml-1 p-1 rounded hover:bg-red-50 text-neutral-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Enviar a papelera"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             )
 
-            return email.href
-              ? <Link key={email.id} href={email.href} className="block">{inner}</Link>
-              : <div key={email.id}>{inner}</div>
+            return email.href && !isTrashView
+              ? <Link key={email.id} href={email.href} className="block group">{inner}</Link>
+              : <div key={email.id} className="group">{inner}</div>
           })
         )}
       </div>

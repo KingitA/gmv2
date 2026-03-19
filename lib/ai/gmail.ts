@@ -331,6 +331,30 @@ function parseGmailMessage(message: gmail_v1.Schema$Message): ParsedEmail | null
         findAttachments(message.payload)
     }
 
+    // Also extract Google Drive links from email body HTML
+    // These appear when someone shares a file as a link, not as a smart attachment
+    if (bodyHtml) {
+        const driveRegex = /https?:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/g
+        const docsRegex = /https?:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/g
+        const seenIds = new Set(driveAttachments.map(d => d.fileId))
+
+        for (const regex of [driveRegex, docsRegex]) {
+            let match
+            while ((match = regex.exec(bodyHtml as string)) !== null) {
+                const fileId = match[1]
+                if (!seenIds.has(fileId)) {
+                    seenIds.add(fileId)
+                    console.log(`[Gmail] Found Drive link in body: ${fileId}`)
+                    driveAttachments.push({
+                        fileId,
+                        filename: `Drive_Link_${fileId}`,
+                        mimeType: 'application/vnd.google-apps.drive-sdk'
+                    })
+                }
+            }
+        }
+    }
+
     // Parse date
     const dateHeader = getHeader('Date')
     let receivedAt: string | null = null
