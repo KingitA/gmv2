@@ -9,6 +9,8 @@ import type { AttachmentContent } from './attachment-content-extractor'
 import { getSupabaseAdmin } from './supabase-admin'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { MatchingEngine } from '@/lib/matching/matcher'
+import { processWithGemini } from '@/lib/services/ocr'
+import { resolveFactorConversion, type UnidadFactura } from '@/lib/services/conversion'
 
 const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
 const genAI = new GoogleGenerativeAI(apiKey)
@@ -857,7 +859,8 @@ function mapTipoComprobante(tipo: string | null): string {
 }
 
 // ── Article-level OCR for invoices linked to OC ───────────
-// Uses Gemini to extract items from the PDF and updates recepciones_items
+// Uses the EXISTING OCR pipeline: processWithGemini + processOCRData
+// Same code that works when uploading files manually from /ordenes-compra/[id]/comprobantes
 async function runArticleLevelOCR(
     db: ReturnType<typeof getSupabaseAdmin>,
     recepcionId: string,
@@ -870,131 +873,120 @@ async function runArticleLevelOCR(
 ) {
     console.log(`[InvoiceProcessor] 🔍 Running article-level OCR on ${filename} for recepcion ${recepcionId}`)
 
-    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
-    if (!apiKey || !comprobanteId) {
-        console.warn('[InvoiceProcessor] No Gemini API key or comprobanteId for article OCR')
-        return
-    }
-
-    const { GoogleGenerativeAI } = await import('@google/generative-ai')
-    const localGenAI = new GoogleGenerativeAI(apiKey)
-    const model = localGenAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-
-    const { data: prov } = await db.from('proveedores').select('nombre').eq('id', proveedorId).single()
-
-    const base64 = buffer.toString('base64')
-    const geminiMime = mimeType.startsWith('image/') ? mimeType : 'application/pdf'
-
-    const prompt = `Sos un asistente experto en procesamiento de documentos comerciales.
-        
-CONTEXTO:
-- Proveedor: ${prov?.nombre || "Desconocido"}
-- Tipo de documento: ${tipoDocumento}
-
-TAREA:
-Extraé los ítems de este documento en formato JSON.
-Priorizá la exactitud de los códigos y descripciones.
-
-FORMATO JSON ESPERADO:
-{
-    "items": [
-        {
-            "codigo": "SKU o código del artículo",
-            "descripcion": "Nombre del producto",
-            "cantidad": 10,
-            "precio_unitario": 150.50,
-            "unidad_medida": "UNIDAD o BULTO"
-        }
-    ]
-}
-
-REGLAS:
-- Si no ves un código, poné null
-- cantidad debe ser numérico
-- precio_unitario es el precio por unidad (no por bulto)
-- Respondé SOLO con JSON válido, sin comentarios`
-
     try {
-        const result = await model.generateContent([
-            { inlineData: { mimeType: geminiMime, data: base64 } },
-            { text: prompt }
-        ])
+        // Get proveedor info
+        const { data: prov } = await db.from('proveedores').select('nombre, default_unidad_factura').eq('id', proveedorId).single()
 
-        const text = result.response.text()
-        const jsonMatch = text.match(/\{[\s\S]*\}/)
-        if (!jsonMatch) return
+        // Convert Buffer to File (processWithGemini expects a File)
+        const uint8 = new Uint8Array(buffer)
+        const file = new File([uint8], filename, { type: mimeType })
 
-        const ocrData = JSON.parse(jsonMatch[0])
-        if (!ocrData.items || ocrData.items.length === 0) return
+        // 1. Run OCR with the SAME function used in /api/recepciones/[id]/ocr
+        const context = {
+            proveedorNombre: prov?.nombre || 'Desconocido',
+            tipoDocumento: tipoDocumento
+        }
+        const ocrResult = await processWithGemini(file, context)
 
-        console.log(`[InvoiceProcessor] 📋 Article OCR found ${ocrData.items.length} items`)
+        if (!ocrResult.items || ocrResult.items.length === 0) {
+            console.log(`[InvoiceProcessor] Article OCR: no items found in ${filename}`)
+            return
+        }
 
-        // Use the existing MatchingEngine (vectors + embeddings + exact match)
+        console.log(`[InvoiceProcessor] 📋 OCR extracted ${ocrResult.items.length} items from ${filename}`)
+
+        // 2. Save document in recepciones_documentos (same as manual upload)
+        await db.from('recepciones_documentos').insert({
+            recepcion_id: recepcionId,
+            tipo_documento: tipoDocumento,
+            url_imagen: `gmail://${filename}`,
+            datos_ocr: ocrResult,
+            procesado: true,
+        })
+
+        // 3. Match items and update recepciones_items using the EXISTING MatchingEngine
         const engine = new MatchingEngine()
+        const { data: currentItems } = await db.from('recepciones_items')
+            .select('*, articulo:articulos(id, descripcion, sku, rubro, categoria, unidades_por_bulto, precio_compra)')
+            .eq('recepcion_id', recepcionId)
 
-        const inserts = []
+        if (!currentItems) return
+
         let matched = 0
+        const detalleInserts = []
 
-        for (const ocrItem of ocrData.items) {
+        for (const item of ocrResult.items) {
             const rawItem = {
-                description: ocrItem.descripcion || '',
-                code: ocrItem.codigo || undefined,
-                ean: ocrItem.ean || undefined,
-                price: ocrItem.precio_unitario,
-            } as any
+                description: item.descripcion || item.descripcion_ocr,
+                code: item.codigo,
+                ean: item.ean,
+                price: item.precio_unitario,
+                ...item
+            }
 
             const matchResult = await engine.resolveItem(rawItem, proveedorId)
 
             if (matchResult.status === 'matched' && matchResult.bestCandidate?.sku_id) {
-                const qty = Number(ocrItem.cantidad) || 0
-                const price = Number(ocrItem.precio_unitario) || 0
+                const articuloId = matchResult.bestCandidate.sku_id
+                const matchedItem = currentItems.find((ci: any) => ci.articulo_id === articuloId)
 
-                inserts.push({
-                    comprobante_id: comprobanteId,
-                    articulo_id: matchResult.bestCandidate.sku_id,
-                    cantidad_facturada: qty,
-                    precio_unitario: price,
-                    iva_porcentaje: tipoDocumento === 'ADQ' ? 0 : 21,
-                    tipo_cantidad: ocrItem.unidad_medida?.toLowerCase() === 'bulto' ? 'bulto' : 'unidad',
-                    descripcion_proveedor: ocrItem.descripcion || null,
-                    codigo_proveedor: ocrItem.codigo || null,
-                })
-                matched++
-                console.log(`[InvoiceProcessor] ✅ Matched: "${ocrItem.descripcion}" → ${matchResult.bestCandidate.sku_name} (${matchResult.bestCandidate.method}, ${(matchResult.bestCandidate.score * 100).toFixed(0)}%)`)
-            } else {
-                console.log(`[InvoiceProcessor] ⚠️ No match for: ${ocrItem.codigo} "${ocrItem.descripcion}" (best: ${matchResult.bestCandidate?.score?.toFixed(2) || 'none'})`)
-            }
-        }
+                if (matchedItem) {
+                    const articulo = matchedItem.articulo
+                    const conversion = resolveFactorConversion({
+                        proveedorDefaultUnidad: prov?.default_unidad_factura,
+                        articuloUnidadesPorBulto: articulo?.unidades_por_bulto,
+                        apUnidadFactura: null,
+                        apFactorConversion: null,
+                        descripcionOcr: item.descripcion || item.descripcion_ocr,
+                        ocrUnidadMedida: item.unidad_medida,
+                        precioDocumento: item.precio_unitario,
+                        costoBaseArticulo: articulo?.precio_compra
+                    })
 
-        if (inserts.length > 0) {
-            const { error } = await db.from('comprobantes_compra_detalle').insert(inserts)
-            if (error) {
-                console.error('[InvoiceProcessor] Error inserting comprobante detalle:', error)
-            } else {
-                console.log(`[InvoiceProcessor] ✅ Saved ${inserts.length} items to comprobantes_compra_detalle`)
-            }
-        }
+                    const cantidadBase = (item.cantidad || 0) * conversion.factor
 
-        // Also update recepciones_items for backward compatibility
-        const { data: recItems } = await db.from('recepciones_items')
-            .select('*, articulo:articulos(id, sku)')
-            .eq('recepcion_id', recepcionId)
-
-        if (recItems) {
-            for (const ins of inserts) {
-                const ri = recItems.find((r: any) => r.articulo_id === ins.articulo_id)
-                if (ri) {
-                    const newDocQty = Number(ri.cantidad_documentada || 0) + ins.cantidad_facturada
+                    // Update recepciones_items (same as processOCRData does)
                     await db.from('recepciones_items').update({
-                        cantidad_documentada: newDocQty,
-                        precio_documentado: ins.precio_unitario || ri.precio_documentado || 0,
-                    }).eq('id', ri.id)
-                    ri.cantidad_documentada = newDocQty
+                        cantidad_documentada: Number(matchedItem.cantidad_documentada || 0) + cantidadBase,
+                        precio_documentado: item.precio_unitario || 0,
+                        precio_real: item.precio_unitario || matchedItem.precio_oc || 0,
+                        cantidad_base: cantidadBase,
+                        factor_conversion: conversion.factor,
+                        conversion_source: conversion.source,
+                        requires_review: conversion.requiresReview
+                    }).eq('id', matchedItem.id)
+
+                    // Update local copy for accumulation
+                    matchedItem.cantidad_documentada = Number(matchedItem.cantidad_documentada || 0) + cantidadBase
+
+                    // Also save to comprobantes_compra_detalle for per-comprobante view
+                    if (comprobanteId) {
+                        detalleInserts.push({
+                            comprobante_id: comprobanteId,
+                            articulo_id: articuloId,
+                            cantidad_facturada: cantidadBase,
+                            precio_unitario: item.precio_unitario || 0,
+                            iva_porcentaje: tipoDocumento === 'ADQ' ? 0 : 21,
+                            tipo_cantidad: item.unidad_medida?.toLowerCase() === 'bulto' ? 'bulto' : 'unidad',
+                            descripcion_proveedor: item.descripcion || null,
+                            codigo_proveedor: item.codigo || null,
+                        })
+                    }
+
+                    matched++
+                    console.log(`[InvoiceProcessor] ✅ ${item.descripcion} → ${matchResult.bestCandidate.sku_name} (${matchResult.bestCandidate.method}, ${(matchResult.bestCandidate.score * 100).toFixed(0)}%)`)
                 }
+            } else {
+                console.log(`[InvoiceProcessor] ⚠️ No match: ${item.codigo} "${item.descripcion}"`)
             }
         }
 
-        console.log(`[InvoiceProcessor] ✅ Article OCR: matched ${matched}/${ocrData.items.length}`)
+        // Save comprobante detalle
+        if (detalleInserts.length > 0) {
+            await db.from('comprobantes_compra_detalle').insert(detalleInserts)
+        }
+
+        console.log(`[InvoiceProcessor] ✅ Article OCR complete: ${matched}/${ocrResult.items.length} matched`)
 
     } catch (err) {
         console.error('[InvoiceProcessor] Article OCR error:', err)
