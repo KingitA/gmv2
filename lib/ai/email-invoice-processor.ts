@@ -928,87 +928,31 @@ REGLAS:
 
         console.log(`[InvoiceProcessor] 📋 Article OCR found ${ocrData.items.length} items`)
 
-        // Get OC articles to match against
-        const { data: recData } = await db.from('recepciones').select('orden_compra_id').eq('id', recepcionId).single()
-        const ocId = recData?.orden_compra_id
-        if (!ocId) return
+        // Use the existing MatchingEngine (vectors + embeddings + exact match)
+        const { MatchingEngine } = await import('@/lib/matching/matcher')
+        const { ImportItemRaw } = await import('@/lib/matching/types')
+        const engine = new MatchingEngine()
 
-        const { data: ocDetalle } = await db.from('ordenes_compra_detalle')
-            .select('articulo_id, cantidad_pedida, precio_unitario, articulo:articulos(id, sku, descripcion, unidades_por_bulto)')
-            .eq('orden_compra_id', ocId)
-
-        if (!ocDetalle) return
-
-        // Load existing articulos_proveedores mappings
-        const { data: apMappings } = await db.from('articulos_proveedores')
-            .select('articulo_id, codigo_proveedor, descripcion_proveedor')
-            .eq('proveedor_id', proveedorId)
-
-        const apByCode: Record<string, string> = {}
-        for (const ap of (apMappings || [])) {
-            if (ap.codigo_proveedor) apByCode[ap.codigo_proveedor] = ap.articulo_id
-        }
-
-        // Match OCR items and insert into comprobantes_compra_detalle
         const inserts = []
-        const newMappings = []
         let matched = 0
 
         for (const ocrItem of ocrData.items) {
-            const code = String(ocrItem.codigo || '').trim()
-            const desc = String(ocrItem.descripcion || '').toLowerCase()
-            const qty = Number(ocrItem.cantidad) || 0
-            const price = Number(ocrItem.precio_unitario) || 0
+            const rawItem = {
+                description: ocrItem.descripcion || '',
+                code: ocrItem.codigo || undefined,
+                ean: ocrItem.ean || undefined,
+                price: ocrItem.precio_unitario,
+            } as any
 
-            let articuloId: string | null = null
+            const matchResult = await engine.resolveItem(rawItem, proveedorId)
 
-            // 1. Match by codigo_proveedor in articulos_proveedores
-            if (code && apByCode[code]) {
-                articuloId = apByCode[code]
-            }
+            if (matchResult.status === 'matched' && matchResult.bestCandidate?.sku_id) {
+                const qty = Number(ocrItem.cantidad) || 0
+                const price = Number(ocrItem.precio_unitario) || 0
 
-            // 2. Match by SKU in OC articles
-            if (!articuloId && code) {
-                const m = ocDetalle.find((d: any) => d.articulo?.sku === code)
-                if (m) articuloId = m.articulo_id
-            }
-
-            // 3. Match by quantity + price against OC (strongest signal when codes don't match)
-            if (!articuloId && qty > 0) {
-                const m = ocDetalle.find((d: any) => {
-                    const ocQty = d.cantidad_pedida
-                    const ocPrice = Number(d.precio_unitario) || 0
-                    // Match if quantity AND price match closely
-                    return Math.abs(ocQty - qty) < 0.01 && Math.abs(ocPrice - price) < 1
-                })
-                if (m) articuloId = m.articulo_id
-            }
-
-            // 4. Match by description keywords
-            if (!articuloId && desc) {
-                const descWords = desc.split(/\s+/).filter(w => w.length > 3)
-                let bestMatch: any = null
-                let bestScore = 0
-
-                for (const d of ocDetalle) {
-                    const artDesc = (d.articulo?.descripcion || '').toLowerCase()
-                    const artWords = artDesc.split(/\s+/).filter((w: string) => w.length > 3)
-                    const commonWords = descWords.filter(w => artWords.some((aw: string) => aw.includes(w) || w.includes(aw)))
-                    const score = commonWords.length / Math.max(descWords.length, 1)
-
-                    if (score > bestScore && score >= 0.3) {
-                        bestScore = score
-                        bestMatch = d
-                    }
-                }
-
-                if (bestMatch) articuloId = bestMatch.articulo_id
-            }
-
-            if (articuloId) {
                 inserts.push({
                     comprobante_id: comprobanteId,
-                    articulo_id: articuloId,
+                    articulo_id: matchResult.bestCandidate.sku_id,
                     cantidad_facturada: qty,
                     precio_unitario: price,
                     iva_porcentaje: tipoDocumento === 'ADQ' ? 0 : 21,
@@ -1017,21 +961,9 @@ REGLAS:
                     codigo_proveedor: ocrItem.codigo || null,
                 })
                 matched++
-
-                // Create mapping in articulos_proveedores for future matches
-                if (code && !apByCode[code]) {
-                    newMappings.push({
-                        proveedor_id: proveedorId,
-                        articulo_id: articuloId,
-                        codigo_proveedor: code,
-                        descripcion_proveedor: ocrItem.descripcion || null,
-                        descripcion_proveedor_norm: desc,
-                        confianza: 'auto_ocr',
-                    })
-                    apByCode[code] = articuloId // Prevent duplicate mappings in same run
-                }
+                console.log(`[InvoiceProcessor] ✅ Matched: "${ocrItem.descripcion}" → ${matchResult.bestCandidate.sku_name} (${matchResult.bestCandidate.method}, ${(matchResult.bestCandidate.score * 100).toFixed(0)}%)`)
             } else {
-                console.log(`[InvoiceProcessor] ⚠️ No match for: ${code} "${ocrItem.descripcion}" qty=${qty} price=${price}`)
+                console.log(`[InvoiceProcessor] ⚠️ No match for: ${ocrItem.codigo} "${ocrItem.descripcion}" (best: ${matchResult.bestCandidate?.score?.toFixed(2) || 'none'})`)
             }
         }
 
@@ -1041,16 +973,6 @@ REGLAS:
                 console.error('[InvoiceProcessor] Error inserting comprobante detalle:', error)
             } else {
                 console.log(`[InvoiceProcessor] ✅ Saved ${inserts.length} items to comprobantes_compra_detalle`)
-            }
-        }
-
-        // Save new articulos_proveedores mappings for future matching
-        if (newMappings.length > 0) {
-            const { error: mapError } = await db.from('articulos_proveedores').insert(newMappings)
-            if (mapError) {
-                console.error('[InvoiceProcessor] Error saving mappings:', mapError)
-            } else {
-                console.log(`[InvoiceProcessor] 🔗 Created ${newMappings.length} new articulos_proveedores mappings`)
             }
         }
 
