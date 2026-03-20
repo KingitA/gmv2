@@ -56,9 +56,17 @@ type Pedido = {
   observaciones: string | null
   prioridad: number
   condicion_entrega: string
+  metodo_facturacion_pedido: string | null
   clientes?: {
     nombre_razon_social: string
     cuit: string
+    direccion: string | null
+    localidad: string | null
+    metodo_facturacion: string | null
+    lista_precio_id: string | null
+    listas_precio?: {
+      nombre: string
+    } | null
   }
   vendedores?: {
     nombre: string
@@ -200,7 +208,7 @@ export default function ClientesPedidosPage() {
         .from("pedidos")
         .select(`
           *,
-          clientes (nombre_razon_social, cuit),
+          clientes (nombre_razon_social, cuit, direccion, localidad, metodo_facturacion, lista_precio_id, listas_precio:lista_precio_id (nombre)),
           vendedores (nombre),
           viajes (nombre, fecha)
         `)
@@ -471,11 +479,17 @@ export default function ClientesPedidosPage() {
               <div class="info-box">
                 <div class="label">Cliente</div>
                 <div class="value">${pedido.clientes?.nombre_razon_social}</div>
-                <div class="label" style="margin-top: 8px;">CUIT</div>
-                <div class="value">${pedido.clientes?.cuit}</div>
+                <div class="label" style="margin-top: 8px;">Dirección</div>
+                <div class="value">${pedido.clientes?.direccion || "—"}</div>
+                <div class="label" style="margin-top: 8px;">Localidad</div>
+                <div class="value">${pedido.clientes?.localidad || "—"}</div>
               </div>
               <div class="info-box">
-                <div class="label">Vendedor</div>
+                <div class="label">Lista de Precios</div>
+                <div class="value">${(pedido.clientes as any)?.listas_precio?.nombre || "Sin lista"}</div>
+                <div class="label" style="margin-top: 8px;">Forma de Facturación</div>
+                <div class="value">${pedido.metodo_facturacion_pedido || pedido.clientes?.metodo_facturacion || "—"}${pedido.metodo_facturacion_pedido && pedido.metodo_facturacion_pedido !== pedido.clientes?.metodo_facturacion ? ' <span style="color: #e67e22; font-size: 11px;">(modificado en pedido)</span>' : ''}</div>
+                <div class="label" style="margin-top: 8px;">Vendedor</div>
                 <div class="value">${pedido.vendedores?.nombre || "Sin asignar"}</div>
                 <div class="label" style="margin-top: 8px;">Estado</div>
                 <div class="value">${pedido.estado.toUpperCase()}</div>
@@ -889,8 +903,27 @@ export default function ClientesPedidosPage() {
                       <p className="font-medium">{pedidoSeleccionado.clientes?.nombre_razon_social}</p>
                     </div>
                     <div>
-                      <Label className="text-muted-foreground">CUIT</Label>
-                      <p>{pedidoSeleccionado.clientes?.cuit}</p>
+                      <Label className="text-muted-foreground">Dirección</Label>
+                      <p>{pedidoSeleccionado.clientes?.direccion || "—"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Localidad</Label>
+                      <p>{pedidoSeleccionado.clientes?.localidad || "—"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Lista de Precios</Label>
+                      <p>{pedidoSeleccionado.clientes?.listas_precio?.nombre || "Sin lista asignada"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Forma de Facturación</Label>
+                      <p className="font-medium">
+                        {pedidoSeleccionado.metodo_facturacion_pedido
+                          || pedidoSeleccionado.clientes?.metodo_facturacion
+                          || "—"}
+                        {pedidoSeleccionado.metodo_facturacion_pedido && pedidoSeleccionado.metodo_facturacion_pedido !== pedidoSeleccionado.clientes?.metodo_facturacion && (
+                          <span className="text-xs text-orange-500 ml-2">(modificado en pedido)</span>
+                        )}
+                      </p>
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Vendedor</Label>

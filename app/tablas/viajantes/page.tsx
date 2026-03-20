@@ -17,6 +17,7 @@ type Vendedor = {
   id: string
   nombre: string
   email: string | null
+  emails_alternativos: string | null
   telefono: string | null
   comision_bazar_limpieza: number
   comision_perfumeria: number
@@ -60,11 +61,21 @@ export default function ViajantesPage() {
 
     const vendedorData = {
       nombre: formData.nombre,
-      email: formData.email || null,
+      email: null as string | null,
+      emails_alternativos: null as string | null,
       telefono: formData.telefono || null,
       comision_bazar_limpieza: Number.parseFloat(formData.comision_bazar_limpieza),
       comision_perfumeria: Number.parseFloat(formData.comision_perfumeria),
       activo: true,
+    }
+
+    // Split email field: first email = primary, rest = alternativos
+    const emailParts = formData.email.trim().split(/\s+/).filter(Boolean)
+    if (emailParts.length > 0) {
+      vendedorData.email = emailParts[0]
+      if (emailParts.length > 1) {
+        vendedorData.emails_alternativos = emailParts.slice(1).join(' ')
+      }
     }
 
     if (editando) {
@@ -90,9 +101,11 @@ export default function ViajantesPage() {
 
   const handleEdit = (vendedor: Vendedor) => {
     setEditando(vendedor)
+    // Combine primary + alternative emails into one field for display
+    const allEmails = [vendedor.email, vendedor.emails_alternativos].filter(Boolean).join(' ')
     setFormData({
       nombre: vendedor.nombre,
-      email: vendedor.email || "",
+      email: allEmails,
       telefono: vendedor.telefono || "",
       comision_bazar_limpieza: vendedor.comision_bazar_limpieza.toString(),
       comision_perfumeria: vendedor.comision_perfumeria.toString(),
@@ -165,13 +178,15 @@ export default function ViajantesPage() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email">Email(s)</Label>
                     <Input
                       id="email"
-                      type="email"
+                      type="text"
+                      placeholder="principal@mail.com alternativo@mail.com"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     />
+                    <p className="text-xs text-muted-foreground mt-1">Separar múltiples emails con espacio</p>
                   </div>
                   <div>
                     <Label htmlFor="telefono">Teléfono</Label>
@@ -246,7 +261,7 @@ export default function ViajantesPage() {
                   vendedores.map((vendedor) => (
                     <TableRow key={vendedor.id}>
                       <TableCell className="font-medium">{vendedor.nombre}</TableCell>
-                      <TableCell>{vendedor.email || "-"}</TableCell>
+                      <TableCell>{[vendedor.email, vendedor.emails_alternativos].filter(Boolean).join(' ') || "-"}</TableCell>
                       <TableCell>{vendedor.telefono || "-"}</TableCell>
                       <TableCell>{vendedor.comision_bazar_limpieza}%</TableCell>
                       <TableCell>{vendedor.comision_perfumeria}%</TableCell>

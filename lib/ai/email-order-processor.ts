@@ -293,15 +293,38 @@ export async function processEmailAsOrder(
     let vendedorId: string | null = null
     let vendedorClientes: any[] = []
 
+    // Helper: search vendedor by email (checks both 'email' and 'emails_alternativos')
+    async function findVendedorByEmail(emailToFind: string): Promise<{ id: string; nombre: string; email: string } | null> {
+        const emailLower = emailToFind.toLowerCase().trim()
+        // Try primary email first
+        const { data: vendedor } = await db
+            .from('vendedores')
+            .select('id, nombre, email, emails_alternativos')
+            .ilike('email', emailLower)
+            .limit(1)
+            .maybeSingle()
+
+        if (vendedor) return vendedor
+
+        // Try alternative emails (space-separated in emails_alternativos)
+        const { data: allVendedores } = await db
+            .from('vendedores')
+            .select('id, nombre, email, emails_alternativos')
+            .not('emails_alternativos', 'is', null)
+
+        if (allVendedores) {
+            for (const v of allVendedores) {
+                const altEmails = (v.emails_alternativos || '').toLowerCase().split(/\s+/).filter(Boolean)
+                if (altEmails.includes(emailLower)) return v
+            }
+        }
+        return null
+    }
+
     // Try direct sender first
     if (emailData.from) {
         const senderEmail = emailData.from.toLowerCase().trim()
-        const { data: vendedor } = await db
-            .from('vendedores')
-            .select('id, nombre, email')
-            .ilike('email', senderEmail)
-            .limit(1)
-            .maybeSingle()
+        const vendedor = await findVendedorByEmail(senderEmail)
 
         if (vendedor) {
             vendedorId = vendedor.id
@@ -325,12 +348,7 @@ export async function processEmailAsOrder(
                 // Don't match our own accounts
                 if (forwardedEmail.includes('megasur.clientes') || forwardedEmail.includes('megasur.proveedores')) continue
 
-                const { data: vendedor } = await db
-                    .from('vendedores')
-                    .select('id, nombre, email')
-                    .ilike('email', forwardedEmail)
-                    .limit(1)
-                    .maybeSingle()
+                const vendedor = await findVendedorByEmail(forwardedEmail)
 
                 if (vendedor) {
                     vendedorId = vendedor.id
@@ -470,12 +488,16 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
         let facturacionOverride: string | null = null
         const fullText = (customerStr + ' ' + (emailData.subject || '') + ' ' + (emailData.bodyText || '')).toLowerCase()
 
-        if (fullText.includes('presupuesto') || fullText.includes('remito') || fullText.includes('negro') || fullText.includes('sin iva')) {
+        // Check "Final/Mixto" FIRST (more specific patterns)
+        if (fullText.includes('mitad y mitad') || fullText.includes('factura y presupuesto') || fullText.includes('factura y remito') || fullText.match(/\bfinal\b/)) {
+            facturacionOverride = 'Final'
+            console.log(`[EmailOrderProcessor] 📋 Facturación override: Final (Mixto)`)
+        } else if (fullText.includes('presupuesto') || fullText.includes('remito') || fullText.includes('negro') || fullText.includes('sin iva')) {
             facturacionOverride = 'Presupuesto'
             console.log(`[EmailOrderProcessor] 📋 Facturación override: Presupuesto`)
-        } else if (fullText.includes('con iva') || fullText.match(/factura\s*a\b/) || fullText.includes('responsable inscripto')) {
+        } else if (fullText.includes('con iva') || fullText.match(/factura\s*a\b/) || fullText.includes('facturado') || fullText.includes('responsable inscripto')) {
             facturacionOverride = 'Factura'
-            console.log(`[EmailOrderProcessor] 📋 Facturación override: Factura A`)
+            console.log(`[EmailOrderProcessor] 📋 Facturación override: Factura`)
         }
 
         // ── 4c. Decide: auto-create, accumulate, or send to review ────

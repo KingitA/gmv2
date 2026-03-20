@@ -66,24 +66,30 @@ export interface ExtractedInvoiceData {
   subtotal_neto: number | null
   iva: number | null
   percepciones: number | null
-  concepto: 'producto' | 'servicio' | 'mixto' | null
+  concepto: 'producto' | 'servicio' | 'transporte' | 'mixto' | null
 }
 
 export interface ExtractedPaymentData {
   monto: number | null
   fecha_pago: string | null
-  medio_pago: string | null  // transferencia, efectivo, cheque, etc.
+  medio_pago: string | null  // transferencia, efectivo, cheque, echeq, deposito, etc.
   numero_referencia: string | null
   banco: string | null
   cbu_origen: string | null
   pagador_nombre: string | null
   pagador_tipo: 'cliente' | 'proveedor' | 'desconocido'
+  // Cheque/echeq fields
+  tipo_cheque?: string | null  // 'echeq' | 'cheque fisico'
+  numero_cheque?: string | null
+  fecha_emision?: string | null
+  plaza?: string | null  // localidad del cheque
 }
 
 export interface ExtractedPriceListData {
   proveedor_nombre: string | null
   fecha_vigencia: string | null
   porcentaje_aumento: number | null
+  porcentaje_descuento: number | null
   productos_mencionados: number   // count of products mentioned
   es_lista_completa: boolean      // full list vs. partial update
 }
@@ -148,7 +154,7 @@ export interface XlsxInvoiceAnalysis {
   subtotal_neto: number | null
   iva: number | null
   percepciones: number | null
-  concepto: 'producto' | 'servicio' | 'mixto' | null
+  concepto: 'producto' | 'servicio' | 'transporte' | 'mixto' | null
   items: XlsxInvoiceLineItem[]
 }
 
