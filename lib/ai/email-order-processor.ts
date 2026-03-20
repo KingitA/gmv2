@@ -417,11 +417,17 @@ LISTA DE CLIENTES:
 ${clientList}
 
 INSTRUCCIONES:
-- Analizá el texto y pensá como una persona: si dice "chino av 25 de mayo pringles" se refiere a un cliente que tiene una dirección en "25 de mayo" y está en la localidad "pringles" o "coronel pringles"
-- Si dice un apellido como "chinchurreta jorge", buscá un cliente que tenga ese apellido
-- Si dice un nombre de calle o localidad, fijate en la dirección y localidad de los clientes
-- Si dice un código numérico, fijate en el código de cliente
-- Si no estás seguro de cuál es, respondé "NONE"
+- Analizá el texto y pensá como una persona: El texto puede (o no) contener: direccion (con o sin numero), localidad, nombre del cliente, codigo del cliente.
+Es muy probable que NO se indique cual es la referencia. Van a pasar los pedidos como "sarmiento", debemos interpretar y filtrar los clientes que coincidan.
+Hay que entender si el pedido lo envia un viajante, que zonas atiende ese viajante o que pedidos envia recurrentemente
+- Necesitamos saber a que se refiere y priorizar en este orden:
+1) si se refiere a codigo de cliente debemos vincularlo al cliente con ese codigo.
+2) si se refiere al nombre del cliente debemos vincularlo al cliente con ese nombre. OJO este puede contener nombres repetidos con otros clientes, por ejemplo "huang chao yan" no es el mismo cliente que "huang chao li"
+en caso de encontrar mas de una coincidencia debemos filtrar esos clientes, y buscar otras coincidencias como si el pedido lo envia el viajante, a que localidad pertenece, direccion y cualquier otra dato que obtengamos.
+3) si se refiere a la calle del cliente, debemos buscar dentro de los clientes de este vendedor, que cliente corresponde a esa calle, puede haber uno o mas clientes en la misma direccion, si indica el numero debemos indicar el mas aproximado.
+Por ejemplo, envian "zapiola 1200" y tenemos un cliente del mismo vendedor en "zapiola 2450" y "zapiola 1250", claramente se refiere a zapiola 1250.
+- OJO, hay localidades como necochea, que las calles son numeros, entonces nos van a pasar el pedido como "CHINO 59", en este caso, si se que el viajante que envia el mail vende en necochea, veo que todos los pedidos que esta pasando el viajante son de necochea, es obvio que si dice "chino 59" esta hablando de la calle del cliente y no el codigo.
+-Para ayudar en contexto, debemos analizar que pedidos esta enviando un viajante, si esta pasando pedidos de necochea ya sea en el mismo mail o en los ultimos que envio, es obvio que esta atendiendo la zona necochea, hay que darle prioridad a esa zona
 
 Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificarlo. Nada más.`
 
