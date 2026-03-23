@@ -7,9 +7,10 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical, Plus, Upload, History, ArrowLeft } from "lucide-react"
+import { Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical, Plus, Upload, History, ArrowLeft, ArrowUpDown } from "lucide-react"
 import { ImportPriceListDialog } from "@/components/articulos/ImportPriceListDialog"
 import * as XLSX from "xlsx"
+import Link from "next/link"
 import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
 
 interface LP { id:string; nombre:string; codigo:string; recargo_limpieza_bazar:number; recargo_perfumeria_negro:number; recargo_perfumeria_blanco:number }
@@ -221,6 +222,12 @@ export default function ArticulosUnificadoPage() {
         <div><h1 className="text-xl font-bold">Artículos</h1><p className="text-xs text-muted-foreground">{tc} artículos · Pág {pg+1}/{tp||1}</p></div>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" className="h-7 text-xs" onClick={()=>setShowNewArt(true)}><Plus className="h-3 w-3 mr-1"/>Nuevo</Button>
+          <Link href="/articulos/actualizaciones">
+            <Button variant="outline" size="sm" className="h-7 text-xs">
+              <ArrowUpDown className="h-3 w-3 mr-1"/>Actualizaciones
+              {pendingCount>0&&<span className="ml-1 bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{pendingCount}</span>}
+            </Button>
+          </Link>
           <Button variant="outline" size="sm" className="h-7 text-xs" onClick={openImports}>
             <History className="h-3 w-3 mr-1"/>Importaciones
             {pendingCount>0&&<span className="ml-1 bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{pendingCount}</span>}
