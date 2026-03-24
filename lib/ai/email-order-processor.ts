@@ -232,12 +232,13 @@ export async function processEmailAsOrder(
                 console.log(`[EmailOrderProcessor] Drive download failed or no items found for ${fileId}, creating agenda event.`)
                 try {
                     const driveUrl = `https://docs.google.com/spreadsheets/d/${fileId}`
-                    await db.from('agenda').insert({
-                        title: `Pedido mediante enlace/adjunto de Drive`,
-                        description: `Remitente: ${emailData.from}\nAsunto: ${emailData.subject}\n\nEnlace: ${driveUrl}`,
-                        event_type: 'pedido_link_drive',
+                    await db.from('ai_agenda_events').insert({
+                        title: `📎 Pedido mediante enlace/adjunto de Drive`,
+                        description: `Remitente: ${emailData.from}\nAsunto: ${emailData.subject}\n\nEnlace: ${driveUrl}\n\nNo se pudo descargar automáticamente. Revisá el archivo manualmente.`,
+                        event_type: 'pedido_preparar',
                         priority: 'alta',
                         status: 'pendiente',
+                        due_date: new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0],
                         source: 'gmail',
                         source_ref_id: emailData.gmailId,
                         metadata: { drive_url: driveUrl, from: emailData.from, subject: emailData.subject }
@@ -476,10 +477,11 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
             }
         }
 
-        // Also try candidateCustomerData from the parsing phase (backup)
+        // candidateCustomerData from parsing is NOT used to auto-assign clienteId.
+        // It was causing incorrect client assignments on ambiguous matches.
+        // The data remains in parseResult for manual review in imports.
         if (!clienteId && parseResult.candidateCustomerData) {
-            clienteId = parseResult.candidateCustomerData.id
-            console.log(`[EmailOrderProcessor] ✅ Using candidateCustomerData from parsing: ${parseResult.candidateCustomerData.razon_social}`)
+            console.log(`[EmailOrderProcessor] ℹ️ candidateCustomerData exists (${parseResult.candidateCustomerData.razon_social}) but NOT used for auto-create — will go to review`)
         }
 
         if (clienteId) clienteFound = true

@@ -193,7 +193,7 @@ export async function fetchRecentEmails(
 
     const res = await gmail.users.messages.list({
         userId: 'me',
-        q: 'newer_than:1d -category:promotions -category:social',
+        q: 'newer_than:3d -category:promotions -category:social',
         maxResults,
     })
 
@@ -700,7 +700,7 @@ export async function fetchNewEmailsSinceHistory(
             console.warn('[Gmail Sync] HistoryId expired — falling back to full recent fetch')
 
             // Do a full fetch and get the current historyId from profile
-            const emails = await fetchRecentEmails(email, 15)
+            const emails = await fetchRecentEmails(email, 30)
 
             // Get current historyId from profile for future incremental syncs
             const profileRes = await gmail.users.getProfile({ userId: 'me' })
