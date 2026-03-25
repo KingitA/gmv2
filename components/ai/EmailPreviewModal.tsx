@@ -98,7 +98,7 @@ export function EmailPreviewModal({ emailId, open, onClose }: Props) {
 
     return (
         <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-            <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col p-0 gap-0">
+            <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-20">
                         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -149,9 +149,9 @@ export function EmailPreviewModal({ emailId, open, onClose }: Props) {
                         )}
 
                         {/* Content */}
-                        <div className="flex-1 overflow-auto">
+                        <div className="flex-1 overflow-auto min-h-0">
                             {activeTab === 'email' ? (
-                                <div className="p-5">
+                                <div className="h-full">
                                     {email.bodyHtml ? (
                                         <iframe
                                             srcDoc={`
@@ -159,18 +159,21 @@ export function EmailPreviewModal({ emailId, open, onClose }: Props) {
                                                 <html>
                                                 <head>
                                                     <meta charset="utf-8">
+                                                    <meta name="viewport" content="width=device-width, initial-scale=1">
                                                     <style>
-                                                        body { font-family: -apple-system, sans-serif; font-size: 14px; line-height: 1.5; color: #333; margin: 0; padding: 0; }
+                                                        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 14px; line-height: 1.6; color: #333; margin: 0; padding: 16px; }
                                                         img { max-width: 100%; height: auto; }
-                                                        table { max-width: 100%; }
+                                                        table { max-width: 100%; border-collapse: collapse; }
+                                                        td, th { padding: 4px 8px; }
                                                         a { color: #2563eb; }
+                                                        pre { white-space: pre-wrap; word-break: break-word; }
                                                     </style>
                                                 </head>
                                                 <body>${email.bodyHtml}</body>
                                                 </html>
                                             `}
-                                            className="w-full border-0 min-h-[300px]"
-                                            style={{ height: '450px' }}
+                                            className="w-full border-0 h-full"
+                                            style={{ minHeight: '500px' }}
                                             sandbox="allow-same-origin"
                                             title="Email preview"
                                         />
@@ -192,19 +195,24 @@ export function EmailPreviewModal({ emailId, open, onClose }: Props) {
                                         return (
                                             <div
                                                 key={att.id}
-                                                className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${hasUrl ? 'hover:bg-muted/50 cursor-pointer' : 'opacity-60'}`}
+                                                className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${hasUrl ? 'hover:bg-blue-50/50 cursor-pointer' : 'bg-muted/30'}`}
                                                 onClick={() => hasUrl && openAttachment(att)}
                                             >
-                                                <span className="text-xl">{icon}</span>
+                                                <span className="text-xl flex-shrink-0">{icon}</span>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="text-sm font-medium truncate">{att.filename}</div>
                                                     <div className="text-xs text-muted-foreground">
                                                         {formatBytes(att.sizeBytes)}
-                                                        {!hasUrl && ' — No disponible para descarga'}
+                                                        {!hasUrl && ' — El archivo fue procesado por la IA pero no se guardó para descarga'}
                                                     </div>
                                                 </div>
-                                                {hasUrl && (
-                                                    <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                                {hasUrl ? (
+                                                    <div className="flex items-center gap-1 text-blue-600 flex-shrink-0">
+                                                        <span className="text-xs font-medium">Abrir</span>
+                                                        <ExternalLink className="h-4 w-4" />
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground flex-shrink-0">⚠️</span>
                                                 )}
                                             </div>
                                         )
