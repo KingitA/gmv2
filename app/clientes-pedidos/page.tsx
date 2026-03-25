@@ -24,10 +24,12 @@ import {
   ExternalLink,
   Printer,
   Trash2,
+  Eye,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { ImportOrderDialog } from "@/components/pedidos/ImportOrderDialog"
+import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -154,6 +156,7 @@ export default function ClientesPedidosPage() {
   const [expandedPriorities, setExpandedPriorities] = useState<Record<string, boolean>>({ "1": true, "2": true, "3": true })
   const [dragPedidoId, setDragPedidoId] = useState<string | null>(null)
   const [expandedArticulosGroups, setExpandedArticulosGroups] = useState<Record<string, boolean>>({ pendientes: true, preparados: true, faltantes: false })
+  const [previewEmailId, setPreviewEmailId] = useState<string | null>(null)
 
   const supabase = createClient()
   const searchParams = useSearchParams()
@@ -1146,7 +1149,34 @@ export default function ClientesPedidosPage() {
 
               {/* Botones de acción del modal */}
               <div className="flex justify-between">
-                <div>
+                <div className="flex gap-2">
+                  {pedidoSeleccionado.observaciones?.includes('Gmail') && (
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        // Extract sender email from observaciones to find the ai_email
+                        const obs = pedidoSeleccionado.observaciones || ''
+                        const deMatch = obs.match(/De:\s*(\S+)/)
+                        const asuntoMatch = obs.match(/Asunto:\s*"([^"]+)"/)
+                        if (deMatch || asuntoMatch) {
+                          const { data } = await supabase
+                            .from('ai_emails')
+                            .select('id')
+                            .or([
+                              deMatch ? `from_email.ilike.%${deMatch[1]}%` : null,
+                              asuntoMatch ? `subject.ilike.%${asuntoMatch[1].substring(0, 30)}%` : null,
+                            ].filter(Boolean).join(','))
+                            .order('created_at', { ascending: false })
+                            .limit(1)
+                            .maybeSingle()
+                          if (data?.id) setPreviewEmailId(data.id)
+                        }
+                      }}
+                    >
+                      <Eye className="h-4 w-4 mr-2" />
+                      Ver Email
+                    </Button>
+                  )}
                   {!tieneComprobantes(pedidoSeleccionado.id) && (
                     <Button
                       onClick={() => generarComprobantes(pedidoSeleccionado.id)}
@@ -1214,6 +1244,12 @@ export default function ClientesPedidosPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EmailPreviewModal
+        emailId={previewEmailId}
+        open={!!previewEmailId}
+        onClose={() => setPreviewEmailId(null)}
+      />
     </div >
   )
 }

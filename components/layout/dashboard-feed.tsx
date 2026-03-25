@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
-import { Paperclip, Trash2 } from 'lucide-react'
+import { Paperclip, Trash2, Eye } from 'lucide-react'
+import { EmailPreviewModal } from '@/components/ai/EmailPreviewModal'
 
 // ── Hardcoded accounts ─────────────────────────────
 const ACCOUNT_CLIENTES = 'megasur.clientes@gmail.com'
@@ -102,6 +103,7 @@ export function DashboardFeed() {
   const [loading, setLoading] = useState(true)
   const [activeBandeja, setActiveBandeja] = useState<Bandeja>('proveedores')
   const [activeFilter, setActiveFilter] = useState('todos')
+  const [previewEmailId, setPreviewEmailId] = useState<string | null>(null)
 
   useEffect(() => { loadEmails() }, [])
 
@@ -290,13 +292,22 @@ export function DashboardFeed() {
                       <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4" /></svg>
                     </button>
                   ) : (
-                    <button
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveToTrash(email.id) }}
-                      className="ml-1 p-1 rounded hover:bg-red-50 text-neutral-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                      title="Enviar a papelera"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <>
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewEmailId(email.id) }}
+                        className="ml-1 p-1 rounded hover:bg-blue-50 text-neutral-300 hover:text-blue-600 transition-colors opacity-0 group-hover:opacity-100"
+                        title="Ver email y adjuntos"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveToTrash(email.id) }}
+                        className="p-1 rounded hover:bg-red-50 text-neutral-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                        title="Enviar a papelera"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -308,6 +319,13 @@ export function DashboardFeed() {
           })
         )}
       </div>
+
+      {/* Email Preview Modal */}
+      <EmailPreviewModal
+        emailId={previewEmailId}
+        open={!!previewEmailId}
+        onClose={() => setPreviewEmailId(null)}
+      />
     </div>
   )
 }

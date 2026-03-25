@@ -5,12 +5,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, ArrowLeft, Check, X, Search, AlertCircle } from "lucide-react"
+import { Loader2, ArrowLeft, Check, X, Search, AlertCircle, Eye } from "lucide-react"
 import { toast } from "sonner"
 import { getPendingImports, approveImport, rejectImport } from "@/lib/actions/import-review"
 import { Input } from "@/components/ui/input"
 import { searchClientes } from "@/lib/actions/clientes"
 import { searchProductos } from "@/lib/actions/productos"
+import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 
 export default function ImportReviewPage() {
     const [imports, setImports] = useState<any[]>([])
@@ -30,6 +31,7 @@ export default function ImportReviewPage() {
     const [productSearchTerm, setProductSearchTerm] = useState("")
     const [productSearchResults, setProductSearchResults] = useState<any[]>([])
     const [isSearchingProduct, setIsSearchingProduct] = useState(false)
+    const [previewEmailId, setPreviewEmailId] = useState<string | null>(null)
 
     useEffect(() => {
         loadImports()
@@ -142,6 +144,27 @@ export default function ImportReviewPage() {
         }
     }
 
+    const openEmailPreview = async (gmailId: string) => {
+        // Look up ai_emails.id from gmail_id
+        try {
+            const { createClient } = await import("@/lib/supabase/client")
+            const supabase = createClient()
+            const { data } = await supabase
+                .from("ai_emails")
+                .select("id")
+                .eq("gmail_id", gmailId)
+                .limit(1)
+                .maybeSingle()
+            if (data?.id) {
+                setPreviewEmailId(data.id)
+            } else {
+                toast.error("No se encontró el email original")
+            }
+        } catch {
+            toast.error("Error buscando email")
+        }
+    }
+
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
@@ -205,6 +228,11 @@ export default function ImportReviewPage() {
                                     <p className="text-sm text-muted-foreground">Origen: {selectedImport.meta.source}</p>
                                 </div>
                                 <div className="flex gap-2">
+                                    {selectedImport.meta?.gmail_id && (
+                                        <Button variant="outline" size="sm" onClick={() => openEmailPreview(selectedImport.meta.gmail_id)}>
+                                            <Eye className="h-4 w-4 mr-1" /> Ver Email
+                                        </Button>
+                                    )}
                                     <Button variant="outline" size="sm" onClick={() => handleReject(selectedImport.id)}>
                                         <X className="h-4 w-4 mr-1" /> Descartar
                                     </Button>
@@ -362,6 +390,12 @@ export default function ImportReviewPage() {
                     )}
                 </Card>
             </div>
+
+            <EmailPreviewModal
+                emailId={previewEmailId}
+                open={!!previewEmailId}
+                onClose={() => setPreviewEmailId(null)}
+            />
         </div>
     )
 }
