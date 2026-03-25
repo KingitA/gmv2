@@ -239,14 +239,17 @@ export default function ImportReviewPage() {
                                                 {clientesEncontrados.map(c => (
                                                     <div
                                                         key={c.id}
-                                                        className="px-3 py-2 hover:bg-muted cursor-pointer text-sm"
+                                                        className="px-3 py-2 hover:bg-muted cursor-pointer"
                                                         onClick={() => {
                                                             setClienteId(c.id)
-                                                            setSelectedClienteName(c.razon_social)
+                                                            setSelectedClienteName(c.nombre_razon_social || c.nombre || c.razon_social || '')
                                                             setClienteSearchOpen(false)
                                                         }}
                                                     >
-                                                        {c.razon_social}
+                                                        <div className="text-sm font-medium">{c.nombre_razon_social || c.nombre || c.razon_social}</div>
+                                                        {(c.direccion || c.localidad) && (
+                                                            <div className="text-xs text-muted-foreground">{[c.direccion, c.localidad].filter(Boolean).join(' — ')}</div>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>

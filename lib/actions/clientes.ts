@@ -73,16 +73,18 @@ export async function searchClientes(searchTerm: string) {
     query = query.eq("vendedor_id", user.id)
   }
 
-  // Search by multiple fields
-  // Removing zona and direccion as they might be causing 42703 if they are not in the table
-  // Adding nombre as it is present in the Cliente interface
+  // Search by multiple fields including name, address, locality and client code
   query = query.or(
-    `razon_social.ilike.%${searchTerm}%,` +
+    `nombre_razon_social.ilike.%${searchTerm}%,` +
     `nombre.ilike.%${searchTerm}%,` +
+    `razon_social.ilike.%${searchTerm}%,` +
+    `direccion.ilike.%${searchTerm}%,` +
+    `localidad.ilike.%${searchTerm}%,` +
+    `codigo_cliente.ilike.%${searchTerm}%,` +
     `cuit.ilike.%${searchTerm}%`
   )
 
-  const { data, error } = await query.order("razon_social")
+  const { data, error } = await query.order("nombre_razon_social").limit(30)
 
   if (error) throw error
   return data
