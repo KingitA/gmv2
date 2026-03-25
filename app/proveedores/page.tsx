@@ -62,7 +62,7 @@ export default function ProveedoresPage() {
 
   async function loadProveedores() {
     const supabase = createClient()
-    const { data, error } = await supabase.from("proveedores").select("*").eq("activo", true).order("nombre")
+    const { data, error } = await supabase.from("proveedores").select("*").order("activo", { ascending: false }).order("nombre")
 
     if (error) {
       console.error("[v0] Error loading proveedores:", error)
