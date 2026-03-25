@@ -101,9 +101,36 @@ export function DashboardFeed() {
   const [emails, setEmails] = useState<EmailItem[]>([])
   const [trashedEmails, setTrashedEmails] = useState<EmailItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeBandeja, setActiveBandeja] = useState<Bandeja>('proveedores')
-  const [activeFilter, setActiveFilter] = useState('todos')
+  const [activeBandeja, setActiveBandeja] = useState<Bandeja>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dashboard_bandeja')
+      if (saved === 'clientes' || saved === 'proveedores' || saved === 'personal') return saved
+    }
+    return 'proveedores'
+  })
+  const [activeFilter, setActiveFilter] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('dashboard_filter') || 'todos'
+    }
+    return 'todos'
+  })
   const [previewEmailId, setPreviewEmailId] = useState<string | null>(null)
+
+  // Persist bandeja and filter to localStorage
+  const changeBandeja = (b: Bandeja) => {
+    setActiveBandeja(b)
+    setActiveFilter('todos')
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dashboard_bandeja', b)
+      localStorage.setItem('dashboard_filter', 'todos')
+    }
+  }
+  const changeFilter = (f: string) => {
+    setActiveFilter(f)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dashboard_filter', f)
+    }
+  }
 
   useEffect(() => { loadEmails() }, [])
 
@@ -127,8 +154,6 @@ export function DashboardFeed() {
       setTrashedEmails(prev => prev.filter(e => e.id !== emailId))
     }
   }
-
-  useEffect(() => { loadEmails() }, [])
 
   const loadEmails = async () => {
     const supabase = createClient()
@@ -219,7 +244,7 @@ export function DashboardFeed() {
         ]).map(tab => (
           <button
             key={tab.id}
-            onClick={() => { setActiveBandeja(tab.id); setActiveFilter('todos') }}
+            onClick={() => changeBandeja(tab.id)}
             className={`flex-1 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors flex items-center justify-center gap-1.5
               ${activeBandeja === tab.id
                 ? 'border-blue-500 text-blue-700 bg-white'
@@ -240,7 +265,7 @@ export function DashboardFeed() {
           {filters.map(f => (
             <button
               key={f.id}
-              onClick={() => setActiveFilter(f.id)}
+              onClick={() => changeFilter(f.id)}
               className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap
                 ${activeFilter === f.id
                   ? 'bg-neutral-100 text-neutral-900'

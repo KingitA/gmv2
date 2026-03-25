@@ -98,7 +98,7 @@ export function EmailPreviewModal({ emailId, open, onClose }: Props) {
 
     return (
         <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-            <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
+            <DialogContent className="!max-w-[95vw] w-[95vw] max-h-[90vh] h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-20">
                         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
