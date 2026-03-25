@@ -4,7 +4,7 @@
 // =====================================================
 
 import { classifyAndExtract } from './claude'
-import { type ParsedEmail } from './gmail'
+import { type ParsedEmail, downloadAttachment } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
 import { extractAttachmentContents, uploadToStorage, type AttachmentContent } from './attachment-content-extractor'
 import { processEmailAsOrder, type OrderProcessingResult } from './email-order-processor'
@@ -230,29 +230,50 @@ export async function processIncomingEmail(
         traceError(traceId, 'CLASSIFICATION_LOG', `Failed to save classification log: ${classError.message}`, { errorCode: classError.code })
     }
 
-    // 5. Upload attachments to Storage + save metadata (NOW we have savedEmail.id)
+    // 5. Upload ALL attachments to Storage + save metadata (NOW we have savedEmail.id)
+    // Previously only extracted attachments were uploaded. Now we upload everything
+    // so all files are available for preview/download.
     const failedUploads: string[] = []
     for (const att of emailData.attachments) {
         const extracted = extractedAttachments.find(e => e.attachmentId === att.attachmentId)
 
-        // Upload to storage now that we have savedEmailId
         let storagePath: string | null = null
-        if (extracted?.rawBuffer) {
-            storagePath = await uploadToStorage(
-                extracted.rawBuffer,
-                emailData.gmailId,
-                att.filename,
-                att.mimeType,
-                savedEmail.id
-            ) || null
+        let buffer: Buffer | null = extracted?.rawBuffer || null
+
+        // If no buffer from extraction, download the attachment directly for storage
+        if (!buffer && att.attachmentId) {
+            try {
+                const downloaded = await downloadAttachment(targetEmail, emailData.gmailId, att.attachmentId)
+                buffer = downloaded.data
+            } catch (dlErr) {
+                traceLog(traceId, 'DOWNLOAD', `Could not download ${att.filename} for storage: ${dlErr instanceof Error ? dlErr.message : dlErr}`)
+            }
+        }
+
+        // Upload to storage with retry (1 retry on failure)
+        if (buffer) {
+            // Sanitize filename: remove special chars that Supabase storage doesn't like
+            const safeFilename = att.filename.replace(/[#?%&{}\\<>*$!'":@+`|=]/g, '_').replace(/\s+/g, ' ').trim() || 'attachment'
+
+            storagePath = await uploadToStorage(buffer, emailData.gmailId, safeFilename, att.mimeType, savedEmail.id) || null
+
+            // Retry once on failure
+            if (!storagePath) {
+                traceLog(traceId, 'UPLOAD', `Retrying upload for ${att.filename}...`)
+                await new Promise(r => setTimeout(r, 1000))
+                storagePath = await uploadToStorage(buffer, emailData.gmailId, safeFilename, att.mimeType, savedEmail.id) || null
+            }
+
             if (storagePath) {
                 traceLog(traceId, 'UPLOAD', `Uploaded ${att.filename} → ${storagePath}`)
             } else {
                 failedUploads.push(att.filename)
             }
+        } else {
+            failedUploads.push(att.filename)
         }
 
-        // Save attachment metadata
+        // Save attachment metadata (always, even if upload failed)
         const { error: attError } = await db.from('ai_email_attachments').insert({
             email_id: savedEmail.id,
             filename: att.filename,
