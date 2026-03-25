@@ -106,6 +106,45 @@ export function obtenerRecargoLista(art: DatosArticulo, lista: DatosLista): numb
   return lista.recargo_limpieza_bazar
 }
 
+// ─── Coeficiente IVA según combinación compras/ventas ──
+//
+// Determina el ajuste de precio según cómo entró y cómo sale el artículo.
+// No es IVA contable — es un ajuste comercial para que el precio no explote.
+//
+// iva_compras:
+//   "adquisicion_stock" = entra en negro (sin IVA)
+//   "mixto"             = entra con IVA 10.5%
+//   "factura"           = entra en blanco (IVA 21%)
+//
+// iva_ventas:
+//   "presupuesto" = sale en negro
+//   "factura"     = sale en blanco (Factura A)
+
+export function obtenerCoeficienteIva(
+  iva_compras: DatosArticulo["iva_compras"],
+  iva_ventas: DatosArticulo["iva_ventas"],
+): number {
+  // Entra blanco, sale blanco → sin ajuste
+  if (iva_compras === "factura" && iva_ventas === "factura") return 1.00
+
+  // Entra blanco, sale negro → IVA va dentro del precio
+  if (iva_compras === "factura" && iva_ventas === "presupuesto") return 1.21
+
+  // Entra mixto, sale blanco → descuento 5% para no disparar el precio (ajuste comercial)
+  if (iva_compras === "mixto" && iva_ventas === "factura") return 0.95
+
+  // Entra mixto, sale negro → +10% para recuperar el IVA pagado al proveedor
+  if (iva_compras === "mixto" && iva_ventas === "presupuesto") return 1.10
+
+  // Entra negro, sale negro → sin ajuste
+  if (iva_compras === "adquisicion_stock" && iva_ventas === "presupuesto") return 1.00
+
+  // Entra negro, sale blanco → descuento 10% para no disparar el precio
+  if (iva_compras === "adquisicion_stock" && iva_ventas === "factura") return 0.90
+
+  return 1.00 // fallback
+}
+
 // ─── Paso 3 + 4: Precio Final ─────────────────────────
 
 export function calcularPrecioFinal(
@@ -115,28 +154,47 @@ export function calcularPrecioFinal(
   const recargoListaPct = obtenerRecargoLista(art, lista)
   const precioLista = round2(precioBase * (1 + recargoListaPct / 100))
   const precioConDescuento = round2(precioLista * (1 - (descuentoCliente || 0) / 100))
-  const esNegro = art.iva_ventas === "presupuesto"
 
+  // Determinar comprobante según método del cliente
+  const esNegro = art.iva_ventas === "presupuesto"
   let vaEnComprobante: "factura" | "presupuesto"
   if (metodoFacturacion === "Final") vaEnComprobante = esNegro ? "presupuesto" : "factura"
   else if (metodoFacturacion === "Factura") vaEnComprobante = "factura"
   else vaEnComprobante = "presupuesto"
 
-  let descuentoNegroEnFacturaPct = 0, precioAntesIva = precioConDescuento
-  let ivaIncluido = false, ivaPct = 0, montoIvaDiscriminado = 0, precioUnitarioFinal = precioConDescuento
+  // Coeficiente de ajuste según IVA compras/ventas del artículo
+  const coefIva = obtenerCoeficienteIva(art.iva_compras, art.iva_ventas)
+
+  let coefAjusteAplicado = 0
+  let precioAntesIva = precioConDescuento
+  let ivaIncluido = false
+  let ivaPct = 0
+  let montoIvaDiscriminado = 0
+  let precioUnitarioFinal = precioConDescuento
 
   if (vaEnComprobante === "factura") {
-    if (esNegro) { descuentoNegroEnFacturaPct = 10; precioAntesIva = round2(precioConDescuento * 0.90) }
-    else precioAntesIva = precioConDescuento
-    ivaPct = 21; montoIvaDiscriminado = round2(precioAntesIva * 0.21); precioUnitarioFinal = precioAntesIva
+    // Sale en Factura A: precio neto + IVA 21% discriminado abajo
+    precioAntesIva = round2(precioConDescuento * coefIva)
+    if (coefIva !== 1.00) coefAjusteAplicado = round2((1 - coefIva) * 100)
+    ivaPct = 21
+    montoIvaDiscriminado = round2(precioAntesIva * 0.21)
+    precioUnitarioFinal = precioAntesIva
   } else {
-    if (esNegro) { precioUnitarioFinal = precioConDescuento }
-    else { ivaPct = 21; precioUnitarioFinal = round2(precioConDescuento * 1.21); ivaIncluido = true }
+    // Sale en Presupuesto: precio final con IVA incluido (no discriminado)
+    precioAntesIva = precioConDescuento
+    precioUnitarioFinal = round2(precioConDescuento * coefIva)
+    if (coefIva !== 1.00) {
+      ivaIncluido = true
+      ivaPct = coefIva > 1 ? round2((coefIva - 1) * 100) : 0
+    }
   }
 
   return {
-    costoNeto, precioBase, recargoListaPct, precioLista, descuentoClientePct: descuentoCliente || 0,
-    precioConDescuento, descuentoNegroEnFacturaPct, precioAntesIva, ivaIncluido, ivaPct,
+    costoNeto, precioBase, recargoListaPct, precioLista,
+    descuentoClientePct: descuentoCliente || 0,
+    precioConDescuento,
+    descuentoNegroEnFacturaPct: coefAjusteAplicado,
+    precioAntesIva, ivaIncluido, ivaPct,
     montoIvaDiscriminado, precioUnitarioFinal, vaEnComprobante,
   }
 }
