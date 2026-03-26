@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Auditoría GM ERP — Marzo 2026</title>
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #222638; --border: #2e3350;
+      --accent: #4f6ef7; --accent2: #7c3aed; --green: #22c55e; --yellow: #eab308;
+      --red: #ef4444; --orange: #f97316; --text: #e2e8f0; --muted: #8892a4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; font-size: 15px; }
+    .hero { background: linear-gradient(135deg,#1a1d27 0%,#0f1117 60%); border-bottom:1px solid var(--border); padding:48px 0 36px; text-align:center; }
+    .hero .badge { display:inline-block; background:var(--accent); color:white; font-size:11px; font-weight:700; letter-spacing:1.5px; padding:4px 12px; border-radius:20px; text-transform:uppercase; margin-bottom:16px; }
+    .hero h1 { font-size:2.2rem; font-weight:800; margin-bottom:8px; }
+    .hero p { color:var(--muted); font-size:1rem; }
+    nav { background:var(--surface); border-bottom:1px solid var(--border); padding:0 32px; display:flex; gap:4px; overflow-x:auto; position:sticky; top:0; z-index:100; }
+    nav a { color:var(--muted); text-decoration:none; font-size:13px; font-weight:600; padding:14px 16px; border-bottom:2px solid transparent; white-space:nowrap; transition:all .2s; }
+    nav a:hover { color:var(--text); }
+    nav a.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .container { max-width:1100px; margin:0 auto; padding:40px 24px; }
+    section { margin-bottom:64px; scroll-margin-top:60px; }
+    section h2 { font-size:1.5rem; font-weight:700; margin-bottom:24px; padding-bottom:12px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+    section h3 { font-size:1.1rem; font-weight:700; margin:24px 0 12px; }
+    .pill { display:inline-block; font-size:11px; font-weight:700; padding:2px 10px; border-radius:20px; letter-spacing:.5px; }
+    .pill-red { background:rgba(239,68,68,.15); color:var(--red); border:1px solid rgba(239,68,68,.3); }
+    .pill-yellow { background:rgba(234,179,8,.12); color:var(--yellow); border:1px solid rgba(234,179,8,.3); }
+    .pill-green { background:rgba(34,197,94,.12); color:var(--green); border:1px solid rgba(34,197,94,.3); }
+    .pill-blue { background:rgba(79,110,247,.12); color:var(--accent); border:1px solid rgba(79,110,247,.3); }
+    .pill-orange { background:rgba(249,115,22,.12); color:var(--orange); border:1px solid rgba(249,115,22,.3); }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px 24px; margin-bottom:16px; }
+    .card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .card-title { font-weight:700; font-size:1rem; }
+    .card p { color:var(--muted); font-size:14px; line-height:1.6; }
+    .card ul { margin:8px 0 0 16px; }
+    .card ul li { color:var(--muted); font-size:14px; margin-bottom:4px; }
+    .card ul li strong { color:var(--text); }
+    .bug-card { background:rgba(239,68,68,.06); border:1px solid rgba(239,68,68,.25); border-radius:12px; padding:20px 24px; margin-bottom:16px; }
+    .bug-card .bug-title { font-weight:700; color:var(--red); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+    .bug-card p,.bug-card li { color:#fca5a5; font-size:14px; line-height:1.6; }
+    .bug-card ul { margin:8px 0 0 16px; }
+    .bug-card ul li { margin-bottom:4px; }
+    .bug-card code { background:rgba(239,68,68,.15); color:#fca5a5; padding:1px 6px; border-radius:4px; font-family:monospace; font-size:13px; }
+    .fix-card { background:rgba(34,197,94,.06); border:1px solid rgba(34,197,94,.25); border-radius:12px; padding:20px 24px; margin-bottom:16px; }
+    .fix-card .fix-title { font-weight:700; color:var(--green); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+    .fix-card p,.fix-card li { color:#86efac; font-size:14px; line-height:1.6; }
+    .fix-card ul { margin:8px 0 0 16px; }
+    .fix-card ul li { margin-bottom:4px; }
+    .warn-card { background:rgba(234,179,8,.06); border:1px solid rgba(234,179,8,.25); border-radius:12px; padding:20px 24px; margin-bottom:16px; }
+    .warn-card .warn-title { font-weight:700; color:var(--yellow); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+    .warn-card p,.warn-card li { color:#fde68a; font-size:14px; line-height:1.6; }
+    .warn-card ul { margin:8px 0 0 16px; }
+    .warn-card ul li { margin-bottom:4px; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .status-table { width:100%; border-collapse:collapse; font-size:14px; }
+    .status-table th { background:var(--surface2); color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; padding:10px 14px; text-align:left; }
+    .status-table td { padding:10px 14px; border-bottom:1px solid var(--border); vertical-align:top; }
+    .status-table tr:last-child td { border-bottom:none; }
+    .status-table tr:hover td { background:rgba(255,255,255,.02); }
+    .flow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:16px 0; }
+    .flow-step { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:6px 14px; font-size:13px; font-weight:600; }
+    .flow-step.ok { border-color:rgba(34,197,94,.4); color:var(--green); background:rgba(34,197,94,.08); }
+    .flow-step.fail { border-color:rgba(239,68,68,.4); color:var(--red); background:rgba(239,68,68,.08); }
+    .flow-step.warn { border-color:rgba(234,179,8,.4); color:var(--yellow); background:rgba(234,179,8,.08); }
+    .flow-arrow { color:var(--muted); font-size:18px; }
+    .phase { background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-bottom:16px; }
+    .phase-header { background:var(--surface2); padding:16px 20px; display:flex; align-items:center; gap:12px; }
+    .phase-num { background:var(--accent); color:white; font-size:12px; font-weight:800; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+    .phase-title { font-weight:700; font-size:1rem; }
+    .phase-body { padding:16px 20px; }
+    .phase-body ul { margin-left:16px; }
+    .phase-body ul li { margin-bottom:6px; font-size:14px; color:var(--muted); }
+    .phase-body ul li strong { color:var(--text); }
+    .llm-compare { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:16px 0; }
+    .llm-box { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:18px; }
+    .llm-box h4 { font-size:14px; font-weight:700; margin-bottom:10px; }
+    .llm-box ul { margin-left:16px; }
+    .llm-box ul li { font-size:13px; color:var(--muted); margin-bottom:5px; }
+    .llm-box.winner { border-color:rgba(79,110,247,.5); background:rgba(79,110,247,.06); }
+    .llm-box.winner h4 { color:var(--accent); }
+    .highlight { background:rgba(79,110,247,.08); border:1px solid rgba(79,110,247,.3); border-radius:10px; padding:16px 20px; margin:16px 0; }
+    .highlight p { font-size:14px; color:#a5b4fc; line-height:1.7; }
+    .highlight strong { color:white; }
+    .employee-box { background:rgba(124,58,237,.08); border:1px solid rgba(124,58,237,.3); border-radius:12px; padding:20px 24px; margin-bottom:16px; }
+    .employee-box .emp-title { font-weight:700; color:#c4b5fd; margin-bottom:8px; display:flex; align-items:center; gap:8px; font-size:15px; }
+    .employee-box p,.employee-box li { color:#ddd6fe; font-size:14px; line-height:1.7; }
+    .employee-box ul { margin:8px 0 0 16px; }
+    .employee-box ul li { margin-bottom:5px; }
+    .done-card { background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.3); border-radius:12px; padding:16px 20px; margin-bottom:12px; }
+    .done-card .done-title { font-weight:700; color:var(--green); margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+    .done-card p,.done-card li { color:#86efac; font-size:14px; }
+    .done-card ul { margin:6px 0 0 16px; }
+    .done-card ul li { margin-bottom:4px; }
+    code.inline { background:var(--surface2); color:#a5b4fc; padding:1px 6px; border-radius:4px; font-family:monospace; font-size:13px; }
+    hr.divider { border:none; border-top:1px solid var(--border); margin:40px 0; }
+    @media(max-width:700px){ .grid-2,.llm-compare { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="badge">Auditoría v2 — Actualizada 26 Mar 2026</div>
+  <h1>GM ERP — Diagnóstico + Roadmap</h1>
+  <p>Next.js 16 · Supabase · Claude API · Vercel · Stack completo</p>
+</div>
+
+<nav>
+  <a href="#hoy">Hecho hoy</a>
+  <a href="#situacion">Situación actual</a>
+  <a href="#bugs">Bugs críticos</a>
+  <a href="#diario">Operativa real</a>
+  <a href="#stock">Stock</a>
+  <a href="#pedidos-email">Pedidos por email</a>
+  <a href="#fase1">Fase 1</a>
+  <a href="#llm">LLM / IA</a>
+  <a href="#roadmap">Roadmap</a>
+</nav>
+
+<div class="container">
+
+<!-- HECHO HOY -->
+<section id="hoy">
+  <h2>✅ Cambios realizados hoy — 26/03/2026</h2>
+
+  <div class="done-card">
+    <div class="done-title">✅ Auto-creación de pedidos DESACTIVADA</div>
+    <p>Archivo: <code class="inline">lib/ai/email-order-processor.ts</code></p>
+    <ul>
+      <li>Cambiado <code class="inline">canAutoCreate</code> a siempre <strong>false</strong>.</li>
+      <li>Todo pedido que llega por email va directamente a la Bandeja de Revisión.</li>
+      <li>Ningún pedido se crea automáticamente sin que un operario lo confirme.</li>
+      <li>Elimina los 4/10 pedidos que se creaban con datos incorrectos.</li>
+    </ul>
+  </div>
+
+  <div class="done-card">
+    <div class="done-title">✅ Bug de Cuentas Corrientes de Clientes corregido</div>
+    <p>Archivo: <code class="inline">app/api/clientes/[id]/cuenta-corriente/route.ts</code></p>
+    <ul>
+      <li>El endpoint llamaba a <code class="inline">createClient()</code> que no estaba importado → crash 500 en cada carga.</li>
+      <li>Corregido: ahora usa <code class="inline">createSupabaseClient</code> correctamente importado desde <code class="inline">@supabase/supabase-js</code>.</li>
+      <li>La página de CC de clientes ya no debería mostrar "No se pudo cargar la información".</li>
+    </ul>
+  </div>
+
+  <div class="done-card">
+    <div class="done-title">✅ Bandeja de Revisión completamente rediseñada</div>
+    <p>Archivo: <code class="inline">app/clientes-pedidos/import-review/page.tsx</code></p>
+    <ul>
+      <li><strong>Cantidades editables</strong> por artículo directamente en la tabla.</li>
+      <li><strong>Re-vincular cualquier artículo</strong> aunque ya esté asignado (clic en el nombre para cambiar).</li>
+      <li><strong>Agregar artículos faltantes</strong> con botón "+ Agregar artículo".</li>
+      <li><strong>Eliminar artículos</strong> erróneos con el botón papelera.</li>
+      <li><strong>Banner de validación</strong>: no se puede aprobar sin cliente ni con artículos sin vincular.</li>
+      <li><strong>Nombre del remitente/asunto</strong> visible en el encabezado.</li>
+      <li><strong>Sugerencia de la IA</strong> visible como hint cuando el cliente no está confirmado.</li>
+    </ul>
+  </div>
+
+  <div class="done-card">
+    <div class="done-title">✅ Link directo en sidebar</div>
+    <p>Archivo: <code class="inline">components/layout/sidebar.tsx</code></p>
+    <ul>
+      <li>Agregado "📬 Bandeja de Revisión" en la sección Principal del sidebar.</li>
+      <li>Acceso directo sin tener que pasar por /clientes-pedidos.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- SITUACIÓN ACTUAL -->
+<section id="situacion">
+  <h2>📊 Situación actual del sistema</h2>
+
+  <div class="highlight">
+    <p><strong>Diagnóstico:</strong> El sistema tiene arquitectura sólida (80+ endpoints, motor fiscal con 6 escenarios, pipeline de IA) pero casi ningún módulo está conectado de punta a punta. Hay esqueleto completo pero faltan los tejidos — triggers, flujos de datos reales, y UIs para operaciones básicas del día a día.</p>
+  </div>
+
+  <table class="status-table" style="margin-top:20px; border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+    <thead>
+      <tr><th>Módulo</th><th>Estado</th><th>Qué funciona</th><th>Qué falta</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Recepción de Pedidos (Gmail)</strong></td>
+        <td><span class="pill pill-yellow">⚠ Mejorado hoy</span></td>
+        <td>Todo va a bandeja de revisión. La UI de revisión ahora es completa.</td>
+        <td>Confirmar que Gmail sync esté activo. Poblar aliases de artículos.</td>
+      </tr>
+      <tr>
+        <td><strong>Cuentas Corrientes Clientes</strong></td>
+        <td><span class="pill pill-yellow">⚠ Bug fix hoy</span></td>
+        <td>Bug de import corregido. La página debería cargar.</td>
+        <td>Sin datos reales (pagos y facturas aún vacíos). Sin triggers automáticos.</td>
+      </tr>
+      <tr>
+        <td><strong>Devoluciones</strong></td>
+        <td><span class="pill pill-red">🔴 Sin UI</span></td>
+        <td>API existe. Aprobación funciona en /revision-devoluciones.</td>
+        <td>No hay formulario para CREAR una devolución en el ERP.</td>
+      </tr>
+      <tr>
+        <td><strong>Depósito</strong></td>
+        <td><span class="pill pill-yellow">⚠ En pruebas</span></td>
+        <td>Preparar pedidos, recepciones, ajuste stock.</td>
+        <td>Integración completa con pedidos confirmados, stock real.</td>
+      </tr>
+      <tr>
+        <td><strong>Stock</strong></td>
+        <td><span class="pill pill-yellow">⚠ Parcial</span></td>
+        <td>stock_actual + stock_reservado en tabla articulos. RPC de inc/dec existe.</td>
+        <td>No se decrementa al confirmar pedido. Sin alertas de mínimos.</td>
+      </tr>
+      <tr>
+        <td><strong>Facturación / AFIP</strong></td>
+        <td><span class="pill pill-red">🔴 Pendiente</span></td>
+        <td>Motor de 6 escenarios fiscales implementado en código.</td>
+        <td>Sin conexión AFIP. Precio base desde Excel no integrado. Es la Fase 1 punto 2.</td>
+      </tr>
+      <tr>
+        <td><strong>Pagos de Clientes</strong></td>
+        <td><span class="pill pill-red">🔴 Sin UI</span></td>
+        <td>Tabla pagos_clientes existe.</td>
+        <td>No hay pantalla para registrar un cobro.</td>
+      </tr>
+      <tr>
+        <td><strong>CC Proveedores</strong></td>
+        <td><span class="pill pill-yellow">⚠ Parcial</span></td>
+        <td>Tabla cuenta_corriente_proveedores existe. API implementada.</td>
+        <td>Sin triggers que la alimenten automáticamente.</td>
+      </tr>
+      <tr>
+        <td><strong>Artículos / Precios</strong></td>
+        <td><span class="pill pill-yellow">⚠ Incompleto</span></td>
+        <td>Estructura base. Import de listas de precios.</td>
+        <td>Muchos artículos sin precio, sin stock, sin proveedor. Sin aliases cargados.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- BUGS -->
+<section id="bugs">
+  <h2>🐛 Bugs críticos — estado</h2>
+
+  <div class="fix-card">
+    <div class="fix-title">✅ RESUELTO — CC Clientes: crash en runtime</div>
+    <p><code class="inline">app/api/clientes/[id]/cuenta-corriente/route.ts</code> — <code class="inline">createClient</code> no importado → corregido con <code class="inline">createSupabaseClient</code> de <code class="inline">@supabase/supabase-js</code>.</p>
+  </div>
+
+  <div class="fix-card">
+    <div class="fix-title">✅ RESUELTO — Auto-creación de pedidos incorrectos</div>
+    <p><code class="inline">lib/ai/email-order-processor.ts</code> — <code class="inline">canAutoCreate = false</code>. Todo va a revisión manual.</p>
+  </div>
+
+  <div class="bug-card">
+    <div class="bug-title">🔴 PENDIENTE — No hay UI para crear Devoluciones</div>
+    <p>El API <code>POST /api/devoluciones</code> funciona. Pero no hay formulario en el ERP para iniciar una.</p>
+    <p style="margin-top:8px;"><strong>Fix propuesto:</strong> Agregar formulario en <code>/devoluciones/nueva</code>: buscar cliente → ver pedidos → seleccionar ítems → motivo → enviar a revisión.</p>
+  </div>
+
+  <div class="warn-card">
+    <div class="warn-title">⚠ PENDIENTE — Stock no se decrementa al confirmar pedido</div>
+    <p>La verificación existe al crear pedido pero ningún trigger llama a RPC <code>decrementar_stock</code> cuando el pedido pasa a "en_preparacion" o "en_viaje".</p>
+  </div>
+
+  <div class="warn-card">
+    <div class="warn-title">⚠ PENDIENTE — Sin pagos de clientes registrables</div>
+    <p>No existe UI para registrar un cobro. La tabla <code>pagos_clientes</code> existe en DB pero está vacía. Sin cobros la CC siempre muestra saldo pendiente.</p>
+  </div>
+</section>
+
+<!-- OPERATIVA REAL -->
+<section id="diario">
+  <h2>👷 Operativa diaria — perspectiva de empleado</h2>
+
+  <div class="employee-box">
+    <div class="emp-title">📧 Llega un pedido por email</div>
+    <p>El sistema lo recibe automáticamente (si Gmail sync activo). <strong>Ya no crea nada solo</strong>. Va directo a la Bandeja de Revisión.</p>
+    <ul>
+      <li>Abrís <strong>Bandeja de Revisión</strong> desde el sidebar.</li>
+      <li>Ves el pedido con el remitente, asunto y artículos detectados por la IA.</li>
+      <li>Confirmás o corregís el cliente (la IA sugiere, vos elegís el real).</li>
+      <li>Revisás cada artículo: si está mal vinculado, clic para cambiarlo. Si falta uno, lo agregás. Si hay uno de más, lo borrás.</li>
+      <li>Editás cantidades si es necesario.</li>
+      <li>Clic en <strong>Crear Pedido</strong> — listo.</li>
+    </ul>
+    <p style="margin-top:8px;"><strong>Problema que queda:</strong> No hay notificación activa cuando llega un pedido nuevo. Hay que acordarse de revisar la bandeja.</p>
+  </div>
+
+  <div class="employee-box">
+    <div class="emp-title">📦 Un cliente llama para hacer una devolución</div>
+    <p>Todavía no hay formulario para crearla. <strong>Pendiente de implementar.</strong></p>
+  </div>
+
+  <div class="employee-box">
+    <div class="emp-title">💰 Un cliente paga una factura</div>
+    <p>Todavía no hay pantalla de "Registrar cobro". <strong>Pendiente de implementar.</strong></p>
+  </div>
+
+  <div class="employee-box">
+    <div class="emp-title">🏭 Llega mercadería del proveedor</div>
+    <p>Módulo más avanzado. <code>/deposito/recibir-mercaderia</code> → escanear remito → OCR con Gemini → comparar con OC → finalizar recepción. Funciona parcialmente.</p>
+  </div>
+</section>
+
+<!-- STOCK -->
+<section id="stock">
+  <h2>📦 Estructura de Stock</h2>
+
+  <div class="highlight">
+    <p>La lógica de stock está bien diseñada en la DB. Los dos campos existen en la tabla <code class="inline">articulos</code>:</p>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">stock_actual</div>
+      <p>Lo que existe físicamente en depósito. Se incrementa al finalizar una recepción. Se decrementa en devoluciones confirmadas. <strong>Aún falta:</strong> decrementar al despachar un pedido.</p>
+    </div>
+    <div class="card">
+      <div class="card-title">stock_reservado</div>
+      <p>Artículos comprometidos: pedidos confirmados no preparados + devoluciones vendibles en tránsito. <strong>stock_disponible</strong> = <code class="inline">stock_actual - stock_reservado</code> (calculado en app, no guardado).</p>
+    </div>
+  </div>
+
+  <div class="warn-card">
+    <div class="warn-title">⚠ Flujos que faltan para que el stock sea confiable</div>
+    <ul>
+      <li>Al <strong>confirmar pedido</strong>: incrementar stock_reservado.</li>
+      <li>Al <strong>despachar pedido</strong> (viaje saliente): decrementar stock_actual + stock_reservado.</li>
+      <li>Al <strong>finalizar recepción</strong>: incrementar stock_actual.</li>
+      <li>Al <strong>confirmar devolución vendible</strong>: incrementar stock_reservado o stock_actual según si ya llegó al depósito.</li>
+      <li>Alertas cuando stock_actual - stock_reservado &lt; stock_minimo.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- PEDIDOS EMAIL -->
+<section id="pedidos-email">
+  <h2>📬 Pedidos por email — análisis y mejora</h2>
+
+  <div class="flow">
+    <div class="flow-step ok">Gmail Sync</div><div class="flow-arrow">→</div>
+    <div class="flow-step ok">Clasificación Claude</div><div class="flow-arrow">→</div>
+    <div class="flow-step warn">OCR Gemini</div><div class="flow-arrow">→</div>
+    <div class="flow-step warn">Matching Cliente</div><div class="flow-arrow">→</div>
+    <div class="flow-step warn">Matching Artículos</div><div class="flow-arrow">→</div>
+    <div class="flow-step ok">Cola de Revisión</div><div class="flow-arrow">→</div>
+    <div class="flow-step ok">Crear Pedido (manual)</div>
+  </div>
+
+  <div class="grid-2">
+    <div class="bug-card">
+      <div class="bug-title">Por qué 2/10 no llegan</div>
+      <ul>
+        <li>Token Gmail expirado y refresh silencioso falla.</li>
+        <li>Email ya marcado como procesado por error en dedup.</li>
+        <li>Webhook Gmail caído y polling cron no configurado en Vercel.</li>
+        <li>Adjunto de formato no soportado sin texto en el cuerpo.</li>
+      </ul>
+    </div>
+    <div class="fix-card">
+      <div class="fix-title">Próximo: mejorar del 40% al 95%</div>
+      <ul>
+        <li>Verificar estado de tokens Gmail en el dashboard.</li>
+        <li>Log visible de emails recibidos vs procesados vs errores.</li>
+        <li>Retry automático para emails en estado "error".</li>
+        <li>Cargar aliases de artículos (nombres que usan los clientes) para mejorar el matching de la IA.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="highlight" style="margin-top:16px;">
+    <p><strong>Flujo actual (después de hoy):</strong> Todos los pedidos aterrizan en la Bandeja de Revisión. El operario revisa, corrige y confirma. Ningún pedido se pierde ni se crea mal. El volumen de revisión manual disminuirá a medida que se carguen los aliases de artículos y mejore el matching.</p>
+  </div>
+</section>
+
+<!-- FASE 1 -->
+<section id="fase1">
+  <h2>🎯 Fase 1 — Qué hacer para completar el ciclo básico</h2>
+
+  <div class="highlight">
+    <p><strong>Criterio de Fase 1 completa:</strong> Un empleado gestiona el ciclo completo ventas (pedido → factura AFIP → cobro → CC actualizada) y compras (OC → recepción → deuda → pago → CC actualizada) sin salir del sistema ni usar Excel.</p>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num" style="background:var(--green);">✓</div>
+      <div><div class="phase-title">Recepción de pedidos sin pérdidas — HECHO HOY</div></div>
+    </div>
+    <div class="phase-body">
+      <ul>
+        <li>Auto-creación desactivada. Todo va a revisión.</li>
+        <li>UI de revisión completa: editar cantidades, re-vincular, agregar, eliminar.</li>
+        <li>Link directo en sidebar.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">2</div>
+      <div><div class="phase-title">Facturación real con AFIP</div><span class="pill pill-red" style="margin-top:4px;">Próximo</span></div>
+    </div>
+    <div class="phase-body">
+      <ul>
+        <li><strong>Precio base desde Excel:</strong> Import de lista de proveedor → precio_compra en articulos. Mantener en Excel como ahora, importar cuando cambia.</li>
+        <li><strong>Cálculo de precio de venta:</strong> precio_compra + margen + IVA según cliente. El motor ya existe en <code class="inline">lib/pricing/calculator.ts</code>.</li>
+        <li><strong>Conexión AFIP:</strong> Integrar con AFIP WSFE (web service de facturación electrónica) vía API. Generar CAE para facturas A, B, C.</li>
+        <li><strong>Flujo:</strong> pedido aprobado → "Generar factura" → cálculo de precios → envío a AFIP → CAE → PDF.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">3</div>
+      <div><div class="phase-title">Cuentas corrientes + pagos con triggers automáticos</div><span class="pill pill-orange">Después de facturación</span></div>
+    </div>
+    <div class="phase-body">
+      <ul>
+        <li>Trigger: al generar factura → insertar movimiento "debe" en CC del cliente.</li>
+        <li>UI para registrar cobro → insertar movimiento "haber" e imputar a factura.</li>
+        <li>Trigger: al finalizar recepción de mercadería → registrar deuda en CC del proveedor.</li>
+        <li>UI para aprobar orden de pago → registrar pago a proveedor.</li>
+        <li>Implementar con Supabase DB triggers (PostgreSQL) para garantizar consistencia.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">4</div>
+      <div><div class="phase-title">Stock automático + alertas</div><span class="pill pill-blue">Paralelo a punto 3</span></div>
+    </div>
+    <div class="phase-body">
+      <ul>
+        <li>Al confirmar pedido → incrementar stock_reservado.</li>
+        <li>Al despachar → decrementar stock_actual + stock_reservado.</li>
+        <li>Al recibir mercadería → incrementar stock_actual.</li>
+        <li>Alertas en dashboard cuando stock_disponible &lt; stock_minimo.</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider">
+  <h3>Resumen de prioridades Fase 1</h3>
+  <table class="status-table" style="border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-top:12px;">
+    <thead><tr><th>#</th><th>Tarea</th><th>Estado</th><th>Impacto</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Pedidos: bandeja de revisión operativa</td><td><span class="pill pill-green">✅ Hecho hoy</span></td><td><span class="pill pill-red">Crítico</span></td></tr>
+      <tr><td>2</td><td>Bug CC Clientes corregido</td><td><span class="pill pill-green">✅ Hecho hoy</span></td><td><span class="pill pill-red">Crítico</span></td></tr>
+      <tr><td>3</td><td>Import lista de precios Excel → articulos.precio_compra</td><td><span class="pill pill-yellow">Pendiente</span></td><td><span class="pill pill-red">Crítico</span></td></tr>
+      <tr><td>4</td><td>Conexión AFIP + generación CAE</td><td><span class="pill pill-yellow">Pendiente</span></td><td><span class="pill pill-red">Crítico</span></td></tr>
+      <tr><td>5</td><td>UI registrar cobro de cliente</td><td><span class="pill pill-yellow">Pendiente</span></td><td><span class="pill pill-red">Crítico</span></td></tr>
+      <tr><td>6</td><td>Triggers CC automáticos (factura → CC, pago → CC)</td><td><span class="pill pill-yellow">Pendiente</span></td><td><span class="pill pill-orange">Alto</span></td></tr>
+      <tr><td>7</td><td>UI crear devolución</td><td><span class="pill pill-yellow">Pendiente</span></td><td><span class="pill pill-orange">Alto</span></td></tr>
+      <tr><td>8</td><td>Stock automático al confirmar/despachar</td><td><span class="pill pill-yellow">Pendiente</span></td><td><span class="pill pill-orange">Alto</span></td></tr>
+      <tr><td>9</td><td>Aliases de artículos para matching de email</td><td><span class="pill pill-yellow">Pendiente</span></td><td><span class="pill pill-orange">Alto</span></td></tr>
+      <tr><td>10</td><td>Completar datos maestros (artículos, clientes, proveedores)</td><td><span class="pill pill-yellow">Ongoing</span></td><td><span class="pill pill-yellow">Necesario</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- LLM -->
+<section id="llm">
+  <h2>🧠 LLM / IA — La respuesta honesta</h2>
+
+  <div class="highlight">
+    <p><strong>Respuesta directa:</strong> Ningún LLM hoy aprende en tiempo real de forma autónoma. Ni Claude, ni GPT-4, ni Gemini. El fine-tuning existe pero es caro, lento y no es en tiempo real. Lo más cercano a lo que describís es <strong>Mem0</strong> — una capa de memoria persistente que simula aprendizaje sobre la marcha.</p>
+  </div>
+
+  <div class="llm-compare">
+    <div class="llm-box">
+      <h4>❌ Múltiples agentes separados</h4>
+      <ul>
+        <li>Agente para pedidos, otro para stock, otro para CC...</li>
+        <li>Cada uno tiene contexto limitado de los otros módulos.</li>
+        <li>Difícil coordinar y depurar.</li>
+        <li>Más costoso en tokens.</li>
+        <li>No ve el negocio completo.</li>
+      </ul>
+    </div>
+    <div class="llm-box winner">
+      <h4>✅ Un LLM central + Mem0 (recomendado)</h4>
+      <ul>
+        <li>Un solo Claude con acceso a toda la DB via herramientas (function calling).</li>
+        <li>Mem0 guarda decisiones, correcciones y patrones del negocio.</li>
+        <li>La próxima vez que se da una situación similar, Claude la reconoce.</li>
+        <li>Ya tienen Claude integrado — solo falta agregarle herramientas + Mem0.</li>
+        <li>Sub-agentes solo para OCR (Gemini) y análisis predictivo futuro.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:8px;">
+    <div class="card-title">¿Qué le falta al chat de IA para ser útil de verdad?</div>
+    <p>Hoy Claude responde preguntas generales pero <strong>no puede consultar tu DB</strong>. Para que responda "¿cuánto me debe García?" o "¿tengo stock para el pedido de mañana?" hay que agregarle herramientas:</p>
+    <ul>
+      <li><code class="inline">buscar_cliente(nombre)</code>, <code class="inline">ver_cc(cliente_id)</code>, <code class="inline">ver_stock(articulo)</code>, <code class="inline">listar_pedidos_pendientes()</code></li>
+      <li>El endpoint <code class="inline">/api/ai/chat</code> ya existe. Solo hay que conectarle estas funciones.</li>
+      <li>Con esto el empleado pregunta en lenguaje natural y obtiene datos reales de Supabase.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ROADMAP -->
+<section id="roadmap">
+  <h2>🗺 Roadmap — después de Fase 1</h2>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num" style="background:var(--green);">2</div>
+      <div><div class="phase-title">LLM con acceso real a datos</div><span class="pill pill-green">Después de Fase 1</span></div>
+    </div>
+    <div class="phase-body">
+      <ul>
+        <li>Claude con 10-15 herramientas conectadas a Supabase.</li>
+        <li>Mem0 integrado para memoria persistente de decisiones y patrones.</li>
+        <li>Chat operativo: cualquier empleado consulta datos en lenguaje natural.</li>
+        <li>Sugerencias proactivas: clientes inactivos, deudas por vencer, stock bajo.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num" style="background:var(--yellow);">3</div>
+      <div><div class="phase-title">Inteligencia predictiva</div><span class="pill pill-yellow">Mediano plazo</span></div>
+    </div>
+    <div class="phase-body">
+      <ul>
+        <li>Predicción de ventas por cliente/zona/producto.</li>
+        <li>Predicción de compras: "En 3 semanas necesitás reponer X".</li>
+        <li>Detección automática de aumentos de precios en listas de proveedores.</li>
+        <li>Análisis de rentabilidad por cliente, producto, zona, vendedor.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num" style="background:var(--accent2);">4</div>
+      <div><div class="phase-title">Apps satélite + automatización</div><span class="pill pill-blue">Largo plazo</span></div>
+    </div>
+    <div class="phase-body">
+      <ul>
+        <li>App clientes: ver CC, hacer pedidos, ver facturas.</li>
+        <li>App viajantes: cartera, pedidos en calle, cobros offline.</li>
+        <li>App choferes: confirmar entregas, devoluciones en el momento.</li>
+        <li>Automatización de compras: OC automática cuando stock baja del mínimo.</li>
+        <li>Portal proveedores: el proveedor sube su factura y el sistema la imputa solo.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="background:linear-gradient(135deg,rgba(79,110,247,.1) 0%,rgba(124,58,237,.1) 100%); border-color:rgba(79,110,247,.3); margin-top:16px;">
+    <div class="card-title" style="font-size:1.1rem; margin-bottom:10px;">💡 El diferencial real de GM ERP</div>
+    <p style="color:var(--text); font-size:14px; line-height:1.8;">
+      La mayoría de los sistemas ERP para distribuidoras son herramientas pasivas. GM ERP está construido para ser <strong>activo</strong>: recibe emails y crea pedidos, lee facturas con OCR, sugiere acciones, y va a predecir necesidades antes de que sean urgentes.<br><br>
+      El stack que ya tienen (Claude, Gemini, pgvector, Gmail API) es exactamente el correcto. La Fase 1 es el momento de conexión — una vez que los datos fluyen solos entre módulos, cada hora de desarrollo siguiente multiplica el valor del sistema.
+    </p>
+  </div>
+</section>
+
+</div>
+
+<script>
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('nav a');
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        navLinks.forEach(l => l.classList.remove('active'));
+        const a = document.querySelector(`nav a[href="#${e.target.id}"]`);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { threshold: 0.3 });
+  sections.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

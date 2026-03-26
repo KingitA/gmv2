@@ -505,9 +505,13 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
         // ── 4c. Decide: auto-create, accumulate, or send to review ────
         const matchedItems = parseResult.items.filter(i => i.matchedProduct)
         const unmatchedItems = parseResult.items.filter(i => !i.matchedProduct)
-        const canAutoCreate = clienteId && matchedItems.length > 0 && unmatchedItems.length === 0
+        // AUTO-CREATE DISABLED: todo pedido va a revisión manual.
+        // Esto garantiza que ningún pedido se crea con datos incorrectos.
+        // Cuando la revisión manual esté consolidada, se puede volver a habilitar
+        // solo para matches con score >= 0.98 y cliente identificado con certeza.
+        const canAutoCreate = false
 
-        console.log(`[EmailOrderProcessor] "${fileName}": ${matchedItems.length} matched, ${unmatchedItems.length} unmatched, clienteId=${clienteId || 'none'}, canAutoCreate=${canAutoCreate}`)
+        console.log(`[EmailOrderProcessor] "${fileName}": ${matchedItems.length} matched, ${unmatchedItems.length} unmatched, clienteId=${clienteId || 'none'}, canAutoCreate=false (manual review enforced)`)
 
         if (canAutoCreate) {
             try {

@@ -22,6 +22,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Dashboard', href: '/', icon: '📊' },
       { label: 'Pedidos', href: '/clientes-pedidos', icon: '📦' },
+      { label: 'Bandeja de Revisión', href: '/clientes-pedidos/import-review', icon: '📬' },
     ],
   },
   {
