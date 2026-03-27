@@ -12,6 +12,8 @@ export interface DescuentoTipado {
 
 export interface DatosArticulo {
   precio_compra: number
+  /** Si está seteado, se usa como precio base directamente sin calcular desde precio_compra */
+  precio_base_stored?: number | null
   descuentos: DescuentoTipado[]
   tipo_descuento: "cascada" | "sobre_lista"
   porcentaje_ganancia: number
@@ -70,6 +72,12 @@ export function resumirDescuentos(descuentos: DescuentoTipado[]): ResumenDescuen
 // ─── Paso 1: Precio Base ───────────────────────────────
 
 export function calcularPrecioBase(art: DatosArticulo): { costoNeto: number; precioBase: number } {
+  // Feature: precio_base_stored — si está seteado, se usa directamente
+  // sin recalcular desde precio_compra, descuentos y margen.
+  if (art.precio_base_stored != null && art.precio_base_stored > 0) {
+    return { costoNeto: 0, precioBase: art.precio_base_stored }
+  }
+
   let costoNeto = art.precio_compra || 0
 
   // Ordenar todos los descuentos por orden
@@ -236,6 +244,7 @@ export function articuloToDatosArticulo(art: any, descuentosDB?: DescuentoTipado
   }
   return {
     precio_compra: art.precio_compra || 0,
+    precio_base_stored: art.precio_base ?? null,
     descuentos,
     tipo_descuento: art.proveedor?.tipo_descuento || art.tipo_descuento || "cascada",
     porcentaje_ganancia: art.porcentaje_ganancia || 0,

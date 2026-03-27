@@ -9,6 +9,7 @@ import {
   type MetodoFacturacion,
   type DescuentoTipado,
 } from "@/lib/pricing/calculator"
+import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
 
 export async function POST(request: Request) {
   try {
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient()
     const body = await request.json()
-    const { pedido_id } = body
+    const { pedido_id, pago_contado } = body
 
     // ─── 1. Obtener pedido con cliente, detalles y artículos ───
     const { data: pedido, error: pedidoError } = await supabase
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
         detalle:pedidos_detalle(
           id, articulo_id, cantidad,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
-            id, descripcion, sku, precio_compra,
+            id, descripcion, sku, precio_compra, precio_base,
             descuento1, descuento2, descuento3, descuento4,
             porcentaje_ganancia, categoria, rubro,
             iva_compras, iva_ventas,
@@ -170,11 +171,22 @@ export async function POST(request: Request) {
     const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
     await supabase.from("pedidos").update({ total: round2(totalPedido) }).eq("id", pedido_id)
 
+    // ─── 8. Generar bonificación pago contado si corresponde ───
+    let bonificacion = null
+    if (pago_contado && comprobantesGenerados.length > 0) {
+      const comprobanteIds = comprobantesGenerados.map((c: any) => c.id).filter(Boolean)
+      bonificacion = await generarBonificacionContado(supabase, {
+        cliente_id: pedido.cliente.id,
+        comprobante_ids: comprobanteIds,
+      })
+    }
+
     return NextResponse.json({
       success: true,
       comprobantes: comprobantesGenerados,
       metodo_facturacion: metodoFacturacion,
       total_pedido: round2(totalPedido),
+      bonificacion_contado: bonificacion,
     })
   } catch (error: any) {
     console.error("[Generar Comprobantes] Error:", error)

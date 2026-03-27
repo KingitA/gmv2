@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label"
 import { Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical, Plus, Upload, History, ArrowLeft, ArrowUpDown } from "lucide-react"
 import { ImportPriceListDialog } from "@/components/articulos/ImportPriceListDialog"
+import { ImportArticulosDialog } from "@/components/articulos/ImportArticulosDialog"
 import * as XLSX from "xlsx"
 import Link from "next/link"
 import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
@@ -16,14 +17,28 @@ import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resum
 interface LP { id:string; nombre:string; codigo:string; recargo_limpieza_bazar:number; recargo_perfumeria_negro:number; recargo_perfumeria_blanco:number }
 interface ColLista { id:string; lista:LP; fac:MetodoFacturacion; label:string }
 
+// Presets de lista para el selector de precios
+interface ListaPreset { id:string; label:string; listaCode:string; fac:MetodoFacturacion; usarContado:boolean }
+const LISTA_PRESETS:ListaPreset[] = [
+  { id:"bahia_pres_cte",    label:"Bahía Presupuesto Contado",    listaCode:"bahia",    fac:"Presupuesto", usarContado:true  },
+  { id:"bahia_pres_ctacte", label:"Bahía Presupuesto Cta Cte",   listaCode:"bahia",    fac:"Presupuesto", usarContado:false },
+  { id:"bahia_fac_ctacte",  label:"Bahía Factura Cta Cte",       listaCode:"bahia",    fac:"Factura",     usarContado:false },
+  { id:"neco_pres_cte",     label:"Neco Presupuesto Contado",     listaCode:"neco",     fac:"Presupuesto", usarContado:true  },
+  { id:"neco_pres_ctacte",  label:"Neco Presupuesto Cta Cte",    listaCode:"neco",     fac:"Presupuesto", usarContado:false },
+  { id:"neco_fac_ctacte",   label:"Neco Con IVA Cta Cte",        listaCode:"neco",     fac:"Factura",     usarContado:false },
+  { id:"viajante_pres_cte", label:"Viajante Presupuesto Contado",listaCode:"viajante", fac:"Presupuesto", usarContado:true  },
+  { id:"viajante_pres_cte2",label:"Viajante Presupuesto Cta Cte",listaCode:"viajante", fac:"Presupuesto", usarContado:false },
+  { id:"viajante_fac_ctacte",label:"Viajante Con IVA Cta Cte",  listaCode:"viajante", fac:"Factura",     usarContado:false },
+]
+
 const PS = 50
 const TC: Record<string,{bg:string;text:string}> = { comercial:{bg:"bg-blue-100",text:"text-blue-700"}, financiero:{bg:"bg-green-100",text:"text-green-700"}, promocional:{bg:"bg-purple-100",text:"text-purple-700"} }
 
-type FColId = "art"|"prov"|"ivac"|"ivav"|"plista"|"desc"|"marg"|"br"|"pbase"
+type FColId = "art"|"prov"|"ivac"|"ivav"|"plista"|"desc"|"marg"|"br"|"pbase"|"pbcont"|"preset"
 const FCOLS:{id:FColId;label:string;dw:number;mw:number}[] = [
   {id:"art",label:"Artículo",dw:220,mw:100},{id:"prov",label:"Proveedor",dw:100,mw:50},{id:"ivac",label:"IVA C.",dw:45,mw:35},{id:"ivav",label:"IVA V.",dw:45,mw:35},
   {id:"plista",label:"P. Lista",dw:100,mw:60},{id:"desc",label:"Desc.",dw:80,mw:40},{id:"marg",label:"Margen",dw:65,mw:40},
-  {id:"br",label:"B/R",dw:55,mw:35},{id:"pbase",label:"P. Base",dw:95,mw:60},
+  {id:"br",label:"B/R",dw:55,mw:35},{id:"pbase",label:"P. Base",dw:95,mw:60},{id:"pbcont",label:"P. Contado",dw:95,mw:60},
 ]
 
 export default function ArticulosUnificadoPage() {
@@ -38,7 +53,7 @@ export default function ArticulosUnificadoPage() {
   const [sd,setSd]=useState("")
   const [pf,setPf]=useState("todos")
   const [ld,setLd]=useState(true)
-  const [ed,setEd]=useState<Map<string,Record<string,number>>>(new Map())
+  const [ed,setEd]=useState<Map<string,Record<string,number|null>>>(new Map())
   const [sav,setSav]=useState(false)
   const [cls,setCls]=useState<ColLista[]>([])
   const [dli,setDli]=useState<number|null>(null)
@@ -53,6 +68,10 @@ export default function ArticulosUnificadoPage() {
   const [fa,setFa]=useState<any>(null)
   const [ff,setFf]=useState<Record<string,any>>({})
   const [fs,setFs]=useState(false)
+  // Importar artículos Excel mapeado
+  const [showImportArticulos,setShowImportArticulos]=useState(false)
+  // Selector de lista preset para visualizar precios
+  const [selectedPreset,setSelectedPreset]=useState<string>("none")
   // Importaciones modal
   const [showImports,setShowImports]=useState(false)
   const [importHist,setImportHist]=useState<any[]>([])
@@ -78,7 +97,7 @@ export default function ArticulosUnificadoPage() {
     setLd(false)
   }
   const tp=Math.ceil(tc/PS)
-  const edt=(id:string,c:string,v:number)=>{setEd(p=>{const n=new Map(p);n.set(id,{...(n.get(id)||{}),[c]:v});return n});setArts(p=>p.map(a=>a.id===id?{...a,[c]:v}:a))}
+  const edt=(id:string,c:string,v:number|null)=>{setEd(p=>{const n=new Map(p);n.set(id,{...(n.get(id)||{}),[c]:v});return n});setArts(p=>p.map(a=>a.id===id?{...a,[c]:v}:a))}
   const gsv=async()=>{if(ed.size===0)return;setSav(true);let ok=0;for(const[id,c]of ed.entries()){const{error}=await sb.from("articulos").update(c).eq("id",id);if(!error)ok++};setSav(false);setEd(new Map());alert(`${ok} artículo(s) actualizados`)}
 
   // Resize - works for both fixed and lista columns
@@ -222,6 +241,7 @@ export default function ArticulosUnificadoPage() {
         <div><h1 className="text-xl font-bold">Artículos</h1><p className="text-xs text-muted-foreground">{tc} artículos · Pág {pg+1}/{tp||1}</p></div>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" className="h-7 text-xs" onClick={()=>setShowNewArt(true)}><Plus className="h-3 w-3 mr-1"/>Nuevo</Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={()=>setShowImportArticulos(true)}><Upload className="h-3 w-3 mr-1"/>Importar Excel</Button>
           <Link href="/articulos/actualizaciones">
             <Button variant="outline" size="sm" className="h-7 text-xs">
               <ArrowUpDown className="h-3 w-3 mr-1"/>Actualizaciones
@@ -249,6 +269,16 @@ export default function ArticulosUnificadoPage() {
           <span className="text-[9px] font-bold text-muted-foreground uppercase">Listas:</span>
           {listas.map(l=><div key={l.id} className="flex gap-px">{facs.map(f=><button key={`${l.codigo}_${f}`} onClick={()=>tgl(l,f)} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${ila(l.codigo,f)?"bg-blue-600 text-white border-blue-600":"bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400"}`}>{l.nombre.slice(0,3)}·{f==="Presupuesto"?"P":f==="Factura"?"F":"Fi"}</button>)}</div>)}
         </div>
+        <div className="border-l pl-2 flex items-center gap-1.5">
+          <span className="text-[9px] font-bold text-muted-foreground uppercase whitespace-nowrap">Ver como:</span>
+          <Select value={selectedPreset} onValueChange={setSelectedPreset}>
+            <SelectTrigger className="h-7 text-[10px] w-[190px]"><SelectValue placeholder="Seleccionar lista..."/></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none" className="text-xs">— Precio base calculado —</SelectItem>
+              {LISTA_PRESETS.map(p=><SelectItem key={p.id} value={p.id} className="text-xs">{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="bg-white border rounded-lg overflow-hidden" style={{userSelect:rc?"none":undefined}}>
@@ -263,6 +293,10 @@ export default function ArticulosUnificadoPage() {
               :arts.length===0?<tr><td colSpan={99} className="text-center py-10 text-muted-foreground">Sin artículos</td></tr>
               :arts.map(a=>{
                 const ds=dm[a.id]||[];const dt=articuloToDatosArticulo(a,ds);const bs=calcularPrecioBase(dt);const rs=resumirDescuentos(ds);const ie=ed.has(a.id)
+                // Preset de lista: calcular precio usando precio_base_contado o precio_base según preset
+                const activePreset=selectedPreset!=="none"?LISTA_PRESETS.find(p=>p.id===selectedPreset):null
+                const presetLista=activePreset?listas.find(l=>l.codigo===activePreset.listaCode):null
+                const presetPrecio=activePreset&&presetLista?calcularPrecioFinal({...dt,precio_base_stored:activePreset.usarContado?(a.precio_base_contado??null):(a.precio_base??null)},{recargo_limpieza_bazar:presetLista.recargo_limpieza_bazar,recargo_perfumeria_negro:presetLista.recargo_perfumeria_negro,recargo_perfumeria_blanco:presetLista.recargo_perfumeria_blanco},activePreset.fac,0):null
                 return(<tr key={a.id} className={`border-b border-neutral-50 hover:bg-neutral-50/50 ${ie?"bg-yellow-50/30":""}`} style={{height:36}}>
                   {!ch.art&&<td className="px-3 py-0 sticky left-0 bg-white z-10 overflow-hidden" style={{width:cw.art,maxWidth:cw.art}}><button onClick={()=>ofa(a)} className="text-left hover:text-blue-600 block w-full overflow-hidden"><div className="font-medium text-[11px] leading-tight truncate">{a.descripcion}</div><span className="text-[10px] text-muted-foreground font-mono truncate block">{a.sku}</span></button></td>}
                   {!ch.prov&&<td className="px-1 py-0 text-center border-r border-neutral-50 overflow-hidden" style={{width:cw.prov,maxWidth:cw.prov}}><span className="text-[10px] text-muted-foreground truncate block">{a.proveedor?.nombre||"—"}</span></td>}
@@ -272,7 +306,17 @@ export default function ArticulosUnificadoPage() {
                   {!ch.desc&&<td className="px-1 py-0 text-center border-r border-neutral-50" style={{width:cw.desc,maxWidth:cw.desc}}><button onClick={()=>odm(a)} className="inline-flex gap-px px-1 py-0.5 rounded hover:bg-neutral-100">{ds.length===0?<span className="text-[10px] text-neutral-300">+</span>:<>{rs.totalComercial>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-blue-100 text-blue-700">{rs.totalComercial}</span>}{rs.totalFinanciero>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-green-100 text-green-700">{rs.totalFinanciero}</span>}{rs.totalPromocional>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-purple-100 text-purple-700">{rs.totalPromocional}</span>}</>}</button></td>}
                   {!ch.marg&&<td className="px-1 py-0 border-r border-neutral-50" style={{width:cw.marg,maxWidth:cw.marg}}><input type="number" step="0.1" className="w-full text-center text-[11px] font-semibold text-green-700 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded" value={a.porcentaje_ganancia||""} placeholder="—" onChange={e=>edt(a.id,"porcentaje_ganancia",parseFloat(e.target.value)||0)}/></td>}
                   {!ch.br&&<td className="px-1 py-0 border-r border-neutral-50" style={{width:cw.br,maxWidth:cw.br}}><input type="number" step="0.1" className={`w-full text-center text-[11px] font-semibold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${(a.bonif_recargo||0)<0?"text-red-600":(a.bonif_recargo||0)>0?"text-amber-600":"text-neutral-300"}`} value={a.bonif_recargo||""} placeholder="—" onChange={e=>edt(a.id,"bonif_recargo",parseFloat(e.target.value)||0)}/></td>}
-                  {!ch.pbase&&<td className="px-2 py-0 text-right font-bold font-mono text-[11px] border-r-2 border-neutral-200" style={{width:cw.pbase,maxWidth:cw.pbase}}>{fmt(bs.precioBase)}</td>}
+                  {!ch.pbase&&<td className="px-1 py-0 border-r border-neutral-100" style={{width:cw.pbase,maxWidth:cw.pbase}}>
+                    <div className="flex items-center gap-0.5">
+                      <input type="number" step="0.01" className={`flex-1 text-right text-[11px] font-mono font-bold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${a.precio_base!=null?"text-blue-700":"text-neutral-400"}`} value={a.precio_base!=null?a.precio_base:""} placeholder={fmt(bs.precioBase)} onChange={e=>{const v=e.target.value;edt(a.id,"precio_base",v===""?null:parseFloat(v)||0);edt(a.id,"precio_base_contado",v===""?null:Math.round((parseFloat(v)||0)*0.9*100)/100)}}/>
+                      {a.precio_base!=null&&<button className="text-[9px] text-neutral-300 hover:text-red-500 flex-shrink-0 leading-none pb-0.5" title="Limpiar (usar calculado)" onClick={()=>{edt(a.id,"precio_base",null);edt(a.id,"precio_base_contado",null)}}>×</button>}
+                    </div>
+                    {a.precio_base==null&&<div className="text-[8px] text-neutral-300 text-right leading-none pb-0.5">calc.</div>}
+                  </td>}
+                  {!ch.pbcont&&<td className="px-1 py-0 border-r-2 border-neutral-200" style={{width:cw.pbcont,maxWidth:cw.pbcont}}>
+                    <input type="number" step="0.01" className="w-full text-right text-[11px] font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded text-amber-700" value={a.precio_base_contado!=null?a.precio_base_contado:""} placeholder={a.precio_base!=null?fmt(Math.round(a.precio_base*0.9*100)/100):"—"} onChange={e=>edt(a.id,"precio_base_contado",parseFloat(e.target.value)||0)}/>
+                    {activePreset&&presetPrecio&&<div className="text-[9px] text-emerald-600 font-bold text-right leading-none">{fmt(presetPrecio.ivaIncluido?presetPrecio.precioUnitarioFinal:presetPrecio.precioUnitarioFinal+presetPrecio.montoIvaDiscriminado)}</div>}
+                  </td>}
                   {cls.map(c=>{const ld2:DatosLista={recargo_limpieza_bazar:c.lista.recargo_limpieza_bazar,recargo_perfumeria_negro:c.lista.recargo_perfumeria_negro,recargo_perfumeria_blanco:c.lista.recargo_perfumeria_blanco};const r=calcularPrecioFinal(dt,ld2,c.fac,0);const pf2=r.ivaIncluido?r.precioUnitarioFinal:r.precioUnitarioFinal+r.montoIvaDiscriminado;return(<td key={c.id} className="px-2 py-0 text-right bg-blue-50/20 border-l border-blue-50 overflow-hidden" style={{width:lcw[c.id]||100,maxWidth:lcw[c.id]||100}}><div className="font-bold font-mono text-[11px] truncate">{fmt(pf2)}</div></td>)})}
                 </tr>)})}
             </tbody>
@@ -395,6 +439,13 @@ export default function ArticulosUnificadoPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Importar artículos desde Excel (mapeado) */}
+      <ImportArticulosDialog
+        open={showImportArticulos}
+        onOpenChange={setShowImportArticulos}
+        onImportComplete={()=>{ load() }}
+      />
     </div>
   )
 }

@@ -28,7 +28,7 @@ export async function GET(
         // 1. Fetch client data
         const { data: cliente, error: clienteError } = await supabase
             .from("clientes")
-            .select("id, razon_social, nombre, cuit, direccion, telefono")
+            .select("id, razon_social, nombre, cuit, direccion, telefono, condicion_iva")
             .eq("id", cliente_id)
             .single();
 
@@ -49,6 +49,8 @@ export async function GET(
         numero_comprobante,
         fecha,
         pedido_id,
+        total_neto,
+        total_iva,
         total_factura,
         saldo_pendiente,
         estado_pago
@@ -189,6 +191,7 @@ export async function GET(
             cliente: {
                 ...cliente,
                 saldo_total,
+                condicion_iva: cliente.condicion_iva || null,
             },
             comprobantes: allComprobantes.map((comp: any) => ({
                 id: comp.id,
@@ -197,6 +200,8 @@ export async function GET(
                 fecha: comp.fecha,
                 pedido_id: comp.pedido_id,
                 numero_pedido: comp.numero_pedido || comp.numero_comprobante, // Ensure we show something
+                total_neto: Number(comp.total_neto || 0),
+                total_iva: Number(comp.total_iva || 0),
                 total_factura: Number(comp.total_factura),
                 saldo_pendiente: Number(comp.saldo_pendiente),
                 estado: comp.estado_pago || "pendiente", // Map estado_pago to estado

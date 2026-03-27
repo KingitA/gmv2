@@ -89,6 +89,10 @@ export interface Articulo {
   rubro: string | null
   proveedor_id: string | null
   precio_compra: number
+  /** Precio base almacenado. Si está seteado se usa directamente; si es null se calcula desde precio_compra - descuentos + margen */
+  precio_base?: number | null
+  /** Precio base con descuento de pago contado (10%). Se actualiza automáticamente vía trigger: precio_base * 0.9 */
+  precio_base_contado?: number | null
   margen_ganancia_custom: number | null
   descuento_propio: number | null
   descuento1: number | null

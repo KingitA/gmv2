@@ -48,6 +48,8 @@ interface Comprobante {
     fecha: string;
     pedido_id: string;
     numero_pedido: string;
+    total_neto: number;
+    total_iva: number;
     total_factura: number;
     saldo_pendiente: number;
     estado: string;
@@ -97,6 +99,7 @@ interface CuentaCorrienteData {
         direccion: string;
         telefono: string;
         saldo_total: number;
+        condicion_iva?: string | null;
     };
     comprobantes: Comprobante[];
     pagos: Pago[];
@@ -140,6 +143,9 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     const [selectedDocumentos, setSelectedDocumentos] = useState<string[]>([]);
     const [pagosForm, setPagosForm] = useState<PagoFormData[]>([]);
     const [observaciones, setObservaciones] = useState("");
+
+    // Pago contado 10%
+    const [aplicarContado, setAplicarContado] = useState(false);
 
     // Adjustment form
     const [selectedComprobanteForAdjustment, setSelectedComprobanteForAdjustment] = useState<string>("");
@@ -231,6 +237,24 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         );
     };
 
+    /** Calcula el total de bonificación contado 10% sobre los comprobantes seleccionados */
+    const calcularBonificacionContado = (): number => {
+        if (!data) return 0;
+        return selectedDocumentos.reduce((sum, id) => {
+            const comp = data.comprobantes.find(c => c.id === id);
+            if (!comp) return sum;
+            if (comp.tipo_comprobante === "PRES") {
+                return sum + Math.abs(comp.total_factura) * 0.1;
+            } else if (["FA", "FB", "FC"].includes(comp.tipo_comprobante)) {
+                const neto = Math.abs(comp.total_neto || 0);
+                const bonifNeto = neto * 0.1;
+                const bonifIva = bonifNeto * 0.21;
+                return sum + bonifNeto + bonifIva;
+            }
+            return sum;
+        }, 0);
+    };
+
     const handleAddPagoForm = () => {
         setPagosForm([...pagosForm, { tipo: 'efectivo', monto: 0, detalles: {} }]);
     };
@@ -274,11 +298,46 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
 
             if (!response.ok) throw new Error('Error al registrar pago');
 
+            const pagoResult = await response.json();
+
+            // Generar bonificación pago contado 10% si corresponde
+            if (aplicarContado && selectedDocumentos.length > 0) {
+                const comprobanteIds = selectedDocumentos.filter(id => {
+                    const doc = allDocs.find(d => d.id === id);
+                    return doc && !doc.es_devolucion && doc.tipo !== "PAGO";
+                });
+
+                if (comprobanteIds.length > 0) {
+                    try {
+                        const bonifRes = await fetch('/api/pagos/generar-bonificacion', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                cliente_id: clienteId,
+                                comprobante_ids: comprobanteIds,
+                                pago_id: pagoResult?.pago?.id || pagoResult?.id,
+                            }),
+                        });
+                        const bonifData = await bonifRes.json();
+                        if (bonifRes.ok && bonifData.total_bonificacion > 0) {
+                            toast({
+                                title: "Bonificación contado generada",
+                                description: `NC/REV por $${Math.round(bonifData.total_bonificacion).toLocaleString('es-AR')} generados automáticamente`,
+                            });
+                        }
+                    } catch {
+                        // Si falla la bonificación, no bloqueamos el pago ya registrado
+                        toast({ variant: "destructive", title: "Atención", description: "Pago registrado, pero hubo un error al generar la bonificación contado. Verificar manualmente." });
+                    }
+                }
+            }
+
             toast({ title: "Éxito", description: "Pago registrado correctamente" });
             setShowPaymentModal(false);
             setSelectedDocumentos([]);
             setPagosForm([]);
             setObservaciones("");
+            setAplicarContado(false);
             fetchData();
         } catch (error) {
             toast({ variant: "destructive", title: "Error", description: "No se pudo registrar el pago" });
@@ -539,10 +598,35 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                             <Label>Observaciones</Label>
                             <Textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} />
                         </div>
+
+                        {/* Pago contado — bonificación 10% */}
+                        {selectedDocumentos.length > 0 && (
+                            <div className={`flex items-start gap-3 rounded-lg border p-3 transition-colors ${aplicarContado ? "bg-amber-50 border-amber-200" : "bg-muted/30"}`}>
+                                <Checkbox
+                                    id="aplicar-contado"
+                                    checked={aplicarContado}
+                                    onCheckedChange={(v) => setAplicarContado(!!v)}
+                                    className="mt-0.5"
+                                />
+                                <div className="flex-1">
+                                    <label htmlFor="aplicar-contado" className="text-sm font-medium cursor-pointer">
+                                        Aplicar 10% descuento pago contado
+                                    </label>
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                        Se generará automáticamente una NC/REV (artículo 11115) por cada comprobante seleccionado.
+                                    </p>
+                                    {aplicarContado && (
+                                        <p className="text-sm font-bold text-amber-700 mt-1">
+                                            Bonificación estimada: ${Math.round(calcularBonificacionContado()).toLocaleString('es-AR')}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowPaymentModal(false)}>Cancelar</Button>
-                        <Button onClick={handleSubmitPayment}>Registrar Pago</Button>
+                        <Button variant="outline" onClick={() => { setShowPaymentModal(false); setAplicarContado(false); }}>Cancelar</Button>
+                        <Button onClick={handleSubmitPayment}>Registrar Pago{aplicarContado ? " + Bonif. Contado" : ""}</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
