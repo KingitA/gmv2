@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical, Plus, Upload, History, ArrowLeft, ArrowUpDown } from "lucide-react"
+import { Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical, Plus, Upload, History, ArrowLeft, ArrowUpDown, ChevronDown, Check, Eye } from "lucide-react"
 import { ImportPriceListDialog } from "@/components/articulos/ImportPriceListDialog"
 import { ImportArticulosDialog } from "@/components/articulos/ImportArticulosDialog"
 import * as XLSX from "xlsx"
@@ -36,9 +36,35 @@ const TC: Record<string,{bg:string;text:string}> = { comercial:{bg:"bg-blue-100"
 
 type FColId = "art"|"prov"|"ivac"|"ivav"|"plista"|"desc"|"marg"|"br"|"pbase"|"pbcont"|"preset"
 const FCOLS:{id:FColId;label:string;dw:number;mw:number}[] = [
-  {id:"art",label:"Artículo",dw:220,mw:100},{id:"prov",label:"Proveedor",dw:100,mw:50},{id:"ivac",label:"IVA C.",dw:45,mw:35},{id:"ivav",label:"IVA V.",dw:45,mw:35},
-  {id:"plista",label:"P. Lista",dw:100,mw:60},{id:"desc",label:"Desc.",dw:80,mw:40},{id:"marg",label:"Margen",dw:65,mw:40},
-  {id:"br",label:"B/R",dw:55,mw:35},{id:"pbase",label:"P. Base",dw:95,mw:60},{id:"pbcont",label:"P. Contado",dw:95,mw:60},
+  {id:"art",  label:"Artículo",  dw:220,mw:100},
+  {id:"prov", label:"Proveedor", dw:100,mw:50},
+  {id:"pbase",label:"P. Base",   dw:95, mw:60},
+  {id:"pbcont",label:"P. Contado",dw:95,mw:60},
+  {id:"plista",label:"P. Costo", dw:100,mw:60},
+  {id:"desc", label:"Desc.",     dw:80, mw:40},
+  {id:"marg", label:"Margen",    dw:65, mw:40},
+  {id:"br",   label:"B/R",       dw:55, mw:35},
+  {id:"ivac", label:"IVA C.",    dw:45, mw:35},
+  {id:"ivav", label:"IVA V.",    dw:45, mw:35},
+]
+
+// Menu de listas agrupado
+const LISTA_MENU = [
+  { group:"Bahía", listaCode:"bahia", items:[
+    { label:"Presup. Contado",   fac:"Presupuesto" as MetodoFacturacion, usarContado:true,  presetId:"bahia_pres_cte" },
+    { label:"Presup. Cta Cte",   fac:"Presupuesto" as MetodoFacturacion, usarContado:false, presetId:"bahia_pres_ctacte" },
+    { label:"Factura Cta Cte",   fac:"Factura"     as MetodoFacturacion, usarContado:false, presetId:"bahia_fac_ctacte" },
+  ]},
+  { group:"Neco", listaCode:"neco", items:[
+    { label:"Presup. Contado",   fac:"Presupuesto" as MetodoFacturacion, usarContado:true,  presetId:"neco_pres_cte" },
+    { label:"Presup. Cta Cte",   fac:"Presupuesto" as MetodoFacturacion, usarContado:false, presetId:"neco_pres_ctacte" },
+    { label:"Con IVA Cta Cte",   fac:"Factura"     as MetodoFacturacion, usarContado:false, presetId:"neco_fac_ctacte" },
+  ]},
+  { group:"Viajante", listaCode:"viajante", items:[
+    { label:"Presup. Contado",   fac:"Presupuesto" as MetodoFacturacion, usarContado:true,  presetId:"viajante_pres_cte" },
+    { label:"Presup. Cta Cte",   fac:"Presupuesto" as MetodoFacturacion, usarContado:false, presetId:"viajante_pres_cte2" },
+    { label:"Con IVA Cta Cte",   fac:"Factura"     as MetodoFacturacion, usarContado:false, presetId:"viajante_fac_ctacte" },
+  ]},
 ]
 
 export default function ArticulosUnificadoPage() {
@@ -72,6 +98,9 @@ export default function ArticulosUnificadoPage() {
   const [showImportArticulos,setShowImportArticulos]=useState(false)
   // Selector de lista preset para visualizar precios
   const [selectedPreset,setSelectedPreset]=useState<string>("none")
+  // Dropdown de listas
+  const [showListaMenu,setShowListaMenu]=useState(false)
+  const listaMenuRef=useRef<HTMLDivElement>(null)
   // Importaciones modal
   const [showImports,setShowImports]=useState(false)
   const [importHist,setImportHist]=useState<any[]>([])
@@ -226,6 +255,8 @@ export default function ArticulosUnificadoPage() {
   // Load pending count on mount
   useEffect(()=>{(async()=>{const{count}=await sb.from("importaciones_articulos").select("*",{count:"exact",head:true}).eq("estado","pendiente");setPendingCount(count||0)})()},[])
 
+  // Close lista menu on outside click
+  useEffect(()=>{if(!showListaMenu)return;const h=(e:MouseEvent)=>{if(!listaMenuRef.current?.contains(e.target as Node))setShowListaMenu(false)};document.addEventListener("mousedown",h);return()=>document.removeEventListener("mousedown",h)},[showListaMenu])
 
   const fmt=(n:number)=>n>0?`$${n.toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"
   const icC=(v:string)=>v==="factura"?"+":v==="mixto"?"½":"0"
@@ -265,19 +296,98 @@ export default function ArticulosUnificadoPage() {
           <div className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase">Buscar</div>
           <div className="relative"><Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground"/><Input value={st} onChange={e=>setSt(e.target.value)} placeholder="Descripción, SKU, EAN..." className="pl-7 h-7 text-xs"/></div>
         </div>
-        <div className="border-l pl-2 flex gap-1.5 flex-wrap items-center">
-          <span className="text-[9px] font-bold text-muted-foreground uppercase">Listas:</span>
-          {listas.map(l=><div key={l.id} className="flex gap-px">{facs.map(f=><button key={`${l.codigo}_${f}`} onClick={()=>tgl(l,f)} className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${ila(l.codigo,f)?"bg-blue-600 text-white border-blue-600":"bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400"}`}>{l.nombre.slice(0,3)}·{f==="Presupuesto"?"P":f==="Factura"?"F":"Fi"}</button>)}</div>)}
-        </div>
-        <div className="border-l pl-2 flex items-center gap-1.5">
-          <span className="text-[9px] font-bold text-muted-foreground uppercase whitespace-nowrap">Ver como:</span>
-          <Select value={selectedPreset} onValueChange={setSelectedPreset}>
-            <SelectTrigger className="h-7 text-[10px] w-[190px]"><SelectValue placeholder="Seleccionar lista..."/></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none" className="text-xs">— Precio base calculado —</SelectItem>
-              {LISTA_PRESETS.map(p=><SelectItem key={p.id} value={p.id} className="text-xs">{p.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        {/* ─── Dropdown moderno de listas ─── */}
+        <div className="border-l pl-2" ref={listaMenuRef}>
+          {(()=>{
+            const activeItem=LISTA_MENU.flatMap(g=>g.items).find(i=>i.presetId===selectedPreset)
+            const activeGroup=activeItem?LISTA_MENU.find(g=>g.items.includes(activeItem)):null
+            const colCount=cls.length
+            return(
+              <div className="relative">
+                <button
+                  onClick={()=>setShowListaMenu(p=>!p)}
+                  className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors ${showListaMenu?"bg-blue-600 text-white border-blue-600":"bg-white text-neutral-700 border-neutral-200 hover:border-neutral-400 hover:bg-neutral-50"}`}
+                >
+                  <Eye className="h-3 w-3 flex-shrink-0"/>
+                  {activeGroup&&activeItem
+                    ? <span>{activeGroup.group} · {activeItem.label}</span>
+                    : <span>Listas de precios</span>
+                  }
+                  {colCount>0&&<span className={`inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full text-[9px] font-bold ${showListaMenu?"bg-blue-400 text-white":"bg-blue-100 text-blue-700"}`}>{colCount}</span>}
+                  <ChevronDown className={`h-3 w-3 flex-shrink-0 transition-transform ${showListaMenu?"rotate-180":""}`}/>
+                </button>
+
+                {showListaMenu&&(
+                  <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-neutral-200 rounded-xl shadow-xl w-64 py-2 text-xs">
+                    {/* Header: limpiar vista */}
+                    <div className="px-3 pb-2 mb-1 border-b border-neutral-100 flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-wide">Vista activa</span>
+                      {selectedPreset!=="none"&&(
+                        <button onClick={()=>setSelectedPreset("none")} className="text-[10px] text-blue-600 hover:text-blue-800 font-medium">Limpiar</button>
+                      )}
+                    </div>
+                    {selectedPreset==="none"&&(
+                      <div className="mx-2 mb-2 px-2 py-1.5 rounded-lg bg-neutral-50 border border-neutral-100 text-[11px] text-muted-foreground">Mostrando precio base calculado</div>
+                    )}
+
+                    {/* Grupos de listas */}
+                    {LISTA_MENU.map(group=>{
+                      const lista=listas.find(l=>l.codigo===group.listaCode)
+                      const groupHasCol=group.items.some(item=>cls.some(c=>c.id===`${group.listaCode}_${item.fac}`))
+                      return(
+                        <div key={group.group} className="mb-1">
+                          <div className="flex items-center gap-1.5 px-3 py-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-500">{group.group}</span>
+                            {groupHasCol&&<span className="h-1.5 w-1.5 rounded-full bg-blue-500 flex-shrink-0"/>}
+                          </div>
+                          {group.items.map(item=>{
+                            const colId=`${group.listaCode}_${item.fac}`
+                            const isColActive=cls.some(c=>c.id===colId)
+                            const isPreset=selectedPreset===item.presetId
+                            return(
+                              <div key={item.presetId} className={`flex items-center gap-2 mx-2 px-2 py-1.5 rounded-lg cursor-default transition-colors ${isPreset?"bg-blue-50 border border-blue-100":"hover:bg-neutral-50"}`}>
+                                {/* Checkbox: toggle columna */}
+                                <button
+                                  onClick={()=>{if(lista)tgl(lista,item.fac)}}
+                                  title="Mostrar columna en tabla"
+                                  className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${isColActive?"bg-blue-600 border-blue-600":"border-neutral-300 hover:border-blue-400"}`}
+                                >
+                                  {isColActive&&<Check className="h-2.5 w-2.5 text-white"/>}
+                                </button>
+                                {/* Label — click para seleccionar vista */}
+                                <button
+                                  onClick={()=>setSelectedPreset(isPreset?"none":item.presetId)}
+                                  className="flex-1 text-left text-[11px] font-medium leading-tight"
+                                >
+                                  {item.label}
+                                </button>
+                                {/* Radio: vista activa */}
+                                <button
+                                  onClick={()=>setSelectedPreset(isPreset?"none":item.presetId)}
+                                  title="Usar como vista activa"
+                                  className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${isPreset?"bg-blue-600 border-blue-600":"border-neutral-300 hover:border-blue-400"}`}
+                                >
+                                  {isPreset&&<div className="w-1.5 h-1.5 bg-white rounded-full"/>}
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })}
+
+                    {/* Footer: hint */}
+                    <div className="px-3 pt-2 mt-1 border-t border-neutral-100">
+                      <p className="text-[10px] text-muted-foreground leading-tight">
+                        <span className="font-semibold">☑ Columna</span> · muestra precios en tabla<br/>
+                        <span className="font-semibold">○ Vista</span> · precio activo en columna base
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </div>
 
@@ -285,7 +395,7 @@ export default function ArticulosUnificadoPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-xs border-collapse">
             <thead><tr className="bg-neutral-50 border-b" style={{height:32}}>
-              {vc.map(c=><th key={c.id} className={`relative text-center px-1 py-1.5 font-semibold uppercase text-[10px] border-r border-neutral-100 ${c.id==="art"?"text-left px-3 sticky left-0 bg-neutral-50 z-10":""} ${c.id==="pbase"?"border-r-2 border-neutral-200":""}`} style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}} onDoubleClick={()=>toggleHide(c.id)}>{c.label}<div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 z-20" onMouseDown={e=>sr(c.id,e)}/></th>)}
+              {vc.map(c=><th key={c.id} className={`relative text-center px-1 py-1.5 font-semibold uppercase text-[10px] border-r border-neutral-100 ${c.id==="art"?"text-left px-3 sticky left-0 bg-neutral-50 z-10":""} ${c.id==="pbcont"?"border-r-2 border-neutral-300":""} ${c.id==="pbase"||c.id==="pbcont"?"bg-blue-50/30 text-blue-700":""}`} style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}} onDoubleClick={()=>toggleHide(c.id)}>{c.label}<div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 z-20" onMouseDown={e=>sr(c.id,e)}/></th>)}
               {cls.map((c,i)=><th key={c.id} className={`relative text-right px-2 py-1.5 font-semibold text-[10px] bg-blue-50 border-l border-blue-100 cursor-grab ${dli===i?"opacity-30":""}`} style={{width:lcw[c.id]||100,minWidth:60}} draggable onDragStart={()=>dds(i)} onDragOver={e=>ddo(e,i)} onDragEnd={dde}><div className="flex items-center justify-end gap-0.5"><GripVertical className="h-2.5 w-2.5 text-blue-300"/><span className="truncate">{c.label}</span><button onClick={()=>tgl(c.lista,c.fac)} className="text-blue-300 hover:text-red-500 ml-0.5 flex-shrink-0">×</button></div><div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400 z-20" onMouseDown={e=>sr(c.id,e)}/></th>)}
             </tr></thead>
             <tbody>
@@ -297,27 +407,29 @@ export default function ArticulosUnificadoPage() {
                 const activePreset=selectedPreset!=="none"?LISTA_PRESETS.find(p=>p.id===selectedPreset):null
                 const presetLista=activePreset?listas.find(l=>l.codigo===activePreset.listaCode):null
                 const presetPrecio=activePreset&&presetLista?calcularPrecioFinal({...dt,precio_base_stored:activePreset.usarContado?(a.precio_base_contado??null):(a.precio_base??null)},{recargo_limpieza_bazar:presetLista.recargo_limpieza_bazar,recargo_perfumeria_negro:presetLista.recargo_perfumeria_negro,recargo_perfumeria_blanco:presetLista.recargo_perfumeria_blanco},activePreset.fac,0):null
-                return(<tr key={a.id} className={`border-b border-neutral-50 hover:bg-neutral-50/50 ${ie?"bg-yellow-50/30":""}`} style={{height:36}}>
+                return(<tr key={a.id} className={`border-b border-neutral-50 hover:bg-blue-50/10 ${ie?"bg-yellow-50/40":""}`} style={{height:36}}>
                   {!ch.art&&<td className="px-3 py-0 sticky left-0 bg-white z-10 overflow-hidden" style={{width:cw.art,maxWidth:cw.art}}><button onClick={()=>ofa(a)} className="text-left hover:text-blue-600 block w-full overflow-hidden"><div className="font-medium text-[11px] leading-tight truncate">{a.descripcion}</div><span className="text-[10px] text-muted-foreground font-mono truncate block">{a.sku}</span></button></td>}
                   {!ch.prov&&<td className="px-1 py-0 text-center border-r border-neutral-50 overflow-hidden" style={{width:cw.prov,maxWidth:cw.prov}}><span className="text-[10px] text-muted-foreground truncate block">{a.proveedor?.nombre||"—"}</span></td>}
-                  {!ch.ivac&&<td className="px-1 py-0 text-center border-r border-neutral-50" style={{width:cw.ivac,maxWidth:cw.ivac}}><span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${ccC(a.iva_compras||"factura")}`}>{icC(a.iva_compras||"factura")}</span></td>}
-                  {!ch.ivav&&<td className="px-1 py-0 text-center border-r border-neutral-50" style={{width:cw.ivav,maxWidth:cw.ivav}}><span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${ccV(a.iva_ventas||"factura")}`}>{icV(a.iva_ventas||"factura")}</span></td>}
-                  {!ch.plista&&<td className="px-1 py-0 border-r border-neutral-50" style={{width:cw.plista,maxWidth:cw.plista}}><input type="number" step="0.01" className="w-full text-right text-[11px] font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded" value={a.precio_compra||""} onChange={e=>edt(a.id,"precio_compra",parseFloat(e.target.value)||0)}/></td>}
-                  {!ch.desc&&<td className="px-1 py-0 text-center border-r border-neutral-50" style={{width:cw.desc,maxWidth:cw.desc}}><button onClick={()=>odm(a)} className="inline-flex gap-px px-1 py-0.5 rounded hover:bg-neutral-100">{ds.length===0?<span className="text-[10px] text-neutral-300">+</span>:<>{rs.totalComercial>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-blue-100 text-blue-700">{rs.totalComercial}</span>}{rs.totalFinanciero>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-green-100 text-green-700">{rs.totalFinanciero}</span>}{rs.totalPromocional>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-purple-100 text-purple-700">{rs.totalPromocional}</span>}</>}</button></td>}
-                  {!ch.marg&&<td className="px-1 py-0 border-r border-neutral-50" style={{width:cw.marg,maxWidth:cw.marg}}><input type="number" step="0.1" className="w-full text-center text-[11px] font-semibold text-green-700 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded" value={a.porcentaje_ganancia||""} placeholder="—" onChange={e=>edt(a.id,"porcentaje_ganancia",parseFloat(e.target.value)||0)}/></td>}
-                  {!ch.br&&<td className="px-1 py-0 border-r border-neutral-50" style={{width:cw.br,maxWidth:cw.br}}><input type="number" step="0.1" className={`w-full text-center text-[11px] font-semibold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${(a.bonif_recargo||0)<0?"text-red-600":(a.bonif_recargo||0)>0?"text-amber-600":"text-neutral-300"}`} value={a.bonif_recargo||""} placeholder="—" onChange={e=>edt(a.id,"bonif_recargo",parseFloat(e.target.value)||0)}/></td>}
-                  {!ch.pbase&&<td className="px-1 py-0 border-r border-neutral-100" style={{width:cw.pbase,maxWidth:cw.pbase}}>
+                  {/* ── Precios de venta (prominentes) ── */}
+                  {!ch.pbase&&<td className="px-1 py-0 bg-blue-50/20 border-r border-blue-100" style={{width:cw.pbase,maxWidth:cw.pbase}}>
                     <div className="flex items-center gap-0.5">
-                      <input type="number" step="0.01" className={`flex-1 text-right text-[11px] font-mono font-bold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${a.precio_base!=null?"text-blue-700":"text-neutral-400"}`} value={a.precio_base!=null?a.precio_base:""} placeholder={fmt(bs.precioBase)} onChange={e=>{const v=e.target.value;edt(a.id,"precio_base",v===""?null:parseFloat(v)||0);edt(a.id,"precio_base_contado",v===""?null:Math.round((parseFloat(v)||0)*0.9*100)/100)}}/>
+                      <input type="number" step="0.01" className={`flex-1 text-right text-[11px] font-mono font-bold bg-transparent border-b border-transparent hover:border-blue-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${a.precio_base!=null?"text-blue-700":"text-neutral-500"}`} value={a.precio_base!=null?a.precio_base:""} placeholder={fmt(bs.precioBase)} onChange={e=>{const v=e.target.value;edt(a.id,"precio_base",v===""?null:parseFloat(v)||0);edt(a.id,"precio_base_contado",v===""?null:Math.round((parseFloat(v)||0)*0.9*100)/100)}}/>
                       {a.precio_base!=null&&<button className="text-[9px] text-neutral-300 hover:text-red-500 flex-shrink-0 leading-none pb-0.5" title="Limpiar (usar calculado)" onClick={()=>{edt(a.id,"precio_base",null);edt(a.id,"precio_base_contado",null)}}>×</button>}
                     </div>
                     {a.precio_base==null&&<div className="text-[8px] text-neutral-300 text-right leading-none pb-0.5">calc.</div>}
                   </td>}
-                  {!ch.pbcont&&<td className="px-1 py-0 border-r-2 border-neutral-200" style={{width:cw.pbcont,maxWidth:cw.pbcont}}>
-                    <input type="number" step="0.01" className="w-full text-right text-[11px] font-mono bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded text-amber-700" value={a.precio_base_contado!=null?a.precio_base_contado:""} placeholder={a.precio_base!=null?fmt(Math.round(a.precio_base*0.9*100)/100):"—"} onChange={e=>edt(a.id,"precio_base_contado",parseFloat(e.target.value)||0)}/>
+                  {!ch.pbcont&&<td className="px-1 py-0 bg-blue-50/20 border-r-2 border-neutral-300" style={{width:cw.pbcont,maxWidth:cw.pbcont}}>
+                    <input type="number" step="0.01" className="w-full text-right text-[11px] font-mono font-semibold bg-transparent border-b border-transparent hover:border-amber-300 focus:border-amber-500 focus:outline-none py-0.5 rounded text-amber-700" value={a.precio_base_contado!=null?a.precio_base_contado:""} placeholder={a.precio_base!=null?fmt(Math.round(a.precio_base*0.9*100)/100):"—"} onChange={e=>edt(a.id,"precio_base_contado",parseFloat(e.target.value)||0)}/>
                     {activePreset&&presetPrecio&&<div className="text-[9px] text-emerald-600 font-bold text-right leading-none">{fmt(presetPrecio.ivaIncluido?presetPrecio.precioUnitarioFinal:presetPrecio.precioUnitarioFinal+presetPrecio.montoIvaDiscriminado)}</div>}
                   </td>}
-                  {cls.map(c=>{const ld2:DatosLista={recargo_limpieza_bazar:c.lista.recargo_limpieza_bazar,recargo_perfumeria_negro:c.lista.recargo_perfumeria_negro,recargo_perfumeria_blanco:c.lista.recargo_perfumeria_blanco};const r=calcularPrecioFinal(dt,ld2,c.fac,0);const pf2=r.ivaIncluido?r.precioUnitarioFinal:r.precioUnitarioFinal+r.montoIvaDiscriminado;return(<td key={c.id} className="px-2 py-0 text-right bg-blue-50/20 border-l border-blue-50 overflow-hidden" style={{width:lcw[c.id]||100,maxWidth:lcw[c.id]||100}}><div className="font-bold font-mono text-[11px] truncate">{fmt(pf2)}</div></td>)})}
+                  {/* ── Datos de costo (secundarios) ── */}
+                  {!ch.plista&&<td className="px-1 py-0 border-r border-neutral-50" style={{width:cw.plista,maxWidth:cw.plista}}><input type="number" step="0.01" className="w-full text-right text-[11px] font-mono text-neutral-500 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded" value={a.precio_compra||""} onChange={e=>edt(a.id,"precio_compra",parseFloat(e.target.value)||0)}/></td>}
+                  {!ch.desc&&<td className="px-1 py-0 text-center border-r border-neutral-50" style={{width:cw.desc,maxWidth:cw.desc}}><button onClick={()=>odm(a)} className="inline-flex gap-px px-1 py-0.5 rounded hover:bg-neutral-100">{ds.length===0?<span className="text-[10px] text-neutral-300">+</span>:<>{rs.totalComercial>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-blue-100 text-blue-700">{rs.totalComercial}</span>}{rs.totalFinanciero>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-green-100 text-green-700">{rs.totalFinanciero}</span>}{rs.totalPromocional>0&&<span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded text-[8px] font-bold bg-purple-100 text-purple-700">{rs.totalPromocional}</span>}</>}</button></td>}
+                  {!ch.marg&&<td className="px-1 py-0 border-r border-neutral-50" style={{width:cw.marg,maxWidth:cw.marg}}><input type="number" step="0.1" className="w-full text-center text-[11px] font-semibold text-green-700 bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded" value={a.porcentaje_ganancia||""} placeholder="—" onChange={e=>edt(a.id,"porcentaje_ganancia",parseFloat(e.target.value)||0)}/></td>}
+                  {!ch.br&&<td className="px-1 py-0 border-r border-neutral-50" style={{width:cw.br,maxWidth:cw.br}}><input type="number" step="0.1" className={`w-full text-center text-[11px] font-semibold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 rounded ${(a.bonif_recargo||0)<0?"text-red-600":(a.bonif_recargo||0)>0?"text-amber-600":"text-neutral-300"}`} value={a.bonif_recargo||""} placeholder="—" onChange={e=>edt(a.id,"bonif_recargo",parseFloat(e.target.value)||0)}/></td>}
+                  {!ch.ivac&&<td className="px-1 py-0 text-center border-r border-neutral-50" style={{width:cw.ivac,maxWidth:cw.ivac}}><span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${ccC(a.iva_compras||"factura")}`}>{icC(a.iva_compras||"factura")}</span></td>}
+                  {!ch.ivav&&<td className="px-1 py-0 text-center border-r border-neutral-50" style={{width:cw.ivav,maxWidth:cw.ivav}}><span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${ccV(a.iva_ventas||"factura")}`}>{icV(a.iva_ventas||"factura")}</span></td>}
+                  {cls.map(c=>{const ld2:DatosLista={recargo_limpieza_bazar:c.lista.recargo_limpieza_bazar,recargo_perfumeria_negro:c.lista.recargo_perfumeria_negro,recargo_perfumeria_blanco:c.lista.recargo_perfumeria_blanco};const r=calcularPrecioFinal(dt,ld2,c.fac,0);const pf2=r.ivaIncluido?r.precioUnitarioFinal:r.precioUnitarioFinal+r.montoIvaDiscriminado;return(<td key={c.id} className="px-2 py-0 text-right bg-emerald-50/30 border-l border-emerald-100 overflow-hidden" style={{width:lcw[c.id]||100,maxWidth:lcw[c.id]||100}}><div className="font-bold font-mono text-[11px] text-emerald-800 truncate">{fmt(pf2)}</div></td>)})}
                 </tr>)})}
             </tbody>
           </table>
