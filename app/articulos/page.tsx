@@ -171,11 +171,24 @@ export default function ArticulosPage() {
   // ── Data ──────────────────────────────────────────────────────────────────
   const load=async()=>{
     setLd(true)
-    let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento)",{count:"exact"}).eq("activo",true)
-    if(pf!=="todos") q=q.eq("proveedor_id",pf)
-    if(sd.trim()) q=q.or(`descripcion.ilike.%${sd.trim()}%,sku.ilike.%${sd.trim()}%,ean13.ilike.%${sd.trim()}%`)
-    const{data,count}=await q.order("descripcion").range(pg*PS,(pg+1)*PS-1)
-    const a=data||[]; setArts(a); setTc(count||0)
+    let a:any[]=[], total=0
+
+    if(sd.trim()){
+      // Vector + text search via API (no pagination when searching)
+      try {
+        const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}`)
+        let results=res.ok?await res.json():[]
+        if(pf!=="todos") results=results.filter((x:any)=>x.proveedor_id===pf)
+        a=results; total=results.length
+      } catch { a=[]; total=0 }
+    } else {
+      let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento)",{count:"exact"}).eq("activo",true)
+      if(pf!=="todos") q=q.eq("proveedor_id",pf)
+      const{data,count}=await q.order("descripcion").range(pg*PS,(pg+1)*PS-1)
+      a=data||[]; total=count||0
+    }
+
+    setArts(a); setTc(total)
     if(a.length>0){
       const ids=a.map((x:any)=>x.id)
       const{data:d}=await sb.from("articulos_descuentos").select("*").in("articulo_id",ids).order("orden")
@@ -211,8 +224,12 @@ export default function ArticulosPage() {
   const sfa=async()=>{
     if(!fa) return; setFs(true)
     const{error}=await sb.from("articulos").update(ff).eq("id",fa.id)
-    if(!error){ const prov=provs.find((p:any)=>p.id===ff.proveedor_id); setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff,proveedor:prov?{nombre:prov.nombre}:null}:a)); setFa(null) }
-    else alert(`Error: ${error.message}`)
+    if(!error){
+      const prov=provs.find((p:any)=>p.id===ff.proveedor_id)
+      setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff,proveedor:prov?{nombre:prov.nombre}:null}:a))
+      fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:fa.id})}).catch(()=>{})
+      setFa(null)
+    } else alert(`Error: ${error.message}`)
     setFs(false)
   }
 
@@ -684,7 +701,7 @@ export default function ArticulosPage() {
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={()=>setShowNew(false)}>Cancelar</Button>
-              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={async()=>{ if(!nf.sku.trim()||!nf.descripcion.trim()){alert("SKU y Descripción son obligatorios");return}; const{error}=await sb.from("articulos").insert({...nf,activo:true}); if(error){alert(`Error: ${error.message}`);return}; setShowNew(false); setNf({sku:"",descripcion:"",categoria:"",rubro:"",iva_compras:"factura",iva_ventas:"factura",precio_compra:0,porcentaje_ganancia:0}); load() }}>Crear</Button>
+              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={async()=>{ if(!nf.sku.trim()||!nf.descripcion.trim()){alert("SKU y Descripción son obligatorios");return}; const{data:newArt,error}=await sb.from("articulos").insert({...nf,activo:true}).select("id").single(); if(error){alert(`Error: ${error.message}`);return}; if(newArt?.id) fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:newArt.id})}).catch(()=>{}); setShowNew(false); setNf({sku:"",descripcion:"",categoria:"",rubro:"",iva_compras:"factura",iva_ventas:"factura",precio_compra:0,porcentaje_ganancia:0}); load() }}>Crear</Button>
             </div>
           </div>
         </DialogContent>

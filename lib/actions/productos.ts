@@ -1,26 +1,41 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { searchProductsByVector } from "@/lib/actions/embeddings"
 
 export async function searchProductos(searchTerm: string) {
   const supabase = createAdminClient()
+  const term = searchTerm?.trim() || ""
 
-  let query = supabase
-    .from("articulos")
-    .select("id, sku, sigla, ean13, descripcion, rubro, categoria, stock_actual, precio_compra, unidades_por_bulto, unidad_medida, activo")
-    .eq("activo", true)
+  const SELECT = "id, sku, sigla, ean13, descripcion, rubro, categoria, stock_actual, precio_compra, unidades_por_bulto, unidad_medida, activo"
 
-  if (searchTerm && searchTerm.trim().length > 0) {
-    const term = searchTerm.trim()
-    query = query.or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%,ean13.ilike.%${term}%,sigla.ilike.%${term}%`)
+  if (!term) {
+    const { data, error } = await supabase
+      .from("articulos")
+      .select(SELECT)
+      .eq("activo", true)
+      .order("descripcion")
+      .limit(50)
+    if (error) { console.error("[searchProductos] Error:", error); return [] }
+    return data || []
   }
 
-  const { data, error } = await query.order("descripcion").limit(50)
+  const [{ data: textResults }, vectorResults] = await Promise.all([
+    supabase
+      .from("articulos")
+      .select(SELECT)
+      .eq("activo", true)
+      .or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%,ean13.ilike.%${term}%,sigla.ilike.%${term}%`)
+      .order("descripcion")
+      .limit(50),
+    searchProductsByVector(term, 0.35, 50),
+  ])
 
-  if (error) {
-    console.error("[searchProductos] Error:", error)
-    return []
-  }
+  const textIds = new Set((textResults || []).map((r: any) => r.id))
+  const merged = [
+    ...(textResults || []),
+    ...vectorResults.filter((r: any) => !textIds.has(r.id)),
+  ].slice(0, 50)
 
-  return data || []
+  return merged
 }

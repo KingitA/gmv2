@@ -75,17 +75,11 @@ export default function ConsultaPreciosPage() {
       }
 
       setLoadingArticulos(true)
-      const { data, error } = await supabase
-        .from("articulos")
-        .select("*")
-        .eq("activo", true)
-        .ilike("descripcion", `%${busquedaArticulo}%`)
-        .limit(10)
-
-      if (error) {
-        console.error("[v0] Error buscando artículos:", error)
-      } else {
-        setArticulos(data || [])
+      try {
+        const res = await fetch(`/api/articulos/buscar?q=${encodeURIComponent(busquedaArticulo)}`)
+        setArticulos(res.ok ? await res.json() : [])
+      } catch {
+        setArticulos([])
       }
       setLoadingArticulos(false)
     }
@@ -102,17 +96,11 @@ export default function ConsultaPreciosPage() {
       }
 
       setLoadingClientes(true)
-      const { data, error } = await supabase
-        .from("clientes")
-        .select("*")
-        .eq("activo", true)
-        .or(`nombre.ilike.%${busquedaCliente}%,razon_social.ilike.%${busquedaCliente}%`)
-        .limit(10)
-
-      if (error) {
-        console.error("[v0] Error buscando clientes:", error)
-      } else {
-        setClientes(data || [])
+      try {
+        const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(busquedaCliente)}`)
+        setClientes(res.ok ? await res.json() : [])
+      } catch {
+        setClientes([])
       }
       setLoadingClientes(false)
     }

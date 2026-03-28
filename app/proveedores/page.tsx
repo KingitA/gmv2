@@ -55,10 +55,27 @@ export default function ProveedoresPage() {
     default_unidad_factura: "UNIDAD" as "UNIDAD" | "BULTO" | "CAJA" | "PACK" | "DOCENA",
   })
   const [searchTerm, setSearchTerm] = useState("")
+  const [vectorResults, setVectorResults] = useState<Proveedor[] | null>(null)
 
   useEffect(() => {
     loadProveedores()
   }, [])
+
+  useEffect(() => {
+    if (searchTerm.trim().length < 2) {
+      setVectorResults(null)
+      return
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/proveedores/buscar?q=${encodeURIComponent(searchTerm.trim())}`)
+        setVectorResults(res.ok ? await res.json() : null)
+      } catch {
+        setVectorResults(null)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
 
   async function loadProveedores() {
     const supabase = createClient()
@@ -83,13 +100,15 @@ export default function ProveedoresPage() {
         console.error("[v0] Error updating proveedor:", error)
         return
       }
+      fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: editingProveedor.id }) }).catch(() => {})
     } else {
-      const { error } = await supabase.from("proveedores").insert([formData])
+      const { data: newProv, error } = await supabase.from("proveedores").insert(formData).select("id").single()
 
       if (error) {
         console.error("[v0] Error creating proveedor:", error)
         return
       }
+      if (newProv?.id) fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: newProv.id }) }).catch(() => {})
     }
 
     setIsDialogOpen(false)
@@ -300,12 +319,14 @@ export default function ProveedoresPage() {
     }
   }
 
-  const filteredProveedores = proveedores.filter(
-    (proveedor) =>
-      proveedor.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      proveedor.cuit?.includes(searchTerm) ||
-      proveedor.mail_oficina?.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  const filteredProveedores = vectorResults !== null
+    ? vectorResults as Proveedor[]
+    : proveedores.filter(
+        (proveedor) =>
+          proveedor.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          proveedor.cuit?.includes(searchTerm) ||
+          proveedor.mail_oficina?.toLowerCase().includes(searchTerm.toLowerCase()),
+      )
 
   return (
     <div className="min-h-screen bg-background">

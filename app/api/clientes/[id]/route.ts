@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
-import { requireAuth } from '@/lib/auth'
+import { requireAuth } from "@/lib/auth"
+import { updateClienteEmbedding } from "@/lib/actions/embeddings"
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireAuth()
@@ -46,6 +47,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       .single()
 
     if (clienteError) throw clienteError
+
+    // Auto-vectorizar en background (no bloqueante)
+    void updateClienteEmbedding(id)
 
     return NextResponse.json({
       success: true,
