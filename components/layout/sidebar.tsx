@@ -46,7 +46,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Inventario',
     items: [
-      { label: 'Artículos', href: '/articulos/precios', icon: '🏷️' },
+      { label: 'Artículos', href: '/articulos', icon: '🏷️' },
     ],
   },
   {
