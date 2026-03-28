@@ -1,41 +1,44 @@
-import { createClient } from "@/lib/supabase/server";
-import { type NextRequest, NextResponse } from "next/server";
-import { requireAuth } from '@/lib/auth'
+import { createAdminClient } from "@/lib/supabase/admin"
+import { type NextRequest, NextResponse } from "next/server"
+import { requireAuth } from "@/lib/auth"
+import { searchProductsByVector } from "@/lib/actions/embeddings"
 
 export async function GET(request: NextRequest) {
     try {
         const auth = await requireAuth()
         if (auth.error) return auth.error
-        const supabase = await createClient();
-        const { searchParams } = new URL(request.url);
-        const query = searchParams.get("q");
 
-        if (!query || query.length < 3) {
-            return NextResponse.json([]);
-        }
+        const { searchParams } = new URL(request.url)
+        const q = searchParams.get("q")?.trim()
 
-        // Buscar por descripcion o SKU
-        // Usamos una sintaxis más segura para el OR
-        const { data: articulos, error } = await supabase
-            .from("articulos")
-            .select("id, descripcion, sku")
-            .or(`sku.ilike.%${query}%,descripcion.ilike.%${query}%`)
-            .eq("activo", true)
-            .limit(20);
+        if (!q || q.length < 2) return NextResponse.json([])
+
+        const supabase = createAdminClient()
+
+        const [{ data: textResults, error }, vectorResults] = await Promise.all([
+            supabase
+                .from("articulos")
+                .select("id, descripcion, sku")
+                .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
+                .eq("activo", true)
+                .limit(20),
+            searchProductsByVector(q, 0.35, 20),
+        ])
 
         if (error) {
-            console.error("[v0] Supabase error in search:", error);
-            throw error;
+            console.error("[articulos/buscar] Supabase error:", error)
+            throw error
         }
 
-        if (error) throw error;
+        const textIds = new Set((textResults || []).map((r: any) => r.id))
+        const merged = [
+            ...(textResults || []),
+            ...vectorResults.filter((r: any) => !textIds.has(r.id)),
+        ].slice(0, 20)
 
-        return NextResponse.json(articulos || []);
+        return NextResponse.json(merged)
     } catch (error: any) {
-        console.error("[v0] Error buscando artículos:", error);
-        return NextResponse.json(
-            { error: error.message || "Error buscando artículos" },
-            { status: 500 }
-        );
+        console.error("[articulos/buscar] Error:", error)
+        return NextResponse.json({ error: error.message || "Error buscando artículos" }, { status: 500 })
     }
 }

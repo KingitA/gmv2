@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { searchProductsByVector } from "@/lib/actions/embeddings"
 
 // POST: Iniciar o retomar sesión de picking para un pedido
 export async function POST(request: NextRequest) {
@@ -92,25 +94,38 @@ export async function GET(request: NextRequest) {
 
     if (!q || q.length < 2) return NextResponse.json([])
 
-    // EAN13 exacto primero (scanner)
+    const adminSupabase = createAdminClient()
+    const SELECT = "id, sku, descripcion, ean13, stock_actual, unidades_por_bulto"
+
+    // EAN13 exacto primero (scanner — máxima prioridad, no mezclar con vector)
     const { data: porEan } = await supabase
       .from("articulos")
-      .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
+      .select(SELECT)
       .eq("ean13", q)
       .eq("activo", true)
       .limit(5)
 
     if (porEan && porEan.length > 0) return NextResponse.json(porEan)
 
-    const { data: articulos, error } = await supabase
-      .from("articulos")
-      .select("id, sku, descripcion, ean13, stock_actual, unidades_por_bulto")
-      .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
-      .eq("activo", true)
-      .limit(20)
+    const [{ data: textResults, error }, vectorResults] = await Promise.all([
+      adminSupabase
+        .from("articulos")
+        .select(SELECT)
+        .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
+        .eq("activo", true)
+        .limit(20),
+      searchProductsByVector(q, 0.35, 20),
+    ])
 
     if (error) throw error
-    return NextResponse.json(articulos || [])
+
+    const textIds = new Set((textResults || []).map((r: any) => r.id))
+    const merged = [
+      ...(textResults || []),
+      ...vectorResults.filter((r: any) => !textIds.has(r.id)),
+    ].slice(0, 20)
+
+    return NextResponse.json(merged)
 
   } catch (error: any) {
     return NextResponse.json({ error: "Error en búsqueda" }, { status: 500 })

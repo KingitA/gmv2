@@ -20,7 +20,10 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
     try {
         console.log("Generating embedding using model:", (model as any).model || "unknown");
-        const result = await model.embedContent(cleanedText)
+        const result = await model.embedContent({
+            content: { parts: [{ text: cleanedText }], role: "user" },
+            outputDimensionality: 768,
+        } as any)
         const embedding = result.embedding
         return embedding.values
     } catch (error) {
@@ -32,12 +35,18 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 export async function updateProductEmbedding(productId: string) {
     const supabase = createAdminClient()
 
-    // 1. Get product details
-    const { data: product, error: fetchError } = await supabase
-        .from("articulos")
-        .select("descripcion, sku, ean13, categoria, proveedor:proveedor_id(nombre)")
-        .eq("id", productId)
-        .single()
+    // 1. Get product details + aliases
+    const [{ data: product, error: fetchError }, { data: aliases }] = await Promise.all([
+        supabase
+            .from("articulos")
+            .select("descripcion, sku, ean13, categoria, proveedor:proveedor_id(nombre)")
+            .eq("id", productId)
+            .single(),
+        supabase
+            .from("articulos_alias")
+            .select("descripcion_proveedor, codigo_proveedor, alias_texto")
+            .eq("articulo_id", productId),
+    ])
 
     if (fetchError || !product) {
         console.error("Error fetching product for embedding:", fetchError)
@@ -46,17 +55,21 @@ export async function updateProductEmbedding(productId: string) {
 
     // 2. Construct text representation
     const p: any = product
-    // Handle array response from joins if any
     const proveedorNombre = Array.isArray(p.proveedor) ? p.proveedor[0]?.nombre : p.proveedor?.nombre
-    // Category is a simple field in articulos table, not a join
-    const categoriaNombre = p.categoria
+
+    const aliasLines = (aliases || []).map((a: any) => [
+        a.descripcion_proveedor,
+        a.codigo_proveedor,
+        a.alias_texto,
+    ].filter(Boolean).join(' ')).filter(Boolean).join(' | ')
 
     const textToEmbed = `
         Producto: ${p.descripcion}
         Descripción: ${p.descripcion}
         SKU: ${p.sku}
-        Proveedor: ${p.proveedor?.nombre || ''}
+        Proveedor: ${proveedorNombre || ''}
         Categoría: ${p.categoria || ''} - ${p.subcategoria || ''} - ${p.rubro || ''}
+        ${aliasLines ? `Aliases: ${aliasLines}` : ''}
     `.trim()
 
     // 3. Generate embedding
@@ -108,6 +121,127 @@ export async function searchProductsByVector(query: string, matchThreshold = 0.3
         return products || []
     } catch (err) {
         console.error("Vector search exception:", err)
+        return []
+    }
+}
+
+// ─── PROVEEDORES ─────────────────────────────────────────────────────────────
+
+export async function updateProveedorEmbedding(proveedorId: string) {
+    const supabase = createAdminClient()
+
+    const { data: proveedor, error: fetchError } = await supabase
+        .from("proveedores")
+        .select("nombre, cuit, direccion")
+        .eq("id", proveedorId)
+        .single()
+
+    if (fetchError || !proveedor) {
+        throw new Error(`Proveedor ${proveedorId} not found`)
+    }
+
+    const textToEmbed = `
+        Proveedor: ${proveedor.nombre}
+        Nombre: ${proveedor.nombre}
+        CUIT: ${proveedor.cuit || ''}
+        Dirección: ${proveedor.direccion || ''}
+    `.trim()
+
+    const embedding = await generateEmbedding(textToEmbed)
+
+    const { error: updateError } = await supabase
+        .from("proveedores")
+        .update({ embedding })
+        .eq("id", proveedorId)
+
+    if (updateError) throw updateError
+
+    return { success: true, proveedorId }
+}
+
+export async function searchProveedoresByVector(query: string, matchThreshold = 0.35, matchCount = 10) {
+    if (!apiKey) return []
+
+    try {
+        const embedding = await generateEmbedding(query)
+        const supabase = createAdminClient()
+
+        const { data, error } = await supabase.rpc("match_proveedores", {
+            query_embedding: embedding,
+            match_threshold: matchThreshold,
+            match_count: matchCount,
+        })
+
+        if (error) {
+            console.error("Vector search proveedores RPC error:", error)
+            return []
+        }
+
+        return data || []
+    } catch (err) {
+        console.error("Vector search proveedores exception:", err)
+        return []
+    }
+}
+
+// ─── CLIENTES ─────────────────────────────────────────────────────────────────
+
+export async function updateClienteEmbedding(clienteId: string) {
+    const supabase = createAdminClient()
+
+    const { data: cliente, error: fetchError } = await supabase
+        .from("clientes")
+        .select("nombre, razon_social, cuit, direccion, localidad, provincia, tipo_canal")
+        .eq("id", clienteId)
+        .single()
+
+    if (fetchError || !cliente) {
+        throw new Error(`Cliente ${clienteId} not found`)
+    }
+
+    const textToEmbed = `
+        Cliente: ${cliente.nombre}
+        Nombre: ${cliente.nombre}
+        Razón social: ${cliente.razon_social || ''}
+        CUIT: ${cliente.cuit || ''}
+        Dirección: ${cliente.direccion || ''}
+        Localidad: ${cliente.localidad || ''} ${cliente.provincia || ''}
+        Canal: ${cliente.tipo_canal || ''}
+    `.trim()
+
+    const embedding = await generateEmbedding(textToEmbed)
+
+    const { error: updateError } = await supabase
+        .from("clientes")
+        .update({ embedding })
+        .eq("id", clienteId)
+
+    if (updateError) throw updateError
+
+    return { success: true, clienteId }
+}
+
+export async function searchClientesByVector(query: string, matchThreshold = 0.35, matchCount = 10) {
+    if (!apiKey) return []
+
+    try {
+        const embedding = await generateEmbedding(query)
+        const supabase = createAdminClient()
+
+        const { data, error } = await supabase.rpc("match_clientes", {
+            query_embedding: embedding,
+            match_threshold: matchThreshold,
+            match_count: matchCount,
+        })
+
+        if (error) {
+            console.error("Vector search clientes RPC error:", error)
+            return []
+        }
+
+        return data || []
+    } catch (err) {
+        console.error("Vector search clientes exception:", err)
         return []
     }
 }

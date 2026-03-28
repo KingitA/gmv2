@@ -163,14 +163,16 @@ export default function ClientesPage() {
         alert(`Error al actualizar: ${error.message}`)
         return
       }
+      fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id: editingCliente.id }) }).catch(() => {})
     } else {
-      const { error } = await supabase.from("clientes").insert([dataToSave])
+      const { data: newCliente, error } = await supabase.from("clientes").insert(dataToSave).select("id").single()
 
       if (error) {
         console.error("[v0] Error creating cliente:", error)
         alert(`Error al crear: ${error.message}`)
         return
       }
+      if (newCliente?.id) fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id: newCliente.id }) }).catch(() => {})
     }
 
     setIsDialogOpen(false)

@@ -1,7 +1,9 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
+import { searchClientesByVector } from "@/lib/actions/embeddings"
 
 export async function getViajanteClientes() {
   const supabase = await createClient()
@@ -67,14 +69,12 @@ export async function searchClientes(searchTerm: string) {
     throw new Error("No autorizado")
   }
 
-  let query = supabase.from("clientes").select("*").eq("activo", true)
+  const isRestricted = (roles.includes("viajante") || roles.includes("vendedor")) && !roles.includes("admin")
 
-  if ((roles.includes("viajante") || roles.includes("vendedor")) && !roles.includes("admin")) {
-    query = query.eq("vendedor_id", user.id)
-  }
+  let textQuery = supabase.from("clientes").select("*").eq("activo", true)
+  if (isRestricted) textQuery = textQuery.eq("vendedor_id", user.id)
 
-  // Search by multiple fields including name, address, locality and client code
-  query = query.or(
+  textQuery = textQuery.or(
     `nombre_razon_social.ilike.%${searchTerm}%,` +
     `nombre.ilike.%${searchTerm}%,` +
     `razon_social.ilike.%${searchTerm}%,` +
@@ -84,10 +84,25 @@ export async function searchClientes(searchTerm: string) {
     `cuit.ilike.%${searchTerm}%`
   )
 
-  const { data, error } = await query.order("nombre_razon_social").limit(30)
+  const [{ data: textResults, error }, vectorResultsRaw] = await Promise.all([
+    textQuery.order("nombre_razon_social").limit(30),
+    searchClientesByVector(searchTerm, 0.35, 30),
+  ])
 
   if (error) throw error
-  return data
+
+  // For restricted users, post-filter vector results by vendedor_id
+  const vectorResults = isRestricted
+    ? vectorResultsRaw.filter((r: any) => r.vendedor_id === user.id)
+    : vectorResultsRaw
+
+  const textIds = new Set((textResults || []).map((r: any) => r.id))
+  const merged = [
+    ...(textResults || []),
+    ...vectorResults.filter((r: any) => !textIds.has(r.id)),
+  ].slice(0, 30)
+
+  return merged
 }
 
 export async function createCliente(formData: {
@@ -135,6 +150,9 @@ export async function createCliente(formData: {
     .single()
 
   if (error) throw error
+
+  // Auto-vectorizar en background (no bloqueante)
+  void updateClienteEmbedding(data.id)
 
   revalidatePath("/viajante/clientes")
   return data

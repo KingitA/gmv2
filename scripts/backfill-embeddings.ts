@@ -84,16 +84,29 @@ async function main() {
                 const p: any = article;
                 const proveedorNombre = Array.isArray(p.proveedor) ? p.proveedor[0]?.nombre : p.proveedor?.nombre;
 
-                // New WEIGHTED text: repeat description to give it more signal than provider
+                // Fetch aliases for this article
+                const { data: aliases } = await supabase
+                    .from('articulos_alias')
+                    .select('descripcion_proveedor, codigo_proveedor, alias_texto')
+                    .eq('articulo_id', p.id);
+
+                const aliasLines = (aliases || []).map((a: any) => [
+                    a.descripcion_proveedor, a.codigo_proveedor, a.alias_texto
+                ].filter(Boolean).join(' ')).filter(Boolean).join(' | ');
+
                 const textToEmbed = `
             Producto: ${p.descripcion}
             Descripción: ${p.descripcion}
             SKU: ${p.sku || ""}
             Proveedor: ${proveedorNombre || ""}
             Categoría: ${p.categoria || ""}
+            ${aliasLines ? `Aliases: ${aliasLines}` : ''}
         `.trim().replace(/\n/g, " ");
 
-                const result = await model.embedContent(textToEmbed);
+                const result = await (model as any).embedContent({
+                    content: { parts: [{ text: textToEmbed }], role: "user" },
+                    outputDimensionality: 768,
+                });
                 const embedding = result.embedding.values;
 
                 const { error: updateError } = await supabase
