@@ -431,15 +431,36 @@ async function processMatches(parsedData: any): Promise<ParseResult> {
                 let cleanCode = item.code ? String(item.code).trim() : ""
                 let exactSkuMatch = null
 
+                // Extract code from parentheses in description like "(#000022)" or "(033100)"
+                if (!cleanCode && baseDescription) {
+                    const codeInParens = baseDescription.match(/\(#?(\d+)\)/)
+                    if (codeInParens) {
+                        cleanCode = codeInParens[1].replace(/^0+/, '') || '0' // strip leading zeros
+                    }
+                }
+
                 if (cleanCode !== "") {
-                    // Query directly by SKU
+                    // Try exact match first
                     const { data } = await supabase
                         .from("articulos")
                         .select("id, descripcion, sku")
                         .ilike("sku", cleanCode)
                         .maybeSingle()
 
-                    if (data) exactSkuMatch = data
+                    if (data) {
+                        exactSkuMatch = data
+                    } else {
+                        // Try without leading zeros (e.g. "000022" → "22")
+                        const stripped = cleanCode.replace(/^0+/, '') || '0'
+                        if (stripped !== cleanCode) {
+                            const { data: d2 } = await supabase
+                                .from("articulos")
+                                .select("id, descripcion, sku")
+                                .ilike("sku", stripped)
+                                .maybeSingle()
+                            if (d2) exactSkuMatch = d2
+                        }
+                    }
                 }
 
                 // Alternate exact match: Try extracting the first word if it looks like an SKU model (at least 3 chars alphanumeric)
