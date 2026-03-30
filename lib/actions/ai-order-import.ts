@@ -402,7 +402,7 @@ export async function processOrderTextMulti(text: string): Promise<MultiOrderPar
 /**
  * Shared logic to match detected items with the database
  */
-async function processMatches(parsedData: any): Promise<ParseResult> {
+export async function processMatches(parsedData: any): Promise<ParseResult> {
     const processedItems: ParsedItem[] = []
     let needsReviewCount = 0
 

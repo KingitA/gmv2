@@ -34,7 +34,8 @@ export async function GET() {
                 }
             })
 
-            const matchingResults = await processMatches(batchToProcess)
+            const res = await processMatches({ items: batchToProcess })
+            const matchingResults = res.items
 
             for (let i = 0; i < batchToProcess.length; i++) {
                 const dbId = batchToProcess[i].db_id
