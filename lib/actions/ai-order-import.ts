@@ -502,8 +502,8 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                         if (candidates && candidates.length > 0) {
                             const best = candidates[0]
                             if (best.similarity > 0.82) { match = best; confidence = "HIGH" }
-                            else if (best.similarity > 0.70) { match = best; confidence = "MEDIUM" }
-                            else if (best.similarity > 0.50) { match = best; confidence = "LOW" }
+                            else if (best.similarity > 0.65) { match = best; confidence = "MEDIUM" }
+                            else if (best.similarity > 0.40) { match = best; confidence = "LOW" }
                         }
                     }
                 }
@@ -516,7 +516,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                 if (!match || confidence === "LOW") {
                     const aiQuery = [item.brand || "", baseDescription, item.color || ""].filter(Boolean).join(" ").trim()
                     if (aiQuery.length > 2) {
-                        const aiCandidates = await searchProductsByVector(aiQuery, 0.25, 6)
+                        const aiCandidates = await searchProductsByVector(aiQuery, 0.15, 8)
                         if (aiCandidates && aiCandidates.length > 0) {
                             // Si tenemos código numérico, filtrar candidatos que tengan ese SKU exacto
                             const rawStripped = rawCode ? rawCode.replace(/^0+/, '') || '0' : ''
@@ -542,7 +542,14 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                                     ).join("\n")
                                     const prompt = `Artículo del pedido: "${originalTextForFrontend}"\nCandidatos del inventario:\n${candidateList}\n\n¿Cuál corresponde? (considerá: edt=eau de toilette, edc=eau de cologne, edp=eau de parfum, deo=desodorante, shamp=shampoo, crema=cream). Número del candidato o 0 si ninguno. JSON: {"match": número}`
                                     const res = await model.generateContent(prompt)
-                                    const parsed = JSON.parse(res.response.text())
+                                    let textObj = res.response.text().trim()
+                                    if (textObj.startsWith("\`\`\`json")) {
+                                        textObj = textObj.replace(/^\`\`\`json/, "").replace(/\`\`\`$/, "").trim()
+                                    } else if (textObj.startsWith("\`\`\`")) {
+                                        textObj = textObj.replace(/^\`\`\`/, "").replace(/\`\`\`$/, "").trim()
+                                    }
+                                    
+                                    const parsed = JSON.parse(textObj)
                                     const idx = parseInt(parsed.match) - 1
                                     if (idx >= 0 && idx < filteredCandidates.length) {
                                         const aiMatch = filteredCandidates[idx]
@@ -562,16 +569,35 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                 }
 
                 // ═══════════════════════════════════════════════════════════════
-                // PASO 4: FALLBACK — ilike directo en descripción
+                // PASO 4: FALLBACK DIRECTO EN BASE DE DATOS (POR SI FALTAN EMBEDDINGS)
                 // ═══════════════════════════════════════════════════════════════
                 if (!match && baseDescription.length > 3) {
+                    // Try exact substring first
                     const { data: fallbackMatch } = await supabase
                         .from("articulos")
                         .select("id, descripcion, sku")
                         .ilike("descripcion", `%${baseDescription}%`)
                         .limit(1)
                         .maybeSingle()
-                    if (fallbackMatch) { match = fallbackMatch; confidence = "MEDIUM" }
+                    if (fallbackMatch) { 
+                        match = fallbackMatch; confidence = "LOW" 
+                    } else {
+                        // If exact substring fails, split to longest words and 'AND' them in search
+                        const words = baseDescription.split(/[\s,]+/).filter((w: string) => w.length > 2)
+                        // Limitar a máximo 4 palabras clave para no romper la query
+                        const queryWords = words.slice(0, 4)
+                        if (queryWords.length > 0) {
+                            let rpcQuery = supabase.from("articulos").select("id, descripcion, sku")
+                            for (const w of queryWords) {
+                                rpcQuery = rpcQuery.ilike("descripcion", `%${w}%`)
+                            }
+                            const { data: wordFallbackMap } = await rpcQuery.limit(1).maybeSingle()
+                            if (wordFallbackMap) {
+                                match = wordFallbackMap; confidence = "LOW"
+                                console.log(`[processMatches] 🔍 Fallback Multi-Word Matched: ${wordFallbackMap.descripcion}`)
+                            }
+                        }
+                    }
                 }
 
             } catch (e: any) {
