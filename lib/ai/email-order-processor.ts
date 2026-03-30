@@ -544,20 +544,39 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
 
         if (clienteId) clienteFound = true
 
-        // ── 4b. Detect forma de facturación override ────
+        // ── 4b. Detect forma de facturación override con IA ────
         let facturacionOverride: string | null = null
-        const fullText = (customerStr + ' ' + (emailData.subject || '') + ' ' + (emailData.bodyText || '')).toLowerCase()
+        const fullTextContext = (emailData.subject || '') + '\n' + (emailData.bodyText || '')
+        if (fullTextContext.trim().length > 5) {
+            try {
+                const { GoogleGenerativeAI } = await import('@google/generative-ai')
+                const geminiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ''
+                if (geminiKey) {
+                    const genAI = new GoogleGenerativeAI(geminiKey)
+                    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', generationConfig: { temperature: 0.1, responseMimeType: 'application/json', maxOutputTokens: 64 } })
+                    const prompt = `Analizá si el viajante está pidiendo una forma de facturación ESPECÍFICA para este pedido.
+Mensaje: "${fullTextContext}"
 
-        // Check "Final/Mixto" FIRST (more specific patterns)
-        if (fullText.includes('mitad y mitad') || fullText.includes('factura y presupuesto') || fullText.includes('factura y remito') || fullText.match(/\bfinal\b/)) {
-            facturacionOverride = 'Final'
-            console.log(`[EmailOrderProcessor] 📋 Facturación override: Final (Mixto)`)
-        } else if (fullText.includes('presupuesto') || fullText.includes('remito') || fullText.includes('negro') || fullText.includes('sin iva')) {
-            facturacionOverride = 'Presupuesto'
-            console.log(`[EmailOrderProcessor] 📋 Facturación override: Presupuesto`)
-        } else if (fullText.includes('con iva') || fullText.match(/factura\s*a\b/) || fullText.includes('facturado') || fullText.includes('responsable inscripto')) {
-            facturacionOverride = 'Factura'
-            console.log(`[EmailOrderProcessor] 📋 Facturación override: Factura`)
+Reglas:
+- Si pide explícitamente remito, presupuesto, negro, sin iva, o similar -> devuelve "Presupuesto".
+- Si pide factura, con iva, blanco, facturado, responsable inscripto -> devuelve "Factura".
+- Si pide mitad y mitad, final, 1/2 y 1/2, mixto -> devuelve "Final".
+- Si el mensaje NO HACE REFERENCIA CLARA a cómo facturar (solo manda el pedido, saluda, o dice 'viamonte') -> devuelve null.
+
+Devolvé UNICAMENTE un JSON con este formato: { "facturacion": "Presupuesto" | "Factura" | "Final" | null }`
+                    const response = await model.generateContent(prompt)
+                    let textObj = response.response.text().trim()
+                    if (textObj.startsWith('\`\`\`json')) textObj = textObj.replace(/^\`\`\`json/, '').replace(/\`\`\`$/, '').trim()
+                    else if (textObj.startsWith('\`\`\`')) textObj = textObj.replace(/^\`\`\`/, '').replace(/\`\`\`$/, '').trim()
+                    const parsedData = JSON.parse(textObj)
+                    if (parsedData.facturacion && ['Presupuesto', 'Factura', 'Final'].includes(parsedData.facturacion)) {
+                        facturacionOverride = parsedData.facturacion
+                        console.log(`[EmailOrderProcessor] 🤖 IA evaluó override de facturación: ${facturacionOverride}`)
+                    }
+                }
+            } catch (err: any) {
+                console.error('[EmailOrderProcessor] Error al evaluar override de facturación con Gemini:', err.message)
+            }
         }
 
         // ── 4c. Decide: auto-create, accumulate, or send to review ────

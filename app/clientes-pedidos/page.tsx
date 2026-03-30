@@ -498,7 +498,7 @@ export default function ClientesPedidosPage() {
             <div class="info">
               <div class="info-box">
                 <div class="label">Cliente</div>
-                <div class="value">${pedido.clientes?.nombre_razon_social}</div>
+                <div class="value">${pedido.clientes?.nombre_razon_social}${pedido.clientes?.codigo_cliente ? ` (${pedido.clientes?.codigo_cliente})` : ''}</div>
                 <div class="label" style="margin-top: 8px;">Dirección</div>
                 <div class="value">${pedido.clientes?.direccion || "—"}</div>
                 <div class="label" style="margin-top: 8px;">Localidad</div>
