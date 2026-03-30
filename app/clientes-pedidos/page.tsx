@@ -25,6 +25,9 @@ import {
   Printer,
   Trash2,
   Eye,
+  Clock,
+  Mail,
+  Download,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -157,6 +160,7 @@ export default function ClientesPedidosPage() {
   const [dragPedidoId, setDragPedidoId] = useState<string | null>(null)
   const [expandedArticulosGroups, setExpandedArticulosGroups] = useState<Record<string, boolean>>({ pendientes: true, preparados: true, faltantes: false })
   const [previewEmailId, setPreviewEmailId] = useState<string | null>(null)
+  const [pendingImports, setPendingImports] = useState<any[]>([])
 
   const supabase = createClient()
   const searchParams = useSearchParams()
@@ -173,6 +177,7 @@ export default function ClientesPedidosPage() {
     cargarPedidos()
     cargarViajes()
     cargarPickingStatus()
+    cargarPendingImports()
 
     // Realtime: recargar detalles del pedido abierto cuando el depósito escanea
     const channel = supabase
@@ -265,6 +270,18 @@ export default function ClientesPedidosPage() {
       const res = await fetch("/api/pedidos/picking-status")
       if (res.ok) setPickingStatus(await res.json())
     } catch (e) { console.error("Error cargando picking status:", e) }
+  }
+
+  const cargarPendingImports = async () => {
+    try {
+      const { data } = await supabase
+        .from("imports")
+        .select("id, created_at, meta, status")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(20)
+      setPendingImports(data || [])
+    } catch (e) { console.error("Error cargando imports pendientes:", e) }
   }
 
   const cambiarPrioridad = async (pedidoId: string, nuevaPrioridad: number) => {
@@ -750,6 +767,73 @@ export default function ClientesPedidosPage() {
           </SelectContent>
         </Select>
       </div>
+
+      {/* ═══ BANDEJA DE IMPORTS PENDIENTES ═══ */}
+      {pendingImports.length > 0 && (
+        <div className="border rounded-xl overflow-hidden border-amber-200 bg-amber-50">
+          <div className="flex items-center justify-between px-5 py-3">
+            <div className="flex items-center gap-3">
+              <Clock className="h-4 w-4 text-amber-600" />
+              <span className="text-base font-bold text-amber-800">📥 Pendientes de revisión (Gmail)</span>
+              <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-semibold">
+                {pendingImports.length}
+              </span>
+            </div>
+            <a
+              href="/clientes-pedidos/import-review"
+              className="flex items-center gap-1.5 text-xs text-amber-700 hover:text-amber-900 font-medium underline underline-offset-2"
+            >
+              Ver todos →
+            </a>
+          </div>
+          <div className="px-3 pb-3 space-y-1.5">
+            {pendingImports.slice(0, 5).map((imp) => (
+              <a
+                key={imp.id}
+                href={`/clientes-pedidos/import-review`}
+                className="flex items-center justify-between bg-white border border-amber-100 rounded-lg px-4 py-2.5 hover:border-amber-300 hover:shadow-sm transition-all group"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Mail className="h-4 w-4 text-amber-500 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate max-w-[300px]">
+                      {imp.meta?.cliente_nombre || imp.meta?.sender_name || imp.meta?.sender || "Remitente desconocido"}
+                    </div>
+                    {imp.meta?.subject && (
+                      <div className="text-xs text-muted-foreground truncate max-w-[400px]">{imp.meta.subject}</div>
+                    )}
+                    {imp.meta?.needs_manual_download && (
+                      <div className="flex items-center gap-1 text-xs text-amber-600 mt-0.5">
+                        <Download className="h-3 w-3" />
+                        Requiere descarga manual de Drive
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(imp.created_at).toLocaleString("es-AR", {
+                      timeZone: "America/Argentina/Buenos_Aires",
+                      day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
+                    })}
+                  </span>
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium group-hover:bg-amber-200 transition-colors">
+                    Revisar →
+                  </span>
+                </div>
+              </a>
+            ))}
+            {pendingImports.length > 5 && (
+              <a
+                href="/clientes-pedidos/import-review"
+                className="block text-center text-xs text-amber-600 hover:text-amber-800 py-1 font-medium"
+              >
+                +{pendingImports.length - 5} más pendientes...
+              </a>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ═══ ACORDEÓN POR PRIORIDAD ═══ */}
       <div className="space-y-4">

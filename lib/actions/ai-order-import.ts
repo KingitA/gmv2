@@ -420,115 +420,168 @@ async function processMatches(parsedData: any): Promise<ParseResult> {
             let match: any = null
             let confidence: "HIGH" | "MEDIUM" | "LOW" = "LOW"
 
-            // Failsafe extraction of original text:
             const baseDescription = item.description || item.originalText || ""
             const originalTextForFrontend = `${item.code ? item.code + " " : ""}${baseDescription}`.trim() || "ARTÍCULO SIN DESCRIPCIÓN"
 
             try {
                 const supabase = createAdminClient()
 
-                // 1. FIRST PRIORITY: EXACT SKU MATCH IN DATABASE
-                let cleanCode = item.code ? String(item.code).trim() : ""
-                let exactSkuMatch = null
+                // ═══════════════════════════════════════════════════════════════
+                // PASO 1: BÚSQUEDA EXACTA POR SKU (MULTIVARIANTE DE CEROS)
+                // Maneja casos como "000022" → "22", "22" → "000022", EAN13, etc.
+                // ═══════════════════════════════════════════════════════════════
+                let rawCode = item.code ? String(item.code).trim() : ""
 
-                // Extract code from parentheses in description like "(#000022)" or "(033100)"
-                if (!cleanCode && baseDescription) {
+                // Extraer código de paréntesis: "(#000022)" o "(033100)"
+                if (!rawCode && baseDescription) {
                     const codeInParens = baseDescription.match(/\(#?(\d+)\)/)
-                    if (codeInParens) {
-                        cleanCode = codeInParens[1].replace(/^0+/, '') || '0' // strip leading zeros
-                    }
+                    if (codeInParens) rawCode = codeInParens[1]
                 }
 
-                if (cleanCode !== "") {
-                    // Try exact match first
-                    const { data } = await supabase
-                        .from("articulos")
-                        .select("id, descripcion, sku")
-                        .ilike("sku", cleanCode)
-                        .maybeSingle()
-
-                    if (data) {
-                        exactSkuMatch = data
-                    } else {
-                        // Try without leading zeros (e.g. "000022" → "22")
-                        const stripped = cleanCode.replace(/^0+/, '') || '0'
-                        if (stripped !== cleanCode) {
-                            const { data: d2 } = await supabase
-                                .from("articulos")
-                                .select("id, descripcion, sku")
-                                .ilike("sku", stripped)
-                                .maybeSingle()
-                            if (d2) exactSkuMatch = d2
-                        }
-                    }
+                // Primer token numérico del texto como fallback de código
+                if (!rawCode && baseDescription) {
+                    const firstNumeric = baseDescription.trim().match(/^(\d{2,10})(?:\s|$)/)
+                    if (firstNumeric) rawCode = firstNumeric[1]
                 }
 
-                // Alternate exact match: Try extracting the first word if it looks like an SKU model (at least 3 chars alphanumeric)
-                if (!exactSkuMatch && baseDescription) {
-                    const firstWordMatch = baseDescription.trim().match(/^([A-Za-z0-9\-_]+)(?:\s|$)/);
-                    if (firstWordMatch && firstWordMatch[1].length >= 3) {
-                        const possibleCode = firstWordMatch[1];
+                if (rawCode !== "") {
+                    const stripped = rawCode.replace(/^0+/, '') || '0'
+                    const padded6 = /^\d+$/.test(stripped) ? stripped.padStart(6, '0') : null
+
+                    // Intentar: código exacto → sin ceros → con padding de 6 dígitos
+                    const codesToTry = Array.from(new Set([rawCode, stripped, ...(padded6 ? [padded6] : [])]))
+
+                    for (const code of codesToTry) {
                         const { data } = await supabase
                             .from("articulos")
                             .select("id, descripcion, sku")
-                            .ilike("sku", possibleCode)
+                            .ilike("sku", code)
+                            .limit(1)
                             .maybeSingle()
+                        if (data) { match = data; confidence = "HIGH"; break }
+                    }
 
-                        if (data) {
-                            exactSkuMatch = data
-                            cleanCode = possibleCode
+                    // Buscar como EAN13 si es un número largo
+                    if (!match && /^\d{8,14}$/.test(stripped)) {
+                        const { data: eanMatch } = await supabase
+                            .from("articulos")
+                            .select("id, descripcion, sku")
+                            .eq("ean13", stripped)
+                            .limit(1)
+                            .maybeSingle()
+                        if (eanMatch) { match = eanMatch; confidence = "HIGH" }
+                    }
+                }
+
+                // Primer token alfanumérico del texto (e.g. "ABC-123 descripcion" → buscar SKU "ABC-123")
+                if (!match && baseDescription) {
+                    const firstWordMatch = baseDescription.trim().match(/^([A-Za-z0-9\-_]{3,20})(?:\s|$)/)
+                    if (firstWordMatch) {
+                        const { data } = await supabase
+                            .from("articulos")
+                            .select("id, descripcion, sku")
+                            .ilike("sku", firstWordMatch[1])
+                            .limit(1)
+                            .maybeSingle()
+                        if (data) { match = data; confidence = "HIGH" }
+                    }
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // PASO 2: BÚSQUEDA VECTORIAL SEMÁNTICA
+                // Query limpio sin números puros para mejor embedding semántico
+                // ═══════════════════════════════════════════════════════════════
+                if (!match) {
+                    const stripped = rawCode ? rawCode.replace(/^0+/, '') || '0' : ''
+                    // No agregar código numérico puro al query semántico (arruina el embedding)
+                    const codeForQuery = (!stripped || /^\d+$/.test(stripped)) ? '' : stripped
+                    const searchQuery = [codeForQuery, item.brand || "", baseDescription, item.color || ""].filter(Boolean).join(" ").trim()
+
+                    if (searchQuery.length > 2) {
+                        const candidates = await searchProductsByVector(searchQuery, 0.35, 8)
+                        if (candidates && candidates.length > 0) {
+                            const best = candidates[0]
+                            if (best.similarity > 0.82) { match = best; confidence = "HIGH" }
+                            else if (best.similarity > 0.70) { match = best; confidence = "MEDIUM" }
+                            else if (best.similarity > 0.50) { match = best; confidence = "LOW" }
                         }
                     }
                 }
 
-                if (exactSkuMatch) {
-                    match = exactSkuMatch
-                    confidence = "HIGH"
-                }
+                // ═══════════════════════════════════════════════════════════════
+                // PASO 3: INTERPRETACIÓN CON GEMINI
+                // Para abreviaturas: "edt x40ml" → "eau de toilette x40ml"
+                // Solo si no hayamos match o es LOW confidence
+                // ═══════════════════════════════════════════════════════════════
+                if (!match || confidence === "LOW") {
+                    const aiQuery = [item.brand || "", baseDescription, item.color || ""].filter(Boolean).join(" ").trim()
+                    if (aiQuery.length > 2) {
+                        const aiCandidates = await searchProductsByVector(aiQuery, 0.25, 6)
+                        if (aiCandidates && aiCandidates.length > 0) {
+                            // Si tenemos código numérico, filtrar candidatos que tengan ese SKU exacto
+                            const rawStripped = rawCode ? rawCode.replace(/^0+/, '') || '0' : ''
+                            let filteredCandidates = aiCandidates
+                            if (rawStripped && /^\d+$/.test(rawStripped) && parseInt(rawStripped) > 0) {
+                                const byCode = aiCandidates.filter((c: any) =>
+                                    String(c.sku || c.codigo_interno || '').replace(/^0+/, '') === rawStripped
+                                )
+                                if (byCode.length > 0) filteredCandidates = byCode
+                            }
 
-                // 2. SECOND PRIORITY: VECTOR / FUZZY MATCH IF NO EXACT SKU
-                if (!match) {
-                    const searchQuery = `${item.code || ""} ${item.brand || ""} ${baseDescription} ${item.color || ""}`.trim()
-                    const candidates = await searchProductsByVector(searchQuery, 0.4, 5)
-
-                    if (candidates && candidates.length > 0) {
-                        const bestCandidate = candidates[0]
-                        if (bestCandidate.similarity > 0.82) {
-                            match = bestCandidate
-                            confidence = "HIGH"
-                        } else if (bestCandidate.similarity > 0.75) {
-                            match = bestCandidate
-                            confidence = "MEDIUM"
-                        } else {
-                            match = bestCandidate
-                            confidence = "LOW"
-                        }
-                    } else {
-                        // 3. THIRD PRIORITY: DIRECT BACKUP ILIKE QUERY ON DB IN CASE VECTOR IS EMPTY
-                        if (baseDescription.length > 3) {
-                            const { data: fallbackMatch } = await supabase
-                                .from("articulos")
-                                .select("id, descripcion, sku")
-                                .ilike("descripcion", `%${baseDescription}%`)
-                                .limit(1)
-                                .maybeSingle()
-
-                            if (fallbackMatch) {
-                                match = fallbackMatch
-                                confidence = "MEDIUM" // Fallback query is considered medium confidence
+                            try {
+                                const { GoogleGenerativeAI } = await import("@google/generative-ai")
+                                const geminiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
+                                if (geminiKey) {
+                                    const genAI = new GoogleGenerativeAI(geminiKey)
+                                    const model = genAI.getGenerativeModel({
+                                        model: "gemini-2.0-flash",
+                                        generationConfig: { temperature: 0.1, responseMimeType: "application/json", maxOutputTokens: 64 }
+                                    })
+                                    const candidateList = filteredCandidates.map((c: any, i: number) =>
+                                        `${i + 1}. SKU:${c.sku || c.codigo_interno} - ${c.descripcion}`
+                                    ).join("\n")
+                                    const prompt = `Artículo del pedido: "${originalTextForFrontend}"\nCandidatos del inventario:\n${candidateList}\n\n¿Cuál corresponde? (considerá: edt=eau de toilette, edc=eau de cologne, edp=eau de parfum, deo=desodorante, shamp=shampoo, crema=cream). Número del candidato o 0 si ninguno. JSON: {"match": número}`
+                                    const res = await model.generateContent(prompt)
+                                    const parsed = JSON.parse(res.response.text())
+                                    const idx = parseInt(parsed.match) - 1
+                                    if (idx >= 0 && idx < filteredCandidates.length) {
+                                        const aiMatch = filteredCandidates[idx]
+                                        if (!match || confidence === "LOW") {
+                                            match = aiMatch
+                                            confidence = "MEDIUM"
+                                            console.log(`[processMatches] 🧠 IA interpretó "${originalTextForFrontend}" → SKU:${aiMatch.sku || aiMatch.codigo_interno} "${aiMatch.descripcion}"`)
+                                        }
+                                    }
+                                }
+                            } catch (aiErr: any) {
+                                // La IA falló, no es bloqueante
+                                console.log(`[processMatches] IA interpretation skipped: ${aiErr.message || aiErr}`)
                             }
                         }
                     }
                 }
+
+                // ═══════════════════════════════════════════════════════════════
+                // PASO 4: FALLBACK — ilike directo en descripción
+                // ═══════════════════════════════════════════════════════════════
+                if (!match && baseDescription.length > 3) {
+                    const { data: fallbackMatch } = await supabase
+                        .from("articulos")
+                        .select("id, descripcion, sku")
+                        .ilike("descripcion", `%${baseDescription}%`)
+                        .limit(1)
+                        .maybeSingle()
+                    if (fallbackMatch) { match = fallbackMatch; confidence = "MEDIUM" }
+                }
+
             } catch (e: any) {
                 console.error(`Error matching item '${item.description}':`, e.message || e)
             }
 
-            // Log match result for debugging
             if (match) {
-                console.log(`[processMatches] ✅ "${originalTextForFrontend}" → matched to id=${match.id}, desc="${match.descripcion || match.sku || '?'}", confidence=${confidence}`)
+                console.log(`[processMatches] ✅ "${originalTextForFrontend}" → SKU:${match.sku || match.codigo_interno || '?'} "${match.descripcion || '?'}" [${confidence}]`)
             } else {
-                console.log(`[processMatches] ❌ "${originalTextForFrontend}" → NO MATCH FOUND`)
+                console.log(`[processMatches] ❌ "${originalTextForFrontend}" → SIN MATCH`)
             }
 
             return {

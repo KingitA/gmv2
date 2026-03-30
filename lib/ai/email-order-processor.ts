@@ -3,7 +3,7 @@
 // Connects Gmail sync with existing order import pipeline
 // =====================================================
 
-import { downloadAttachment, downloadDriveFileAndExport, type ParsedEmail } from './gmail'
+import { downloadAttachment, downloadDriveFileAndExport, downloadPublicDriveFile, type ParsedEmail } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
 import { processOrder, processOrderText, processOrderTextMulti, type ParseResult } from '@/lib/actions/ai-order-import'
 import Anthropic from '@anthropic-ai/sdk'
@@ -218,35 +218,93 @@ export async function processEmailAsOrder(
         console.log(`[EmailOrderProcessor] Found ${driveIdsToProcess.size} Drive file(s)/link(s) to process.`)
 
         for (const [fileId, filename] of Array.from(driveIdsToProcess.entries())) {
+            let downloadSuccess = false
+
+            // ── APPROACH 1: Descarga pública (sin OAuth) ──────────────────────────
+            // Los viajantes/clientes comparten archivos con "cualquiera con el link"
+            // Estos se pueden descargar sin necesidad de autenticación del sistema
             try {
-                console.log(`[EmailOrderProcessor] Attempting to download Drive file ${fileId} via API...`)
-                const driveFile = await downloadDriveFileAndExport(emailAccountAddress, fileId)
+                console.log(`[EmailOrderProcessor] Intentando descarga pública de Drive ${fileId}...`)
+                const driveFile = await downloadPublicDriveFile(fileId)
                 const result = await processOrder(driveFile.data, filename, driveFile.mimeType)
 
                 if (result && result.items.length > 0) {
                     allParseResults.push({ result, fileName: filename })
-                    console.log(`[EmailOrderProcessor] ✅ Successfully parsed ${result.items.length} items from Drive export`)
+                    console.log(`[EmailOrderProcessor] ✅ Descarga pública exitosa: ${result.items.length} items de Drive`)
+                    downloadSuccess = true
                 }
-            } catch (err) {
-                // Fallback to Agenda event if Drive fails
-                console.log(`[EmailOrderProcessor] Drive download failed or no items found for ${fileId}, creating agenda event.`)
+            } catch (pubErr) {
+                console.log(`[EmailOrderProcessor] Descarga pública falló para ${fileId}: ${pubErr instanceof Error ? pubErr.message : pubErr}`)
+            }
+
+            // ── APPROACH 2: Fallback con OAuth del sistema (si el archivo está en la cuenta de empresa) ──
+            if (!downloadSuccess) {
                 try {
-                    const driveUrl = `https://docs.google.com/spreadsheets/d/${fileId}`
-                    await db.from('ai_agenda_events').insert({
-                        title: `📎 Pedido mediante enlace/adjunto de Drive`,
-                        description: `Remitente: ${emailData.from}\nAsunto: ${emailData.subject}\n\nEnlace: ${driveUrl}\n\nNo se pudo descargar automáticamente. Revisá el archivo manualmente.`,
-                        event_type: 'pedido_preparar',
-                        priority: 'alta',
-                        status: 'pendiente',
-                        due_date: new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0],
-                        source: 'gmail',
-                        source_ref_id: emailData.gmailId,
-                        metadata: { drive_url: driveUrl, from: emailData.from, subject: emailData.subject }
-                    })
-                    createdDriveAgendaEvent = true
-                    console.log(`[EmailOrderProcessor] Drive link agenda event created for ${fileId}`)
-                } catch (agendaErr) {
-                    console.error('[EmailOrderProcessor] Failed to create agenda event for Drive link', agendaErr)
+                    console.log(`[EmailOrderProcessor] Intentando descarga con OAuth para ${fileId}...`)
+                    const driveFile = await downloadDriveFileAndExport(emailAccountAddress, fileId)
+                    const result = await processOrder(driveFile.data, filename, driveFile.mimeType)
+
+                    if (result && result.items.length > 0) {
+                        allParseResults.push({ result, fileName: filename })
+                        console.log(`[EmailOrderProcessor] ✅ Descarga OAuth exitosa: ${result.items.length} items de Drive`)
+                        downloadSuccess = true
+                    }
+                } catch (oauthErr) {
+                    console.log(`[EmailOrderProcessor] Descarga OAuth también falló para ${fileId}: ${oauthErr instanceof Error ? oauthErr.message : oauthErr}`)
+                }
+            }
+
+            // ── APPROACH 3: Si ambos fallan, crear import pendiente con el link ──
+            // El operador puede luego descargarlo manualmente y subirlo al sistema
+            if (!downloadSuccess) {
+                console.log(`[EmailOrderProcessor] No se pudo descargar ${fileId} — creando import pendiente con el link`)
+                try {
+                    const isProbablySheet = filename.includes('spreadsheet') || filename.includes('Sheet') || fileId.length > 20
+                    const driveUrl = isProbablySheet
+                        ? `https://docs.google.com/spreadsheets/d/${fileId}/export?format=xlsx`
+                        : `https://drive.google.com/file/d/${fileId}/view`
+
+                    // Guardar como import pendiente con el link para revisión manual
+                    const { data: importRec } = await db.from('imports').insert({
+                        type: 'auto_order_gmail',
+                        status: 'pending',
+                        meta: {
+                            source: 'gmail',
+                            sender: emailData.from,
+                            sender_name: emailData.fromName,
+                            subject: emailData.subject,
+                            file_name: `Drive: ${filename}`,
+                            drive_file_id: fileId,
+                            drive_url: driveUrl,
+                            gmail_id: emailData.gmailId,
+                            note: 'Archivo de Drive compartido externamente. Descargalo y subilo manualmente.',
+                            needs_manual_download: true,
+                        }
+                    }).select().single()
+
+                    if (importRec) {
+                        createdDriveAgendaEvent = true
+                        console.log(`[EmailOrderProcessor] Import pendiente creado para revisión manual: ${importRec.id}`)
+                    }
+                } catch (importErr) {
+                    console.error('[EmailOrderProcessor] Error creando import pendiente:', importErr)
+                    // Último recurso: evento en agenda
+                    try {
+                        await db.from('ai_agenda_events').insert({
+                            title: `📎 Pedido via Drive (revisar manualmente) — ${emailData.fromName || emailData.from}`,
+                            description: `Remitente: ${emailData.from}\nAsunto: ${emailData.subject}\n\nLink: https://drive.google.com/file/d/${fileId}/view\n\nNo se pudo descargar. Descargalo y subilo desde /clientes-pedidos.`,
+                            event_type: 'pedido_preparar',
+                            priority: 'alta',
+                            status: 'pendiente',
+                            due_date: new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0],
+                            source: 'gmail',
+                            source_ref_id: emailData.gmailId,
+                            metadata: { drive_file_id: fileId, from: emailData.from, subject: emailData.subject }
+                        })
+                        createdDriveAgendaEvent = true
+                    } catch (agendaErr) {
+                        console.error('[EmailOrderProcessor] Failed to create agenda event for Drive link', agendaErr)
+                    }
                 }
             }
         }

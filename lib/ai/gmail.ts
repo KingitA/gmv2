@@ -463,6 +463,110 @@ export async function downloadDriveFileAndExport(
 }
 
 /**
+ * Descarga un archivo de Google Drive compartido públicamente ("cualquiera con el link").
+ * NO requiere OAuth ni tokens del sistema - funciona con links que viajantes/clientes comparten.
+ * Soporta Google Sheets (exporta como XLSX) y archivos binarios (.xlsx, .pdf, etc).
+ *
+ * Estrategia de 3 intentos:
+ * 1. Export URL de Google Sheets (funciona para Sheets con "cualquiera con el link puede ver")
+ * 2. Download directo para archivos .xlsx/.pdf subidos a Drive y compartidos
+ * 3. API de Drive con API key de Google (para archivos públicos indexados)
+ */
+export async function downloadPublicDriveFile(
+    fileId: string
+): Promise<{ data: Buffer; mimeType: string }> {
+    const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+    console.log(`[PublicDrive] Intentando descarga pública de ${fileId}...`)
+
+    // Intento 1: Export de Google Sheets via URL pública
+    // Funciona cuando el Sheet está compartido "cualquiera con el link puede ver"
+    try {
+        const exportUrl = `https://docs.google.com/spreadsheets/d/${fileId}/export?format=xlsx`
+        const response = await fetch(exportUrl, {
+            redirect: 'follow',
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GMVII/1.0)' },
+        })
+
+        if (response.ok) {
+            const contentType = response.headers.get('content-type') || ''
+            // Si Google devuelve HTML es porque no tiene acceso (pide login)
+            if (!contentType.includes('text/html')) {
+                const arrayBuffer = await response.arrayBuffer()
+                const data = Buffer.from(arrayBuffer)
+                if (data.length > 1000) { // Mínimo razonable para un XLSX
+                    console.log(`[PublicDrive] ✅ Intento 1 exitoso: ${data.length} bytes (Google Sheets export)`)
+                    return { data, mimeType: XLSX_MIME }
+                }
+            }
+        }
+    } catch (err) {
+        console.log(`[PublicDrive] Intento 1 (Sheets export) falló: ${err instanceof Error ? err.message : err}`)
+    }
+
+    // Intento 2: Download directo para archivos subidos a Drive y compartidos
+    // Funciona para .xlsx, .pdf, etc. compartidos "cualquiera con el link"
+    try {
+        const directUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`
+        const response = await fetch(directUrl, {
+            redirect: 'follow',
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GMVII/1.0)' },
+        })
+
+        if (response.ok) {
+            const contentType = response.headers.get('content-type') || ''
+            if (!contentType.includes('text/html')) {
+                const arrayBuffer = await response.arrayBuffer()
+                const data = Buffer.from(arrayBuffer)
+                if (data.length > 500) {
+                    console.log(`[PublicDrive] ✅ Intento 2 exitoso: ${data.length} bytes (descarga directa, tipo: ${contentType})`)
+                    return { data, mimeType: contentType.split(';')[0].trim() || XLSX_MIME }
+                }
+            }
+        }
+    } catch (err) {
+        console.log(`[PublicDrive] Intento 2 (descarga directa) falló: ${err instanceof Error ? err.message : err}`)
+    }
+
+    // Intento 3: API de Drive con API key de Google (reutilizamos la GEMINI_API_KEY que es de Google)
+    const apiKey = process.env.GEMINI_API_KEY
+    if (apiKey) {
+        try {
+            // Obtener metadata del archivo
+            const metaRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${fileId}?fields=mimeType,name&key=${apiKey}`
+            )
+            if (metaRes.ok) {
+                const meta = await metaRes.json()
+                const mimeType = meta.mimeType || ''
+
+                let downloadUrl: string
+                if (mimeType.includes('apps.spreadsheet') || mimeType.includes('apps.document')) {
+                    downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(XLSX_MIME)}&key=${apiKey}`
+                } else {
+                    downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`
+                }
+
+                const fileRes = await fetch(downloadUrl)
+                if (fileRes.ok) {
+                    const arrayBuffer = await fileRes.arrayBuffer()
+                    const data = Buffer.from(arrayBuffer)
+                    if (data.length > 500) {
+                        const finalMime = mimeType.includes('apps.') ? XLSX_MIME : mimeType
+                        console.log(`[PublicDrive] ✅ Intento 3 exitoso: ${data.length} bytes (API key)`)
+                        return { data, mimeType: finalMime }
+                    }
+                }
+            }
+        } catch (err) {
+            console.log(`[PublicDrive] Intento 3 (API key) falló: ${err instanceof Error ? err.message : err}`)
+        }
+    }
+
+    throw new Error(`No se pudo descargar el archivo públicamente. El archivo ${fileId} puede no estar compartido con "cualquiera con el link".`)
+}
+
+/**
  * Verifica si hay cuentas de Gmail conectadas para un usuario
  * @param userId - ID del usuario del sistema (si no se pasa, devuelve todas — backward compat para webhooks)
  */
