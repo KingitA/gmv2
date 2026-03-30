@@ -502,8 +502,8 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                         if (candidates && candidates.length > 0) {
                             const best = candidates[0]
                             if (best.similarity > 0.82) { match = best; confidence = "HIGH" }
-                            else if (best.similarity > 0.65) { match = best; confidence = "MEDIUM" }
-                            else if (best.similarity > 0.40) { match = best; confidence = "LOW" }
+                            else if (best.similarity > 0.70) { match = best; confidence = "MEDIUM" }
+                            else if (best.similarity > 0.50) { match = best; confidence = "LOW" }
                         }
                     }
                 }
@@ -516,7 +516,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                 if (!match || confidence === "LOW") {
                     const aiQuery = [item.brand || "", baseDescription, item.color || ""].filter(Boolean).join(" ").trim()
                     if (aiQuery.length > 2) {
-                        const aiCandidates = await searchProductsByVector(aiQuery, 0.15, 8)
+                        const aiCandidates = await searchProductsByVector(aiQuery, 0.25, 6)
                         if (aiCandidates && aiCandidates.length > 0) {
                             // Si tenemos código numérico, filtrar candidatos que tengan ese SKU exacto
                             const rawStripped = rawCode ? rawCode.replace(/^0+/, '') || '0' : ''
@@ -569,34 +569,61 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                 }
 
                 // ═══════════════════════════════════════════════════════════════
-                // PASO 4: FALLBACK DIRECTO EN BASE DE DATOS (POR SI FALTAN EMBEDDINGS)
+                // PASO 4: EXTRACCIÓN SEMÁNTICA ESTRUCTURADA (Deep Fallback)
                 // ═══════════════════════════════════════════════════════════════
                 if (!match && baseDescription.length > 3) {
-                    // Try exact substring first
-                    const { data: fallbackMatch } = await supabase
-                        .from("articulos")
-                        .select("id, descripcion, sku")
-                        .ilike("descripcion", `%${baseDescription}%`)
-                        .limit(1)
-                        .maybeSingle()
-                    if (fallbackMatch) { 
-                        match = fallbackMatch; confidence = "LOW" 
-                    } else {
-                        // If exact substring fails, split to longest words and 'AND' them in search
-                        const words = baseDescription.split(/[\s,]+/).filter((w: string) => w.length > 2)
-                        // Limitar a máximo 4 palabras clave para no romper la query
-                        const queryWords = words.slice(0, 4)
-                        if (queryWords.length > 0) {
-                            let rpcQuery = supabase.from("articulos").select("id, descripcion, sku")
-                            for (const w of queryWords) {
-                                rpcQuery = rpcQuery.ilike("descripcion", `%${w}%`)
-                            }
-                            const { data: wordFallbackMap } = await rpcQuery.limit(1).maybeSingle()
-                            if (wordFallbackMap) {
-                                match = wordFallbackMap; confidence = "LOW"
-                                console.log(`[processMatches] 🔍 Fallback Multi-Word Matched: ${wordFallbackMap.descripcion}`)
+                    try {
+                        const { GoogleGenerativeAI } = await import("@google/generative-ai")
+                        const geminiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
+                        if (geminiKey) {
+                            const genAI = new GoogleGenerativeAI(geminiKey)
+                            const model = genAI.getGenerativeModel({
+                                model: "gemini-2.0-flash",
+                                generationConfig: { temperature: 0.1, responseMimeType: "application/json", maxOutputTokens: 128 }
+                            })
+                            const prompt = `Extraé los atributos clave del artículo comercial: "${originalTextForFrontend}".
+Incluí proveedor, tipo de artículo, marca, color, fracciones, unidades por paquete, si tiene.
+Ignorá cantidades iniciales del pedido (ej si dice '10 cajas toalla', ignorá '10' y 'cajas'). 
+Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON array ["palabra1", "palabra2"]. Si la sigla tiene puntos, quitalos (ej. "o.b" -> "ob").`
+                            
+                            const res = await model.generateContent(prompt)
+                            let textObj = res.response.text().trim()
+                            if (textObj.startsWith("\`\`\`json")) textObj = textObj.replace(/^\`\`\`json/, "").replace(/\`\`\`$/, "").trim()
+                            else if (textObj.startsWith("\`\`\`")) textObj = textObj.replace(/^\`\`\`/, "").replace(/\`\`\`$/, "").trim()
+                            
+                            const keywords = JSON.parse(textObj)
+                            
+                            if (Array.isArray(keywords) && keywords.length > 0) {
+                                // Limpieza final de keywords cortas/ruido
+                                const validKeywords = keywords
+                                    .map(k => String(k).replace(/[.\-]/g, '').trim()) // quitar puntos e.g O.B -> ob
+                                    .filter(k => k.length >= 2 && !['de', 'la', 'con', 'sin', 'un', 'una', 'el', 'los', 'las', 'por', 'uni', 'cajas', 'bulto'].includes(k)) 
+                                
+                                if (validKeywords.length > 0) {
+                                    let rpcQuery = supabase.from("articulos").select("id, descripcion, sku")
+                                    // AND ILIKE estricto: la descripción debió haber matcheado CADA palabra
+                                    for (const kw of validKeywords) {
+                                        rpcQuery = rpcQuery.ilike("descripcion", `%${kw}%`)
+                                    }
+                                    
+                                    const { data: deepMatches } = await rpcQuery.limit(2)
+                                    // Solo asignamos si hay una sola coincidencia exacta y clara para no mezclar artículos
+                                    if (deepMatches && deepMatches.length === 1) {
+                                        match = deepMatches[0]
+                                        confidence = "LOW"
+                                        console.log(`[processMatches] 🔬 Deep Fallback "${originalTextForFrontend}" -> Keywords: [${validKeywords.join(', ')}] -> ÚNICO MATCH: ${match.descripcion}`)
+                                    } else if (deepMatches && deepMatches.length > 1) {
+                                        console.log(`[processMatches] 🔬 Deep Fallback "${originalTextForFrontend}" -> Encontró múltiples opciones. Se ignora para evitar colisiones.`)
+                                    } else {
+                                        // Último intento: reemplazar regex 'x'
+                                        // A veces "x8" en el sistema está como "x 8", si validKeywords tiene una X y numero ej "x8", no lo encuentra. 
+                                        console.log(`[processMatches] 🔬 Deep Fallback "${originalTextForFrontend}" -> Keywords: [${validKeywords.join(', ')}] -> SIN MATCH DIRECTO.`)
+                                    }
+                                }
                             }
                         }
+                    } catch (e: any) {
+                        console.log(`[processMatches] Error en Deep Fallback: ${e.message}`)
                     }
                 }
 
