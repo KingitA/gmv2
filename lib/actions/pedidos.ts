@@ -330,3 +330,91 @@ export async function softDeletePedido(pedidoId: string) {
   revalidatePath("/clientes-pedidos")
   return { success: true, numero_pedido: pedido.numero_pedido }
 }
+
+// ─── Edición de pedidos pendientes ─────────────────────────────────────────
+
+async function assertPedidoEditable(supabase: any, pedidoId: string) {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("id, estado")
+    .eq("id", pedidoId)
+    .single()
+  if (error || !data) throw new Error("Pedido no encontrado")
+  if (data.estado === "eliminado") throw new Error("El pedido está eliminado y no puede modificarse")
+  if (data.estado !== "pendiente") throw new Error("Solo se pueden editar pedidos en estado 'pendiente'")
+  return data
+}
+
+export async function agregarItemPedido(
+  pedidoId: string,
+  productoId: string,
+  cantidad: number
+) {
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+
+  const { data: articulo, error: artError } = await supabase
+    .from("articulos")
+    .select("precio_compra, ultimo_costo, precio_venta")
+    .eq("id", productoId)
+    .single()
+
+  if (artError || !articulo) throw new Error("Artículo no encontrado")
+
+  const precioBase = articulo.precio_compra || 0
+  const precioFinal = articulo.precio_venta || precioBase
+
+  const { error } = await supabase.from("pedidos_detalle").insert({
+    pedido_id: pedidoId,
+    articulo_id: productoId,
+    cantidad,
+    precio_base: precioBase,
+    precio_final: precioFinal,
+    subtotal: precioFinal * cantidad,
+    precio_costo: articulo.ultimo_costo || precioBase,
+  })
+
+  if (error) throw error
+
+  revalidatePath("/clientes-pedidos")
+  return { success: true }
+}
+
+export async function actualizarCantidadItem(
+  itemId: string,
+  pedidoId: string,
+  cantidad: number
+) {
+  if (cantidad <= 0) throw new Error("La cantidad debe ser mayor a 0")
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+
+  const { data: item, error: fetchError } = await supabase
+    .from("pedidos_detalle")
+    .select("precio_final")
+    .eq("id", itemId)
+    .single()
+
+  if (fetchError || !item) throw new Error("Ítem no encontrado")
+
+  const { error } = await supabase
+    .from("pedidos_detalle")
+    .update({ cantidad, subtotal: item.precio_final * cantidad })
+    .eq("id", itemId)
+
+  if (error) throw error
+
+  revalidatePath("/clientes-pedidos")
+  return { success: true }
+}
+
+export async function eliminarItemPedido(itemId: string, pedidoId: string) {
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+
+  const { error } = await supabase.from("pedidos_detalle").delete().eq("id", itemId)
+  if (error) throw error
+
+  revalidatePath("/clientes-pedidos")
+  return { success: true }
+}

@@ -25,14 +25,16 @@ import {
   Printer,
   Trash2,
   Eye,
-  Clock,
-  Mail,
-  Download,
+  Plus,
+  X,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { ImportOrderDialog } from "@/components/pedidos/ImportOrderDialog"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
+import { NuevoPedidoDialog } from "@/components/pedidos/NuevoPedidoDialog"
+import { ColaProcesamiento } from "@/components/pedidos/ColaProcesamiento"
+import { useOrderQueue } from "@/hooks/use-order-queue"
+import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido } from "@/lib/actions/pedidos"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -160,7 +162,13 @@ export default function ClientesPedidosPage() {
   const [dragPedidoId, setDragPedidoId] = useState<string | null>(null)
   const [expandedArticulosGroups, setExpandedArticulosGroups] = useState<Record<string, boolean>>({ pendientes: true, preparados: true, faltantes: false })
   const [previewEmailId, setPreviewEmailId] = useState<string | null>(null)
-  const [pendingImports, setPendingImports] = useState<any[]>([])
+  const [nuevoPedidoOpen, setNuevoPedidoOpen] = useState(false)
+  // Order editing state
+  const [editMode, setEditMode] = useState(false)
+  const [addProductQuery, setAddProductQuery] = useState("")
+  const [addProductsFound, setAddProductsFound] = useState<any[]>([])
+  const [addProductQty, setAddProductQty] = useState(1)
+  const [savingItem, setSavingItem] = useState(false)
 
   const supabase = createClient()
   const searchParams = useSearchParams()
@@ -241,6 +249,9 @@ export default function ClientesPedidosPage() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const { queue, addToQueue, removeFromQueue, confirmOrder, retryItem } = useOrderQueue(cargarPedidos)
+
   const cargarComprobantesExistentes = async () => {
     try {
       const pedidoIds = pedidos.map((p) => p.id)
@@ -273,15 +284,8 @@ export default function ClientesPedidosPage() {
   }
 
   const cargarPendingImports = async () => {
-    try {
-      const { data } = await supabase
-        .from("imports")
-        .select("id, created_at, meta, status")
-        .eq("status", "pending")
-        .order("created_at", { ascending: false })
-        .limit(20)
-      setPendingImports(data || [])
-    } catch (e) { console.error("Error cargando imports pendientes:", e) }
+    // Legacy: no longer displayed — queue managed in-memory via useOrderQueue
+    return
   }
 
   const cambiarPrioridad = async (pedidoId: string, nuevaPrioridad: number) => {
@@ -721,13 +725,10 @@ export default function ClientesPedidosPage() {
           <p className="text-muted-foreground">Administra todos los pedidos de clientes</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" asChild>
-            <a href="/clientes-pedidos/import-review">
-              <FileText className="h-4 w-4" />
-              Revisar Automáticos
-            </a>
+          <Button className="gap-2" onClick={() => setNuevoPedidoOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Nuevo Pedido
           </Button>
-          <ImportOrderDialog onOrderCreated={cargarPedidos} />
           <Button variant="outline" asChild>
             <a href="/viajes">
               <Truck className="h-4 w-4 mr-2" />
@@ -768,72 +769,13 @@ export default function ClientesPedidosPage() {
         </Select>
       </div>
 
-      {/* ═══ BANDEJA DE IMPORTS PENDIENTES ═══ */}
-      {pendingImports.length > 0 && (
-        <div className="border rounded-xl overflow-hidden border-amber-200 bg-amber-50">
-          <div className="flex items-center justify-between px-5 py-3">
-            <div className="flex items-center gap-3">
-              <Clock className="h-4 w-4 text-amber-600" />
-              <span className="text-base font-bold text-amber-800">📥 Pendientes de revisión (Gmail)</span>
-              <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-semibold">
-                {pendingImports.length}
-              </span>
-            </div>
-            <a
-              href="/clientes-pedidos/import-review"
-              className="flex items-center gap-1.5 text-xs text-amber-700 hover:text-amber-900 font-medium underline underline-offset-2"
-            >
-              Ver todos →
-            </a>
-          </div>
-          <div className="px-3 pb-3 space-y-1.5">
-            {pendingImports.slice(0, 5).map((imp) => (
-              <a
-                key={imp.id}
-                href={`/clientes-pedidos/import-review`}
-                className="flex items-center justify-between bg-white border border-amber-100 rounded-lg px-4 py-2.5 hover:border-amber-300 hover:shadow-sm transition-all group"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Mail className="h-4 w-4 text-amber-500 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate max-w-[300px]">
-                      {imp.meta?.cliente_nombre || imp.meta?.sender_name || imp.meta?.sender || "Remitente desconocido"}
-                    </div>
-                    {imp.meta?.subject && (
-                      <div className="text-xs text-muted-foreground truncate max-w-[400px]">{imp.meta.subject}</div>
-                    )}
-                    {imp.meta?.needs_manual_download && (
-                      <div className="flex items-center gap-1 text-xs text-amber-600 mt-0.5">
-                        <Download className="h-3 w-3" />
-                        Requiere descarga manual de Drive
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(imp.created_at).toLocaleString("es-AR", {
-                      timeZone: "America/Argentina/Buenos_Aires",
-                      day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
-                    })}
-                  </span>
-                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium group-hover:bg-amber-200 transition-colors">
-                    Revisar →
-                  </span>
-                </div>
-              </a>
-            ))}
-            {pendingImports.length > 5 && (
-              <a
-                href="/clientes-pedidos/import-review"
-                className="block text-center text-xs text-amber-600 hover:text-amber-800 py-1 font-medium"
-              >
-                +{pendingImports.length - 5} más pendientes...
-              </a>
-            )}
-          </div>
-        </div>
-      )}
+      {/* ═══ COLA DE PROCESAMIENTO ═══ */}
+      <ColaProcesamiento
+        queue={queue}
+        onRemove={removeFromQueue}
+        onRetry={retryItem}
+        onConfirmOrder={confirmOrder}
+      />
 
       {/* ═══ ACORDEÓN POR PRIORIDAD ═══ */}
       <div className="space-y-4">
@@ -1104,6 +1046,144 @@ export default function ClientesPedidosPage() {
                 </Card>
               )}
 
+              {/* ═══ EDICIÓN DE ARTÍCULOS (solo pendiente, no eliminado) ═══ */}
+              {pedidoSeleccionado.estado === "pendiente" && (
+                <Card className="border-blue-200 bg-blue-50/40">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      <span>Editar Artículos</span>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => {
+                        setEditMode((prev: boolean) => !prev)
+                        setAddProductQuery("")
+                        setAddProductsFound([])
+                        setAddProductQty(1)
+                      }}>
+                        {editMode ? <><X className="h-3 w-3 mr-1" />Cerrar</> : <><Plus className="h-3 w-3 mr-1" />Agregar artículo</>}
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                  {editMode && (
+                    <CardContent className="space-y-3">
+                      {/* Add product search */}
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <Input
+                            placeholder="Buscar producto para agregar..."
+                            className="h-8 text-sm"
+                            value={addProductQuery}
+                            onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
+                              setAddProductQuery(e.target.value)
+                              if (e.target.value.length >= 2) {
+                                const { searchProductos } = await import("@/lib/actions/productos")
+                                const res = await searchProductos(e.target.value)
+                                setAddProductsFound(res || [])
+                              } else {
+                                setAddProductsFound([])
+                              }
+                            }}
+                          />
+                          {addProductsFound.length > 0 && (
+                            <div className="absolute top-full left-0 w-full bg-popover border rounded-md shadow-md mt-1 z-50 max-h-[200px] overflow-auto">
+                              {addProductsFound.map((p: any) => (
+                                <div
+                                  key={p.id}
+                                  className="px-3 py-2 hover:bg-muted cursor-pointer text-sm border-b last:border-0"
+                                  onClick={async () => {
+                                    setSavingItem(true)
+                                    try {
+                                      await agregarItemPedido(pedidoSeleccionado.id, p.id, addProductQty)
+                                      await cargarDetallesPedido(pedidoSeleccionado.id)
+                                      setAddProductQuery("")
+                                      setAddProductsFound([])
+                                      setAddProductQty(1)
+                                    } catch (err: any) {
+                                      alert(err.message || "Error al agregar artículo")
+                                    } finally {
+                                      setSavingItem(false)
+                                    }
+                                  }}
+                                >
+                                  <div className="font-medium">{p.descripcion}</div>
+                                  <div className="text-[10px] text-muted-foreground">SKU: {p.sku}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <Input
+                          type="number"
+                          min={1}
+                          className="h-8 w-20 text-center text-sm"
+                          value={addProductQty}
+                          onChange={(e) => setAddProductQty(parseInt(e.target.value) || 1)}
+                          placeholder="Cant."
+                        />
+                        {savingItem && <Loader2 className="h-4 w-4 animate-spin self-center text-blue-600" />}
+                      </div>
+
+                      {/* Existing items with edit/remove controls */}
+                      {detallesPedido.length > 0 && (
+                        <div className="border rounded-md overflow-hidden bg-white">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="text-xs">
+                                <TableHead className="py-1.5 text-xs">SKU</TableHead>
+                                <TableHead className="py-1.5 text-xs">Descripción</TableHead>
+                                <TableHead className="text-center py-1.5 text-xs w-24">Cant.</TableHead>
+                                <TableHead className="w-10" />
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {detallesPedido.map((detalle: PedidoDetalle) => (
+                                <TableRow key={detalle.id} className="text-sm">
+                                  <TableCell className="font-mono text-xs py-1.5">{detalle.articulos?.sku}</TableCell>
+                                  <TableCell className="py-1.5 text-xs">{detalle.articulos?.descripcion}</TableCell>
+                                  <TableCell className="text-center py-1">
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      className="h-7 w-16 mx-auto text-center text-xs"
+                                      defaultValue={detalle.cantidad}
+                                      onBlur={async (e: React.FocusEvent<HTMLInputElement>) => {
+                                        const newQty = parseInt(e.target.value)
+                                        if (newQty !== detalle.cantidad && newQty > 0) {
+                                          try {
+                                            await actualizarCantidadItem(detalle.id, pedidoSeleccionado.id, newQty)
+                                            await cargarDetallesPedido(pedidoSeleccionado.id)
+                                          } catch (err: any) {
+                                            alert(err.message || "Error al actualizar cantidad")
+                                          }
+                                        }
+                                      }}
+                                    />
+                                  </TableCell>
+                                  <TableCell className="py-1 text-center">
+                                    <button
+                                      className="text-muted-foreground hover:text-destructive"
+                                      onClick={async () => {
+                                        if (!confirm(`¿Quitar ${detalle.articulos?.descripcion} del pedido?`)) return
+                                        try {
+                                          await eliminarItemPedido(detalle.id, pedidoSeleccionado.id)
+                                          await cargarDetallesPedido(pedidoSeleccionado.id)
+                                        } catch (err: any) {
+                                          alert(err.message || "Error al eliminar artículo")
+                                        }
+                                      }}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </CardContent>
+                  )}
+                </Card>
+              )}
+
               {/* Artículos agrupados por estado de preparación — tiempo real */}
               <Card>
                 <CardHeader>
@@ -1334,7 +1414,13 @@ export default function ClientesPedidosPage() {
         open={!!previewEmailId}
         onClose={() => setPreviewEmailId(null)}
       />
-    </div >
+
+      <NuevoPedidoDialog
+        open={nuevoPedidoOpen}
+        onOpenChange={setNuevoPedidoOpen}
+        onAddToQueue={addToQueue}
+      />
+    </div>
   )
 }
 

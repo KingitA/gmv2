@@ -7,7 +7,7 @@ import { classifyAndExtract } from './claude'
 import { type ParsedEmail, downloadAttachment } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
 import { extractAttachmentContents, uploadToStorage, type AttachmentContent } from './attachment-content-extractor'
-import { processEmailAsOrder, type OrderProcessingResult } from './email-order-processor'
+// processEmailAsOrder removed — pedidos via Gmail are now manual-only
 import { processEmailAsInvoice } from './email-invoice-processor'
 import { processEmailAsPayment } from './email-payment-processor'
 import { processEmailAsPriceChange } from './email-pricelist-processor'
@@ -413,103 +413,34 @@ export async function processBatchEmails(
 // ─── Classification-specific handlers ──────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function processAsPedido(db: any, emailData: ParsedEmail, targetEmail: string, savedEmailId: string, classification: EnrichedClassificationResult, fechaHoy: string, result: EmailProcessingResult, extractedAttachments: AttachmentContent[]) {
-    console.log(`[Email Pipeline] Email classified as PEDIDO — processing order...`)
-    try {
-        // Pass extracted attachment buffers so order processor doesn't re-download
-        const orderResult: OrderProcessingResult = await processEmailAsOrder(
-            emailData,
-            targetEmail,
-            savedEmailId,
-            extractedAttachments
-        )
+async function processAsPedido(db: any, emailData: ParsedEmail, _targetEmail: string, savedEmailId: string, classification: EnrichedClassificationResult, fechaHoy: string, result: EmailProcessingResult, _extractedAttachments: AttachmentContent[]) {
+    // Pedidos via Gmail are NO LONGER auto-processed.
+    // They are logged as agenda events so the user can import them manually from /clientes-pedidos.
+    console.log(`[Email Pipeline] Email classified as PEDIDO — skipping auto-processing (manual import required)`)
 
-        result.ordersProcessed++
-        result.ordersAutoCreated += orderResult.ordersCreated
-        result.ordersSentToReview += orderResult.ordersSentToReview
+    const senderLabel = emailData.fromName || emailData.from || 'Remitente desconocido'
+    const attachmentCount = emailData.attachments.length
 
-        if (orderResult.ordersCreated > 0) {
-            await db.from('ai_agenda_events').insert({
-                title: `✅ ${orderResult.ordersCreated} pedido(s) creado(s) automáticamente — ${emailData.fromName || emailData.from}`,
-                description: `Se crearon ${orderResult.ordersCreated} pedido(s) desde el email "${emailData.subject}". ${orderResult.itemsDetected} artículos detectados en total.${orderResult.ordersSentToReview > 0 ? ` ${orderResult.ordersSentToReview} archivo(s) requieren revisión.` : ''}`,
-                event_type: 'pedido_preparar',
-                priority: 'alta',
-                status: 'pendiente',
-                due_date: fechaHoy,
-                source: 'gmail',
-                source_ref_id: savedEmailId,
-                related_entity_type: 'cliente',
-                metadata: {
-                    email_subject: emailData.subject,
-                    email_from: emailData.from,
-                    auto_created: true,
-                    pedido_ids: orderResult.pedidoIds,
-                    items_detected: orderResult.itemsDetected,
-                    orders_created: orderResult.ordersCreated,
-                    orders_sent_to_review: orderResult.ordersSentToReview,
-                },
-            })
-            result.eventsCreated++
-        }
-
-        if (orderResult.ordersSentToReview > 0 && orderResult.ordersCreated === 0) {
-            await db.from('ai_agenda_events').insert({
-                title: `⚠️ ${orderResult.ordersSentToReview} pedido(s) requieren revisión — ${emailData.fromName || emailData.from}`,
-                description: `Se detectaron pedidos en el email "${emailData.subject}" con ${orderResult.itemsDetected} artículos, pero requieren revisión manual.${!orderResult.clienteFound ? ' No se encontró el cliente.' : ''} Ver en /clientes-pedidos/import-review`,
-                event_type: 'pedido_preparar',
-                priority: 'alta',
-                status: 'pendiente',
-                due_date: fechaHoy,
-                source: 'gmail',
-                source_ref_id: savedEmailId,
-                metadata: {
-                    email_subject: emailData.subject,
-                    email_from: emailData.from,
-                    needs_review: true,
-                    items_detected: orderResult.itemsDetected,
-                    cliente_found: orderResult.clienteFound,
-                },
-            })
-            result.eventsCreated++
-        }
-
-        if (orderResult.itemsDetected === 0) {
-            if (classification.suggestedEvent) {
-                const event = classification.suggestedEvent
-                await db.from('ai_agenda_events').insert({
-                    title: event.title,
-                    description: event.description + ' (No se detectaron artículos para importar)',
-                    event_type: event.eventType,
-                    priority: event.priority,
-                    status: 'pendiente',
-                    due_date: event.dueDate || null,
-                    source: 'gmail',
-                    source_ref_id: savedEmailId,
-                    metadata: { email_subject: emailData.subject, email_from: emailData.from },
-                })
-                result.eventsCreated++
-            }
-        }
-    } catch (orderError) {
-        const msg = orderError instanceof Error ? orderError.message : 'Error procesando pedido'
-        console.error(`[Email Pipeline] Error processing order:`, msg)
-
-        if (classification.suggestedEvent) {
-            const event = classification.suggestedEvent
-            await db.from('ai_agenda_events').insert({
-                title: event.title,
-                description: event.description,
-                event_type: event.eventType,
-                priority: event.priority,
-                status: 'pendiente',
-                due_date: event.dueDate || null,
-                source: 'gmail',
-                source_ref_id: savedEmailId,
-                metadata: { email_subject: emailData.subject, email_from: emailData.from, extracted_data: classification.extractedData },
-            })
-            result.eventsCreated++
-        }
-    }
+    await db.from('ai_agenda_events').insert({
+        title: `📥 Pedido recibido por email — ${senderLabel}`,
+        description: `Se recibió un pedido de "${senderLabel}" con asunto "${emailData.subject}".${attachmentCount > 0 ? ` Tiene ${attachmentCount} adjunto(s).` : ''} Importar manualmente desde /clientes-pedidos usando el botón "Nuevo Pedido".`,
+        event_type: 'pedido_preparar',
+        priority: 'alta',
+        status: 'pendiente',
+        due_date: fechaHoy,
+        source: 'gmail',
+        source_ref_id: savedEmailId,
+        related_entity_type: classification.entityType !== 'desconocido' ? classification.entityType : null,
+        metadata: {
+            email_subject: emailData.subject,
+            email_from: emailData.from,
+            manual_import_required: true,
+            attachment_count: attachmentCount,
+            entity_name: classification.entityName,
+        },
+    })
+    result.eventsCreated++
+    result.ordersProcessed++
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
