@@ -654,12 +654,13 @@ export async function renewWatchIfNeeded(email: string): Promise<boolean> {
     const db = getSupabaseAdmin()
     const { data: tokenData } = await db
         .from('google_tokens')
-        .select('watch_expiry')
+        .select('watch_expiry, updated_at')
         .eq('email', email)
         .single()
 
     if (!tokenData?.watch_expiry) {
         // No watch set up yet — set it up now
+        console.log(`[Gmail Watch] No watch found for ${email} — setting up...`)
         const result = await setupGmailWatch(email)
         return result !== null
     }
@@ -668,12 +669,23 @@ export async function renewWatchIfNeeded(email: string): Promise<boolean> {
     const now = new Date()
     const hoursRemaining = (expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60)
 
-    if (hoursRemaining < 48) {
-        console.log(`[Gmail Watch] Watch expiring in ${hoursRemaining.toFixed(1)}h — renewing...`)
+    // Safety net: renew if no update in 5+ days, even if expiry looks ok
+    const daysSinceUpdate = tokenData.updated_at
+        ? (now.getTime() - new Date(tokenData.updated_at).getTime()) / (1000 * 60 * 60 * 24)
+        : 999
+
+    if (hoursRemaining < 48 || daysSinceUpdate > 5) {
+        const reason = hoursRemaining < 0
+            ? `ya expiró hace ${Math.abs(hoursRemaining).toFixed(0)}h`
+            : hoursRemaining < 48
+            ? `expira en ${hoursRemaining.toFixed(1)}h`
+            : `sin actualizar hace ${daysSinceUpdate.toFixed(1)} días`
+        console.log(`[Gmail Watch] Renovando watch para ${email} — ${reason}`)
         const result = await setupGmailWatch(email)
         return result !== null
     }
 
+    console.log(`[Gmail Watch] Watch OK para ${email} — ${hoursRemaining.toFixed(1)}h restantes`)
     return true // Watch is still valid
 }
 
