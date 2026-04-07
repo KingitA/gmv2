@@ -54,6 +54,7 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "porcentaje_ganancia",   label: "% Ganancia / Margen",        aliases: ["ganancia", "margen", "margin", "margin%", "pctgan", "utilidad"] },
   { id: "precio_base",           label: "Precio base (cta cte)",      aliases: ["base", "preciobase", "pbase", "precio"] },
   { id: "precio_base_contado",   label: "Precio base contado",        aliases: ["contado", "basecontado", "pbasecontado", "pcontado"] },
+  { id: "marca_codigo",          label: "Marca (código)",             aliases: ["marca", "brand", "codigomarca", "marcacod"] },
   { id: "__skip__",              label: "— No importar —",            aliases: [] },
 ]
 
