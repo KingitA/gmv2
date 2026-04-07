@@ -16,6 +16,8 @@ export async function createPedido(data: {
   }>
   observaciones?: string
   zona_entrega?: string
+  metodo_facturacion_pedido?: string
+  lista_precio_pedido_id?: string
 }) {
   const supabase = await createClient()
 
@@ -78,6 +80,8 @@ export async function createPedido(data: {
       estado: "pendiente",
       subtotal,
       descuento_general: 0,
+      ...(data.metodo_facturacion_pedido ? { metodo_facturacion_pedido: data.metodo_facturacion_pedido } : {}),
+      ...(data.lista_precio_pedido_id ? { lista_precio_pedido_id: data.lista_precio_pedido_id } : {}),
       total_flete: flete,
       total_impuestos: iva + percepciones,
       total: total,

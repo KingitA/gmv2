@@ -6,12 +6,18 @@ import { createPedido } from "@/lib/actions/pedidos"
 
 export type QueueItemStatus = "waiting" | "processing" | "needs_review" | "done" | "error"
 
+export type PedidoOverrides = {
+  metodo_facturacion_pedido?: string
+  lista_precio_pedido_id?: string
+}
+
 export type QueueItem = {
   id: string
   clienteId: string
   clienteNombre: string
   files: File[]
   status: QueueItemStatus
+  overrides?: PedidoOverrides
   parseResult?: ParseResult
   pedidoNumero?: string
   pedidoId?: string
@@ -23,12 +29,13 @@ export function useOrderQueue(onOrderCreated?: () => void) {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const processingRef = useRef(false)
 
-  const addToQueue = useCallback((clienteId: string, clienteNombre: string, files: File[]) => {
+  const addToQueue = useCallback((clienteId: string, clienteNombre: string, files: File[], overrides?: PedidoOverrides) => {
     const item: QueueItem = {
       id: crypto.randomUUID(),
       clienteId,
       clienteNombre,
       files,
+      overrides,
       status: "waiting",
       addedAt: new Date(),
     }
@@ -78,6 +85,7 @@ export function useOrderQueue(onOrderCreated?: () => void) {
               descuento: 0,
             })),
             observaciones: "Importado vía IA",
+            ...nextWaiting.overrides,
           })
           updateItem(nextWaiting.id, {
             status: "done",
@@ -112,6 +120,7 @@ export function useOrderQueue(onOrderCreated?: () => void) {
     const validItems = items.filter(i => i.matchedProduct)
     if (validItems.length === 0) throw new Error("No hay artículos válidos")
 
+    const queueItem = queue.find(q => q.id === itemId)
     const pedido = await createPedido({
       cliente_id: clienteId,
       items: validItems.map(i => ({
@@ -121,6 +130,7 @@ export function useOrderQueue(onOrderCreated?: () => void) {
         descuento: 0,
       })),
       observaciones: "Importado vía IA",
+      ...queueItem?.overrides,
     })
 
     updateItem(itemId, {
