@@ -10,6 +10,7 @@ import {
   Tags,
   PackageCheck,
   DollarSign,
+  Bookmark,
 } from "lucide-react"
 
 const TABLAS = [
@@ -69,6 +70,13 @@ const TABLAS = [
     title: "Listas de Precio",
     desc: "Bahía, Neco, Viajante — recargos por categoría",
   },
+  {
+    href: "/tablas/marcas",
+    icon: Bookmark,
+    color: "indigo",
+    title: "Marcas",
+    desc: "Marcas de artículos — código y descripción",
+  },
 ]
 
 const colorMap: Record<string, { border: string; bg: string; text: string }> = {
@@ -80,6 +88,7 @@ const colorMap: Record<string, { border: string; bg: string; text: string }> = {
   amber: { border: "border-l-amber-500", bg: "bg-amber-50 group-hover:bg-amber-100", text: "text-amber-600" },
   rose: { border: "border-l-rose-500", bg: "bg-rose-50 group-hover:bg-rose-100", text: "text-rose-600" },
   emerald: { border: "border-l-emerald-500", bg: "bg-emerald-50 group-hover:bg-emerald-100", text: "text-emerald-600" },
+  indigo:  { border: "border-l-indigo-500",  bg: "bg-indigo-50 group-hover:bg-indigo-100",  text: "text-indigo-600"  },
 }
 
 export default function TablasPage() {

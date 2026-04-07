@@ -75,6 +75,7 @@ export default function ArticulosPage() {
   const [tc,setTc]       = useState(0)
   const [pg,setPg]       = useState(0)
   const [provs,setProvs] = useState<any[]>([])
+  const [marcas,setMarcas] = useState<any[]>([])
   const [listas,setListas] = useState<LP[]>([])
   const [ld,setLd]       = useState(true)
   const [st,setSt]       = useState("")
@@ -126,11 +127,13 @@ export default function ArticulosPage() {
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(()=>{
     (async()=>{
-      const [{data:p},{data:l}] = await Promise.all([
+      const [{data:p},{data:m},{data:l}] = await Promise.all([
         sb.from("proveedores").select("id,nombre").eq("activo",true).order("nombre"),
+        sb.from("marcas").select("id,codigo,descripcion").eq("activo",true).order("descripcion"),
         sb.from("listas_precio").select("*").eq("activo",true).order("nombre"),
       ])
       if(p) setProvs(p)
+      if(m) setMarcas(m)
       if(l){
         setListas(l)
         const b = l.find((x:any)=>x.codigo==="bahia")
@@ -182,7 +185,7 @@ export default function ArticulosPage() {
         a=results; total=results.length
       } catch { a=[]; total=0 }
     } else {
-      let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento)",{count:"exact"}).eq("activo",true)
+      let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)",{count:"exact"}).eq("activo",true)
       if(pf!=="todos") q=q.eq("proveedor_id",pf)
       const{data,count}=await q.order("descripcion").range(pg*PS,(pg+1)*PS-1)
       a=data||[]; total=count||0
@@ -220,13 +223,14 @@ export default function ArticulosPage() {
   }
 
   // Ficha
-  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:a.ean13||"",unidades_por_bulto:a.unidades_por_bulto||1,marca:a.marca||"",categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:a.iva_compras||"factura",iva_ventas:a.iva_ventas||"factura",proveedor_id:a.proveedor_id||null}) }
+  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:a.ean13||"",unidades_por_bulto:a.unidades_por_bulto||1,marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:a.iva_compras||"factura",iva_ventas:a.iva_ventas||"factura",proveedor_id:a.proveedor_id||null}) }
   const sfa=async()=>{
     if(!fa) return; setFs(true)
     const{error}=await sb.from("articulos").update(ff).eq("id",fa.id)
     if(!error){
       const prov=provs.find((p:any)=>p.id===ff.proveedor_id)
-      setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff,proveedor:prov?{nombre:prov.nombre}:null}:a))
+      const marc=marcas.find((m:any)=>m.id===ff.marca_id)
+      setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff,proveedor:prov?{nombre:prov.nombre}:null,marca:marc?{codigo:marc.codigo,descripcion:marc.descripcion}:null}:a))
       fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:fa.id})}).catch(()=>{})
       setFa(null)
     } else alert(`Error: ${error.message}`)
@@ -250,7 +254,7 @@ export default function ArticulosPage() {
       const{data}=await sb.from("articulos").select("*,proveedor:proveedores(nombre)").eq("activo",true).order("descripcion")
       const fieldMap:Record<string,(a:any)=>any>={
         "SKU":a=>a.sku,"EAN13":a=>a.ean13||"","Descripción":a=>a.descripcion,"Unid/Bulto":a=>a.unidades_por_bulto||"",
-        "Proveedor":a=>a.proveedor?.nombre||"","Marca":a=>a.marca||"","Categoría":a=>a.categoria||"","Subcategoría":a=>a.subcategoria||"",
+        "Proveedor":a=>a.proveedor?.nombre||"","Marca":a=>a.marca?.descripcion||"","Categoría":a=>a.categoria||"","Subcategoría":a=>a.subcategoria||"",
         "P. Lista":a=>a.precio_compra||0,"Margen %":a=>a.porcentaje_ganancia||0,"B/R %":a=>a.bonif_recargo||0,
         "IVA Compras":a=>a.iva_compras||"","IVA Ventas":a=>a.iva_ventas||"","P. Base":a=>a.precio_base||"","P. Contado":a=>a.precio_base_contado||"",
       }
@@ -510,7 +514,7 @@ export default function ArticulosPage() {
                     {isVis("ean13")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-[10px] text-slate-400 text-center overflow-hidden" style={{width:cw.ean13,maxWidth:cw.ean13}}>{a.ean13||"—"}</td>}
                     {isVis("ubulto")&&<td className="px-2 py-0 border-r border-slate-100 text-center text-[11px] font-bold text-slate-600" style={{width:cw.ubulto,maxWidth:cw.ubulto}}>{a.unidades_por_bulto||"—"}</td>}
                     {isVis("prov")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.prov,maxWidth:cw.prov}}><span className="text-[10px] text-slate-500 truncate block">{a.proveedor?.nombre||"—"}</span></td>}
-                    {isVis("marca")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.marca,maxWidth:cw.marca}}><span className="text-[10px] text-slate-500 truncate block">{a.marca||"—"}</span></td>}
+                    {isVis("marca")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.marca,maxWidth:cw.marca}}><span className="text-[10px] text-slate-500 truncate block">{a.marca?.descripcion||"—"}</span></td>}
                     {isVis("cat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.cat,maxWidth:cw.cat}}><span className="text-[10px] text-slate-500 truncate block">{a.categoria||"—"}</span></td>}
                     {isVis("subcat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.subcat,maxWidth:cw.subcat}}><span className="text-[10px] text-slate-500 truncate block">{a.subcategoria||"—"}</span></td>}
 
@@ -651,7 +655,7 @@ export default function ArticulosPage() {
               <div><Label className="text-xs">Unid/Bulto</Label><Input type="number" className="h-8 text-xs" value={ff.unidades_por_bulto} onChange={e=>setFf(p=>({...p,unidades_por_bulto:parseInt(e.target.value)||1}))}/></div>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">Marca</Label><Input className="h-8 text-xs" value={ff.marca} onChange={e=>setFf(p=>({...p,marca:e.target.value}))}/></div>
+              <div><Label className="text-xs">Marca</Label><Select value={ff.marca_id||"none"} onValueChange={v=>setFf(p=>({...p,marca_id:v==="none"?null:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin marca"/></SelectTrigger><SelectContent><SelectItem value="none">Sin marca</SelectItem>{marcas.map((m:any)=><SelectItem key={m.id} value={m.id}>{m.descripcion}</SelectItem>)}</SelectContent></Select></div>
               <div><Label className="text-xs">Categoría</Label><Input className="h-8 text-xs" value={ff.categoria} onChange={e=>setFf(p=>({...p,categoria:e.target.value}))}/></div>
               <div><Label className="text-xs">Subcategoría</Label><Input className="h-8 text-xs" value={ff.subcategoria} onChange={e=>setFf(p=>({...p,subcategoria:e.target.value}))}/></div>
             </div>
@@ -749,7 +753,7 @@ export default function ArticulosPage() {
               <p className="text-xs text-slate-500">Importá artículos desde Excel. El sistema detecta automáticamente las columnas y te muestra una preview de los cambios antes de confirmar.</p>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-500 space-y-1">
                 <p className="font-semibold text-slate-700">Campos soportados:</p>
-                <p>sku, ean13, descripcion, unidades_por_bulto, proveedor_codigo, marca, categoria, subcategoria, precio_compra, porcentaje_ganancia, bonif_recargo, iva_compras, iva_ventas, precio_base, precio_base_contado</p>
+                <p>sku, ean13, descripcion, unidades_por_bulto, proveedor_codigo, marca_codigo, categoria, subcategoria, precio_compra, porcentaje_ganancia, bonif_recargo, iva_compras, iva_ventas, precio_base, precio_base_contado</p>
                 <p className="font-semibold text-slate-700 mt-1">Descuentos tipados:</p>
                 <p>descuento_comercial, descuento_financiero, descuento_promocional — Formato: "10+5"</p>
               </div>

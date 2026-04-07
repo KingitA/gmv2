@@ -33,10 +33,11 @@ type Localidad = {
 }
 
 type DestinoAsignado = {
-  id: string
+  id: string          // DB id when editing; temp uuid when creating
   localidad_id: string
   localidad_nombre: string
   localidad_provincia: string | null
+  _pending?: boolean  // true = not yet saved to DB
 }
 
 export default function TransportesPage() {
@@ -49,9 +50,8 @@ export default function TransportesPage() {
     porcentaje_seguro: "", notas: "",
   })
 
-  // Destinos
+  // Destinos — unificado para create y edit
   const [destinos, setDestinos] = useState<DestinoAsignado[]>([])
-  const [localidades, setLocalidades] = useState<Localidad[]>([])
   const [busquedaLoc, setBusquedaLoc] = useState("")
   const [locResults, setLocResults] = useState<Localidad[]>([])
 
@@ -70,7 +70,7 @@ export default function TransportesPage() {
       .select("id, localidad_id, localidades(nombre, provincia)")
       .eq("transporte_id", transporteId)
       .order("created_at")
-    
+
     const mapped: DestinoAsignado[] = (data || []).map((d: any) => ({
       id: d.id,
       localidad_id: d.localidad_id,
@@ -88,27 +88,48 @@ export default function TransportesPage() {
       .select("id, nombre, provincia")
       .ilike("nombre", `%${term}%`)
       .limit(10)
-    // Filtrar las que ya están asignadas
     const assignedIds = new Set(destinos.map(d => d.localidad_id))
-    setLocResults((data || []).filter(l => !assignedIds.has(l.id)))
+    setLocResults((data || []).filter((l: Localidad) => !assignedIds.has(l.id)))
   }
 
   const addDestino = async (localidad: Localidad) => {
-    if (!editando) return
-    const { error } = await supabase.from("transportes_destinos").insert({
-      transporte_id: editando.id,
-      localidad_id: localidad.id,
-    })
-    if (error) { alert(`Error: ${error.message}`); return }
     setBusquedaLoc("")
     setLocResults([])
-    await loadDestinos(editando.id)
+
+    if (editando) {
+      // Edit mode: insert to DB immediately
+      const { data, error } = await supabase.from("transportes_destinos").insert({
+        transporte_id: editando.id,
+        localidad_id: localidad.id,
+      }).select("id").single()
+      if (error) { alert(`Error: ${error.message}`); return }
+      setDestinos(prev => [...prev, {
+        id: data.id,
+        localidad_id: localidad.id,
+        localidad_nombre: localidad.nombre,
+        localidad_provincia: localidad.provincia,
+      }])
+    } else {
+      // Create mode: add to local state with temp id
+      setDestinos(prev => [...prev, {
+        id: crypto.randomUUID(),
+        localidad_id: localidad.id,
+        localidad_nombre: localidad.nombre,
+        localidad_provincia: localidad.provincia,
+        _pending: true,
+      }])
+    }
   }
 
-  const removeDestino = async (destinoId: string) => {
-    const { error } = await supabase.from("transportes_destinos").delete().eq("id", destinoId)
+  const removeDestino = async (destino: DestinoAsignado) => {
+    if (destino._pending) {
+      // Not in DB yet — remove from local state only
+      setDestinos(prev => prev.filter(d => d.id !== destino.id))
+      return
+    }
+    const { error } = await supabase.from("transportes_destinos").delete().eq("id", destino.id)
     if (error) { alert(`Error: ${error.message}`); return }
-    if (editando) await loadDestinos(editando.id)
+    setDestinos(prev => prev.filter(d => d.id !== destino.id))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -125,13 +146,28 @@ export default function TransportesPage() {
       notas: formData.notas || null,
       activo: true,
     }
+
     if (editando) {
       const { error } = await supabase.from("transportes").update(payload).eq("id", editando.id)
       if (error) { alert(`Error: ${error.message}`); return }
     } else {
-      const { error } = await supabase.from("transportes").insert([payload])
+      const { data: nuevo, error } = await supabase
+        .from("transportes")
+        .insert([payload])
+        .select("id")
+        .single()
       if (error) { alert(`Error: ${error.message}`); return }
+
+      // Insert any pending destinos now that we have the ID
+      const pendientes = destinos.filter(d => d._pending)
+      if (pendientes.length > 0 && nuevo?.id) {
+        const { error: destError } = await supabase.from("transportes_destinos").insert(
+          pendientes.map(d => ({ transporte_id: nuevo.id, localidad_id: d.localidad_id }))
+        )
+        if (destError) alert(`Transporte creado pero error en destinos: ${destError.message}`)
+      }
     }
+
     setDialogOpen(false)
     resetForm()
     loadTransportes()
@@ -153,7 +189,6 @@ export default function TransportesPage() {
 
   const handleNew = () => {
     resetForm()
-    setDestinos([])
     setDialogOpen(true)
   }
 
@@ -223,7 +258,7 @@ export default function TransportesPage() {
         </Table>
       </div>
 
-      {/* Dialog edición */}
+      {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm() }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -285,61 +320,66 @@ export default function TransportesPage() {
               />
             </div>
 
-            {/* Destinos — solo cuando se edita (necesita ID) */}
-            {editando && (
-              <div>
-                <h3 className="font-semibold text-sm mb-3 text-neutral-700 uppercase tracking-wide">
-                  Destinos ({destinos.length} localidades)
-                </h3>
+            {/* Destinos — visible siempre (crear y editar) */}
+            <div>
+              <h3 className="font-semibold text-sm mb-3 text-neutral-700 uppercase tracking-wide">
+                Destinos ({destinos.length} localidades)
+                {!editando && destinos.length > 0 && (
+                  <span className="ml-2 text-xs font-normal text-blue-600 normal-case">se guardarán al crear</span>
+                )}
+              </h3>
 
-                {/* Buscador */}
-                <div className="relative mb-3">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
-                  <Input
-                    value={busquedaLoc}
-                    onChange={e => searchLocalidades(e.target.value)}
-                    placeholder="Buscar localidad para agregar..."
-                    className="pl-9"
-                  />
-                  {locResults.length > 0 && (
-                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                      {locResults.map(loc => (
-                        <button
-                          key={loc.id}
-                          type="button"
-                          onClick={() => addDestino(loc)}
-                          className="w-full text-left px-4 py-2 text-sm hover:bg-blue-50 flex justify-between items-center"
-                        >
-                          <span className="font-medium">{loc.nombre}</span>
-                          <span className="text-xs text-neutral-400">{loc.provincia}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Lista de destinos asignados */}
-                {destinos.length === 0 ? (
-                  <p className="text-sm text-neutral-400 py-3">No hay destinos asignados. Buscá localidades arriba para agregar.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {destinos.map(d => (
-                      <Badge key={d.id} variant="secondary" className="pl-3 pr-1 py-1.5 gap-1 text-sm">
-                        {d.localidad_nombre}
-                        {d.localidad_provincia && <span className="text-neutral-400 text-xs ml-1">({d.localidad_provincia})</span>}
-                        <button
-                          type="button"
-                          onClick={() => removeDestino(d.id)}
-                          className="ml-1 p-0.5 rounded-full hover:bg-neutral-300 transition-colors"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
+              {/* Buscador */}
+              <div className="relative mb-3">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+                <Input
+                  value={busquedaLoc}
+                  onChange={e => searchLocalidades(e.target.value)}
+                  placeholder="Buscar localidad para agregar..."
+                  className="pl-9"
+                />
+                {locResults.length > 0 && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {locResults.map(loc => (
+                      <button
+                        key={loc.id}
+                        type="button"
+                        onClick={() => addDestino(loc)}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-blue-50 flex justify-between items-center"
+                      >
+                        <span className="font-medium">{loc.nombre}</span>
+                        <span className="text-xs text-neutral-400">{loc.provincia}</span>
+                      </button>
                     ))}
                   </div>
                 )}
               </div>
-            )}
+
+              {/* Lista de destinos asignados */}
+              {destinos.length === 0 ? (
+                <p className="text-sm text-neutral-400 py-3">No hay destinos asignados. Buscá localidades arriba para agregar.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {destinos.map(d => (
+                    <Badge
+                      key={d.id}
+                      variant="secondary"
+                      className={`pl-3 pr-1 py-1.5 gap-1 text-sm ${d._pending ? "border-blue-200 bg-blue-50 text-blue-700" : ""}`}
+                    >
+                      {d.localidad_nombre}
+                      {d.localidad_provincia && <span className="text-neutral-400 text-xs ml-1">({d.localidad_provincia})</span>}
+                      <button
+                        type="button"
+                        onClick={() => removeDestino(d)}
+                        className="ml-1 p-0.5 rounded-full hover:bg-neutral-300 transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>

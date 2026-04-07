@@ -29,6 +29,7 @@ export interface ArticleUpdateRow {
   porcentaje_ganancia?: number
   precio_base?: number
   precio_base_contado?: number
+  marca_codigo?: string          // se resuelve a marca_id antes de guardar
 }
 
 interface DiffRow {
@@ -91,6 +92,13 @@ export async function POST(request: NextRequest) {
       { auth: { persistSession: false, autoRefreshToken: false } },
     )
 
+    // Cargar marcas para resolver marca_codigo → marca_id
+    const marcasMap: Map<string, string> = new Map()
+    const { data: marcasData } = await supabase.from("marcas").select("id,codigo")
+    for (const m of marcasData || []) {
+      marcasMap.set(m.codigo.toUpperCase(), m.id)
+    }
+
     // Obtener todos los SKUs de la importación
     const skus = [...new Set(rows.map(r => r.sku.trim().toUpperCase()))]
 
@@ -102,7 +110,7 @@ export async function POST(request: NextRequest) {
         .from("articulos")
         .select(`
           id, sku, descripcion, ean13, unidades_por_bulto,
-          precio_compra, porcentaje_ganancia, precio_base, precio_base_contado
+          precio_compra, porcentaje_ganancia, precio_base, precio_base_contado, marca_id
         `)
         .in("sku", chunk)
 
@@ -155,6 +163,22 @@ export async function POST(request: NextRequest) {
             campo,
             valor_actual: valorActual ?? null,
             valor_nuevo: valorNuevo ?? null,
+            accion: existente ? "actualizar" : "nuevo",
+          })
+        }
+      }
+
+      // marca_codigo → diff
+      if (row.marca_codigo !== undefined) {
+        const marcaIdNuevo = marcasMap.get(row.marca_codigo.trim().toUpperCase()) || null
+        const marcaIdActual = existente?.marca_id || null
+        if (marcaIdActual !== marcaIdNuevo) {
+          diffs.push({
+            sku: row.sku,
+            articulo_id: articuloId,
+            campo: "marca_codigo",
+            valor_actual: marcaIdActual,
+            valor_nuevo: row.marca_codigo || null,
             accion: existente ? "actualizar" : "nuevo",
           })
         }
@@ -221,6 +245,11 @@ export async function POST(request: NextRequest) {
           if (row[campo as keyof ArticleUpdateRow] !== undefined) {
             camposUpdate[campo] = row[campo as keyof ArticleUpdateRow]
           }
+        }
+        // Resolver marca_codigo → marca_id
+        if (row.marca_codigo !== undefined) {
+          const marcaId = marcasMap.get(row.marca_codigo.trim().toUpperCase()) || null
+          camposUpdate["marca_id"] = marcaId
         }
 
         let articuloId: string
