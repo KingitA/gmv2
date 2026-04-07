@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Upload, Plus, X, Search, Check, FileText, MapPin, Sparkles } from "lucide-react"
 import { searchClientes } from "@/lib/actions/clientes"
+import { interpretClientFromText } from "@/lib/actions/interpret-client"
 import { toast } from "sonner"
 import type { PedidoOverrides } from "@/hooks/use-order-queue"
 
@@ -41,74 +42,31 @@ const METODOS = [
 ]
 
 /** Scan files for potential client name candidates */
-// Generic header words to skip when scanning Excel cells
-const LABEL_WORDS = new Set([
-  "cliente","clientes","fecha","item","items","cod","codigo","hoja","total","numero",
-  "nro","pedido","orden","remito","factura","precio","cantidad","descripcion",
-  "detalle","producto","articulo","vp","subtotal","iva","importe","unidades",
-  "bulto","marca","categoria","rubro","sku","ean","flete","entrega",
-])
-
-/** Return true if the word is meaningful enough to search as client name */
-function isMeaningfulWord(w: string): boolean {
-  const l = w.toLowerCase()
-  return w.length >= 4 && !LABEL_WORDS.has(l) && !/^\d+$/.test(w)
-}
-
-async function extractCandidates(files: File[]): Promise<string[]> {
-  const seen = new Set<string>()
-  const list: string[] = []
-
-  const push = (v: string) => {
-    const c = v.trim()
-    const key = c.toLowerCase()
-    if (!c || c.length < 3 || seen.has(key)) return
-    seen.add(key)
-    list.push(c)
-  }
+/** Extracts readable raw text from files to send to Claude for interpretation */
+async function extractRawText(files: File[]): Promise<string> {
+  const parts: string[] = []
 
   for (const file of files) {
-    // From filename (strip extension, normalize separators)
+    // Filename without extension
     const base = file.name.replace(/\.[^.]+$/, "").replace(/[_\-\.]+/g, " ").trim()
-    push(base)
-    // Also push individual meaningful words from filename
-    for (const w of base.split(/\s+/)) {
-      if (isMeaningfulWord(w)) push(w)
-    }
+    parts.push(`archivo: ${base}`)
 
-    // From Excel: first 4 rows × first 4 cols
+    // Excel/CSV: first 5 rows × first 5 cols
     if (/\.(xlsx|xls|csv)$/i.test(file.name)) {
       try {
         const buf = await file.arrayBuffer()
         const wb = XLSX.read(buf, { type: "array" })
         const ws = wb.Sheets[wb.SheetNames[0]]
-        const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", range: { s: { r: 0, c: 0 }, e: { r: 4, c: 4 } } })
+        const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", range: { s: { r: 0, c: 0 }, e: { r: 5, c: 5 } } })
         for (const row of rows || []) {
-          for (const cell of row) {
-            const v = String(cell ?? "").trim()
-            if (!v) continue
-            // Skip labels (end in colon, or pure label words)
-            if (v.endsWith(":")) continue
-            const lower = v.toLowerCase()
-            if (LABEL_WORDS.has(lower)) continue
-            // Could be a client code (3–8 digit string incl. leading zeros)
-            if (/^\d{3,8}$/.test(v)) { push(v); continue }
-            // Skip pure numbers / date-like patterns
-            if (!isNaN(Number(v)) || /^[\d\/\-:.]+$/.test(v)) continue
-            // Skip if all-caps short word (column header noise like "COD", "VR")
-            if (/^[A-Z]{2,5}$/.test(v)) continue
-            push(v)
-            // Also push individual meaningful words from multi-word cells
-            for (const w of v.split(/\s+/)) {
-              if (isMeaningfulWord(w)) push(w)
-            }
-          }
+          const cells = (row as any[]).map(c => String(c ?? "").trim()).filter(Boolean)
+          if (cells.length) parts.push(cells.join(" | "))
         }
       } catch { /* ignore */ }
     }
   }
 
-  return list.slice(0, 12)
+  return parts.join("\n").slice(0, 800)
 }
 
 export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
@@ -158,28 +116,11 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     if (!cliente) {
       setAnalyzing(true)
       try {
-        const candidates = await extractCandidates(added)
-        let fallback: any = null
-
-        for (const term of candidates) {
-          const res = await searchClientes(term)
-          if (res.length === 0) continue
-
-          // Prefer results where the term actually appears in the client name (text match)
-          // rather than a pure vector/embedding coincidence
-          const termWords = term.toLowerCase().split(/\s+/).filter(w => w.length >= 4)
-          const textMatch = res.find((r: any) => {
-            const name = (r.nombre_razon_social || r.razon_social || "").toLowerCase()
-            const code = (r.codigo_cliente || "").toLowerCase()
-            return termWords.some(w => name.includes(w)) || code === term.toLowerCase()
-          })
-
-          if (textMatch) { setSuggestion(textMatch); break }
-          if (!fallback) fallback = res[0]
+        const rawText = await extractRawText(added)
+        if (rawText.trim()) {
+          const result = await interpretClientFromText(rawText)
+          if (result) setSuggestion(result)
         }
-
-        // Only use vector-only fallback if nothing better was found
-        // (intentionally left out to avoid wrong suggestions — user can search manually)
       } catch { /* ignore */ }
       setAnalyzing(false)
     }
@@ -316,7 +257,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] text-indigo-500 font-semibold uppercase tracking-wide">Sugerido</p>
                   <p className="text-sm font-semibold truncate leading-tight">
-                    {suggestion.nombre_razon_social || suggestion.razon_social}
+                    {suggestion.nombre_razon_social}
                   </p>
                   <p className="text-xs text-slate-400 truncate">
                     {[suggestion.codigo_cliente, suggestion.direccion, suggestion.localidad].filter(Boolean).join(" · ")}
