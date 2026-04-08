@@ -34,11 +34,9 @@ interface Props {
 }
 
 const METODOS = [
-  { value: "factura_a", label: "Factura A" },
-  { value: "factura_b", label: "Factura B" },
-  { value: "factura_c", label: "Factura C" },
-  { value: "remito",    label: "Remito"    },
-  { value: "presupuesto", label: "Presupuesto" },
+  { value: "Factura (21% IVA)", label: "Factura (21% IVA)" },
+  { value: "Final (Mixto)",     label: "Final (Mixto)"     },
+  { value: "Presupuesto",       label: "Presupuesto"       },
 ]
 
 /** Scan files for potential client name candidates */

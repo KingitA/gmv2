@@ -224,7 +224,7 @@ export default function ClientesPedidosPage() {
         .from("pedidos")
         .select(`
           *,
-          clientes (nombre_razon_social, cuit, direccion, localidad, metodo_facturacion, lista_precio_id, listas_precio:lista_precio_id (nombre)),
+          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, listas_precio:lista_precio_id (nombre)),
           vendedores (nombre),
           viajes (nombre, fecha)
         `)
