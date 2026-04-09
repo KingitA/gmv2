@@ -108,6 +108,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
   const [fileName, setFileName] = useState("")
   const [excelRows, setExcelRows] = useState<any[][]>([])
   const [headers, setHeaders] = useState<string[]>([])
+  // Posición original de cada header en el Excel (para columnas con gaps entre ellas)
+  const [headerColIndices, setHeaderColIndices] = useState<number[]>([])
   const [mappings, setMappings] = useState<ColumnMapping[]>([])
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -119,6 +121,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     setFileName("")
     setExcelRows([])
     setHeaders([])
+    setHeaderColIndices([])
     setMappings([])
     setPreview(null)
     setLoading(false)
@@ -146,18 +149,23 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
         return
       }
 
-      const hdrs: string[] = (data[0] as any[]).map(h => String(h ?? "").trim()).filter(h => h !== "")
-      if (hdrs.length === 0) {
+      // Preservar la posición original de cada columna no-vacía
+      const hdrObjects = (data[0] as any[])
+        .map((h, i) => ({ name: String(h ?? "").trim(), colIdx: i }))
+        .filter(h => h.name !== "")
+      if (hdrObjects.length === 0) {
         setError("No se encontraron columnas en la primera fila.")
         return
       }
 
+      const hdrs = hdrObjects.map(h => h.name)
       const initialMappings: ColumnMapping[] = hdrs.map(col => ({
         excelCol: col,
         dbField: suggestField(col),
       }))
 
       setHeaders(hdrs)
+      setHeaderColIndices(hdrObjects.map(h => h.colIdx))
       setExcelRows(data.slice(1))   // sin encabezado
       setMappings(initialMappings)
       setStep("mapping")
@@ -186,7 +194,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     headers.forEach((h, i) => {
       const mapping = mappings.find(m => m.excelCol === h)
       if (mapping && mapping.dbField !== SKIP_ID) {
-        colIndexMap[mapping.dbField] = i
+        // Usar la posición original en el Excel, no el índice del array filtrado
+        colIndexMap[mapping.dbField] = headerColIndices[i]
       }
     })
 
