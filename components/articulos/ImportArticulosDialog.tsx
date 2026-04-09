@@ -112,6 +112,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
   const [headerColIndices, setHeaderColIndices] = useState<number[]>([])
   const [mappings, setMappings] = useState<ColumnMapping[]>([])
   const [preview, setPreview] = useState<PreviewResult | null>(null)
+  const [previewFilter, setPreviewFilter] = useState<"todos" | "actualizar" | "nuevo">("todos")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [doneResult, setDoneResult] = useState<any>(null)
@@ -124,6 +125,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     setHeaderColIndices([])
     setMappings([])
     setPreview(null)
+    setPreviewFilter("todos")
     setLoading(false)
     setError(null)
     setDoneResult(null)
@@ -382,20 +384,26 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
         {/* ── STEP 3: PREVIEW ── */}
         {step === "preview" && preview && (
           <div>
-            {/* Resumen */}
+            {/* Resumen — cards filtrables */}
             <div className="grid grid-cols-4 gap-3 mb-4">
               <div className="bg-muted rounded-lg p-3 text-center">
                 <div className="text-2xl font-bold">{preview.total_filas}</div>
                 <div className="text-xs text-muted-foreground">Filas totales</div>
               </div>
-              <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <button
+                onClick={() => setPreviewFilter(f => f === "actualizar" ? "todos" : "actualizar")}
+                className={`rounded-lg p-3 text-center transition-all border-2 ${previewFilter === "actualizar" ? "border-amber-500 bg-amber-100" : "border-transparent bg-amber-50 hover:bg-amber-100"}`}
+              >
                 <div className="text-2xl font-bold text-amber-700">{preview.articulos_actualizados}</div>
                 <div className="text-xs text-amber-600">A actualizar</div>
-              </div>
-              <div className="bg-green-50 rounded-lg p-3 text-center">
+              </button>
+              <button
+                onClick={() => setPreviewFilter(f => f === "nuevo" ? "todos" : "nuevo")}
+                className={`rounded-lg p-3 text-center transition-all border-2 ${previewFilter === "nuevo" ? "border-green-500 bg-green-100" : "border-transparent bg-green-50 hover:bg-green-100"}`}
+              >
                 <div className="text-2xl font-bold text-green-700">{preview.articulos_nuevos}</div>
                 <div className="text-xs text-green-600">Nuevos</div>
-              </div>
+              </button>
               <div className="bg-muted rounded-lg p-3 text-center">
                 <div className="text-2xl font-bold text-muted-foreground">{preview.articulos_sin_cambios}</div>
                 <div className="text-xs text-muted-foreground">Sin cambios</div>
@@ -411,7 +419,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
               <>
                 <div className="text-xs text-muted-foreground mb-2">
                   {preview.cambios_totales} cambio{preview.cambios_totales !== 1 ? "s" : ""} en total.
-                  Primeras 200 filas mostradas.
+                  {previewFilter !== "todos" && <span className="ml-1 font-medium text-foreground">· Mostrando: {previewFilter === "actualizar" ? "A actualizar" : "Nuevos"}</span>}
+                  {" "}Primeras 200 filas mostradas.
                 </div>
                 <div className="border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
                   <table className="w-full text-xs">
@@ -425,7 +434,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
                       </tr>
                     </thead>
                     <tbody>
-                      {preview.diffs.slice(0, 200).map((d, i) => (
+                      {preview.diffs.filter(d => previewFilter === "todos" || d.accion === previewFilter).slice(0, 200).map((d, i) => (
                         <tr key={i} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
                           <td className="px-2 py-1 font-mono font-medium">{d.sku}</td>
                           <td className="px-2 py-1 text-muted-foreground">{fieldLabel(d.campo)}</td>

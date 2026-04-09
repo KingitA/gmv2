@@ -18,10 +18,10 @@ export async function GET(request: NextRequest) {
         const [{ data: textResults, error }, vectorResults] = await Promise.all([
             supabase
                 .from("articulos")
-                .select("id, descripcion, sku")
+                .select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)")
                 .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
                 .eq("activo", true)
-                .limit(20),
+                .limit(30),
             searchProductsByVector(q, 0.35, 20),
         ])
 

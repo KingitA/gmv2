@@ -42,8 +42,8 @@ const COMPRAS_COLS = [
   { id:"ivav",    label:"IVA V.",      dw:50,  mw:40 },
 ]
 const VENTAS_COLS = [
-  { id:"pbase",   label:"P. Base",    dw:90, mw:60 },
-  { id:"pbcont",  label:"Contado",    dw:90, mw:60 },
+  { id:"pbase",   label:"P. Base",    dw:115, mw:75 },
+  { id:"pbcont",  label:"Contado",    dw:115, mw:75 },
   { id:"ivac_v",  label:"IVA C.",     dw:50, mw:40 },
   { id:"ivav_v",  label:"IVA V.",     dw:50, mw:40 },
 ]
