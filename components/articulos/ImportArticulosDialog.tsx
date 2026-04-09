@@ -52,8 +52,8 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "descuento_financiero",  label: "Descuento financiero",       aliases: ["dfinan", "descfinanciero", "financiero", "d2"] },
   { id: "descuento_promocional", label: "Descuento promocional",      aliases: ["dpromo", "descpromocional", "promocional", "promo", "d3"] },
   { id: "porcentaje_ganancia",   label: "% Ganancia / Margen",        aliases: ["ganancia", "margen", "margin", "margin%", "pctgan", "utilidad"] },
-  { id: "precio_base",           label: "Precio base (cta cte)",      aliases: ["base", "preciobase", "pbase", "precio"] },
-  { id: "precio_base_contado",   label: "Precio base contado",        aliases: ["contado", "basecontado", "pbasecontado", "pcontado"] },
+  { id: "precio_base_contado",   label: "Precio base contado",        aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
+  { id: "precio_base",           label: "Precio base (cta cte)",      aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
   { id: "marca_codigo",          label: "Marca (código)",             aliases: ["marca", "brand", "codigomarca", "marcacod"] },
   { id: "__skip__",              label: "— No importar —",            aliases: [] },
 ]
@@ -203,7 +203,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
           // Campos numéricos
           if (["unidades_por_bulto", "precio_compra", "porcentaje_ganancia", "precio_base", "precio_base_contado"].includes(field)) {
             const n = parseFloat(String(val).replace(",", "."))
-            if (!isNaN(n)) obj[field] = n
+            if (!isNaN(n) && n > 0) obj[field] = n
           } else {
             obj[field] = String(val).trim()
           }
