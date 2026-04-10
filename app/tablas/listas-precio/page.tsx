@@ -1,185 +1,584 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { createClient } from "@/lib/supabase/client"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Pencil, Plus } from "lucide-react"
+/**
+ * Listas de Precio — Tabla de Fórmulas Configurables
+ *
+ * Matriz de 12 filas (2 grupos × 6 combinaciones IVA) × 9 sublistas.
+ * Cada celda contiene una fórmula editable que define cómo calcular
+ * el precio de esa sublista para ese segmento de artículo.
+ *
+ * Variables disponibles en fórmulas:
+ *   Base        = precio_base del artículo
+ *   BaseContado = precio_base_contado del artículo
+ *   + cualquier sublista ya calculada (cascada): ej. bahia_presupuesto
+ *
+ * Guardado: auto-save en onBlur de cada celda (actualiza el JSONB completo de la fila)
+ */
 
-interface ListaPrecio {
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createClient } from "@/lib/supabase/client"
+import {
+  SUBLISTA_CODIGOS,
+  SUBLISTA_META,
+  calcularPreciosConFormulas,
+  evaluarFormula,
+  type SublistaCodigo,
+} from "@/lib/pricing/formula-evaluator"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Loader2, RotateCcw } from "lucide-react"
+
+// ─── Tipos ────────────────────────────────────────────
+
+interface ReglaPrecio {
   id: string
-  nombre: string
-  codigo: string
-  recargo_limpieza_bazar: number
-  recargo_perfumeria_negro: number
-  recargo_perfumeria_blanco: number
-  descripcion: string | null
-  activo: boolean
+  grupo_precio: "LIMPIEZA_BAZAR" | "PERFUMERIA"
+  iva_compras: "factura" | "adquisicion_stock" | "mixto"
+  iva_ventas: "factura" | "presupuesto"
+  formulas: Record<string, string>
 }
 
-export default function ListasPrecioPage() {
-  const [items, setItems] = useState<ListaPrecio[]>([])
-  const [loading, setLoading] = useState(true)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState<ListaPrecio | null>(null)
-  const [form, setForm] = useState({
-    nombre: "", codigo: "", descripcion: "",
-    recargo_limpieza_bazar: "", recargo_perfumeria_negro: "", recargo_perfumeria_blanco: "",
+// ─── Fórmulas default (réplica del comportamiento anterior) ──
+// Sirven para el botón "Resetear a defaults".
+// Derivadas de obtenerCoeficienteIva() + recargas de bahia(0) / neco(12%) / viajante(20%)
+
+const DEFAULTS: Record<string, Record<string, string>> = {
+  // ── LIMPIEZA_BAZAR ──
+  "LIMPIEZA_BAZAR|factura|factura": {
+    bahia_presupuesto: "Base*1.21",
+    bahia_final:       "Base",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base*1.21",
+    neco_presupuesto:  "Base*1.21*1.12",
+    neco_final:        "Base*1.12",
+    neco_sin_iva:      "Base*1.12",
+    neco_con_iva:      "Base*1.21*1.12",
+    viajante:          "Base*1.20",
+  },
+  "LIMPIEZA_BAZAR|factura|presupuesto": {
+    bahia_presupuesto: "Base*1.21",
+    bahia_final:       "Base*1.21",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base*1.21",
+    neco_presupuesto:  "Base*1.21*1.12",
+    neco_final:        "Base*1.21*1.12",
+    neco_sin_iva:      "Base*1.12",
+    neco_con_iva:      "Base*1.21*1.12",
+    viajante:          "Base*1.21*1.20",
+  },
+  "LIMPIEZA_BAZAR|adquisicion_stock|factura": {
+    bahia_presupuesto: "Base",
+    bahia_final:       "Base*0.90",
+    bahia_sin_iva:     "Base*0.90",
+    bahia_con_iva:     "Base",
+    neco_presupuesto:  "Base*1.12",
+    neco_final:        "Base*0.90*1.12",
+    neco_sin_iva:      "Base*0.90*1.12",
+    neco_con_iva:      "Base*1.12",
+    viajante:          "Base*1.20",
+  },
+  "LIMPIEZA_BAZAR|adquisicion_stock|presupuesto": {
+    bahia_presupuesto: "Base",
+    bahia_final:       "Base",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base",
+    neco_presupuesto:  "Base*1.12",
+    neco_final:        "Base*1.12",
+    neco_sin_iva:      "Base*1.12",
+    neco_con_iva:      "Base*1.12",
+    viajante:          "Base*1.20",
+  },
+  "LIMPIEZA_BAZAR|mixto|factura": {
+    bahia_presupuesto: "Base*1.10",
+    bahia_final:       "Base*0.95",
+    bahia_sin_iva:     "Base*0.95",
+    bahia_con_iva:     "Base*1.10",
+    neco_presupuesto:  "Base*1.10*1.12",
+    neco_final:        "Base*0.95*1.12",
+    neco_sin_iva:      "Base*0.95*1.12",
+    neco_con_iva:      "Base*1.10*1.12",
+    viajante:          "Base*1.20",
+  },
+  "LIMPIEZA_BAZAR|mixto|presupuesto": {
+    bahia_presupuesto: "Base*1.10",
+    bahia_final:       "Base*1.10",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base*1.10",
+    neco_presupuesto:  "Base*1.10*1.12",
+    neco_final:        "Base*1.10*1.12",
+    neco_sin_iva:      "Base*1.12",
+    neco_con_iva:      "Base*1.10*1.12",
+    viajante:          "Base*1.10*1.20",
+  },
+  // ── PERFUMERIA (misma lógica, sin recargo diferenciado en defaults) ──
+  "PERFUMERIA|factura|factura": {
+    bahia_presupuesto: "Base*1.21",
+    bahia_final:       "Base",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base*1.21",
+    neco_presupuesto:  "Base*1.21*1.09",
+    neco_final:        "Base*1.09",
+    neco_sin_iva:      "Base*1.09",
+    neco_con_iva:      "Base*1.21*1.09",
+    viajante:          "Base*1.09",
+  },
+  "PERFUMERIA|factura|presupuesto": {
+    bahia_presupuesto: "Base*1.21",
+    bahia_final:       "Base*1.21",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base*1.21",
+    neco_presupuesto:  "Base*1.21*1.09",
+    neco_final:        "Base*1.21*1.09",
+    neco_sin_iva:      "Base*1.09",
+    neco_con_iva:      "Base*1.21*1.09",
+    viajante:          "Base*1.21*1.09",
+  },
+  "PERFUMERIA|adquisicion_stock|factura": {
+    bahia_presupuesto: "Base",
+    bahia_final:       "Base*0.90",
+    bahia_sin_iva:     "Base*0.90",
+    bahia_con_iva:     "Base",
+    neco_presupuesto:  "Base*1.09",
+    neco_final:        "Base*0.90*1.09",
+    neco_sin_iva:      "Base*0.90*1.09",
+    neco_con_iva:      "Base*1.09",
+    viajante:          "Base*1.09",
+  },
+  "PERFUMERIA|adquisicion_stock|presupuesto": {
+    bahia_presupuesto: "Base",
+    bahia_final:       "Base",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base",
+    neco_presupuesto:  "Base*1.09",
+    neco_final:        "Base*1.09",
+    neco_sin_iva:      "Base*1.09",
+    neco_con_iva:      "Base*1.09",
+    viajante:          "Base*1.09",
+  },
+  "PERFUMERIA|mixto|factura": {
+    bahia_presupuesto: "Base*1.10",
+    bahia_final:       "Base*0.95",
+    bahia_sin_iva:     "Base*0.95",
+    bahia_con_iva:     "Base*1.10",
+    neco_presupuesto:  "Base*1.10*1.09",
+    neco_final:        "Base*0.95*1.09",
+    neco_sin_iva:      "Base*0.95*1.09",
+    neco_con_iva:      "Base*1.10*1.09",
+    viajante:          "Base*1.09",
+  },
+  "PERFUMERIA|mixto|presupuesto": {
+    bahia_presupuesto: "Base*1.10",
+    bahia_final:       "Base*1.10",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base*1.10",
+    neco_presupuesto:  "Base*1.10*1.09",
+    neco_final:        "Base*1.10*1.09",
+    neco_sin_iva:      "Base*1.09",
+    neco_con_iva:      "Base*1.10*1.09",
+    viajante:          "Base*1.10*1.09",
+  },
+}
+
+// ─── Helpers de display ───────────────────────────────
+
+const GRUPO_LABEL: Record<string, string> = {
+  LIMPIEZA_BAZAR: "Limpieza/Bazar",
+  PERFUMERIA:     "Perfumería",
+}
+const GRUPO_CLS: Record<string, string> = {
+  LIMPIEZA_BAZAR: "bg-sky-100 text-sky-800",
+  PERFUMERIA:     "bg-pink-100 text-pink-800",
+}
+
+const IVA_C_MAP: Record<string, { label: string; cls: string }> = {
+  factura:           { label: "+",  cls: "bg-blue-100 text-blue-700"    },
+  adquisicion_stock: { label: "0",  cls: "bg-neutral-100 text-neutral-500" },
+  mixto:             { label: "½",  cls: "bg-amber-100 text-amber-700"  },
+}
+const IVA_V_MAP: Record<string, { label: string; cls: string }> = {
+  factura:     { label: "+", cls: "bg-blue-100 text-blue-700"       },
+  presupuesto: { label: "0", cls: "bg-neutral-100 text-neutral-500" },
+}
+
+const GRUPO_SUBLISTA: Record<string, { th: string; border: string; cell: string }> = {
+  bahia:    { th: "bg-sky-50 text-sky-800",       border: "border-sky-200",    cell: "bg-sky-50/30"    },
+  neco:     { th: "bg-violet-50 text-violet-800", border: "border-violet-200", cell: "bg-violet-50/30" },
+  viajante: { th: "bg-teal-50 text-teal-800",     border: "border-teal-200",   cell: "bg-teal-50/30"   },
+}
+
+// Ordenamiento de filas para display consistente
+const ORDER_GRUPO = ["LIMPIEZA_BAZAR", "PERFUMERIA"]
+const ORDER_IVA_C = ["factura", "adquisicion_stock", "mixto"]
+const ORDER_IVA_V = ["factura", "presupuesto"]
+
+function sortReglas(reglas: ReglaPrecio[]): ReglaPrecio[] {
+  return [...reglas].sort((a, b) => {
+    const ga = ORDER_GRUPO.indexOf(a.grupo_precio)
+    const gb = ORDER_GRUPO.indexOf(b.grupo_precio)
+    if (ga !== gb) return ga - gb
+    const ca = ORDER_IVA_C.indexOf(a.iva_compras)
+    const cb = ORDER_IVA_C.indexOf(b.iva_compras)
+    if (ca !== cb) return ca - cb
+    return ORDER_IVA_V.indexOf(a.iva_ventas) - ORDER_IVA_V.indexOf(b.iva_ventas)
   })
-  const supabase = createClient()
+}
 
-  useEffect(() => { load() }, [])
+// ─── Celda de fórmula individual ─────────────────────
 
-  const load = async () => {
-    const { data } = await supabase.from("listas_precio").select("*").order("nombre")
-    setItems(data || [])
-    setLoading(false)
+interface CeldaProps {
+  reglId: string
+  codigo: SublistaCodigo
+  initialValue: string
+  onSave: (reglId: string, codigo: SublistaCodigo, valor: string) => Promise<void>
+  saving: boolean
+  disabled?: boolean
+}
+
+function CeldaFormula({ reglId, codigo, initialValue, onSave, saving, disabled }: CeldaProps) {
+  const [valor, setValor] = useState(initialValue)
+  const [focused, setFocused] = useState(false)
+  const prevRef = useRef(initialValue)
+
+  // Sincronizar si cambia desde afuera (ej: reset a defaults)
+  useEffect(() => {
+    setValor(initialValue)
+    prevRef.current = initialValue
+  }, [initialValue])
+
+  // Preview calculado con Base=1000 (solo cuando no está enfocada o al escribir)
+  const preview = useMemo(() => {
+    if (!valor) return null
+    const vars: Record<string, number> = { Base: 1000, BaseContado: 900 }
+    return evaluarFormula(valor, vars)
+  }, [valor])
+
+  const handleBlur = async () => {
+    setFocused(false)
+    if (valor === prevRef.current) return
+    prevRef.current = valor
+    await onSave(reglId, codigo, valor)
   }
 
-  const save = async () => {
-    if (!form.nombre.trim() || !form.codigo.trim()) return
-    const payload = {
-      nombre: form.nombre.trim(),
-      codigo: form.codigo.trim().toLowerCase().replace(/\s+/g, "_"),
-      recargo_limpieza_bazar: parseFloat(form.recargo_limpieza_bazar) || 0,
-      recargo_perfumeria_negro: parseFloat(form.recargo_perfumeria_negro) || 0,
-      recargo_perfumeria_blanco: parseFloat(form.recargo_perfumeria_blanco) || 0,
-      descripcion: form.descripcion.trim() || null,
-    }
-    if (editing) {
-      const { error } = await supabase.from("listas_precio").update(payload).eq("id", editing.id)
-      if (error) { alert(`Error: ${error.message}`); return }
-    } else {
-      const { error } = await supabase.from("listas_precio").insert(payload)
-      if (error) { alert(`Error: ${error.message}`); return }
-    }
-    setDialogOpen(false)
-    load()
-  }
-
-  const openEdit = (item: ListaPrecio) => {
-    setEditing(item)
-    setForm({
-      nombre: item.nombre, codigo: item.codigo, descripcion: item.descripcion || "",
-      recargo_limpieza_bazar: String(item.recargo_limpieza_bazar),
-      recargo_perfumeria_negro: String(item.recargo_perfumeria_negro),
-      recargo_perfumeria_blanco: String(item.recargo_perfumeria_blanco),
-    })
-    setDialogOpen(true)
-  }
-
-  const openNew = () => {
-    setEditing(null)
-    setForm({ nombre: "", codigo: "", descripcion: "", recargo_limpieza_bazar: "0", recargo_perfumeria_negro: "0", recargo_perfumeria_blanco: "0" })
-    setDialogOpen(true)
-  }
+  const meta = SUBLISTA_META[codigo]
+  const gs = GRUPO_SUBLISTA[meta.grupo]
 
   return (
-    <div className="p-6 lg:p-8 max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">Listas de Precio</h1>
-          <p className="text-sm text-muted-foreground">Bahía, Neco, Viajante — con recargos por categoría</p>
-        </div>
-        <Button onClick={openNew} size="sm"><Plus className="h-4 w-4 mr-1" /> Nueva Lista</Button>
+    <td
+      className={`px-1 py-1 border-r ${gs.border} ${gs.cell} align-top`}
+      style={{ minWidth: 118 }}
+    >
+      <div className="relative">
+        <input
+          value={valor}
+          onChange={e => setValor(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={handleBlur}
+          disabled={disabled}
+          placeholder="Ej: Base*1.21"
+          spellCheck={false}
+          className={[
+            "w-full text-[11px] font-mono px-1.5 py-1 rounded border bg-white transition-colors",
+            valor
+              ? "border-emerald-300 text-slate-800"
+              : "border-slate-200 text-slate-400",
+            focused
+              ? "border-indigo-400 outline-none shadow-[0_0_0_1px_rgba(99,102,241,0.4)]"
+              : "",
+            "focus:outline-none disabled:opacity-40",
+          ].join(" ")}
+        />
+        {saving && (
+          <Loader2 className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-indigo-400 animate-spin" />
+        )}
       </div>
 
-      <div className="bg-white border rounded-xl overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Código</TableHead>
-              <TableHead className="text-center">Limpieza/Bazar</TableHead>
-              <TableHead className="text-center">Perfumería Negro</TableHead>
-              <TableHead className="text-center">Perfumería Blanco</TableHead>
-              <TableHead>Descripción</TableHead>
-              <TableHead className="w-[60px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow><TableCell colSpan={7} className="text-center py-8">Cargando...</TableCell></TableRow>
-            ) : items.length === 0 ? (
-              <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No hay listas. Ejecutá el SQL de migración.</TableCell></TableRow>
-            ) : items.map(item => (
-              <TableRow key={item.id}>
-                <TableCell className="font-bold">{item.nombre}</TableCell>
-                <TableCell className="font-mono text-sm text-muted-foreground">{item.codigo}</TableCell>
-                <TableCell className="text-center font-semibold">{item.recargo_limpieza_bazar}%</TableCell>
-                <TableCell className="text-center font-semibold">{item.recargo_perfumeria_negro}%</TableCell>
-                <TableCell className="text-center font-semibold">{item.recargo_perfumeria_blanco}%</TableCell>
-                <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{item.descripcion || "—"}</TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="icon" onClick={() => openEdit(item)}><Pencil className="h-3.5 w-3.5" /></Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Ejemplo visual */}
-      {items.length > 0 && (
-        <div className="mt-6 bg-white border rounded-xl p-5">
-          <h3 className="font-bold text-sm mb-3">Ejemplo: Artículo con precio base $100</h3>
-          <div className="grid grid-cols-3 gap-4">
-            {items.map(lista => (
-              <div key={lista.id} className="border rounded-lg p-4 text-center">
-                <div className="font-bold text-lg mb-2">{lista.nombre}</div>
-                <div className="space-y-1 text-sm">
-                  <div>Limpieza: <span className="font-bold">${(100 * (1 + lista.recargo_limpieza_bazar / 100)).toFixed(2)}</span></div>
-                  <div>Perf. Negro: <span className="font-bold">${(100 * (1 + lista.recargo_perfumeria_negro / 100)).toFixed(2)}</span></div>
-                  <div>Perf. Blanco: <span className="font-bold">${(100 * (1 + lista.recargo_perfumeria_blanco / 100)).toFixed(2)}</span></div>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Preview con Base=1000 */}
+      {preview !== null && (
+        <div className="text-[9px] text-slate-400 font-mono text-right mt-0.5 leading-none px-0.5">
+          ={preview.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      {/* Badge estado */}
+      <div className={`flex items-center gap-0.5 text-[8px] font-semibold mt-0.5 px-0.5 leading-none ${valor ? "text-emerald-600" : "text-slate-300"}`}>
+        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${valor ? "bg-emerald-500" : "bg-slate-200"}`} />
+        {valor ? "ok" : "vacío"}
+      </div>
+    </td>
+  )
+}
+
+// ─── Componente principal ─────────────────────────────
+
+export default function ListasPrecioPage() {
+  const sb = createClient()
+  const [reglas, setReglas] = useState<ReglaPrecio[]>([])
+  const [loading, setLoading] = useState(true)
+  // savingCell: "reglId|codigo"
+  const [savingCells, setSavingCells] = useState<Set<string>>(new Set())
+  // Reset dialog
+  const [resetDialogOpen, setResetDialogOpen] = useState(false)
+  const [resetTarget, setResetTarget] = useState<ReglaPrecio | null>(null)
+  const [resetting, setResetting] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const { data } = await sb
+      .from("listas_precio_reglas")
+      .select("*")
+      .order("grupo_precio")
+    setReglas(sortReglas((data as ReglaPrecio[]) || []))
+    setLoading(false)
+  }, [sb])
+
+  useEffect(() => { load() }, [load])
+
+  // Auto-save de una celda
+  const handleSave = async (reglId: string, codigo: SublistaCodigo, valor: string) => {
+    const regla = reglas.find(r => r.id === reglId)
+    if (!regla) return
+
+    const cellKey = `${reglId}|${codigo}`
+    setSavingCells(prev => new Set(prev).add(cellKey))
+
+    const nuevasFormulas = { ...regla.formulas }
+    if (valor.trim() === "") {
+      delete nuevasFormulas[codigo]
+    } else {
+      nuevasFormulas[codigo] = valor.trim()
+    }
+
+    const { error } = await sb
+      .from("listas_precio_reglas")
+      .update({ formulas: nuevasFormulas })
+      .eq("id", reglId)
+
+    if (!error) {
+      setReglas(prev =>
+        prev.map(r => r.id === reglId ? { ...r, formulas: nuevasFormulas } : r),
+      )
+    }
+
+    setSavingCells(prev => {
+      const next = new Set(prev)
+      next.delete(cellKey)
+      return next
+    })
+  }
+
+  // Reset una fila a los defaults del sistema anterior
+  const handleResetRow = async () => {
+    if (!resetTarget) return
+    setResetting(true)
+
+    const key = `${resetTarget.grupo_precio}|${resetTarget.iva_compras}|${resetTarget.iva_ventas}`
+    const defaults = DEFAULTS[key] || {}
+
+    const { error } = await sb
+      .from("listas_precio_reglas")
+      .update({ formulas: defaults })
+      .eq("id", resetTarget.id)
+
+    if (!error) {
+      setReglas(prev =>
+        prev.map(r => r.id === resetTarget.id ? { ...r, formulas: defaults } : r),
+      )
+    }
+
+    setResetting(false)
+    setResetDialogOpen(false)
+    setResetTarget(null)
+  }
+
+  const openReset = (regla: ReglaPrecio) => {
+    setResetTarget(regla)
+    setResetDialogOpen(true)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-6 lg:p-8">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">Listas de Precio — Fórmulas</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Definí qué cálculo aplicar para cada combinación de tipo de artículo × IVA × lista.
+          Variables disponibles: <code className="text-xs font-mono bg-slate-100 px-1 rounded">Base</code>, <code className="text-xs font-mono bg-slate-100 px-1 rounded">BaseContado</code>, y cualquier sublista ya calculada.
+          El preview muestra el resultado con <strong>Base = $1.000</strong>.
+        </p>
+      </div>
+
+      <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="text-xs border-collapse">
+            <thead>
+              {/* Fila 1: grupos de sublistas */}
+              <tr className="border-b">
+                <th className="px-3 py-2 bg-slate-50 text-left font-semibold text-slate-600 border-r" colSpan={3}>
+                  Segmento
+                </th>
+                <th className="px-2 py-2 text-center font-bold border-r bg-sky-50 text-sky-800" colSpan={4}>
+                  Bahía
+                </th>
+                <th className="px-2 py-2 text-center font-bold border-r bg-violet-50 text-violet-800" colSpan={4}>
+                  Neco
+                </th>
+                <th className="px-2 py-2 text-center font-bold bg-teal-50 text-teal-800" colSpan={1}>
+                  Viajante
+                </th>
+                <th className="px-2 py-2 bg-slate-50 w-10" />
+              </tr>
+              {/* Fila 2: columnas individuales */}
+              <tr className="border-b bg-slate-50">
+                <th className="px-3 py-1.5 text-left font-medium text-slate-500 border-r whitespace-nowrap">Grupo</th>
+                <th className="px-2 py-1.5 text-center font-medium text-slate-500 border-r whitespace-nowrap">IVA C.</th>
+                <th className="px-2 py-1.5 text-center font-medium text-slate-500 border-r whitespace-nowrap">IVA V.</th>
+                {SUBLISTA_CODIGOS.map(codigo => {
+                  const meta = SUBLISTA_META[codigo]
+                  const gs = GRUPO_SUBLISTA[meta.grupo]
+                  const isLast = codigo === "neco_con_iva" || codigo === "viajante"
+                  return (
+                    <th
+                      key={codigo}
+                      className={`px-1.5 py-1.5 text-center font-medium ${gs.th} ${isLast ? "border-r" : ""}`}
+                      style={{ minWidth: 118 }}
+                    >
+                      {meta.label}
+                    </th>
+                  )
+                })}
+                <th className="px-2 py-1.5 bg-slate-50" />
+              </tr>
+            </thead>
+
+            <tbody>
+              {reglas.map((regla, ri) => {
+                const ivaC = IVA_C_MAP[regla.iva_compras]
+                const ivaV = IVA_V_MAP[regla.iva_ventas]
+                const grupoCls = GRUPO_CLS[regla.grupo_precio] || "bg-slate-100 text-slate-700"
+                const isLastInGroup = ri === reglas.length - 1 ||
+                  reglas[ri + 1].grupo_precio !== regla.grupo_precio
+
+                return (
+                  <tr
+                    key={regla.id}
+                    className={`border-b ${isLastInGroup ? "border-b-2 border-slate-200" : ""}`}
+                  >
+                    {/* Grupo */}
+                    <td className="px-3 py-2 border-r whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${grupoCls}`}>
+                        {GRUPO_LABEL[regla.grupo_precio] || regla.grupo_precio}
+                      </span>
+                    </td>
+
+                    {/* IVA Compras */}
+                    <td className="px-2 py-2 text-center border-r">
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] font-bold ${ivaC?.cls}`}>
+                        {ivaC?.label}
+                      </span>
+                    </td>
+
+                    {/* IVA Ventas */}
+                    <td className="px-2 py-2 text-center border-r">
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] font-bold ${ivaV?.cls}`}>
+                        {ivaV?.label}
+                      </span>
+                    </td>
+
+                    {/* Celdas de fórmula */}
+                    {SUBLISTA_CODIGOS.map(codigo => (
+                      <CeldaFormula
+                        key={codigo}
+                        reglId={regla.id}
+                        codigo={codigo}
+                        initialValue={regla.formulas[codigo] || ""}
+                        onSave={handleSave}
+                        saving={savingCells.has(`${regla.id}|${codigo}`)}
+                      />
+                    ))}
+
+                    {/* Botón reset */}
+                    <td className="px-2 py-2 text-center">
+                      <button
+                        onClick={() => openReset(regla)}
+                        title="Resetear a defaults del sistema anterior"
+                        className="p-1 rounded text-slate-300 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Leyenda */}
+      <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">+</span>
+          <span>Factura (blanco)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">½</span>
+          <span>Mixto (IVA 10.5%)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-neutral-100 text-neutral-500">0</span>
+          <span>Adquisición / Presupuesto (negro)</span>
+        </div>
+        <div className="ml-4 flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-emerald-500" />
+          <span>Celda con fórmula guardada</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-slate-200" />
+          <span>Celda vacía (fallback al sistema anterior)</span>
+        </div>
+      </div>
+
+      {/* Dialog de confirmación de reset */}
+      <Dialog open={resetDialogOpen} onOpenChange={v => { if (!v) { setResetDialogOpen(false); setResetTarget(null) } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing ? "Editar" : "Nueva"} Lista de Precio</DialogTitle>
+            <DialogTitle>Resetear fórmulas a defaults</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Nombre *</Label>
-                <Input value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Neco" />
-              </div>
-              <div>
-                <Label>Código *</Label>
-                <Input value={form.codigo} onChange={e => setForm({...form, codigo: e.target.value})} placeholder="Ej: neco" />
-              </div>
+          {resetTarget && (
+            <div className="text-sm text-slate-600 space-y-2">
+              <p>
+                Se van a sobreescribir todas las fórmulas de la fila{" "}
+                <strong>{GRUPO_LABEL[resetTarget.grupo_precio]}</strong>{" "}
+                / IVA C. <strong>{IVA_C_MAP[resetTarget.iva_compras]?.label}</strong>{" "}
+                / IVA V. <strong>{IVA_V_MAP[resetTarget.iva_ventas]?.label}</strong>{" "}
+                con los valores del sistema anterior.
+              </p>
+              <p className="text-amber-700 text-xs bg-amber-50 px-3 py-2 rounded">
+                Esta acción no puede deshacerse. Podés volver a editar cada celda manualmente.
+              </p>
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label>% Limpieza/Bazar</Label>
-                <Input type="number" step="0.01" value={form.recargo_limpieza_bazar} onChange={e => setForm({...form, recargo_limpieza_bazar: e.target.value})} />
-              </div>
-              <div>
-                <Label>% Perf. Negro</Label>
-                <Input type="number" step="0.01" value={form.recargo_perfumeria_negro} onChange={e => setForm({...form, recargo_perfumeria_negro: e.target.value})} />
-              </div>
-              <div>
-                <Label>% Perf. Blanco</Label>
-                <Input type="number" step="0.01" value={form.recargo_perfumeria_blanco} onChange={e => setForm({...form, recargo_perfumeria_blanco: e.target.value})} />
-              </div>
-            </div>
-            <div>
-              <Label>Descripción</Label>
-              <Input value={form.descripcion} onChange={e => setForm({...form, descripcion: e.target.value})} placeholder="Opcional" />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-              <Button onClick={save}>{editing ? "Actualizar" : "Crear"}</Button>
-            </div>
-          </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setResetDialogOpen(false); setResetTarget(null) }}>
+              Cancelar
+            </Button>
+            <Button onClick={handleResetRow} disabled={resetting} className="bg-amber-600 hover:bg-amber-700 text-white">
+              {resetting ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Reseteando...</> : "Sí, resetear"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

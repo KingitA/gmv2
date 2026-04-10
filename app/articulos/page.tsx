@@ -14,12 +14,13 @@ import {
 } from "lucide-react"
 import { ImportArticulosDialog } from "@/components/articulos/ImportArticulosDialog"
 import * as XLSX from "xlsx"
-import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
+import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, determinarGrupoPrecio, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
+import { calcularPreciosConFormulas, SUBLISTA_CODIGOS, SUBLISTA_META, type SublistaCodigo } from "@/lib/pricing/formula-evaluator"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Mode = "compras" | "ventas" | "gestion"
 interface LP { id:string; nombre:string; codigo:string; recargo_limpieza_bazar:number; recargo_perfumeria_negro:number; recargo_perfumeria_blanco:number }
-interface ColLista { id:string; lista:LP; fac:MetodoFacturacion }
+interface ReglaPrecioFila { grupo_precio:string; iva_compras:string; iva_ventas:string; formulas:Record<string,string> }
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 const BASE_COLS = [
@@ -47,15 +48,21 @@ const VENTAS_COLS = [
   { id:"ivac_v",  label:"IVA C.",     dw:50, mw:40 },
   { id:"ivav_v",  label:"IVA V.",     dw:50, mw:40 },
 ]
-const SUBLISTAS: { fac:MetodoFacturacion; label:string }[] = [
-  { fac:"Presupuesto", label:"Presupuesto" },
-  { fac:"Factura",     label:"Con IVA"    },
-  { fac:"Final",       label:"Final"      },
-]
-const LISTA_ACCENT: Record<string,{dot:string;th:string;border:string;cell:string;name:string;ctacte:string;contado:string}> = {
-  bahia:    { dot:"bg-sky-500",    th:"bg-sky-50 text-sky-800",    border:"border-sky-200",    cell:"bg-sky-50/20",    name:"text-sky-600",   ctacte:"text-slate-500", contado:"text-sky-700"    },
-  neco:     { dot:"bg-violet-500", th:"bg-violet-50 text-violet-800", border:"border-violet-200", cell:"bg-violet-50/20", name:"text-violet-600", ctacte:"text-slate-500", contado:"text-violet-700" },
-  viajante: { dot:"bg-teal-500",   th:"bg-teal-50 text-teal-800",  border:"border-teal-200",   cell:"bg-teal-50/20",   name:"text-teal-600",  ctacte:"text-slate-500", contado:"text-teal-700"   },
+const SL_ACCENT: Record<string,{dot:string;th:string;border:string;cell:string;name:string;price:string}> = {
+  bahia:    { dot:"bg-sky-500",    th:"bg-sky-50 text-sky-800",       border:"border-sky-200",    cell:"bg-sky-50/20",    name:"text-sky-600",    price:"text-sky-700"    },
+  neco:     { dot:"bg-violet-500", th:"bg-violet-50 text-violet-800", border:"border-violet-200", cell:"bg-violet-50/20", name:"text-violet-600", price:"text-violet-700" },
+  viajante: { dot:"bg-teal-500",   th:"bg-teal-50 text-teal-800",     border:"border-teal-200",   cell:"bg-teal-50/20",   name:"text-teal-600",   price:"text-teal-700"   },
+}
+const MAP_LEGACY: Record<string,{listaCodigo:string;fac:MetodoFacturacion}> = {
+  bahia_presupuesto: {listaCodigo:"bahia",    fac:"Presupuesto"},
+  bahia_final:       {listaCodigo:"bahia",    fac:"Final"      },
+  bahia_sin_iva:     {listaCodigo:"bahia",    fac:"Presupuesto"},
+  bahia_con_iva:     {listaCodigo:"bahia",    fac:"Factura"    },
+  neco_presupuesto:  {listaCodigo:"neco",     fac:"Presupuesto"},
+  neco_final:        {listaCodigo:"neco",     fac:"Final"      },
+  neco_sin_iva:      {listaCodigo:"neco",     fac:"Presupuesto"},
+  neco_con_iva:      {listaCodigo:"neco",     fac:"Factura"    },
+  viajante:          {listaCodigo:"viajante", fac:"Final"      },
 }
 const TC: Record<string,{bg:string;text:string}> = {
   comercial:   { bg:"bg-blue-100",   text:"text-blue-700"   },
@@ -98,7 +105,8 @@ export default function ArticulosPage() {
   const rsx=useRef(0); const rsw=useRef(0)
 
   // Lista columns (Ventas mode)
-  const [activeListas,setActiveListas] = useState<ColLista[]>([])
+  const [reglasFormulas,setReglasFormulas] = useState<ReglaPrecioFila[]>([])
+  const [activeSublistas,setActiveSublistas] = useState<SublistaCodigo[]>(["bahia_presupuesto"])
   const [dli,setDli] = useState<number|null>(null)
   const [showListaPanel,setShowListaPanel] = useState(false)
   const listaRef = useRef<HTMLDivElement>(null)
@@ -127,18 +135,16 @@ export default function ArticulosPage() {
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(()=>{
     (async()=>{
-      const [{data:p},{data:m},{data:l}] = await Promise.all([
+      const [{data:p},{data:m},{data:l},{data:r}] = await Promise.all([
         sb.from("proveedores").select("id,nombre").eq("activo",true).order("nombre"),
         sb.from("marcas").select("id,codigo,descripcion").eq("activo",true).order("descripcion"),
         sb.from("listas_precio").select("*").eq("activo",true).order("nombre"),
+        sb.from("listas_precio_reglas").select("grupo_precio,iva_compras,iva_ventas,formulas"),
       ])
       if(p) setProvs(p)
       if(m) setMarcas(m)
-      if(l){
-        setListas(l)
-        const b = l.find((x:any)=>x.codigo==="bahia")
-        if(b) setActiveListas([{id:"bahia_Presupuesto",lista:b,fac:"Presupuesto"}])
-      }
+      if(l) setListas(l)
+      if(r) setReglasFormulas(r as ReglaPrecioFila[])
     })()
   },[])
   useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0)},400); return()=>clearTimeout(t) },[st])
@@ -237,11 +243,17 @@ export default function ArticulosPage() {
     setFs(false)
   }
 
-  // Lista columns
-  const tglLista=(l:LP,f:MetodoFacturacion)=>{ const id=`${l.codigo}_${f}`; setActiveListas(p=>p.find(c=>c.id===id)?p.filter(c=>c.id!==id):[...p,{id,lista:l,fac:f}]) }
-  const hasLista=(code:string,f:MetodoFacturacion)=>activeListas.some(c=>c.id===`${code}_${f}`)
+  // Sublista columns
+  const tglSublista=(c:SublistaCodigo)=>setActiveSublistas(p=>p.includes(c)?p.filter(x=>x!==c):[...p,c])
+  const getFormulasParaArticulo=(art:any):Record<string,string>|null=>{
+    const grupo=determinarGrupoPrecio(art.categoria||art.rubro||"")
+    const regla=reglasFormulas.find(r=>r.grupo_precio===grupo&&r.iva_compras===(art.iva_compras||"factura")&&r.iva_ventas===(art.iva_ventas||"factura"))
+    if(!regla) return null
+    const has=Object.values(regla.formulas).some((f:any)=>f&&String(f).trim()!=="")
+    return has?regla.formulas:null
+  }
   const dds=(i:number)=>setDli(i)
-  const ddo=(e:React.DragEvent,i:number)=>{ e.preventDefault(); if(dli===null||dli===i)return; setActiveListas(p=>{const n=[...p];const[m]=n.splice(dli,1);n.splice(i,0,m);return n}); setDli(i) }
+  const ddo=(e:React.DragEvent,i:number)=>{ e.preventDefault(); if(dli===null||dli===i)return; setActiveSublistas(p=>{const n=[...p];const[m]=n.splice(dli,1);n.splice(i,0,m);return n}); setDli(i) }
 
   // Column visibility
   const isVis=(id:string)=>!hid.has(id)
@@ -276,7 +288,7 @@ export default function ArticulosPage() {
   const visBase=BASE_COLS.filter(c=>isVis(c.id))
   const visCompras=COMPRAS_COLS.filter(c=>isVis(c.id))
   const visVentas=VENTAS_COLS.filter(c=>isVis(c.id))
-  const listRowH=mode==="ventas"&&activeListas.length>0?46:34
+  const listRowH=34
 
   return (
     <div className="flex flex-col h-screen bg-slate-50" style={{userSelect:rc?"none":undefined}}>
@@ -344,40 +356,38 @@ export default function ArticulosPage() {
             <div className="relative" ref={listaRef}>
               <button onClick={()=>setShowListaPanel(p=>!p)} className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-lg border text-[11px] font-semibold transition-all ${showListaPanel?"bg-indigo-600 text-white border-indigo-600":"bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-700"}`}>
                 <TrendingUp className="h-3 w-3"/>Listas
-                {activeListas.length>0&&<span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold leading-none ${showListaPanel?"bg-white/20 text-white":"bg-indigo-100 text-indigo-700"}`}>{activeListas.length}</span>}
+                {activeSublistas.length>0&&<span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold leading-none ${showListaPanel?"bg-white/20 text-white":"bg-indigo-100 text-indigo-700"}`}>{activeSublistas.length}</span>}
                 <ChevronDown className={`h-3 w-3 transition-transform ${showListaPanel?"rotate-180":""}`}/>
               </button>
               {showListaPanel&&(
-                <div className="absolute right-0 top-full mt-1.5 z-50 bg-white border border-slate-200 rounded-2xl shadow-2xl w-64 py-3 overflow-hidden">
+                <div className="absolute right-0 top-full mt-1.5 z-50 bg-white border border-slate-200 rounded-2xl shadow-2xl w-56 py-3 overflow-hidden">
                   <div className="px-3 pb-2 mb-1 border-b border-slate-100 flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Columnas de precios</span>
-                    {activeListas.length>0&&<button onClick={()=>setActiveListas([])} className="text-[10px] text-red-500 font-semibold hover:text-red-700">Limpiar</button>}
+                    {activeSublistas.length>0&&<button onClick={()=>setActiveSublistas([])} className="text-[10px] text-red-500 font-semibold hover:text-red-700">Limpiar</button>}
                   </div>
-                  {listas.map(l=>{
-                    const ac=LISTA_ACCENT[l.codigo]||{dot:"bg-slate-400",th:"",border:"border-slate-200",cell:"",name:"text-slate-600",ctacte:"",contado:""}
+                  {(["bahia","neco","viajante"] as const).map(grupo=>{
+                    const ac=SL_ACCENT[grupo]
+                    const codigos=SUBLISTA_CODIGOS.filter(c=>SUBLISTA_META[c].grupo===grupo)
                     return(
-                      <div key={l.id} className="mb-2 last:mb-0">
+                      <div key={grupo} className="mb-2 last:mb-0">
                         <div className="flex items-center gap-1.5 px-3 py-1.5">
                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${ac.dot}`}/>
-                          <span className={`text-[11px] font-bold uppercase tracking-wide ${ac.name}`}>{l.nombre}</span>
+                          <span className={`text-[11px] font-bold uppercase tracking-wide ${ac.name}`}>{grupo==="bahia"?"Bahía":grupo==="neco"?"Neco":"Viajante"}</span>
                         </div>
-                        {SUBLISTAS.map(s=>{
-                          const on=hasLista(l.codigo,s.fac)
+                        {codigos.map(c=>{
+                          const on=activeSublistas.includes(c)
                           return(
-                            <button key={s.fac} onClick={()=>tglLista(l,s.fac)} className={`w-full flex items-center gap-2.5 mx-0 px-4 py-1.5 transition-colors ${on?ac.th+" border-l-2 "+ac.border:"hover:bg-slate-50"}`}>
-                              <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${on?ac.dot.replace("bg-","bg-")+" border-0":"border-slate-300"}`} style={on?{backgroundColor:""}:{}}>
-                                {on?<Check className="h-2.5 w-2.5 text-white"/>:null}
+                            <button key={c} onClick={()=>tglSublista(c)} className={`w-full flex items-center gap-2.5 px-4 py-1.5 transition-colors ${on?ac.th+" border-l-2 "+ac.border:"hover:bg-slate-50"}`}>
+                              <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${on?ac.dot+" border-0":"border-slate-300"}`}>
+                                {on&&<Check className="h-2.5 w-2.5 text-white"/>}
                               </div>
-                              <span className="text-xs font-medium flex-1 text-left">{s.label}</span>
+                              <span className="text-xs font-medium flex-1 text-left">{SUBLISTA_META[c].label}</span>
                             </button>
                           )
                         })}
                       </div>
                     )
                   })}
-                  <div className="px-3 pt-2 mt-1 border-t border-slate-100">
-                    <p className="text-[10px] text-slate-400 leading-snug">Cada columna muestra <strong>Cta Cte</strong> y <strong>Contado</strong></p>
-                  </div>
                 </div>
               )}
             </div>
@@ -450,27 +460,28 @@ export default function ArticulosPage() {
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
                   </th>
                 ))}
-                {/* Lista col headers */}
-                {mode==="ventas"&&activeListas.map((cl,i)=>{
-                  const ac=LISTA_ACCENT[cl.lista.codigo]||{dot:"bg-slate-400",th:"bg-slate-50 text-slate-700",border:"border-slate-200",cell:"",name:"",ctacte:"",contado:""}
-                  const sub=SUBLISTAS.find(s=>s.fac===cl.fac)
+                {/* Sublista col headers */}
+                {mode==="ventas"&&activeSublistas.map((codigo,i)=>{
+                  const meta=SUBLISTA_META[codigo]
+                  const ac=SL_ACCENT[meta.grupo]||{dot:"bg-slate-400",th:"bg-slate-50 text-slate-700",border:"border-slate-200",cell:"",name:"",price:"text-slate-700"}
+                  const grupoLabel=meta.grupo==="bahia"?"Bahía":meta.grupo==="neco"?"Neco":"Viajante"
                   return(
-                    <th key={cl.id}
+                    <th key={codigo}
                       className={`relative px-2 py-1 border-l-2 ${ac.border} ${ac.th} cursor-grab select-none ${dli===i?"opacity-40":""}`}
-                      style={{width:lcw[cl.id]||140,minWidth:100}}
+                      style={{width:lcw[codigo]||120,minWidth:80}}
                       draggable onDragStart={()=>dds(i)} onDragOver={e=>ddo(e,i)} onDragEnd={()=>setDli(null)}
                     >
                       <div className="flex items-center justify-between gap-1">
                         <div className="flex items-center gap-1.5">
                           <GripVertical className="h-3 w-3 opacity-40"/>
                           <div>
-                            <div className={`text-[9px] font-bold uppercase tracking-wider ${ac.name}`}>{cl.lista.nombre}</div>
-                            <div className="text-[10px] font-semibold">{sub?.label}</div>
+                            <div className={`text-[9px] font-bold uppercase tracking-wider ${ac.name}`}>{grupoLabel}</div>
+                            <div className="text-[10px] font-semibold">{meta.label}</div>
                           </div>
                         </div>
-                        <button onClick={()=>tglLista(cl.lista,cl.fac)} className="opacity-30 hover:opacity-100 hover:text-red-500 transition-all leading-none text-base">×</button>
+                        <button onClick={()=>tglSublista(codigo)} className="opacity-30 hover:opacity-100 hover:text-red-500 transition-all leading-none text-base">×</button>
                       </div>
-                      <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(cl.id,e)}/>
+                      <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(codigo,e)}/>
                     </th>
                   )
                 })}
@@ -567,25 +578,36 @@ export default function ArticulosPage() {
                       {isVis("ivav_v")&&<td className="px-1 py-0 text-center border-r border-indigo-100 bg-indigo-50/20" style={{width:cw.ivav_v,maxWidth:cw.ivav_v}}>
                         <span className={`inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-bold ${ccV(a.iva_ventas||"factura")}`}>{icV(a.iva_ventas||"factura")}</span>
                       </td>}
-                      {/* Lista dual-price cells */}
-                      {activeListas.map(cl=>{
-                        const ac=LISTA_ACCENT[cl.lista.codigo]||{dot:"",th:"",border:"border-slate-200",cell:"bg-slate-50/20",name:"",ctacte:"text-slate-400",contado:"text-slate-700"}
-                        const ld2:DatosLista={recargo_limpieza_bazar:cl.lista.recargo_limpieza_bazar,recargo_perfumeria_negro:cl.lista.recargo_perfumeria_negro,recargo_perfumeria_blanco:cl.lista.recargo_perfumeria_blanco}
-                        const rCC=calcularPrecioFinal({...dt,precio_base_stored:a.precio_base??null},ld2,cl.fac,0)
-                        const pCC=rCC.ivaIncluido?rCC.precioUnitarioFinal:rCC.precioUnitarioFinal+rCC.montoIvaDiscriminado
-                        const rCO=calcularPrecioFinal({...dt,precio_base_stored:a.precio_base_contado??null},ld2,cl.fac,0)
-                        const pCO=rCO.ivaIncluido?rCO.precioUnitarioFinal:rCO.precioUnitarioFinal+rCO.montoIvaDiscriminado
+                      {/* Sublista price cells */}
+                      {activeSublistas.map(codigo=>{
+                        const meta=SUBLISTA_META[codigo]
+                        const ac=SL_ACCENT[meta.grupo]||{dot:"",th:"",border:"border-slate-200",cell:"bg-slate-50/20",name:"",price:"text-slate-700"}
+                        const base=a.precio_base??bs.precioBase
+                        const baseContado=a.precio_base_contado??(base*0.9)
+                        const formulas=getFormulasParaArticulo(a)
+                        let precio:number|null=null
+                        let isLegacy=false
+                        if(formulas&&base>0){
+                          const precios=calcularPreciosConFormulas(base,baseContado,formulas)
+                          precio=precios[codigo]??null
+                        }
+                        if(precio===null){
+                          const leg=MAP_LEGACY[codigo]
+                          if(leg){
+                            const lista=listas.find(l=>l.codigo===leg.listaCodigo)
+                            if(lista){
+                              const ld2:DatosLista={recargo_limpieza_bazar:lista.recargo_limpieza_bazar,recargo_perfumeria_negro:lista.recargo_perfumeria_negro,recargo_perfumeria_blanco:lista.recargo_perfumeria_blanco}
+                              const r=calcularPrecioFinal({...dt,precio_base_stored:base},ld2,leg.fac,0)
+                              precio=r.ivaIncluido?r.precioUnitarioFinal:r.precioUnitarioFinal+r.montoIvaDiscriminado
+                              isLegacy=true
+                            }
+                          }
+                        }
                         return(
-                          <td key={cl.id} className={`px-2.5 py-0 border-l-2 ${ac.border} ${ac.cell}`} style={{width:lcw[cl.id]||140,maxWidth:lcw[cl.id]||140}}>
-                            <div className="flex flex-col items-end gap-0.5 py-0.5">
-                              <div className="flex items-baseline gap-1.5">
-                                <span className="text-[8px] font-medium uppercase tracking-wide text-slate-400">Cta Cte</span>
-                                <span className={`text-[10px] font-mono ${ac.ctacte}`}>{fmt(pCC)}</span>
-                              </div>
-                              <div className="flex items-baseline gap-1.5">
-                                <span className={`text-[8px] font-bold uppercase tracking-wide ${ac.name}`}>Contado</span>
-                                <span className={`text-[13px] font-bold font-mono leading-none ${ac.contado}`}>{fmt(pCO)}</span>
-                              </div>
+                          <td key={codigo} className={`px-2.5 py-0 border-l-2 ${ac.border} ${ac.cell}`} style={{width:lcw[codigo]||120,maxWidth:lcw[codigo]||120}}>
+                            <div className="flex flex-col items-end gap-0 py-0.5">
+                              <span className={`text-[12px] font-bold font-mono leading-none ${ac.price}`}>{precio!=null?fmt(precio):"—"}</span>
+                              {isLegacy&&<span className="text-[8px] text-slate-300 leading-none mt-0.5">legacy</span>}
                             </div>
                           </td>
                         )

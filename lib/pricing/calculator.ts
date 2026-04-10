@@ -256,3 +256,15 @@ export function articuloToDatosArticulo(art: any, descuentosDB?: DescuentoTipado
 }
 
 function round2(n: number): number { return Math.round(n * 100) / 100 }
+
+// ─── Determinación de grupo de precio ─────────────────
+// Extrae la lógica de segmentación de obtenerRecargoLista como función pública.
+// Usada por el nuevo sistema de fórmulas configurables (listas_precio_reglas).
+
+export function determinarGrupoPrecio(
+  categoria: string,
+): "LIMPIEZA_BAZAR" | "PERFUMERIA" {
+  const cat = (categoria || "").toUpperCase()
+  if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA")) return "PERFUMERIA"
+  return "LIMPIEZA_BAZAR"
+}
