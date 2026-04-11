@@ -49,7 +49,6 @@ interface ReglaPrecio {
 // Derivadas de obtenerCoeficienteIva() + recargas de bahia(0) / neco(12%) / viajante(20%)
 
 const DEFAULTS: Record<string, Record<string, string>> = {
-  // ── LIMPIEZA_BAZAR ──
   "LIMPIEZA_BAZAR|factura|factura": {
     bahia_presupuesto: "Base*1.21",
     bahia_final:       "Base",
@@ -59,28 +58,6 @@ const DEFAULTS: Record<string, Record<string, string>> = {
     neco_final:        "Base*1.12",
     neco_sin_iva:      "Base*1.12",
     neco_con_iva:      "Base*1.21*1.12",
-    viajante:          "Base*1.20",
-  },
-  "LIMPIEZA_BAZAR|factura|presupuesto": {
-    bahia_presupuesto: "Base*1.21",
-    bahia_final:       "Base*1.21",
-    bahia_sin_iva:     "Base",
-    bahia_con_iva:     "Base*1.21",
-    neco_presupuesto:  "Base*1.21*1.12",
-    neco_final:        "Base*1.21*1.12",
-    neco_sin_iva:      "Base*1.12",
-    neco_con_iva:      "Base*1.21*1.12",
-    viajante:          "Base*1.21*1.20",
-  },
-  "LIMPIEZA_BAZAR|adquisicion_stock|factura": {
-    bahia_presupuesto: "Base",
-    bahia_final:       "Base*0.90",
-    bahia_sin_iva:     "Base*0.90",
-    bahia_con_iva:     "Base",
-    neco_presupuesto:  "Base*1.12",
-    neco_final:        "Base*0.90*1.12",
-    neco_sin_iva:      "Base*0.90*1.12",
-    neco_con_iva:      "Base*1.12",
     viajante:          "Base*1.20",
   },
   "LIMPIEZA_BAZAR|adquisicion_stock|presupuesto": {
@@ -94,17 +71,6 @@ const DEFAULTS: Record<string, Record<string, string>> = {
     neco_con_iva:      "Base*1.12",
     viajante:          "Base*1.20",
   },
-  "LIMPIEZA_BAZAR|mixto|factura": {
-    bahia_presupuesto: "Base*1.10",
-    bahia_final:       "Base*0.95",
-    bahia_sin_iva:     "Base*0.95",
-    bahia_con_iva:     "Base*1.10",
-    neco_presupuesto:  "Base*1.10*1.12",
-    neco_final:        "Base*0.95*1.12",
-    neco_sin_iva:      "Base*0.95*1.12",
-    neco_con_iva:      "Base*1.10*1.12",
-    viajante:          "Base*1.20",
-  },
   "LIMPIEZA_BAZAR|mixto|presupuesto": {
     bahia_presupuesto: "Base*1.10",
     bahia_final:       "Base*1.10",
@@ -116,7 +82,6 @@ const DEFAULTS: Record<string, Record<string, string>> = {
     neco_con_iva:      "Base*1.10*1.12",
     viajante:          "Base*1.10*1.20",
   },
-  // ── PERFUMERIA (misma lógica, sin recargo diferenciado en defaults) ──
   "PERFUMERIA|factura|factura": {
     bahia_presupuesto: "Base*1.21",
     bahia_final:       "Base",
@@ -126,28 +91,6 @@ const DEFAULTS: Record<string, Record<string, string>> = {
     neco_final:        "Base*1.09",
     neco_sin_iva:      "Base*1.09",
     neco_con_iva:      "Base*1.21*1.09",
-    viajante:          "Base*1.09",
-  },
-  "PERFUMERIA|factura|presupuesto": {
-    bahia_presupuesto: "Base*1.21",
-    bahia_final:       "Base*1.21",
-    bahia_sin_iva:     "Base",
-    bahia_con_iva:     "Base*1.21",
-    neco_presupuesto:  "Base*1.21*1.09",
-    neco_final:        "Base*1.21*1.09",
-    neco_sin_iva:      "Base*1.09",
-    neco_con_iva:      "Base*1.21*1.09",
-    viajante:          "Base*1.21*1.09",
-  },
-  "PERFUMERIA|adquisicion_stock|factura": {
-    bahia_presupuesto: "Base",
-    bahia_final:       "Base*0.90",
-    bahia_sin_iva:     "Base*0.90",
-    bahia_con_iva:     "Base",
-    neco_presupuesto:  "Base*1.09",
-    neco_final:        "Base*0.90*1.09",
-    neco_sin_iva:      "Base*0.90*1.09",
-    neco_con_iva:      "Base*1.09",
     viajante:          "Base*1.09",
   },
   "PERFUMERIA|adquisicion_stock|presupuesto": {
@@ -160,28 +103,6 @@ const DEFAULTS: Record<string, Record<string, string>> = {
     neco_sin_iva:      "Base*1.09",
     neco_con_iva:      "Base*1.09",
     viajante:          "Base*1.09",
-  },
-  "PERFUMERIA|mixto|factura": {
-    bahia_presupuesto: "Base*1.10",
-    bahia_final:       "Base*0.95",
-    bahia_sin_iva:     "Base*0.95",
-    bahia_con_iva:     "Base*1.10",
-    neco_presupuesto:  "Base*1.10*1.09",
-    neco_final:        "Base*0.95*1.09",
-    neco_sin_iva:      "Base*0.95*1.09",
-    neco_con_iva:      "Base*1.10*1.09",
-    viajante:          "Base*1.09",
-  },
-  "PERFUMERIA|mixto|presupuesto": {
-    bahia_presupuesto: "Base*1.10",
-    bahia_final:       "Base*1.10",
-    bahia_sin_iva:     "Base",
-    bahia_con_iva:     "Base*1.10",
-    neco_presupuesto:  "Base*1.10*1.09",
-    neco_final:        "Base*1.10*1.09",
-    neco_sin_iva:      "Base*1.09",
-    neco_con_iva:      "Base*1.10*1.09",
-    viajante:          "Base*1.10*1.09",
   },
 }
 
