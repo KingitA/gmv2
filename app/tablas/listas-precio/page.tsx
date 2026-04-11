@@ -229,6 +229,33 @@ function sortReglas(reglas: ReglaPrecio[]): ReglaPrecio[] {
   })
 }
 
+// ─── Variables disponibles para autocompletado ───────
+
+const FORMULA_VARS: { code: string; label: string; group: string; cls: string }[] = [
+  { code: "Base",        label: "Base",        group: "base",     cls: "bg-indigo-100 text-indigo-700" },
+  { code: "BaseContado", label: "BaseContado",  group: "base",     cls: "bg-amber-100 text-amber-700"  },
+  ...SUBLISTA_CODIGOS.map(c => ({
+    code:  c,
+    label: SUBLISTA_META[c].label,
+    group: SUBLISTA_META[c].grupo,
+    cls:   SUBLISTA_META[c].grupo === "bahia"
+      ? "bg-sky-100 text-sky-700"
+      : SUBLISTA_META[c].grupo === "neco"
+        ? "bg-violet-100 text-violet-700"
+        : "bg-teal-100 text-teal-700",
+  })),
+]
+
+function getCurrentToken(val: string, cursor: number) {
+  const before = val.slice(0, cursor)
+  const after  = val.slice(cursor)
+  const startM = before.match(/[a-zA-Z_][a-zA-Z_0-9]*$/)
+  const endM   = after.match(/^[a-zA-Z_0-9]*/)
+  const start  = startM ? cursor - startM[0].length : cursor
+  const end    = cursor + (endM ? endM[0].length : 0)
+  return { token: val.slice(start, end), start, end }
+}
+
 // ─── Celda de fórmula individual ─────────────────────
 
 interface CeldaProps {
@@ -243,7 +270,10 @@ interface CeldaProps {
 function CeldaFormula({ reglId, codigo, initialValue, onSave, saving, disabled }: CeldaProps) {
   const [valor, setValor] = useState(initialValue)
   const [focused, setFocused] = useState(false)
-  const prevRef = useRef(initialValue)
+  const [sugs, setSugs] = useState<typeof FORMULA_VARS>([])
+  const [sugIdx, setSugIdx] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const prevRef  = useRef(initialValue)
 
   // Sincronizar si cambia desde afuera (ej: reset a defaults)
   useEffect(() => {
@@ -251,15 +281,68 @@ function CeldaFormula({ reglId, codigo, initialValue, onSave, saving, disabled }
     prevRef.current = initialValue
   }, [initialValue])
 
-  // Preview calculado con Base=1000 (solo cuando no está enfocada o al escribir)
+  // Preview calculado con Base=1000
   const preview = useMemo(() => {
     if (!valor) return null
     const vars: Record<string, number> = { Base: 1000, BaseContado: 900 }
     return evaluarFormula(valor, vars)
   }, [valor])
 
+  // Actualizar sugerencias según el token bajo el cursor
+  const refreshSugs = (val: string) => {
+    const el = inputRef.current
+    if (!el) return setSugs([])
+    const cursor = el.selectionStart ?? val.length
+    const { token } = getCurrentToken(val, cursor)
+    if (!token) { setSugs([]); return }
+    const lc = token.toLowerCase()
+    const filtered = FORMULA_VARS.filter(v => v.code.toLowerCase().includes(lc))
+    setSugs(filtered)
+    setSugIdx(0)
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setValor(e.target.value)
+    refreshSugs(e.target.value)
+  }
+
+  // Al hacer click dentro del input también refrescamos
+  const handleSelect = () => {
+    refreshSugs(valor)
+  }
+
+  // Aplicar una sugerencia reemplazando el token actual
+  const applySug = (varCode: string) => {
+    const el = inputRef.current
+    if (!el) return
+    const cursor = el.selectionStart ?? valor.length
+    const { start, end } = getCurrentToken(valor, cursor)
+    const newVal = valor.slice(0, start) + varCode + valor.slice(end)
+    setValor(newVal)
+    setSugs([])
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + varCode.length, start + varCode.length)
+    })
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (sugs.length === 0) return
+    if (e.key === "ArrowDown") { e.preventDefault(); setSugIdx(i => Math.min(i + 1, sugs.length - 1)) }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setSugIdx(i => Math.max(i - 1, 0)) }
+    else if (e.key === "Tab" || e.key === "Enter") {
+      e.preventDefault()
+      applySug(sugs[sugIdx].code)
+    } else if (e.key === "Escape") {
+      setSugs([])
+    }
+  }
+
   const handleBlur = async () => {
+    // Esperar un tick para que onMouseDown de sugerencia se ejecute primero
+    await new Promise(r => setTimeout(r, 120))
     setFocused(false)
+    setSugs([])
     if (valor === prevRef.current) return
     prevRef.current = valor
     await onSave(reglId, codigo, valor)
@@ -275,26 +358,49 @@ function CeldaFormula({ reglId, codigo, initialValue, onSave, saving, disabled }
     >
       <div className="relative">
         <input
+          ref={inputRef}
           value={valor}
-          onChange={e => setValor(e.target.value)}
-          onFocus={() => setFocused(true)}
+          onChange={handleChange}
+          onSelect={handleSelect}
+          onFocus={() => { setFocused(true); refreshSugs(valor) }}
           onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
           disabled={disabled}
           placeholder="Ej: Base*1.21"
           spellCheck={false}
+          autoComplete="off"
           className={[
             "w-full text-[11px] font-mono px-1.5 py-1 rounded border bg-white transition-colors",
-            valor
-              ? "border-emerald-300 text-slate-800"
-              : "border-slate-200 text-slate-400",
-            focused
-              ? "border-indigo-400 outline-none shadow-[0_0_0_1px_rgba(99,102,241,0.4)]"
-              : "",
+            valor ? "border-emerald-300 text-slate-800" : "border-slate-200 text-slate-400",
+            focused ? "border-indigo-400 outline-none shadow-[0_0_0_1px_rgba(99,102,241,0.4)]" : "",
             "focus:outline-none disabled:opacity-40",
           ].join(" ")}
         />
         {saving && (
           <Loader2 className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-indigo-400 animate-spin" />
+        )}
+
+        {/* Dropdown de sugerencias */}
+        {sugs.length > 0 && (
+          <div className="absolute left-0 top-full mt-0.5 z-50 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden"
+            style={{ minWidth: 160 }}>
+            {sugs.map((v, i) => (
+              <button
+                key={v.code}
+                type="button"
+                onMouseDown={e => { e.preventDefault(); applySug(v.code) }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left transition-colors ${i === sugIdx ? "bg-indigo-50" : "hover:bg-slate-50"}`}
+              >
+                <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold ${v.cls}`}>
+                  {v.group === "base" ? "BASE" : v.group.toUpperCase().slice(0,3)}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-mono font-semibold text-slate-700 truncate">{v.code}</div>
+                  <div className="text-[9px] text-slate-400 truncate">{v.label}</div>
+                </div>
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
