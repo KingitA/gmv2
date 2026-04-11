@@ -288,7 +288,7 @@ export default function ArticulosPage() {
   const visBase=BASE_COLS.filter(c=>isVis(c.id))
   const visCompras=COMPRAS_COLS.filter(c=>isVis(c.id))
   const visVentas=VENTAS_COLS.filter(c=>isVis(c.id))
-  const listRowH=34
+  const listRowH=mode==="ventas"&&activeSublistas.length>0?46:34
 
   return (
     <div className="flex flex-col h-screen bg-slate-50" style={{userSelect:rc?"none":undefined}}>
@@ -603,11 +603,19 @@ export default function ArticulosPage() {
                             }
                           }
                         }
+                        const precioContado=precio!=null?Math.round(precio*0.9*100)/100:null
                         return(
                           <td key={codigo} className={`px-2.5 py-0 border-l-2 ${ac.border} ${ac.cell}`} style={{width:lcw[codigo]||120,maxWidth:lcw[codigo]||120}}>
-                            <div className="flex flex-col items-end gap-0 py-0.5">
-                              <span className={`text-[12px] font-bold font-mono leading-none ${ac.price}`}>{precio!=null?fmt(precio):"—"}</span>
-                              {isLegacy&&<span className="text-[8px] text-slate-300 leading-none mt-0.5">legacy</span>}
+                            <div className="flex flex-col items-end gap-0.5 py-0.5">
+                              <div className="flex items-baseline gap-1">
+                                <span className="text-[8px] font-medium text-slate-400 leading-none">cte</span>
+                                <span className={`text-[11px] font-bold font-mono leading-none ${ac.price}`}>{precio!=null?fmt(precio):"—"}</span>
+                              </div>
+                              <div className="flex items-baseline gap-1">
+                                <span className={`text-[8px] font-bold leading-none ${ac.name}`}>ctdo</span>
+                                <span className={`text-[12px] font-bold font-mono leading-none ${ac.price}`}>{precioContado!=null?fmt(precioContado):"—"}</span>
+                              </div>
+                              {isLegacy&&<span className="text-[8px] text-slate-300 leading-none">legacy</span>}
                             </div>
                           </td>
                         )
