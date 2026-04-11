@@ -232,88 +232,119 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── Aplicar cambios ──────────────────────────────────────────────────────
+    // Separar en dos grupos: existentes (update) y nuevos (insert)
+    const paraActualizar = rowsParaActualizar.filter(x => x.articulo !== null)
+    const paraNuevos     = rowsParaActualizar.filter(x => x.articulo === null)
+
     let actualizados = 0
     let nuevosCreados = 0
     let errores = 0
     const erroresDetalle: Array<{ sku: string; error: string }> = []
 
-    for (const { row, articulo } of rowsParaActualizar) {
-      try {
-        // Construir objeto con campos directos que trae el row
-        const camposUpdate: Record<string, any> = {}
-        for (const campo of CAMPOS_DIRECTOS) {
-          if (row[campo as keyof ArticleUpdateRow] !== undefined) {
-            camposUpdate[campo] = row[campo as keyof ArticleUpdateRow]
-          }
+    // ── 1. Bulk update de campos directos (upsert por id en batches de 200) ──
+    // Agrupa por sku→id y envía updates en batches paralelos
+    const updateBatch: Array<{ id: string; sku: string; campos: Record<string,any> }> = []
+    for (const { row, articulo } of paraActualizar) {
+      const camposUpdate: Record<string, any> = {}
+      for (const campo of CAMPOS_DIRECTOS) {
+        if (row[campo as keyof ArticleUpdateRow] !== undefined) {
+          camposUpdate[campo] = row[campo as keyof ArticleUpdateRow]
         }
-        // Resolver marca_codigo → marca_id
-        if (row.marca_codigo !== undefined) {
-          const marcaId = marcasMap.get(row.marca_codigo.trim().toUpperCase()) || null
-          camposUpdate["marca_id"] = marcaId
-        }
+      }
+      if (row.marca_codigo !== undefined) {
+        camposUpdate["marca_id"] = marcasMap.get(row.marca_codigo.trim().toUpperCase()) || null
+      }
+      if (Object.keys(camposUpdate).length > 0) {
+        updateBatch.push({ id: articulo!.id, sku: row.sku, campos: camposUpdate })
+      } else {
+        actualizados++ // sin cambios de campos directos, igual se cuenta
+      }
+    }
 
-        let articuloId: string
-
-        if (articulo) {
-          // Actualizar artículo existente
-          if (Object.keys(camposUpdate).length > 0) {
-            const { error } = await supabase
-              .from("articulos")
-              .update(camposUpdate)
-              .eq("id", articulo.id)
-
-            if (error) throw new Error(error.message)
-          }
-          articuloId = articulo.id
+    // Ejecutar updates en paralelo con batches de 50
+    const BATCH = 50
+    for (let i = 0; i < updateBatch.length; i += BATCH) {
+      const chunk = updateBatch.slice(i, i + BATCH)
+      const results = await Promise.allSettled(
+        chunk.map(({ id, campos }) =>
+          supabase.from("articulos").update(campos).eq("id", id)
+        )
+      )
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j]
+        if (r.status === "fulfilled" && !r.value.error) {
           actualizados++
         } else {
-          // Crear nuevo artículo
-          const { data: nuevo, error } = await supabase
-            .from("articulos")
-            .insert({
-              sku: row.sku.trim().toUpperCase(),
-              activo: true,
-              precio_compra: 0,
-              ...camposUpdate,
-            })
-            .select("id")
-            .single()
-
-          if (error || !nuevo) throw new Error(error?.message || "Error creando artículo")
-          articuloId = nuevo.id
-          nuevosCreados++
+          errores++
+          const msg = r.status === "rejected" ? r.reason?.message : (r.value.error?.message || "Error")
+          erroresDetalle.push({ sku: chunk[j].sku, error: msg })
         }
+      }
+    }
 
-        // Manejar descuentos tipados
-        for (const tipoDesc of ["comercial", "financiero", "promocional"] as const) {
-          const key = `descuento_${tipoDesc}` as keyof ArticleUpdateRow
-          if (row[key] === undefined) continue
+    // ── 2. Insert de artículos nuevos (también en batches) ──
+    for (let i = 0; i < paraNuevos.length; i += BATCH) {
+      const chunk = paraNuevos.slice(i, i + BATCH)
+      const results = await Promise.allSettled(
+        chunk.map(({ row }) => {
+          const camposUpdate: Record<string, any> = {}
+          for (const campo of CAMPOS_DIRECTOS) {
+            if (row[campo as keyof ArticleUpdateRow] !== undefined) {
+              camposUpdate[campo] = row[campo as keyof ArticleUpdateRow]
+            }
+          }
+          if (row.marca_codigo !== undefined) {
+            camposUpdate["marca_id"] = marcasMap.get(row.marca_codigo.trim().toUpperCase()) || null
+          }
+          return supabase.from("articulos").insert({
+            sku: row.sku.trim().toUpperCase(),
+            activo: true,
+            precio_compra: 0,
+            ...camposUpdate,
+          }).select("id").single()
+        })
+      )
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j]
+        if (r.status === "fulfilled" && !r.value.error && r.value.data) {
+          nuevosCreados++
+          // Guardar id del nuevo artículo para descuentos
+          ;(paraNuevos[i + j] as any).__newId = r.value.data.id
+        } else {
+          errores++
+          const msg = r.status === "rejected" ? r.reason?.message : (r.value.error?.message || "Error")
+          erroresDetalle.push({ sku: paraNuevos[i + j].row.sku, error: msg })
+        }
+      }
+    }
 
-          const nuevosDesc = parseDescuentos(row[key] as string)
-
-          // Eliminar descuentos anteriores del mismo tipo
-          await supabase
-            .from("articulos_descuentos")
-            .delete()
-            .eq("articulo_id", articuloId)
-            .eq("tipo", tipoDesc)
-
-          // Insertar nuevos
+    // ── 3. Descuentos tipados (solo para filas que los traen) ──
+    // Construir lista de operaciones de descuento
+    const descOps: Array<{ articuloId: string; tipoDesc: string; nuevosDesc: number[] }> = []
+    for (const { row, articulo } of rowsParaActualizar) {
+      const articuloId = articulo?.id || (row as any).__newId
+      if (!articuloId) continue
+      for (const tipoDesc of ["comercial", "financiero", "promocional"] as const) {
+        const key = `descuento_${tipoDesc}` as keyof ArticleUpdateRow
+        if (row[key] === undefined) continue
+        descOps.push({ articuloId, tipoDesc, nuevosDesc: parseDescuentos(row[key] as string) })
+      }
+    }
+    // Ejecutar en batches
+    for (let i = 0; i < descOps.length; i += BATCH) {
+      await Promise.allSettled(
+        descOps.slice(i, i + BATCH).map(async ({ articuloId, tipoDesc, nuevosDesc }) => {
+          await supabase.from("articulos_descuentos")
+            .delete().eq("articulo_id", articuloId).eq("tipo", tipoDesc)
           if (nuevosDesc.length > 0) {
             await supabase.from("articulos_descuentos").insert(
               nuevosDesc.map((pct, idx) => ({
-                articulo_id: articuloId,
-                tipo: tipoDesc,
-                porcentaje: pct,
-                orden: idx + 1,
-              })),
+                articulo_id: articuloId, tipo: tipoDesc, porcentaje: pct, orden: idx + 1,
+              }))
             )
           }
-        }
-      } catch (e: any) {
-        errores++
-        erroresDetalle.push({ sku: row.sku, error: e.message })
-      }
+        })
+      )
     }
 
     return NextResponse.json({
