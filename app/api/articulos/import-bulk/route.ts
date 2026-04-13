@@ -29,6 +29,7 @@ export interface ArticleUpdateRow {
   porcentaje_ganancia?: number
   precio_base?: number
   precio_base_contado?: number
+  descuento_propio?: number      // % ya incluido en el precio base, sólo para mostrar en comprobantes
   marca_codigo?: string          // se resuelve a marca_id antes de guardar
 }
 
@@ -50,6 +51,7 @@ const CAMPOS_DIRECTOS = [
   "porcentaje_ganancia",
   "precio_base",
   "precio_base_contado",
+  "descuento_propio",
 ] as const
 
 type CampoDirecto = typeof CAMPOS_DIRECTOS[number]
@@ -110,7 +112,8 @@ export async function POST(request: NextRequest) {
         .from("articulos")
         .select(`
           id, sku, descripcion, ean13, unidades_por_bulto,
-          precio_compra, porcentaje_ganancia, precio_base, precio_base_contado, marca_id
+          precio_compra, porcentaje_ganancia, precio_base, precio_base_contado,
+          descuento_propio, marca_id
         `)
         .in("sku", chunk)
 

@@ -52,10 +52,12 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "descuento_financiero",  label: "Descuento financiero",       aliases: ["dfinan", "descfinanciero", "financiero", "d2"] },
   { id: "descuento_promocional", label: "Descuento promocional",      aliases: ["dpromo", "descpromocional", "promocional", "promo", "d3"] },
   { id: "porcentaje_ganancia",   label: "% Ganancia / Margen",        aliases: ["ganancia", "margen", "margin", "margin%", "pctgan", "utilidad"] },
-  { id: "precio_base_contado",   label: "Precio base contado",        aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
-  { id: "precio_base",           label: "Precio base (cta cte)",      aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
-  { id: "marca_codigo",          label: "Marca (código)",             aliases: ["marca", "brand", "codigomarca", "marcacod"] },
-  { id: "__skip__",              label: "— No importar —",            aliases: [] },
+  { id: "precio_base_contado",   label: "Precio base contado",             aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
+  { id: "precio_base",           label: "Precio base (cta cte)",           aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
+  { id: "descripcion_oferta",    label: "Descripción + % oferta (combinado)", aliases: ["descoferta", "descuento", "oferta", "producto"] },
+  { id: "descuento_propio",      label: "% Oferta / Dto. propio",          aliases: ["descuentopropio", "pctoferta", "dtopio"] },
+  { id: "marca_codigo",          label: "Marca (código)",                  aliases: ["marca", "brand", "codigomarca", "marcacod"] },
+  { id: "__skip__",              label: "— No importar —",                 aliases: [] },
 ]
 
 const SKIP_ID = "__skip__"
@@ -190,16 +192,27 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     return null
   }
 
+  // Regex para detectar "Texto (15%)" — captura descripción y porcentaje
+  const OFERTA_RE = /^(.*?)\s*\(\s*(\d+(?:[.,]\d+)?)\s*%\s*\)\s*$/
+
   /** Convierte las filas de Excel al formato ArticleUpdateRow según el mapeo */
   function buildRows(): any[] {
     const colIndexMap: Record<string, number> = {}
+    let descOfertaIdx: number | null = null   // columna mapeada como "descripcion_oferta"
+
     headers.forEach((h, i) => {
       const mapping = mappings.find(m => m.excelCol === h)
-      if (mapping && mapping.dbField !== SKIP_ID) {
-        // Usar la posición original en el Excel, no el índice del array filtrado
+      if (!mapping || mapping.dbField === SKIP_ID) return
+      if (mapping.dbField === "descripcion_oferta") {
+        descOfertaIdx = headerColIndices[i]
+      } else {
         colIndexMap[mapping.dbField] = headerColIndices[i]
       }
     })
+
+    // Campos que admiten 0 como valor válido
+    const NUMERIC_GT0  = ["unidades_por_bulto","precio_compra","porcentaje_ganancia","precio_base","precio_base_contado"]
+    const NUMERIC_GTE0 = ["descuento_propio"]
 
     return excelRows
       .filter(row => {
@@ -208,17 +221,39 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
       })
       .map(row => {
         const obj: Record<string, any> = {}
+
+        // Campos mapeados normalmente
         for (const [field, idx] of Object.entries(colIndexMap)) {
           const val = row[idx]
           if (val === "" || val === undefined || val === null) continue
-          // Campos numéricos
-          if (["unidades_por_bulto", "precio_compra", "porcentaje_ganancia", "precio_base", "precio_base_contado"].includes(field)) {
+          if (NUMERIC_GT0.includes(field)) {
             const n = parseFloat(String(val).replace(",", "."))
             if (!isNaN(n) && n > 0) obj[field] = n
+          } else if (NUMERIC_GTE0.includes(field)) {
+            const n = parseFloat(String(val).replace(",", "."))
+            if (!isNaN(n) && n >= 0) obj[field] = n
           } else {
             obj[field] = String(val).trim()
           }
         }
+
+        // Columna combinada "Descripción + % oferta"
+        if (descOfertaIdx !== null) {
+          const raw = String(row[descOfertaIdx] ?? "").trim()
+          if (raw) {
+            const m = raw.match(OFERTA_RE)
+            if (m) {
+              const desc = m[1].trim()
+              if (desc) obj["descripcion"] = desc
+              obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
+            } else {
+              // Sin porcentaje → toda la celda es descripción, descuento = 0
+              obj["descripcion"] = raw
+              obj["descuento_propio"] = 0
+            }
+          }
+        }
+
         return obj
       })
       .filter(r => r.sku)
@@ -232,20 +267,36 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
 
     try {
       const rows = buildRows()
+      console.log("[import] buildRows →", rows.length, "filas válidas", rows.slice(0,3))
       if (rows.length === 0) { setError("No se encontraron filas válidas con SKU."); setLoading(false); return }
 
-      const res = await fetch("/api/articulos/import-bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, dry_run: true }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Error en preview")
+      console.log("[import] enviando preview al servidor...")
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 55_000)
+      let res: Response
+      try {
+        res = await fetch("/api/articulos/import-bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows, dry_run: true }),
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(timeout)
+      }
+      console.log("[import] respuesta preview:", res.status, res.statusText)
+      const text = await res.text()
+      let data: any
+      try { data = JSON.parse(text) } catch { throw new Error(`Respuesta no válida (${res.status}): ${text.slice(0, 200)}`) }
+      if (!res.ok) throw new Error(data.error || `Error ${res.status}: ${text.slice(0, 200)}`)
+      console.log("[import] preview ok:", data.total_filas, "filas,", data.cambios_totales, "cambios")
 
       setPreview(data)
       setStep("preview")
     } catch (err: any) {
-      setError(err.message)
+      const msg = err.name === "AbortError" ? "Timeout: el servidor tardó más de 55 segundos" : err.message
+      console.error("[import] error preview:", msg)
+      setError(msg)
     } finally {
       setLoading(false)
     }

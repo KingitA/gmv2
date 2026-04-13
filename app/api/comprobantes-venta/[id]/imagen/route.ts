@@ -62,7 +62,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         *,
         articulos (
           descripcion,
-          sku
+          sku,
+          descuento_propio
         )
       `)
       .eq("comprobante_id", comprobanteId)
@@ -114,17 +115,33 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
     REV: "REVERSA",
   } as Record<string, string>)[comprobante.tipo_comprobante]
 
+  const hayDescuentos = comprobante.detalle?.some((i: any) => (i.articulos?.descuento_propio || 0) > 0)
+
+  const fmtARS = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
   const detalleHTML = comprobante.detalle
     ?.map(
-      (item: any, index: number) => `
+      (item: any) => {
+        const dto = Number(item.articulos?.descuento_propio || 0)
+        const precioFinal = Number(item.precio_unitario || 0)
+        // Si tiene descuento propio, el precio "de lista" es el que se muestra inflado
+        // precio_lista = precio_final * 100 / (100 - dto)
+        const precioLista = dto > 0 ? precioFinal * 100 / (100 - dto) : precioFinal
+        return `
     <tr style="border-bottom: 1px solid #e5e7eb;">
       <td style="padding: 8px; text-align: center;">${item.articulos?.sku || "-"}</td>
       <td style="padding: 8px;">${item.articulos?.descripcion || item.descripcion}</td>
       <td style="padding: 8px; text-align: center;">${item.cantidad}</td>
-      <td style="padding: 8px; text-align: right;">$${item.precio_unitario?.toFixed(2)}</td>
-      <td style="padding: 8px; text-align: right; font-weight: 600;">$${item.precio_total?.toFixed(2)}</td>
-    </tr>
-  `,
+      ${hayDescuentos ? `
+      <td style="padding: 8px; text-align: right; color: #6b7280; text-decoration: ${dto > 0 ? "line-through" : "none"};">$${fmtARS(precioLista)}</td>
+      <td style="padding: 8px; text-align: center; color: #dc2626; font-weight: 600;">${dto > 0 ? dto + "%" : "—"}</td>
+      <td style="padding: 8px; text-align: right; font-weight: 700;">$${fmtARS(precioFinal)}</td>
+      ` : `
+      <td style="padding: 8px; text-align: right; font-weight: 600;">$${fmtARS(precioFinal)}</td>
+      `}
+      <td style="padding: 8px; text-align: right; font-weight: 600;">$${fmtARS(Number(item.precio_total || 0))}</td>
+    </tr>`
+      },
     )
     .join("")
 
@@ -369,9 +386,15 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
       <thead>
         <tr>
           <th style="width: 10%; text-align: center;">Código</th>
-          <th style="width: 40%;">Descripción</th>
-          <th style="width: 10%; text-align: center;">Cantidad</th>
+          <th style="width: ${hayDescuentos ? "30%" : "40%"};">Descripción</th>
+          <th style="width: 8%; text-align: center;">Cantidad</th>
+          ${hayDescuentos ? `
+          <th style="width: 13%; text-align: right;">P. Lista</th>
+          <th style="width: 7%; text-align: center;">Dto.</th>
+          <th style="width: 13%; text-align: right;">P. c/Dto.</th>
+          ` : `
           <th style="width: 15%; text-align: right;">Precio Unit.</th>
+          `}
           <th style="width: 15%; text-align: right;">Subtotal</th>
         </tr>
       </thead>
