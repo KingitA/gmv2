@@ -45,7 +45,7 @@ interface DbFieldDef {
 const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "sku",                   label: "SKU / Código",               aliases: ["sku", "codigo", "cod", "code"] },
   { id: "ean13",                 label: "EAN / Código de barras",     aliases: ["ean", "ean13", "barcode", "barra", "codbar"] },
-  { id: "descripcion",           label: "Descripción",                aliases: ["descripcion", "descripción", "nombre", "detalle", "articulo", "artículo", "name"] },
+  { id: "descripcion",           label: "Descripción (auto-quita % oferta al final)", aliases: ["descripcion", "descripción", "nombre", "detalle", "articulo", "artículo", "name", "item"] },
   { id: "unidades_por_bulto",    label: "Unidades por bulto",         aliases: ["bulto", "unidadesbulto", "unidadesxbulto", "xbulto", "porb", "cant"] },
   { id: "precio_compra",         label: "Precio de compra / costo",   aliases: ["compra", "costo", "cost", "preciocompra", "preciocosto"] },
   { id: "descuento_comercial",   label: "Descuento comercial",        aliases: ["dcomer", "desccomercial", "descuento", "desc", "dto", "d1"] },
@@ -54,8 +54,7 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "porcentaje_ganancia",   label: "% Ganancia / Margen",        aliases: ["ganancia", "margen", "margin", "margin%", "pctgan", "utilidad"] },
   { id: "precio_base_contado",   label: "Precio base contado",             aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
   { id: "precio_base",           label: "Precio base (cta cte)",           aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
-  { id: "descripcion_oferta",    label: "Descripción + % oferta (combinado)", aliases: ["descoferta", "descuento", "oferta", "producto"] },
-  { id: "descuento_propio",      label: "% Oferta / Dto. propio",          aliases: ["descuentopropio", "pctoferta", "dtopio"] },
+  { id: "descuento_propio",      label: "% Oferta / Dto. propio (extrae de 'Texto (15%)')", aliases: ["descuentopropio", "pctoferta", "dtopio", "oferta"] },
   { id: "marca_codigo",          label: "Marca (código)",                  aliases: ["marca", "brand", "codigomarca", "marcacod"] },
   { id: "__skip__",              label: "— No importar —",                 aliases: [] },
 ]
@@ -192,27 +191,24 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     return null
   }
 
-  // Regex para detectar "Texto (15%)" — captura descripción y porcentaje
+  /**
+   * Regex para detectar SOLO el formato "(XX%)" al FINAL de la celda.
+   * Solo matchea si está entre paréntesis y tiene signo %.
+   * NO matchea: "algodon 500", "60x70", números sueltos.
+   */
   const OFERTA_RE = /^(.*?)\s*\(\s*(\d+(?:[.,]\d+)?)\s*%\s*\)\s*$/
 
   /** Convierte las filas de Excel al formato ArticleUpdateRow según el mapeo */
   function buildRows(): any[] {
     const colIndexMap: Record<string, number> = {}
-    let descOfertaIdx: number | null = null   // columna mapeada como "descripcion_oferta"
 
     headers.forEach((h, i) => {
       const mapping = mappings.find(m => m.excelCol === h)
       if (!mapping || mapping.dbField === SKIP_ID) return
-      if (mapping.dbField === "descripcion_oferta") {
-        descOfertaIdx = headerColIndices[i]
-      } else {
-        colIndexMap[mapping.dbField] = headerColIndices[i]
-      }
+      colIndexMap[mapping.dbField] = headerColIndices[i]
     })
 
-    // Campos que admiten 0 como valor válido
-    const NUMERIC_GT0  = ["unidades_por_bulto","precio_compra","porcentaje_ganancia","precio_base","precio_base_contado"]
-    const NUMERIC_GTE0 = ["descuento_propio"]
+    const NUMERIC_GT0 = ["unidades_por_bulto","precio_compra","porcentaje_ganancia","precio_base","precio_base_contado"]
 
     return excelRows
       .filter(row => {
@@ -222,35 +218,36 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
       .map(row => {
         const obj: Record<string, any> = {}
 
-        // Campos mapeados normalmente
         for (const [field, idx] of Object.entries(colIndexMap)) {
           const val = row[idx]
           if (val === "" || val === undefined || val === null) continue
-          if (NUMERIC_GT0.includes(field)) {
-            const n = parseFloat(String(val).replace(",", "."))
-            if (!isNaN(n) && n > 0) obj[field] = n
-          } else if (NUMERIC_GTE0.includes(field)) {
-            const n = parseFloat(String(val).replace(",", "."))
-            if (!isNaN(n) && n >= 0) obj[field] = n
-          } else {
-            obj[field] = String(val).trim()
-          }
-        }
+          const str = String(val).trim()
 
-        // Columna combinada "Descripción + % oferta"
-        if (descOfertaIdx !== null) {
-          const raw = String(row[descOfertaIdx] ?? "").trim()
-          if (raw) {
-            const m = raw.match(OFERTA_RE)
-            if (m) {
-              const desc = m[1].trim()
-              if (desc) obj["descripcion"] = desc
-              obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
+          if (NUMERIC_GT0.includes(field)) {
+            // Numérico estricto > 0
+            const n = parseFloat(str.replace(",", "."))
+            if (!isNaN(n) && n > 0) obj[field] = n
+
+          } else if (field === "descripcion") {
+            // Siempre guarda la descripción, pero QUITA el "(XX%)" del final si existe
+            const m = str.match(OFERTA_RE)
+            const desc = m ? m[1].trim() : str
+            if (desc) obj["descripcion"] = desc
+
+          } else if (field === "descuento_propio") {
+            // Si la celda es "Texto (15%)" → extrae 15
+            // Si la celda es "15" o "15.0" → usa ese número
+            // Si la celda es texto sin porcentaje (ej: "Blanco") → 0
+            const mPct = str.match(OFERTA_RE)
+            if (mPct) {
+              obj["descuento_propio"] = parseFloat(mPct[2].replace(",", "."))
             } else {
-              // Sin porcentaje → toda la celda es descripción, descuento = 0
-              obj["descripcion"] = raw
-              obj["descuento_propio"] = 0
+              const n = parseFloat(str.replace(",", "."))
+              obj["descuento_propio"] = !isNaN(n) && n >= 0 ? n : 0
             }
+
+          } else {
+            obj[field] = str
           }
         }
 
