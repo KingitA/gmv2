@@ -7,7 +7,7 @@ export async function searchProductos(searchTerm: string) {
   const supabase = createAdminClient()
   const term = searchTerm?.trim() || ""
 
-  const SELECT = "id, sku, sigla, ean13, descripcion, rubro, categoria, stock_actual, precio_compra, unidades_por_bulto, unidad_medida, activo"
+  const SELECT = "id, sku, ean13, descripcion, rubro, categoria, precio_compra, precio_base, unidades_por_bulto, activo"
 
   if (!term) {
     const { data, error } = await supabase
@@ -25,7 +25,7 @@ export async function searchProductos(searchTerm: string) {
       .from("articulos")
       .select(SELECT)
       .eq("activo", true)
-      .or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%,ean13.ilike.%${term}%,sigla.ilike.%${term}%`)
+      .or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%,ean13.ilike.%${term}%`)
       .order("descripcion")
       .limit(50),
     searchProductsByVector(term, 0.35, 50),

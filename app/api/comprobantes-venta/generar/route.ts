@@ -20,23 +20,22 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { pedido_id, pago_contado } = body
 
-    // ─── 1. Obtener pedido con cliente, detalles y artículos ───
+    // ─── 1. Obtener pedido con cliente y detalles ───
+    // Prices are already stored in pedidos_detalle (calculated when the order was created).
+    // precio_final = precio al cliente (IVA incluido for presupuesto, net for factura)
+    // precio_base  = precio neto antes de IVA
     const { data: pedido, error: pedidoError } = await supabase
       .from("pedidos")
       .select(`
         *,
         cliente:clientes!pedidos_cliente_id_fkey(
           id, nombre_razon_social, condicion_iva, metodo_facturacion,
-          cuit, direccion, exento_iva, lista_precio_id, descuento_especial
+          cuit, direccion, exento_iva
         ),
         detalle:pedidos_detalle(
-          id, articulo_id, cantidad,
+          id, articulo_id, cantidad, precio_final, precio_base,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
-            id, descripcion, sku, precio_compra, precio_base,
-            descuento1, descuento2, descuento3, descuento4,
-            porcentaje_ganancia, categoria, rubro,
-            iva_compras, iva_ventas,
-            proveedor:proveedores!articulos_proveedor_id_fkey(tipo_descuento)
+            id, descripcion, sku, iva_ventas
           )
         )
       `)
@@ -47,56 +46,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 })
     }
 
-    // Obtener descuentos tipados para todos los artículos del pedido
-    const articuloIds = pedido.detalle.map((d: any) => d.articulo_id).filter(Boolean)
-    const { data: descuentosDB } = await supabase
-      .from("articulos_descuentos")
-      .select("articulo_id, tipo, porcentaje, orden")
-      .in("articulo_id", articuloIds)
-      .order("orden")
-
-    const descuentosPorArticulo: Record<string, DescuentoTipado[]> = {}
-    for (const d of (descuentosDB || [])) {
-      if (!descuentosPorArticulo[d.articulo_id]) descuentosPorArticulo[d.articulo_id] = []
-      descuentosPorArticulo[d.articulo_id].push({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden })
-    }
-
-    // ─── 2. Obtener lista de precio del cliente ───
-    let listaDatos: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }
-    if (pedido.cliente.lista_precio_id) {
-      const { data: lista } = await supabase
-        .from("listas_precio")
-        .select("*")
-        .eq("id", pedido.cliente.lista_precio_id)
-        .single()
-      if (lista) {
-        listaDatos = {
-          recargo_limpieza_bazar: lista.recargo_limpieza_bazar || 0,
-          recargo_perfumeria_negro: lista.recargo_perfumeria_negro || 0,
-          recargo_perfumeria_blanco: lista.recargo_perfumeria_blanco || 0,
-        }
-      }
-    }
-
-    // ─── 3. Determinar método de facturación ───
-    // Prioridad: override del pedido > default del cliente
+    // ─── 2. Determinar método de facturación ───
     const metodoRaw = pedido.metodo_facturacion_pedido || pedido.cliente.metodo_facturacion || "Final"
     const metodoFacturacion: MetodoFacturacion =
-      metodoRaw === "Factura" ? "Factura" :
+      metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "Factura" :
       metodoRaw === "Presupuesto" ? "Presupuesto" : "Final"
 
-    const descuentoCliente = pedido.cliente.descuento_especial || 0
-
-    // ─── 4. Calcular precios para cada item ───
+    // ─── 3. Build items using stored prices ───
+    // precio_final = lo que el cliente paga (IVA incluido en presupuesto, neto en factura)
+    // Para factura A: discriminamos IVA retrocalculando desde el precio almacenado.
     type ItemCalculado = {
       detalle_id: string
       articulo_id: string
       descripcion: string
       sku: string
       cantidad: number
-      precioUnitario: number       // precio que se muestra al cliente
-      precioAntesIva: number       // neto antes de IVA
-      ivaUnitario: number          // IVA por unidad (discriminado, 0 si incluido)
+      precioUnitario: number    // precio en la línea del comprobante
+      precioAntesIva: number    // neto (= precioUnitario para factura)
+      ivaUnitario: number       // IVA por unidad
       ivaIncluido: boolean
       subtotalNeto: number
       subtotalIva: number
@@ -105,15 +72,42 @@ export async function POST(request: Request) {
       vaEnComprobante: "factura" | "presupuesto"
     }
 
-    const itemsCalculados: ItemCalculado[] = []
+    const IVA_RATE = 0.21
 
+    const itemsCalculados: ItemCalculado[] = []
     for (const det of pedido.detalle) {
       const art = det.articulo
       if (!art) continue
 
-      const datosArticulo = articuloToDatosArticulo(art, descuentosPorArticulo[det.articulo_id])
+      const esPresupuesto = art.iva_ventas === "presupuesto" || metodoFacturacion === "Presupuesto"
+      const vaEnComprobante: "factura" | "presupuesto" =
+        metodoFacturacion === "Presupuesto" ? "presupuesto" :
+        metodoFacturacion === "Factura"     ? "factura"     :
+        esPresupuesto ? "presupuesto" : "factura"
 
-      const resultado = calcularPrecioFinal(datosArticulo, listaDatos, metodoFacturacion, descuentoCliente)
+      // precio_final stored = precio al cliente (with IVA for presupuesto, net for factura)
+      const precioAlCliente = det.precio_final || 0
+
+      let precioUnitario: number
+      let ivaUnitario: number
+      let ivaIncluido: boolean
+
+      if (vaEnComprobante === "factura") {
+        // Factura A: line shows net, IVA discriminated at bottom
+        // precio_final stored is already the net (set by calcularPrecioPedido)
+        precioUnitario = precioAlCliente
+        ivaUnitario    = round2(precioAlCliente * IVA_RATE)
+        ivaIncluido    = false
+      } else {
+        // Presupuesto: line shows full price with IVA included
+        precioUnitario = precioAlCliente
+        ivaUnitario    = 0
+        ivaIncluido    = true
+      }
+
+      const subtotalNeto  = round2(precioUnitario * det.cantidad)
+      const subtotalIva   = round2(ivaUnitario * det.cantidad)
+      const subtotalFinal = round2(subtotalNeto + subtotalIva)
 
       itemsCalculados.push({
         detalle_id: det.id,
@@ -121,30 +115,26 @@ export async function POST(request: Request) {
         descripcion: art.descripcion || "",
         sku: art.sku || "",
         cantidad: det.cantidad,
-        precioUnitario: resultado.precioUnitarioFinal,
-        precioAntesIva: resultado.precioAntesIva,
-        ivaUnitario: resultado.montoIvaDiscriminado,
-        ivaIncluido: resultado.ivaIncluido,
-        subtotalNeto: round2(resultado.precioUnitarioFinal * det.cantidad),
-        subtotalIva: round2(resultado.montoIvaDiscriminado * det.cantidad),
-        subtotalFinal: round2(
-          resultado.ivaIncluido
-            ? resultado.precioUnitarioFinal * det.cantidad
-            : (resultado.precioUnitarioFinal + resultado.montoIvaDiscriminado) * det.cantidad
-        ),
-        descNegroAplicado: resultado.descuentoNegroEnFacturaPct > 0,
-        vaEnComprobante: resultado.vaEnComprobante,
+        precioUnitario,
+        precioAntesIva: precioUnitario,
+        ivaUnitario,
+        ivaIncluido,
+        subtotalNeto,
+        subtotalIva,
+        subtotalFinal,
+        descNegroAplicado: false,
+        vaEnComprobante,
       })
     }
 
-    // ─── 5. Agrupar items por tipo de comprobante ───
+    // ─── 4. Agrupar items por tipo de comprobante ───
     const itemsFactura = itemsCalculados.filter(i => i.vaEnComprobante === "factura")
     const itemsPresupuesto = itemsCalculados.filter(i => i.vaEnComprobante === "presupuesto")
 
     const comprobantesGenerados = []
     const tipoFactura = determinarTipoFactura(pedido.cliente.condicion_iva)
 
-    // ─── 6. Generar comprobantes ───
+    // ─── 5. Generar comprobantes ───
     if (itemsFactura.length > 0) {
       const resultado = await generarComprobante(supabase, pedido, itemsFactura, tipoFactura)
       comprobantesGenerados.push(resultado)
@@ -155,21 +145,8 @@ export async function POST(request: Request) {
       comprobantesGenerados.push(resultado)
     }
 
-    // ─── 7. Actualizar pedidos_detalle con los precios calculados ───
-    for (const item of itemsCalculados) {
-      await supabase
-        .from("pedidos_detalle")
-        .update({
-          precio_final: item.precioUnitario,
-          precio_base: item.precioAntesIva,
-          subtotal: item.subtotalNeto,
-        })
-        .eq("id", item.detalle_id)
-    }
-
-    // Actualizar total del pedido
+    // ─── 6. Actualizar total del pedido ───
     const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
-    await supabase.from("pedidos").update({ total: round2(totalPedido) }).eq("id", pedido_id)
 
     // ─── 8. Generar bonificación pago contado si corresponde ───
     let bonificacion = null

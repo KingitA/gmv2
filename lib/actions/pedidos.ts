@@ -5,13 +5,44 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
 import { getNextOrderNumber } from "@/lib/utils/next-order-number"
 import { nowArgentina } from "@/lib/utils"
+import { calcularPrecioPedido } from "@/lib/pricing/calcular-precio-pedido"
+import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/pricing/calculator"
+
+// ─── Helper: fetch lista + metodo and calculate price for one articulo ────────
+async function fetchListaYMetodo(
+  supabase: any,
+  clienteInfo: any,
+  metodo_facturacion_pedido?: string,
+  lista_precio_pedido_id?: string,
+): Promise<{ listaDatos: DatosLista; metodo: MetodoFacturacion; descuentoCliente: number }> {
+  const listaId = lista_precio_pedido_id || clienteInfo.lista_precio_id
+  let listaDatos: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }
+  if (listaId) {
+    const { data: lista } = await supabase.from("listas_precio").select("recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_blanco").eq("id", listaId).single()
+    if (lista) listaDatos = { recargo_limpieza_bazar: lista.recargo_limpieza_bazar || 0, recargo_perfumeria_negro: lista.recargo_perfumeria_negro || 0, recargo_perfumeria_blanco: lista.recargo_perfumeria_blanco || 0 }
+  }
+  const metodoRaw = metodo_facturacion_pedido || clienteInfo.metodo_facturacion || "Final"
+  const metodo: MetodoFacturacion = metodoRaw === "Factura (21% IVA)" ? "Factura" : metodoRaw === "Presupuesto" ? "Presupuesto" : "Final"
+  const descuentoCliente = clienteInfo.descuento_especial || 0
+  return { listaDatos, metodo, descuentoCliente }
+}
+
+async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
+  const [{ data: articulo }, { data: descuentosDB }] = await Promise.all([
+    supabase.from("articulos").select("id,precio_compra,precio_base,precio_base_contado,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
+    supabase.from("articulos_descuentos").select("tipo,porcentaje,orden").eq("articulo_id", productoId).order("orden"),
+  ])
+  if (!articulo) throw new Error("Artículo no encontrado")
+  const descuentos: DescuentoTipado[] = (descuentosDB || []).map((d: any) => ({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden }))
+  return { ...articulo, descuentos }
+}
 
 export async function createPedido(data: {
   cliente_id: string
   items: Array<{
     producto_id: string
     cantidad: number
-    precio_unitario: number
+    precio_unitario: number  // ignored — price is always calculated from lista/metodo
     descuento: number
   }>
   observaciones?: string
@@ -21,110 +52,77 @@ export async function createPedido(data: {
 }) {
   const supabase = await createClient()
 
-  // Get current user
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
+  const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error("No autenticado")
 
-  // Simple check: user must be logged in. No strict role gates as per user request.
-  // We'll use the client's assigned salesperson.
-
-  // Permissions handled above. Anyone authenticated can create.
-
-  // Generate order number (numeric-only)
   const numeroPedido = await getNextOrderNumber(supabase)
 
-  // Calculate totals
-  let subtotal = 0
-  const itemsWithSubtotal = data.items.map((item) => {
-    const itemSubtotal = item.cantidad * item.precio_unitario * (1 - item.descuento / 100)
-    subtotal += itemSubtotal
-    return {
-      ...item,
-      subtotal: itemSubtotal,
-    }
-  })
-
-  // Get client info for IVA calculation
-  const { data: clienteInfo } = await supabase.from("clientes").select("*").eq("id", data.cliente_id).single()
-
+  const { data: clienteInfo } = await supabase
+    .from("clientes")
+    .select("id,vendedor_id,metodo_facturacion,lista_precio_id,descuento_especial,aplica_percepciones")
+    .eq("id", data.cliente_id)
+    .single()
   if (!clienteInfo) throw new Error("Cliente no encontrado")
 
-  // Calculate IVA (21% for most cases)
-  const iva = clienteInfo.condicion_iva === "responsable_inscripto" ? 0 : subtotal * 0.21
+  const { listaDatos, metodo, descuentoCliente } = await fetchListaYMetodo(
+    supabase, clienteInfo, data.metodo_facturacion_pedido, data.lista_precio_pedido_id
+  )
 
-  // Calculate percepciones (3% if applicable)
-  const percepciones = clienteInfo.aplica_percepciones ? subtotal * 0.03 : 0
+  // ── Calculate real price for each item ──────────────────────────────────
+  type ItemCalc = {
+    producto_id: string; cantidad: number
+    precioAlCliente: number; precioNeto: number; precio_costo: number
+  }
+  const itemsCalc: ItemCalc[] = []
+  for (const item of data.items) {
+    const articulo = await fetchArticuloConDescuentos(supabase, item.producto_id)
+    const precio = calcularPrecioPedido(articulo, listaDatos, metodo, descuentoCliente)
+    itemsCalc.push({
+      producto_id: item.producto_id,
+      cantidad: item.cantidad,
+      precioAlCliente: precio.precioAlCliente,
+      precioNeto: precio.precioNeto,
+      precio_costo: articulo.precio_compra || 0,
+    })
+  }
 
-  // Flete (can be calculated based on zone, for now 0)
-  const flete = 0
-
-  const total = subtotal + iva + percepciones + flete
-
-  // Create pedido
-  console.log("Inserting into 'pedidos'...", {
-    numero_pedido: numeroPedido,
-    cliente_id: data.cliente_id,
-    vendedor_id: clienteInfo.vendedor_id,
-  })
+  const total = Math.round(itemsCalc.reduce((s, i) => s + i.precioAlCliente * i.cantidad, 0) * 100) / 100
+  const percepciones = clienteInfo.aplica_percepciones ? Math.round(total * 0.03 * 100) / 100 : 0
 
   const { data: pedido, error: pedidoError } = await supabase
     .from("pedidos")
     .insert({
       numero_pedido: numeroPedido,
       cliente_id: data.cliente_id,
-      vendedor_id: clienteInfo.vendedor_id, // Assigned vendor from client
+      vendedor_id: clienteInfo.vendedor_id,
       fecha: nowArgentina(),
       estado: "pendiente",
-      subtotal,
+      subtotal: total,
       descuento_general: 0,
       ...(data.metodo_facturacion_pedido ? { metodo_facturacion_pedido: data.metodo_facturacion_pedido } : {}),
       ...(data.lista_precio_pedido_id ? { lista_precio_pedido_id: data.lista_precio_pedido_id } : {}),
-      total_flete: flete,
-      total_impuestos: iva + percepciones,
-      total: total,
+      total_flete: 0,
+      total_impuestos: percepciones,
+      total: Math.round((total + percepciones) * 100) / 100,
       observaciones: data.observaciones,
     })
     .select()
     .single()
 
-  if (pedidoError) {
-    console.error("Error inserting into 'pedidos' (possible FK mismatch):", pedidoError)
-    throw pedidoError
-  }
-  console.log("Pedido created successfully:", pedido.id)
+  if (pedidoError) throw pedidoError
 
-  // Create pedido items
-  for (const item of itemsWithSubtotal) {
-    const precioFinal = item.precio_unitario * (1 - item.descuento / 100)
-
-    // Fetch prices from articulos to avoid 23502 (NOT NULL constraints)
-    const { data: articulo } = await supabase
-      .from("articulos")
-      .select("precio_compra, ultimo_costo")
-      .eq("id", item.producto_id)
-      .single()
-
-    console.log(`Inserting item into 'pedidos_detalle' for product ${item.producto_id}...`)
-
+  for (const item of itemsCalc) {
     const { error: itemError } = await supabase.from("pedidos_detalle").insert({
       pedido_id: pedido.id,
       articulo_id: item.producto_id,
       cantidad: item.cantidad,
-      precio_base: articulo?.precio_compra || item.precio_unitario || 0, // Mandatory
-      precio_final: precioFinal,
-      subtotal: item.subtotal,
-      precio_costo: articulo?.ultimo_costo || articulo?.precio_compra || 0 // Mandatory
+      precio_base: item.precioNeto,
+      precio_final: item.precioAlCliente,
+      subtotal: Math.round(item.precioAlCliente * item.cantidad * 100) / 100,
+      precio_costo: item.precio_costo,
     })
-
-    if (itemError) {
-      console.error("Error inserting into 'pedidos_detalle':", itemError)
-      throw itemError
-    }
+    if (itemError) throw itemError
   }
-  console.log("All items inserted successfully")
 
   // Create account movement and update balance
   console.log("Updating account movements...")
@@ -357,25 +355,30 @@ export async function agregarItemPedido(
   const supabase = await createClient()
   await assertPedidoEditable(supabase, pedidoId)
 
-  const { data: articulo, error: artError } = await supabase
-    .from("articulos")
-    .select("precio_compra, ultimo_costo, precio_venta")
-    .eq("id", productoId)
+  // Fetch pedido to get lista + metodo + cliente
+  const { data: pedido } = await supabase
+    .from("pedidos")
+    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,descuento_especial,aplica_percepciones)")
+    .eq("id", pedidoId)
     .single()
+  if (!pedido) throw new Error("Pedido no encontrado")
 
-  if (artError || !articulo) throw new Error("Artículo no encontrado")
+  const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
+  const { listaDatos, metodo, descuentoCliente } = await fetchListaYMetodo(
+    supabase, clienteInfo, pedido.metodo_facturacion_pedido, pedido.lista_precio_pedido_id
+  )
 
-  const precioBase = articulo.precio_compra || 0
-  const precioFinal = articulo.precio_venta || precioBase
+  const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
+  const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, descuentoCliente)
 
   const { error } = await supabase.from("pedidos_detalle").insert({
     pedido_id: pedidoId,
     articulo_id: productoId,
     cantidad,
-    precio_base: precioBase,
-    precio_final: precioFinal,
-    subtotal: precioFinal * cantidad,
-    precio_costo: articulo.ultimo_costo || precioBase,
+    precio_base: precio.precioNeto,
+    precio_final: precio.precioAlCliente,
+    subtotal: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
+    precio_costo: articuloConDescuentos.precio_compra || 0,
   })
 
   if (error) throw error
