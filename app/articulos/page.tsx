@@ -32,6 +32,7 @@ const BASE_COLS = [
   { id:"marca",  label:"Marca",        dw:90,  mw:60  },
   { id:"cat",    label:"Categoría",    dw:100, mw:60  },
   { id:"subcat", label:"Subcategoría", dw:100, mw:60  },
+  { id:"oferta", label:"Oferta",       dw:60,  mw:45  },
 ]
 const COMPRAS_COLS = [
   { id:"plista",  label:"P. Lista",    dw:90,  mw:60 },
@@ -528,6 +529,7 @@ export default function ArticulosPage() {
                     {isVis("marca")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.marca,maxWidth:cw.marca}}><span className="text-[10px] text-slate-500 truncate block">{a.marca?.descripcion||"—"}</span></td>}
                     {isVis("cat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.cat,maxWidth:cw.cat}}><span className="text-[10px] text-slate-500 truncate block">{a.categoria||"—"}</span></td>}
                     {isVis("subcat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.subcat,maxWidth:cw.subcat}}><span className="text-[10px] text-slate-500 truncate block">{a.subcategoria||"—"}</span></td>}
+                    {isVis("oferta")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.oferta,maxWidth:cw.oferta}}>{a.descuento_propio>0?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700">{a.descuento_propio}%</span>:<span className="text-[10px] text-slate-300">—</span>}</td>}
 
                     {/* ── Compras cells ── */}
                     {mode==="compras"&&<>
