@@ -57,12 +57,12 @@ export async function createPedido(data: {
 
   const numeroPedido = await getNextOrderNumber(supabase)
 
-  const { data: clienteInfo } = await supabase
+  const { data: clienteInfo, error: clienteError } = await supabase
     .from("clientes")
-    .select("id,vendedor_id,metodo_facturacion,lista_precio_id,descuento_especial,aplica_percepciones")
+    .select("id,vendedor_id,metodo_facturacion,lista_precio_id")
     .eq("id", data.cliente_id)
     .single()
-  if (!clienteInfo) throw new Error("Cliente no encontrado")
+  if (clienteError || !clienteInfo) throw new Error(`Cliente no encontrado: ${clienteError?.message || data.cliente_id}`)
 
   const { listaDatos, metodo, descuentoCliente } = await fetchListaYMetodo(
     supabase, clienteInfo, data.metodo_facturacion_pedido, data.lista_precio_pedido_id
@@ -87,7 +87,7 @@ export async function createPedido(data: {
   }
 
   const total = Math.round(itemsCalc.reduce((s, i) => s + i.precioAlCliente * i.cantidad, 0) * 100) / 100
-  const percepciones = clienteInfo.aplica_percepciones ? Math.round(total * 0.03 * 100) / 100 : 0
+  const percepciones = 0 // aplica_percepciones no implementado aún en DB
 
   const { data: pedido, error: pedidoError } = await supabase
     .from("pedidos")
@@ -358,7 +358,7 @@ export async function agregarItemPedido(
   // Fetch pedido to get lista + metodo + cliente
   const { data: pedido } = await supabase
     .from("pedidos")
-    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,descuento_especial,aplica_percepciones)")
+    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id)")
     .eq("id", pedidoId)
     .single()
   if (!pedido) throw new Error("Pedido no encontrado")
