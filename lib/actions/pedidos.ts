@@ -161,7 +161,7 @@ export async function createPedido(data: {
   // Commission
   console.log("Calculating commission...")
   try {
-    const { data: article } = await supabase.from("articulos").select("proveedor_id").eq("id", itemsWithSubtotal[0].producto_id).single()
+    const { data: article } = await supabase.from("articulos").select("proveedor_id").eq("id", itemsCalc[0].producto_id).single()
 
     if (article && article.proveedor_id && clienteInfo.vendedor_id) {
       const { data: proveedor } = await supabase
