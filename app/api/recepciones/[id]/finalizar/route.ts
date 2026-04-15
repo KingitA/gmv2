@@ -12,16 +12,7 @@ export async function POST(
     if (auth.error) return auth.error
     try {
         const { id: recepcion_id } = await params;
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!,
-            {
-                auth: {
-                    persistSession: false,
-                    autoRefreshToken: false,
-                },
-            }
-        );
+        const supabase = createAdminClient();
 
         // 1. Fetch reception items WITH conversion factor AND related OC details
         // Note: We need to join ordenes_compra to get the details
