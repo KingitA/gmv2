@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
     // ─── 1. Obtener pedido con cliente y detalles ───
     // Prices are already stored in pedidos_detalle (calculated when the order was created).
-    // precio_final = precio al cliente (IVA incluido for presupuesto, net for factura)
+    // precio_final = precio al cliente con IVA incluido (siempre)
     // precio_base  = precio neto antes de IVA
     const { data: pedido, error: pedidoError } = await supabase
       .from("pedidos")
@@ -86,21 +86,25 @@ export async function POST(request: Request) {
         metodoFacturacion === "Factura"     ? "factura"     :
         esPresupuesto ? "presupuesto" : "factura"
 
-      // precio_final stored = precio al cliente (with IVA for presupuesto, net for factura)
+      // precio_final = precio final al cliente (IVA siempre incluido)
+      // precio_base  = precio neto antes de IVA
       const precioAlCliente = det.precio_final || 0
+      const precioNeto = det.precio_base > 0
+        ? det.precio_base
+        : round2(precioAlCliente / (1 + IVA_RATE))
 
       let precioUnitario: number
       let ivaUnitario: number
       let ivaIncluido: boolean
 
       if (vaEnComprobante === "factura") {
-        // Factura A: line shows net, IVA discriminated at bottom
-        // precio_final stored is already the net (set by calcularPrecioPedido)
-        precioUnitario = precioAlCliente
-        ivaUnitario    = round2(precioAlCliente * IVA_RATE)
+        // Factura: la línea muestra el neto, el IVA se discrimina al pie
+        // precio_final = $100 (con IVA) → línea = $82.64, IVA = $17.36
+        precioUnitario = precioNeto
+        ivaUnitario    = round2(precioAlCliente - precioNeto)
         ivaIncluido    = false
       } else {
-        // Presupuesto: line shows full price with IVA included
+        // Presupuesto/Reversa: precio final con IVA incluido, sin discriminar
         precioUnitario = precioAlCliente
         ivaUnitario    = 0
         ivaIncluido    = true
