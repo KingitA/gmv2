@@ -74,6 +74,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           })
           .eq("id", imp.comprobante_id)
 
+        // Si el comprobante quedó saldado → marcar comisiones como cobrables
+        if (nuevoEstado === "pagado") {
+          await supabase
+            .from("comisiones")
+            .update({
+              comprobante_cobrado: true,
+              fecha_comprobante_cobrado: nowArgentina(),
+            })
+            .eq("comprobante_venta_id", imp.comprobante_id)
+            .eq("comprobante_cobrado", false)
+        }
+
         // Confirmar o crear la imputación
         if (imp.id) {
           await supabase.from("imputaciones").update({ estado: "confirmado" }).eq("id", imp.id)

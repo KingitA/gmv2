@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { insertarKardex } from "@/lib/kardex/insertar-kardex"
 
 // GET: Órdenes de compra pendientes de recibir
 export async function GET() {
@@ -151,24 +152,51 @@ export async function PATCH(request: NextRequest) {
         if (item.cantidad_fisica > 0) {
           const { data: art } = await supabase
             .from("articulos")
-            .select("stock_actual")
+            .select("stock_actual, sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas")
             .eq("id", item.articulo_id)
             .single()
 
-          const nuevoStock = (art?.stock_actual || 0) + item.cantidad_fisica
+          const stockAntes = art?.stock_actual || 0
+          const nuevoStock = stockAntes + item.cantidad_fisica
 
           await supabase
             .from("articulos")
             .update({ stock_actual: nuevoStock })
             .eq("id", item.articulo_id)
 
-          // Movimiento de stock
+          // Movimiento de stock (legacy — mantener para compatibilidad)
           await supabase.from("movimientos_stock").insert({
             articulo_id: item.articulo_id,
             tipo_movimiento: "entrada",
             cantidad: item.cantidad_fisica,
             observaciones: `Recepción depósito #${recepcion_id}`,
           })
+
+          // Kardex unificado
+          await insertarKardex(
+            supabase,
+            {
+              tipo_movimiento: "compra",
+              fecha: new Date().toISOString(),
+              articulo_id: item.articulo_id,
+              cantidad: item.cantidad_fisica,
+              precio_unitario_neto: 0,   // sin precio en este flujo simplificado
+              precio_unitario_final: 0,
+              subtotal_neto: 0,
+              subtotal_total: 0,
+              recepcion_id,
+              stock_antes: stockAntes,
+              stock_despues: nuevoStock,
+            },
+            {
+              sku: art?.sku,
+              descripcion: art?.descripcion,
+              categoria: art?.categoria,
+              proveedor_id: art?.proveedor_id,
+              iva_compras: art?.iva_compras,
+              iva_ventas: art?.iva_ventas,
+            },
+          )
         }
       }
 

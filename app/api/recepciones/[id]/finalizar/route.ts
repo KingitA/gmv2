@@ -2,6 +2,7 @@ import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from '@/lib/auth'
+import { insertarKardex } from "@/lib/kardex/insertar-kardex"
 
 export async function POST(
     request: NextRequest,
@@ -34,6 +35,7 @@ export async function POST(
                     articulo:articulos(unidades_por_bulto)
                 ),
                 orden_compra:ordenes_compra(
+                    id,
                     detalles:ordenes_compra_detalle(
                         articulo_id,
                         tipo_cantidad
@@ -57,7 +59,7 @@ export async function POST(
                 const unitsPerPack = articulo?.unidades_por_bulto || 1;
                 const totalUnits = item.cantidad_fisica * unitsPerPack;
 
-                // Insert movement
+                // Insert legacy movement (mantener para compatibilidad)
                 await supabase.from("movimientos_stock").insert({
                     articulo_id: item.articulo_id,
                     tipo_movimiento: "ingreso_compra",
@@ -67,6 +69,7 @@ export async function POST(
                 });
 
                 // Update article stock
+                let stockAntes = 0
                 const { error: rpcError } = await supabase.rpc('actualizar_stock', {
                     p_articulo_id: item.articulo_id,
                     p_cantidad: totalUnits
@@ -75,12 +78,56 @@ export async function POST(
                 if (rpcError) {
                     // Fallback: Read and Update (Not safe for concurrency but works for MVP)
                     const { data: art } = await supabase.from("articulos").select("stock_actual").eq("id", item.articulo_id).single();
+                    stockAntes = art?.stock_actual || 0
                     if (art) {
                         await supabase.from("articulos").update({
-                            stock_actual: (art.stock_actual || 0) + totalUnits
+                            stock_actual: stockAntes + totalUnits
                         }).eq("id", item.articulo_id);
                     }
                 }
+
+                // Kardex unificado — precio desde recepciones_items si está disponible
+                const { data: recItem } = await supabase
+                    .from("recepciones_items")
+                    .select("precio_real, precio_oc, precio_documentado, articulo_id")
+                    .eq("recepcion_id", recepcion_id)
+                    .eq("articulo_id", item.articulo_id)
+                    .single()
+                const precioCompra = recItem?.precio_real || recItem?.precio_documentado || recItem?.precio_oc || 0
+
+                // Datos del artículo para denormalizar
+                const { data: artInfo } = await supabase
+                    .from("articulos")
+                    .select("sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, stock_actual")
+                    .eq("id", item.articulo_id)
+                    .single()
+
+                await insertarKardex(
+                    supabase,
+                    {
+                        tipo_movimiento: "compra",
+                        fecha: nowArgentina(),
+                        articulo_id: item.articulo_id,
+                        cantidad: totalUnits,
+                        precio_unitario_neto: precioCompra,
+                        precio_unitario_final: precioCompra,
+                        subtotal_neto: Math.round(precioCompra * totalUnits * 100) / 100,
+                        subtotal_total: Math.round(precioCompra * totalUnits * 100) / 100,
+                        proveedor_id: reception.proveedor_id ?? null,
+                        recepcion_id,
+                        orden_compra_id: (Array.isArray(reception.orden_compra) ? reception.orden_compra[0] : reception.orden_compra)?.id ?? null,
+                        stock_antes: stockAntes,
+                        stock_despues: stockAntes + totalUnits,
+                    },
+                    {
+                        sku: artInfo?.sku,
+                        descripcion: artInfo?.descripcion,
+                        categoria: artInfo?.categoria,
+                        proveedor_id: artInfo?.proveedor_id,
+                        iva_compras: artInfo?.iva_compras,
+                        iva_ventas: artInfo?.iva_ventas,
+                    },
+                )
             }
         }
 

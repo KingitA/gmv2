@@ -10,6 +10,7 @@ import {
   type DescuentoTipado,
 } from "@/lib/pricing/calculator"
 import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
+import { vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
 
 export async function POST(request: Request) {
   try {
@@ -145,6 +146,39 @@ export async function POST(request: Request) {
       comprobantesGenerados.push(resultado)
     }
 
+    // ── Vincular kardex al comprobante generado ───────────────────────────────
+    // Cada comprobante puede cubrir un subconjunto de ítems; vinculamos por tipo
+    for (const comp of comprobantesGenerados) {
+      if (!comp.id) continue
+      const colorComp = comp.tipo_comprobante === "PRES" ? "NEGRO" : "BLANCO"
+      const metodoComp = comp.tipo_comprobante === "PRES" ? "Presupuesto" : "Factura"
+      await vincularKardexAComprobante(
+        supabase,
+        pedido_id,
+        comp.id,
+        comp.tipo_comprobante,
+        comp.numero,
+        metodoComp,
+        colorComp,
+      )
+    }
+
+    // ── Distribuir percepciones IVA/IIBB del comprobante entre ítems del kardex
+    const percIva = comprobantesGenerados.reduce((s: number, c: any) => s + (c.percepcion_iva ?? 0), 0)
+    const percIibb = comprobantesGenerados.reduce((s: number, c: any) => s + (c.percepcion_iibb ?? 0), 0)
+    if (percIva > 0 || percIibb > 0) {
+      await distribuirPercepcionesKardex(supabase, pedido_id, percIva, percIibb)
+    }
+
+    // ── Vincular comisión al comprobante principal ────────────────────────────
+    if (comprobantesGenerados.length > 0 && comprobantesGenerados[0].id) {
+      await supabase
+        .from("comisiones")
+        .update({ comprobante_venta_id: comprobantesGenerados[0].id })
+        .eq("pedido_id", pedido_id)
+        .is("comprobante_venta_id", null)
+    }
+
     // ─── 6. Actualizar total del pedido ───
     const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
 
@@ -247,7 +281,7 @@ async function generarComprobante(
       saldo_pendiente: totalFactura,
       estado_pago: "pendiente",
     })
-    .select()
+    .select("id, percepcion_iva, percepcion_iibb")
     .single()
 
   if (compError) throw new Error("Error creando comprobante: " + compError.message)
@@ -297,5 +331,7 @@ async function generarComprobante(
     total_neto: totalNeto,
     total_iva: totalIva,
     total: totalFactura,
+    percepcion_iva: comprobante.percepcion_iva ?? 0,
+    percepcion_iibb: comprobante.percepcion_iibb ?? 0,
   }
 }

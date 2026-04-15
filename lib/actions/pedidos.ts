@@ -7,6 +7,7 @@ import { getNextOrderNumber } from "@/lib/utils/next-order-number"
 import { nowArgentina } from "@/lib/utils"
 import { calcularPrecioPedido } from "@/lib/pricing/calcular-precio-pedido"
 import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/pricing/calculator"
+import { insertarKardex } from "@/lib/kardex/insertar-kardex"
 
 // ─── Helper: fetch lista + metodo and calculate price for one articulo ────────
 async function fetchListaYMetodo(
@@ -111,6 +112,14 @@ export async function createPedido(data: {
 
   if (pedidoError) throw pedidoError
 
+  // Obtener stock actual de todos los artículos en una sola query
+  const productIds = itemsCalc.map(i => i.producto_id)
+  const { data: articulosInfo } = await supabase
+    .from("articulos")
+    .select("id, sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, stock_actual")
+    .in("id", productIds)
+  const articulosMap = Object.fromEntries((articulosInfo || []).map((a: any) => [a.id, a]))
+
   for (const item of itemsCalc) {
     const { error: itemError } = await supabase.from("pedidos_detalle").insert({
       pedido_id: pedido.id,
@@ -122,6 +131,52 @@ export async function createPedido(data: {
       precio_costo: item.precio_costo,
     })
     if (itemError) throw itemError
+
+    // ── Insertar en kardex ────────────────────────────────────────────────
+    const art = articulosMap[item.producto_id]
+    const ivaIncluido = item.precioAlCliente === item.precioNeto   // presupuesto
+    const ivaMonto = ivaIncluido ? 0 : Math.round((item.precioAlCliente - item.precioNeto) * 100) / 100
+    const ivaPct = ivaMonto > 0 && item.precioNeto > 0
+      ? Math.round((ivaMonto / item.precioNeto) * 10000) / 100
+      : 0
+    const stockActual = art?.stock_actual ?? null
+    const metodoColor = (data.metodo_facturacion_pedido || clienteInfo.metodo_facturacion || "Final")
+    const colorDinero = metodoColor === "Factura (21% IVA)" || metodoColor === "Factura" ? "BLANCO" : "NEGRO"
+
+    await insertarKardex(
+      supabase,
+      {
+        tipo_movimiento: "venta",
+        fecha: nowArgentina(),
+        articulo_id: item.producto_id,
+        cantidad: item.cantidad,
+        precio_costo: item.precio_costo,
+        precio_unitario_neto: item.precioNeto,
+        precio_unitario_final: item.precioAlCliente,
+        iva_porcentaje: ivaPct,
+        iva_monto_unitario: ivaMonto,
+        iva_incluido: ivaIncluido,
+        subtotal_neto: Math.round(item.precioNeto * item.cantidad * 100) / 100,
+        subtotal_iva: Math.round(ivaMonto * item.cantidad * 100) / 100,
+        subtotal_total: Math.round(item.precioAlCliente * item.cantidad * 100) / 100,
+        cliente_id: data.cliente_id,
+        vendedor_id: clienteInfo.vendedor_id ?? null,
+        pedido_id: pedido.id,
+        lista_precio_id: data.lista_precio_pedido_id || clienteInfo.lista_precio_id || null,
+        metodo_facturacion: metodoColor,
+        color_dinero: colorDinero,
+        stock_antes: stockActual,
+        stock_despues: stockActual !== null ? stockActual - item.cantidad : null,
+      },
+      {
+        sku: art?.sku,
+        descripcion: art?.descripcion,
+        categoria: art?.categoria,
+        proveedor_id: art?.proveedor_id,
+        iva_compras: art?.iva_compras,
+        iva_ventas: art?.iva_ventas,
+      },
+    )
   }
 
   // Create account movement and update balance
@@ -382,6 +437,54 @@ export async function agregarItemPedido(
   })
 
   if (error) throw error
+
+  // ── Insertar en kardex ──────────────────────────────────────────────────
+  const { data: artInfo } = await supabase
+    .from("articulos")
+    .select("sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, stock_actual")
+    .eq("id", productoId)
+    .single()
+
+  const ivaIncluido = precio.precioAlCliente === precio.precioNeto
+  const ivaMonto = ivaIncluido ? 0 : Math.round((precio.precioAlCliente - precio.precioNeto) * 100) / 100
+  const ivaPct = ivaMonto > 0 && precio.precioNeto > 0
+    ? Math.round((ivaMonto / precio.precioNeto) * 10000) / 100 : 0
+  const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
+  const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
+
+  await insertarKardex(
+    supabase,
+    {
+      tipo_movimiento: "venta",
+      fecha: nowArgentina(),
+      articulo_id: productoId,
+      cantidad,
+      precio_costo: articuloConDescuentos.precio_compra || 0,
+      precio_unitario_neto: precio.precioNeto,
+      precio_unitario_final: precio.precioAlCliente,
+      iva_porcentaje: ivaPct,
+      iva_monto_unitario: ivaMonto,
+      iva_incluido: ivaIncluido,
+      subtotal_neto: Math.round(precio.precioNeto * cantidad * 100) / 100,
+      subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
+      subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
+      cliente_id: pedido.cliente_id,
+      pedido_id: pedidoId,
+      lista_precio_id: pedido.lista_precio_pedido_id || (pedido.clientes as any)?.lista_precio_id || null,
+      metodo_facturacion: metodoRaw,
+      color_dinero: colorDinero,
+      stock_antes: artInfo?.stock_actual ?? null,
+      stock_despues: artInfo?.stock_actual != null ? artInfo.stock_actual - cantidad : null,
+    },
+    {
+      sku: artInfo?.sku,
+      descripcion: artInfo?.descripcion,
+      categoria: artInfo?.categoria,
+      proveedor_id: artInfo?.proveedor_id,
+      iva_compras: artInfo?.iva_compras,
+      iva_ventas: artInfo?.iva_ventas,
+    },
+  )
 
   revalidatePath("/clientes-pedidos")
   return { success: true }
