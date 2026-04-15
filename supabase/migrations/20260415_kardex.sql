@@ -72,12 +72,13 @@ CREATE TABLE IF NOT EXISTS kardex (
   provincia_destino VARCHAR(100),           -- clientes.zona al momento de la venta
 
   -- Referencias a tablas originales (trazabilidad)
-  comprobante_venta_id UUID REFERENCES comprobantes_venta(id),
-  comprobante_compra_id UUID REFERENCES comprobantes_compra(id),
+  -- FKs opcionales se agregan después via DO $$ para no fallar si la tabla no existe
+  comprobante_venta_id UUID,
+  comprobante_compra_id UUID,
   pedido_id UUID REFERENCES pedidos(id),
   recepcion_id UUID REFERENCES recepciones(id),
   orden_compra_id UUID REFERENCES ordenes_compra(id),
-  lista_precio_id UUID REFERENCES listas_precio(id),
+  lista_precio_id UUID,
 
   -- Snapshot de stock al momento del movimiento
   stock_antes DECIMAL(10, 2),
@@ -85,6 +86,37 @@ CREATE TABLE IF NOT EXISTS kardex (
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ─── FKs opcionales (solo si las tablas referenciadas existen) ───────────────
+DO $$
+BEGIN
+  -- comprobantes_venta → kardex.comprobante_venta_id
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'comprobantes_venta')
+  AND NOT EXISTS (SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_kardex_comprobante_venta' AND table_name = 'kardex')
+  THEN
+    ALTER TABLE kardex ADD CONSTRAINT fk_kardex_comprobante_venta
+      FOREIGN KEY (comprobante_venta_id) REFERENCES comprobantes_venta(id);
+  END IF;
+
+  -- comprobantes_compra → kardex.comprobante_compra_id
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'comprobantes_compra')
+  AND NOT EXISTS (SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_kardex_comprobante_compra' AND table_name = 'kardex')
+  THEN
+    ALTER TABLE kardex ADD CONSTRAINT fk_kardex_comprobante_compra
+      FOREIGN KEY (comprobante_compra_id) REFERENCES comprobantes_compra(id);
+  END IF;
+
+  -- listas_precio → kardex.lista_precio_id
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'listas_precio')
+  AND NOT EXISTS (SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_kardex_lista_precio' AND table_name = 'kardex')
+  THEN
+    ALTER TABLE kardex ADD CONSTRAINT fk_kardex_lista_precio
+      FOREIGN KEY (lista_precio_id) REFERENCES listas_precio(id);
+  END IF;
+END $$;
 
 -- ─── Índices para reportes ────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_kardex_fecha              ON kardex (fecha DESC);
@@ -100,14 +132,60 @@ CREATE INDEX IF NOT EXISTS idx_kardex_recepcion          ON kardex (recepcion_id
 
 -- ─── RLS ─────────────────────────────────────────────────────────────────────
 ALTER TABLE kardex ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "kardex_authenticated" ON kardex FOR ALL TO authenticated USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'kardex' AND policyname = 'kardex_authenticated'
+  ) THEN
+    CREATE POLICY "kardex_authenticated" ON kardex FOR ALL TO authenticated USING (true);
+  END IF;
+END $$;
+
+-- ─── Tabla comisiones (create if not exists) ─────────────────────────────────
+-- La tabla puede existir ya en Supabase; la creamos solo si no está.
+CREATE TABLE IF NOT EXISTS comisiones (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  viajante_id UUID,                        -- vendedor / viajante
+  pedido_id UUID REFERENCES pedidos(id) ON DELETE SET NULL,
+  monto DECIMAL(12, 2) NOT NULL DEFAULT 0,
+  porcentaje DECIMAL(5, 2) NOT NULL DEFAULT 0,
+  pagado BOOLEAN NOT NULL DEFAULT FALSE,
+  fecha_pago TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- ─── Ajustes a tabla comisiones ───────────────────────────────────────────────
--- Vincular comisión al comprobante generado y rastrear cuándo se vuelve cobrable
-ALTER TABLE comisiones
-  ADD COLUMN IF NOT EXISTS comprobante_venta_id UUID REFERENCES comprobantes_venta(id),
-  ADD COLUMN IF NOT EXISTS comprobante_cobrado BOOLEAN NOT NULL DEFAULT FALSE,
-  ADD COLUMN IF NOT EXISTS fecha_comprobante_cobrado TIMESTAMPTZ;
+-- Agregar columnas nuevas de forma defensiva (ignora si ya existen)
+DO $$
+BEGIN
+  -- comprobante_venta_id
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'comisiones' AND column_name = 'comprobante_venta_id'
+  ) THEN
+    ALTER TABLE comisiones ADD COLUMN comprobante_venta_id UUID;
+    -- FK por separado para que no falle si la columna ya existía sin FK
+    ALTER TABLE comisiones
+      ADD CONSTRAINT fk_comisiones_comprobante_venta
+      FOREIGN KEY (comprobante_venta_id) REFERENCES comprobantes_venta(id);
+  END IF;
+
+  -- comprobante_cobrado
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'comisiones' AND column_name = 'comprobante_cobrado'
+  ) THEN
+    ALTER TABLE comisiones ADD COLUMN comprobante_cobrado BOOLEAN NOT NULL DEFAULT FALSE;
+  END IF;
+
+  -- fecha_comprobante_cobrado
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'comisiones' AND column_name = 'fecha_comprobante_cobrado'
+  ) THEN
+    ALTER TABLE comisiones ADD COLUMN fecha_comprobante_cobrado TIMESTAMPTZ;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_comisiones_comprobante     ON comisiones (comprobante_venta_id);
 CREATE INDEX IF NOT EXISTS idx_comisiones_viajante_estado ON comisiones (viajante_id, comprobante_cobrado, pagado);
