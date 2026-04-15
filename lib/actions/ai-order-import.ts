@@ -48,6 +48,21 @@ export async function parseOrderFile(formData: FormData): Promise<ParseResult> {
             const mimeType = file.type || "image/jpeg"
             const fileName = file.name || "upload.jpg"
 
+            // EML files: parse as text and route through processOrderText
+            const isEml = fileName.toLowerCase().endsWith(".eml") || mimeType === "message/rfc822"
+            if (isEml) {
+                const emlText = buffer.toString("utf-8")
+                const extractedText = extractEmlText(emlText)
+                const result = await processOrderText(extractedText)
+                aggregatedItems.push(...result.items)
+                if (result.candidateCustomer && !detectedCustomer) {
+                    detectedCustomer = result.candidateCustomer
+                }
+                totalDetected += result.totalDetected
+                needsReview += result.needsReview
+                continue
+            }
+
             const result = await processOrder(buffer, fileName, mimeType)
 
             aggregatedItems.push(...result.items)
@@ -725,6 +740,79 @@ Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON
         needsReview: needsReviewCount,
         rawAnalysis: parsedData
     }
+}
+
+/**
+ * Extract readable text content from an EML (RFC 822) email string.
+ * Handles multipart MIME, quoted-printable, and base64 encoding.
+ */
+function extractEmlText(emlRaw: string): string {
+    // Decode quoted-printable encoding
+    function decodeQP(s: string): string {
+        return s
+            .replace(/=\r?\n/g, "")               // soft line breaks
+            .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    }
+
+    // Strip HTML tags and decode common entities
+    function stripHtml(html: string): string {
+        return html
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/tr>/gi, "\n")
+            .replace(/<\/td>/gi, " | ")
+            .replace(/<\/th>/gi, " | ")
+            .replace(/<[^>]+>/g, "")
+            .replace(/&nbsp;/g, " ")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&[a-z]+;/gi, " ")
+            .replace(/[ \t]{2,}/g, " ")
+            .trim()
+    }
+
+    // Parse a single MIME part: extract headers + body text
+    function extractPartText(part: string): string {
+        const sep = part.indexOf("\r\n\r\n") !== -1 ? "\r\n\r\n" : "\n\n"
+        const sepIdx = part.indexOf(sep)
+        if (sepIdx === -1) return ""
+        const headers = part.slice(0, sepIdx).toLowerCase()
+        let body = part.slice(sepIdx + sep.length)
+
+        // Skip non-text parts
+        if (headers.includes("content-type: image/") ||
+            headers.includes("content-type: application/") ||
+            headers.includes("content-disposition: attachment")) {
+            return ""
+        }
+
+        // Decode transfer encoding
+        if (headers.includes("content-transfer-encoding: base64")) {
+            try {
+                body = Buffer.from(body.replace(/\s/g, ""), "base64").toString("utf-8")
+            } catch { return "" }
+        } else if (headers.includes("content-transfer-encoding: quoted-printable")) {
+            body = decodeQP(body)
+        }
+
+        // Strip HTML
+        if (headers.includes("content-type: text/html")) {
+            return stripHtml(body)
+        }
+        return body.trim()
+    }
+
+    // Find boundary for multipart emails
+    const boundaryMatch = emlRaw.match(/boundary="?([^"\r\n;]+)"?/i)
+    if (boundaryMatch) {
+        const boundary = boundaryMatch[1].trim()
+        const parts = emlRaw.split(new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:--)?`))
+        const texts = parts.map(extractPartText).filter(Boolean)
+        if (texts.length > 0) return texts.join("\n").slice(0, 8000)
+    }
+
+    // No multipart — treat whole email as a single part
+    return extractPartText(emlRaw) || emlRaw.slice(0, 8000)
 }
 
 /**

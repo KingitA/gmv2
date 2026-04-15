@@ -499,11 +499,11 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                     {getEstadoBadge(doc.saldo, doc.es_devolucion)}
                                                 </TableCell>
                                                 <TableCell>
-                                                    {!doc.es_devolucion && (
+                                                    {!doc.es_devolucion && doc.tipo !== "PAGO" && (
                                                         <Button
                                                             variant="ghost"
                                                             size="sm"
-                                                            onClick={() => window.open(`/api/comprobantes-venta/${doc.id}/pdf`, '_blank')}
+                                                            onClick={() => window.open(`/api/comprobantes-venta/${doc.id}/imagen`, '_blank')}
                                                         >
                                                             <FileTextIcon />
                                                         </Button>

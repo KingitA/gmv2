@@ -212,8 +212,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
             >
               <Upload className="h-6 w-6 mb-1.5" />
               <p className="text-sm font-medium">Arrastrá o hacé clic para subir</p>
-              <p className="text-xs mt-0.5">JPG, PNG, PDF, Excel — múltiples archivos</p>
-              <input ref={fileRef} type="file" className="hidden" accept="image/*,.pdf,.xlsx,.xls,.csv,.txt" multiple
+              <p className="text-xs mt-0.5">JPG, PNG, PDF, Excel, EML — múltiples archivos</p>
+              <input ref={fileRef} type="file" className="hidden" accept="image/*,.pdf,.xlsx,.xls,.csv,.txt,.eml,message/rfc822" multiple
                 onChange={e => handleFiles(e.target.files)} />
             </div>
             {files.length > 0 && (
