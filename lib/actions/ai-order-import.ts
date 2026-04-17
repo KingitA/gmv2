@@ -94,8 +94,10 @@ export async function parseOrderFile(formData: FormData): Promise<ParseResult> {
  * Core processing logic that can be used by both UI and Webhooks
  */
 export async function processOrder(buffer: Buffer, fileName: string, mimeType: string): Promise<ParseResult> {
-    // Determine if it's XLSX specifically
-    const isXlsx = mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" || fileName.endsWith(".xlsx") || fileName.endsWith(".xls")
+    // Determine if it's XLSX specifically (case-insensitive filename check)
+    const fileNameLower = fileName.toLowerCase()
+    const isXlsx = mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+        fileNameLower.endsWith(".xlsx") || fileNameLower.endsWith(".xls")
 
     if (isXlsx) {
         try {
