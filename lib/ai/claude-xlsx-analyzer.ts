@@ -254,7 +254,8 @@ export async function analyzeXlsxOrder(buffer: Buffer, filename: string): Promis
     const client = getClient()
 
     const totalRows = sheets.reduce((sum, s) => sum + s.totalRows, 0)
-    const maxTokens = 8192
+    // 16384 tokens for large orders (1 token ≈ 4 chars; 246 items × ~90 chars ≈ ~5500 tokens + overhead)
+    const maxTokens = 16384
 
     console.log(`[ClaudeXlsx] Sending ${formattedData.length} chars to Claude (${totalRows} total rows, max_tokens: ${maxTokens})`)
 
@@ -358,20 +359,52 @@ export async function analyzeXlsxInvoice(buffer: Buffer, filename: string): Prom
 function parseJsonResponse<T>(text: string): T {
     let jsonStr = text.trim()
 
-    // Handle markdown code blocks
-    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
-    if (jsonMatch) {
-        jsonStr = jsonMatch[1].trim()
+    // Handle markdown code blocks — try with closing ``` first, then without (truncated response)
+    const jsonMatchClosed = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
+    if (jsonMatchClosed) {
+        jsonStr = jsonMatchClosed[1].trim()
+    } else {
+        // Truncated response: grab everything after ```json (no closing ```)
+        const jsonMatchOpen = jsonStr.match(/```(?:json)?\s*([\s\S]*)$/)
+        if (jsonMatchOpen) {
+            jsonStr = jsonMatchOpen[1].trim()
+        }
     }
 
-    // Try to find JSON object directly
-    const objMatch = jsonStr.match(/\{[\s\S]*\}/)
-    if (objMatch) {
-        jsonStr = objMatch[0]
-    }
+    // Try to find JSON object start
+    const objStart = jsonStr.indexOf('{')
+    if (objStart > 0) jsonStr = jsonStr.slice(objStart)
 
+    // First attempt: parse as-is
     try {
         return JSON.parse(jsonStr) as T
+    } catch { /* continue to repair */ }
+
+    // Repair truncated JSON: close any open arrays and objects
+    let fixed = jsonStr.trimEnd()
+    // Remove trailing comma before trying to close
+    fixed = fixed.replace(/,\s*$/, '')
+    // Remove incomplete last item (last line that doesn't end with } or ])
+    const lines = fixed.split('\n')
+    while (lines.length > 0) {
+        const last = lines[lines.length - 1].trim()
+        if (last.endsWith('}') || last.endsWith(']') || last === '') break
+        lines.pop()
+        // Remove trailing comma from new last line
+        if (lines.length > 0) lines[lines.length - 1] = lines[lines.length - 1].replace(/,\s*$/, '')
+    }
+    fixed = lines.join('\n').trimEnd().replace(/,\s*$/, '')
+
+    // Count and close unclosed brackets/braces
+    const opens = (fixed.match(/\[/g) || []).length - (fixed.match(/\]/g) || []).length
+    const braces = (fixed.match(/\{/g) || []).length - (fixed.match(/\}/g) || []).length
+    for (let i = 0; i < opens; i++) fixed += ']'
+    for (let i = 0; i < braces; i++) fixed += '}'
+
+    try {
+        const result = JSON.parse(fixed) as T
+        console.warn('[ClaudeXlsx] ⚠️ JSON was truncated — recovered partial response')
+        return result
     } catch {
         console.error('[ClaudeXlsx] Failed to parse JSON response:', text.substring(0, 500))
         throw new Error('No se pudo parsear la respuesta de Claude para el archivo Excel')
