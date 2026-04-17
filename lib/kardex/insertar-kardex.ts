@@ -90,6 +90,9 @@ export interface KardexMovimientoInput {
   // ── Stock snapshot ─────────────────────────────────────────────────────────
   stock_antes?: number | null
   stock_despues?: number | null
+
+  // ── Auditoría ──────────────────────────────────────────────────────────────
+  operador_id?: string | null             // user.id de quien registró el movimiento
 }
 
 // Tipos que reducen stock (signo -1)
@@ -177,6 +180,8 @@ export async function insertarKardex(
 
     stock_antes: input.stock_antes ?? null,
     stock_despues: input.stock_despues ?? null,
+
+    operador_id: input.operador_id ?? null,
   })
 
   if (error) {

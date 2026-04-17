@@ -141,12 +141,12 @@ export async function POST(request: Request) {
 
     // ─── 5. Generar comprobantes ───
     if (itemsFactura.length > 0) {
-      const resultado = await generarComprobante(supabase, pedido, itemsFactura, tipoFactura)
+      const resultado = await generarComprobante(supabase, pedido, itemsFactura, tipoFactura, auth.user.id)
       comprobantesGenerados.push(resultado)
     }
 
     if (itemsPresupuesto.length > 0) {
-      const resultado = await generarComprobante(supabase, pedido, itemsPresupuesto, "PRES")
+      const resultado = await generarComprobante(supabase, pedido, itemsPresupuesto, "PRES", auth.user.id)
       comprobantesGenerados.push(resultado)
     }
 
@@ -233,6 +233,7 @@ async function generarComprobante(
     descNegroAplicado: boolean
   }>,
   tipoComprobante: string,
+  creadoPor?: string,
 ) {
   // Obtener numeración
   const { data: numeracion, error: numError } = await supabase
@@ -284,6 +285,7 @@ async function generarComprobante(
       total_factura: totalFactura,
       saldo_pendiente: totalFactura,
       estado_pago: "pendiente",
+      ...(creadoPor ? { creado_por: creadoPor } : {}),
     })
     .select("id, percepcion_iva, percepcion_iibb")
     .single()

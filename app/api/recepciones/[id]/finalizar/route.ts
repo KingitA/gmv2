@@ -109,6 +109,7 @@ export async function POST(
                         orden_compra_id: (Array.isArray(reception.orden_compra) ? reception.orden_compra[0] : reception.orden_compra)?.id ?? null,
                         stock_antes: stockAntes,
                         stock_despues: stockAntes + totalUnits,
+                        operador_id: auth.user.id,
                     },
                     {
                         sku: artInfo?.sku,
@@ -127,7 +128,8 @@ export async function POST(
             .from("recepciones")
             .update({
                 estado: "finalizada",
-                fecha_fin: nowArgentina()
+                fecha_fin: nowArgentina(),
+                actualizado_por: auth.user.id,
             })
             .eq("id", recepcion_id)
             .select()

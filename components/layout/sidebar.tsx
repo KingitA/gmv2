@@ -59,7 +59,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Configuración',
     items: [
       { label: 'Tablas', href: '/tablas', icon: '⚙️' },
-      { label: 'Usuarios', href: '/usuarios-crm', icon: '👤' },
+      { label: 'Usuarios', href: '/admin/usuarios', icon: '👤' },
     ],
   },
   {

@@ -7,8 +7,16 @@ import { createPedido } from "@/lib/actions/pedidos"
 export type QueueItemStatus = "waiting" | "processing" | "needs_review" | "done" | "error"
 
 export type PedidoOverrides = {
+  // General (todo el pedido)
   metodo_facturacion_pedido?: string
   lista_precio_pedido_id?: string
+  // Por segmento de proveedor
+  lista_limpieza_pedido_id?: string
+  metodo_limpieza_pedido?: string
+  lista_perf0_pedido_id?: string
+  metodo_perf0_pedido?: string
+  lista_perf_plus_pedido_id?: string
+  metodo_perf_plus_pedido?: string
 }
 
 export type QueueItem = {
@@ -94,6 +102,8 @@ export function useOrderQueue(onOrderCreated?: () => void) {
             parseResult,
           })
           onOrderCreated?.()
+          // Auto-remove from queue after brief confirmation window
+          setTimeout(() => removeFromQueue(nextWaiting.id), 1500)
         } else {
           // Needs manual review
           updateItem(nextWaiting.id, {
@@ -139,8 +149,10 @@ export function useOrderQueue(onOrderCreated?: () => void) {
       pedidoId: pedido.id,
     })
     onOrderCreated?.()
+    // Auto-remove from queue after brief confirmation window
+    setTimeout(() => removeFromQueue(itemId), 1500)
     return pedido
-  }, [updateItem, onOrderCreated])
+  }, [updateItem, removeFromQueue, onOrderCreated])
 
   const retryItem = useCallback((id: string) => {
     updateItem(id, { status: "waiting", error: undefined, parseResult: undefined })

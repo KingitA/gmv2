@@ -115,7 +115,10 @@ export async function PATCH(request: NextRequest) {
 
             // Update article fields
             if (Object.keys(articuloUpdates).length > 0) {
-                const { error } = await supabase.from('articulos').update(articuloUpdates).eq('id', articulo_id)
+                const { error } = await supabase.from('articulos').update({
+                    ...articuloUpdates,
+                    actualizado_por: auth.user.id,
+                }).eq('id', articulo_id)
                 if (error) {
                     errors.push(`${articulo_id}: ${error.message}`)
                 } else {

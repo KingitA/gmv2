@@ -28,6 +28,12 @@ export function LoginFormClient() {
         return
       }
 
+      // Primer login: forzar cambio de contraseña
+      if (result.mustChangePassword) {
+        router.push("/auth/cambiar-password")
+        return
+      }
+
       // Login exitoso → ir al dashboard
       router.push("/")
       router.refresh()

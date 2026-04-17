@@ -9,7 +9,87 @@ import { calcularPrecioPedido } from "@/lib/pricing/calcular-precio-pedido"
 import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/pricing/calculator"
 import { insertarKardex } from "@/lib/kardex/insertar-kardex"
 
-// ─── Helper: fetch lista + metodo and calculate price for one articulo ────────
+// ─── Tipos de segmento de proveedor ──────────────────────────────────────────
+type Segmento = "limpieza" | "perf0" | "perf_plus"
+
+function detectarSegmento(articulo: { categoria?: string | null; iva_compras?: string | null }): Segmento {
+  const cat = (articulo.categoria || "").toUpperCase()
+  if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA")) {
+    return articulo.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
+  }
+  return "limpieza"
+}
+
+function toMetodoFacturacion(raw: string | null | undefined): MetodoFacturacion {
+  if (!raw) return "Final"
+  if (raw === "Factura (21% IVA)" || raw === "Factura") return "Factura"
+  if (raw === "Presupuesto") return "Presupuesto"
+  return "Final"
+}
+
+// Resuelve qué listaId + metodoRaw usar para un segmento dado
+// Jerarquía: override pedido → default cliente → fallback general
+function resolverListaSegmento(
+  segmento: Segmento,
+  overrides: {
+    lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
+    lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
+    lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
+    lista_precio_pedido_id?: string;   metodo_facturacion_pedido?: string
+  },
+  cliente: {
+    lista_limpieza_id?: string; metodo_limpieza?: string
+    lista_perf0_id?: string;    metodo_perf0?: string
+    lista_perf_plus_id?: string; metodo_perf_plus?: string
+    lista_precio_id?: string;   metodo_facturacion?: string
+  },
+): { listaId: string | null; metodoRaw: string } {
+  const general = {
+    listaId: overrides.lista_precio_pedido_id || cliente.lista_precio_id || null,
+    metodoRaw: overrides.metodo_facturacion_pedido || cliente.metodo_facturacion || "Final",
+  }
+
+  if (segmento === "limpieza") {
+    return {
+      listaId: overrides.lista_limpieza_pedido_id || cliente.lista_limpieza_id || general.listaId,
+      metodoRaw: overrides.metodo_limpieza_pedido || cliente.metodo_limpieza || general.metodoRaw,
+    }
+  }
+  if (segmento === "perf0") {
+    return {
+      listaId: overrides.lista_perf0_pedido_id || cliente.lista_perf0_id || general.listaId,
+      metodoRaw: overrides.metodo_perf0_pedido || cliente.metodo_perf0 || general.metodoRaw,
+    }
+  }
+  // perf_plus
+  return {
+    listaId: overrides.lista_perf_plus_pedido_id || cliente.lista_perf_plus_id || general.listaId,
+    metodoRaw: overrides.metodo_perf_plus_pedido || cliente.metodo_perf_plus || general.metodoRaw,
+  }
+}
+
+// ─── Helper: fetch lista datos por id (con caché en-memoria por llamada) ──────
+async function fetchListaDatos(
+  supabase: any,
+  listaId: string | null,
+  cache: Record<string, DatosLista>,
+): Promise<DatosLista> {
+  const empty: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }
+  if (!listaId) return empty
+  if (cache[listaId]) return cache[listaId]
+  const { data } = await supabase
+    .from("listas_precio")
+    .select("recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_blanco")
+    .eq("id", listaId)
+    .single()
+  const result: DatosLista = data
+    ? { recargo_limpieza_bazar: data.recargo_limpieza_bazar || 0, recargo_perfumeria_negro: data.recargo_perfumeria_negro || 0, recargo_perfumeria_blanco: data.recargo_perfumeria_blanco || 0 }
+    : empty
+  cache[listaId] = result
+  return result
+}
+
+// ─── Helper legacy: fetch lista + metodo (usado en agregarItemPedido) ─────────
 async function fetchListaYMetodo(
   supabase: any,
   clienteInfo: any,
@@ -17,13 +97,9 @@ async function fetchListaYMetodo(
   lista_precio_pedido_id?: string,
 ): Promise<{ listaDatos: DatosLista; metodo: MetodoFacturacion; descuentoCliente: number }> {
   const listaId = lista_precio_pedido_id || clienteInfo.lista_precio_id
-  let listaDatos: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }
-  if (listaId) {
-    const { data: lista } = await supabase.from("listas_precio").select("recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_blanco").eq("id", listaId).single()
-    if (lista) listaDatos = { recargo_limpieza_bazar: lista.recargo_limpieza_bazar || 0, recargo_perfumeria_negro: lista.recargo_perfumeria_negro || 0, recargo_perfumeria_blanco: lista.recargo_perfumeria_blanco || 0 }
-  }
+  const listaDatos = await fetchListaDatos(supabase, listaId || null, {})
   const metodoRaw = metodo_facturacion_pedido || clienteInfo.metodo_facturacion || "Final"
-  const metodo: MetodoFacturacion = metodoRaw === "Factura (21% IVA)" ? "Factura" : metodoRaw === "Presupuesto" ? "Presupuesto" : "Final"
+  const metodo = toMetodoFacturacion(metodoRaw)
   const descuentoCliente = clienteInfo.descuento_especial || 0
   return { listaDatos, metodo, descuentoCliente }
 }
@@ -48,8 +124,16 @@ export async function createPedido(data: {
   }>
   observaciones?: string
   zona_entrega?: string
+  // Condiciones generales (todo el pedido)
   metodo_facturacion_pedido?: string
   lista_precio_pedido_id?: string
+  // Condiciones por segmento de proveedor
+  lista_limpieza_pedido_id?: string
+  metodo_limpieza_pedido?: string
+  lista_perf0_pedido_id?: string
+  metodo_perf0_pedido?: string
+  lista_perf_plus_pedido_id?: string
+  metodo_perf_plus_pedido?: string
 }) {
   const supabase = await createClient()
 
@@ -60,23 +144,45 @@ export async function createPedido(data: {
 
   const { data: clienteInfo, error: clienteError } = await supabase
     .from("clientes")
-    .select("id,vendedor_id,metodo_facturacion,lista_precio_id")
+    .select(`
+      id, vendedor_id, metodo_facturacion, lista_precio_id, descuento_especial,
+      lista_limpieza_id, metodo_limpieza,
+      lista_perf0_id, metodo_perf0,
+      lista_perf_plus_id, metodo_perf_plus
+    `)
     .eq("id", data.cliente_id)
     .single()
   if (clienteError || !clienteInfo) throw new Error(`Cliente no encontrado: ${clienteError?.message || data.cliente_id}`)
 
-  const { listaDatos, metodo, descuentoCliente } = await fetchListaYMetodo(
-    supabase, clienteInfo, data.metodo_facturacion_pedido, data.lista_precio_pedido_id
-  )
+  // Cache de listas para evitar múltiples queries a la misma lista
+  const listasCache: Record<string, DatosLista> = {}
+  const descuentoCliente = clienteInfo.descuento_especial || 0
+
+  // Overrides de segmento del pedido (vienen del formulario)
+  const segmentoOverrides = {
+    lista_precio_pedido_id:    data.lista_precio_pedido_id,
+    metodo_facturacion_pedido: data.metodo_facturacion_pedido,
+    lista_limpieza_pedido_id:  data.lista_limpieza_pedido_id,
+    metodo_limpieza_pedido:    data.metodo_limpieza_pedido,
+    lista_perf0_pedido_id:     data.lista_perf0_pedido_id,
+    metodo_perf0_pedido:       data.metodo_perf0_pedido,
+    lista_perf_plus_pedido_id: data.lista_perf_plus_pedido_id,
+    metodo_perf_plus_pedido:   data.metodo_perf_plus_pedido,
+  }
 
   // ── Calculate real price for each item ──────────────────────────────────
   type ItemCalc = {
     producto_id: string; cantidad: number
     precioAlCliente: number; precioNeto: number; precio_costo: number
+    listaUsadaId: string | null; metodoUsado: string
   }
   const itemsCalc: ItemCalc[] = []
   for (const item of data.items) {
     const articulo = await fetchArticuloConDescuentos(supabase, item.producto_id)
+    const segmento = detectarSegmento(articulo)
+    const { listaId, metodoRaw } = resolverListaSegmento(segmento, segmentoOverrides, clienteInfo)
+    const listaDatos = await fetchListaDatos(supabase, listaId, listasCache)
+    const metodo = toMetodoFacturacion(metodoRaw)
     const precio = calcularPrecioPedido(articulo, listaDatos, metodo, descuentoCliente)
     itemsCalc.push({
       producto_id: item.producto_id,
@@ -84,6 +190,8 @@ export async function createPedido(data: {
       precioAlCliente: precio.precioAlCliente,
       precioNeto: precio.precioNeto,
       precio_costo: articulo.precio_compra || 0,
+      listaUsadaId: listaId,
+      metodoUsado: metodoRaw,
     })
   }
 
@@ -100,12 +208,19 @@ export async function createPedido(data: {
       estado: "pendiente",
       subtotal: total,
       descuento_general: 0,
-      ...(data.metodo_facturacion_pedido ? { metodo_facturacion_pedido: data.metodo_facturacion_pedido } : {}),
-      ...(data.lista_precio_pedido_id ? { lista_precio_pedido_id: data.lista_precio_pedido_id } : {}),
+      ...(data.metodo_facturacion_pedido    ? { metodo_facturacion_pedido:    data.metodo_facturacion_pedido }    : {}),
+      ...(data.lista_precio_pedido_id       ? { lista_precio_pedido_id:       data.lista_precio_pedido_id }       : {}),
+      ...(data.lista_limpieza_pedido_id     ? { lista_limpieza_pedido_id:     data.lista_limpieza_pedido_id }     : {}),
+      ...(data.metodo_limpieza_pedido       ? { metodo_limpieza_pedido:       data.metodo_limpieza_pedido }       : {}),
+      ...(data.lista_perf0_pedido_id        ? { lista_perf0_pedido_id:        data.lista_perf0_pedido_id }        : {}),
+      ...(data.metodo_perf0_pedido          ? { metodo_perf0_pedido:          data.metodo_perf0_pedido }          : {}),
+      ...(data.lista_perf_plus_pedido_id    ? { lista_perf_plus_pedido_id:    data.lista_perf_plus_pedido_id }    : {}),
+      ...(data.metodo_perf_plus_pedido      ? { metodo_perf_plus_pedido:      data.metodo_perf_plus_pedido }      : {}),
       total_flete: 0,
       total_impuestos: percepciones,
       total: Math.round((total + percepciones) * 100) / 100,
       observaciones: data.observaciones,
+      creado_por: user.id,
     })
     .select()
     .single()
@@ -129,6 +244,8 @@ export async function createPedido(data: {
       precio_final: item.precioAlCliente,
       subtotal: Math.round(item.precioAlCliente * item.cantidad * 100) / 100,
       precio_costo: item.precio_costo,
+      lista_precio_id: item.listaUsadaId,
+      metodo_facturacion_item: item.metodoUsado,
     })
     if (itemError) throw itemError
 
@@ -140,7 +257,8 @@ export async function createPedido(data: {
       ? Math.round((ivaMonto / item.precioNeto) * 10000) / 100
       : 0
     const stockActual = art?.stock_actual ?? null
-    const metodoColor = (data.metodo_facturacion_pedido || clienteInfo.metodo_facturacion || "Final")
+    // Usar el metodo efectivo de este ítem (puede ser diferente al general)
+    const metodoColor = item.metodoUsado
     const colorDinero = metodoColor === "Factura (21% IVA)" || metodoColor === "Factura" ? "BLANCO" : "NEGRO"
 
     await insertarKardex(
@@ -162,11 +280,12 @@ export async function createPedido(data: {
         cliente_id: data.cliente_id,
         vendedor_id: clienteInfo.vendedor_id ?? null,
         pedido_id: pedido.id,
-        lista_precio_id: data.lista_precio_pedido_id || clienteInfo.lista_precio_id || null,
+        lista_precio_id: item.listaUsadaId,
         metodo_facturacion: metodoColor,
         color_dinero: colorDinero,
         stock_antes: stockActual,
         stock_despues: stockActual !== null ? stockActual - item.cantidad : null,
+        operador_id: user.id,
       },
       {
         sku: art?.sku,
@@ -410,6 +529,8 @@ export async function agregarItemPedido(
   const supabase = await createClient()
   await assertPedidoEditable(supabase, pedidoId)
 
+  const { data: { user } } = await supabase.auth.getUser()
+
   // Fetch pedido to get lista + metodo + cliente
   const { data: pedido } = await supabase
     .from("pedidos")
@@ -475,6 +596,7 @@ export async function agregarItemPedido(
       color_dinero: colorDinero,
       stock_antes: artInfo?.stock_actual ?? null,
       stock_despues: artInfo?.stock_actual != null ? artInfo.stock_actual - cantidad : null,
+      operador_id: user?.id ?? null,
     },
     {
       sku: artInfo?.sku,
@@ -485,6 +607,11 @@ export async function agregarItemPedido(
       iva_ventas: artInfo?.iva_ventas,
     },
   )
+
+  // Marcar actualizado_por en el pedido
+  if (user?.id) {
+    await supabase.from("pedidos").update({ actualizado_por: user.id }).eq("id", pedidoId)
+  }
 
   revalidatePath("/clientes-pedidos")
   return { success: true }

@@ -25,7 +25,7 @@ export async function loginUser(email: string, password: string) {
     // Verificar que el usuario exista en la tabla usuarios del ERP
     const { data: usuario, error: userError } = await supabase
         .from("usuarios")
-        .select("id, email, nombre, estado")
+        .select("id, email, nombre, estado, debe_cambiar_password")
         .eq("id", data.user.id)
         .single()
 
@@ -39,6 +39,11 @@ export async function loginUser(email: string, password: string) {
     if (usuario.estado !== "activo") {
         await supabase.auth.signOut()
         return { success: false, error: "Tu cuenta está inactiva. Contactá al administrador." }
+    }
+
+    // Forzar cambio de contraseña si corresponde
+    if (usuario.debe_cambiar_password) {
+        return { success: true, mustChangePassword: true }
     }
 
     // Obtener roles del usuario
