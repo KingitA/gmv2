@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
-import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, X } from "lucide-react"
+import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, X, ExternalLink } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -59,6 +60,8 @@ export default function ClientesPage() {
   const [vendedores, setVendedores] = useState<Vendedor[]>([])
   const [localidades, setLocalidades] = useState<Localidad[]>([])
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
+  const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null)
+  const [sheetBonifs, setSheetBonifs] = useState<any[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -313,6 +316,14 @@ export default function ClientesPage() {
       metodo_perf_plus: "",
     })
     setEditingCliente(null)
+  }
+
+  async function openClienteSheet(cliente: Cliente) {
+    setSelectedCliente(cliente)
+    setSheetBonifs([])
+    const sb = createClient()
+    const { data } = await sb.from("bonificaciones").select("*").eq("cliente_id", cliente.id).eq("activo", true)
+    setSheetBonifs(data || [])
   }
 
   function openEditDialog(cliente: Cliente) {
@@ -811,8 +822,7 @@ export default function ClientesPage() {
                     <TableHead className="font-semibold">Localidad</TableHead>
                     <TableHead className="font-semibold">Puntaje</TableHead>
                     <TableHead className="font-semibold">Nivel</TableHead>
-                    <TableHead className="font-semibold">Cuenta Corriente</TableHead>
-                    <TableHead className="text-right font-semibold">Acciones</TableHead>
+                    <TableHead className="font-semibold">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -824,7 +834,11 @@ export default function ClientesPage() {
                     </TableRow>
                   ) : (
                     filteredClientes.map((cliente) => (
-                      <TableRow key={cliente.id} className="hover:bg-muted/50 transition-colors">
+                      <TableRow
+                        key={cliente.id}
+                        className="hover:bg-muted/50 transition-colors cursor-pointer"
+                        onClick={() => openClienteSheet(cliente)}
+                      >
                         <TableCell className="font-medium">{cliente.codigo_cliente || "-"}</TableCell>
                         <TableCell className="font-medium">{cliente.nombre_razon_social}</TableCell>
                         <TableCell className="text-muted-foreground">{cliente.direccion || "-"}</TableCell>
@@ -847,23 +861,16 @@ export default function ClientesPage() {
                             {cliente.nivel_puntaje}
                           </span>
                         </TableCell>
-                        <TableCell>
-                          <Link href={`/clientes/${cliente.id}/cuenta-corriente`}>
-                            <Button variant="outline" size="sm" className="hover:bg-primary/10">
-                              Ver Cuenta
-                            </Button>
-                          </Link>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex gap-2 justify-end">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openEditDialog(cliente)}
-                              className="hover:bg-blue-50 hover:text-blue-600"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <div className="flex gap-2">
+                            <Link href={`/clientes/${cliente.id}`}>
+                              <Button variant="ghost" size="icon" className="hover:bg-blue-50 hover:text-blue-600">
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </Link>
+                            <Link href={`/clientes/${cliente.id}/cuenta-corriente`}>
+                              <Button variant="outline" size="sm" className="hover:bg-primary/10">CC</Button>
+                            </Link>
                             <Button
                               variant="ghost"
                               size="icon"
@@ -883,6 +890,150 @@ export default function ClientesPage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* ── Sheet de vista rápida ── */}
+      <Sheet open={!!selectedCliente} onOpenChange={(open) => !open && setSelectedCliente(null)}>
+        <SheetContent side="right" className="w-[480px] max-w-[480px] flex flex-col overflow-hidden">
+          <SheetHeader className="border-b pb-4 shrink-0 pr-10">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${(selectedCliente as any)?.activo ? "bg-green-500" : "bg-gray-300"}`} />
+              <SheetTitle className="text-lg leading-tight">{selectedCliente?.nombre_razon_social}</SheetTitle>
+            </div>
+            <SheetDescription className="text-xs">
+              CUIT: {selectedCliente?.cuit || "—"} · Cód: {selectedCliente?.codigo_cliente || "—"}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-5">
+            {/* Ubicación */}
+            <div>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Ubicación</p>
+              <p className="text-sm">{selectedCliente?.direccion || "—"}</p>
+              <p className="text-sm text-muted-foreground">
+                {selectedCliente?.localidades?.nombre || "—"}
+                {selectedCliente?.provincia ? ` · ${selectedCliente.provincia}` : ""}
+              </p>
+            </div>
+
+            {/* Comercial */}
+            <div>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Comercial</p>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Lista:</span>
+                  <span className="font-medium">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_precio_id)?.nombre || "—"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Facturación:</span>
+                  <span>{(selectedCliente as any)?.metodo_facturacion || "—"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Pago:</span>
+                  <span>{selectedCliente?.condicion_pago}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Entrega:</span>
+                  <span>{selectedCliente?.condicion_entrega === "entregamos_nosotros" ? "Entregamos nosotros" : selectedCliente?.condicion_entrega === "retira_mostrador" ? "Retira en mostrador" : selectedCliente?.condicion_entrega === "transporte" ? "Transporte" : selectedCliente?.condicion_entrega || "—"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Canal:</span>
+                  <span>{selectedCliente?.tipo_canal}</span>
+                </div>
+                {selectedCliente?.vendedor_id && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Vendedor:</span>
+                    <span>{vendedores.find((v) => v.id === selectedCliente?.vendedor_id)?.nombre || "—"}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Segmentos configurados */}
+            {((selectedCliente as any)?.lista_limpieza_id || (selectedCliente as any)?.lista_perf0_id || (selectedCliente as any)?.lista_perf_plus_id) && (
+              <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Segmentos</p>
+                <div className="space-y-1">
+                  {(selectedCliente as any)?.lista_limpieza_id && (
+                    <div className="flex justify-between text-xs bg-slate-50 rounded px-2 py-1.5">
+                      <span className="text-muted-foreground">Limpieza/Bazar</span>
+                      <span className="font-medium">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_limpieza_id)?.nombre || "—"}</span>
+                    </div>
+                  )}
+                  {(selectedCliente as any)?.lista_perf0_id && (
+                    <div className="flex justify-between text-xs bg-slate-50 rounded px-2 py-1.5">
+                      <span className="text-muted-foreground">Perf0</span>
+                      <span className="font-medium">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_perf0_id)?.nombre || "—"}</span>
+                    </div>
+                  )}
+                  {(selectedCliente as any)?.lista_perf_plus_id && (
+                    <div className="flex justify-between text-xs bg-slate-50 rounded px-2 py-1.5">
+                      <span className="text-muted-foreground">Perf Plus</span>
+                      <span className="font-medium">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_perf_plus_id)?.nombre || "—"}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Bonificaciones activas */}
+            {sheetBonifs.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Bonificaciones activas</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {sheetBonifs.map((b: any) => (
+                    <span key={b.id} className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
+                      b.tipo === "mercaderia" ? "border-green-300 bg-green-50 text-green-800" :
+                      b.tipo === "plata" ? "border-blue-300 bg-blue-50 text-blue-800" :
+                      "border-orange-300 bg-orange-50 text-orange-800"
+                    }`}>
+                      {b.tipo} {b.porcentaje}%
+                      {b.segmento ? ` · ${b.segmento}` : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Fiscal */}
+            <div>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Fiscal</p>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Condición IVA:</span>
+                  <span>{selectedCliente?.condicion_iva}</span>
+                </div>
+                {selectedCliente?.nro_iibb && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">N° IIBB:</span>
+                    <span>{selectedCliente.nro_iibb}</span>
+                  </div>
+                )}
+                {(selectedCliente?.exento_iva || selectedCliente?.exento_iibb) && (
+                  <div className="flex gap-2">
+                    {selectedCliente.exento_iva && <span className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-700 px-2 py-0.5 rounded">Exento IVA</span>}
+                    {selectedCliente.exento_iibb && <span className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-700 px-2 py-0.5 rounded">Exento IIBB</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <SheetFooter className="border-t pt-4 shrink-0 flex-row gap-2">
+            <Link href={`/clientes/${selectedCliente?.id}`} className="flex-1">
+              <Button className="w-full gap-2">
+                <Pencil className="h-4 w-4" />
+                Editar Ficha
+              </Button>
+            </Link>
+            <Link href={`/clientes/${selectedCliente?.id}/cuenta-corriente`}>
+              <Button variant="outline" className="gap-2">
+                <ExternalLink className="h-4 w-4" />
+                CC
+              </Button>
+            </Link>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

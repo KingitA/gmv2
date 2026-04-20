@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Search,
@@ -937,7 +938,7 @@ export default function ClientesPedidosPage() {
         })}
       </div>
 
-      <Dialog
+      <Sheet
         open={modalDetalleAbierto}
         onOpenChange={(open) => {
           setModalDetalleAbierto(open);
@@ -948,14 +949,14 @@ export default function ClientesPedidosPage() {
           }
         }}
       >
-        <DialogContent className="max-w-[95vw] sm:max-w-[95vw] md:max-w-[95vw] w-full max-h-[95vh] overflow-y-auto">
-          <DialogHeader className="flex flex-row items-start justify-between gap-4">
+        <SheetContent side="right" className="w-[85vw] max-w-none overflow-y-auto flex flex-col">
+          <SheetHeader className="flex flex-row items-start justify-between gap-4 border-b pb-4 shrink-0">
             <div>
-              <DialogTitle>Detalle del Pedido {pedidoSeleccionado?.numero_pedido}</DialogTitle>
-              <DialogDescription>Información completa del pedido y sus artículos</DialogDescription>
+              <SheetTitle>Detalle del Pedido {pedidoSeleccionado?.numero_pedido}</SheetTitle>
+              <SheetDescription>Información completa del pedido y sus artículos</SheetDescription>
             </div>
             {pedidoSeleccionado && (
-              <div className="flex gap-2 shrink-0 mt-0.5">
+              <div className="flex gap-2 shrink-0 mt-0.5 mr-8">
                 {!tieneComprobantes(pedidoSeleccionado.id) && (
                   <Button
                     size="sm"
@@ -978,10 +979,10 @@ export default function ClientesPedidosPage() {
                 </Button>
               </div>
             )}
-          </DialogHeader>
+          </SheetHeader>
 
           {pedidoSeleccionado && (
-            <div className="space-y-6">
+            <div className="space-y-6 flex-1 overflow-y-auto p-1">
               <div className="grid grid-cols-2 gap-4">
                 <Card>
                   <CardHeader>
@@ -1418,8 +1419,8 @@ export default function ClientesPedidosPage() {
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <AlertDialog open={!!pedidoAEliminar} onOpenChange={(open) => !open && setPedidoAEliminar(null)}>
         <AlertDialogContent>
