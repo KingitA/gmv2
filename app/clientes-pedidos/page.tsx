@@ -64,6 +64,13 @@ type Pedido = {
   prioridad: number
   condicion_entrega: string
   metodo_facturacion_pedido: string | null
+  lista_precio_pedido_id?: string | null
+  lista_limpieza_pedido_id?: string | null
+  metodo_limpieza_pedido?: string | null
+  lista_perf0_pedido_id?: string | null
+  metodo_perf0_pedido?: string | null
+  lista_perf_plus_pedido_id?: string | null
+  metodo_perf_plus_pedido?: string | null
   clientes?: {
     nombre_razon_social: string
     cuit: string
@@ -71,9 +78,13 @@ type Pedido = {
     localidad: string | null
     metodo_facturacion: string | null
     lista_precio_id: string | null
-    listas_precio?: {
-      nombre: string
-    } | null
+    lista_limpieza_id?: string | null
+    metodo_limpieza?: string | null
+    lista_perf0_id?: string | null
+    metodo_perf0?: string | null
+    lista_perf_plus_id?: string | null
+    metodo_perf_plus?: string | null
+    listas_precio?: { nombre: string } | null
   }
   vendedores?: {
     nombre: string
@@ -224,7 +235,7 @@ export default function ClientesPedidosPage() {
         .from("pedidos")
         .select(`
           *,
-          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, listas_precio:lista_precio_id (nombre)),
+          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, listas_precio:lista_precio_id (nombre)),
           vendedores (nombre),
           viajes (nombre, fecha)
         `)
@@ -509,10 +520,34 @@ export default function ClientesPedidosPage() {
                 <div class="value">${pedido.clientes?.localidad || "—"}</div>
               </div>
               <div class="info-box">
-                <div class="label">Lista de Precios</div>
-                <div class="value">${(pedido.clientes as any)?.listas_precio?.nombre || "Sin lista"}</div>
-                <div class="label" style="margin-top: 8px;">Forma de Facturación</div>
-                <div class="value">${pedido.metodo_facturacion_pedido || pedido.clientes?.metodo_facturacion || "—"}${pedido.metodo_facturacion_pedido && pedido.metodo_facturacion_pedido !== pedido.clientes?.metodo_facturacion ? ' <span style="color: #e67e22; font-size: 11px;">(modificado en pedido)</span>' : ''}</div>
+                ${(() => {
+                  const c = pedido.clientes as any
+                  const hasSegmentos = (pedido as any).lista_limpieza_pedido_id || c?.lista_limpieza_id ||
+                    (pedido as any).lista_perf0_pedido_id || c?.lista_perf0_id ||
+                    (pedido as any).lista_perf_plus_pedido_id || c?.lista_perf_plus_id ||
+                    (pedido as any).metodo_limpieza_pedido || c?.metodo_limpieza ||
+                    (pedido as any).metodo_perf0_pedido || c?.metodo_perf0 ||
+                    (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus
+
+                  if (hasSegmentos) {
+                    const segRows = [
+                      { label: "Limpieza / Bazar", lista: (pedido as any).lista_limpieza_pedido_id || c?.lista_limpieza_id, metodo: (pedido as any).metodo_limpieza_pedido || c?.metodo_limpieza },
+                      { label: "Perfumería Perf0", lista: (pedido as any).lista_perf0_pedido_id || c?.lista_perf0_id, metodo: (pedido as any).metodo_perf0_pedido || c?.metodo_perf0 },
+                      { label: "Perfumería Plus", lista: (pedido as any).lista_perf_plus_pedido_id || c?.lista_perf_plus_id, metodo: (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus },
+                    ].filter(s => s.lista || s.metodo)
+                    return segRows.map(s => `
+                      <div class="label">${s.label}</div>
+                      <div class="value" style="margin-bottom: 6px;">${s.metodo || c?.metodo_facturacion || "—"}${s.lista ? ` — ${s.lista}` : ""}</div>
+                    `).join('')
+                  } else {
+                    return `
+                      <div class="label">Lista de Precios</div>
+                      <div class="value">${c?.listas_precio?.nombre || "Sin lista"}</div>
+                      <div class="label" style="margin-top: 8px;">Forma de Facturación</div>
+                      <div class="value">${pedido.metodo_facturacion_pedido || pedido.clientes?.metodo_facturacion || "—"}</div>
+                    `
+                  }
+                })()}
                 <div class="label" style="margin-top: 8px;">Vendedor</div>
                 <div class="value">${pedido.vendedores?.nombre || "Sin asignar"}</div>
                 <div class="label" style="margin-top: 8px;">Estado</div>

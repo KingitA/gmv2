@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
         const [{ data: textResults }, vectorResults] = await Promise.all([
             supabase
                 .from("clientes")
-                .select("id, nombre, razon_social, cuit, direccion, localidad, provincia, tipo_canal, activo")
+                .select("id, nombre, razon_social, nombre_razon_social, cuit, codigo_cliente, direccion, localidad, provincia, tipo_canal, activo, metodo_facturacion, lista_precio_id, condicion_pago, condicion_entrega, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, vendedor_id")
                 .eq("activo", true)
                 .or(
                     `nombre.ilike.%${q}%,` +

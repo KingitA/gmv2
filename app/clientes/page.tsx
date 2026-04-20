@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, ChevronDown, ChevronUp, X } from "lucide-react"
+import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, X } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -66,7 +66,6 @@ export default function ClientesPage() {
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [bonificaciones, setBonificaciones] = useState<any[]>([])
-  const [showBonificaciones, setShowBonificaciones] = useState(false)
   const [proveedores, setProveedores] = useState<any[]>([])
   const [newBonif, setNewBonif] = useState({ tipo: "plata", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
   const [formData, setFormData] = useState({
@@ -346,7 +345,6 @@ export default function ClientesPage() {
       lista_perf_plus_id: (cliente as any).lista_perf_plus_id || "",
       metodo_perf_plus: (cliente as any).metodo_perf_plus || "",
     })
-    setShowBonificaciones(false)
     setBonificaciones([])
     loadBonificaciones(cliente.id)
     setIsDialogOpen(true)
@@ -523,472 +521,274 @@ export default function ClientesPage() {
                     <DialogHeader>
                       <DialogTitle>{editingCliente ? "Editar Cliente" : "Nuevo Cliente"}</DialogTitle>
                     </DialogHeader>
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Datos Básicos</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="codigo_cliente">Código de Cliente</Label>
-                            <Input
-                              id="codigo_cliente"
-                              value={formData.codigo_cliente}
-                              onChange={(e) => setFormData({ ...formData, codigo_cliente: e.target.value })}
-                              placeholder="Ej: CL-001"
-                            />
-                          </div>
-                          <div className="col-span-1">
-                            <Label htmlFor="nombre_razon_social">Nombre / Razón Social *</Label>
-                            <Input
-                              id="nombre_razon_social"
-                              value={formData.nombre_razon_social}
-                              onChange={(e) => setFormData({ ...formData, nombre_razon_social: e.target.value })}
-                              required
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="cuit">CUIT</Label>
-                            <Input
-                              id="cuit"
-                              value={formData.cuit}
-                              onChange={(e) => setFormData({ ...formData, cuit: e.target.value })}
-                              placeholder="20-12345678-9"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="tipo_canal">Tipo de Canal *</Label>
-                            <Select
-                              value={formData.tipo_canal}
-                              onValueChange={(value) => setFormData({ ...formData, tipo_canal: value })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Mayorista">Mayorista</SelectItem>
-                                <SelectItem value="Minorista">Minorista</SelectItem>
-                                <SelectItem value="Consumidor Final">Consumidor Final</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                      {/* ── Fila 1: Identificación ── */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <Label className="text-xs text-slate-500">Código</Label>
+                          <Input value={formData.codigo_cliente} onChange={(e) => setFormData({ ...formData, codigo_cliente: e.target.value })} placeholder="CL-001" className="h-9" />
+                        </div>
+                        <div className="col-span-2">
+                          <Label className="text-xs text-slate-500">Nombre / Razón Social *</Label>
+                          <Input value={formData.nombre_razon_social} onChange={(e) => setFormData({ ...formData, nombre_razon_social: e.target.value })} required className="h-9" />
                         </div>
                       </div>
 
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Dirección</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="col-span-2">
-                            <Label htmlFor="direccion">Dirección</Label>
-                            <Input
-                              id="direccion"
-                              value={formData.direccion}
-                              onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="localidad_id">Localidad</Label>
-                            <Select value={formData.localidad_id} onValueChange={handleLocalidadChange}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Seleccionar localidad" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {localidades.map((loc) => (
-                                  <SelectItem key={loc.id} value={loc.id}>
-                                    {loc.nombre} - {loc.provincia}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label htmlFor="provincia">Provincia</Label>
-                            <Input id="provincia" value={formData.provincia} disabled className="bg-muted" />
-                          </div>
-                          {zonaAsignada && (
-                            <div className="col-span-2">
-                              <Label>Zona Asignada</Label>
-                              <div className="px-3 py-2 bg-blue-50 text-blue-700 rounded-md border border-blue-200">
-                                {zonaAsignada}
-                              </div>
+                      {/* ── Fila 2: Fiscal + Contacto ── */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs text-slate-500">CUIT</Label>
+                          <Input value={formData.cuit} onChange={(e) => setFormData({ ...formData, cuit: e.target.value })} placeholder="20-12345678-9" className="h-9" />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Condición IVA *</Label>
+                          <Select value={formData.condicion_iva} onValueChange={(v) => setFormData({ ...formData, condicion_iva: v })}>
+                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Responsable Inscripto">Responsable Inscripto</SelectItem>
+                              <SelectItem value="Monotributo">Monotributo</SelectItem>
+                              <SelectItem value="Consumidor Final">Consumidor Final</SelectItem>
+                              <SelectItem value="Sujeto Exento">Sujeto Exento</SelectItem>
+                              <SelectItem value="No Categorizado">No Categorizado</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Teléfono</Label>
+                          <Input value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} className="h-9" />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Email</Label>
+                          <Input type="email" value={formData.mail} onChange={(e) => setFormData({ ...formData, mail: e.target.value })} className="h-9" />
+                        </div>
+                      </div>
+
+                      {/* ── Fila 3: Dirección ── */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-2">
+                          <Label className="text-xs text-slate-500">Dirección</Label>
+                          <Input value={formData.direccion} onChange={(e) => setFormData({ ...formData, direccion: e.target.value })} className="h-9" />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Localidad</Label>
+                          <Select value={formData.localidad_id} onValueChange={handleLocalidadChange}>
+                            <SelectTrigger className="h-9"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                            <SelectContent>
+                              {localidades.map((loc) => (
+                                <SelectItem key={loc.id} value={loc.id}>{loc.nombre} - {loc.provincia}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      {/* ── Fila 4: Comercial ── */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <Label className="text-xs text-slate-500">Facturación *</Label>
+                          <Select value={formData.metodo_facturacion} onValueChange={(v) => setFormData({ ...formData, metodo_facturacion: v })}>
+                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
+                              <SelectItem value="Final">Final (Mixto)</SelectItem>
+                              <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Lista de Precio</Label>
+                          <Select value={formData.lista_precio_id || "__none__"} onValueChange={(v) => setFormData({ ...formData, lista_precio_id: v === "__none__" ? "" : v })}>
+                            <SelectTrigger className="h-9"><SelectValue placeholder="Sin lista" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Sin lista</SelectItem>
+                              {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Vendedor</Label>
+                          <Select value={formData.vendedor_id || "none"} onValueChange={(v) => setFormData({ ...formData, vendedor_id: v === "none" ? "" : v })}>
+                            <SelectTrigger className="h-9"><SelectValue placeholder="Sin vendedor" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Sin vendedor</SelectItem>
+                              {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Condición de Pago *</Label>
+                          <Select value={formData.condicion_pago} onValueChange={(v) => setFormData({ ...formData, condicion_pago: v })}>
+                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Efectivo">Efectivo</SelectItem>
+                              <SelectItem value="Transferencia">Transferencia</SelectItem>
+                              <SelectItem value="Cheque al día">Cheque al día</SelectItem>
+                              <SelectItem value="Cheque 30 días">Cheque 30 días</SelectItem>
+                              <SelectItem value="Cheque 30/60/90">Cheque 30/60/90</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Condición de Entrega *</Label>
+                          <Select value={formData.condicion_entrega} onValueChange={(v) => setFormData({ ...formData, condicion_entrega: v })}>
+                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="retira_mostrador">Retira en Mostrador</SelectItem>
+                              <SelectItem value="transporte">Envío por Transporte</SelectItem>
+                              <SelectItem value="entregamos_nosotros">Entregamos Nosotros</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Descuento Especial (%)</Label>
+                          <Input type="number" step="0.01" min="0" max="100" value={formData.descuento_especial} onChange={(e) => setFormData({ ...formData, descuento_especial: parseFloat(e.target.value) || 0 })} placeholder="0" className="h-9" />
+                        </div>
+                      </div>
+
+                      {/* ── Fila 5: Fiscal extra ── */}
+                      <div className="grid grid-cols-4 gap-3 items-end">
+                        <div>
+                          <Label className="text-xs text-slate-500">Tipo de Canal</Label>
+                          <Select value={formData.tipo_canal} onValueChange={(v) => setFormData({ ...formData, tipo_canal: v })}>
+                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Mayorista">Mayorista</SelectItem>
+                              <SelectItem value="Minorista">Minorista</SelectItem>
+                              <SelectItem value="Consumidor Final">Consumidor Final</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">N° IIBB</Label>
+                          <Input value={formData.nro_iibb} onChange={(e) => setFormData({ ...formData, nro_iibb: e.target.value })} className="h-9" />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">% Percepción IIBB</Label>
+                          <Input type="number" step="0.01" value={formData.percepcion_iibb} onChange={(e) => setFormData({ ...formData, percepcion_iibb: parseFloat(e.target.value) || 0 })} className="h-9" />
+                        </div>
+                        <div className="flex gap-4 pb-1">
+                          <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                            <input type="checkbox" checked={formData.exento_iibb} onChange={(e) => setFormData({ ...formData, exento_iibb: e.target.checked })} className="h-4 w-4 rounded" />
+                            Exento IIBB
+                          </label>
+                          <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                            <input type="checkbox" checked={formData.exento_iva} onChange={(e) => setFormData({ ...formData, exento_iva: e.target.checked })} className="h-4 w-4 rounded" />
+                            Exento IVA
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* ── Segmentos ── */}
+                      <div>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Condiciones por Segmento</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza" },
+                            { label: "Perfumería Perf0", listaKey: "lista_perf0_id", metodoKey: "metodo_perf0" },
+                            { label: "Perfumería Plus", listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus" },
+                          ].map(({ label, listaKey, metodoKey }) => (
+                            <div key={listaKey} className="border rounded-md p-2.5 bg-slate-50 space-y-1.5">
+                              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>
+                              <Select value={(formData as any)[metodoKey] || "__none__"} onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v === "__none__" ? "" : v })}>
+                                <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Heredar" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">Heredar general</SelectItem>
+                                  <SelectItem value="Factura (21% IVA)">Factura</SelectItem>
+                                  <SelectItem value="Final (Mixto)">Final</SelectItem>
+                                  <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Select value={(formData as any)[listaKey] || "__none__"} onValueChange={(v) => setFormData({ ...formData, [listaKey]: v === "__none__" ? "" : v })}>
+                                <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Heredar lista" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">Heredar lista</SelectItem>
+                                  {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
                             </div>
-                          )}
+                          ))}
                         </div>
                       </div>
 
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Contacto</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="telefono">Teléfono</Label>
-                            <Input
-                              id="telefono"
-                              value={formData.telefono}
-                              onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="mail">Email</Label>
-                            <Input
-                              id="mail"
-                              type="email"
-                              value={formData.mail}
-                              onChange={(e) => setFormData({ ...formData, mail: e.target.value })}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Datos Fiscales</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="condicion_iva">Condición de IVA *</Label>
-                            <Select
-                              value={formData.condicion_iva}
-                              onValueChange={(value) => setFormData({ ...formData, condicion_iva: value })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Responsable Inscripto">Responsable Inscripto</SelectItem>
-                                <SelectItem value="Monotributo">Monotributo</SelectItem>
-                                <SelectItem value="Consumidor Final">Consumidor Final</SelectItem>
-                                <SelectItem value="Sujeto Exento">Sujeto Exento</SelectItem>
-                                <SelectItem value="No Categorizado">No Categorizado</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label htmlFor="metodo_facturacion">Método de Facturación *</Label>
-                            <Select
-                              value={formData.metodo_facturacion}
-                              onValueChange={(value) => setFormData({ ...formData, metodo_facturacion: value })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
-                                <SelectItem value="Final">Final (Mixto)</SelectItem>
-                                <SelectItem value="Presupuesto">Presupuesto</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label htmlFor="nro_iibb">N° IIBB</Label>
-                            <Input
-                              id="nro_iibb"
-                              value={formData.nro_iibb}
-                              onChange={(e) => setFormData({ ...formData, nro_iibb: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="percepcion_iibb">% Percepción IIBB</Label>
-                            <Input
-                              id="percepcion_iibb"
-                              type="number"
-                              step="0.01"
-                              value={formData.percepcion_iibb}
-                              onChange={(e) =>
-                                setFormData({ ...formData, percepcion_iibb: Number.parseFloat(e.target.value) || 0 })
-                              }
-                            />
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              id="exento_iibb"
-                              checked={formData.exento_iibb}
-                              onChange={(e) => setFormData({ ...formData, exento_iibb: e.target.checked })}
-                              className="h-4 w-4"
-                            />
-                            <Label htmlFor="exento_iibb">Exento IIBB</Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              id="exento_iva"
-                              checked={formData.exento_iva}
-                              onChange={(e) => setFormData({ ...formData, exento_iva: e.target.checked })}
-                              className="h-4 w-4"
-                            />
-                            <Label htmlFor="exento_iva">Exento IVA</Label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Datos Comerciales</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="condicion_pago">Condición de Pago *</Label>
-                            <Select
-                              value={formData.condicion_pago}
-                              onValueChange={(value) => setFormData({ ...formData, condicion_pago: value })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Efectivo">Efectivo</SelectItem>
-                                <SelectItem value="Transferencia">Transferencia</SelectItem>
-                                <SelectItem value="Cheque al día">Cheque al día</SelectItem>
-                                <SelectItem value="Cheque 30 días">Cheque 30 días</SelectItem>
-                                <SelectItem value="Cheque 30/60/90">Cheque 30/60/90</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label htmlFor="vendedor_id">Vendedor</Label>
-                            <Select
-                              value={formData.vendedor_id}
-                              onValueChange={(value) => setFormData({ ...formData, vendedor_id: value })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Seleccionar vendedor" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Sin vendedor</SelectItem>
-                                {vendedores.map((v) => (
-                                  <SelectItem key={v.id} value={v.id}>
-                                    {v.nombre}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label htmlFor="lista_precio_id">Lista de Precio</Label>
-                            <Select
-                              value={formData.lista_precio_id}
-                              onValueChange={(value) => setFormData({ ...formData, lista_precio_id: value })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Seleccionar lista" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Sin lista</SelectItem>
-                                {listasPrecio.map((lp) => (
-                                  <SelectItem key={lp.id} value={lp.id}>
-                                    {lp.nombre}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label htmlFor="descuento_especial">Descuento Especial (%)</Label>
-                            <Input
-                              id="descuento_especial"
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              max="100"
-                              value={formData.descuento_especial}
-                              onChange={(e) => setFormData({ ...formData, descuento_especial: parseFloat(e.target.value) || 0 })}
-                              placeholder="0"
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <Label htmlFor="condicion_entrega">Condición de Entrega *</Label>
-                            <Select
-                              value={formData.condicion_entrega}
-                              onValueChange={(value) => setFormData({ ...formData, condicion_entrega: value })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="retira_mostrador">Retira en Mostrador</SelectItem>
-                                <SelectItem value="transporte">Envío por Transporte</SelectItem>
-                                <SelectItem value="entregamos_nosotros">Entregamos Nosotros</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Condiciones por Segmento</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Si se configura aquí, el pedido usará estas listas en lugar de la general para ese segmento de proveedor.
-                        </p>
-                        {[
-                          { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza" },
-                          { label: "Perfumería (Perf0)", listaKey: "lista_perf0_id", metodoKey: "metodo_perf0" },
-                          { label: "Perfumería Plus", listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus" },
-                        ].map(({ label, listaKey, metodoKey }) => (
-                          <div key={listaKey} className="border rounded-lg px-3 py-2.5 bg-slate-50">
-                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">{label}</p>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <Label className="text-[11px] text-slate-500 mb-1 block">Facturación</Label>
-                                <Select
-                                  value={(formData as any)[metodoKey] || "__none__"}
-                                  onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v === "__none__" ? "" : v })}
-                                >
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue placeholder="Heredar general" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">Heredar general</SelectItem>
-                                    <SelectItem value="Factura (21% IVA)">Factura (21% IVA)</SelectItem>
-                                    <SelectItem value="Final (Mixto)">Final (Mixto)</SelectItem>
-                                    <SelectItem value="Presupuesto">Presupuesto</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div>
-                                <Label className="text-[11px] text-slate-500 mb-1 block">Lista de precio</Label>
-                                <Select
-                                  value={(formData as any)[listaKey] || "__none__"}
-                                  onValueChange={(v) => setFormData({ ...formData, [listaKey]: v === "__none__" ? "" : v })}
-                                >
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue placeholder="Heredar general" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__none__">Heredar general</SelectItem>
-                                    {listasPrecio.map((lp) => (
-                                      <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
+                      {/* ── Bonificaciones (solo en edición) ── */}
                       {editingCliente && (
-                        <div className="space-y-3">
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 font-semibold text-base w-full"
-                            onClick={() => setShowBonificaciones(v => !v)}
-                          >
-                            Bonificaciones
-                            {bonificaciones.length > 0 && (
-                              <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">{bonificaciones.length}</span>
-                            )}
-                            {showBonificaciones ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
-                          </button>
+                        <div>
+                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Bonificaciones</p>
 
-                          {showBonificaciones && (
-                            <div className="space-y-3">
-                              <p className="text-sm text-muted-foreground">
-                                Configurá bonificaciones automáticas para este cliente por tipo de descuento.
-                              </p>
-
-                              {bonificaciones.length > 0 && (
-                                <div className="divide-y border rounded-lg overflow-hidden">
-                                  {bonificaciones.map((b: any) => (
-                                    <div key={b.id} className={`flex items-center gap-3 px-3 py-2 text-sm ${!b.activo ? "opacity-50" : ""}`}>
-                                      <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                                        b.tipo === "mercaderia" ? "bg-green-100 text-green-700" :
-                                        b.tipo === "plata" ? "bg-blue-100 text-blue-700" :
-                                        "bg-orange-100 text-orange-700"
-                                      }`}>
-                                        {b.tipo === "mercaderia" ? "MERCADERÍA" : b.tipo === "plata" ? "PLATA" : "VIAJANTE"}
-                                      </span>
-                                      <span className="font-mono font-semibold">{b.porcentaje}%</span>
-                                      {b.segmento && <span className="text-muted-foreground text-xs">{b.segmento}</span>}
-                                      {b.proveedores?.nombre && <span className="text-muted-foreground text-xs truncate">{b.proveedores.nombre}</span>}
-                                      {b.observaciones && <span className="text-muted-foreground text-xs italic truncate flex-1">{b.observaciones}</span>}
-                                      <div className="flex items-center gap-1 ml-auto shrink-0">
-                                        <button
-                                          type="button"
-                                          className={`text-xs px-2 py-0.5 rounded ${b.activo ? "bg-green-100 text-green-700" : "bg-neutral-100 text-neutral-500"}`}
-                                          onClick={() => toggleBonificacion(b.id, !b.activo, editingCliente.id)}
-                                        >
-                                          {b.activo ? "Activo" : "Inactivo"}
-                                        </button>
-                                        <button type="button" onClick={() => deleteBonificacion(b.id, editingCliente.id)} className="text-red-400 hover:text-red-600 p-1">
-                                          <X className="h-3.5 w-3.5" />
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
+                          {/* Lista de bonificaciones existentes */}
+                          {bonificaciones.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mb-3">
+                              {bonificaciones.map((b: any) => (
+                                <div key={b.id} className={`flex items-center gap-1.5 border rounded-full px-3 py-1 text-sm font-medium ${!b.activo ? "opacity-40" : ""} ${
+                                  b.tipo === "mercaderia" ? "border-green-300 bg-green-50 text-green-800" :
+                                  b.tipo === "plata"     ? "border-blue-300 bg-blue-50 text-blue-800" :
+                                                           "border-orange-300 bg-orange-50 text-orange-800"
+                                }`}>
+                                  <span className="capitalize">{b.tipo}</span>
+                                  <span className="font-bold">{b.porcentaje}%</span>
+                                  {b.segmento && <span className="text-xs opacity-70">· {b.segmento}</span>}
+                                  {b.proveedores?.nombre && <span className="text-xs opacity-70 truncate max-w-[80px]">· {b.proveedores.nombre}</span>}
+                                  <button type="button" onClick={() => toggleBonificacion(b.id, !b.activo, editingCliente.id)} className="ml-0.5 opacity-60 hover:opacity-100 text-xs">
+                                    {b.activo ? "●" : "○"}
+                                  </button>
+                                  <button type="button" onClick={() => deleteBonificacion(b.id, editingCliente.id)} className="opacity-50 hover:opacity-100 hover:text-red-600">
+                                    <X className="h-3 w-3" />
+                                  </button>
                                 </div>
-                              )}
-
-                              <div className="border rounded-lg p-3 bg-slate-50 space-y-2">
-                                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Nueva bonificación</p>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <Label className="text-xs">Tipo</Label>
-                                    <Select value={newBonif.tipo} onValueChange={(v) => setNewBonif({ ...newBonif, tipo: v })}>
-                                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="mercaderia">Mercadería</SelectItem>
-                                        <SelectItem value="plata">Plata</SelectItem>
-                                        <SelectItem value="viajante">Viajante</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Porcentaje (%)</Label>
-                                    <Input
-                                      className="h-8 text-xs"
-                                      type="number"
-                                      step="0.01"
-                                      min="0.01"
-                                      max="100"
-                                      placeholder="ej: 5"
-                                      value={newBonif.porcentaje}
-                                      onChange={(e) => setNewBonif({ ...newBonif, porcentaje: e.target.value })}
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Segmento (opcional)</Label>
-                                    <Select value={newBonif.segmento || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, segmento: v === "__none__" ? "" : v })}>
-                                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="__none__">Todos los segmentos</SelectItem>
-                                        <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
-                                        <SelectItem value="perfumeria">Perfumería</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Proveedor (opcional)</Label>
-                                    <Select value={newBonif.proveedor_id || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, proveedor_id: v === "__none__" ? "" : v })}>
-                                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="__none__">Todos los proveedores</SelectItem>
-                                        {proveedores.map((p: any) => (
-                                          <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                  <div className="col-span-2">
-                                    <Label className="text-xs">Observaciones (opcional)</Label>
-                                    <Input
-                                      className="h-8 text-xs"
-                                      placeholder="ej: Promo verano"
-                                      value={newBonif.observaciones}
-                                      onChange={(e) => setNewBonif({ ...newBonif, observaciones: e.target.value })}
-                                    />
-                                  </div>
-                                </div>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  className="w-full"
-                                  onClick={() => addBonificacion(editingCliente.id)}
-                                  disabled={!newBonif.porcentaje}
-                                >
-                                  <Plus className="h-3.5 w-3.5 mr-1" />
-                                  Agregar bonificación
-                                </Button>
-                              </div>
+                              ))}
                             </div>
                           )}
+
+                          {/* Nueva bonificación */}
+                          <div className="flex items-end gap-2">
+                            <div className="w-28">
+                              <Label className="text-xs text-slate-500">Tipo</Label>
+                              <Select value={newBonif.tipo} onValueChange={(v) => setNewBonif({ ...newBonif, tipo: v })}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="mercaderia">Mercadería</SelectItem>
+                                  <SelectItem value="plata">Plata</SelectItem>
+                                  <SelectItem value="viajante">Viajante</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="w-20">
+                              <Label className="text-xs text-slate-500">% *</Label>
+                              <Input className="h-8 text-xs" type="number" step="0.01" min="0.01" max="100" placeholder="5" value={newBonif.porcentaje} onChange={(e) => setNewBonif({ ...newBonif, porcentaje: e.target.value })} />
+                            </div>
+                            <div className="w-36">
+                              <Label className="text-xs text-slate-500">Segmento</Label>
+                              <Select value={newBonif.segmento || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, segmento: v === "__none__" ? "" : v })}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">Todos</SelectItem>
+                                  <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
+                                  <SelectItem value="perfumeria">Perfumería</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="w-36">
+                              <Label className="text-xs text-slate-500">Proveedor</Label>
+                              <Select value={newBonif.proveedor_id || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, proveedor_id: v === "__none__" ? "" : v })}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">Todos</SelectItem>
+                                  {proveedores.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="flex-1">
+                              <Label className="text-xs text-slate-500">Obs.</Label>
+                              <Input className="h-8 text-xs" placeholder="opcional" value={newBonif.observaciones} onChange={(e) => setNewBonif({ ...newBonif, observaciones: e.target.value })} />
+                            </div>
+                            <Button type="button" size="sm" className="h-8 px-3 shrink-0" onClick={() => addBonificacion(editingCliente.id)} disabled={!newBonif.porcentaje}>
+                              <Plus className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </div>
                       )}
 
-                      <div className="flex gap-2 justify-end">
+                      <div className="flex gap-2 justify-end pt-2 border-t">
                         <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                           Cancelar
                         </Button>
