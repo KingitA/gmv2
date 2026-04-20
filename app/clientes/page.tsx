@@ -62,6 +62,8 @@ export default function ClientesPage() {
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null)
   const [sheetBonifs, setSheetBonifs] = useState<any[]>([])
+  const [sheetCC, setSheetCC] = useState<number | null>(null)
+  const [sheetPedidos, setSheetPedidos] = useState<any[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -321,9 +323,18 @@ export default function ClientesPage() {
   async function openClienteSheet(cliente: Cliente) {
     setSelectedCliente(cliente)
     setSheetBonifs([])
+    setSheetCC(null)
+    setSheetPedidos([])
     const sb = createClient()
-    const { data } = await sb.from("bonificaciones").select("*").eq("cliente_id", cliente.id).eq("activo", true)
-    setSheetBonifs(data || [])
+    const [bonifRes, ccRes, pedidosRes] = await Promise.all([
+      sb.from("bonificaciones").select("*").eq("cliente_id", cliente.id).eq("activo", true),
+      sb.from("comprobantes_venta").select("saldo_pendiente").eq("cliente_id", cliente.id).neq("estado_pago", "pagado"),
+      sb.from("pedidos").select("id, numero_pedido, fecha, estado, total").eq("cliente_id", cliente.id).neq("estado", "eliminado").order("fecha", { ascending: false }).limit(5),
+    ])
+    setSheetBonifs(bonifRes.data || [])
+    const saldo = (ccRes.data || []).reduce((sum: number, c: any) => sum + (c.saldo_pendiente || 0), 0)
+    setSheetCC(saldo)
+    setSheetPedidos(pedidosRes.data || [])
   }
 
   function openEditDialog(cliente: Cliente) {
@@ -893,145 +904,196 @@ export default function ClientesPage() {
 
       {/* ── Sheet de vista rápida ── */}
       <Sheet open={!!selectedCliente} onOpenChange={(open) => !open && setSelectedCliente(null)}>
-        <SheetContent side="right" className="w-[480px] max-w-[480px] flex flex-col overflow-hidden">
-          <SheetHeader className="border-b pb-4 shrink-0 pr-10">
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full shrink-0 ${(selectedCliente as any)?.activo ? "bg-green-500" : "bg-gray-300"}`} />
-              <SheetTitle className="text-lg leading-tight">{selectedCliente?.nombre_razon_social}</SheetTitle>
+        <SheetContent side="right" className="w-[500px] max-w-[500px] p-0 flex flex-col overflow-hidden">
+
+          {/* ── Gradient Header ── */}
+          <div className="bg-gradient-to-br from-indigo-600 via-purple-600 to-violet-700 text-white pt-12 pb-5 px-5 pr-12 shrink-0">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${(selectedCliente as any)?.activo ? "bg-green-400 shadow-sm" : "bg-red-400"}`} />
+              <span className="text-white/60 text-xs font-semibold uppercase tracking-wider">{selectedCliente?.tipo_canal}</span>
             </div>
-            <SheetDescription className="text-xs">
+            <SheetTitle className="text-white text-xl font-bold leading-tight">{selectedCliente?.nombre_razon_social}</SheetTitle>
+            <SheetDescription className="text-white/60 text-xs mt-0.5">
               CUIT: {selectedCliente?.cuit || "—"} · Cód: {selectedCliente?.codigo_cliente || "—"}
             </SheetDescription>
-          </SheetHeader>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            {/* Ubicación */}
-            <div>
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Ubicación</p>
-              <p className="text-sm">{selectedCliente?.direccion || "—"}</p>
-              <p className="text-sm text-muted-foreground">
-                {selectedCliente?.localidades?.nombre || "—"}
-                {selectedCliente?.provincia ? ` · ${selectedCliente.provincia}` : ""}
+            {(selectedCliente?.direccion || selectedCliente?.localidades?.nombre) && (
+              <p className="text-white/50 text-xs mt-1">
+                {selectedCliente?.direccion}{selectedCliente?.localidades?.nombre ? ` · ${selectedCliente.localidades.nombre}` : ""}
               </p>
-            </div>
+            )}
 
-            {/* Comercial */}
-            <div>
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Comercial</p>
-              <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Lista:</span>
-                  <span className="font-medium">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_precio_id)?.nombre || "—"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Facturación:</span>
-                  <span>{(selectedCliente as any)?.metodo_facturacion || "—"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Pago:</span>
-                  <span>{selectedCliente?.condicion_pago}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Entrega:</span>
-                  <span>{selectedCliente?.condicion_entrega === "entregamos_nosotros" ? "Entregamos nosotros" : selectedCliente?.condicion_entrega === "retira_mostrador" ? "Retira en mostrador" : selectedCliente?.condicion_entrega === "transporte" ? "Transporte" : selectedCliente?.condicion_entrega || "—"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Canal:</span>
-                  <span>{selectedCliente?.tipo_canal}</span>
-                </div>
-                {selectedCliente?.vendedor_id && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Vendedor:</span>
-                    <span>{vendedores.find((v) => v.id === selectedCliente?.vendedor_id)?.nombre || "—"}</span>
-                  </div>
-                )}
+            {/* CC Balance */}
+            <div className={`mt-4 rounded-xl p-3.5 border ${
+              sheetCC === null ? "bg-white/10 border-white/20" :
+              sheetCC > 0 ? "bg-red-500/25 border-red-400/40" :
+              sheetCC < 0 ? "bg-green-500/25 border-green-400/40" :
+              "bg-white/10 border-white/20"
+            }`}>
+              <p className="text-white/50 text-[10px] uppercase tracking-wider font-bold">Cuenta Corriente</p>
+              <div className="flex items-end justify-between mt-1">
+                <p className={`text-2xl font-bold ${
+                  sheetCC === null ? "text-white/30" :
+                  sheetCC > 0 ? "text-red-200" :
+                  sheetCC < 0 ? "text-green-200" : "text-white/40"
+                }`}>
+                  {sheetCC === null ? "—" : `$${Math.abs(sheetCC).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`}
+                </p>
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                  sheetCC === null ? "text-white/40 bg-white/10" :
+                  sheetCC > 0 ? "text-red-100 bg-red-500/40" :
+                  sheetCC < 0 ? "text-green-100 bg-green-500/40" :
+                  "text-white/40 bg-white/10"
+                }`}>
+                  {sheetCC === null ? "cargando" : sheetCC > 0 ? "debe" : sheetCC < 0 ? "a favor" : "al día ✓"}
+                </span>
               </div>
             </div>
+          </div>
 
-            {/* Segmentos configurados */}
+          {/* ── Scrollable body ── */}
+          <div className="flex-1 overflow-y-auto">
+
+            {/* Comercial grid */}
+            <div className="p-4 grid grid-cols-2 gap-2.5">
+              <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Lista de precios</p>
+                <p className="font-bold text-sm text-slate-800">
+                  {listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_precio_id)?.nombre || <span className="text-slate-400 font-normal italic">Sin lista</span>}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">{(selectedCliente as any)?.metodo_facturacion || "—"}</p>
+              </div>
+              <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Condición de pago</p>
+                <p className="font-bold text-sm text-slate-800">{selectedCliente?.condicion_pago}</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {selectedCliente?.condicion_entrega === "entregamos_nosotros" ? "Entregamos nosotros" :
+                   selectedCliente?.condicion_entrega === "retira_mostrador" ? "Retira en mostrador" : "Transporte"}
+                </p>
+              </div>
+              {selectedCliente?.vendedor_id && (
+                <div className="col-span-2 bg-indigo-50 rounded-xl p-3.5 border border-indigo-100">
+                  <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1">Vendedor asignado</p>
+                  <p className="font-bold text-sm text-indigo-800">👤 {vendedores.find((v) => v.id === selectedCliente?.vendedor_id)?.nombre || "—"}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Segmentos */}
             {((selectedCliente as any)?.lista_limpieza_id || (selectedCliente as any)?.lista_perf0_id || (selectedCliente as any)?.lista_perf_plus_id) && (
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Segmentos</p>
-                <div className="space-y-1">
+              <div className="px-4 pb-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Segmentos configurados</p>
+                <div className="space-y-1.5">
                   {(selectedCliente as any)?.lista_limpieza_id && (
-                    <div className="flex justify-between text-xs bg-slate-50 rounded px-2 py-1.5">
-                      <span className="text-muted-foreground">Limpieza/Bazar</span>
-                      <span className="font-medium">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_limpieza_id)?.nombre || "—"}</span>
+                    <div className="flex justify-between items-center bg-emerald-50 rounded-xl px-3.5 py-2.5 border border-emerald-100">
+                      <span className="text-xs text-emerald-700 font-semibold">🧹 Limpieza / Bazar</span>
+                      <span className="text-xs font-bold text-emerald-800">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_limpieza_id)?.nombre || "—"}</span>
                     </div>
                   )}
                   {(selectedCliente as any)?.lista_perf0_id && (
-                    <div className="flex justify-between text-xs bg-slate-50 rounded px-2 py-1.5">
-                      <span className="text-muted-foreground">Perf0</span>
-                      <span className="font-medium">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_perf0_id)?.nombre || "—"}</span>
+                    <div className="flex justify-between items-center bg-pink-50 rounded-xl px-3.5 py-2.5 border border-pink-100">
+                      <span className="text-xs text-pink-700 font-semibold">🌸 Perfumería Perf0</span>
+                      <span className="text-xs font-bold text-pink-800">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_perf0_id)?.nombre || "—"}</span>
                     </div>
                   )}
                   {(selectedCliente as any)?.lista_perf_plus_id && (
-                    <div className="flex justify-between text-xs bg-slate-50 rounded px-2 py-1.5">
-                      <span className="text-muted-foreground">Perf Plus</span>
-                      <span className="font-medium">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_perf_plus_id)?.nombre || "—"}</span>
+                    <div className="flex justify-between items-center bg-violet-50 rounded-xl px-3.5 py-2.5 border border-violet-100">
+                      <span className="text-xs text-violet-700 font-semibold">✨ Perfumería Plus</span>
+                      <span className="text-xs font-bold text-violet-800">{listasPrecio.find((l) => l.id === (selectedCliente as any)?.lista_perf_plus_id)?.nombre || "—"}</span>
                     </div>
                   )}
                 </div>
               </div>
             )}
 
-            {/* Bonificaciones activas */}
+            {/* Bonificaciones */}
             {sheetBonifs.length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Bonificaciones activas</p>
+              <div className="px-4 pb-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Bonificaciones activas</p>
                 <div className="flex flex-wrap gap-1.5">
                   {sheetBonifs.map((b: any) => (
-                    <span key={b.id} className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
+                    <span key={b.id} className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${
                       b.tipo === "mercaderia" ? "border-green-300 bg-green-50 text-green-800" :
                       b.tipo === "plata" ? "border-blue-300 bg-blue-50 text-blue-800" :
                       "border-orange-300 bg-orange-50 text-orange-800"
                     }`}>
-                      {b.tipo} {b.porcentaje}%
-                      {b.segmento ? ` · ${b.segmento}` : ""}
+                      {b.tipo} {b.porcentaje}%{b.segmento ? ` · ${b.segmento}` : ""}
                     </span>
                   ))}
                 </div>
               </div>
             )}
 
+            {/* Pedidos recientes */}
+            {sheetPedidos.length > 0 && (
+              <div className="px-4 pb-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Pedidos recientes</p>
+                <div className="space-y-1.5">
+                  {sheetPedidos.map((p: any) => {
+                    const estadoColors: Record<string, string> = {
+                      pendiente: "bg-yellow-100 text-yellow-700 border-yellow-200",
+                      facturado: "bg-emerald-100 text-emerald-700 border-emerald-200",
+                      entregado: "bg-green-100 text-green-700 border-green-200",
+                      en_viaje: "bg-purple-100 text-purple-700 border-purple-200",
+                      en_preparacion: "bg-blue-100 text-blue-700 border-blue-200",
+                    }
+                    const colorClass = estadoColors[p.estado] || "bg-slate-100 text-slate-600 border-slate-200"
+                    return (
+                      <div key={p.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-3.5 py-2.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                        <div>
+                          <span className="text-sm font-bold text-slate-800">#{p.numero_pedido}</span>
+                          <span className="text-xs text-slate-400 ml-2">{new Date(p.fecha).toLocaleDateString("es-AR")}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-slate-700">${(p.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${colorClass}`}>{p.estado}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Fiscal */}
-            <div>
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Fiscal</p>
-              <div className="space-y-1.5 text-sm">
+            <div className="px-4 pb-4">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Fiscal</p>
+              <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-100 space-y-1.5 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Condición IVA:</span>
-                  <span>{selectedCliente?.condicion_iva}</span>
+                  <span className="text-slate-500">Condición IVA</span>
+                  <span className="font-medium text-slate-700">{selectedCliente?.condicion_iva}</span>
                 </div>
                 {selectedCliente?.nro_iibb && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">N° IIBB:</span>
-                    <span>{selectedCliente.nro_iibb}</span>
+                    <span className="text-slate-500">N° IIBB</span>
+                    <span className="font-medium text-slate-700">{selectedCliente.nro_iibb}</span>
                   </div>
                 )}
                 {(selectedCliente?.exento_iva || selectedCliente?.exento_iibb) && (
-                  <div className="flex gap-2">
-                    {selectedCliente.exento_iva && <span className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-700 px-2 py-0.5 rounded">Exento IVA</span>}
-                    {selectedCliente.exento_iibb && <span className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-700 px-2 py-0.5 rounded">Exento IIBB</span>}
+                  <div className="flex gap-1.5 mt-1">
+                    {selectedCliente?.exento_iva && <span className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-700 px-2 py-0.5 rounded-full font-medium">Exento IVA</span>}
+                    {selectedCliente?.exento_iibb && <span className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-700 px-2 py-0.5 rounded-full font-medium">Exento IIBB</span>}
                   </div>
                 )}
               </div>
             </div>
+
           </div>
 
-          <SheetFooter className="border-t pt-4 shrink-0 flex-row gap-2">
+          {/* ── Footer ── */}
+          <div className="border-t p-4 flex gap-2 shrink-0 bg-background">
             <Link href={`/clientes/${selectedCliente?.id}`} className="flex-1">
-              <Button className="w-full gap-2">
+              <Button className="w-full gap-2 bg-indigo-600 hover:bg-indigo-700">
                 <Pencil className="h-4 w-4" />
                 Editar Ficha
               </Button>
             </Link>
             <Link href={`/clientes/${selectedCliente?.id}/cuenta-corriente`}>
-              <Button variant="outline" className="gap-2">
+              <Button variant="outline" className="gap-1.5 border-slate-300">
                 <ExternalLink className="h-4 w-4" />
                 CC
               </Button>
             </Link>
-          </SheetFooter>
+          </div>
         </SheetContent>
       </Sheet>
     </div>
