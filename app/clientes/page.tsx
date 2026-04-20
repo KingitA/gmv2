@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search } from "lucide-react"
+import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, ChevronDown, ChevronUp, X } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -65,6 +65,10 @@ export default function ClientesPage() {
   const [isImporting, setIsImporting] = useState(false)
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
+  const [bonificaciones, setBonificaciones] = useState<any[]>([])
+  const [showBonificaciones, setShowBonificaciones] = useState(false)
+  const [proveedores, setProveedores] = useState<any[]>([])
+  const [newBonif, setNewBonif] = useState({ tipo: "plata", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
   const [formData, setFormData] = useState({
     codigo_cliente: "",
     nombre_razon_social: "",
@@ -86,6 +90,12 @@ export default function ClientesPage() {
     condicion_entrega: "entregamos_nosotros",
     lista_precio_id: "",
     descuento_especial: 0,
+    lista_limpieza_id: "",
+    metodo_limpieza: "",
+    lista_perf0_id: "",
+    metodo_perf0: "",
+    lista_perf_plus_id: "",
+    metodo_perf_plus: "",
   })
 
   useEffect(() => {
@@ -93,6 +103,7 @@ export default function ClientesPage() {
     loadVendedores()
     loadLocalidades()
     loadListasPrecio()
+    loadProveedores()
   }, [])
 
   async function loadClientes() {
@@ -141,6 +152,45 @@ export default function ClientesPage() {
     setListasPrecio(data || [])
   }
 
+  async function loadProveedores() {
+    const supabase = createClient()
+    const { data } = await supabase.from("proveedores").select("id, nombre").eq("activo", true).order("nombre")
+    setProveedores(data || [])
+  }
+
+  async function loadBonificaciones(clienteId: string) {
+    const supabase = createClient()
+    const { data } = await supabase.from("bonificaciones").select("*, proveedores(nombre)").eq("cliente_id", clienteId).order("created_at")
+    setBonificaciones(data || [])
+  }
+
+  async function addBonificacion(clienteId: string) {
+    if (!newBonif.porcentaje || isNaN(parseFloat(newBonif.porcentaje))) return
+    const supabase = createClient()
+    await supabase.from("bonificaciones").insert({
+      cliente_id: clienteId,
+      tipo: newBonif.tipo,
+      porcentaje: parseFloat(newBonif.porcentaje),
+      segmento: newBonif.segmento || null,
+      proveedor_id: newBonif.proveedor_id || null,
+      observaciones: newBonif.observaciones || null,
+    })
+    setNewBonif({ tipo: "plata", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
+    loadBonificaciones(clienteId)
+  }
+
+  async function toggleBonificacion(id: string, activo: boolean, clienteId: string) {
+    const supabase = createClient()
+    await supabase.from("bonificaciones").update({ activo }).eq("id", id)
+    loadBonificaciones(clienteId)
+  }
+
+  async function deleteBonificacion(id: string, clienteId: string) {
+    const supabase = createClient()
+    await supabase.from("bonificaciones").delete().eq("id", id)
+    loadBonificaciones(clienteId)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const supabase = createClient()
@@ -153,6 +203,12 @@ export default function ClientesPage() {
       localidad_id: formData.localidad_id || null,
       lista_precio_id: formData.lista_precio_id && formData.lista_precio_id !== "none" ? formData.lista_precio_id : null,
       descuento_especial: formData.descuento_especial || 0,
+      lista_limpieza_id: formData.lista_limpieza_id || null,
+      metodo_limpieza: formData.metodo_limpieza || null,
+      lista_perf0_id: formData.lista_perf0_id || null,
+      metodo_perf0: formData.metodo_perf0 || null,
+      lista_perf_plus_id: formData.lista_perf_plus_id || null,
+      metodo_perf_plus: formData.metodo_perf_plus || null,
     }
 
     if (editingCliente) {
@@ -250,6 +306,12 @@ export default function ClientesPage() {
       condicion_entrega: "entregamos_nosotros",
       lista_precio_id: "",
       descuento_especial: 0,
+      lista_limpieza_id: "",
+      metodo_limpieza: "",
+      lista_perf0_id: "",
+      metodo_perf0: "",
+      lista_perf_plus_id: "",
+      metodo_perf_plus: "",
     })
     setEditingCliente(null)
   }
@@ -277,7 +339,16 @@ export default function ClientesPage() {
       condicion_entrega: cliente.condicion_entrega || "entregamos_nosotros",
       lista_precio_id: (cliente as any).lista_precio_id || "",
       descuento_especial: (cliente as any).descuento_especial || 0,
+      lista_limpieza_id: (cliente as any).lista_limpieza_id || "",
+      metodo_limpieza: (cliente as any).metodo_limpieza || "",
+      lista_perf0_id: (cliente as any).lista_perf0_id || "",
+      metodo_perf0: (cliente as any).metodo_perf0 || "",
+      lista_perf_plus_id: (cliente as any).lista_perf_plus_id || "",
+      metodo_perf_plus: (cliente as any).metodo_perf_plus || "",
     })
+    setShowBonificaciones(false)
+    setBonificaciones([])
+    loadBonificaciones(cliente.id)
     setIsDialogOpen(true)
   }
 
@@ -736,6 +807,186 @@ export default function ClientesPage() {
                           </div>
                         </div>
                       </div>
+
+                      <div className="space-y-4">
+                        <h3 className="font-semibold text-lg">Condiciones por Segmento</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Si se configura aquí, el pedido usará estas listas en lugar de la general para ese segmento de proveedor.
+                        </p>
+                        {[
+                          { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza" },
+                          { label: "Perfumería (Perf0)", listaKey: "lista_perf0_id", metodoKey: "metodo_perf0" },
+                          { label: "Perfumería Plus", listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus" },
+                        ].map(({ label, listaKey, metodoKey }) => (
+                          <div key={listaKey} className="border rounded-lg px-3 py-2.5 bg-slate-50">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">{label}</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <Label className="text-[11px] text-slate-500 mb-1 block">Facturación</Label>
+                                <Select
+                                  value={(formData as any)[metodoKey] || "__none__"}
+                                  onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v === "__none__" ? "" : v })}
+                                >
+                                  <SelectTrigger className="h-8 text-xs">
+                                    <SelectValue placeholder="Heredar general" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Heredar general</SelectItem>
+                                    <SelectItem value="Factura (21% IVA)">Factura (21% IVA)</SelectItem>
+                                    <SelectItem value="Final (Mixto)">Final (Mixto)</SelectItem>
+                                    <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-[11px] text-slate-500 mb-1 block">Lista de precio</Label>
+                                <Select
+                                  value={(formData as any)[listaKey] || "__none__"}
+                                  onValueChange={(v) => setFormData({ ...formData, [listaKey]: v === "__none__" ? "" : v })}
+                                >
+                                  <SelectTrigger className="h-8 text-xs">
+                                    <SelectValue placeholder="Heredar general" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Heredar general</SelectItem>
+                                    {listasPrecio.map((lp) => (
+                                      <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {editingCliente && (
+                        <div className="space-y-3">
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 font-semibold text-base w-full"
+                            onClick={() => setShowBonificaciones(v => !v)}
+                          >
+                            Bonificaciones
+                            {bonificaciones.length > 0 && (
+                              <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">{bonificaciones.length}</span>
+                            )}
+                            {showBonificaciones ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+                          </button>
+
+                          {showBonificaciones && (
+                            <div className="space-y-3">
+                              <p className="text-sm text-muted-foreground">
+                                Configurá bonificaciones automáticas para este cliente por tipo de descuento.
+                              </p>
+
+                              {bonificaciones.length > 0 && (
+                                <div className="divide-y border rounded-lg overflow-hidden">
+                                  {bonificaciones.map((b: any) => (
+                                    <div key={b.id} className={`flex items-center gap-3 px-3 py-2 text-sm ${!b.activo ? "opacity-50" : ""}`}>
+                                      <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                                        b.tipo === "mercaderia" ? "bg-green-100 text-green-700" :
+                                        b.tipo === "plata" ? "bg-blue-100 text-blue-700" :
+                                        "bg-orange-100 text-orange-700"
+                                      }`}>
+                                        {b.tipo === "mercaderia" ? "MERCADERÍA" : b.tipo === "plata" ? "PLATA" : "VIAJANTE"}
+                                      </span>
+                                      <span className="font-mono font-semibold">{b.porcentaje}%</span>
+                                      {b.segmento && <span className="text-muted-foreground text-xs">{b.segmento}</span>}
+                                      {b.proveedores?.nombre && <span className="text-muted-foreground text-xs truncate">{b.proveedores.nombre}</span>}
+                                      {b.observaciones && <span className="text-muted-foreground text-xs italic truncate flex-1">{b.observaciones}</span>}
+                                      <div className="flex items-center gap-1 ml-auto shrink-0">
+                                        <button
+                                          type="button"
+                                          className={`text-xs px-2 py-0.5 rounded ${b.activo ? "bg-green-100 text-green-700" : "bg-neutral-100 text-neutral-500"}`}
+                                          onClick={() => toggleBonificacion(b.id, !b.activo, editingCliente.id)}
+                                        >
+                                          {b.activo ? "Activo" : "Inactivo"}
+                                        </button>
+                                        <button type="button" onClick={() => deleteBonificacion(b.id, editingCliente.id)} className="text-red-400 hover:text-red-600 p-1">
+                                          <X className="h-3.5 w-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="border rounded-lg p-3 bg-slate-50 space-y-2">
+                                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Nueva bonificación</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <Label className="text-xs">Tipo</Label>
+                                    <Select value={newBonif.tipo} onValueChange={(v) => setNewBonif({ ...newBonif, tipo: v })}>
+                                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="mercaderia">Mercadería</SelectItem>
+                                        <SelectItem value="plata">Plata</SelectItem>
+                                        <SelectItem value="viajante">Viajante</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Porcentaje (%)</Label>
+                                    <Input
+                                      className="h-8 text-xs"
+                                      type="number"
+                                      step="0.01"
+                                      min="0.01"
+                                      max="100"
+                                      placeholder="ej: 5"
+                                      value={newBonif.porcentaje}
+                                      onChange={(e) => setNewBonif({ ...newBonif, porcentaje: e.target.value })}
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Segmento (opcional)</Label>
+                                    <Select value={newBonif.segmento || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, segmento: v === "__none__" ? "" : v })}>
+                                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__none__">Todos los segmentos</SelectItem>
+                                        <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
+                                        <SelectItem value="perfumeria">Perfumería</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Proveedor (opcional)</Label>
+                                    <Select value={newBonif.proveedor_id || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, proveedor_id: v === "__none__" ? "" : v })}>
+                                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__none__">Todos los proveedores</SelectItem>
+                                        {proveedores.map((p: any) => (
+                                          <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <Label className="text-xs">Observaciones (opcional)</Label>
+                                    <Input
+                                      className="h-8 text-xs"
+                                      placeholder="ej: Promo verano"
+                                      value={newBonif.observaciones}
+                                      onChange={(e) => setNewBonif({ ...newBonif, observaciones: e.target.value })}
+                                    />
+                                  </div>
+                                </div>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="w-full"
+                                  onClick={() => addBonificacion(editingCliente.id)}
+                                  disabled={!newBonif.porcentaje}
+                                >
+                                  <Plus className="h-3.5 w-3.5 mr-1" />
+                                  Agregar bonificación
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       <div className="flex gap-2 justify-end">
                         <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>

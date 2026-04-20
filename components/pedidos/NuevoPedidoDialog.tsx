@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Upload, Plus, X, Search, Check, FileText, MapPin, ChevronDown, ChevronUp } from "lucide-react"
-import { searchClientes } from "@/lib/actions/clientes"
 import type { PedidoOverrides } from "@/hooks/use-order-queue"
 
 type Cliente = {
@@ -101,6 +100,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const [listaPerfPlus, setListaPerfPlus] = useState("")
   const [metodoPerfPlus, setMetodoPerfPlus] = useState("")
   const [saveMode, setSaveMode]       = useState<"temp" | "permanent" | null>(null)
+  const [bonifMercaderia, setBonifMercaderia] = useState<any[]>([])
 
   // Cargar listas al abrir
   useEffect(() => {
@@ -127,6 +127,17 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
         setShowSegmentos(true)
       }
       setSaveMode(null)
+      // Load mercaderia bonificaciones for this client
+      if (cliente) {
+        sb.from("bonificaciones")
+          .select("porcentaje,segmento,observaciones")
+          .eq("cliente_id", cliente.id)
+          .eq("tipo", "mercaderia")
+          .eq("activo", true)
+          .then(({ data }) => setBonifMercaderia(data || []))
+      }
+    } else {
+      setBonifMercaderia([])
     }
   }, [cliente])
 
@@ -152,7 +163,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const handleSearch = useCallback(async (term: string) => {
     setQuery(term)
     if (term.length < 2) { setShowDrop(false); return }
-    const res = await searchClientes(term)
+    const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(term)}`).then(r => r.json())
     setResults(res)
     setShowDrop(true)
   }, [])
@@ -187,6 +198,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     setListaPerfPlus("")
     setMetodoPerfPlus("")
     setSaveMode(null)
+    setBonifMercaderia([])
   }
 
   const handleSubmit = async () => {
@@ -344,6 +356,24 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
               </div>
             )}
           </div>
+
+          {/* ── Alerta bonificación mercadería ────────────────────────────── */}
+          {cliente && bonifMercaderia.length > 0 && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+              <span className="text-amber-600 text-base leading-none mt-0.5">⚠</span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-800">Este cliente tiene bonificación de mercadería activa</p>
+                <ul className="mt-1 space-y-0.5">
+                  {bonifMercaderia.map((b: any, i: number) => (
+                    <li key={i} className="text-xs text-amber-700">
+                      • {b.porcentaje}%{b.segmento ? ` (${b.segmento})` : ""}{b.observaciones ? ` — ${b.observaciones}` : ""}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-amber-600 mt-1">Acordate de agregar los artículos bonificados en el pedido con precio $0.</p>
+              </div>
+            </div>
+          )}
 
           {/* ── Condiciones (solo si hay cliente) ─────────────────────────── */}
           {cliente && (

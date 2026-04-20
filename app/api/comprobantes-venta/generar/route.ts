@@ -11,6 +11,7 @@ import {
 } from "@/lib/pricing/calculator"
 import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
 import { vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
+import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 
 export async function POST(request: Request) {
   try {
@@ -185,6 +186,71 @@ export async function POST(request: Request) {
 
     // ─── 6. Actualizar total del pedido ───
     const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
+
+    // ─── 7. Aplicar bonificaciones plata y viajante del cliente ───
+    const { data: bonificaciones } = await supabase
+      .from("bonificaciones")
+      .select("*")
+      .eq("cliente_id", pedido.cliente.id)
+      .eq("activo", true)
+      .in("tipo", ["plata", "viajante"])
+
+    if (bonificaciones && bonificaciones.length > 0) {
+      const bonifArticuloId = await getBonificacionArticuloId(supabase)
+      for (const comp of comprobantesGenerados) {
+        if (!comp.id) continue
+        const esPresupuesto = comp.tipo_comprobante === "PRES"
+        let descuentoTotal = 0
+        const lineas: { descripcion: string; monto: number }[] = []
+
+        for (const bonif of bonificaciones) {
+          const base = Math.abs(comp.total ?? comp.total_neto + comp.total_iva ?? 0)
+          const monto = round2(base * bonif.porcentaje / 100)
+          const label = bonif.tipo === "plata" ? "Bonificación Plata" : "Desc. Viajante"
+          lineas.push({ descripcion: `${label} ${bonif.porcentaje}%`, monto })
+          descuentoTotal = round2(descuentoTotal + monto)
+        }
+
+        if (descuentoTotal > 0) {
+          const detalleInserts = lineas.map(l => ({
+            comprobante_id: comp.id,
+            articulo_id: bonifArticuloId,
+            descripcion: l.descripcion,
+            cantidad: 1,
+            precio_unitario: -l.monto,
+            precio_total: -l.monto,
+          }))
+          await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
+
+          const descNeto = esPresupuesto ? descuentoTotal : round2(descuentoTotal / (1 + IVA_RATE))
+          const descIva = esPresupuesto ? 0 : round2(descuentoTotal - descNeto)
+          await supabase.from("comprobantes_venta").update({
+            total_neto: round2(comp.total_neto - descNeto),
+            total_iva: round2((comp.total_iva ?? 0) - descIva),
+            total_factura: round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - descuentoTotal),
+            saldo_pendiente: round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - descuentoTotal),
+          }).eq("id", comp.id)
+        }
+
+        // Reduce viajante commission proportionally
+        const bonifViajante = bonificaciones.filter(b => b.tipo === "viajante")
+        if (bonifViajante.length > 0) {
+          const { data: comision } = await supabase
+            .from("comisiones")
+            .select("id, monto, porcentaje")
+            .eq("pedido_id", pedido_id)
+            .maybeSingle()
+          if (comision && comision.porcentaje > 0) {
+            let montoReducido = comision.monto
+            for (const bv of bonifViajante) {
+              const reduccionPct = (bv.porcentaje * 100) / comision.porcentaje
+              montoReducido = round2(montoReducido * (1 - reduccionPct / 100))
+            }
+            await supabase.from("comisiones").update({ monto: montoReducido }).eq("id", comision.id)
+          }
+        }
+      }
+    }
 
     // ─── 8. Generar bonificación pago contado si corresponde ───
     let bonificacion = null

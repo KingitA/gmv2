@@ -914,9 +914,35 @@ export default function ClientesPedidosPage() {
         }}
       >
         <DialogContent className="max-w-[95vw] sm:max-w-[95vw] md:max-w-[95vw] w-full max-h-[95vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Detalle del Pedido {pedidoSeleccionado?.numero_pedido}</DialogTitle>
-            <DialogDescription>Información completa del pedido y sus artículos</DialogDescription>
+          <DialogHeader className="flex flex-row items-start justify-between gap-4">
+            <div>
+              <DialogTitle>Detalle del Pedido {pedidoSeleccionado?.numero_pedido}</DialogTitle>
+              <DialogDescription>Información completa del pedido y sus artículos</DialogDescription>
+            </div>
+            {pedidoSeleccionado && (
+              <div className="flex gap-2 shrink-0 mt-0.5">
+                {!tieneComprobantes(pedidoSeleccionado.id) && (
+                  <Button
+                    size="sm"
+                    onClick={() => generarComprobantes(pedidoSeleccionado.id)}
+                    disabled={generandoComprobante === pedidoSeleccionado.id}
+                  >
+                    {generandoComprobante === pedidoSeleccionado.id ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Generando...</>
+                    ) : (
+                      <><Receipt className="h-4 w-4 mr-2" />Generar Comprobantes</>
+                    )}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => imprimirPedido(pedidoSeleccionado)}
+                >
+                  <Printer className="h-4 w-4 mr-2" />Imprimir
+                </Button>
+              </div>
+            )}
           </DialogHeader>
 
           {pedidoSeleccionado && (
@@ -1341,32 +1367,6 @@ export default function ClientesPedidosPage() {
                       Ver Email
                     </Button>
                   )}
-                  {!tieneComprobantes(pedidoSeleccionado.id) && (
-                    <Button
-                      onClick={() => generarComprobantes(pedidoSeleccionado.id)}
-                      disabled={generandoComprobante === pedidoSeleccionado.id}
-                    >
-                      {generandoComprobante === pedidoSeleccionado.id ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Generando...
-                        </>
-                      ) : (
-                        <>
-                          <Receipt className="h-4 w-4 mr-2" />
-                          Generar Comprobantes
-                        </>
-                      )}
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    className="ml-2"
-                    onClick={() => imprimirPedido(pedidoSeleccionado)}
-                  >
-                    <Printer className="h-4 w-4 mr-2" />
-                    Imprimir
-                  </Button>
                 </div>
                 <Button
                   variant="outline"
