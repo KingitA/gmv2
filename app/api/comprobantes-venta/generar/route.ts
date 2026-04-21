@@ -187,13 +187,13 @@ export async function POST(request: Request) {
     // ─── 6. Actualizar total del pedido ───
     const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
 
-    // ─── 7. Aplicar bonificaciones plata y viajante del cliente ───
+    // ─── 7. Aplicar bonificaciones general y viajante del cliente ───
     const { data: bonificaciones } = await supabase
       .from("bonificaciones")
       .select("*")
       .eq("cliente_id", pedido.cliente.id)
       .eq("activo", true)
-      .in("tipo", ["plata", "viajante"])
+      .in("tipo", ["general", "viajante"])
 
     if (bonificaciones && bonificaciones.length > 0) {
       const bonifArticuloId = await getBonificacionArticuloId(supabase)
@@ -206,7 +206,7 @@ export async function POST(request: Request) {
         for (const bonif of bonificaciones) {
           const base = Math.abs(comp.total ?? comp.total_neto + comp.total_iva ?? 0)
           const monto = round2(base * bonif.porcentaje / 100)
-          const label = bonif.tipo === "plata" ? "Bonificación Plata" : "Desc. Viajante"
+          const label = bonif.tipo === "general" ? "Bonificación General" : "Desc. Viajante"
           lineas.push({ descripcion: `${label} ${bonif.porcentaje}%`, monto })
           descuentoTotal = round2(descuentoTotal + monto)
         }

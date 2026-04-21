@@ -72,7 +72,7 @@ export default function ClientesPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [bonificaciones, setBonificaciones] = useState<any[]>([])
   const [proveedores, setProveedores] = useState<any[]>([])
-  const [newBonif, setNewBonif] = useState({ tipo: "plata", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
+  const [newBonif, setNewBonif] = useState({ tipo: "general", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
   const [formData, setFormData] = useState({
     codigo_cliente: "",
     nombre_razon_social: "",
@@ -179,7 +179,7 @@ export default function ClientesPage() {
       proveedor_id: newBonif.proveedor_id || null,
       observaciones: newBonif.observaciones || null,
     })
-    setNewBonif({ tipo: "plata", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
+    setNewBonif({ tipo: "general", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
     loadBonificaciones(clienteId)
   }
 
@@ -743,7 +743,7 @@ export default function ClientesPage() {
                               {bonificaciones.map((b: any) => (
                                 <div key={b.id} className={`flex items-center gap-1.5 border rounded-full px-3 py-1 text-sm font-medium ${!b.activo ? "opacity-40" : ""} ${
                                   b.tipo === "mercaderia" ? "border-green-300 bg-green-50 text-green-800" :
-                                  b.tipo === "plata"     ? "border-blue-300 bg-blue-50 text-blue-800" :
+                                  b.tipo === "general"   ? "border-blue-300 bg-blue-50 text-blue-800" :
                                                            "border-orange-300 bg-orange-50 text-orange-800"
                                 }`}>
                                   <span className="capitalize">{b.tipo}</span>
@@ -769,7 +769,7 @@ export default function ClientesPage() {
                                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="mercaderia">Mercadería</SelectItem>
-                                  <SelectItem value="plata">Plata</SelectItem>
+                                  <SelectItem value="general">General</SelectItem>
                                   <SelectItem value="viajante">Viajante</SelectItem>
                                 </SelectContent>
                               </Select>
@@ -1013,7 +1013,7 @@ export default function ClientesPage() {
                   {sheetBonifs.map((b: any) => (
                     <span key={b.id} className={`text-xs px-3 py-1.5 rounded-full border font-semibold ${
                       b.tipo === "mercaderia" ? "border-green-300 bg-green-50 text-green-800" :
-                      b.tipo === "plata" ? "border-blue-300 bg-blue-50 text-blue-800" :
+                      b.tipo === "general" ? "border-blue-300 bg-blue-50 text-blue-800" :
                       "border-orange-300 bg-orange-50 text-orange-800"
                     }`}>
                       {b.tipo} {b.porcentaje}%{b.segmento ? ` · ${b.segmento}` : ""}

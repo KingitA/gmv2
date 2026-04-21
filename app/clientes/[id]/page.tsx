@@ -8,9 +8,16 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Save, Loader2, Plus, X, ExternalLink } from "lucide-react"
+import { ArrowLeft, Save, Loader2, ExternalLink, ChevronDown, ChevronRight, TrendingUp, TrendingDown, Minus } from "lucide-react"
 import Link from "next/link"
+
+const ESTADO_COLORS: Record<string, string> = {
+  pendiente: "bg-yellow-100 text-yellow-800",
+  en_preparacion: "bg-blue-100 text-blue-800",
+  facturado: "bg-emerald-100 text-emerald-800",
+  entregado: "bg-green-100 text-green-800",
+  en_viaje: "bg-purple-100 text-purple-800",
+}
 
 export default function ClienteDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -22,9 +29,11 @@ export default function ClienteDetailPage() {
   const [vendedores, setVendedores] = useState<any[]>([])
   const [localidades, setLocalidades] = useState<any[]>([])
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
-  const [proveedores, setProveedores] = useState<any[]>([])
-  const [bonificaciones, setBonificaciones] = useState<any[]>([])
-  const [newBonif, setNewBonif] = useState({ tipo: "plata", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
+  const [bonifPct, setBonifPct] = useState({ general: 0, mercaderia: 0, viajante: 0 })
+  const [savingBonif, setSavingBonif] = useState(false)
+  const [segmentosOpen, setSegmentosOpen] = useState(false)
+  const [ccBalance, setCcBalance] = useState<number | null>(null)
+  const [pedidosCliente, setPedidosCliente] = useState<any[]>([])
   const [formData, setFormData] = useState({
     codigo_cliente: "",
     nombre_razon_social: "",
@@ -60,12 +69,13 @@ export default function ClienteDetailPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [clienteRes, vendRes, locRes, listasRes, provRes] = await Promise.all([
+    const [clienteRes, vendRes, locRes, listasRes, ccRes, pedRes] = await Promise.all([
       supabase.from("clientes").select("*, localidades(nombre, zonas(nombre))").eq("id", id).single(),
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
       supabase.from("localidades").select("*, zonas(nombre)").order("provincia, nombre"),
       supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
-      supabase.from("proveedores").select("id, nombre").eq("activo", true).order("nombre"),
+      supabase.from("comprobantes_venta").select("saldo_pendiente").eq("cliente_id", id).neq("estado_pago", "pagado"),
+      supabase.from("pedidos").select("id, numero_pedido, fecha, estado, total").eq("cliente_id", id).order("fecha", { ascending: false }).limit(10),
     ])
 
     if (clienteRes.data) {
@@ -102,14 +112,32 @@ export default function ClienteDetailPage() {
     setVendedores(vendRes.data || [])
     setLocalidades(locRes.data || [])
     setListasPrecio(listasRes.data || [])
-    setProveedores(provRes.data || [])
+    const balance = (ccRes.data || []).reduce((sum: number, r: any) => sum + (r.saldo_pendiente || 0), 0)
+    setCcBalance(Math.round(balance * 100) / 100)
+    setPedidosCliente(pedRes.data || [])
     loadBonificaciones()
     setLoading(false)
   }
 
   async function loadBonificaciones() {
-    const { data } = await supabase.from("bonificaciones").select("*, proveedores(nombre)").eq("cliente_id", id).order("created_at")
-    setBonificaciones(data || [])
+    const { data } = await supabase.from("bonificaciones").select("id, tipo, porcentaje").eq("cliente_id", id).eq("activo", true)
+    const pct = { general: 0, mercaderia: 0, viajante: 0 }
+    for (const b of (data || [])) {
+      if (b.tipo in pct) (pct as any)[b.tipo] = b.porcentaje
+    }
+    setBonifPct(pct)
+  }
+
+  async function saveBonificaciones() {
+    setSavingBonif(true)
+    for (const tipo of ["general", "mercaderia", "viajante"] as const) {
+      const pct = bonifPct[tipo]
+      await supabase.from("bonificaciones").delete().eq("cliente_id", id).eq("tipo", tipo)
+      if (pct > 0) {
+        await supabase.from("bonificaciones").insert({ cliente_id: id, tipo, porcentaje: pct, activo: true })
+      }
+    }
+    setSavingBonif(false)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -138,30 +166,6 @@ export default function ClienteDetailPage() {
       router.push("/clientes")
     }
     setSaving(false)
-  }
-
-  async function addBonificacion() {
-    if (!newBonif.porcentaje || isNaN(parseFloat(newBonif.porcentaje))) return
-    await supabase.from("bonificaciones").insert({
-      cliente_id: id,
-      tipo: newBonif.tipo,
-      porcentaje: parseFloat(newBonif.porcentaje),
-      segmento: newBonif.segmento || null,
-      proveedor_id: newBonif.proveedor_id || null,
-      observaciones: newBonif.observaciones || null,
-    })
-    setNewBonif({ tipo: "plata", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
-    loadBonificaciones()
-  }
-
-  async function toggleBonificacion(bonifId: string, activo: boolean) {
-    await supabase.from("bonificaciones").update({ activo }).eq("id", bonifId)
-    loadBonificaciones()
-  }
-
-  async function deleteBonificacion(bonifId: string) {
-    await supabase.from("bonificaciones").delete().eq("id", bonifId)
-    loadBonificaciones()
   }
 
   function handleLocalidadChange(localidadId: string) {
@@ -349,10 +353,13 @@ export default function ClienteDetailPage() {
 
               {/* Condiciones por segmento */}
               <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Condiciones por Segmento</CardTitle>
+                <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setSegmentosOpen(o => !o)}>
+                  <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wide flex items-center justify-between">
+                    Condiciones por Segmento
+                    {segmentosOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </CardTitle>
                 </CardHeader>
-                <CardContent>
+                {segmentosOpen && <CardContent>
                   <div className="grid grid-cols-3 gap-3">
                     {[
                       { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza" },
@@ -380,7 +387,7 @@ export default function ClienteDetailPage() {
                       </div>
                     ))}
                   </div>
-                </CardContent>
+                </CardContent>}
               </Card>
             </div>
 
@@ -428,77 +435,111 @@ export default function ClienteDetailPage() {
               {/* Bonificaciones */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wide flex items-center justify-between">
-                    Bonificaciones
-                    {bonificaciones.length > 0 && (
-                      <Badge variant="secondary">{bonificaciones.length}</Badge>
-                    )}
-                  </CardTitle>
+                  <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Bonificaciones</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  {bonificaciones.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {bonificaciones.map((b: any) => (
-                        <div key={b.id} className={`flex items-center gap-1.5 border rounded-full px-3 py-1 text-xs font-medium ${!b.activo ? "opacity-40" : ""} ${
-                          b.tipo === "mercaderia" ? "border-green-300 bg-green-50 text-green-800" :
-                          b.tipo === "plata" ? "border-blue-300 bg-blue-50 text-blue-800" :
-                          "border-orange-300 bg-orange-50 text-orange-800"
-                        }`}>
-                          <span className="capitalize">{b.tipo}</span>
-                          <span className="font-bold">{b.porcentaje}%</span>
-                          {b.segmento && <span className="opacity-70">· {b.segmento}</span>}
-                          {b.proveedores?.nombre && <span className="opacity-70 truncate max-w-[60px]">· {b.proveedores.nombre}</span>}
-                          <button type="button" onClick={() => toggleBonificacion(b.id, !b.activo)} className="opacity-60 hover:opacity-100">
-                            {b.activo ? "●" : "○"}
-                          </button>
-                          <button type="button" onClick={() => deleteBonificacion(b.id)} className="opacity-50 hover:opacity-100 hover:text-red-600">
-                            <X className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
+                <CardContent className="space-y-2">
+                  {([
+                    { tipo: "general" as const, label: "General", rowCls: "border-blue-200 bg-blue-50", labelCls: "text-blue-800", inputCls: "border-blue-300 focus:ring-blue-400" },
+                    { tipo: "mercaderia" as const, label: "Mercadería", rowCls: "border-green-200 bg-green-50", labelCls: "text-green-800", inputCls: "border-green-300 focus:ring-green-400" },
+                    { tipo: "viajante" as const, label: "Viajante", rowCls: "border-orange-200 bg-orange-50", labelCls: "text-orange-800", inputCls: "border-orange-300 focus:ring-orange-400" },
+                  ]).map(({ tipo, label, rowCls, labelCls, inputCls }) => (
+                    <div key={tipo} className={`flex items-center justify-between border rounded-lg px-3 py-2.5 ${rowCls}`}>
+                      <span className={`text-sm font-semibold ${labelCls}`}>{label}</span>
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          type="number" step="0.01" min="0" max="100"
+                          className={`h-8 w-20 text-center text-sm font-bold bg-white ${inputCls}`}
+                          value={bonifPct[tipo]}
+                          onChange={(e) => setBonifPct({ ...bonifPct, [tipo]: parseFloat(e.target.value) || 0 })}
+                        />
+                        <span className={`text-sm font-semibold ${labelCls}`}>%</span>
+                      </div>
                     </div>
-                  )}
-
-                  {/* Nueva bonificación */}
-                  <div className="space-y-2 pt-1 border-t">
-                    <p className="text-xs text-muted-foreground">Nueva bonificación</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Select value={newBonif.tipo} onValueChange={(v) => setNewBonif({ ...newBonif, tipo: v })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="mercaderia">Mercadería</SelectItem>
-                          <SelectItem value="plata">Plata</SelectItem>
-                          <SelectItem value="viajante">Viajante</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input className="h-8 text-xs" type="number" step="0.01" min="0.01" max="100" placeholder="% ej: 5" value={newBonif.porcentaje} onChange={(e) => setNewBonif({ ...newBonif, porcentaje: e.target.value })} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Select value={newBonif.segmento || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, segmento: v === "__none__" ? "" : v })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Segmento" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Todos</SelectItem>
-                          <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
-                          <SelectItem value="perfumeria">Perfumería</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={newBonif.proveedor_id || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, proveedor_id: v === "__none__" ? "" : v })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Proveedor" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Todos</SelectItem>
-                          {proveedores.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex gap-2">
-                      <Input className="h-8 text-xs flex-1" placeholder="Observaciones (opcional)" value={newBonif.observaciones} onChange={(e) => setNewBonif({ ...newBonif, observaciones: e.target.value })} />
-                      <Button type="button" size="sm" className="h-8 px-3 shrink-0" onClick={addBonificacion} disabled={!newBonif.porcentaje}>
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
+                  ))}
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full mt-1 h-8"
+                    onClick={saveBonificaciones}
+                    disabled={savingBonif}
+                  >
+                    {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+                    Guardar bonificaciones
+                  </Button>
                 </CardContent>
               </Card>
+
+              {/* Cuenta Corriente */}
+              <Link href={`/clientes/${id}/cuenta-corriente`}>
+                <Card className={`cursor-pointer transition-all hover:shadow-md border-2 ${
+                  ccBalance === null ? "border-slate-200" :
+                  ccBalance > 0 ? "border-red-200 bg-red-50" :
+                  ccBalance < 0 ? "border-green-200 bg-green-50" :
+                  "border-slate-200 bg-slate-50"
+                }`}>
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center justify-between">
+                      Cuenta Corriente
+                      <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    {ccBalance === null ? (
+                      <p className="text-slate-400 text-sm">Cargando...</p>
+                    ) : ccBalance === 0 ? (
+                      <div className="flex items-center gap-2">
+                        <Minus className="h-5 w-5 text-slate-400" />
+                        <span className="text-xl font-bold text-slate-500">$0</span>
+                      </div>
+                    ) : ccBalance > 0 ? (
+                      <div className="flex items-center gap-2">
+                        <TrendingDown className="h-5 w-5 text-red-500" />
+                        <div>
+                          <span className="text-xl font-bold text-red-600">${ccBalance.toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>
+                          <p className="text-xs text-red-500 font-medium">Deuda pendiente</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="h-5 w-5 text-green-500" />
+                        <div>
+                          <span className="text-xl font-bold text-green-600">${Math.abs(ccBalance).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>
+                          <p className="text-xs text-green-500 font-medium">A favor del cliente</p>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </Link>
+
+              {/* Pedidos recientes */}
+              {pedidosCliente.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wide">Pedidos Recientes</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="divide-y divide-slate-100">
+                      {pedidosCliente.map((p: any) => (
+                        <Link key={p.id} href={`/clientes-pedidos?pedido=${p.numero_pedido}`}>
+                          <div className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors cursor-pointer">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-700">#{p.numero_pedido}</p>
+                              <p className="text-xs text-slate-400">{p.fecha ? new Date(p.fecha).toLocaleDateString("es-AR") : "—"}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-slate-700">${(p.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</p>
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${ESTADO_COLORS[p.estado] || "bg-slate-100 text-slate-600"}`}>
+                                {p.estado}
+                              </span>
+                            </div>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
         </form>

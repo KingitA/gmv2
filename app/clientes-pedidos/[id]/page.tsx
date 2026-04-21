@@ -6,8 +6,9 @@ import { createClient } from "@/lib/supabase/client"
 import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido } from "@/lib/actions/pedidos"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Loader2, Plus, Trash2, Search, Package } from "lucide-react"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ArrowLeft, Loader2, Plus, Trash2, Search, Package, Save, ChevronDown, ChevronRight } from "lucide-react"
 import Link from "next/link"
 
 const ESTADO_COLORS: Record<string, string> = {
@@ -17,6 +18,17 @@ const ESTADO_COLORS: Record<string, string> = {
   entregado: "bg-green-100 text-green-800 border-green-300",
   en_viaje: "bg-purple-100 text-purple-800 border-purple-300",
 }
+
+const ESTADOS_PEDIDO = [
+  { value: "pendiente", label: "Pendiente" },
+  { value: "en_preparacion", label: "En Preparación" },
+  { value: "pendiente_facturacion", label: "Pendiente Facturación" },
+  { value: "facturado", label: "Facturado" },
+  { value: "listo_para_retirar", label: "Listo para Retirar" },
+  { value: "listo_para_enviar", label: "Listo para Enviar" },
+  { value: "en_viaje", label: "En Viaje" },
+  { value: "entregado", label: "Entregado" },
+]
 
 export default function PedidoEditPage() {
   const { id } = useParams<{ id: string }>()
@@ -30,25 +42,96 @@ export default function PedidoEditPage() {
   const [found, setFound] = useState<any[]>([])
   const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
+  const [savingHeader, setSavingHeader] = useState(false)
+  const [headerOpen, setHeaderOpen] = useState(true)
+  const [listasPrecio, setListasPrecio] = useState<any[]>([])
+  const [vendedores, setVendedores] = useState<any[]>([])
+  const [headerForm, setHeaderForm] = useState({
+    estado: "",
+    metodo_facturacion_pedido: "",
+    condicion_entrega: "",
+    vendedor_id: "",
+    lista_precio_pedido_id: "",
+    lista_limpieza_pedido_id: "",
+    metodo_limpieza_pedido: "",
+    lista_perf0_pedido_id: "",
+    metodo_perf0_pedido: "",
+    lista_perf_plus_pedido_id: "",
+    metodo_perf_plus_pedido: "",
+    observaciones: "",
+  })
 
   useEffect(() => { loadAll() }, [id])
 
   async function loadAll() {
     setLoading(true)
-    const [pedRes, itemsRes] = await Promise.all([
+    const [pedRes, itemsRes, listasRes, vendRes] = await Promise.all([
       supabase.from("pedidos").select(`
         id, numero_pedido, fecha, estado, total, subtotal,
-        clientes (nombre_razon_social, cuit, direccion),
+        metodo_facturacion_pedido, condicion_entrega, observaciones,
+        lista_precio_pedido_id, lista_limpieza_pedido_id, metodo_limpieza_pedido,
+        lista_perf0_pedido_id, metodo_perf0_pedido,
+        lista_perf_plus_pedido_id, metodo_perf_plus_pedido,
+        vendedor_id,
+        clientes (nombre_razon_social, cuit, direccion, metodo_facturacion, lista_precio_id),
         vendedores (nombre)
       `).eq("id", id).single(),
       supabase.from("pedidos_detalle").select(`
         id, cantidad, cantidad_preparada, estado_item, precio_base, precio_final, subtotal,
         articulos (id, sku, descripcion, proveedores:proveedor_id (nombre))
-      `).eq("pedido_id", id),
+      `).eq("pedido_id", id).order("created_at" as any),
+      supabase.from("listas_precio").select("id, nombre").eq("activo", true).order("nombre"),
+      supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
     ])
-    setPedido(pedRes.data)
+    const p = pedRes.data as any
+    setPedido(p)
     setItems(itemsRes.data || [])
+    setListasPrecio(listasRes.data || [])
+    setVendedores(vendRes.data || [])
+    if (p) {
+      setHeaderForm({
+        estado: p.estado || "pendiente",
+        metodo_facturacion_pedido: p.metodo_facturacion_pedido || "",
+        condicion_entrega: p.condicion_entrega || "",
+        vendedor_id: p.vendedor_id || "",
+        lista_precio_pedido_id: p.lista_precio_pedido_id || "",
+        lista_limpieza_pedido_id: p.lista_limpieza_pedido_id || "",
+        metodo_limpieza_pedido: p.metodo_limpieza_pedido || "",
+        lista_perf0_pedido_id: p.lista_perf0_pedido_id || "",
+        metodo_perf0_pedido: p.metodo_perf0_pedido || "",
+        lista_perf_plus_pedido_id: p.lista_perf_plus_pedido_id || "",
+        metodo_perf_plus_pedido: p.metodo_perf_plus_pedido || "",
+        observaciones: p.observaciones || "",
+      })
+    }
     setLoading(false)
+  }
+
+  async function saveHeader() {
+    setSavingHeader(true)
+    try {
+      const update: any = {
+        estado: headerForm.estado,
+        metodo_facturacion_pedido: headerForm.metodo_facturacion_pedido || null,
+        condicion_entrega: headerForm.condicion_entrega || null,
+        vendedor_id: headerForm.vendedor_id || null,
+        lista_precio_pedido_id: headerForm.lista_precio_pedido_id || null,
+        lista_limpieza_pedido_id: headerForm.lista_limpieza_pedido_id || null,
+        metodo_limpieza_pedido: headerForm.metodo_limpieza_pedido || null,
+        lista_perf0_pedido_id: headerForm.lista_perf0_pedido_id || null,
+        metodo_perf0_pedido: headerForm.metodo_perf0_pedido || null,
+        lista_perf_plus_pedido_id: headerForm.lista_perf_plus_pedido_id || null,
+        metodo_perf_plus_pedido: headerForm.metodo_perf_plus_pedido || null,
+        observaciones: headerForm.observaciones || null,
+      }
+      const { error } = await supabase.from("pedidos").update(update).eq("id", id)
+      if (error) throw error
+      await loadAll()
+    } catch (err: any) {
+      alert(err.message || "Error al guardar encabezado")
+    } finally {
+      setSavingHeader(false)
+    }
   }
 
   async function buscarProductos(q: string) {
@@ -102,19 +185,20 @@ export default function PedidoEditPage() {
   }
 
   const estadoColor = ESTADO_COLORS[pedido?.estado] || "bg-slate-100 text-slate-700 border-slate-300"
+  const totalItems = items.reduce((sum, i) => sum + (i.subtotal || 0), 0)
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-slate-50">
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
+      <header className="sticky top-0 z-10 border-b bg-white shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => router.back()}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div>
-              <h1 className="text-xl font-bold">Editar Pedido #{pedido?.numero_pedido}</h1>
-              <p className="text-sm text-muted-foreground">
+              <h1 className="text-xl font-bold text-slate-800">Pedido #{pedido?.numero_pedido}</h1>
+              <p className="text-sm text-slate-500">
                 {pedido?.clientes?.nombre_razon_social}
                 {pedido?.vendedores?.nombre ? ` · ${pedido.vendedores.nombre}` : ""}
               </p>
@@ -124,138 +208,293 @@ export default function PedidoEditPage() {
             <span className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${estadoColor}`}>
               {pedido?.estado}
             </span>
-            <span className="text-lg font-bold text-slate-700">
+            <span className="text-xl font-bold text-slate-800">
               ${(pedido?.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}
             </span>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-6 py-8 max-w-4xl">
-        <div className="space-y-6">
+      <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
 
-          {/* Agregar artículo */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
-              <Plus className="h-4 w-4 text-indigo-600" />
-              Agregar artículo
-            </h2>
-            <div className="flex gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  placeholder="Buscar por SKU, descripción..."
-                  className="pl-9 h-10"
-                  value={query}
-                  onChange={(e) => buscarProductos(e.target.value)}
-                />
-                {found.length > 0 && (
-                  <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
-                    {found.map((p: any) => (
-                      <div key={p.id}
-                        className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
-                        onClick={() => agregarItem(p)}>
-                        <div className="font-medium text-slate-800">{p.descripcion}</div>
-                        <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+        {/* ─── Encabezado del pedido ─── */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <button
+            type="button"
+            className="w-full px-5 py-4 flex items-center justify-between hover:bg-slate-50/60 transition-colors"
+            onClick={() => setHeaderOpen(o => !o)}
+          >
+            <h2 className="font-semibold text-slate-800 text-sm uppercase tracking-wide">Encabezado del pedido</h2>
+            {headerOpen ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+          </button>
+
+          {headerOpen && (
+            <div className="border-t border-slate-100 px-5 py-5 space-y-5">
+
+              {/* Row 1: Estado, Facturación, Entrega, Vendedor */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <Label className="text-xs text-slate-500 mb-1 block">Estado</Label>
+                  <Select value={headerForm.estado} onValueChange={(v) => setHeaderForm({ ...headerForm, estado: v })}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ESTADOS_PEDIDO.map(e => <SelectItem key={e.value} value={e.value}>{e.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-500 mb-1 block">Facturación</Label>
+                  <Select
+                    value={headerForm.metodo_facturacion_pedido || "__heredar__"}
+                    onValueChange={(v) => setHeaderForm({ ...headerForm, metodo_facturacion_pedido: v === "__heredar__" ? "" : v })}
+                  >
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Heredar del cliente" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__heredar__">Heredar del cliente ({pedido?.clientes?.metodo_facturacion || "—"})</SelectItem>
+                      <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
+                      <SelectItem value="Final">Final (Mixto)</SelectItem>
+                      <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-500 mb-1 block">Condición de Entrega</Label>
+                  <Select value={headerForm.condicion_entrega || "__heredar__"} onValueChange={(v) => setHeaderForm({ ...headerForm, condicion_entrega: v === "__heredar__" ? "" : v })}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Heredar" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__heredar__">Heredar del cliente</SelectItem>
+                      <SelectItem value="retira_mostrador">Retira en Mostrador</SelectItem>
+                      <SelectItem value="transporte">Envío por Transporte</SelectItem>
+                      <SelectItem value="entregamos_nosotros">Entregamos Nosotros</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-500 mb-1 block">Vendedor</Label>
+                  <Select value={headerForm.vendedor_id || "__none__"} onValueChange={(v) => setHeaderForm({ ...headerForm, vendedor_id: v === "__none__" ? "" : v })}>
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Sin vendedor" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Sin vendedor</SelectItem>
+                      {vendedores.map(v => <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number" min={1} className="h-10 w-24 text-center font-semibold"
-                  value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 1)}
-                />
-                <span className="text-sm text-slate-400">uds.</span>
+
+              {/* Row 2: Lista general */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="md:col-span-2">
+                  <Label className="text-xs text-slate-500 mb-1 block">Lista de Precio General</Label>
+                  <Select
+                    value={headerForm.lista_precio_pedido_id || "__heredar__"}
+                    onValueChange={(v) => setHeaderForm({ ...headerForm, lista_precio_pedido_id: v === "__heredar__" ? "" : v })}
+                  >
+                    <SelectTrigger className="h-9"><SelectValue placeholder="Heredar del cliente" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__heredar__">Heredar del cliente</SelectItem>
+                      {listasPrecio.map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="md:col-span-2">
+                  <Label className="text-xs text-slate-500 mb-1 block">Observaciones</Label>
+                  <Input
+                    className="h-9"
+                    value={headerForm.observaciones}
+                    onChange={(e) => setHeaderForm({ ...headerForm, observaciones: e.target.value })}
+                    placeholder="Notas internas del pedido..."
+                  />
+                </div>
               </div>
-              {saving && <Loader2 className="h-5 w-5 animate-spin text-indigo-600 self-center" />}
+
+              {/* Row 3: Segmentos */}
+              <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Condiciones por Segmento</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {[
+                    { label: "Limpieza / Bazar", listaKey: "lista_limpieza_pedido_id", metodoKey: "metodo_limpieza_pedido" },
+                    { label: "Perfumería Perf0", listaKey: "lista_perf0_pedido_id", metodoKey: "metodo_perf0_pedido" },
+                    { label: "Perfumería Plus", listaKey: "lista_perf_plus_pedido_id", metodoKey: "metodo_perf_plus_pedido" },
+                  ].map(({ label, listaKey, metodoKey }) => (
+                    <div key={listaKey} className="border rounded-lg p-3 bg-slate-50 space-y-2">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>
+                      <Select
+                        value={(headerForm as any)[metodoKey] || "__heredar__"}
+                        onValueChange={(v) => setHeaderForm({ ...headerForm, [metodoKey]: v === "__heredar__" ? "" : v })}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Heredar" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__heredar__">Heredar general</SelectItem>
+                          <SelectItem value="Factura">Factura</SelectItem>
+                          <SelectItem value="Final">Final</SelectItem>
+                          <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select
+                        value={(headerForm as any)[listaKey] || "__heredar__"}
+                        onValueChange={(v) => setHeaderForm({ ...headerForm, [listaKey]: v === "__heredar__" ? "" : v })}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Heredar lista" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__heredar__">Heredar lista</SelectItem>
+                          {listasPrecio.map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <Button onClick={saveHeader} disabled={savingHeader} className="gap-2">
+                  {savingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Guardar encabezado
+                </Button>
+              </div>
             </div>
+          )}
+        </div>
+
+        {/* ─── Agregar artículo ─── */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
+            <Plus className="h-4 w-4 text-indigo-600" />
+            Agregar artículo
+          </h2>
+          <div className="flex gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Buscar por SKU, descripción..."
+                className="pl-9 h-10"
+                value={query}
+                onChange={(e) => buscarProductos(e.target.value)}
+              />
+              {found.length > 0 && (
+                <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
+                  {found.map((p: any) => (
+                    <div key={p.id}
+                      className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
+                      onClick={() => agregarItem(p)}>
+                      <div className="font-medium text-slate-800">{p.descripcion}</div>
+                      <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number" min={1} className="h-10 w-24 text-center font-semibold"
+                value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 1)}
+              />
+              <span className="text-sm text-slate-400">uds.</span>
+            </div>
+            {saving && <Loader2 className="h-5 w-5 animate-spin text-indigo-600 self-center" />}
+          </div>
+        </div>
+
+        {/* ─── Lista de artículos ─── */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {/* Table header */}
+          <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50 grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+            <div className="col-span-5">Artículo</div>
+            <div className="col-span-2 text-right">Precio Unit.</div>
+            <div className="col-span-2 text-center">Cantidad</div>
+            <div className="col-span-2 text-right">Subtotal</div>
+            <div className="col-span-1"></div>
           </div>
 
-          {/* Lista de artículos */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <h2 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Package className="h-4 w-4 text-slate-500" />
-                Artículos del pedido
-              </h2>
-              <span className="text-sm text-slate-500">{items.length} artículo{items.length !== 1 ? "s" : ""}</span>
+          {items.length === 0 ? (
+            <div className="py-16 text-center">
+              <Package className="h-10 w-10 text-slate-300 mx-auto mb-3" />
+              <p className="text-slate-500 font-medium">Sin artículos</p>
+              <p className="text-slate-400 text-sm mt-1">Usá el buscador de arriba para agregar artículos</p>
             </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {items.map((item) => {
+                const estadoItem = item.estado_item
+                const barColor = estadoItem === "COMPLETO" ? "bg-green-500" :
+                  estadoItem === "FALTANTE" ? "bg-red-500" :
+                  estadoItem === "PARCIAL" ? "bg-orange-500" : "bg-yellow-400"
+                const subtotalItem = (item.precio_final || 0) * (item.cantidad || 0)
 
-            {items.length === 0 ? (
-              <div className="py-16 text-center">
-                <Package className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-                <p className="text-slate-500 font-medium">Sin artículos</p>
-                <p className="text-slate-400 text-sm mt-1">Usá el buscador de arriba para agregar artículos</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {items.map((item) => {
-                  const estadoItem = item.estado_item
-                  const barColor = estadoItem === "COMPLETO" ? "bg-green-500" :
-                    estadoItem === "FALTANTE" ? "bg-red-500" :
-                    estadoItem === "PARCIAL" ? "bg-orange-500" : "bg-yellow-400"
-
-                  return (
-                    <div key={item.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors">
-                      <div className={`w-1 h-10 rounded-full shrink-0 ${barColor}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-800 truncate">{item.articulos?.descripcion}</p>
+                return (
+                  <div key={item.id} className="grid grid-cols-12 gap-2 items-center px-5 py-3 hover:bg-slate-50/50 transition-colors">
+                    <div className="col-span-5 flex items-center gap-3 min-w-0">
+                      <div className={`w-1 h-9 rounded-full shrink-0 ${barColor}`} />
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-800 text-sm leading-tight truncate">{item.articulos?.descripcion}</p>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">
                           {item.articulos?.sku}
                           {item.articulos?.proveedores?.nombre ? ` · ${item.articulos.proveedores.nombre}` : ""}
                         </p>
                       </div>
-                      <div className="text-right shrink-0 mr-2">
-                        <p className="text-xs text-slate-400">Precio unit.</p>
-                        <p className="text-sm font-semibold text-slate-700">
-                          ${(item.precio_final || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Input
-                          type="number" min={1}
-                          className="h-9 w-20 text-center font-semibold text-base"
-                          defaultValue={item.cantidad}
-                          onBlur={(e) => {
-                            const newQty = parseInt(e.target.value)
-                            if (newQty !== item.cantidad && newQty > 0) actualizarCantidad(item.id, newQty)
-                          }}
-                        />
-                        <span className="text-xs text-slate-400 w-6">u.</span>
-                        {item.cantidad_preparada != null && item.cantidad_preparada > 0 && (
-                          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                            item.cantidad_preparada >= item.cantidad ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
-                          }`}>
-                            {item.cantidad_preparada} prep.
-                          </span>
-                        )}
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-red-500 hover:bg-red-50"
-                          onClick={() => eliminarItem(item.id, item.articulos?.descripcion || "artículo")}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
                     </div>
-                  )
-                })}
-              </div>
-            )}
 
-            {/* Totales */}
-            {items.length > 0 && (
-              <div className="px-5 py-4 border-t border-slate-200 bg-slate-800 text-white">
-                <div className="flex justify-between items-center">
-                  <span className="text-white/60 text-sm">Total del pedido</span>
-                  <span className="text-2xl font-bold">
+                    <div className="col-span-2 text-right">
+                      <p className="text-sm font-semibold text-slate-700">
+                        ${(item.precio_final || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+
+                    <div className="col-span-2 flex items-center justify-center gap-1">
+                      <Input
+                        type="number" min={1}
+                        className="h-8 w-20 text-center font-semibold text-sm"
+                        defaultValue={item.cantidad}
+                        onBlur={(e) => {
+                          const newQty = parseInt(e.target.value)
+                          if (newQty !== item.cantidad && newQty > 0) actualizarCantidad(item.id, newQty)
+                        }}
+                      />
+                      <span className="text-xs text-slate-400">u.</span>
+                    </div>
+
+                    <div className="col-span-2 text-right">
+                      <p className="text-sm font-bold text-slate-800">
+                        ${subtotalItem.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                      {item.cantidad_preparada != null && item.cantidad_preparada > 0 && (
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                          item.cantidad_preparada >= item.cantidad ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
+                        }`}>
+                          {item.cantidad_preparada} prep.
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="col-span-1 flex justify-end">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50"
+                        onClick={() => eliminarItem(item.id, item.articulos?.descripcion || "artículo")}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Totales */}
+          {items.length > 0 && (
+            <div className="border-t border-slate-200 bg-slate-800 text-white px-5 py-4">
+              <div className="flex justify-between items-center">
+                <div className="text-white/60 text-sm">
+                  {items.length} artículo{items.length !== 1 ? "s" : ""}
+                </div>
+                <div className="text-right">
+                  <p className="text-white/50 text-xs">Total del pedido</p>
+                  <p className="text-2xl font-bold">
                     ${(pedido?.total || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                  </span>
+                  </p>
                 </div>
               </div>
-            )}
-          </div>
-
+            </div>
+          )}
         </div>
+
       </main>
     </div>
   )

@@ -995,13 +995,13 @@ export default function ClientesPedidosPage() {
                       : <><Receipt className="h-3.5 w-3.5 mr-1.5" />Generar</>}
                   </Button>
                 )}
-                <Button size="sm" variant="outline" onClick={() => imprimirPedido(pedidoSeleccionado)}
-                  className="border-white/30 text-white hover:bg-white/10">
+                <Button size="sm" onClick={() => imprimirPedido(pedidoSeleccionado)}
+                  className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                   <Printer className="h-3.5 w-3.5 mr-1.5" />Imprimir
                 </Button>
                 <Link href={`/clientes-pedidos/${pedidoSeleccionado.id}`}>
-                  <Button size="sm" variant="outline" className="border-white/30 text-white hover:bg-white/10">
-                    <Plus className="h-3.5 w-3.5 mr-1.5" />Editar artículos
+                  <Button size="sm" className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
+                    <FileText className="h-3.5 w-3.5 mr-1.5" />Editar pedido
                   </Button>
                 </Link>
                 {pedidoSeleccionado.estado !== "eliminado" && (
