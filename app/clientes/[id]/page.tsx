@@ -379,19 +379,19 @@ export default function ClienteDetailPage() {
                     {segmentosOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                   </CardTitle>
                 </CardHeader>
-                {segmentosOpen && <CardContent>
+                {segmentosOpen && <CardContent className="space-y-4">
                   <div className="grid grid-cols-3 gap-3">
                     {[
-                      { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza" },
-                      { label: "Perfumería Perf0", listaKey: "lista_perf0_id", metodoKey: "metodo_perf0" },
-                      { label: "Perfumería Plus", listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus" },
-                    ].map(({ label, listaKey, metodoKey }) => (
-                      <div key={listaKey} className="border rounded-md p-3 bg-slate-50 space-y-2">
+                      { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza", segKey: "limpieza_bazar" },
+                      { label: "Perfumería Perf0",  listaKey: "lista_perf0_id",    metodoKey: "metodo_perf0",    segKey: "perf0" },
+                      { label: "Perfumería Plus",   listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus", segKey: "perf_plus" },
+                    ].map(({ label, listaKey, metodoKey, segKey }) => (
+                      <div key={listaKey} className="border rounded-lg p-3 bg-slate-50 space-y-2">
                         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>
                         <Select value={(formData as any)[metodoKey] || "__none__"} onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v === "__none__" ? "" : v })}>
                           <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Heredar" /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">Heredar general</SelectItem>
+                            <SelectItem value="__none__">{formData.metodo_facturacion} (general)</SelectItem>
                             <SelectItem value="Factura (21% IVA)">Factura</SelectItem>
                             <SelectItem value="Final (Mixto)">Final</SelectItem>
                             <SelectItem value="Presupuesto">Presupuesto</SelectItem>
@@ -400,13 +400,39 @@ export default function ClienteDetailPage() {
                         <Select value={(formData as any)[listaKey] || "__none__"} onValueChange={(v) => setFormData({ ...formData, [listaKey]: v === "__none__" ? "" : v })}>
                           <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Heredar lista" /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">Heredar lista</SelectItem>
+                            <SelectItem value="__none__">{listasPrecio.find(lp => lp.id === formData.lista_precio_id)?.nombre || "Sin lista"} (general)</SelectItem>
                             {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
                           </SelectContent>
                         </Select>
+                        {/* Descuentos por segmento */}
+                        <div className="border-t border-slate-200 pt-2 space-y-1.5">
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descuentos</p>
+                          {BONIF_TIPOS.map(tipo => {
+                            const key = `${segKey}__${tipo.key}`
+                            const val = bonifGrid[key] || 0
+                            return (
+                              <div key={tipo.key} className="flex items-center justify-between">
+                                <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
+                                <div className="flex items-center gap-1">
+                                  <Input
+                                    type="number" step="0.01" min="0" max="100"
+                                    className="h-6 w-16 text-center text-xs font-bold px-1"
+                                    value={val}
+                                    onChange={(e) => setBonifGrid({ ...bonifGrid, [key]: parseFloat(e.target.value) || 0 })}
+                                  />
+                                  <span className="text-[10px] text-slate-400">%</span>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
                       </div>
                     ))}
                   </div>
+                  <Button type="button" size="sm" className="w-full h-8" onClick={saveBonificaciones} disabled={savingBonif}>
+                    {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+                    Guardar segmentos y descuentos
+                  </Button>
                 </CardContent>}
               </Card>
             </div>
@@ -448,61 +474,6 @@ export default function ClienteDetailPage() {
                       <input type="checkbox" checked={formData.exento_iva} onChange={(e) => setFormData({ ...formData, exento_iva: e.target.checked })} className="h-4 w-4 rounded" />
                       Exento IVA
                     </label>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Bonificaciones */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Bonificaciones</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0 pb-3">
-                  {/* Grid header */}
-                  <div className="grid grid-cols-4 gap-0 px-3 pb-1">
-                    <div />
-                    {BONIF_TIPOS.map(t => (
-                      <div key={t.key} className={`text-center text-[10px] font-bold uppercase tracking-wide py-1 rounded-t mx-0.5 border ${t.cls}`}>
-                        {t.label}
-                      </div>
-                    ))}
-                  </div>
-                  {/* Grid rows */}
-                  <div className="space-y-0.5 px-3">
-                    {BONIF_SEGMENTS.map(seg => (
-                      <div key={seg.key} className="grid grid-cols-4 gap-0 items-center">
-                        <div className={`text-xs font-semibold text-slate-600 pr-2 ${seg.key === "todos" ? "text-slate-800" : "text-slate-500"}`}>
-                          {seg.label}
-                        </div>
-                        {BONIF_TIPOS.map(tipo => {
-                          const key = `${seg.key}__${tipo.key}`
-                          const val = bonifGrid[key] || 0
-                          return (
-                            <div key={tipo.key} className="flex items-center gap-0.5 mx-0.5">
-                              <Input
-                                type="number" step="0.01" min="0" max="100"
-                                className="h-7 text-center text-xs font-bold px-1"
-                                value={val}
-                                onChange={(e) => setBonifGrid({ ...bonifGrid, [key]: parseFloat(e.target.value) || 0 })}
-                              />
-                              <span className="text-[10px] text-slate-400 shrink-0">%</span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="px-3 pt-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="w-full h-8"
-                      onClick={saveBonificaciones}
-                      disabled={savingBonif}
-                    >
-                      {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-                      Guardar bonificaciones
-                    </Button>
                   </div>
                 </CardContent>
               </Card>
