@@ -63,16 +63,26 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         articulos (
           descripcion,
           sku,
-          descuento_propio
+          descuento_propio,
+          categoria,
+          iva_compras
         )
       `)
       .eq("comprobante_id", comprobanteId)
+
+    const { data: bonificacionesCliente } = await supabase
+      .from("bonificaciones")
+      .select("tipo, porcentaje, segmento")
+      .eq("cliente_id", comprobante.cliente_id)
+      .eq("activo", true)
+      .in("tipo", ["general", "viajante"])
 
     const comprobanteCompleto = {
       ...comprobante,
       cliente,
       pedido,
       detalle: detalleArray || [],
+      bonificaciones: bonificacionesCliente || [],
     }
 
     console.log("[v0] Comprobante completo con", detalleArray?.length || 0, "items")
@@ -102,50 +112,76 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 }
 
-function generarHTMLComprobante(comprobante: any, empresa: any): string {
-  const tipoComprobante = ({
-    FA: "FACTURA A",
-    FB: "FACTURA B",
-    FC: "FACTURA C",
-    NCA: "NOTA DE CRÉDITO A",
-    NCB: "NOTA DE CRÉDITO B",
-    NCC: "NOTA DE CRÉDITO C",
-    PRES: "PRESUPUESTO",
-    REM: "REMITO",
-    REV: "REVERSA",
-  } as Record<string, string>)[comprobante.tipo_comprobante]
+function detectarSegmento(art: { categoria?: string | null; iva_compras?: string | null }): string {
+  const cat = (art.categoria || "").toUpperCase()
+  if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA"))
+    return art.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
+  return "limpieza_bazar"
+}
 
-  const hayDescuentos = comprobante.detalle?.some((i: any) => (i.articulos?.descuento_propio || 0) > 0)
+function generarHTMLComprobante(comprobante: any, empresa: any): string {
+  const tipoLabel: Record<string, string> = {
+    FA: "FACTURA A", FB: "FACTURA B", FC: "FACTURA C",
+    NCA: "NOTA DE CRÉDITO A", NCB: "NOTA DE CRÉDITO B", NCC: "NOTA DE CRÉDITO C",
+    PRES: "PRESUPUESTO", REM: "REMITO", REV: "REVERSA",
+  }
+  const tipoComprobante = tipoLabel[comprobante.tipo_comprobante] || comprobante.tipo_comprobante
 
   const fmtARS = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-  const detalleHTML = comprobante.detalle
-    ?.map(
-      (item: any) => {
-        const dto = Number(item.articulos?.descuento_propio || 0)
-        const precioFinal = Number(item.precio_unitario || 0)
-        // Si tiene descuento propio, el precio "de lista" es el que se muestra inflado
-        // precio_lista = precio_final * 100 / (100 - dto)
-        const precioLista = dto > 0 ? precioFinal * 100 / (100 - dto) : precioFinal
-        return `
-    <tr style="border-bottom: 1px solid #e5e7eb;">
-      <td style="padding: 8px; text-align: center;">${item.articulos?.sku || "-"}</td>
-      <td style="padding: 8px;">${item.articulos?.descripcion || item.descripcion}</td>
-      <td style="padding: 8px; text-align: center;">${item.cantidad}</td>
-      ${hayDescuentos ? `
-      <td style="padding: 8px; text-align: right; color: #6b7280; text-decoration: ${dto > 0 ? "line-through" : "none"};">$${fmtARS(precioLista)}</td>
-      <td style="padding: 8px; text-align: center; color: #dc2626; font-weight: 600;">${dto > 0 ? dto + "%" : "—"}</td>
-      <td style="padding: 8px; text-align: right; font-weight: 700;">$${fmtARS(precioFinal)}</td>
-      ` : `
-      <td style="padding: 8px; text-align: right; font-weight: 600;">$${fmtARS(precioFinal)}</td>
-      `}
-      <td style="padding: 8px; text-align: right; font-weight: 600;">$${fmtARS(Number(item.precio_total || 0))}</td>
-    </tr>`
-      },
-    )
-    .join("")
-
   const mostrarIVA = comprobante.tipo_comprobante === "FA" || comprobante.tipo_comprobante === "FB"
+
+  // Split lines: positive = articles, negative = discounts
+  const lineasPositivas: any[] = (comprobante.detalle || []).filter((i: any) => Number(i.precio_unitario || 0) > 0)
+  const lineasNegativas: any[] = (comprobante.detalle || []).filter((i: any) => Number(i.precio_unitario || 0) < 0)
+
+  // Separate bonif mercadería (shown as last article) from general/viajante (shown in footer)
+  const lineasBonifMerc = lineasNegativas.filter((i: any) => (i.descripcion || "").includes("Mercad"))
+  const lineasDescFooter = lineasNegativas.filter((i: any) => !(i.descripcion || "").includes("Mercad"))
+
+  // Detect D1/D2 from bonificaciones loaded for this comprobante
+  const bonificaciones: any[] = comprobante.bonificaciones || []
+
+  // Detect the segment from the first regular article
+  const firstRegular = lineasPositivas.find((i: any) => i.articulos?.categoria !== undefined || i.articulos?.iva_compras !== undefined)
+  const segmento = firstRegular?.articulos ? detectarSegmento(firstRegular.articulos) : "limpieza_bazar"
+
+  const d1 = bonificaciones.find((b: any) => b.tipo === "general" && (!b.segmento || b.segmento === segmento))
+  const d2 = bonificaciones.find((b: any) => b.tipo === "viajante" && (!b.segmento || b.segmento === segmento))
+
+  const hayD1 = !!d1
+  const hayD2 = !!d2
+
+  // Column widths
+  const colDesc = hayD1 || hayD2 ? "28%" : "38%"
+
+  const detalleHTML = [...lineasPositivas, ...lineasBonifMerc].map((item: any) => {
+    const precio = Number(item.precio_unitario || 0)
+    const total = Number(item.precio_total || 0)
+    const esBonifMerc = precio < 0  // comes from lineasBonifMerc
+    const label = item.articulos?.descripcion || item.descripcion || "-"
+    const sku = item.articulos?.sku || "-"
+    return `
+    <tr style="border-bottom: 1px solid #e5e7eb;${esBonifMerc ? " background: #fef3c7;" : ""}">
+      <td style="padding: 7px 8px; text-align: center; font-size: 10px; color: #555;">${esBonifMerc ? "" : sku}</td>
+      <td style="padding: 7px 8px; font-weight: ${esBonifMerc ? "600" : "normal"}; color: ${esBonifMerc ? "#92400e" : "inherit"};">${label}</td>
+      <td style="padding: 7px 8px; text-align: center;">${esBonifMerc ? "—" : item.cantidad}</td>
+      ${hayD1 ? `<td style="padding: 7px 8px; text-align: center; color: #dc2626; font-weight: 600;">${esBonifMerc ? "100%" : (d1.porcentaje + "%")}</td>` : ""}
+      ${hayD2 ? `<td style="padding: 7px 8px; text-align: center; color: #7c3aed; font-weight: 600;">${esBonifMerc ? "" : (d2.porcentaje + "%")}</td>` : ""}
+      <td style="padding: 7px 8px; text-align: right;">${esBonifMerc ? "—" : ("$" + fmtARS(Math.abs(precio)))}</td>
+      <td style="padding: 7px 8px; text-align: right; font-weight: 600; color: ${esBonifMerc ? "#dc2626" : "inherit"};">$${fmtARS(Math.abs(total))}</td>
+    </tr>`
+  }).join("")
+
+  // Footer totals
+  const subtotalArticulos = lineasPositivas.reduce((s: number, i: any) => s + Number(i.precio_total || 0), 0)
+  const totalBonifMerc = lineasBonifMerc.reduce((s: number, i: any) => s + Math.abs(Number(i.precio_total || 0)), 0)
+  const totalDescs = lineasDescFooter.reduce((s: number, i: any) => s + Math.abs(Number(i.precio_total || 0)), 0)
+
+  const lineasFooterHTML = lineasDescFooter.map((i: any) => `
+        <tr>
+          <td style="padding: 5px 8px; text-align: right; color: #6b7280;">${i.descripcion || i.articulos?.descripcion || "Descuento"}:</td>
+          <td style="padding: 5px 8px; text-align: right; color: #dc2626;">−$${fmtARS(Math.abs(Number(i.precio_total || 0)))}</td>
+        </tr>`).join("")
 
   return `
 <!DOCTYPE html>
@@ -155,192 +191,39 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${tipoComprobante} ${comprobante.numero_comprobante}</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      font-size: 12px;
-      background: #f5f5f5;
-    }
-    
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      background: white;
-      border: 2px solid #000;
-      padding: 20px;
-    }
-    
-    .header {
-      display: grid;
-      grid-template-columns: 1fr 100px 1fr;
-      gap: 20px;
-      border-bottom: 2px solid #000;
-      padding-bottom: 15px;
-      margin-bottom: 15px;
-      align-items: start;
-    }
-    
-    .empresa h2 {
-      font-size: 16px;
-      margin-bottom: 5px;
-    }
-    
-    .empresa p {
-      margin: 3px 0;
-      font-size: 11px;
-    }
-    
-    .tipo-comprobante {
-      border: 2px solid #000;
-      padding: 15px 10px;
-      text-align: center;
-      font-size: 32px;
-      font-weight: bold;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    
-    .datos-comprobante {
-      text-align: right;
-    }
-    
-    .datos-comprobante h3 {
-      font-size: 14px;
-      margin-bottom: 5px;
-    }
-    
-    .datos-comprobante p {
-      margin: 3px 0;
-      font-size: 11px;
-    }
-    
-    .cliente-section {
-      border: 1px solid #000;
-      padding: 10px;
-      margin-bottom: 15px;
-    }
-    
-    .cliente-section h4 {
-      margin-bottom: 8px;
-      font-size: 12px;
-    }
-    
-    .cliente-section p {
-      margin: 3px 0;
-      font-size: 11px;
-    }
-    
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 15px 0;
-    }
-    
-    th {
-      background-color: #f3f4f6;
-      padding: 10px;
-      text-align: left;
-      border: 1px solid #000;
-      font-weight: bold;
-      font-size: 11px;
-    }
-    
-    td {
-      padding: 8px;
-      border: 1px solid #e5e7eb;
-      font-size: 11px;
-    }
-    
-    .totales {
-      margin-top: 20px;
-      display: flex;
-      justify-content: flex-end;
-    }
-    
-    .totales table {
-      width: 300px;
-      margin: 0;
-    }
-    
-    .total-final {
-      font-size: 14px;
-      font-weight: bold;
-      background-color: #f3f4f6;
-    }
-    
-    .observaciones {
-      margin-top: 20px;
-      padding: 10px;
-      border: 1px solid #e5e7eb;
-      font-size: 11px;
-    }
-    
-    .footer {
-      margin-top: 30px;
-      padding-top: 15px;
-      border-top: 1px solid #000;
-      font-size: 10px;
-      text-align: center;
-      color: #666;
-    }
-    
-    .footer p {
-      margin: 3px 0;
-    }
-    
-    .actions {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      display: flex;
-      gap: 10px;
-      background: white;
-      padding: 10px;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      z-index: 1000;
-    }
-    
-    .btn {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    
-    .btn-print {
-      background: #3b82f6;
-      color: white;
-    }
-    
-    .btn-print:hover {
-      background: #2563eb;
-    }
-    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; background: #f5f5f5; }
+    .container { max-width: 820px; margin: 0 auto; background: white; border: 2px solid #000; padding: 20px; }
+    .header { display: grid; grid-template-columns: 1fr 80px 1fr; gap: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 12px; align-items: start; }
+    .empresa h2 { font-size: 15px; margin-bottom: 4px; }
+    .empresa p { margin: 2px 0; font-size: 10px; }
+    .tipo-comprobante { border: 2px solid #000; padding: 12px 8px; text-align: center; font-size: 28px; font-weight: bold; display: flex; align-items: center; justify-content: center; }
+    .datos-comprobante { text-align: right; }
+    .datos-comprobante h3 { font-size: 13px; margin-bottom: 4px; }
+    .datos-comprobante p { margin: 2px 0; font-size: 10px; }
+    .cliente-section { border: 1px solid #000; padding: 8px 10px; margin-bottom: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; }
+    .cliente-section p { margin: 2px 0; font-size: 10px; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+    th { background-color: #1e293b; color: white; padding: 8px; text-align: left; font-size: 10px; font-weight: 600; letter-spacing: 0.03em; }
+    th.right { text-align: right; }
+    th.center { text-align: center; }
+    td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
+    .totales { margin-top: 16px; display: flex; justify-content: flex-end; }
+    .totales table { width: 280px; margin: 0; border: 1px solid #e5e7eb; }
+    .totales td { border-bottom: 1px solid #f1f5f9; padding: 5px 8px; font-size: 11px; }
+    .total-final { background-color: #1e293b; color: white; font-size: 13px; font-weight: bold; }
+    .total-final td { color: white !important; border-bottom: none; }
+    .observaciones { margin-top: 16px; padding: 8px; border: 1px solid #e5e7eb; font-size: 10px; }
+    .footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #000; font-size: 9px; text-align: center; color: #888; }
+    .footer p { margin: 2px 0; }
+    .actions { position: fixed; top: 20px; right: 20px; display: flex; gap: 10px; background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; }
+    .btn { padding: 10px 20px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-print { background: #3b82f6; color: white; }
+    .btn-print:hover { background: #2563eb; }
     @media print {
-      body {
-        background: white;
-        padding: 0;
-      }
-      
-      .actions {
-        display: none;
-      }
-      
-      .container {
-        border: none;
-        max-width: 100%;
-      }
+      body { background: white; padding: 0; }
+      .actions { display: none; }
+      .container { border: none; max-width: 100%; }
     }
   </style>
 </head>
@@ -356,14 +239,11 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
         <h2>${empresa?.razon_social || "CIA DE HIGIENE TOTAL S.R.L"}</h2>
         <p>CUIT: ${empresa?.cuit || "30-71234567-8"}</p>
         <p>${empresa?.direccion || "Dirección de la empresa"}</p>
-        <p>Tel: ${empresa?.telefono || "-"}</p>
-        <p>${empresa?.condicion_iva || "Responsable Inscripto"}</p>
+        <p>Tel: ${empresa?.telefono || "-"} · ${empresa?.condicion_iva || "Responsable Inscripto"}</p>
       </div>
-      
       <div class="tipo-comprobante">
         ${comprobante.tipo_comprobante.charAt(comprobante.tipo_comprobante.length - 1) || "X"}
       </div>
-      
       <div class="datos-comprobante">
         <h3>${tipoComprobante}</h3>
         <p><strong>Nº:</strong> ${comprobante.numero_comprobante}</p>
@@ -374,7 +254,6 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
 
     <!-- DATOS DEL CLIENTE -->
     <div class="cliente-section">
-      <h4>DATOS DEL CLIENTE</h4>
       <p><strong>Razón Social:</strong> ${comprobante.cliente?.nombre_razon_social || "Cliente"}</p>
       <p><strong>CUIT:</strong> ${comprobante.cliente?.cuit || "-"}</p>
       <p><strong>Dirección:</strong> ${comprobante.cliente?.direccion || "-"}</p>
@@ -385,17 +264,13 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
     <table>
       <thead>
         <tr>
-          <th style="width: 10%; text-align: center;">Código</th>
-          <th style="width: ${hayDescuentos ? "30%" : "40%"};">Descripción</th>
-          <th style="width: 8%; text-align: center;">Cantidad</th>
-          ${hayDescuentos ? `
-          <th style="width: 13%; text-align: right;">P. Lista</th>
-          <th style="width: 7%; text-align: center;">Dto.</th>
-          <th style="width: 13%; text-align: right;">P. c/Dto.</th>
-          ` : `
-          <th style="width: 15%; text-align: right;">Precio Unit.</th>
-          `}
-          <th style="width: 15%; text-align: right;">Subtotal</th>
+          <th style="width: 9%;" class="center">Código</th>
+          <th style="width: ${colDesc};">Descripción</th>
+          <th style="width: 7%;" class="center">Cant.</th>
+          ${hayD1 ? `<th style="width: 7%;" class="center">D1<br><span style="font-weight:400;font-size:9px;">General</span></th>` : ""}
+          ${hayD2 ? `<th style="width: 7%;" class="center">D2<br><span style="font-weight:400;font-size:9px;">Viajante</span></th>` : ""}
+          <th style="width: 14%;" class="right">P. Neto</th>
+          <th style="width: 14%;" class="right">Total</th>
         </tr>
       </thead>
       <tbody>
@@ -406,60 +281,56 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
     <!-- TOTALES -->
     <div class="totales">
       <table>
-        ${mostrarIVA
-      ? `
         <tr>
-          <td style="padding: 5px; text-align: right;"><strong>Subtotal (Neto):</strong></td>
-          <td style="padding: 5px; text-align: right;">$${comprobante.total_neto?.toFixed(2)}</td>
+          <td style="text-align: right;">Subtotal artículos:</td>
+          <td style="text-align: right;">$${fmtARS(subtotalArticulos)}</td>
+        </tr>
+        ${totalBonifMerc > 0 ? `
+        <tr>
+          <td style="text-align: right; color: #92400e;">Bonif. Mercadería 100%:</td>
+          <td style="text-align: right; color: #dc2626;">−$${fmtARS(totalBonifMerc)}</td>
+        </tr>` : ""}
+        ${lineasFooterHTML}
+        ${(totalBonifMerc > 0 || totalDescs > 0) ? `
+        <tr style="border-top: 1px solid #cbd5e1;">
+          <td style="text-align: right; font-weight: 600;">Subtotal c/desc.:</td>
+          <td style="text-align: right; font-weight: 600;">$${fmtARS(subtotalArticulos - totalBonifMerc - totalDescs)}</td>
+        </tr>` : ""}
+        ${mostrarIVA ? `
+        <tr>
+          <td style="text-align: right; color: #6b7280;">Neto 21%:</td>
+          <td style="text-align: right; color: #6b7280;">$${fmtARS(Number(comprobante.total_neto || 0))}</td>
         </tr>
         <tr>
-          <td style="padding: 5px; text-align: right;"><strong>IVA 21%:</strong></td>
-          <td style="padding: 5px; text-align: right;">$${comprobante.total_iva?.toFixed(2)}</td>
-        </tr>
-        ${comprobante.percepcion_iva > 0
-        ? `
+          <td style="text-align: right; color: #6b7280;">IVA 21%:</td>
+          <td style="text-align: right; color: #6b7280;">$${fmtARS(Number(comprobante.total_iva || 0))}</td>
+        </tr>` : ""}
+        ${(comprobante.percepcion_iva || 0) > 0 ? `
         <tr>
-          <td style="padding: 5px; text-align: right;"><strong>Percepción IVA:</strong></td>
-          <td style="padding: 5px; text-align: right;">$${comprobante.percepcion_iva?.toFixed(2)}</td>
-        </tr>
-        `
-        : ""
-      }
-        ${comprobante.percepcion_iibb > 0
-        ? `
+          <td style="text-align: right; color: #6b7280;">Percepción IVA:</td>
+          <td style="text-align: right; color: #6b7280;">$${fmtARS(Number(comprobante.percepcion_iva))}</td>
+        </tr>` : ""}
+        ${(comprobante.percepcion_iibb || 0) > 0 ? `
         <tr>
-          <td style="padding: 5px; text-align: right;"><strong>Percepción IIBB:</strong></td>
-          <td style="padding: 5px; text-align: right;">$${comprobante.percepcion_iibb?.toFixed(2)}</td>
-        </tr>
-        `
-        : ""
-      }
-        `
-      : ""
-    }
+          <td style="text-align: right; color: #6b7280;">Percepción IIBB:</td>
+          <td style="text-align: right; color: #6b7280;">$${fmtARS(Number(comprobante.percepcion_iibb))}</td>
+        </tr>` : ""}
         <tr class="total-final">
-          <td style="padding: 10px; text-align: right;"><strong>TOTAL:</strong></td>
-          <td style="padding: 10px; text-align: right;"><strong>$${comprobante.total_factura?.toFixed(2)}</strong></td>
+          <td style="text-align: right; padding: 10px 8px;"><strong>TOTAL:</strong></td>
+          <td style="text-align: right; padding: 10px 8px;"><strong>$${fmtARS(Number(comprobante.total_factura || 0))}</strong></td>
         </tr>
       </table>
     </div>
 
-    ${comprobante.observaciones
-      ? `
-    <div class="observaciones">
-      <strong>Observaciones:</strong> ${comprobante.observaciones}
-    </div>
-    `
-      : ""
-    }
+    ${comprobante.observaciones ? `
+    <div class="observaciones"><strong>Observaciones:</strong> ${comprobante.observaciones}</div>` : ""}
 
     <!-- FOOTER -->
     <div class="footer">
-      <p>Este comprobante fue generado electrónicamente por el Sistema ERP+CRM</p>
-      <p>Para consultas: ${empresa?.email || "info@empresa.com"} | Tel: ${empresa?.telefono || "-"}</p>
+      <p>Comprobante generado por Sistema ERP+CRM</p>
+      <p>${empresa?.email || "info@empresa.com"} | Tel: ${empresa?.telefono || "-"}</p>
     </div>
   </div>
 </body>
-</html>
-  `
+</html>`
 }

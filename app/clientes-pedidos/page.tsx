@@ -29,13 +29,16 @@ import {
   Eye,
   Plus,
   X,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { NuevoPedidoDialog } from "@/components/pedidos/NuevoPedidoDialog"
-import { ColaProcesamiento } from "@/components/pedidos/ColaProcesamiento"
+import { ReviewPedidoDialog } from "@/components/pedidos/ReviewPedidoDialog"
 import { useOrderQueue } from "@/hooks/use-order-queue"
+import type { QueueItem } from "@/hooks/use-order-queue"
 import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido } from "@/lib/actions/pedidos"
 import {
   AlertDialog,
@@ -176,6 +179,7 @@ export default function ClientesPedidosPage() {
   const [expandedArticulosGroups, setExpandedArticulosGroups] = useState<Record<string, boolean>>({ pendientes: true, preparados: true, faltantes: false })
   const [previewEmailId, setPreviewEmailId] = useState<string | null>(null)
   const [nuevoPedidoOpen, setNuevoPedidoOpen] = useState(false)
+  const [reviewingItem, setReviewingItem] = useState<QueueItem | null>(null)
   // Order editing state
   const [editMode, setEditMode] = useState(false)
   const [addProductQuery, setAddProductQuery] = useState("")
@@ -837,13 +841,61 @@ export default function ClientesPedidosPage() {
         </Select>
       </div>
 
-      {/* ═══ COLA DE PROCESAMIENTO ═══ */}
-      <ColaProcesamiento
-        queue={queue}
-        onRemove={removeFromQueue}
-        onRetry={retryItem}
-        onConfirmOrder={confirmOrder}
-      />
+      {/* ═══ PEDIDOS EN PROCESAMIENTO ═══ */}
+      {queue.filter(q => q.status !== "done").length > 0 && (
+        <div className="space-y-2">
+          {queue.filter(q => q.status !== "done").map(item => (
+            <div key={item.id} className="bg-white border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                {(item.status === "processing" || item.status === "waiting") && (
+                  <Loader2 className="h-4 w-4 text-blue-500 animate-spin shrink-0" />
+                )}
+                {item.status === "needs_review" && (
+                  <AlertCircle className="h-4 w-4 text-orange-500 shrink-0" />
+                )}
+                {item.status === "error" && (
+                  <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <span className="text-sm font-medium">{item.clienteNombre}</span>
+                  <span className="text-xs text-muted-foreground ml-2">{item.files.map(f => f.name).join(", ")}</span>
+                  {item.status === "error" && item.error && (
+                    <p className="text-xs text-destructive mt-0.5">{item.error}</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  item.status === "processing" ? "bg-blue-100 text-blue-700" :
+                  item.status === "waiting" ? "bg-gray-100 text-gray-600" :
+                  item.status === "needs_review" ? "bg-orange-100 text-orange-700" :
+                  "bg-red-100 text-red-700"
+                }`}>
+                  {item.status === "processing" ? "Importando..." :
+                   item.status === "waiting" ? "En espera" :
+                   item.status === "needs_review" ? "Revisar" : "Error"}
+                </span>
+                {item.status === "needs_review" && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs border-orange-300 text-orange-700 hover:bg-orange-50 gap-1"
+                    onClick={() => setReviewingItem(item)}>
+                    <Eye className="h-3 w-3" />Revisar
+                  </Button>
+                )}
+                {item.status === "error" && (
+                  <Button size="sm" variant="ghost" className="h-7 text-xs text-blue-600" onClick={() => retryItem(item.id)}>
+                    <RefreshCw className="h-3 w-3 mr-1" />Reintentar
+                  </Button>
+                )}
+                {(item.status === "error" || item.status === "needs_review") && (
+                  <button className="text-muted-foreground hover:text-foreground" onClick={() => removeFromQueue(item.id)}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ═══ ACORDEÓN POR PRIORIDAD ═══ */}
       <div className="space-y-4">
@@ -1284,6 +1336,21 @@ export default function ClientesPedidosPage() {
         onOpenChange={setNuevoPedidoOpen}
         onAddToQueue={addToQueue}
       />
+
+      {reviewingItem && reviewingItem.parseResult && (
+        <ReviewPedidoDialog
+          open={true}
+          onOpenChange={(open) => { if (!open) setReviewingItem(null) }}
+          queueItemId={reviewingItem.id}
+          clienteId={reviewingItem.clienteId}
+          clienteNombre={reviewingItem.clienteNombre}
+          parseResult={reviewingItem.parseResult}
+          onConfirm={async (itemId, items, clienteId) => {
+            await confirmOrder(itemId, items, clienteId)
+            setReviewingItem(null)
+          }}
+        />
+      )}
     </div>
   )
 }
