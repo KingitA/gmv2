@@ -73,7 +73,7 @@ export default function PedidoEditPage() {
         lista_perf0_pedido_id, metodo_perf0_pedido,
         lista_perf_plus_pedido_id, metodo_perf_plus_pedido,
         vendedor_id,
-        clientes (nombre_razon_social, cuit, direccion, metodo_facturacion, lista_precio_id),
+        clientes (nombre_razon_social, cuit, direccion, metodo_facturacion, lista_precio_id, condicion_entrega, vendedor_id, lista_limpieza_id, lista_perf0_id, lista_perf_plus_id),
         vendedores (nombre)
       `).eq("id", id).single(),
       supabase.from("pedidos_detalle").select(`
@@ -187,6 +187,21 @@ export default function PedidoEditPage() {
   const estadoColor = ESTADO_COLORS[pedido?.estado] || "bg-slate-100 text-slate-700 border-slate-300"
   const totalItems = items.reduce((sum, i) => sum + (i.subtotal || 0), 0)
 
+  const c = pedido?.clientes as any
+  const listaName = (listId: string | null | undefined) => listasPrecio.find(lp => lp.id === listId)?.nombre || null
+  const entregaLabel = (v: string | null | undefined) =>
+    v === "retira_mostrador" ? "Retira en Mostrador" :
+    v === "transporte" ? "Transporte" :
+    v === "entregamos_nosotros" ? "Entregamos Nosotros" : null
+
+  const defaultMetodo   = c?.metodo_facturacion || "—"
+  const defaultLista    = listaName(c?.lista_precio_id) || "Sin lista"
+  const defaultEntrega  = entregaLabel(c?.condicion_entrega) || "—"
+  const defaultVendedor = vendedores.find(v => v.id === c?.vendedor_id)?.nombre || "Sin vendedor"
+  const defaultLimpiezaLista = listaName(c?.lista_limpieza_id) || defaultLista
+  const defaultPerf0Lista    = listaName(c?.lista_perf0_id)    || defaultLista
+  const defaultPerfPlusLista = listaName(c?.lista_perf_plus_id) || defaultLista
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -248,9 +263,9 @@ export default function PedidoEditPage() {
                     value={headerForm.metodo_facturacion_pedido || "__heredar__"}
                     onValueChange={(v) => setHeaderForm({ ...headerForm, metodo_facturacion_pedido: v === "__heredar__" ? "" : v })}
                   >
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Heredar del cliente" /></SelectTrigger>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__heredar__">Heredar del cliente ({pedido?.clientes?.metodo_facturacion || "—"})</SelectItem>
+                      <SelectItem value="__heredar__">{defaultMetodo} (del cliente)</SelectItem>
                       <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
                       <SelectItem value="Final">Final (Mixto)</SelectItem>
                       <SelectItem value="Presupuesto">Presupuesto</SelectItem>
@@ -260,9 +275,9 @@ export default function PedidoEditPage() {
                 <div>
                   <Label className="text-xs text-slate-500 mb-1 block">Condición de Entrega</Label>
                   <Select value={headerForm.condicion_entrega || "__heredar__"} onValueChange={(v) => setHeaderForm({ ...headerForm, condicion_entrega: v === "__heredar__" ? "" : v })}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Heredar" /></SelectTrigger>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__heredar__">Heredar del cliente</SelectItem>
+                      <SelectItem value="__heredar__">{defaultEntrega} (del cliente)</SelectItem>
                       <SelectItem value="retira_mostrador">Retira en Mostrador</SelectItem>
                       <SelectItem value="transporte">Envío por Transporte</SelectItem>
                       <SelectItem value="entregamos_nosotros">Entregamos Nosotros</SelectItem>
@@ -272,9 +287,9 @@ export default function PedidoEditPage() {
                 <div>
                   <Label className="text-xs text-slate-500 mb-1 block">Vendedor</Label>
                   <Select value={headerForm.vendedor_id || "__none__"} onValueChange={(v) => setHeaderForm({ ...headerForm, vendedor_id: v === "__none__" ? "" : v })}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Sin vendedor" /></SelectTrigger>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">Sin vendedor</SelectItem>
+                      <SelectItem value="__none__">{defaultVendedor} (del cliente)</SelectItem>
                       {vendedores.map(v => <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -289,9 +304,9 @@ export default function PedidoEditPage() {
                     value={headerForm.lista_precio_pedido_id || "__heredar__"}
                     onValueChange={(v) => setHeaderForm({ ...headerForm, lista_precio_pedido_id: v === "__heredar__" ? "" : v })}
                   >
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Heredar del cliente" /></SelectTrigger>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__heredar__">Heredar del cliente</SelectItem>
+                      <SelectItem value="__heredar__">{defaultLista} (del cliente)</SelectItem>
                       {listasPrecio.map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -312,19 +327,19 @@ export default function PedidoEditPage() {
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Condiciones por Segmento</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {[
-                    { label: "Limpieza / Bazar", listaKey: "lista_limpieza_pedido_id", metodoKey: "metodo_limpieza_pedido" },
-                    { label: "Perfumería Perf0", listaKey: "lista_perf0_pedido_id", metodoKey: "metodo_perf0_pedido" },
-                    { label: "Perfumería Plus", listaKey: "lista_perf_plus_pedido_id", metodoKey: "metodo_perf_plus_pedido" },
-                  ].map(({ label, listaKey, metodoKey }) => (
+                    { label: "Limpieza / Bazar", listaKey: "lista_limpieza_pedido_id", metodoKey: "metodo_limpieza_pedido", defLista: defaultLimpiezaLista },
+                    { label: "Perfumería Perf0",  listaKey: "lista_perf0_pedido_id",    metodoKey: "metodo_perf0_pedido",    defLista: defaultPerf0Lista },
+                    { label: "Perfumería Plus",   listaKey: "lista_perf_plus_pedido_id", metodoKey: "metodo_perf_plus_pedido", defLista: defaultPerfPlusLista },
+                  ].map(({ label, listaKey, metodoKey, defLista }) => (
                     <div key={listaKey} className="border rounded-lg p-3 bg-slate-50 space-y-2">
                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>
                       <Select
                         value={(headerForm as any)[metodoKey] || "__heredar__"}
                         onValueChange={(v) => setHeaderForm({ ...headerForm, [metodoKey]: v === "__heredar__" ? "" : v })}
                       >
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Heredar" /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__heredar__">Heredar general</SelectItem>
+                          <SelectItem value="__heredar__">{defaultMetodo} (general)</SelectItem>
                           <SelectItem value="Factura">Factura</SelectItem>
                           <SelectItem value="Final">Final</SelectItem>
                           <SelectItem value="Presupuesto">Presupuesto</SelectItem>
@@ -334,9 +349,9 @@ export default function PedidoEditPage() {
                         value={(headerForm as any)[listaKey] || "__heredar__"}
                         onValueChange={(v) => setHeaderForm({ ...headerForm, [listaKey]: v === "__heredar__" ? "" : v })}
                       >
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Heredar lista" /></SelectTrigger>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__heredar__">Heredar lista</SelectItem>
+                          <SelectItem value="__heredar__">{defLista} (general)</SelectItem>
                           {listasPrecio.map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
                         </SelectContent>
                       </Select>

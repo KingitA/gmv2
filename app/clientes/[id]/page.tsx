@@ -29,7 +29,7 @@ export default function ClienteDetailPage() {
   const [vendedores, setVendedores] = useState<any[]>([])
   const [localidades, setLocalidades] = useState<any[]>([])
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
-  const [bonifPct, setBonifPct] = useState({ general: 0, mercaderia: 0, viajante: 0 })
+  const [bonifGrid, setBonifGrid] = useState<Record<string, number>>({})
   const [savingBonif, setSavingBonif] = useState(false)
   const [segmentosOpen, setSegmentosOpen] = useState(false)
   const [ccBalance, setCcBalance] = useState<number | null>(null)
@@ -119,22 +119,42 @@ export default function ClienteDetailPage() {
     setLoading(false)
   }
 
+  const BONIF_SEGMENTS = [
+    { key: "todos", label: "Todos" },
+    { key: "limpieza_bazar", label: "Limpieza / Bazar" },
+    { key: "perf0", label: "Perfumería Perf0" },
+    { key: "perf_plus", label: "Perfumería Plus" },
+  ]
+  const BONIF_TIPOS = [
+    { key: "general", label: "General", cls: "text-blue-700 bg-blue-50 border-blue-200" },
+    { key: "mercaderia", label: "Mercadería", cls: "text-green-700 bg-green-50 border-green-200" },
+    { key: "viajante", label: "Viajante", cls: "text-orange-700 bg-orange-50 border-orange-200" },
+  ]
+
   async function loadBonificaciones() {
-    const { data } = await supabase.from("bonificaciones").select("id, tipo, porcentaje").eq("cliente_id", id).eq("activo", true)
-    const pct = { general: 0, mercaderia: 0, viajante: 0 }
+    const { data } = await supabase.from("bonificaciones").select("tipo, porcentaje, segmento").eq("cliente_id", id).eq("activo", true)
+    const grid: Record<string, number> = {}
     for (const b of (data || [])) {
-      if (b.tipo in pct) (pct as any)[b.tipo] = b.porcentaje
+      const segKey = b.segmento || "todos"
+      grid[`${segKey}__${b.tipo}`] = b.porcentaje
     }
-    setBonifPct(pct)
+    setBonifGrid(grid)
   }
 
   async function saveBonificaciones() {
     setSavingBonif(true)
-    for (const tipo of ["general", "mercaderia", "viajante"] as const) {
-      const pct = bonifPct[tipo]
-      await supabase.from("bonificaciones").delete().eq("cliente_id", id).eq("tipo", tipo)
-      if (pct > 0) {
-        await supabase.from("bonificaciones").insert({ cliente_id: id, tipo, porcentaje: pct, activo: true })
+    for (const seg of BONIF_SEGMENTS) {
+      for (const tipo of BONIF_TIPOS) {
+        const key = `${seg.key}__${tipo.key}`
+        const pct = bonifGrid[key] || 0
+        const dbSeg = seg.key === "todos" ? null : seg.key
+        let del = supabase.from("bonificaciones").delete().eq("cliente_id", id).eq("tipo", tipo.key)
+        if (dbSeg === null) del = (del as any).is("segmento", null)
+        else del = (del as any).eq("segmento", dbSeg)
+        await del
+        if (pct > 0) {
+          await supabase.from("bonificaciones").insert({ cliente_id: id, tipo: tipo.key, porcentaje: pct, activo: true, segmento: dbSeg })
+        }
       }
     }
     setSavingBonif(false)
@@ -434,38 +454,56 @@ export default function ClienteDetailPage() {
 
               {/* Bonificaciones */}
               <Card>
-                <CardHeader className="pb-3">
+                <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Bonificaciones</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  {([
-                    { tipo: "general" as const, label: "General", rowCls: "border-blue-200 bg-blue-50", labelCls: "text-blue-800", inputCls: "border-blue-300 focus:ring-blue-400" },
-                    { tipo: "mercaderia" as const, label: "Mercadería", rowCls: "border-green-200 bg-green-50", labelCls: "text-green-800", inputCls: "border-green-300 focus:ring-green-400" },
-                    { tipo: "viajante" as const, label: "Viajante", rowCls: "border-orange-200 bg-orange-50", labelCls: "text-orange-800", inputCls: "border-orange-300 focus:ring-orange-400" },
-                  ]).map(({ tipo, label, rowCls, labelCls, inputCls }) => (
-                    <div key={tipo} className={`flex items-center justify-between border rounded-lg px-3 py-2.5 ${rowCls}`}>
-                      <span className={`text-sm font-semibold ${labelCls}`}>{label}</span>
-                      <div className="flex items-center gap-1.5">
-                        <Input
-                          type="number" step="0.01" min="0" max="100"
-                          className={`h-8 w-20 text-center text-sm font-bold bg-white ${inputCls}`}
-                          value={bonifPct[tipo]}
-                          onChange={(e) => setBonifPct({ ...bonifPct, [tipo]: parseFloat(e.target.value) || 0 })}
-                        />
-                        <span className={`text-sm font-semibold ${labelCls}`}>%</span>
+                <CardContent className="p-0 pb-3">
+                  {/* Grid header */}
+                  <div className="grid grid-cols-4 gap-0 px-3 pb-1">
+                    <div />
+                    {BONIF_TIPOS.map(t => (
+                      <div key={t.key} className={`text-center text-[10px] font-bold uppercase tracking-wide py-1 rounded-t mx-0.5 border ${t.cls}`}>
+                        {t.label}
                       </div>
-                    </div>
-                  ))}
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="w-full mt-1 h-8"
-                    onClick={saveBonificaciones}
-                    disabled={savingBonif}
-                  >
-                    {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-                    Guardar bonificaciones
-                  </Button>
+                    ))}
+                  </div>
+                  {/* Grid rows */}
+                  <div className="space-y-0.5 px-3">
+                    {BONIF_SEGMENTS.map(seg => (
+                      <div key={seg.key} className="grid grid-cols-4 gap-0 items-center">
+                        <div className={`text-xs font-semibold text-slate-600 pr-2 ${seg.key === "todos" ? "text-slate-800" : "text-slate-500"}`}>
+                          {seg.label}
+                        </div>
+                        {BONIF_TIPOS.map(tipo => {
+                          const key = `${seg.key}__${tipo.key}`
+                          const val = bonifGrid[key] || 0
+                          return (
+                            <div key={tipo.key} className="flex items-center gap-0.5 mx-0.5">
+                              <Input
+                                type="number" step="0.01" min="0" max="100"
+                                className="h-7 text-center text-xs font-bold px-1"
+                                value={val}
+                                onChange={(e) => setBonifGrid({ ...bonifGrid, [key]: parseFloat(e.target.value) || 0 })}
+                              />
+                              <span className="text-[10px] text-slate-400 shrink-0">%</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="px-3 pt-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="w-full h-8"
+                      onClick={saveBonificaciones}
+                      disabled={savingBonif}
+                    >
+                      {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+                      Guardar bonificaciones
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 

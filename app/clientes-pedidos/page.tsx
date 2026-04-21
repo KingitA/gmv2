@@ -182,6 +182,7 @@ export default function ClientesPedidosPage() {
   const [addProductsFound, setAddProductsFound] = useState<any[]>([])
   const [addProductQty, setAddProductQty] = useState(1)
   const [savingItem, setSavingItem] = useState(false)
+  const [listasPrecio, setListasPrecio] = useState<{ id: string; nombre: string }[]>([])
 
   const supabase = createClient()
   const searchParams = useSearchParams()
@@ -195,6 +196,7 @@ export default function ClientesPedidosPage() {
   }, [searchParams])
 
   useEffect(() => {
+    supabase.from("listas_precio").select("id, nombre").eq("activo", true).then(({ data }) => setListasPrecio(data || []))
     cargarPedidos()
     cargarViajes()
     cargarPickingStatus()
@@ -754,6 +756,35 @@ export default function ClientesPedidosPage() {
     return comprobantesGenerados[pedidoId]?.length > 0
   }
 
+  const listaName = (id: string | null | undefined) =>
+    listasPrecio.find(lp => lp.id === id)?.nombre || null
+
+  const getListaDisplay = (pedido: Pedido): string => {
+    const c = pedido.clientes as any
+    // Effective segment lists: pedido-level override OR client-level
+    const limpieza = pedido.lista_limpieza_pedido_id || c?.lista_limpieza_id || null
+    const perf0    = pedido.lista_perf0_pedido_id    || c?.lista_perf0_id    || null
+    const perfPlus = pedido.lista_perf_plus_pedido_id || c?.lista_perf_plus_id || null
+    const segIds   = [limpieza, perf0, perfPlus].filter(Boolean) as string[]
+
+    const generalId = pedido.lista_precio_pedido_id || c?.lista_precio_id || null
+    const generalNombre = listaName(generalId) || "Sin lista"
+
+    if (segIds.length === 0) return generalNombre
+
+    const uniqueSegs = [...new Set(segIds)]
+    if (uniqueSegs.length === 1) {
+      const nombre = listaName(uniqueSegs[0]) || "?"
+      return `${nombre} (por segmentos)`
+    }
+    return "VARIOS (por segmentos)"
+  }
+
+  const getMetodoDisplay = (pedido: Pedido): string => {
+    const c = pedido.clientes as any
+    return pedido.metodo_facturacion_pedido || c?.metodo_facturacion || "—"
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -1042,19 +1073,8 @@ export default function ClientesPedidosPage() {
 
                 <div className="bg-amber-50 rounded-xl p-4 border border-amber-100">
                   <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-2">Facturación y Precios</p>
-                  <p className="font-bold text-slate-800">
-                    {pedidoSeleccionado.metodo_facturacion_pedido || pedidoSeleccionado.clientes?.metodo_facturacion || "—"}
-                    {pedidoSeleccionado.metodo_facturacion_pedido && pedidoSeleccionado.metodo_facturacion_pedido !== pedidoSeleccionado.clientes?.metodo_facturacion && (
-                      <span className="text-xs text-orange-500 font-normal ml-1">(modificado)</span>
-                    )}
-                  </p>
-                  <p className="text-xs text-slate-600 mt-1.5">
-                    <span className="text-slate-400">Lista: </span>
-                    <span className="font-semibold">{pedidoSeleccionado.clientes?.listas_precio?.nombre || "Sin lista"}</span>
-                  </p>
-                  {(pedidoSeleccionado.lista_limpieza_pedido_id || pedidoSeleccionado.lista_perf0_pedido_id || pedidoSeleccionado.lista_perf_plus_pedido_id) && (
-                    <p className="text-[10px] text-amber-600 mt-1.5 font-medium">⚡ Con segmentos configurados</p>
-                  )}
+                  <p className="font-bold text-slate-800 text-sm">{getMetodoDisplay(pedidoSeleccionado)}</p>
+                  <p className="text-xs text-slate-700 mt-1.5 font-semibold">{getListaDisplay(pedidoSeleccionado)}</p>
                 </div>
               </div>
 
