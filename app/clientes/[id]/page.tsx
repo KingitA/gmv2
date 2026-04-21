@@ -147,6 +147,8 @@ export default function ClienteDetailPage() {
 
   async function saveBonificaciones() {
     setSavingBonif(true)
+
+    // 1. Guardar campos de segmento en clientes
     const { error: updErr } = await supabase.from("clientes").update({
       metodo_facturacion: formData.metodo_facturacion || null,
       lista_precio_id:    listaPorSegmento ? null : (formData.lista_precio_id || null),
@@ -157,21 +159,39 @@ export default function ClienteDetailPage() {
       lista_perf_plus_id: formData.lista_perf_plus_id || null,
       metodo_perf_plus:   formData.metodo_perf_plus || null,
     }).eq("id", id)
-    if (updErr) { alert(`Error al guardar: ${updErr.message}`); setSavingBonif(false); return }
+    if (updErr) { alert(`Error al guardar cliente: ${updErr.message}`); setSavingBonif(false); return }
+
+    // 2. Eliminar TODOS los descuentos manejados para este cliente (un solo query)
+    const { error: delErr } = await supabase
+      .from("bonificaciones")
+      .delete()
+      .eq("cliente_id", id)
+      .in("tipo", ["general", "mercaderia", "viajante"])
+    if (delErr) { alert(`Error al limpiar descuentos: ${delErr.message}`); setSavingBonif(false); return }
+
+    // 3. Insertar solo los que tienen porcentaje > 0
+    const toInsert: any[] = []
     for (const seg of BONIF_SEGMENTS) {
       for (const tipo of BONIF_TIPOS) {
-        const key = `${seg.key}__${tipo.key}`
-        const pct = bonifGrid[key] || 0
-        const dbSeg = seg.key === "todos" ? null : seg.key
-        let del = supabase.from("bonificaciones").delete().eq("cliente_id", id).eq("tipo", tipo.key)
-        if (dbSeg === null) del = (del as any).is("segmento", null)
-        else del = (del as any).eq("segmento", dbSeg)
-        await del
+        const pct = bonifGrid[`${seg.key}__${tipo.key}`] || 0
         if (pct > 0) {
-          await supabase.from("bonificaciones").insert({ cliente_id: id, tipo: tipo.key, porcentaje: pct, activo: true, segmento: dbSeg })
+          toInsert.push({
+            cliente_id: id,
+            tipo: tipo.key,
+            porcentaje: pct,
+            activo: true,
+            segmento: seg.key === "todos" ? null : seg.key,
+          })
         }
       }
     }
+    if (toInsert.length > 0) {
+      const { error: insErr } = await supabase.from("bonificaciones").insert(toInsert)
+      if (insErr) { alert(`Error al guardar descuentos: ${insErr.message}`); setSavingBonif(false); return }
+    }
+
+    // 4. Recargar para confirmar
+    await loadBonificaciones()
     setSavingBonif(false)
   }
 
