@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Save, Loader2, ExternalLink, ChevronDown, ChevronRight, TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { ArrowLeft, Save, Loader2, ExternalLink, TrendingUp, TrendingDown, Minus } from "lucide-react"
 import Link from "next/link"
 
 const ESTADO_COLORS: Record<string, string> = {
@@ -31,7 +31,7 @@ export default function ClienteDetailPage() {
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [bonifGrid, setBonifGrid] = useState<Record<string, number>>({})
   const [savingBonif, setSavingBonif] = useState(false)
-  const [segmentosOpen, setSegmentosOpen] = useState(false)
+  const [listaPorSegmento, setListaPorSegmento] = useState(false)
   const [ccBalance, setCcBalance] = useState<number | null>(null)
   const [pedidosCliente, setPedidosCliente] = useState<any[]>([])
   const [formData, setFormData] = useState({
@@ -115,6 +115,10 @@ export default function ClienteDetailPage() {
     const balance = (ccRes.data || []).reduce((sum: number, r: any) => sum + (r.saldo_pendiente || 0), 0)
     setCcBalance(Math.round(balance * 100) / 100)
     setPedidosCliente(pedRes.data || [])
+    if (clienteRes.data) {
+      const c = clienteRes.data as any
+      setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
+    }
     loadBonificaciones()
     setLoading(false)
   }
@@ -143,7 +147,9 @@ export default function ClienteDetailPage() {
 
   async function saveBonificaciones() {
     setSavingBonif(true)
-    await supabase.from("clientes").update({
+    const { error: updErr } = await supabase.from("clientes").update({
+      metodo_facturacion: formData.metodo_facturacion || null,
+      lista_precio_id:    listaPorSegmento ? null : (formData.lista_precio_id || null),
       lista_limpieza_id:  formData.lista_limpieza_id || null,
       metodo_limpieza:    formData.metodo_limpieza || null,
       lista_perf0_id:     formData.lista_perf0_id || null,
@@ -151,6 +157,7 @@ export default function ClienteDetailPage() {
       lista_perf_plus_id: formData.lista_perf_plus_id || null,
       metodo_perf_plus:   formData.metodo_perf_plus || null,
     }).eq("id", id)
+    if (updErr) { alert(`Error al guardar: ${updErr.message}`); setSavingBonif(false); return }
     for (const seg of BONIF_SEGMENTS) {
       for (const tipo of BONIF_TIPOS) {
         const key = `${seg.key}__${tipo.key}`
@@ -315,38 +322,8 @@ export default function ClienteDetailPage() {
                   <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Condiciones Comerciales</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Fila 1: Pago / Entrega / Vendedor */}
                   <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <Label className="text-xs text-slate-500">Facturación *</Label>
-                      <Select value={formData.metodo_facturacion} onValueChange={(v) => setFormData({ ...formData, metodo_facturacion: v })}>
-                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
-                          <SelectItem value="Final">Final (Mixto)</SelectItem>
-                          <SelectItem value="Presupuesto">Presupuesto</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-slate-500">Lista de Precio</Label>
-                      <Select value={formData.lista_precio_id || "__none__"} onValueChange={(v) => setFormData({ ...formData, lista_precio_id: v === "__none__" ? "" : v })}>
-                        <SelectTrigger className="h-9"><SelectValue placeholder="Sin lista" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Sin lista</SelectItem>
-                          {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-slate-500">Vendedor</Label>
-                      <Select value={formData.vendedor_id || "none"} onValueChange={(v) => setFormData({ ...formData, vendedor_id: v === "none" ? "" : v })}>
-                        <SelectTrigger className="h-9"><SelectValue placeholder="Sin vendedor" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Sin vendedor</SelectItem>
-                          {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
                     <div>
                       <Label className="text-xs text-slate-500">Condición de Pago *</Label>
                       <Select value={formData.condicion_pago} onValueChange={(v) => setFormData({ ...formData, condicion_pago: v })}>
@@ -372,6 +349,64 @@ export default function ClienteDetailPage() {
                       </Select>
                     </div>
                     <div>
+                      <Label className="text-xs text-slate-500">Vendedor</Label>
+                      <Select value={formData.vendedor_id || "none"} onValueChange={(v) => setFormData({ ...formData, vendedor_id: v === "none" ? "" : v })}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Sin vendedor" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Sin vendedor</SelectItem>
+                          {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {/* Fila 2: Facturación / Lista / Descuento */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <Label className="text-xs text-slate-500">Facturación *</Label>
+                      <Select
+                        value={formData.metodo_facturacion}
+                        onValueChange={(v) => {
+                          if (v === "PorSegmento") {
+                            setFormData({ ...formData, metodo_facturacion: "PorSegmento" })
+                          } else {
+                            // Al salir de PorSegmento, limpiar métodos de segmento
+                            setFormData({ ...formData, metodo_facturacion: v, metodo_limpieza: "", metodo_perf0: "", metodo_perf_plus: "" })
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
+                          <SelectItem value="Final">Final (Mixto)</SelectItem>
+                          <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                          <SelectItem value="PorSegmento">— Por Segmento —</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-slate-500">Lista de Precio</Label>
+                      <Select
+                        value={listaPorSegmento ? "__por_segmento__" : (formData.lista_precio_id || "__none__")}
+                        onValueChange={(v) => {
+                          if (v === "__por_segmento__") {
+                            setListaPorSegmento(true)
+                            setFormData({ ...formData, lista_precio_id: "" })
+                          } else {
+                            // Al salir de PorSegmento, limpiar listas de segmento
+                            setListaPorSegmento(false)
+                            setFormData({ ...formData, lista_precio_id: v === "__none__" ? "" : v, lista_limpieza_id: "", lista_perf0_id: "", lista_perf_plus_id: "" })
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Sin lista" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Sin lista</SelectItem>
+                          {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                          <SelectItem value="__por_segmento__">— Por Segmento —</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
                       <Label className="text-xs text-slate-500">Descuento Especial (%)</Label>
                       <Input type="number" step="0.01" min="0" max="100" value={formData.descuento_especial} onChange={(e) => setFormData({ ...formData, descuento_especial: parseFloat(e.target.value) || 0 })} className="h-9" />
                     </div>
@@ -379,70 +414,82 @@ export default function ClienteDetailPage() {
                 </CardContent>
               </Card>
 
-              {/* Condiciones por segmento */}
-              <Card>
-                <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setSegmentosOpen(o => !o)}>
-                  <CardTitle className="text-sm font-semibold text-slate-500 uppercase tracking-wide flex items-center justify-between">
-                    Condiciones por Segmento
-                    {segmentosOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  </CardTitle>
-                </CardHeader>
-                {segmentosOpen && <CardContent className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    {[
-                      { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza", segKey: "limpieza_bazar" },
-                      { label: "Perfumería Perf0",  listaKey: "lista_perf0_id",    metodoKey: "metodo_perf0",    segKey: "perf0" },
-                      { label: "Perfumería Plus",   listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus", segKey: "perf_plus" },
-                    ].map(({ label, listaKey, metodoKey, segKey }) => (
-                      <div key={listaKey} className="border rounded-lg p-3 bg-slate-50 space-y-2">
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>
-                        <Select value={(formData as any)[metodoKey] || "__none__"} onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v === "__none__" ? "" : v })}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Heredar" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">{formData.metodo_facturacion} (general)</SelectItem>
-                            <SelectItem value="Factura (21% IVA)">Factura</SelectItem>
-                            <SelectItem value="Final (Mixto)">Final</SelectItem>
-                            <SelectItem value="Presupuesto">Presupuesto</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select value={(formData as any)[listaKey] || "__none__"} onValueChange={(v) => setFormData({ ...formData, [listaKey]: v === "__none__" ? "" : v })}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Heredar lista" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">{listasPrecio.find(lp => lp.id === formData.lista_precio_id)?.nombre || "Sin lista"} (general)</SelectItem>
-                            {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        {/* Descuentos por segmento */}
-                        <div className="border-t border-slate-200 pt-2 space-y-1.5">
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descuentos</p>
-                          {BONIF_TIPOS.map(tipo => {
-                            const key = `${segKey}__${tipo.key}`
-                            const val = bonifGrid[key] || 0
-                            return (
-                              <div key={tipo.key} className="flex items-center justify-between">
-                                <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
-                                <div className="flex items-center gap-1">
-                                  <Input
-                                    type="number" step="0.01" min="0" max="100"
-                                    className="h-6 w-16 text-center text-xs font-bold px-1"
-                                    value={val}
-                                    onChange={(e) => setBonifGrid({ ...bonifGrid, [key]: parseFloat(e.target.value) || 0 })}
-                                  />
-                                  <span className="text-[10px] text-slate-400">%</span>
+              {/* Condiciones por segmento — aparece automáticamente cuando alguno es "Por Segmento" */}
+              {(formData.metodo_facturacion === "PorSegmento" || listaPorSegmento) && (
+                <Card className="border-indigo-200 bg-indigo-50/30">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-semibold text-indigo-700 uppercase tracking-wide">Condiciones por Segmento</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza", segKey: "limpieza_bazar" },
+                        { label: "Perfumería Perf0",  listaKey: "lista_perf0_id",    metodoKey: "metodo_perf0",    segKey: "perf0" },
+                        { label: "Perfumería Plus",   listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus", segKey: "perf_plus" },
+                      ].map(({ label, listaKey, metodoKey, segKey }) => (
+                        <div key={listaKey} className="border border-indigo-200 rounded-lg p-3 bg-white space-y-2">
+                          <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wide">{label}</p>
+
+                          {/* Metodo: solo si "Por Segmento" está activo en facturación */}
+                          {formData.metodo_facturacion === "PorSegmento" && (
+                            <Select
+                              value={(formData as any)[metodoKey] || ""}
+                              onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v })}
+                            >
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar método *" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
+                                <SelectItem value="Final">Final (Mixto)</SelectItem>
+                                <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+
+                          {/* Lista: solo si "Por Segmento" está activo en lista */}
+                          {listaPorSegmento && (
+                            <Select
+                              value={(formData as any)[listaKey] || ""}
+                              onValueChange={(v) => setFormData({ ...formData, [listaKey]: v })}
+                            >
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar lista *" /></SelectTrigger>
+                              <SelectContent>
+                                {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          )}
+
+                          {/* Descuentos siempre visibles en el segmento */}
+                          <div className="border-t border-slate-200 pt-2 space-y-1.5">
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descuentos</p>
+                            {BONIF_TIPOS.map(tipo => {
+                              const key = `${segKey}__${tipo.key}`
+                              const val = bonifGrid[key] || 0
+                              return (
+                                <div key={tipo.key} className="flex items-center justify-between">
+                                  <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
+                                  <div className="flex items-center gap-1">
+                                    <Input
+                                      type="number" step="0.01" min="0" max="100"
+                                      className="h-6 w-16 text-center text-xs font-bold px-1"
+                                      value={val}
+                                      onChange={(e) => setBonifGrid({ ...bonifGrid, [key]: parseFloat(e.target.value) || 0 })}
+                                    />
+                                    <span className="text-[10px] text-slate-400">%</span>
+                                  </div>
                                 </div>
-                              </div>
-                            )
-                          })}
+                              )
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                  <Button type="button" size="sm" className="w-full h-8" onClick={saveBonificaciones} disabled={savingBonif}>
-                    {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-                    Guardar segmentos y descuentos
-                  </Button>
-                </CardContent>}
-              </Card>
+                      ))}
+                    </div>
+                    <Button type="button" size="sm" className="w-full h-9 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={saveBonificaciones} disabled={savingBonif}>
+                      {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+                      Guardar segmentos y descuentos
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
             </div>
 
             {/* Columna lateral */}
