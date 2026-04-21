@@ -143,6 +143,14 @@ export default function ClienteDetailPage() {
 
   async function saveBonificaciones() {
     setSavingBonif(true)
+    await supabase.from("clientes").update({
+      lista_limpieza_id:  formData.lista_limpieza_id || null,
+      metodo_limpieza:    formData.metodo_limpieza || null,
+      lista_perf0_id:     formData.lista_perf0_id || null,
+      metodo_perf0:       formData.metodo_perf0 || null,
+      lista_perf_plus_id: formData.lista_perf_plus_id || null,
+      metodo_perf_plus:   formData.metodo_perf_plus || null,
+    }).eq("id", id)
     for (const seg of BONIF_SEGMENTS) {
       for (const tipo of BONIF_TIPOS) {
         const key = `${seg.key}__${tipo.key}`

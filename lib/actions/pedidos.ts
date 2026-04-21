@@ -617,6 +617,99 @@ export async function agregarItemPedido(
   return { success: true }
 }
 
+export async function agregarItemBonificado(
+  pedidoId: string,
+  productoId: string,
+  cantidad: number
+) {
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+
+  const { data: { user } } = await supabase.auth.getUser()
+
+  const { data: pedido } = await supabase
+    .from("pedidos")
+    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id)")
+    .eq("id", pedidoId)
+    .single()
+  if (!pedido) throw new Error("Pedido no encontrado")
+
+  const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
+  const { listaDatos, metodo, descuentoCliente } = await fetchListaYMetodo(
+    supabase, clienteInfo, pedido.metodo_facturacion_pedido, pedido.lista_precio_pedido_id
+  )
+
+  const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
+  const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, descuentoCliente)
+
+  const { error } = await supabase.from("pedidos_detalle").insert({
+    pedido_id: pedidoId,
+    articulo_id: productoId,
+    cantidad,
+    precio_base: precio.precioNeto,
+    precio_final: precio.precioAlCliente,
+    subtotal: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
+    precio_costo: articuloConDescuentos.precio_compra || 0,
+    es_bonificado: true,
+  })
+  if (error) throw error
+
+  const { data: artInfo } = await supabase
+    .from("articulos")
+    .select("sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, stock_actual")
+    .eq("id", productoId)
+    .single()
+
+  const ivaIncluido = precio.precioAlCliente === precio.precioNeto
+  const ivaMonto = ivaIncluido ? 0 : Math.round((precio.precioAlCliente - precio.precioNeto) * 100) / 100
+  const ivaPct = ivaMonto > 0 && precio.precioNeto > 0
+    ? Math.round((ivaMonto / precio.precioNeto) * 10000) / 100 : 0
+  const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
+  const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
+
+  await insertarKardex(
+    supabase,
+    {
+      tipo_movimiento: "venta",
+      fecha: nowArgentina(),
+      articulo_id: productoId,
+      cantidad,
+      precio_costo: articuloConDescuentos.precio_compra || 0,
+      precio_unitario_neto: precio.precioNeto,
+      precio_unitario_final: precio.precioAlCliente,
+      iva_porcentaje: ivaPct,
+      iva_monto_unitario: ivaMonto,
+      iva_incluido: ivaIncluido,
+      subtotal_neto: Math.round(precio.precioNeto * cantidad * 100) / 100,
+      subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
+      subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
+      cliente_id: pedido.cliente_id,
+      pedido_id: pedidoId,
+      lista_precio_id: pedido.lista_precio_pedido_id || (pedido.clientes as any)?.lista_precio_id || null,
+      metodo_facturacion: metodoRaw,
+      color_dinero: colorDinero,
+      stock_antes: artInfo?.stock_actual ?? null,
+      stock_despues: artInfo?.stock_actual != null ? artInfo.stock_actual - cantidad : null,
+      operador_id: user?.id ?? null,
+    },
+    {
+      sku: artInfo?.sku,
+      descripcion: artInfo?.descripcion,
+      categoria: artInfo?.categoria,
+      proveedor_id: artInfo?.proveedor_id,
+      iva_compras: artInfo?.iva_compras,
+      iva_ventas: artInfo?.iva_ventas,
+    },
+  )
+
+  if (user?.id) {
+    await supabase.from("pedidos").update({ actualizado_por: user.id }).eq("id", pedidoId)
+  }
+
+  revalidatePath("/clientes-pedidos")
+  return { success: true }
+}
+
 export async function actualizarCantidadItem(
   itemId: string,
   pedidoId: string,

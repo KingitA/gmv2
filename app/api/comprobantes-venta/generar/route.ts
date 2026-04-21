@@ -35,9 +35,9 @@ export async function POST(request: Request) {
           cuit, direccion, exento_iva
         ),
         detalle:pedidos_detalle(
-          id, articulo_id, cantidad, precio_final, precio_base,
+          id, articulo_id, cantidad, precio_final, precio_base, es_bonificado,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
-            id, descripcion, sku, iva_ventas
+            id, descripcion, sku, iva_ventas, categoria, iva_compras
           )
         )
       `)
@@ -72,6 +72,8 @@ export async function POST(request: Request) {
       subtotalFinal: number
       descNegroAplicado: boolean
       vaEnComprobante: "factura" | "presupuesto"
+      segmento: string
+      esBonificado: boolean
     }
 
     const IVA_RATE = 0.21
@@ -115,6 +117,7 @@ export async function POST(request: Request) {
       const subtotalIva   = round2(ivaUnitario * det.cantidad)
       const subtotalFinal = round2(subtotalNeto + subtotalIva)
 
+      const segmento = detectarSegmento(art)
       itemsCalculados.push({
         detalle_id: det.id,
         articulo_id: det.articulo_id,
@@ -130,25 +133,41 @@ export async function POST(request: Request) {
         subtotalFinal,
         descNegroAplicado: false,
         vaEnComprobante,
+        segmento,
+        esBonificado: det.es_bonificado === true,
       })
     }
 
-    // ─── 4. Agrupar items por tipo de comprobante ───
-    const itemsFactura = itemsCalculados.filter(i => i.vaEnComprobante === "factura")
-    const itemsPresupuesto = itemsCalculados.filter(i => i.vaEnComprobante === "presupuesto")
+    // ─── 4. Cargar bonificaciones general + viajante del cliente ───
+    const { data: bonificacionesCliente } = await supabase
+      .from("bonificaciones")
+      .select("tipo, porcentaje, segmento")
+      .eq("cliente_id", pedido.cliente.id)
+      .eq("activo", true)
+      .in("tipo", ["general", "viajante"])
 
-    const comprobantesGenerados = []
-    const tipoFactura = determinarTipoFactura(pedido.cliente.condicion_iva)
-
-    // ─── 5. Generar comprobantes ───
-    if (itemsFactura.length > 0) {
-      const resultado = await generarComprobante(supabase, pedido, itemsFactura, tipoFactura, auth.user.id)
-      comprobantesGenerados.push(resultado)
+    // ─── Agrupar items por (vaEnComprobante, perfil de descuento) ───
+    const grupos = new Map<string, typeof itemsCalculados>()
+    for (const item of itemsCalculados) {
+      const bonifProfile = getBonifProfile(item.segmento, bonificacionesCliente || [])
+      const key = `${item.vaEnComprobante}__${bonifProfile}`
+      if (!grupos.has(key)) grupos.set(key, [])
+      grupos.get(key)!.push(item)
     }
 
-    if (itemsPresupuesto.length > 0) {
-      const resultado = await generarComprobante(supabase, pedido, itemsPresupuesto, "PRES", auth.user.id)
-      comprobantesGenerados.push(resultado)
+    const comprobantesGenerados: Array<any & { _segmento?: string; _bonifs?: any[] }> = []
+    const tipoFactura = determinarTipoFactura(pedido.cliente.condicion_iva)
+
+    // ─── 5. Generar un comprobante por grupo ───
+    for (const [key, grupoItems] of grupos) {
+      const vaEnComp = key.split("__")[0] as "factura" | "presupuesto"
+      const tipo = vaEnComp === "factura" ? tipoFactura : "PRES"
+      const resultado = await generarComprobante(supabase, pedido, grupoItems, tipo, auth.user.id)
+      const segmentoGrupo = grupoItems[0].segmento
+      const bonifAplicables = (bonificacionesCliente || []).filter(
+        (b: any) => !b.segmento || b.segmento === segmentoGrupo
+      )
+      comprobantesGenerados.push({ ...resultado, _segmento: segmentoGrupo, _bonifs: bonifAplicables, _items: grupoItems })
     }
 
     // ── Vincular kardex al comprobante generado ───────────────────────────────
@@ -187,67 +206,71 @@ export async function POST(request: Request) {
     // ─── 6. Actualizar total del pedido ───
     const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
 
-    // ─── 7. Aplicar bonificaciones general y viajante del cliente ───
-    const { data: bonificaciones } = await supabase
-      .from("bonificaciones")
-      .select("*")
-      .eq("cliente_id", pedido.cliente.id)
-      .eq("activo", true)
-      .in("tipo", ["general", "viajante"])
+    // ─── 7. Aplicar bonificaciones por comprobante (filtradas por segmento) + bonif mercadería ───
+    const bonifArticuloId = await getBonificacionArticuloId(supabase)
+    for (const comp of comprobantesGenerados) {
+      if (!comp.id) continue
+      const esPresupuesto = comp.tipo_comprobante === "PRES"
+      const grupoItems: typeof itemsCalculados = comp._items || []
+      const bonifAplicables: any[] = comp._bonifs || []
 
-    if (bonificaciones && bonificaciones.length > 0) {
-      const bonifArticuloId = await getBonificacionArticuloId(supabase)
-      for (const comp of comprobantesGenerados) {
-        if (!comp.id) continue
-        const esPresupuesto = comp.tipo_comprobante === "PRES"
-        let descuentoTotal = 0
-        const lineas: { descripcion: string; monto: number }[] = []
+      let descuentoTotal = 0
+      const lineas: { descripcion: string; monto: number }[] = []
 
-        for (const bonif of bonificaciones) {
-          const base = Math.abs(comp.total ?? comp.total_neto + comp.total_iva ?? 0)
-          const monto = round2(base * bonif.porcentaje / 100)
-          const label = bonif.tipo === "general" ? "Bonificación General" : "Desc. Viajante"
-          lineas.push({ descripcion: `${label} ${bonif.porcentaje}%`, monto })
-          descuentoTotal = round2(descuentoTotal + monto)
-        }
+      // Bonif mercadería: ítems bonificados al precio real → se descuenta el 100% de su subtotal
+      const totalBonificados = grupoItems
+        .filter(i => i.esBonificado)
+        .reduce((sum, i) => sum + i.subtotalFinal, 0)
+      if (totalBonificados > 0) {
+        lineas.push({ descripcion: "Bonificación Mercadería 100%", monto: totalBonificados })
+        descuentoTotal = round2(descuentoTotal + totalBonificados)
+      }
 
-        if (descuentoTotal > 0) {
-          const detalleInserts = lineas.map(l => ({
-            comprobante_id: comp.id,
-            articulo_id: bonifArticuloId,
-            descripcion: l.descripcion,
-            cantidad: 1,
-            precio_unitario: -l.monto,
-            precio_total: -l.monto,
-          }))
-          await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
+      // Bonif general + viajante: se aplican sobre la base SIN los ítems bonificados (sólo ítems normales)
+      const baseNormal = round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - totalBonificados)
+      for (const bonif of bonifAplicables) {
+        const monto = round2(baseNormal * bonif.porcentaje / 100)
+        const label = bonif.tipo === "general" ? "Bonificación General" : "Desc. Viajante"
+        lineas.push({ descripcion: `${label} ${bonif.porcentaje}%`, monto })
+        descuentoTotal = round2(descuentoTotal + monto)
+      }
 
-          const descNeto = esPresupuesto ? descuentoTotal : round2(descuentoTotal / (1 + IVA_RATE))
-          const descIva = esPresupuesto ? 0 : round2(descuentoTotal - descNeto)
-          await supabase.from("comprobantes_venta").update({
-            total_neto: round2(comp.total_neto - descNeto),
-            total_iva: round2((comp.total_iva ?? 0) - descIva),
-            total_factura: round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - descuentoTotal),
-            saldo_pendiente: round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - descuentoTotal),
-          }).eq("id", comp.id)
-        }
+      if (descuentoTotal > 0) {
+        const detalleInserts = lineas.map(l => ({
+          comprobante_id: comp.id,
+          articulo_id: bonifArticuloId,
+          descripcion: l.descripcion,
+          cantidad: 1,
+          precio_unitario: -l.monto,
+          precio_total: -l.monto,
+        }))
+        await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
 
-        // Reduce viajante commission proportionally
-        const bonifViajante = bonificaciones.filter(b => b.tipo === "viajante")
-        if (bonifViajante.length > 0) {
-          const { data: comision } = await supabase
-            .from("comisiones")
-            .select("id, monto, porcentaje")
-            .eq("pedido_id", pedido_id)
-            .maybeSingle()
-          if (comision && comision.porcentaje > 0) {
-            let montoReducido = comision.monto
-            for (const bv of bonifViajante) {
-              const reduccionPct = (bv.porcentaje * 100) / comision.porcentaje
-              montoReducido = round2(montoReducido * (1 - reduccionPct / 100))
-            }
-            await supabase.from("comisiones").update({ monto: montoReducido }).eq("id", comision.id)
+        const descNeto = esPresupuesto ? descuentoTotal : round2(descuentoTotal / (1 + IVA_RATE))
+        const descIva = esPresupuesto ? 0 : round2(descuentoTotal - descNeto)
+        await supabase.from("comprobantes_venta").update({
+          total_neto: round2(comp.total_neto - descNeto),
+          total_iva: round2((comp.total_iva ?? 0) - descIva),
+          total_factura: round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - descuentoTotal),
+          saldo_pendiente: round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - descuentoTotal),
+        }).eq("id", comp.id)
+      }
+
+      // Reduce viajante commission proportionally
+      const bonifViajante = bonifAplicables.filter((b: any) => b.tipo === "viajante")
+      if (bonifViajante.length > 0) {
+        const { data: comision } = await supabase
+          .from("comisiones")
+          .select("id, monto, porcentaje")
+          .eq("pedido_id", pedido_id)
+          .maybeSingle()
+        if (comision && comision.porcentaje > 0) {
+          let montoReducido = comision.monto
+          for (const bv of bonifViajante) {
+            const reduccionPct = (bv.porcentaje * 100) / comision.porcentaje
+            montoReducido = round2(montoReducido * (1 - reduccionPct / 100))
           }
+          await supabase.from("comisiones").update({ monto: montoReducido }).eq("id", comision.id)
         }
       }
     }
@@ -276,6 +299,21 @@ export async function POST(request: Request) {
 }
 
 // ─── Helpers ───────────────────────────────────────────
+
+function detectarSegmento(art: { categoria?: string | null; iva_compras?: string | null }): string {
+  const cat = (art.categoria || "").toUpperCase()
+  if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA"))
+    return art.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
+  return "limpieza_bazar"
+}
+
+function getBonifProfile(itemSegmento: string, bonificaciones: any[]): string {
+  const aplicables = bonificaciones.filter((b: any) => !b.segmento || b.segmento === itemSegmento)
+  return aplicables
+    .sort((a: any, b: any) => a.tipo.localeCompare(b.tipo))
+    .map((b: any) => `${b.tipo}:${b.porcentaje}`)
+    .join("|")
+}
 
 function determinarTipoFactura(condicionIva: string): string {
   const c = (condicionIva || "").toLowerCase()

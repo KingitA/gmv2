@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, agregarItemBonificado, actualizarCantidadItem, eliminarItemPedido } from "@/lib/actions/pedidos"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -42,7 +42,12 @@ export default function PedidoEditPage() {
   const [found, setFound] = useState<any[]>([])
   const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
+  const [savingBonif, setSavingBonif] = useState(false)
   const [savingHeader, setSavingHeader] = useState(false)
+  const [bonifMercaderia, setBonifMercaderia] = useState<any[]>([])
+  const [queryBonif, setQueryBonif] = useState("")
+  const [foundBonif, setFoundBonif] = useState<any[]>([])
+  const [qtyBonif, setQtyBonif] = useState(1)
   const [headerOpen, setHeaderOpen] = useState(true)
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [vendedores, setVendedores] = useState<any[]>([])
@@ -77,7 +82,7 @@ export default function PedidoEditPage() {
         vendedores (nombre)
       `).eq("id", id).single(),
       supabase.from("pedidos_detalle").select(`
-        id, cantidad, cantidad_preparada, estado_item, precio_base, precio_final, subtotal,
+        id, cantidad, cantidad_preparada, estado_item, precio_base, precio_final, subtotal, es_bonificado,
         articulos (id, sku, descripcion, proveedores:proveedor_id (nombre))
       `).eq("pedido_id", id).order("created_at" as any),
       supabase.from("listas_precio").select("id, nombre").eq("activo", true).order("nombre"),
@@ -88,6 +93,15 @@ export default function PedidoEditPage() {
     setItems(itemsRes.data || [])
     setListasPrecio(listasRes.data || [])
     setVendedores(vendRes.data || [])
+    if (p?.cliente_id) {
+      const { data: bonif } = await supabase
+        .from("bonificaciones")
+        .select("id, porcentaje, segmento")
+        .eq("cliente_id", p.cliente_id)
+        .eq("tipo", "mercaderia")
+        .eq("activo", true)
+      setBonifMercaderia(bonif || [])
+    }
     if (p) {
       setHeaderForm({
         estado: p.estado || "pendiente",
@@ -154,6 +168,29 @@ export default function PedidoEditPage() {
       alert(err.message || "Error al agregar artículo")
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function buscarProductosBonif(q: string) {
+    setQueryBonif(q)
+    if (q.length < 2) { setFoundBonif([]); return }
+    const { searchProductos } = await import("@/lib/actions/productos")
+    const res = await searchProductos(q)
+    setFoundBonif(res || [])
+  }
+
+  async function agregarItemBonif(producto: any) {
+    setSavingBonif(true)
+    try {
+      await agregarItemBonificado(id, producto.id, qtyBonif)
+      setQueryBonif("")
+      setFoundBonif([])
+      setQtyBonif(1)
+      await loadAll()
+    } catch (err: any) {
+      alert(err.message || "Error al agregar artículo bonificado")
+    } finally {
+      setSavingBonif(false)
     }
   }
 
@@ -370,6 +407,59 @@ export default function PedidoEditPage() {
           )}
         </div>
 
+        {/* ─── Banner + sección artículos bonificados ─── */}
+        {bonifMercaderia.length > 0 && (
+          <>
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
+              <Package className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">Este cliente tiene mercadería bonificada</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  Los artículos bonificados se agregan al precio de lista pero con descuento 100% — el cliente ve el precio real y la bonificación en el comprobante.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-amber-200 p-5 shadow-sm">
+              <h2 className="font-semibold text-amber-700 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
+                <Plus className="h-4 w-4 text-amber-600" />
+                Artículos bonificados (mercadería)
+              </h2>
+              <div className="flex gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    placeholder="Buscar artículo a bonificar..."
+                    className="pl-9 h-10"
+                    value={queryBonif}
+                    onChange={(e) => buscarProductosBonif(e.target.value)}
+                  />
+                  {foundBonif.length > 0 && (
+                    <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
+                      {foundBonif.map((p: any) => (
+                        <div key={p.id}
+                          className="px-4 py-3 hover:bg-amber-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
+                          onClick={() => agregarItemBonif(p)}>
+                          <div className="font-medium text-slate-800">{p.descripcion}</div>
+                          <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number" min={1} className="h-10 w-24 text-center font-semibold"
+                    value={qtyBonif} onChange={(e) => setQtyBonif(parseInt(e.target.value) || 1)}
+                  />
+                  <span className="text-sm text-slate-400">uds.</span>
+                </div>
+                {savingBonif && <Loader2 className="h-5 w-5 animate-spin text-amber-600 self-center" />}
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ─── Agregar artículo ─── */}
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
           <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
@@ -452,6 +542,9 @@ export default function PedidoEditPage() {
                       <p className="text-sm font-semibold text-slate-700">
                         ${(item.precio_final || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
+                      {item.es_bonificado && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">BONIF</span>
+                      )}
                     </div>
 
                     <div className="col-span-2 flex items-center justify-center gap-1">
