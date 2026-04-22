@@ -443,6 +443,22 @@ export default function ClientesPedidosPage() {
 
   const imprimirPedido = async (pedido: Pedido) => {
     try {
+      // Cargar bonificaciones del cliente para mostrar en impresión
+      const { data: bonifs } = await supabase
+        .from("bonificaciones")
+        .select("tipo, porcentaje, segmento")
+        .eq("cliente_id", pedido.cliente_id)
+        .eq("activo", true)
+        .in("tipo", ["general", "mercaderia", "viajante"])
+
+      const bonifLines = (segKey: string | null) => {
+        const rows = (bonifs || []).filter(b => b.segmento === segKey || b.segmento === "todos" || !b.segmento)
+        if (rows.length === 0) return ""
+        return "<div style='font-size:11px;color:#555;margin-top:3px'>" +
+          rows.map(b => `${b.tipo.charAt(0).toUpperCase() + b.tipo.slice(1)}: -${b.porcentaje}%`).join(" / ") +
+          "</div>"
+      }
+
       // Si no tenemos los detalles, los cargamos
       let detalles = detallesPedido
       if (!pedidoSeleccionado || pedidoSeleccionado.id !== pedido.id) {
@@ -540,51 +556,34 @@ export default function ClientesPedidosPage() {
                     (pedido as any).metodo_perf0_pedido || c?.metodo_perf0 ||
                     (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus
 
-                  const recargoLabel = (lista: any, segKey: "recargo_limpieza_bazar" | "recargo_perfumeria_negro" | "recargo_perfumeria_blanco") => {
-                    const lp = listasPrecio.find(lp => lp.id === lista)
-                    const pct = lp?.[segKey]
-                    return pct !== undefined && pct !== 0 ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""
-                  }
-
                   if (hasSegmentos) {
                     const segRows = [
-                      {
-                        label: "Limpieza / Bazar",
+                      { label: "Limpieza / Bazar", segKey: "limpieza_bazar",
                         listaId: (pedido as any).lista_limpieza_pedido_id || c?.lista_limpieza_id,
-                        metodo: (pedido as any).metodo_limpieza_pedido || c?.metodo_limpieza,
-                        recargo: "recargo_limpieza_bazar" as const
-                      },
-                      {
-                        label: "Perfumería 0",
+                        metodo: (pedido as any).metodo_limpieza_pedido || c?.metodo_limpieza },
+                      { label: "Perfumería 0", segKey: "perf0",
                         listaId: (pedido as any).lista_perf0_pedido_id || c?.lista_perf0_id,
-                        metodo: (pedido as any).metodo_perf0_pedido || c?.metodo_perf0,
-                        recargo: "recargo_perfumeria_negro" as const
-                      },
-                      {
-                        label: "Perfumería +",
+                        metodo: (pedido as any).metodo_perf0_pedido || c?.metodo_perf0 },
+                      { label: "Perfumería +", segKey: "perf_plus",
                         listaId: (pedido as any).lista_perf_plus_pedido_id || c?.lista_perf_plus_id,
-                        metodo: (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus,
-                        recargo: "recargo_perfumeria_blanco" as const
-                      },
+                        metodo: (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus },
                     ].filter(s => s.listaId || s.metodo)
                     return segRows.map(s => {
                       const listaNombre = listaName(s.listaId) || "Sin lista"
-                      const recLabel = s.listaId ? recargoLabel(s.listaId, s.recargo) : ""
                       return `
                         <div class="label">${s.label}</div>
-                        <div class="value" style="margin-bottom: 6px;">${s.metodo || c?.metodo_facturacion || "—"} — ${listaNombre}${recLabel}</div>
+                        <div class="value" style="margin-bottom: 2px;">${s.metodo || c?.metodo_facturacion || "—"} — ${listaNombre}</div>
+                        ${bonifLines(s.segKey)}
                       `
                     }).join('')
                   } else {
                     const listaNombre = listaName(pedido.lista_precio_pedido_id) || c?.listas_precio?.nombre || "Sin lista"
-                    const lp = listasPrecio.find(lp => lp.id === (pedido.lista_precio_pedido_id || c?.lista_precio_id))
-                    const recGral = lp?.recargo_limpieza_bazar !== undefined && lp.recargo_limpieza_bazar !== 0
-                      ? ` (+${lp.recargo_limpieza_bazar}%)` : ""
                     return `
                       <div class="label">Lista de Precios</div>
-                      <div class="value">${listaNombre}${recGral}</div>
+                      <div class="value">${listaNombre}</div>
                       <div class="label" style="margin-top: 8px;">Forma de Facturación</div>
                       <div class="value">${pedido.metodo_facturacion_pedido || pedido.clientes?.metodo_facturacion || "—"}</div>
+                      ${bonifLines(null)}
                     `
                   }
                 })()}
@@ -804,7 +803,7 @@ export default function ClientesPedidosPage() {
     const onMove = (ev: MouseEvent) => {
       if (!resizingRef.current) return
       const newWidth = window.innerWidth - ev.clientX
-      setSheetWidth(Math.max(360, Math.min(Math.round(window.innerWidth * 0.97), newWidth)))
+      setSheetWidth(Math.max(300, newWidth))
     }
     const onUp = () => {
       resizingRef.current = false
@@ -1111,18 +1110,18 @@ export default function ClientesPedidosPage() {
               </div>
 
               {/* Stats */}
-              <div className="grid grid-cols-3 gap-3 mt-5">
-                <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
-                  <p className="text-white/50 text-[10px] uppercase tracking-wider font-semibold">Total</p>
-                  <p className="text-xl font-bold text-white mt-0.5">${pedidoSeleccionado.total?.toLocaleString("es-AR", { maximumFractionDigits: 0 })}</p>
+              <div className="flex gap-2 mt-5">
+                <div className="bg-white/10 rounded-xl px-3 py-2.5 backdrop-blur-sm flex-1 min-w-0">
+                  <p className="text-white/50 text-[10px] uppercase tracking-wide font-semibold">Total</p>
+                  <p className="text-lg font-bold text-white mt-0.5 truncate">${pedidoSeleccionado.total?.toLocaleString("es-AR", { maximumFractionDigits: 0 })}</p>
                 </div>
-                <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
-                  <p className="text-white/50 text-[10px] uppercase tracking-wider font-semibold">Artículos</p>
-                  <p className="text-xl font-bold text-white mt-0.5">{detallesPedido.length}</p>
+                <div className="bg-white/10 rounded-xl px-3 py-2.5 backdrop-blur-sm min-w-[70px] text-center">
+                  <p className="text-white/50 text-[10px] uppercase tracking-wide font-semibold">Arts.</p>
+                  <p className="text-lg font-bold text-white mt-0.5">{detallesPedido.length}</p>
                 </div>
-                <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
-                  <p className="text-white/50 text-[10px] uppercase tracking-wider font-semibold">Entrega</p>
-                  <p className="text-sm font-semibold text-white mt-1">
+                <div className="bg-white/10 rounded-xl px-3 py-2.5 backdrop-blur-sm min-w-0 max-w-[110px]">
+                  <p className="text-white/50 text-[10px] uppercase tracking-wide font-semibold">Entrega</p>
+                  <p className="text-xs font-semibold text-white mt-1 truncate">
                     {pedidoSeleccionado.condicion_entrega === "entregamos_nosotros" ? "Nosotros" :
                      pedidoSeleccionado.condicion_entrega === "retira_mostrador" ? "Mostrador" : "Transporte"}
                   </p>

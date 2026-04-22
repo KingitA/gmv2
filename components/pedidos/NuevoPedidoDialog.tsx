@@ -50,6 +50,7 @@ const SEGMENTOS = [
 export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const sb = createClient()
   const fileRef = useRef<HTMLInputElement>(null)
+  const searchContainerRef = useRef<HTMLDivElement>(null)
 
   const [files, setFiles]           = useState<File[]>([])
   const [cliente, setCliente]       = useState<Cliente | null>(null)
@@ -333,7 +334,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                 </button>
               </div>
             ) : (
-              <div className="relative">
+              <div className="relative" ref={searchContainerRef}>
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                 <Input
                   className="pl-9 h-10"
@@ -343,24 +344,31 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   onFocus={() => { if (results.length) setShowDrop(true) }}
                   onBlur={() => setTimeout(() => setShowDrop(false), 150)}
                 />
-                {showDrop && results.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg shadow-lg bg-background max-h-[420px] overflow-auto z-50">
-                    {results.map(c => (
-                      <div key={c.id} className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0" onMouseDown={() => selectCliente(c)}>
-                        <div className="flex items-center justify-between gap-2 min-w-0">
-                          <span className="text-sm font-medium leading-tight truncate">{c.nombre_razon_social || c.razon_social}</span>
-                          {c.codigo_cliente && <span className="text-[10px] text-muted-foreground font-mono shrink-0 bg-slate-100 px-1.5 py-0.5 rounded">{c.codigo_cliente}</span>}
-                        </div>
-                        {(c.direccion || c.localidad) && (
-                          <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
-                            <MapPin className="h-2.5 w-2.5 shrink-0" />
-                            <span className="truncate">{[c.direccion, c.localidad].filter(Boolean).join(", ")}</span>
+                {showDrop && results.length > 0 && (() => {
+                  const r = searchContainerRef.current?.getBoundingClientRect()
+                  if (!r) return null
+                  return (
+                    <div
+                      className="border rounded-lg shadow-lg bg-background max-h-[420px] overflow-auto"
+                      style={{ position: "fixed", top: r.bottom + 4, left: r.left, width: r.width, zIndex: 9999 }}
+                    >
+                      {results.map(c => (
+                        <div key={c.id} className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0" onMouseDown={() => selectCliente(c)}>
+                          <div className="flex items-center justify-between gap-2 min-w-0">
+                            <span className="text-sm font-medium leading-tight truncate">{c.nombre_razon_social || c.razon_social}</span>
+                            {c.codigo_cliente && <span className="text-[10px] text-muted-foreground font-mono shrink-0 bg-slate-100 px-1.5 py-0.5 rounded">{c.codigo_cliente}</span>}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                          {(c.direccion || c.localidad) && (
+                            <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
+                              <MapPin className="h-2.5 w-2.5 shrink-0" />
+                              <span className="truncate">{[c.direccion, c.localidad].filter(Boolean).join(", ")}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
               </div>
             )}
           </div>
