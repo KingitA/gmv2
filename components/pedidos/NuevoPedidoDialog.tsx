@@ -269,12 +269,14 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   return (
     <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v) }}>
-      <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-base">Nuevo Pedido</DialogTitle>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-[560px] max-h-[90vh] flex flex-col overflow-hidden p-0">
+        {/* ── Título fijo ── */}
+        <div className="px-6 pt-6 pb-3 shrink-0 border-b">
+          <DialogTitle className="text-base font-semibold">Nuevo Pedido</DialogTitle>
+        </div>
 
-        <div className="space-y-5 pt-1">
+        {/* ── Cuerpo scrollable ── */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
           {/* ── Archivos ───────────────────────────────────────────────────── */}
           <div>
@@ -334,7 +336,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                 </button>
               </div>
             ) : (
-              <div className="relative">
+              <div>
+                <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                 <Input
                   className="pl-9 h-10"
@@ -344,8 +347,9 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   onFocus={() => { if (results.length) setShowDrop(true) }}
                   onBlur={() => setTimeout(() => setShowDrop(false), 150)}
                 />
+                </div>
                 {showDrop && results.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 z-50 border rounded-lg shadow-lg bg-background max-h-[260px] overflow-y-auto">
+                  <div className="mt-1 border rounded-lg bg-background max-h-[240px] overflow-y-auto shadow-md">
                     {results.map(c => (
                       <div
                         key={c.id}
@@ -554,8 +558,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
           )}
         </div>
 
-        {/* ── Footer ────────────────────────────────────────────────────────── */}
-        <div className="flex gap-2 pt-5 border-t mt-2">
+        {/* ── Footer fijo ── */}
+        <div className="px-6 pb-5 pt-3 shrink-0 border-t flex gap-2">
           <Button variant="outline" className="flex-1" onClick={() => { reset(); onOpenChange(false) }}>
             Cancelar
           </Button>
