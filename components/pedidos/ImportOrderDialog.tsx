@@ -302,7 +302,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                                         </div>
 
                                         {clienteSearchOpen && clientesEncontrados.length > 0 && (
-                                            <div className="absolute top-full left-0 w-full bg-popover border rounded-md shadow-md mt-1 z-50 max-h-[200px] overflow-auto">
+                                            <div className="absolute top-full left-0 w-full bg-popover border rounded-md shadow-md mt-1 z-50 max-h-[420px] overflow-auto">
                                                 {clientesEncontrados.map(c => (
                                                     <div
                                                         key={c.id}
@@ -359,7 +359,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                                                                 }}
                                                             />
                                                             {productsFound.length > 0 && (
-                                                                <div className="absolute top-full left-0 w-full bg-popover border rounded-md shadow-md mt-1 z-[60] max-h-[200px] overflow-auto">
+                                                                <div className="absolute top-full left-0 w-full bg-popover border rounded-md shadow-md mt-1 z-[60] max-h-[420px] overflow-auto">
                                                                     {productsFound.map(p => (
                                                                         <div
                                                                             key={p.id}

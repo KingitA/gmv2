@@ -344,7 +344,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   onBlur={() => setTimeout(() => setShowDrop(false), 150)}
                 />
                 {showDrop && results.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg shadow-lg bg-background max-h-56 overflow-auto z-50">
+                  <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg shadow-lg bg-background max-h-[420px] overflow-auto z-50">
                     {results.map(c => (
                       <div key={c.id} className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0" onMouseDown={() => selectCliente(c)}>
                         <div className="flex items-center justify-between gap-2 min-w-0">

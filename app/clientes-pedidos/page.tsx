@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { formatDateAR } from "@/lib/utils"
@@ -146,6 +146,7 @@ type Comprobante = {
 const ESTADOS_PEDIDO = [
   { value: "pendiente", label: "Pendiente", color: "bg-yellow-500" },
   { value: "en_preparacion", label: "En Preparación", color: "bg-blue-500" },
+  { value: "impreso", label: "Impreso", color: "bg-green-500" },
   { value: "pendiente_facturacion", label: "Pendiente Facturación", color: "bg-orange-500" },
   { value: "facturado", label: "Facturado", color: "bg-emerald-600" },
   { value: "listo_para_retirar", label: "Listo para Retirar", color: "bg-cyan-500" },
@@ -186,7 +187,9 @@ export default function ClientesPedidosPage() {
   const [addProductsFound, setAddProductsFound] = useState<any[]>([])
   const [addProductQty, setAddProductQty] = useState(1)
   const [savingItem, setSavingItem] = useState(false)
-  const [listasPrecio, setListasPrecio] = useState<{ id: string; nombre: string }[]>([])
+  const [listasPrecio, setListasPrecio] = useState<{ id: string; nombre: string; recargo_limpieza_bazar?: number; recargo_perfumeria_negro?: number; recargo_perfumeria_blanco?: number }[]>([])
+  const [sheetWidth, setSheetWidth] = useState(680)
+  const resizingRef = useRef(false)
 
   const supabase = createClient()
   const searchParams = useSearchParams()
@@ -200,7 +203,7 @@ export default function ClientesPedidosPage() {
   }, [searchParams])
 
   useEffect(() => {
-    supabase.from("listas_precio").select("id, nombre").eq("activo", true).then(({ data }) => setListasPrecio(data || []))
+    supabase.from("listas_precio").select("id, nombre, recargo_limpieza_bazar, recargo_perfumeria_negro, recargo_perfumeria_blanco").eq("activo", true).then(({ data }) => setListasPrecio(data || []))
     cargarPedidos()
     cargarViajes()
     cargarPickingStatus()
@@ -537,20 +540,49 @@ export default function ClientesPedidosPage() {
                     (pedido as any).metodo_perf0_pedido || c?.metodo_perf0 ||
                     (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus
 
+                  const recargoLabel = (lista: any, segKey: "recargo_limpieza_bazar" | "recargo_perfumeria_negro" | "recargo_perfumeria_blanco") => {
+                    const lp = listasPrecio.find(lp => lp.id === lista)
+                    const pct = lp?.[segKey]
+                    return pct !== undefined && pct !== 0 ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""
+                  }
+
                   if (hasSegmentos) {
                     const segRows = [
-                      { label: "Limpieza / Bazar", lista: (pedido as any).lista_limpieza_pedido_id || c?.lista_limpieza_id, metodo: (pedido as any).metodo_limpieza_pedido || c?.metodo_limpieza },
-                      { label: "Perfumería Perf0", lista: (pedido as any).lista_perf0_pedido_id || c?.lista_perf0_id, metodo: (pedido as any).metodo_perf0_pedido || c?.metodo_perf0 },
-                      { label: "Perfumería Plus", lista: (pedido as any).lista_perf_plus_pedido_id || c?.lista_perf_plus_id, metodo: (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus },
-                    ].filter(s => s.lista || s.metodo)
-                    return segRows.map(s => `
-                      <div class="label">${s.label}</div>
-                      <div class="value" style="margin-bottom: 6px;">${s.metodo || c?.metodo_facturacion || "—"}${s.lista ? ` — ${s.lista}` : ""}</div>
-                    `).join('')
+                      {
+                        label: "Limpieza / Bazar",
+                        listaId: (pedido as any).lista_limpieza_pedido_id || c?.lista_limpieza_id,
+                        metodo: (pedido as any).metodo_limpieza_pedido || c?.metodo_limpieza,
+                        recargo: "recargo_limpieza_bazar" as const
+                      },
+                      {
+                        label: "Perfumería 0",
+                        listaId: (pedido as any).lista_perf0_pedido_id || c?.lista_perf0_id,
+                        metodo: (pedido as any).metodo_perf0_pedido || c?.metodo_perf0,
+                        recargo: "recargo_perfumeria_negro" as const
+                      },
+                      {
+                        label: "Perfumería +",
+                        listaId: (pedido as any).lista_perf_plus_pedido_id || c?.lista_perf_plus_id,
+                        metodo: (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus,
+                        recargo: "recargo_perfumeria_blanco" as const
+                      },
+                    ].filter(s => s.listaId || s.metodo)
+                    return segRows.map(s => {
+                      const listaNombre = listaName(s.listaId) || "Sin lista"
+                      const recLabel = s.listaId ? recargoLabel(s.listaId, s.recargo) : ""
+                      return `
+                        <div class="label">${s.label}</div>
+                        <div class="value" style="margin-bottom: 6px;">${s.metodo || c?.metodo_facturacion || "—"} — ${listaNombre}${recLabel}</div>
+                      `
+                    }).join('')
                   } else {
+                    const listaNombre = listaName(pedido.lista_precio_pedido_id) || c?.listas_precio?.nombre || "Sin lista"
+                    const lp = listasPrecio.find(lp => lp.id === (pedido.lista_precio_pedido_id || c?.lista_precio_id))
+                    const recGral = lp?.recargo_limpieza_bazar !== undefined && lp.recargo_limpieza_bazar !== 0
+                      ? ` (+${lp.recargo_limpieza_bazar}%)` : ""
                     return `
                       <div class="label">Lista de Precios</div>
-                      <div class="value">${c?.listas_precio?.nombre || "Sin lista"}</div>
+                      <div class="value">${listaNombre}${recGral}</div>
                       <div class="label" style="margin-top: 8px;">Forma de Facturación</div>
                       <div class="value">${pedido.metodo_facturacion_pedido || pedido.clientes?.metodo_facturacion || "—"}</div>
                     `
@@ -558,8 +590,6 @@ export default function ClientesPedidosPage() {
                 })()}
                 <div class="label" style="margin-top: 8px;">Vendedor</div>
                 <div class="value">${pedido.vendedores?.nombre || "Sin asignar"}</div>
-                <div class="label" style="margin-top: 8px;">Estado</div>
-                <div class="value">${pedido.estado.toUpperCase()}</div>
               </div>
             </div>
 
@@ -621,6 +651,11 @@ export default function ClientesPedidosPage() {
 
       printWindow.document.write(html)
       printWindow.document.close()
+
+      // Auto-cambiar estado a "impreso"
+      if (pedido.estado === "pendiente" || pedido.estado === "en_preparacion") {
+        await cambiarEstadoPedido(pedido.id, "impreso")
+      }
     } catch (error) {
       console.error("Error al preparar impresión:", error)
       alert("Error al preparar la impresión del pedido.")
@@ -762,6 +797,23 @@ export default function ClientesPedidosPage() {
 
   const listaName = (id: string | null | undefined) =>
     listasPrecio.find(lp => lp.id === id)?.nombre || null
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    resizingRef.current = true
+    const onMove = (ev: MouseEvent) => {
+      if (!resizingRef.current) return
+      const newWidth = window.innerWidth - ev.clientX
+      setSheetWidth(Math.max(360, Math.min(Math.round(window.innerWidth * 0.97), newWidth)))
+    }
+    const onUp = () => {
+      resizingRef.current = false
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+    }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+  }
 
   const getListaDisplay = (pedido: Pedido): string => {
     const c = pedido.clientes as any
@@ -956,12 +1008,15 @@ export default function ClientesPedidosPage() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            {/* Línea 1: número + cliente */}
-                            <div className="flex items-center gap-2 mb-1">
+                            {/* Línea 1: número + cliente + localidad */}
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
                               <span className="font-bold text-sm">{pedido.numero_pedido}</span>
                               <span className="text-xs text-muted-foreground">·</span>
                               <span className="text-sm font-medium truncate">{pedido.clientes?.nombre_razon_social}</span>
                               {pedido.clientes?.cuit && <span className="text-xs text-muted-foreground hidden lg:inline">{pedido.clientes.cuit}</span>}
+                              {pedido.clientes?.localidad && (
+                                <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded hidden sm:inline">{pedido.clientes.localidad}</span>
+                              )}
                             </div>
                             {/* Línea 2: fecha + vendedor + estado */}
                             <div className="flex items-center gap-2 flex-wrap">
@@ -1033,7 +1088,14 @@ export default function ClientesPedidosPage() {
           }
         }}
       >
-        <SheetContent side="right" className="w-[85vw] max-w-none p-0 flex flex-col overflow-hidden">
+        <SheetContent side="right" className="max-w-none p-0 flex flex-col overflow-hidden" style={{ width: sheetWidth }}>
+          {/* Resize handle — arrastrar para cambiar el ancho */}
+          <div
+            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-50 group"
+            onMouseDown={handleResizeStart}
+          >
+            <div className="absolute inset-y-0 left-0.5 w-0.5 bg-transparent group-hover:bg-indigo-400/50 transition-colors" />
+          </div>
 
           {/* ── Gradient header ── */}
           {pedidoSeleccionado ? (
@@ -1067,9 +1129,9 @@ export default function ClientesPedidosPage() {
                 </div>
               </div>
 
-              {/* Action buttons */}
-              <div className="flex gap-2 mt-4 flex-wrap">
-                {!tieneComprobantes(pedidoSeleccionado.id) && (
+              {/* Action buttons — 2 columnas */}
+              <div className="grid grid-cols-2 gap-2 mt-4">
+                {!tieneComprobantes(pedidoSeleccionado.id) ? (
                   <Button size="sm" onClick={() => generarComprobantes(pedidoSeleccionado.id)}
                     disabled={generandoComprobante === pedidoSeleccionado.id}
                     className="bg-white text-slate-800 hover:bg-slate-100 font-semibold shadow-sm">
@@ -1077,23 +1139,23 @@ export default function ClientesPedidosPage() {
                       ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Generando</>
                       : <><Receipt className="h-3.5 w-3.5 mr-1.5" />Generar</>}
                   </Button>
-                )}
+                ) : <div />}
                 <Button size="sm" onClick={() => imprimirPedido(pedidoSeleccionado)}
                   className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                   <Printer className="h-3.5 w-3.5 mr-1.5" />Imprimir
                 </Button>
-                <Link href={`/clientes-pedidos/${pedidoSeleccionado.id}`}>
+                <Link href={`/clientes-pedidos/${pedidoSeleccionado.id}`} className="contents">
                   <Button size="sm" className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                     <FileText className="h-3.5 w-3.5 mr-1.5" />Editar pedido
                   </Button>
                 </Link>
-                {pedidoSeleccionado.estado !== "eliminado" && (
+                {pedidoSeleccionado.estado !== "eliminado" ? (
                   <Button size="sm" variant="outline"
                     onClick={() => { setModalDetalleAbierto(false); setPedidoAEliminar(pedidoSeleccionado) }}
-                    className="border-red-400/50 text-red-300 hover:bg-red-500/20 ml-auto">
+                    className="border-red-400/50 text-red-300 hover:bg-red-500/20">
                     <Trash2 className="h-3.5 w-3.5 mr-1.5" />Eliminar
                   </Button>
-                )}
+                ) : <div />}
               </div>
             </div>
           ) : (
