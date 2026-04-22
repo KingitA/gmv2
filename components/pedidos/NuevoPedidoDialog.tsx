@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { createPortal } from "react-dom"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -51,15 +50,12 @@ const SEGMENTOS = [
 export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const sb = createClient()
   const fileRef = useRef<HTMLInputElement>(null)
-  const searchContainerRef = useRef<HTMLDivElement>(null)
 
   const [files, setFiles]           = useState<File[]>([])
   const [cliente, setCliente]       = useState<Cliente | null>(null)
   const [query, setQuery]           = useState("")
   const [results, setResults]       = useState<any[]>([])
   const [showDrop, setShowDrop]     = useState(false)
-  const [overDrop, setOverDrop]     = useState(false)
-  const [dropPos, setDropPos]       = useState<{ top: number; left: number; width: number } | null>(null)
   const [listas, setListas]         = useState<LP[]>([])
 
   // Condición general
@@ -149,16 +145,6 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     bonifChanged
   )
 
-  // Calcular posición del dropdown para portal
-  useEffect(() => {
-    if (showDrop && results.length > 0 && searchContainerRef.current) {
-      const r = searchContainerRef.current.getBoundingClientRect()
-      setDropPos({ top: r.bottom + 4, left: r.left, width: r.width })
-    } else {
-      setDropPos(null)
-    }
-  }, [showDrop, results.length])
-
   const clienteNombre = cliente?.nombre_razon_social || cliente?.razon_social || ""
 
   const handleFiles = useCallback((selected: FileList | null) => {
@@ -178,7 +164,6 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     setCliente(c)
     setQuery(c.nombre_razon_social || c.razon_social || "")
     setShowDrop(false)
-    setOverDrop(false)
   }
 
   const clearCliente = () => {
@@ -349,7 +334,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                 </button>
               </div>
             ) : (
-              <div className="relative" ref={searchContainerRef}>
+              <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                 <Input
                   className="pl-9 h-10"
@@ -357,8 +342,30 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   value={query}
                   onChange={e => handleSearch(e.target.value)}
                   onFocus={() => { if (results.length) setShowDrop(true) }}
-                  onBlur={() => { if (!overDrop) setTimeout(() => setShowDrop(false), 150) }}
+                  onBlur={() => setTimeout(() => setShowDrop(false), 150)}
                 />
+                {showDrop && results.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-50 border rounded-lg shadow-lg bg-background max-h-[260px] overflow-y-auto">
+                    {results.map(c => (
+                      <div
+                        key={c.id}
+                        className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0"
+                        onMouseDown={() => selectCliente(c)}
+                      >
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <span className="text-sm font-medium leading-tight truncate">{c.nombre_razon_social || c.razon_social}</span>
+                          {c.codigo_cliente && <span className="text-[10px] text-muted-foreground font-mono shrink-0 bg-slate-100 px-1.5 py-0.5 rounded">{c.codigo_cliente}</span>}
+                        </div>
+                        {(c.direccion || c.localidad) && (
+                          <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
+                            <MapPin className="h-2.5 w-2.5 shrink-0" />
+                            <span className="truncate">{[c.direccion, c.localidad].filter(Boolean).join(", ")}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -560,31 +567,6 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       </DialogContent>
     </Dialog>
 
-    {/* Dropdown de búsqueda de cliente — renderizado en body para escapar overflow */}
-    {dropPos && typeof window !== "undefined" && createPortal(
-      <div
-        className="border rounded-lg shadow-lg bg-background max-h-[320px] overflow-auto"
-        style={{ position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999 }}
-        onMouseEnter={() => setOverDrop(true)}
-        onMouseLeave={() => setOverDrop(false)}
-      >
-        {results.map(c => (
-          <div key={c.id} className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0" onMouseDown={() => selectCliente(c)}>
-            <div className="flex items-center justify-between gap-2 min-w-0">
-              <span className="text-sm font-medium leading-tight truncate">{c.nombre_razon_social || c.razon_social}</span>
-              {c.codigo_cliente && <span className="text-[10px] text-muted-foreground font-mono shrink-0 bg-slate-100 px-1.5 py-0.5 rounded">{c.codigo_cliente}</span>}
-            </div>
-            {(c.direccion || c.localidad) && (
-              <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
-                <MapPin className="h-2.5 w-2.5 shrink-0" />
-                <span className="truncate">{[c.direccion, c.localidad].filter(Boolean).join(", ")}</span>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>,
-      document.body
-    )}
     </>
   )
 }
