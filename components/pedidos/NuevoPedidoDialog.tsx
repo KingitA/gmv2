@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -57,6 +58,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const [query, setQuery]           = useState("")
   const [results, setResults]       = useState<any[]>([])
   const [showDrop, setShowDrop]     = useState(false)
+  const [dropPos, setDropPos]       = useState<{ top: number; left: number; width: number } | null>(null)
   const [listas, setListas]         = useState<LP[]>([])
 
   // Condición general
@@ -145,6 +147,16 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     metodoPerfPlus !== (c?.metodo_perf_plus  || "") ||
     bonifChanged
   )
+
+  // Calcular posición del dropdown para portal
+  useEffect(() => {
+    if (showDrop && results.length > 0 && searchContainerRef.current) {
+      const r = searchContainerRef.current.getBoundingClientRect()
+      setDropPos({ top: r.bottom + 4, left: r.left, width: r.width })
+    } else {
+      setDropPos(null)
+    }
+  }, [showDrop, results.length])
 
   const clienteNombre = cliente?.nombre_razon_social || cliente?.razon_social || ""
 
@@ -268,6 +280,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v) }}>
       <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -344,31 +357,6 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   onFocus={() => { if (results.length) setShowDrop(true) }}
                   onBlur={() => setTimeout(() => setShowDrop(false), 150)}
                 />
-                {showDrop && results.length > 0 && (() => {
-                  const r = searchContainerRef.current?.getBoundingClientRect()
-                  if (!r) return null
-                  return (
-                    <div
-                      className="border rounded-lg shadow-lg bg-background max-h-[420px] overflow-auto"
-                      style={{ position: "fixed", top: r.bottom + 4, left: r.left, width: r.width, zIndex: 9999 }}
-                    >
-                      {results.map(c => (
-                        <div key={c.id} className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0" onMouseDown={() => selectCliente(c)}>
-                          <div className="flex items-center justify-between gap-2 min-w-0">
-                            <span className="text-sm font-medium leading-tight truncate">{c.nombre_razon_social || c.razon_social}</span>
-                            {c.codigo_cliente && <span className="text-[10px] text-muted-foreground font-mono shrink-0 bg-slate-100 px-1.5 py-0.5 rounded">{c.codigo_cliente}</span>}
-                          </div>
-                          {(c.direccion || c.localidad) && (
-                            <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
-                              <MapPin className="h-2.5 w-2.5 shrink-0" />
-                              <span className="truncate">{[c.direccion, c.localidad].filter(Boolean).join(", ")}</span>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}
               </div>
             )}
           </div>
@@ -569,5 +557,30 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Dropdown de búsqueda de cliente — renderizado en body para escapar overflow */}
+    {dropPos && typeof window !== "undefined" && createPortal(
+      <div
+        className="border rounded-lg shadow-lg bg-background max-h-[320px] overflow-auto"
+        style={{ position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999 }}
+      >
+        {results.map(c => (
+          <div key={c.id} className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0" onMouseDown={() => selectCliente(c)}>
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              <span className="text-sm font-medium leading-tight truncate">{c.nombre_razon_social || c.razon_social}</span>
+              {c.codigo_cliente && <span className="text-[10px] text-muted-foreground font-mono shrink-0 bg-slate-100 px-1.5 py-0.5 rounded">{c.codigo_cliente}</span>}
+            </div>
+            {(c.direccion || c.localidad) && (
+              <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
+                <MapPin className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">{[c.direccion, c.localidad].filter(Boolean).join(", ")}</span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>,
+      document.body
+    )}
+    </>
   )
 }

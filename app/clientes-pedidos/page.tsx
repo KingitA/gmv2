@@ -651,9 +651,17 @@ export default function ClientesPedidosPage() {
       printWindow.document.write(html)
       printWindow.document.close()
 
-      // Auto-cambiar estado a "impreso"
-      if (pedido.estado === "pendiente" || pedido.estado === "en_preparacion") {
-        await cambiarEstadoPedido(pedido.id, "impreso")
+      // Cambiar estado a "impreso" — actualización directa para máxima confiabilidad
+      const { error: estadoErr } = await supabase
+        .from("pedidos")
+        .update({ estado: "impreso" })
+        .eq("id", pedido.id)
+
+      if (!estadoErr) {
+        setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, estado: "impreso" } : p))
+        setPedidoSeleccionado(prev => prev?.id === pedido.id ? { ...prev, estado: "impreso" } : prev)
+      } else {
+        console.error("[imprimir] Error al cambiar estado:", estadoErr)
       }
     } catch (error) {
       console.error("Error al preparar impresión:", error)
