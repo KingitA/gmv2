@@ -806,19 +806,24 @@ export default function ClientesPedidosPage() {
 
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault()
-    // Subir al elemento con data-side (SheetContent de Radix)
+    // SheetContent tiene data-slot="sheet-content"
     let el: HTMLElement | null = e.currentTarget as HTMLElement
-    while (el && !(el as HTMLElement).dataset.side) el = el.parentElement
+    while (el && el.dataset.slot !== "sheet-content") el = el.parentElement
     const sheetEl = el as HTMLElement | null
 
+    const applyWidth = (w: number) => {
+      if (!sheetEl) return
+      sheetEl.style.width = w + "px"
+      sheetEl.style.maxWidth = "none"
+    }
+
     const onMove = (ev: MouseEvent) => {
-      const w = Math.max(300, window.innerWidth - ev.clientX)
-      if (sheetEl) sheetEl.style.width = w + "px"
+      applyWidth(Math.max(300, window.innerWidth - ev.clientX))
     }
     const onUp = (ev: MouseEvent) => {
       const w = Math.max(300, window.innerWidth - ev.clientX)
+      applyWidth(w)
       setSheetWidth(w)
-      if (sheetEl) sheetEl.style.width = w + "px"
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
     }
@@ -1099,7 +1104,7 @@ export default function ClientesPedidosPage() {
           }
         }}
       >
-        <SheetContent side="right" className="max-w-none p-0 flex flex-col overflow-hidden" style={{ width: sheetWidth }}>
+        <SheetContent side="right" className="max-w-none p-0 flex flex-col overflow-hidden" style={{ width: sheetWidth, maxWidth: "none" }}>
           {/* Resize handle — arrastrar para cambiar el ancho */}
           <div
             className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-50 group"

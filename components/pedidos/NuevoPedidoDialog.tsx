@@ -58,6 +58,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const [query, setQuery]           = useState("")
   const [results, setResults]       = useState<any[]>([])
   const [showDrop, setShowDrop]     = useState(false)
+  const [overDrop, setOverDrop]     = useState(false)
   const [dropPos, setDropPos]       = useState<{ top: number; left: number; width: number } | null>(null)
   const [listas, setListas]         = useState<LP[]>([])
 
@@ -177,6 +178,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     setCliente(c)
     setQuery(c.nombre_razon_social || c.razon_social || "")
     setShowDrop(false)
+    setOverDrop(false)
   }
 
   const clearCliente = () => {
@@ -355,7 +357,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   value={query}
                   onChange={e => handleSearch(e.target.value)}
                   onFocus={() => { if (results.length) setShowDrop(true) }}
-                  onBlur={() => setTimeout(() => setShowDrop(false), 150)}
+                  onBlur={() => { if (!overDrop) setTimeout(() => setShowDrop(false), 150) }}
                 />
               </div>
             )}
@@ -563,7 +565,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       <div
         className="border rounded-lg shadow-lg bg-background max-h-[320px] overflow-auto"
         style={{ position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999 }}
-        onMouseDown={e => e.preventDefault()}
+        onMouseEnter={() => setOverDrop(true)}
+        onMouseLeave={() => setOverDrop(false)}
       >
         {results.map(c => (
           <div key={c.id} className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0" onMouseDown={() => selectCliente(c)}>
