@@ -471,6 +471,16 @@ export async function updatePedidoStatus(pedidoId: string, status: string) {
   return { success: true }
 }
 
+export async function marcarPedidoImpreso(pedidoId: string) {
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from("pedidos")
+    .update({ estado: "impreso" })
+    .eq("id", pedidoId)
+  if (error) throw new Error(error.message)
+  return { success: true }
+}
+
 export async function softDeletePedido(pedidoId: string) {
   const supabase = await createClient()
 

@@ -563,6 +563,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       <div
         className="border rounded-lg shadow-lg bg-background max-h-[320px] overflow-auto"
         style={{ position: "fixed", top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999 }}
+        onMouseDown={e => e.preventDefault()}
       >
         {results.map(c => (
           <div key={c.id} className="px-3 py-2.5 hover:bg-muted cursor-pointer border-b last:border-b-0" onMouseDown={() => selectCliente(c)}>

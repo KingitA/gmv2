@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/layout/sidebar"
 import { MainContent } from "@/components/layout/main-content"
 import { AiChatWidget } from "@/components/ai/ai-chat-widget"
 import { NavbarWrapper } from "@/components/auth/navbar-wrapper"
+import { Toaster } from "@/components/ui/sonner"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
@@ -30,6 +31,7 @@ export default function RootLayout({
           <AiChatWidget />
         </NavbarWrapper>
         <Analytics />
+        <Toaster richColors position="top-right" />
       </body>
     </html>
   )

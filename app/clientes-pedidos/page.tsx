@@ -5,6 +5,7 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { toast } from "sonner"
 import { formatDateAR } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -39,7 +40,7 @@ import { NuevoPedidoDialog } from "@/components/pedidos/NuevoPedidoDialog"
 import { ReviewPedidoDialog } from "@/components/pedidos/ReviewPedidoDialog"
 import { useOrderQueue } from "@/hooks/use-order-queue"
 import type { QueueItem } from "@/hooks/use-order-queue"
-import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido, marcarPedidoImpreso } from "@/lib/actions/pedidos"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -651,17 +652,15 @@ export default function ClientesPedidosPage() {
       printWindow.document.write(html)
       printWindow.document.close()
 
-      // Cambiar estado a "impreso" — actualización directa para máxima confiabilidad
-      const { error: estadoErr } = await supabase
-        .from("pedidos")
-        .update({ estado: "impreso" })
-        .eq("id", pedido.id)
-
-      if (!estadoErr) {
+      // Cambiar estado a "impreso" vía server action (admin client, bypass RLS)
+      try {
+        await marcarPedidoImpreso(pedido.id)
         setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, estado: "impreso" } : p))
         setPedidoSeleccionado(prev => prev?.id === pedido.id ? { ...prev, estado: "impreso" } : prev)
-      } else {
+        toast.success("Pedido marcado como impreso")
+      } catch (estadoErr: any) {
         console.error("[imprimir] Error al cambiar estado:", estadoErr)
+        toast.error(`No se pudo actualizar el estado: ${estadoErr?.message || "error desconocido"}`)
       }
     } catch (error) {
       console.error("Error al preparar impresión:", error)
@@ -807,14 +806,19 @@ export default function ClientesPedidosPage() {
 
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault()
-    resizingRef.current = true
+    // Subir al elemento con data-side (SheetContent de Radix)
+    let el: HTMLElement | null = e.currentTarget as HTMLElement
+    while (el && !(el as HTMLElement).dataset.side) el = el.parentElement
+    const sheetEl = el as HTMLElement | null
+
     const onMove = (ev: MouseEvent) => {
-      if (!resizingRef.current) return
-      const newWidth = window.innerWidth - ev.clientX
-      setSheetWidth(Math.max(300, newWidth))
+      const w = Math.max(300, window.innerWidth - ev.clientX)
+      if (sheetEl) sheetEl.style.width = w + "px"
     }
-    const onUp = () => {
-      resizingRef.current = false
+    const onUp = (ev: MouseEvent) => {
+      const w = Math.max(300, window.innerWidth - ev.clientX)
+      setSheetWidth(w)
+      if (sheetEl) sheetEl.style.width = w + "px"
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
     }
