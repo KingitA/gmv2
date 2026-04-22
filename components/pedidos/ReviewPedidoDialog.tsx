@@ -136,27 +136,35 @@ export function ReviewPedidoDialog({
                   <TableRow key={idx} className={item.confidence !== "HIGH" ? "bg-red-50/50" : ""}>
                     <TableCell>
                       {searchingIdx === idx ? (
-                        <div className="relative">
-                          <Input
-                            autoFocus
-                            placeholder="Buscar producto..."
-                            className="h-8 text-sm"
-                            value={productQuery}
-                            onChange={(e) => {
-                              setProductQuery(e.target.value)
-                              handleSearchProducts(e.target.value)
-                            }}
-                          />
+                        <div className="flex flex-col gap-1">
+                          <div className="relative">
+                            <Input
+                              autoFocus
+                              placeholder="Buscar producto..."
+                              className="h-8 text-sm pr-8"
+                              value={productQuery}
+                              onChange={(e) => {
+                                setProductQuery(e.target.value)
+                                handleSearchProducts(e.target.value)
+                              }}
+                            />
+                            <button
+                              className="absolute right-2 top-1.5 text-muted-foreground hover:text-foreground"
+                              onMouseDown={() => setSearchingIdx(null)}
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
                           {productsFound.length > 0 && (
-                            <div className="absolute top-full left-0 w-full bg-popover border rounded-md shadow-md mt-1 z-[60] max-h-[420px] overflow-auto">
+                            <div className="border rounded-lg bg-background max-h-[260px] overflow-y-auto shadow-sm">
                               {productsFound.map(p => (
                                 <div
                                   key={p.id}
-                                  className="px-3 py-2 hover:bg-muted cursor-pointer text-sm border-b last:border-0"
-                                  onClick={() => linkProduct(idx, p)}
+                                  className="px-3 py-2.5 hover:bg-muted cursor-pointer text-sm border-b last:border-b-0"
+                                  onMouseDown={() => linkProduct(idx, p)}
                                 >
                                   <div className="font-medium">{p.descripcion}</div>
-                                  <div className="text-[10px] text-muted-foreground flex gap-2">
+                                  <div className="text-[10px] text-muted-foreground flex gap-3">
                                     <span>SKU: {p.sku}</span>
                                     <span>${p.precio_venta || p.precio_base}</span>
                                   </div>
@@ -164,12 +172,6 @@ export function ReviewPedidoDialog({
                               ))}
                             </div>
                           )}
-                          <button
-                            className="absolute right-2 top-1.5 text-muted-foreground hover:text-foreground"
-                            onClick={() => setSearchingIdx(null)}
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
                         </div>
                       ) : (
                         <div
