@@ -122,9 +122,8 @@ export default function ArticulosPage() {
   const [ff,setFf]   = useState<Record<string,any>>({})
   const [fs,setFs]   = useState(false)
 
-  // New article modal
-  const [showNew,setShowNew] = useState(false)
-  const [nf,setNf]   = useState({sku:"",descripcion:"",categoria:"",rubro:"",iva_compras:"factura",iva_ventas:"factura",precio_compra:0,porcentaje_ganancia:0})
+  // Image upload state
+  const [imgUploading,setImgUploading] = useState(false)
 
   // Import/Export
   const [showImpExp,setShowImpExp] = useState(false)
@@ -229,19 +228,42 @@ export default function ArticulosPage() {
     setDm(p=>({...p,[dma.id]:v.map((d,i)=>({...d,orden:i+1}))})); setDms(false); setDma(null)
   }
 
-  // Ficha
-  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:a.ean13||"",unidades_por_bulto:a.unidades_por_bulto||1,marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:a.iva_compras||"factura",iva_ventas:a.iva_ventas||"factura",proveedor_id:a.proveedor_id||null}) }
+  // Ficha (unificado crear + editar)
+  const BLANK_FF = {descripcion:"",sku:"",ean13:"",unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,imagen_url:""}
+  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:a.ean13||"",unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:a.iva_compras||"factura",iva_ventas:a.iva_ventas||"factura",proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,imagen_url:a.imagen_url||""}) }
+  const openNew=()=>{ setFa({id:"__new__"}); setFf({...BLANK_FF}) }
   const sfa=async()=>{
     if(!fa) return; setFs(true)
-    const{error}=await sb.from("articulos").update(ff).eq("id",fa.id)
-    if(!error){
-      const prov=provs.find((p:any)=>p.id===ff.proveedor_id)
-      const marc=marcas.find((m:any)=>m.id===ff.marca_id)
-      setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff,proveedor:prov?{nombre:prov.nombre}:null,marca:marc?{codigo:marc.codigo,descripcion:marc.descripcion}:null}:a))
-      fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:fa.id})}).catch(()=>{})
-      setFa(null)
-    } else alert(`Error: ${error.message}`)
+    const isNew=fa.id==="__new__"
+    if(isNew){
+      if(!ff.sku.trim()||!ff.descripcion.trim()){ alert("SKU y Descripción son obligatorios"); setFs(false); return }
+      const{data:newArt,error}=await sb.from("articulos").insert({...ff,activo:true}).select("id").single()
+      if(error){ alert(`Error: ${error.message}`); setFs(false); return }
+      if(newArt?.id) fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:newArt.id})}).catch(()=>{})
+      setFa(null); load()
+    } else {
+      const{error}=await sb.from("articulos").update(ff).eq("id",fa.id)
+      if(!error){
+        const prov=provs.find((p:any)=>p.id===ff.proveedor_id)
+        const marc=marcas.find((m:any)=>m.id===ff.marca_id)
+        setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff,proveedor:prov?{nombre:prov.nombre}:null,marca:marc?{codigo:marc.codigo,descripcion:marc.descripcion}:null}:a))
+        fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:fa.id})}).catch(()=>{})
+        setFa(null)
+      } else alert(`Error: ${error.message}`)
+    }
     setFs(false)
+  }
+  const handleImgUpload=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+    const file=e.target.files?.[0]; if(!file) return
+    setImgUploading(true)
+    const ext=file.name.split(".").pop()
+    const path=`${Date.now()}.${ext}`
+    const{error}=await sb.storage.from("articulos-imagenes").upload(path,file,{upsert:true})
+    if(!error){
+      const{data}=sb.storage.from("articulos-imagenes").getPublicUrl(path)
+      setFf(p=>({...p,imagen_url:data.publicUrl}))
+    } else alert(`Error subiendo imagen: ${error.message}`)
+    setImgUploading(false)
   }
 
   // Sublista columns
@@ -318,7 +340,7 @@ export default function ArticulosPage() {
 
           <div className="w-px h-7 bg-slate-200"/>
 
-          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={()=>setShowNew(true)}>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={openNew}>
             <Plus className="h-3.5 w-3.5"/>Nuevo
           </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={()=>{setShowImpExp(true);setIeTab("export")}}>
@@ -675,71 +697,117 @@ export default function ArticulosPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Ficha */}
+      {/* Ficha unificada (crear + editar) */}
       <Dialog open={!!fa} onOpenChange={o=>{if(!o)setFa(null)}}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle className="text-sm font-semibold">Ficha de artículo — <span className="font-mono">{fa?.sku}</span></DialogTitle></DialogHeader>
-          {fa&&<div className="space-y-3">
-            <div><Label className="text-xs">Descripción</Label><Input className="h-8 text-xs" value={ff.descripcion} onChange={e=>setFf(p=>({...p,descripcion:e.target.value}))}/></div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">SKU</Label><Input className="h-8 text-xs font-mono" value={ff.sku} onChange={e=>setFf(p=>({...p,sku:e.target.value}))}/></div>
-              <div><Label className="text-xs">EAN 13</Label><Input className="h-8 text-xs font-mono" value={ff.ean13} onChange={e=>setFf(p=>({...p,ean13:e.target.value}))}/></div>
-              <div><Label className="text-xs">Unid/Bulto</Label><Input type="number" className="h-8 text-xs" value={ff.unidades_por_bulto} onChange={e=>setFf(p=>({...p,unidades_por_bulto:parseInt(e.target.value)||1}))}/></div>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold">
+              {fa?.id==="__new__" ? "Nuevo Artículo" : <>Ficha — <span className="font-mono">{fa?.sku}</span></>}
+            </DialogTitle>
+          </DialogHeader>
+          {fa&&<div className="space-y-4">
+
+            {/* Imagen */}
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0">
+                {ff.imagen_url
+                  ? <img src={ff.imagen_url} alt="imagen" className="w-20 h-20 object-cover rounded-lg border border-slate-200"/>
+                  : <div className="w-20 h-20 rounded-lg border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-300"><Upload className="h-6 w-6"/></div>
+                }
+              </div>
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs">Imagen del artículo</Label>
+                <label className="block">
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImgUpload} disabled={imgUploading}/>
+                  <span className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 text-xs font-medium cursor-pointer hover:bg-slate-50 transition-colors ${imgUploading?"opacity-50 pointer-events-none":""}`}>
+                    <Upload className="h-3.5 w-3.5"/>{imgUploading?"Subiendo...":"Subir imagen"}
+                  </span>
+                </label>
+                {ff.imagen_url&&<button className="text-[10px] text-red-400 hover:text-red-600" onClick={()=>setFf(p=>({...p,imagen_url:""}))}>Quitar imagen</button>}
+              </div>
             </div>
+
+            {/* Descripción */}
+            <div><Label className="text-xs">Descripción {fa?.id==="__new__"&&<span className="text-red-500">*</span>}</Label>
+              <Input className="h-8 text-xs" value={ff.descripcion} onChange={e=>setFf(p=>({...p,descripcion:e.target.value}))}/>
+            </div>
+
+            {/* SKU / EAN / Unid/Bulto / Unidad medida */}
+            <div className="grid grid-cols-4 gap-3">
+              <div><Label className="text-xs">SKU {fa?.id==="__new__"&&<span className="text-red-500">*</span>}</Label><Input className="h-8 text-xs font-mono" value={ff.sku} onChange={e=>setFf(p=>({...p,sku:e.target.value}))}/></div>
+              <div><Label className="text-xs">EAN 13</Label><Input className="h-8 text-xs font-mono" value={ff.ean13} onChange={e=>setFf(p=>({...p,ean13:e.target.value}))}/></div>
+              <div><Label className="text-xs">Unid/Bulto</Label><Input type="number" className="h-8 text-xs" value={ff.unidades_por_bulto||""} onChange={e=>setFf(p=>({...p,unidades_por_bulto:parseInt(e.target.value)||1}))}/></div>
+              <div><Label className="text-xs">Unid. Medida</Label><Input className="h-8 text-xs uppercase" placeholder="UN" value={ff.unidad_de_medida} onChange={e=>setFf(p=>({...p,unidad_de_medida:e.target.value.toUpperCase()}))}/></div>
+            </div>
+
+            {/* Proveedor / Marca */}
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Proveedor</Label>
+                <Select value={ff.proveedor_id||"none"} onValueChange={v=>setFf(p=>({...p,proveedor_id:v==="none"?null:v}))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin proveedor"/></SelectTrigger>
+                  <SelectContent>{[{id:"none",nombre:"Sin proveedor"},...provs,...(ff.proveedor_id&&!provs.find((p:any)=>p.id===ff.proveedor_id)?[{id:ff.proveedor_id,nombre:`${fa?.proveedor?.nombre||"Proveedor"} (inactivo)`}]:[])].map(p=><SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label className="text-xs">Marca</Label>
+                <Select value={ff.marca_id||"none"} onValueChange={v=>setFf(p=>({...p,marca_id:v==="none"?null:v}))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin marca"/></SelectTrigger>
+                  <SelectContent><SelectItem value="none">Sin marca</SelectItem>{marcas.map((m:any)=><SelectItem key={m.id} value={m.id}>{m.descripcion}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Rubro / Categoría / Subcategoría */}
             <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">Marca</Label><Select value={ff.marca_id||"none"} onValueChange={v=>setFf(p=>({...p,marca_id:v==="none"?null:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin marca"/></SelectTrigger><SelectContent><SelectItem value="none">Sin marca</SelectItem>{marcas.map((m:any)=><SelectItem key={m.id} value={m.id}>{m.descripcion}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label className="text-xs">Rubro</Label><Input className="h-8 text-xs" value={ff.rubro} onChange={e=>setFf(p=>({...p,rubro:e.target.value}))}/></div>
               <div><Label className="text-xs">Categoría</Label><Input className="h-8 text-xs" value={ff.categoria} onChange={e=>setFf(p=>({...p,categoria:e.target.value}))}/></div>
               <div><Label className="text-xs">Subcategoría</Label><Input className="h-8 text-xs" value={ff.subcategoria} onChange={e=>setFf(p=>({...p,subcategoria:e.target.value}))}/></div>
             </div>
+
+            {/* IVA Compras / IVA Ventas / Orden depósito */}
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label className="text-xs">IVA Compras</Label>
+                <Select value={ff.iva_compras} onValueChange={v=>setFf(p=>({...p,iva_compras:v}))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
+                  <SelectContent><SelectItem value="factura">Blanco (+IVA)</SelectItem><SelectItem value="adquisicion_stock">Negro (sin IVA)</SelectItem><SelectItem value="mixto">Mixto</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div><Label className="text-xs">IVA Ventas</Label>
+                <Select value={ff.iva_ventas} onValueChange={v=>setFf(p=>({...p,iva_ventas:v}))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
+                  <SelectContent><SelectItem value="factura">Blanco (factura)</SelectItem><SelectItem value="presupuesto">Negro (presupuesto)</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div><Label className="text-xs">Orden Depósito</Label><Input type="number" className="h-8 text-xs" value={ff.orden_deposito||""} onChange={e=>setFf(p=>({...p,orden_deposito:parseInt(e.target.value)||0}))}/></div>
+            </div>
+
+            {/* Precios */}
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">IVA Compras</Label><Select value={ff.iva_compras} onValueChange={v=>setFf(p=>({...p,iva_compras:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="factura">Blanco (+IVA)</SelectItem><SelectItem value="adquisicion_stock">Negro (sin IVA)</SelectItem><SelectItem value="mixto">Mixto</SelectItem></SelectContent></Select></div>
-              <div><Label className="text-xs">IVA Ventas</Label><Select value={ff.iva_ventas} onValueChange={v=>setFf(p=>({...p,iva_ventas:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="factura">Blanco (factura)</SelectItem><SelectItem value="presupuesto">Negro (presupuesto)</SelectItem></SelectContent></Select></div>
+              <div><Label className="text-xs">P. Compra (lista)</Label><Input type="number" step="0.01" className="h-8 text-xs" value={ff.precio_compra||""} onChange={e=>setFf(p=>({...p,precio_compra:parseFloat(e.target.value)||0}))}/></div>
+              <div><Label className="text-xs">Margen %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.porcentaje_ganancia||""} onChange={e=>setFf(p=>({...p,porcentaje_ganancia:parseFloat(e.target.value)||0}))}/></div>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">P. Compra</Label><Input type="number" step="0.01" className="h-8 text-xs" value={ff.precio_compra} onChange={e=>setFf(p=>({...p,precio_compra:parseFloat(e.target.value)||0}))}/></div>
-              <div><Label className="text-xs">Margen %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.porcentaje_ganancia} onChange={e=>setFf(p=>({...p,porcentaje_ganancia:parseFloat(e.target.value)||0}))}/></div>
-              <div><Label className="text-xs">B/R %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.bonif_recargo} onChange={e=>setFf(p=>({...p,bonif_recargo:parseFloat(e.target.value)||0}))}/></div>
+              <div><Label className="text-xs">B/R %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.bonif_recargo||""} onChange={e=>setFf(p=>({...p,bonif_recargo:parseFloat(e.target.value)||0}))}/></div>
+              <div><Label className="text-xs">P. Base</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="Calculado" value={ff.precio_base??""} onChange={e=>setFf(p=>({...p,precio_base:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
+              <div><Label className="text-xs">P. Base Contado</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="Calculado" value={ff.precio_base_contado??""} onChange={e=>setFf(p=>({...p,precio_base_contado:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
             </div>
-            <div><Label className="text-xs">Proveedor</Label>
-              <Select value={ff.proveedor_id||"none"} onValueChange={v=>setFf(p=>({...p,proveedor_id:v==="none"?null:v}))}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin proveedor"/></SelectTrigger>
-                <SelectContent>{[{id:"none",nombre:"Sin proveedor"},...provs,...(ff.proveedor_id&&!provs.find((p:any)=>p.id===ff.proveedor_id)?[{id:ff.proveedor_id,nombre:`${fa?.proveedor?.nombre||"Proveedor"} (inactivo)`}]:[])].map(p=><SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
+
+            {/* Descuentos (solo en modo edición) */}
+            {fa?.id!=="__new__"&&(
+              <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
+                <span className="text-xs font-medium text-slate-600 flex-1">Descuentos tipados</span>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={()=>{ setFa(null); setTimeout(()=>odm(fa),50) }}>
+                  Gestionar descuentos
+                </Button>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1 border-t border-slate-100">
               <Button variant="outline" size="sm" onClick={()=>setFa(null)}>Cancelar</Button>
-              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={sfa} disabled={fs}>{fs?"Guardando...":"Guardar"}</Button>
+              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={sfa} disabled={fs||imgUploading}>
+                {fs?"Guardando...":fa?.id==="__new__"?"Crear artículo":"Guardar cambios"}
+              </Button>
             </div>
           </div>}
-        </DialogContent>
-      </Dialog>
-
-      {/* Nuevo artículo */}
-      <Dialog open={showNew} onOpenChange={setShowNew}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle className="text-sm">Nuevo Artículo</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">SKU *</Label><Input className="h-8 text-xs font-mono" value={nf.sku} onChange={e=>setNf(p=>({...p,sku:e.target.value}))}/></div>
-              <div><Label className="text-xs">Descripción *</Label><Input className="h-8 text-xs" value={nf.descripcion} onChange={e=>setNf(p=>({...p,descripcion:e.target.value}))}/></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Categoría</Label><Input className="h-8 text-xs" value={nf.categoria} onChange={e=>setNf(p=>({...p,categoria:e.target.value}))}/></div>
-              <div><Label className="text-xs">Rubro</Label><Input className="h-8 text-xs" value={nf.rubro} onChange={e=>setNf(p=>({...p,rubro:e.target.value}))}/></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">IVA Compras</Label><Select value={nf.iva_compras} onValueChange={v=>setNf(p=>({...p,iva_compras:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="factura">Blanco</SelectItem><SelectItem value="adquisicion_stock">Negro</SelectItem><SelectItem value="mixto">Mixto</SelectItem></SelectContent></Select></div>
-              <div><Label className="text-xs">IVA Ventas</Label><Select value={nf.iva_ventas} onValueChange={v=>setNf(p=>({...p,iva_ventas:v}))}><SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="factura">Blanco</SelectItem><SelectItem value="presupuesto">Negro</SelectItem></SelectContent></Select></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Precio Compra</Label><Input type="number" step="0.01" className="h-8 text-xs" value={nf.precio_compra||""} onChange={e=>setNf(p=>({...p,precio_compra:parseFloat(e.target.value)||0}))}/></div>
-              <div><Label className="text-xs">Margen %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={nf.porcentaje_ganancia||""} onChange={e=>setNf(p=>({...p,porcentaje_ganancia:parseFloat(e.target.value)||0}))}/></div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={()=>setShowNew(false)}>Cancelar</Button>
-              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={async()=>{ if(!nf.sku.trim()||!nf.descripcion.trim()){alert("SKU y Descripción son obligatorios");return}; const{data:newArt,error}=await sb.from("articulos").insert({...nf,activo:true}).select("id").single(); if(error){alert(`Error: ${error.message}`);return}; if(newArt?.id) fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:newArt.id})}).catch(()=>{}); setShowNew(false); setNf({sku:"",descripcion:"",categoria:"",rubro:"",iva_compras:"factura",iva_ventas:"factura",precio_compra:0,porcentaje_ganancia:0}); load() }}>Crear</Button>
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
 

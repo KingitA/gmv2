@@ -19,6 +19,8 @@ export interface DatosArticulo {
   porcentaje_ganancia: number
   bonif_recargo: number             // positivo = recargo, negativo = bonif
   categoria: string
+  /** Slug del rubro relacional: 'limpieza' | 'bazar' | 'perfumeria'. Tiene prioridad sobre categoria para detectar segmento. */
+  rubro_slug?: string
   iva_compras: "factura" | "adquisicion_stock" | "mixto"
   iva_ventas: "factura" | "presupuesto"
 }
@@ -106,6 +108,15 @@ export function calcularPrecioBase(art: DatosArticulo): { costoNeto: number; pre
 // ─── Paso 2: Recargo de Lista ──────────────────────────
 
 export function obtenerRecargoLista(art: DatosArticulo, lista: DatosLista): number {
+  // Nuevo: usar rubro_slug si está disponible (más preciso que string de categoria)
+  if (art.rubro_slug) {
+    if (art.rubro_slug === 'perfumeria') {
+      // perf0 = presupuesto (negro), perf+ = factura (blanco)
+      return art.iva_ventas === 'presupuesto' ? lista.recargo_perfumeria_negro : lista.recargo_perfumeria_blanco
+    }
+    return lista.recargo_limpieza_bazar
+  }
+  // Fallback legacy: detección por string de categoria
   const esPerfumeria = (art.categoria || "").toUpperCase().includes("PERFUMERIA")
     || (art.categoria || "").toUpperCase().includes("PERFUMERÍA")
   if (esPerfumeria) {
@@ -250,6 +261,7 @@ export function articuloToDatosArticulo(art: any, descuentosDB?: DescuentoTipado
     porcentaje_ganancia: art.porcentaje_ganancia || 0,
     bonif_recargo: art.bonif_recargo || 0,
     categoria: art.categoria || art.rubro || "",
+    rubro_slug: art.rubro_slug || art.rubros?.slug || undefined,
     iva_compras: art.iva_compras || "factura",
     iva_ventas: art.iva_ventas || "factura",
   }
@@ -263,7 +275,9 @@ function round2(n: number): number { return Math.round(n * 100) / 100 }
 
 export function determinarGrupoPrecio(
   categoria: string,
+  rubro_slug?: string,
 ): "LIMPIEZA_BAZAR" | "PERFUMERIA" {
+  if (rubro_slug) return rubro_slug === 'perfumeria' ? "PERFUMERIA" : "LIMPIEZA_BAZAR"
   const cat = (categoria || "").toUpperCase()
   if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA")) return "PERFUMERIA"
   return "LIMPIEZA_BAZAR"

@@ -78,7 +78,7 @@ export async function parseOrderFile(formData: FormData): Promise<ParseResult> {
     }
 
     if (aggregatedItems.length === 0 && errors.length > 0) {
-        throw new Error(`Fallaron todos los archivos: ${errors.join(", ")}`)
+        return { candidateCustomer: null, items: [], totalDetected: 0, needsReview: 0, errors }
     }
 
     return {
@@ -288,13 +288,18 @@ export async function processOrderText(text: string): Promise<ParseResult> {
     ${text}
     `
 
-    const result = await model.generateContent(prompt)
+    let result
+    try {
+        result = await model.generateContent(prompt)
+    } catch (e: any) {
+        throw new Error(`Gemini falló al procesar el texto del email: ${e.message || 'error desconocido'}`)
+    }
     const response = await result.response
     const responseText = response.text()
     const parsedData = tryParseJson(responseText)
 
     if (!parsedData) {
-        throw new Error("Failed to parse AI response for order text")
+        throw new Error("No se pudo interpretar la respuesta de la IA para el texto del pedido")
     }
 
     return await processMatches(parsedData)

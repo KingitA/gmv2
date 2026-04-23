@@ -75,6 +75,11 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
             setResult(res)
             setItems(res.items)
 
+            if (res.items.length === 0 && res.errors && res.errors.length > 0) {
+                toast.error(res.errors[0])
+                return
+            }
+
             let foundClienteId = ""
 
             if (res.candidateCustomerData) {

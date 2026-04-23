@@ -11,6 +11,7 @@ import {
   PackageCheck,
   DollarSign,
   Bookmark,
+  Layers,
 } from "lucide-react"
 
 const TABLAS = [
@@ -77,6 +78,13 @@ const TABLAS = [
     title: "Marcas",
     desc: "Marcas de artículos — código y descripción",
   },
+  {
+    href: "/tablas/categorias",
+    icon: Layers,
+    color: "violet",
+    title: "Categorías",
+    desc: "Rubros, categorías y subcategorías de artículos",
+  },
 ]
 
 const colorMap: Record<string, { border: string; bg: string; text: string }> = {
@@ -89,6 +97,7 @@ const colorMap: Record<string, { border: string; bg: string; text: string }> = {
   rose: { border: "border-l-rose-500", bg: "bg-rose-50 group-hover:bg-rose-100", text: "text-rose-600" },
   emerald: { border: "border-l-emerald-500", bg: "bg-emerald-50 group-hover:bg-emerald-100", text: "text-emerald-600" },
   indigo:  { border: "border-l-indigo-500",  bg: "bg-indigo-50 group-hover:bg-indigo-100",  text: "text-indigo-600"  },
+  violet:  { border: "border-l-violet-500",  bg: "bg-violet-50 group-hover:bg-violet-100",  text: "text-violet-600"  },
 }
 
 export default function TablasPage() {

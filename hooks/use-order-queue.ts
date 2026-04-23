@@ -78,6 +78,10 @@ export function useOrderQueue(onOrderCreated?: () => void) {
 
         const parseResult = await parseOrderFile(formData)
 
+        if (parseResult.items.length === 0 && parseResult.errors && parseResult.errors.length > 0) {
+          throw new Error(parseResult.errors[0])
+        }
+
         // Check if all items are high confidence and we have the client
         const allHigh = parseResult.items.length > 0 &&
           parseResult.items.every(i => i.confidence === "HIGH" && i.matchedProduct)
