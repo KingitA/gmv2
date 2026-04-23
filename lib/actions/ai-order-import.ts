@@ -7,6 +7,26 @@ import { createAdminClient } from "@/lib/supabase/admin"
 const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""
 const genAI = new GoogleGenerativeAI(apiKey)
 
+const sleepMs = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+async function withGeminiRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn()
+        } catch (e: any) {
+            const is429 = e?.message?.includes("429") || e?.status === 429
+            if (is429 && attempt < maxRetries) {
+                const waitMs = (attempt + 1) * 6000 // 6s, 12s, 18s
+                console.warn(`[Gemini] 429 rate limit, reintentando en ${waitMs / 1000}s (intento ${attempt + 1}/${maxRetries})...`)
+                await sleepMs(waitMs)
+                continue
+            }
+            throw e
+        }
+    }
+    throw new Error("withGeminiRetry: no debería llegar aquí")
+}
+
 export type ParsedItem = {
     originalText: string
     quantity: number
@@ -196,40 +216,25 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
     console.log("Sending non-XLSX file to Gemini...")
     let result;
     try {
-        result = await model.generateContent([
+        result = await withGeminiRetry(() => model.generateContent([
             prompt,
-            {
-                inlineData: {
-                    data: base64Data,
-                    mimeType: mimeType,
-                },
-            },
-        ])
+            { inlineData: { data: base64Data, mimeType: mimeType } },
+        ]))
     } catch (e: any) {
         console.warn("Gemini 2.0 Flash failed for non-XLSX, trying fallbacks...", e.message)
         try {
             model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-001", generationConfig })
-            result = await model.generateContent([
+            result = await withGeminiRetry(() => model.generateContent([
                 prompt,
-                {
-                    inlineData: {
-                        data: base64Data,
-                        mimeType: mimeType,
-                    },
-                },
-            ])
+                { inlineData: { data: base64Data, mimeType: mimeType } },
+            ]))
         } catch (e2) {
             console.warn("Gemini 2.0 Flash 001 failed for non-XLSX, trying gemini-flash-latest...", e2)
             model = genAI.getGenerativeModel({ model: "gemini-flash-latest", generationConfig })
-            result = await model.generateContent([
+            result = await withGeminiRetry(() => model.generateContent([
                 prompt,
-                {
-                    inlineData: {
-                        data: base64Data,
-                        mimeType: mimeType,
-                    },
-                },
-            ])
+                { inlineData: { data: base64Data, mimeType: mimeType } },
+            ]))
         }
     }
 
@@ -290,7 +295,7 @@ export async function processOrderText(text: string): Promise<ParseResult> {
 
     let result
     try {
-        result = await model.generateContent(prompt)
+        result = await withGeminiRetry(() => model.generateContent(prompt))
     } catch (e: any) {
         throw new Error(`Gemini falló al procesar el texto del email: ${e.message || 'error desconocido'}`)
     }
@@ -382,7 +387,7 @@ export async function processOrderTextMulti(text: string): Promise<MultiOrderPar
     ${text}
     `
 
-    const result = await model.generateContent(prompt)
+    const result = await withGeminiRetry(() => model.generateContent(prompt))
     const response = await result.response
     const responseText = response.text()
     const parsedData = tryParseJson(responseText)
@@ -430,15 +435,9 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
 
     const itemsToProcess = parsedData.items || []
 
-    // Batch processing to avoid hitting rate limits (429 Too Many Requests) on Gemini Embeddings API
-    const BATCH_SIZE = 10
-    const DELAY_MS = 1000 // 1 second delay between batches
-
-    for (let i = 0; i < itemsToProcess.length; i += BATCH_SIZE) {
-        const batch = itemsToProcess.slice(i, i + BATCH_SIZE)
-        console.log(`Processing vector matches batch ${Math.floor(i / BATCH_SIZE) + 1} of ${Math.ceil(itemsToProcess.length / BATCH_SIZE)}...`)
-
-        const processItemPromises = batch.map(async (item: any) => {
+    // Items procesados secuencialmente para no disparar múltiples llamadas Gemini simultáneas
+    for (const item of itemsToProcess) {
+        const processItemPromises = [item].map(async (item: any) => {
             let match: any = null
             let confidence: "HIGH" | "MEDIUM" | "LOW" = "LOW"
 
@@ -563,7 +562,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                                         `${i + 1}. SKU:${c.sku || c.codigo_interno} - ${c.descripcion}`
                                     ).join("\n")
                                     const prompt = `Artículo del pedido: "${originalTextForFrontend}"\nCandidatos del inventario:\n${candidateList}\n\n¿Cuál corresponde? (considerá: edt=eau de toilette, edc=eau de cologne, edp=eau de parfum, deo=desodorante, shamp=shampoo, crema=cream). Número del candidato o 0 si ninguno. JSON: {"match": número}`
-                                    const res = await model.generateContent(prompt)
+                                    const res = await withGeminiRetry(() => model.generateContent(prompt))
                                     let textObj = res.response.text().trim()
                                     if (textObj.startsWith("\`\`\`json")) {
                                         textObj = textObj.replace(/^\`\`\`json/, "").replace(/\`\`\`$/, "").trim()
@@ -608,11 +607,11 @@ Incluí proveedor, tipo de artículo, marca, color, fracciones, unidades por paq
 Ignorá cantidades iniciales del pedido (ej si dice '10 cajas toalla', ignorá '10' y 'cajas'). 
 Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON array ["palabra1", "palabra2"]. Si la sigla tiene puntos, quitalos (ej. "o.b" -> "ob").`
                             
-                            const res = await model.generateContent(prompt)
+                            const res = await withGeminiRetry(() => model.generateContent(prompt))
                             let textObj = res.response.text().trim()
                             if (textObj.startsWith("\`\`\`json")) textObj = textObj.replace(/^\`\`\`json/, "").replace(/\`\`\`$/, "").trim()
                             else if (textObj.startsWith("\`\`\`")) textObj = textObj.replace(/^\`\`\`/, "").replace(/\`\`\`$/, "").trim()
-                            
+
                             const keywords = JSON.parse(textObj)
                             
                             if (Array.isArray(keywords) && keywords.length > 0) {
@@ -671,11 +670,6 @@ Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON
         for (const res of batchResults) {
             if (res.confidence !== "HIGH") needsReviewCount++
             processedItems.push(res)
-        }
-
-        // Wait before next batch if not the last one
-        if (i + BATCH_SIZE < itemsToProcess.length) {
-            await new Promise(resolve => setTimeout(resolve, DELAY_MS))
         }
     }
 
