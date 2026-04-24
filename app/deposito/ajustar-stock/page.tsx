@@ -178,8 +178,8 @@ export default function ModificacionArticulosPage() {
         )}
       </div>
 
-      {/* Resultados de búsqueda */}
-      {!articulo && (
+      {/* Resultados de búsqueda — se muestran siempre que haya texto, aunque haya artículo cargado */}
+      {busqueda.length >= 2 && (
         <>
           {buscando && <div style={{ padding: "16px", color: "#6b7280", fontSize: 15, textAlign: "center" }}>Buscando...</div>}
           {resultados.length > 0 && (
@@ -195,22 +195,24 @@ export default function ModificacionArticulosPage() {
               ))}
             </div>
           )}
-          {!buscando && !busqueda && (
+          {!buscando && resultados.length === 0 && (
             <div style={C.empty}>
-              <span style={{ fontSize: 48 }}>🔧</span>
-              <span style={{ fontSize: 16 }}>Buscá un artículo para modificarlo</span>
-            </div>
-          )}
-          {!buscando && busqueda.length >= 2 && resultados.length === 0 && (
-            <div style={{ ...C.empty }}>
               <span style={{ fontSize: 16 }}>Sin resultados para &quot;{busqueda}&quot;</span>
             </div>
           )}
         </>
       )}
 
-      {/* Artículo seleccionado */}
-      {articulo && (
+      {/* Estado vacío inicial */}
+      {!articulo && busqueda.length < 2 && (
+        <div style={C.empty}>
+          <span style={{ fontSize: 48 }}>🔧</span>
+          <span style={{ fontSize: 16 }}>Buscá un artículo para modificarlo</span>
+        </div>
+      )}
+
+      {/* Artículo seleccionado — solo visible cuando no hay búsqueda activa */}
+      {articulo && busqueda.length < 2 && (
         <>
           <div style={C.artSelected}>
             <div style={C.artSelectedInfo}>
