@@ -14,10 +14,13 @@ async function withGeminiRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise
         try {
             return await fn()
         } catch (e: any) {
-            const is429 = e?.message?.includes("429") || e?.status === 429
-            if (is429 && attempt < maxRetries) {
+            const msg = e?.message || ""
+            const isRetriable = msg.includes("429") || e?.status === 429
+                || msg.includes("503") || e?.status === 503
+                || msg.includes("SERVICE UNAVAILABLE") || msg.includes("UNAVAILABLE")
+            if (isRetriable && attempt < maxRetries) {
                 const waitMs = (attempt + 1) * 6000 // 6s, 12s, 18s
-                console.warn(`[Gemini] 429 rate limit, reintentando en ${waitMs / 1000}s (intento ${attempt + 1}/${maxRetries})...`)
+                console.warn(`[Gemini] error transitorio (${e?.status || "503/429"}), reintentando en ${waitMs / 1000}s (intento ${attempt + 1}/${maxRetries})...`)
                 await sleepMs(waitMs)
                 continue
             }

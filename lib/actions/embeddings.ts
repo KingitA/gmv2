@@ -239,7 +239,18 @@ export async function searchClientesByVector(query: string, matchThreshold = 0.3
             return []
         }
 
-        return data || []
+        if (!data || data.length === 0) return []
+
+        // La función devuelve (id, similarity); buscamos los datos completos por ID
+        const ids = (data as { id: string; similarity: number }[]).map(r => r.id)
+        const { data: clientes } = await supabase
+            .from("clientes")
+            .select("id, nombre, razon_social, nombre_razon_social, cuit, codigo_cliente, direccion, localidad, provincia, tipo_canal, activo, metodo_facturacion, lista_precio_id, condicion_pago, condicion_entrega, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, vendedor_id")
+            .in("id", ids)
+
+        // Mantener orden por similitud
+        const map = new Map((clientes || []).map((c: any) => [c.id, c]))
+        return ids.map(id => map.get(id)).filter(Boolean)
     } catch (err) {
         console.error("Vector search clientes exception:", err)
         return []
