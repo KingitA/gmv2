@@ -129,7 +129,7 @@ export interface Articulo {
   id: string
   sku: string
   sigla?: string
-  ean13?: string
+  ean13?: string[]
   descripcion: string
   rubro: string
   categoria: string

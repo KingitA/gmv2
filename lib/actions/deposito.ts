@@ -22,7 +22,7 @@ export async function buscarArticulosDeposito(query: string) {
     const { data: byEan } = await sb
       .from("articulos")
       .select(SELECT)
-      .eq("ean13", q)
+      .contains("ean13", [q])
       .eq("activo", true)
       .limit(5)
     if (byEan && byEan.length > 0) return byEan
@@ -39,7 +39,7 @@ export async function buscarArticulosDeposito(query: string) {
 }
 
 export async function actualizarDatosArticulo(id: string, datos: {
-  ean13?: string
+  ean13?: string[]
   unidades_por_bulto?: number
   unidad_de_medida?: string
   orden_deposito?: number

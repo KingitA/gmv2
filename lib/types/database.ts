@@ -82,7 +82,7 @@ export interface Cliente {
 export interface Articulo {
   id: string
   sku: string
-  ean13: string | null
+  ean13: string[] | null
   descripcion: string | null
   categoria: string | null
   subcategoria: string | null

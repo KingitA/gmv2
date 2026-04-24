@@ -137,7 +137,7 @@ export function ManualMatchDialog({ open, onOpenChange, onSelect, itemName, prov
                                     <div className="font-medium">{r.descripcion}</div>
                                     <div className="text-xs text-muted-foreground flex gap-2">
                                         <span>SKU: {r.sku || r.codigo_interno}</span>
-                                        {(r.ean13 || r.codigo_barras) && <span>EAN: {r.ean13 || r.codigo_barras}</span>}
+                                        {(r.ean13?.length || r.codigo_barras) && <span>EAN: {Array.isArray(r.ean13) ? r.ean13.join(', ') : (r.ean13 || r.codigo_barras)}</span>}
                                     </div>
                                 </div>
                                 <Button size="sm" onClick={() => onSelect(r.id, 'manual_search', 1.0)}>

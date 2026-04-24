@@ -488,7 +488,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                         const { data: eanMatch } = await supabase
                             .from("articulos")
                             .select("id, descripcion, sku")
-                            .eq("ean13", stripped)
+                            .contains("ean13", [stripped])
                             .limit(1)
                             .maybeSingle()
                         if (eanMatch) { match = eanMatch; confidence = "HIGH" }

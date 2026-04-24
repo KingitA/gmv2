@@ -171,8 +171,8 @@ export default function ActualizacionesPage() {
       }
 
       // EAN change (if item has code that looks like EAN)
-      if (item.code && item.code.length >= 8 && /^\d+$/.test(item.code) && item.code !== art.ean13) {
-        artChanges.push({ field: "ean13", oldValue: art.ean13, newValue: item.code })
+      if (item.code && item.code.length >= 8 && /^\d+$/.test(item.code) && !art.ean13?.includes(item.code)) {
+        artChanges.push({ field: "ean13", oldValue: art.ean13?.join(', ') ?? null, newValue: item.code })
       }
 
       if (artChanges.length > 0) {
@@ -457,7 +457,7 @@ export default function ActualizacionesPage() {
                               {eanChange ? (
                                 <span className="text-blue-600 font-bold">{String(eanChange.newValue)}</span>
                               ) : (
-                                <span className="text-muted-foreground">{art.ean13 || "—"}</span>
+                                <span className="text-muted-foreground">{art.ean13?.join(', ') || "—"}</span>
                               )}
                             </TableCell>
                             <TableCell className="text-right py-1.5">

@@ -25,7 +25,7 @@ export async function searchProductos(searchTerm: string) {
       .from("articulos")
       .select(SELECT)
       .eq("activo", true)
-      .or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%,ean13.ilike.%${term}%`)
+      .or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%`)
       .order("descripcion")
       .limit(50),
     searchProductsByVector(term, 0.35, 50),

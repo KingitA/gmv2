@@ -229,8 +229,8 @@ export default function ArticulosPage() {
   }
 
   // Ficha (unificado crear + editar)
-  const BLANK_FF = {descripcion:"",sku:"",ean13:"",unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,imagen_url:""}
-  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:a.ean13||"",unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:a.iva_compras||"factura",iva_ventas:a.iva_ventas||"factura",proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,imagen_url:a.imagen_url||""}) }
+  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,imagen_url:""}
+  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:a.iva_compras||"factura",iva_ventas:a.iva_ventas||"factura",proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,imagen_url:a.imagen_url||""}) }
   const openNew=()=>{ setFa({id:"__new__"}); setFf({...BLANK_FF}) }
   const sfa=async()=>{
     if(!fa) return; setFs(true)
@@ -288,7 +288,7 @@ export default function ArticulosPage() {
     try{
       const{data}=await sb.from("articulos").select("*,proveedor:proveedores(nombre)").eq("activo",true).order("descripcion")
       const fieldMap:Record<string,(a:any)=>any>={
-        "SKU":a=>a.sku,"EAN13":a=>a.ean13||"","Descripción":a=>a.descripcion,"Unid/Bulto":a=>a.unidades_por_bulto||"",
+        "SKU":a=>a.sku,"EAN13":a=>a.ean13?.join(', ')||"","Descripción":a=>a.descripcion,"Unid/Bulto":a=>a.unidades_por_bulto||"",
         "Proveedor":a=>a.proveedor?.nombre||"","Marca":a=>a.marca?.descripcion||"","Categoría":a=>a.categoria||"","Subcategoría":a=>a.subcategoria||"",
         "P. Lista":a=>a.precio_compra||0,"Margen %":a=>a.porcentaje_ganancia||0,"B/R %":a=>a.bonif_recargo||0,
         "IVA Compras":a=>a.iva_compras||"","IVA Ventas":a=>a.iva_ventas||"","P. Base":a=>a.precio_base||"","P. Contado":a=>a.precio_base_contado||"",
@@ -545,7 +545,7 @@ export default function ArticulosPage() {
                       </td>
                     )}
                     {isVis("sku")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-[11px] text-slate-500 overflow-hidden" style={{width:cw.sku,maxWidth:cw.sku}}>{a.sku}</td>}
-                    {isVis("ean13")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-[10px] text-slate-400 text-center overflow-hidden" style={{width:cw.ean13,maxWidth:cw.ean13}}>{a.ean13||"—"}</td>}
+                    {isVis("ean13")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-[10px] text-slate-400 text-center overflow-hidden" style={{width:cw.ean13,maxWidth:cw.ean13}}>{a.ean13?.join(', ')||"—"}</td>}
                     {isVis("ubulto")&&<td className="px-2 py-0 border-r border-slate-100 text-center text-[11px] font-bold text-slate-600" style={{width:cw.ubulto,maxWidth:cw.ubulto}}>{a.unidades_por_bulto||"—"}</td>}
                     {isVis("prov")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.prov,maxWidth:cw.prov}}><span className="text-[10px] text-slate-500 truncate block">{a.proveedor?.nombre||"—"}</span></td>}
                     {isVis("marca")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.marca,maxWidth:cw.marca}}><span className="text-[10px] text-slate-500 truncate block">{a.marca?.descripcion||"—"}</span></td>}
@@ -733,11 +733,43 @@ export default function ArticulosPage() {
             </div>
 
             {/* SKU / EAN / Unid/Bulto / Unidad medida */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">SKU {fa?.id==="__new__"&&<span className="text-red-500">*</span>}</Label><Input className="h-8 text-xs font-mono" value={ff.sku} onChange={e=>setFf(p=>({...p,sku:e.target.value}))}/></div>
-              <div><Label className="text-xs">EAN 13</Label><Input className="h-8 text-xs font-mono" value={ff.ean13} onChange={e=>setFf(p=>({...p,ean13:e.target.value}))}/></div>
               <div><Label className="text-xs">Unid/Bulto</Label><Input type="number" className="h-8 text-xs" value={ff.unidades_por_bulto||""} onChange={e=>setFf(p=>({...p,unidades_por_bulto:parseInt(e.target.value)||1}))}/></div>
               <div><Label className="text-xs">Unid. Medida</Label><Input className="h-8 text-xs uppercase" placeholder="UN" value={ff.unidad_de_medida} onChange={e=>setFf(p=>({...p,unidad_de_medida:e.target.value.toUpperCase()}))}/></div>
+            </div>
+            {/* EAN 13 — múltiples */}
+            <div>
+              <Label className="text-xs">EAN 13 <span className="text-slate-400 font-normal">(puede tener varios)</span></Label>
+              <div className="flex flex-wrap gap-1.5 mt-1 min-h-[32px] border rounded-md px-2 py-1.5 bg-white">
+                {ff.ean13.map((e,i)=>(
+                  <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 text-[11px] font-mono px-2 py-0.5 rounded-full">
+                    {e}
+                    <button type="button" className="text-slate-400 hover:text-red-500 leading-none" onClick={()=>setFf(p=>({...p,ean13:p.ean13.filter((_,j)=>j!==i)}))}>×</button>
+                  </span>
+                ))}
+                <input
+                  type="text" inputMode="numeric"
+                  placeholder={ff.ean13.length===0?"Agregar EAN...":""}
+                  className="flex-1 min-w-[120px] text-[11px] font-mono outline-none bg-transparent placeholder:text-slate-300"
+                  onKeyDown={e=>{
+                    if((e.key==="Enter"||e.key===","||e.key===" ")&&e.currentTarget.value.trim()){
+                      e.preventDefault()
+                      const v=e.currentTarget.value.trim()
+                      if(!ff.ean13.includes(v)) setFf(p=>({...p,ean13:[...p.ean13,v]}))
+                      e.currentTarget.value=""
+                    }
+                  }}
+                  onBlur={e=>{
+                    if(e.target.value.trim()){
+                      const v=e.target.value.trim()
+                      if(!ff.ean13.includes(v)) setFf(p=>({...p,ean13:[...p.ean13,v]}))
+                      e.target.value=""
+                    }
+                  }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">Enter o coma para agregar · × para quitar</p>
             </div>
 
             {/* Proveedor / Marca */}

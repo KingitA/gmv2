@@ -105,9 +105,12 @@ export async function PATCH(request: NextRequest) {
 
             for (const [key, value] of Object.entries(updates)) {
                 if (key.startsWith('descuento_tipado_')) {
-                    // Format: descuento_tipado_comercial, descuento_tipado_financiero, descuento_tipado_promocional
                     const tipo = key.replace('descuento_tipado_', '')
                     descuentoUpdates.push({ tipo, porcentajes: value })
+                } else if (key === 'ean13') {
+                    // ean13 es TEXT[] — si llega como string lo envolvemos en array,
+                    // si llega como array lo usamos directamente
+                    articuloUpdates[key] = Array.isArray(value) ? value : (value ? [value] : null)
                 } else {
                     articuloUpdates[key] = value
                 }

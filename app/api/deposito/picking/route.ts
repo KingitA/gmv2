@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
     const { data: porEan } = await supabase
       .from("articulos")
       .select(SELECT)
-      .eq("ean13", q)
+      .contains("ean13", [q])
       .eq("activo", true)
       .limit(5)
 

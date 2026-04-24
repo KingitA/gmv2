@@ -11,7 +11,7 @@ import { toast } from "sonner"
 type Articulo = {
   id: string
   sku: string
-  ean13: string | null
+  ean13: string[] | null
   descripcion: string
   unidades_por_bulto: number | null
   unidad_de_medida: string | null
@@ -56,7 +56,7 @@ export default function DepositoPage() {
     setSelected(art)
     setEditMode(null)
     setEditDatos({
-      ean13: art.ean13 || "",
+      ean13: Array.isArray(art.ean13) ? art.ean13.join(', ') : (art.ean13 || ""),
       unidades_por_bulto: art.unidades_por_bulto || 1,
       unidad_de_medida: art.unidad_de_medida || "",
       orden_deposito: art.orden_deposito || 0,
@@ -70,9 +70,16 @@ export default function DepositoPage() {
     if (!selected) return
     setSavingDatos(true)
     try {
-      await actualizarDatosArticulo(selected.id, editDatos)
-      setSelected(p => p ? { ...p, ...editDatos } : p)
-      setResults(p => p.map(a => a.id === selected.id ? { ...a, ...editDatos } : a))
+      const datosParaGuardar = {
+        ...editDatos,
+        ean13: editDatos.ean13
+          ? editDatos.ean13.split(',').map(s => s.trim()).filter(Boolean)
+          : undefined,
+      }
+      await actualizarDatosArticulo(selected.id, datosParaGuardar)
+      const ean13Array = datosParaGuardar.ean13 || null
+      setSelected(p => p ? { ...p, ...editDatos, ean13: ean13Array } : p)
+      setResults(p => p.map(a => a.id === selected.id ? { ...a, ...editDatos, ean13: ean13Array } : a))
       toast.success("Datos actualizados")
       setEditMode(null)
     } catch (e: any) {
@@ -151,7 +158,7 @@ export default function DepositoPage() {
               }
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm text-slate-800 leading-tight truncate">{art.descripcion}</p>
-                <p className="text-[11px] text-slate-500 font-mono mt-0.5">{art.sku}{art.ean13 ? ` · ${art.ean13}` : ""}</p>
+                <p className="text-[11px] text-slate-500 font-mono mt-0.5">{art.sku}{art.ean13?.length ? ` · ${art.ean13.join(', ')}` : ""}</p>
                 {art.proveedor && <p className="text-[11px] text-slate-400 truncate">{art.proveedor.nombre}</p>}
                 <div className="flex items-center gap-3 mt-1.5">
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${(art.cantidad_stock ?? 0) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>

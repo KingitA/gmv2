@@ -51,7 +51,7 @@ export default function RecepcionPage() {
         (art) =>
           art.descripcion.toLowerCase().includes(busquedaDescripcion.toLowerCase()) ||
           art.sku.includes(busquedaDescripcion) ||
-          (art.ean13 && art.ean13.includes(busquedaDescripcion)),
+          (art.ean13 && art.ean13.some((e: string) => e.includes(busquedaDescripcion))),
       )
       setArticulosFiltrados(filtrados)
     } else {

@@ -7,7 +7,7 @@ interface Articulo {
   id: string
   sku: string
   descripcion: string
-  ean13: string | null
+  ean13: string[] | null
   cantidad_stock: number | null
   unidades_por_bulto: number | null
   unidad_de_medida: string | null
@@ -24,7 +24,8 @@ export default function ModificacionArticulosPage() {
   const [seccion, setSeccion] = useState<Seccion>("stock")
 
   // datos
-  const [ean13, setEan13] = useState("")
+  const [ean13, setEan13] = useState<string[]>([])
+  const [eanInput, setEanInput] = useState("")
   const [unidadesBulto, setUnidadesBulto] = useState("")
   const [unidadMedida, setUnidadMedida] = useState("")
   const [guardandoDatos, setGuardandoDatos] = useState(false)
@@ -56,7 +57,8 @@ export default function ModificacionArticulosPage() {
 
   const seleccionar = (art: Articulo) => {
     setArticulo(art)
-    setEan13(art.ean13 || "")
+    setEan13(Array.isArray(art.ean13) ? art.ean13 : (art.ean13 ? [art.ean13] : []))
+    setEanInput("")
     setUnidadesBulto(art.unidades_por_bulto ? String(art.unidades_por_bulto) : "")
     setUnidadMedida(art.unidad_de_medida || "")
     setCantidad(tipo === "correccion" ? String(art.cantidad_stock ?? 0) : "")
@@ -73,11 +75,11 @@ export default function ModificacionArticulosPage() {
     setMsgDatos(null)
     try {
       await actualizarDatosArticulo(articulo.id, {
-        ean13: ean13 || undefined,
+        ean13: ean13.length > 0 ? ean13 : undefined,
         unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : undefined,
         unidad_de_medida: unidadMedida || undefined,
       })
-      setArticulo(a => a ? { ...a, ean13: ean13 || null, unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : null, unidad_de_medida: unidadMedida || null } : a)
+      setArticulo(a => a ? { ...a, ean13: ean13.length > 0 ? ean13 : null, unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : null, unidad_de_medida: unidadMedida || null } : a)
       setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
     } catch (e: any) {
       setMsgDatos({ ok: false, txt: e.message || "Error al guardar" })
@@ -217,7 +219,7 @@ export default function ModificacionArticulosPage() {
           <div style={C.artSelected}>
             <div style={C.artSelectedInfo}>
               <div style={C.artSelectedName}>{articulo.descripcion}</div>
-              <div style={C.artSelectedSub}>{articulo.sku}{articulo.ean13 ? ` · ${articulo.ean13}` : ""}</div>
+              <div style={C.artSelectedSub}>{articulo.sku}{articulo.ean13?.length ? ` · ${articulo.ean13.join(', ')}` : ""}</div>
             </div>
             <div style={C.stockBadge}>Stock: {articulo.cantidad_stock ?? 0}</div>
             <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda("") }}>Cambiar</button>
@@ -289,8 +291,38 @@ export default function ModificacionArticulosPage() {
             {seccion === "datos" && (
               <>
                 <div style={C.card}>
-                  <span style={C.label}>EAN 13</span>
-                  <input style={C.input} type="text" inputMode="numeric" placeholder="Sin código de barras" value={ean13} onChange={e => setEan13(e.target.value)} />
+                  <span style={C.label}>EAN 13 <span style={{ color: "#6b7280", fontWeight: 400, textTransform: "none" as const }}>— puede tener varios</span></span>
+                  <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 8, background: "#374151", border: "1px solid #4b5563", borderRadius: 12, padding: "10px 12px", minHeight: 48 }}>
+                    {ean13.map((e, i) => (
+                      <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#1f2937", border: "1px solid #4b5563", borderRadius: 20, padding: "4px 10px", color: "#e5e7eb", fontSize: 14, fontFamily: "monospace" }}>
+                        {e}
+                        <button type="button" onClick={() => setEan13(p => p.filter((_, j) => j !== i))} style={{ color: "#9ca3af", background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
+                      </span>
+                    ))}
+                    <input
+                      type="text" inputMode="numeric"
+                      value={eanInput}
+                      onChange={e => setEanInput(e.target.value)}
+                      placeholder={ean13.length === 0 ? "Escribí un EAN y presioná Enter..." : "Agregar otro..."}
+                      style={{ flex: 1, minWidth: 140, background: "transparent", border: "none", outline: "none", color: "#f9fafb", fontSize: 15 }}
+                      onKeyDown={e => {
+                        if ((e.key === "Enter" || e.key === ",") && eanInput.trim()) {
+                          e.preventDefault()
+                          const v = eanInput.trim()
+                          if (!ean13.includes(v)) setEan13(p => [...p, v])
+                          setEanInput("")
+                        }
+                      }}
+                      onBlur={() => {
+                        if (eanInput.trim()) {
+                          const v = eanInput.trim()
+                          if (!ean13.includes(v)) setEan13(p => [...p, v])
+                          setEanInput("")
+                        }
+                      }}
+                    />
+                  </div>
+                  <div style={{ color: "#6b7280", fontSize: 12, marginTop: 6 }}>Enter o coma para agregar · × para quitar</div>
                 </div>
 
                 <div style={{ ...C.card, ...C.row2 }}>
