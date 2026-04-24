@@ -11,6 +11,8 @@ interface Articulo {
   cantidad_stock: number | null
   unidades_por_bulto: number | null
   unidad_de_medida: string | null
+  tipo_fraccion: string | null
+  cantidad_fraccion: number | null
 }
 
 type TipoAjuste = "entrada" | "salida" | "correccion"
@@ -28,6 +30,8 @@ export default function ModificacionArticulosPage() {
   const [eanInput, setEanInput] = useState("")
   const [unidadesBulto, setUnidadesBulto] = useState("")
   const [unidadMedida, setUnidadMedida] = useState("")
+  const [tipoFraccion, setTipoFraccion] = useState("")
+  const [cantidadFraccion, setCantidadFraccion] = useState("")
   const [guardandoDatos, setGuardandoDatos] = useState(false)
   const [msgDatos, setMsgDatos] = useState<{ ok: boolean; txt: string } | null>(null)
 
@@ -61,6 +65,8 @@ export default function ModificacionArticulosPage() {
     setEanInput("")
     setUnidadesBulto(art.unidades_por_bulto ? String(art.unidades_por_bulto) : "")
     setUnidadMedida(art.unidad_de_medida || "")
+    setTipoFraccion(art.tipo_fraccion || "")
+    setCantidadFraccion(art.cantidad_fraccion ? String(art.cantidad_fraccion) : "")
     setCantidad(tipo === "correccion" ? String(art.cantidad_stock ?? 0) : "")
     setMotivo("")
     setMsgDatos(null)
@@ -75,12 +81,13 @@ export default function ModificacionArticulosPage() {
     setMsgDatos(null)
     try {
       await actualizarDatosArticulo(articulo.id, {
-        ean13: ean13.length > 0 ? ean13 : undefined,
+        ean13: ean13.length > 0 ? ean13 : null,
         unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : undefined,
         unidad_de_medida: unidadMedida || undefined,
+        tipo_fraccion: tipoFraccion || null,
+        cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null,
       })
-      setArticulo(a => a ? { ...a, ean13: ean13.length > 0 ? ean13 : null, unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : null, unidad_de_medida: unidadMedida || null } : a)
-      setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
+      setArticulo(a => a ? { ...a, ean13: ean13.length > 0 ? ean13 : null, unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : null, unidad_de_medida: unidadMedida || null, tipo_fraccion: tipoFraccion || null, cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null } : a)
     } catch (e: any) {
       setMsgDatos({ ok: false, txt: e.message || "Error al guardar" })
     }
@@ -336,7 +343,18 @@ export default function ModificacionArticulosPage() {
                   </div>
                 </div>
 
-                {msgDatos && <div style={C.msg(msgDatos.ok)}>{msgDatos.txt}</div>}
+                <div style={{ ...C.card, ...C.row2 }}>
+                  <div>
+                    <span style={C.label}>Tipo de fracción</span>
+                    <input style={C.input} type="text" placeholder="pack, blister, docena..." value={tipoFraccion} onChange={e => setTipoFraccion(e.target.value)} />
+                  </div>
+                  <div>
+                    <span style={C.label}>Unidades / fracción</span>
+                    <input style={C.input} type="number" inputMode="numeric" placeholder="—" value={cantidadFraccion} onChange={e => setCantidadFraccion(e.target.value)} />
+                  </div>
+                </div>
+
+                {msgDatos && !msgDatos.ok && <div style={C.msg(false)}>{msgDatos.txt}</div>}
 
                 <button style={C.saveBtn("#2563eb", guardandoDatos)} onClick={guardarDatos} disabled={guardandoDatos}>
                   {guardandoDatos ? "Guardando..." : "Guardar Datos"}

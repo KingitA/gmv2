@@ -39,10 +39,12 @@ export async function buscarArticulosDeposito(query: string) {
 }
 
 export async function actualizarDatosArticulo(id: string, datos: {
-  ean13?: string[]
-  unidades_por_bulto?: number
-  unidad_de_medida?: string
-  orden_deposito?: number
+  ean13?: string[] | null
+  unidades_por_bulto?: number | null
+  unidad_de_medida?: string | null
+  orden_deposito?: number | null
+  tipo_fraccion?: string | null
+  cantidad_fraccion?: number | null
 }) {
   const sb = createAdminClient()
   const { error } = await sb.from("articulos").update(datos).eq("id", id)
