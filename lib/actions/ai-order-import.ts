@@ -294,6 +294,7 @@ ${text}`
             model: "claude-haiku-4-5-20251001",
             max_tokens: 8192,
             temperature: 0.1,
+            system: "You are a data extraction assistant. Always respond with valid JSON only. No markdown, no explanation, no code fences.",
             messages: [{ role: "user", content: prompt }],
         })
         responseText = (msg.content[0] as { type: string; text: string }).text
@@ -826,6 +827,8 @@ function tryParseJson(str: string) {
     } catch (e) {
         // Attempt to close truncation
         let fixed = str.trim()
+        // Strip markdown code fences (```json ... ``` or ``` ... ```)
+        fixed = fixed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()
         if (fixed.endsWith(",")) fixed = fixed.slice(0, -1)
 
         // Count braces and brackets
