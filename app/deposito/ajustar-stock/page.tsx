@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback } from "react"
-import { actualizarDatosArticulo, ajustarStock } from "@/lib/actions/deposito"
+import { actualizarDatosArticulo, ajustarStock, getArticuloExtra } from "@/lib/actions/deposito"
 
 interface Articulo {
   id: string
@@ -59,20 +59,28 @@ export default function ModificacionArticulosPage() {
     }, 300)
   }, [])
 
-  const seleccionar = (art: Articulo) => {
+  const seleccionar = async (art: Articulo) => {
     setArticulo(art)
     setEan13(Array.isArray(art.ean13) ? art.ean13 : (art.ean13 ? [art.ean13] : []))
     setEanInput("")
     setUnidadesBulto(art.unidades_por_bulto ? String(art.unidades_por_bulto) : "")
     setUnidadMedida(art.unidad_de_medida || "")
-    setTipoFraccion(art.tipo_fraccion || "")
-    setCantidadFraccion(art.cantidad_fraccion ? String(art.cantidad_fraccion) : "")
+    setTipoFraccion("")
+    setCantidadFraccion("")
     setCantidad(tipo === "correccion" ? String(art.cantidad_stock ?? 0) : "")
     setMotivo("")
     setMsgDatos(null)
     setMsgStock(null)
     setBusqueda("")
     setResultados([])
+    // Cargar campos extra (tipo_fraccion, cantidad_fraccion) en background
+    try {
+      const extra = await getArticuloExtra(art.id)
+      if (extra) {
+        setTipoFraccion(extra.tipo_fraccion || "")
+        setCantidadFraccion(extra.cantidad_fraccion ? String(extra.cantidad_fraccion) : "")
+      }
+    } catch { /* columnas aún no migradas, ignorar */ }
   }
 
   const guardarDatos = async () => {

@@ -52,6 +52,16 @@ export async function actualizarDatosArticulo(id: string, datos: {
   return { success: true }
 }
 
+export async function getArticuloExtra(id: string) {
+  const sb = createAdminClient()
+  const { data } = await sb
+    .from("articulos")
+    .select("tipo_fraccion, cantidad_fraccion")
+    .eq("id", id)
+    .single()
+  return data
+}
+
 export async function ajustarStock(
   articuloId: string,
   cantidad: number,

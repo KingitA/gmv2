@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
     if (!q || q.length < 2) return NextResponse.json([])
 
     const adminSupabase = createAdminClient()
-    const SELECT = "id, sku, descripcion, ean13, cantidad_stock, unidades_por_bulto, unidad_de_medida, tipo_fraccion, cantidad_fraccion"
+    const SELECT = "id, sku, descripcion, ean13, cantidad_stock, unidades_por_bulto, unidad_de_medida"
 
     // EAN13 exacto primero (scanner — máxima prioridad, no mezclar con vector)
     const { data: porEan } = await supabase
