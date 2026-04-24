@@ -1,8 +1,11 @@
 "use server"
 
 import { GoogleGenerativeAI } from "@google/generative-ai"
+import Anthropic from "@anthropic-ai/sdk"
 import { searchProductsByVector } from "./embeddings"
 import { createAdminClient } from "@/lib/supabase/admin"
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" })
 
 const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""
 const genAI = new GoogleGenerativeAI(apiKey)
@@ -257,53 +260,47 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
 
 /**
  * Process order from plain text (e.g., body of an email or WhatsApp message)
+ * Uses Claude Haiku instead of Gemini to avoid rate limit issues.
  */
 export async function processOrderText(text: string): Promise<ParseResult> {
-    const generationConfig = {
-        maxOutputTokens: 8192,
-        temperature: 0.1,
-        responseMimeType: "application/json",
-    }
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash", generationConfig })
+    const prompt = `Analyze this message content to extract ALL requested items and quantities.
+The message might be an email, a WhatsApp chat, or an order message.
 
-    const prompt = `
-    Analyze this message content to extract ALL requested items and quantities.
-    The message might be an email, a WhatsApp chat, or an order message.
-    
-    STRICT RULES:
-    1. Extract EVERY SINGLE LINE that has a quantity + product description. Do NOT skip any item.
-    2. Each line is typically formatted as: "<quantity> <product description>" (e.g., "12 colgate clasico x70", "1 caja trapo gris eco max").
-    3. IGNORE "Bulto", "Units per Box", or "Pack Size" information.
-    4. Try to detect the customer name. Common patterns:
-       - "Pedido <customer_name>:" in the subject or body (e.g., "Pedido chin chu lin:" means customer is "chin chu lin")
-       - "Cliente: <name>"
-       - If you cannot find a clear name, set "customer" to null.
-    5. Return ALL items found. It is CRITICAL to not miss any item. Count the lines carefully.
-    6. If the message has a subject line like "Asunto: Pedido X" or body starts with "Pedido X:", then "X" is the customer name.
+STRICT RULES:
+1. Extract EVERY SINGLE LINE that has a quantity + product description. Do NOT skip any item.
+2. Each line is typically formatted as: "<quantity> <product description>" (e.g., "12 colgate clasico x70", "1 caja trapo gris eco max").
+3. IGNORE "Bulto", "Units per Box", or "Pack Size" information.
+4. Try to detect the customer name. Common patterns:
+   - "Pedido <customer_name>:" in the subject or body
+   - "Cliente: <name>"
+   - If you cannot find a clear name, set "customer" to null.
+5. Return ALL items found. It is CRITICAL to not miss any item.
+6. If the message has a subject line like "Asunto: Pedido X" or body starts with "Pedido X:", then "X" is the customer name.
 
-    JSON Structure:
-    {
-      "customer": "Name of the single customer found, or null",
-      "items": [
-        { "description": "...", "quantity": 12, "code": "...", "brand": "...", "color": "..." }
-      ]
-    }
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "customer": "Name of the single customer found, or null",
+  "items": [
+    { "description": "...", "quantity": 12, "code": "...", "brand": "...", "color": "..." }
+  ]
+}
 
-    IMPORTANT: A single message may contain MULTIPLE orders or requests. Extract ALL items from ALL orders.
-    The message may reference different customers, products from different categories, etc. Extract EVERYTHING.
+MESSAGE CONTENT:
+${text}`
 
-    MESSAGE CONTENT:
-    ${text}
-    `
-
-    let result
+    let responseText: string
     try {
-        result = await withGeminiRetry(() => model.generateContent(prompt))
+        const msg = await anthropic.messages.create({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 8192,
+            temperature: 0.1,
+            messages: [{ role: "user", content: prompt }],
+        })
+        responseText = (msg.content[0] as { type: string; text: string }).text
     } catch (e: any) {
-        throw new Error(`Gemini falló al procesar el texto del email: ${e.message || 'error desconocido'}`)
+        throw new Error(`Claude falló al procesar el texto del email: ${e.message || 'error desconocido'}`)
     }
-    const response = await result.response
-    const responseText = response.text()
+
     const parsedData = tryParseJson(responseText)
 
     if (!parsedData) {
