@@ -257,7 +257,7 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
  */
 export async function processOrderText(text: string): Promise<ParseResult> {
     const generationConfig = {
-        maxOutputTokens: 2048,
+        maxOutputTokens: 8192,
         temperature: 0.1,
         responseMimeType: "application/json",
     }
@@ -304,6 +304,7 @@ export async function processOrderText(text: string): Promise<ParseResult> {
     const parsedData = tryParseJson(responseText)
 
     if (!parsedData) {
+        console.error("[processOrderText] JSON parse failed. Response length:", responseText.length, "| Sample:", responseText.slice(0, 300))
         throw new Error("No se pudo interpretar la respuesta de la IA para el texto del pedido")
     }
 
@@ -333,7 +334,7 @@ export interface MultiOrderParseResult {
  */
 export async function processOrderTextMulti(text: string): Promise<MultiOrderParseResult> {
     const generationConfig = {
-        maxOutputTokens: 4096,
+        maxOutputTokens: 8192,
         temperature: 0.1,
         responseMimeType: "application/json",
     }
