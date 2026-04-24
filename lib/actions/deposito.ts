@@ -2,13 +2,15 @@
 
 import { createAdminClient } from "@/lib/supabase/admin"
 
+const SELECT = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, imagen_url, proveedor:proveedores(nombre), marca:marca_id(descripcion)"
+
 export async function buscarArticulosDeposito(query: string) {
   const sb = createAdminClient()
   const q = query.trim()
   if (!q) {
     const { data } = await sb
       .from("articulos")
-      .select("id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, imagen_url, proveedor:proveedores(razon_social), marca:marca_id(descripcion)")
+      .select(SELECT)
       .eq("activo", true)
       .order("descripcion")
       .limit(30)
@@ -19,7 +21,7 @@ export async function buscarArticulosDeposito(query: string) {
   if (/^\d{8,14}$/.test(q)) {
     const { data: byEan } = await sb
       .from("articulos")
-      .select("id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, imagen_url, proveedor:proveedores(razon_social), marca:marca_id(descripcion)")
+      .select(SELECT)
       .eq("ean13", q)
       .eq("activo", true)
       .limit(5)
@@ -28,7 +30,7 @@ export async function buscarArticulosDeposito(query: string) {
 
   const { data } = await sb
     .from("articulos")
-    .select("id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, imagen_url, proveedor:proveedores(razon_social), marca:marca_id(descripcion)")
+    .select(SELECT)
     .eq("activo", true)
     .or(`descripcion.ilike.%${q}%,sku.ilike.%${q}%`)
     .order("descripcion")
