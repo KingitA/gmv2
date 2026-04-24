@@ -9,7 +9,7 @@ import { UrgentOrderNotification } from "@/components/deposito/urgent-notificati
 const MODULES = [
   { href: "/deposito/preparar-pedidos", label: "Preparar Pedidos", icon: "📦", desc: "Picking de órdenes de venta", bg: "#fff7ed", accent: "#ea580c", border: "#fed7aa" },
   { href: "/deposito/recibir-mercaderia", label: "Recibir Mercadería", icon: "🚚", desc: "Recepción contra OC", bg: "#f0fdf4", accent: "#16a34a", border: "#bbf7d0" },
-  { href: "/deposito/ajustar-stock", label: "Ajustar Stock", icon: "🔧", desc: "Correcciones de inventario", bg: "#fffbeb", accent: "#d97706", border: "#fde68a" },
+  { href: "/deposito/ajustar-stock", label: "Modificación de Artículos", icon: "🔧", desc: "Datos y stock de artículos", bg: "#fffbeb", accent: "#d97706", border: "#fde68a" },
   { href: "/deposito/devoluciones", label: "Devoluciones", icon: "↩️", desc: "Recibir devoluciones", bg: "#faf5ff", accent: "#9333ea", border: "#e9d5ff" },
 ]
 

@@ -1,269 +1,316 @@
 "use client"
 
 import { useState, useRef, useCallback } from "react"
+import { actualizarDatosArticulo, ajustarStock } from "@/lib/actions/deposito"
 
-interface ArticuloFound {
-  id: string; sku: string; descripcion: string; ean13?: string; stock_actual: number
+interface Articulo {
+  id: string
+  sku: string
+  descripcion: string
+  ean13: string | null
+  cantidad_stock: number | null
+  unidades_por_bulto: number | null
+  unidad_de_medida: string | null
 }
 
-type Step = "buscar" | "ajustar" | "historial"
+type TipoAjuste = "entrada" | "salida" | "correccion"
+type Seccion = "datos" | "stock"
 
-export default function AjustarStockPage() {
-  const [step, setStep] = useState<Step>("buscar")
+export default function ModificacionArticulosPage() {
   const [busqueda, setBusqueda] = useState("")
-  const [resultados, setResultados] = useState<ArticuloFound[]>([])
+  const [resultados, setResultados] = useState<Articulo[]>([])
   const [buscando, setBuscando] = useState(false)
-  const [articuloSel, setArticuloSel] = useState<ArticuloFound | null>(null)
+  const [articulo, setArticulo] = useState<Articulo | null>(null)
+  const [seccion, setSeccion] = useState<Seccion>("stock")
 
-  const [tipo, setTipo] = useState<"entrada" | "salida" | "ajuste">("ajuste")
+  // datos
+  const [ean13, setEan13] = useState("")
+  const [unidadesBulto, setUnidadesBulto] = useState("")
+  const [unidadMedida, setUnidadMedida] = useState("")
+  const [guardandoDatos, setGuardandoDatos] = useState(false)
+  const [msgDatos, setMsgDatos] = useState<{ ok: boolean; txt: string } | null>(null)
+
+  // stock
+  const [tipo, setTipo] = useState<TipoAjuste>("correccion")
   const [cantidad, setCantidad] = useState("")
   const [motivo, setMotivo] = useState("")
-  const [guardando, setGuardando] = useState(false)
-  const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
+  const [guardandoStock, setGuardandoStock] = useState(false)
+  const [msgStock, setMsgStock] = useState<{ ok: boolean; txt: string } | null>(null)
 
-  const [historial, setHistorial] = useState<any[]>([])
-  const [loadingHist, setLoadingHist] = useState(false)
+  const timeout = useRef<NodeJS.Timeout>()
 
-  const inputRef = useRef<HTMLInputElement>(null)
-  const searchTimeout = useRef<NodeJS.Timeout>()
-
-  const buscarArticulo = useCallback((q: string) => {
-    if (!q || q.length < 2) { setResultados([]); return }
-    clearTimeout(searchTimeout.current)
-    searchTimeout.current = setTimeout(async () => {
+  const buscar = useCallback((q: string) => {
+    setBusqueda(q)
+    setResultados([])
+    if (!q || q.length < 2) return
+    clearTimeout(timeout.current)
+    timeout.current = setTimeout(async () => {
       setBuscando(true)
       try {
         const r = await fetch(`/api/deposito/picking?q=${encodeURIComponent(q)}`)
-        setResultados(await r.json())
+        const data = await r.json()
+        setResultados(Array.isArray(data) ? data : [])
       } finally { setBuscando(false) }
     }, 300)
   }, [])
 
-  const seleccionar = (art: ArticuloFound) => {
-    setArticuloSel(art)
+  const seleccionar = (art: Articulo) => {
+    setArticulo(art)
+    setEan13(art.ean13 || "")
+    setUnidadesBulto(art.unidades_por_bulto ? String(art.unidades_por_bulto) : "")
+    setUnidadMedida(art.unidad_de_medida || "")
+    setCantidad(tipo === "correccion" ? String(art.cantidad_stock ?? 0) : "")
+    setMotivo("")
+    setMsgDatos(null)
+    setMsgStock(null)
     setBusqueda("")
     setResultados([])
-    setCantidad("")
-    setMotivo("")
-    setStep("ajustar")
   }
 
-  const guardarAjuste = async () => {
-    if (!articuloSel || !cantidad) { setError("Ingresá una cantidad"); return }
-    setGuardando(true)
-    setError("")
+  const guardarDatos = async () => {
+    if (!articulo) return
+    setGuardandoDatos(true)
+    setMsgDatos(null)
     try {
-      const r = await fetch("/api/deposito/ajustes-stock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          articulo_id: articuloSel.id,
-          tipo,
-          cantidad: parseFloat(cantidad),
-          motivo,
-        }),
+      await actualizarDatosArticulo(articulo.id, {
+        ean13: ean13 || undefined,
+        unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : undefined,
+        unidad_de_medida: unidadMedida || undefined,
       })
-      const data = await r.json()
-      if (data.error) { setError(data.error); return }
-      setSuccess("Ajuste enviado al ERP para confirmación")
-      setTimeout(() => {
-        setSuccess("")
-        setStep("buscar")
-        setArticuloSel(null)
-        setCantidad("")
-        setMotivo("")
-      }, 2500)
-    } catch { setError("Error de conexión") }
-    finally { setGuardando(false) }
+      setArticulo(a => a ? { ...a, ean13: ean13 || null, unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : null, unidad_de_medida: unidadMedida || null } : a)
+      setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
+    } catch (e: any) {
+      setMsgDatos({ ok: false, txt: e.message || "Error al guardar" })
+    }
+    setGuardandoDatos(false)
   }
 
-  const cargarHistorial = async () => {
-    setLoadingHist(true)
+  const aplicarStock = async () => {
+    if (!articulo || !cantidad) { setMsgStock({ ok: false, txt: "Ingresá una cantidad" }); return }
+    setGuardandoStock(true)
+    setMsgStock(null)
     try {
-      const r = await fetch("/api/deposito/ajustes-stock")
-      setHistorial(await r.json())
-    } finally { setLoadingHist(false) }
-    setStep("historial")
+      const res = await ajustarStock(articulo.id, parseFloat(cantidad), tipo, motivo)
+      setArticulo(a => a ? { ...a, cantidad_stock: res.nuevoStock } : a)
+      setCantidad(tipo === "correccion" ? String(res.nuevoStock) : "")
+      setMotivo("")
+      setMsgStock({ ok: true, txt: `✓ Stock actualizado: ${res.nuevoStock} ${articulo.unidad_de_medida || "UN"}` })
+    } catch (e: any) {
+      setMsgStock({ ok: false, txt: e.message || "Error al guardar" })
+    }
+    setGuardandoStock(false)
   }
 
-  const stockNuevo = () => {
-    if (!articuloSel || !cantidad) return null
-    const cant = parseFloat(cantidad) || 0
-    if (tipo === "entrada") return articuloSel.stock_actual + cant
-    if (tipo === "salida") return articuloSel.stock_actual - cant
-    return cant // ajuste directo
+  const stockResultante = () => {
+    if (!articulo || !cantidad) return null
+    const c = parseFloat(cantidad) || 0
+    const s = articulo.cantidad_stock ?? 0
+    if (tipo === "correccion") return c
+    if (tipo === "entrada") return s + c
+    return s - c
   }
 
-  // ─── HISTORIAL ───
-  if (step === "historial") {
-    return (
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-white font-bold text-lg">Ajustes recientes</h2>
-          <button onClick={() => setStep("buscar")} className="px-4 py-2 rounded-xl bg-gray-800 text-gray-300 text-sm">← Volver</button>
-        </div>
-        {loadingHist && <div className="text-gray-400 animate-pulse text-center py-8">Cargando...</div>}
-        <div className="flex flex-col gap-3">
-          {historial.map(aj => (
-            <div key={aj.id} className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="text-white font-semibold text-sm">{aj.articulos?.descripcion}</div>
-                  <div className="text-gray-500 text-xs font-mono">{aj.articulos?.sku}</div>
-                </div>
-                <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                  aj.estado === "confirmado" ? "bg-green-700 text-green-100" :
-                  aj.estado === "rechazado" ? "bg-red-700 text-red-100" :
-                  "bg-yellow-700 text-yellow-100"
-                }`}>{aj.estado}</span>
-              </div>
-              <div className="flex gap-3 mt-2 text-sm text-gray-400">
-                <span>{aj.tipo === "entrada" ? "+" : aj.tipo === "salida" ? "-" : "="}{aj.cantidad}</span>
-                <span>•</span>
-                <span>{aj.usuario_nombre}</span>
-                <span>•</span>
-                <span>{new Date(aj.created_at).toLocaleDateString("es-AR")}</span>
-              </div>
-              {aj.motivo && <div className="text-gray-500 text-xs mt-1">{aj.motivo}</div>}
-            </div>
-          ))}
-          {historial.length === 0 && !loadingHist && (
-            <div className="text-center text-gray-500 py-8">Sin ajustes recientes</div>
-          )}
-        </div>
-      </div>
-    )
+  const C = {
+    page: { minHeight: "calc(100dvh - 64px)", background: "#111827", color: "#f9fafb", display: "flex", flexDirection: "column" as const },
+    searchBar: { background: "#1f2937", borderBottom: "1px solid #374151", padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 },
+    searchInput: { flex: 1, background: "#374151", border: "1px solid #4b5563", borderRadius: 14, padding: "14px 18px", color: "#f9fafb", fontSize: 17, outline: "none" },
+    clearBtn: { width: 44, height: 44, borderRadius: 12, background: "#374151", border: "1px solid #4b5563", color: "#9ca3af", fontSize: 20, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 as const },
+    results: { flex: 1, overflowY: "auto" as const, padding: "12px 16px", display: "flex", flexDirection: "column" as const, gap: 8 },
+    artBtn: { background: "#1f2937", border: "1px solid #374151", borderRadius: 16, padding: "16px 18px", textAlign: "left" as const, cursor: "pointer", width: "100%" },
+    artName: { color: "#f9fafb", fontWeight: 700, fontSize: 17, lineHeight: 1.3 },
+    artSub: { color: "#9ca3af", fontSize: 14, marginTop: 4, display: "flex", gap: 16 },
+    artStock: { color: "#34d399", fontWeight: 700 },
+
+    artSelected: { background: "#1f2937", borderBottom: "1px solid #374151", padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 },
+    artSelectedInfo: { flex: 1 },
+    artSelectedName: { color: "#f9fafb", fontWeight: 700, fontSize: 16, lineHeight: 1.3 },
+    artSelectedSub: { color: "#6b7280", fontSize: 13, marginTop: 2 },
+    stockBadge: { background: "#065f46", color: "#34d399", borderRadius: 10, padding: "6px 12px", fontWeight: 700, fontSize: 15, whiteSpace: "nowrap" as const },
+    changeBtn: { background: "#374151", border: "1px solid #4b5563", borderRadius: 10, padding: "8px 14px", color: "#9ca3af", fontSize: 13, cursor: "pointer" },
+
+    tabs: { display: "flex", borderBottom: "1px solid #374151" },
+    tab: (active: boolean, color: string) => ({
+      flex: 1, padding: "16px", fontWeight: 700, fontSize: 15, textAlign: "center" as const, cursor: "pointer",
+      background: active ? "#1f2937" : "transparent",
+      color: active ? color : "#6b7280",
+      borderBottom: active ? `3px solid ${color}` : "3px solid transparent",
+    }),
+
+    body: { flex: 1, overflowY: "auto" as const, padding: "16px", display: "flex", flexDirection: "column" as const, gap: 14 },
+    card: { background: "#1f2937", border: "1px solid #374151", borderRadius: 16, padding: "18px" },
+    label: { color: "#9ca3af", fontSize: 13, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: 8, display: "block" },
+    input: { width: "100%", background: "#374151", border: "1px solid #4b5563", borderRadius: 12, padding: "14px 16px", color: "#f9fafb", fontSize: 17, outline: "none", boxSizing: "border-box" as const },
+    row2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+    typeGrid: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 },
+    typeBtn: (active: boolean, color: string) => ({
+      padding: "14px 8px", borderRadius: 12, fontWeight: 700, fontSize: 15, textAlign: "center" as const, cursor: "pointer", border: "none",
+      background: active ? color : "#374151", color: active ? "#fff" : "#9ca3af",
+    }),
+    bigInput: { width: "100%", background: "#374151", border: "2px solid #4b5563", borderRadius: 14, padding: "18px", color: "#f9fafb", fontSize: 28, fontWeight: 700, textAlign: "center" as const, outline: "none", boxSizing: "border-box" as const },
+    resultante: { textAlign: "center" as const, marginTop: 10, fontSize: 15, color: "#9ca3af" },
+    saveBtn: (color: string, disabled: boolean) => ({
+      width: "100%", padding: "18px", borderRadius: 16, fontWeight: 700, fontSize: 17, border: "none", cursor: disabled ? "not-allowed" : "pointer",
+      background: disabled ? "#374151" : color, color: disabled ? "#6b7280" : "#fff",
+      opacity: disabled ? 0.7 : 1,
+    }),
+    msg: (ok: boolean) => ({
+      padding: "12px 16px", borderRadius: 12, fontSize: 15, fontWeight: 600, textAlign: "center" as const,
+      background: ok ? "#064e3b" : "#7f1d1d", color: ok ? "#34d399" : "#fca5a5",
+    }),
+    empty: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" as const, gap: 12, color: "#4b5563" },
   }
 
-  // ─── AJUSTAR ARTÍCULO ───
-  if (step === "ajustar" && articuloSel) {
-    const nuevo = stockNuevo()
-    return (
-      <div className="p-4 flex flex-col gap-4">
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-          <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Artículo seleccionado</div>
-          <div className="text-white font-bold text-lg">{articuloSel.descripcion}</div>
-          <div className="text-gray-400 text-sm font-mono mt-1">{articuloSel.sku}</div>
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-gray-400 text-sm">Stock actual:</span>
-            <span className="text-white font-bold text-xl">{articuloSel.stock_actual}</span>
-          </div>
-        </div>
-
-        {/* Tipo de ajuste */}
-        <div className="grid grid-cols-3 gap-2">
-          {(["entrada", "salida", "ajuste"] as const).map(t => (
-            <button key={t} onClick={() => setTipo(t)}
-              className={`py-3 rounded-xl font-semibold text-sm capitalize transition-all ${
-                tipo === t
-                  ? t === "entrada" ? "bg-green-600 text-white" : t === "salida" ? "bg-red-600 text-white" : "bg-amber-600 text-white"
-                  : "bg-gray-800 text-gray-400"
-              }`}>
-              {t === "entrada" ? "📥 Entrada" : t === "salida" ? "📤 Salida" : "✏️ Corrección"}
-            </button>
-          ))}
-        </div>
-
-        {/* Cantidad */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          <label className="text-gray-400 text-sm block mb-2">
-            {tipo === "ajuste" ? "Stock correcto (valor final):" : `Cantidad a ${tipo === "entrada" ? "ingresar" : "retirar"}:`}
-          </label>
-          <input
-            type="number" inputMode="decimal"
-            value={cantidad}
-            onChange={e => setCantidad(e.target.value)}
-            className="w-full bg-gray-800 text-white text-3xl font-bold text-center rounded-xl px-4 py-4 border border-gray-700 focus:border-amber-500 outline-none"
-            autoFocus
-          />
-          {nuevo !== null && (
-            <div className="text-center mt-3 text-sm">
-              <span className="text-gray-400">Stock resultante: </span>
-              <span className={`font-bold text-lg ${nuevo < 0 ? "text-red-400" : "text-white"}`}>{nuevo}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Motivo */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          <label className="text-gray-400 text-sm block mb-2">Motivo (opcional):</label>
-          <input
-            type="text"
-            value={motivo}
-            onChange={e => setMotivo(e.target.value)}
-            placeholder="Ej: Rotura, conteo físico, mercadería vencida..."
-            className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 border border-gray-700 focus:border-amber-500 outline-none text-sm placeholder-gray-600"
-          />
-        </div>
-
-        {error && <div className="bg-red-900/50 border border-red-700 rounded-xl p-3 text-red-300 text-sm text-center">{error}</div>}
-        {success && <div className="bg-green-900/50 border border-green-700 rounded-xl p-3 text-green-300 text-sm text-center">{success}</div>}
-
-        <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => { setStep("buscar"); setArticuloSel(null) }}
-            className="bg-gray-800 text-gray-300 font-semibold py-4 rounded-2xl active:bg-gray-700">
-            ← Volver
-          </button>
-          <button onClick={guardarAjuste} disabled={guardando}
-            className="bg-amber-600 active:bg-amber-700 text-white font-bold py-4 rounded-2xl disabled:opacity-50">
-            {guardando ? "Enviando..." : "📤 Enviar ajuste"}
-          </button>
-        </div>
-
-        <div className="text-center text-xs text-gray-500">
-          El ajuste queda pendiente de confirmación en el ERP
-        </div>
-      </div>
-    )
-  }
-
-  // ─── BUSCAR ───
+  // ── BUSQUEDA ─────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)]">
-      <div className="p-4 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
-        <div>
-          <h2 className="text-white font-bold text-lg">Ajustar Stock</h2>
-          <p className="text-gray-400 text-sm">Buscá el artículo a ajustar</p>
-        </div>
-        <button onClick={cargarHistorial} className="px-3 py-2 rounded-xl bg-gray-800 text-gray-300 text-sm active:bg-gray-700">
-          📋 Historial
-        </button>
-      </div>
-
-      <div className="p-4">
+    <div style={C.page}>
+      {/* Barra de búsqueda */}
+      <div style={C.searchBar}>
         <input
-          ref={inputRef}
+          style={C.searchInput}
           type="text" inputMode="search"
-          placeholder="Escanear EAN o buscar por SKU / descripción..."
+          placeholder="Escanear EAN o buscar SKU / descripción..."
           value={busqueda}
-          onChange={e => { setBusqueda(e.target.value); buscarArticulo(e.target.value) }}
-          className="w-full bg-gray-800 text-white text-lg rounded-2xl px-5 py-4 border border-gray-700 focus:border-amber-500 outline-none placeholder-gray-500"
-          autoFocus
+          onChange={e => buscar(e.target.value)}
+          autoFocus={!articulo}
         />
+        {(busqueda || articulo) && (
+          <button style={C.clearBtn} onClick={() => { setBusqueda(""); setResultados([]); setArticulo(null) }}>✕</button>
+        )}
       </div>
 
-      {buscando && <div className="px-4 text-gray-400 text-sm animate-pulse">Buscando...</div>}
-
-      {resultados.length > 0 && (
-        <div className="flex-1 overflow-auto px-4 flex flex-col gap-2">
-          {resultados.map(art => (
-            <button key={art.id} onClick={() => seleccionar(art)}
-              className="text-left w-full bg-gray-900 border border-gray-700 rounded-2xl p-4 active:bg-gray-800">
-              <div className="text-white font-semibold">{art.descripcion}</div>
-              <div className="flex gap-4 mt-1 text-sm">
-                <span className="text-gray-400 font-mono">{art.sku}</span>
-                <span className="text-gray-500">Stock: <span className="text-white font-bold">{art.stock_actual}</span></span>
-              </div>
-            </button>
-          ))}
-        </div>
+      {/* Resultados de búsqueda */}
+      {!articulo && (
+        <>
+          {buscando && <div style={{ padding: "16px", color: "#6b7280", fontSize: 15, textAlign: "center" }}>Buscando...</div>}
+          {resultados.length > 0 && (
+            <div style={C.results}>
+              {resultados.map(art => (
+                <button key={art.id} style={C.artBtn} onClick={() => seleccionar(art)}>
+                  <div style={C.artName}>{art.descripcion}</div>
+                  <div style={C.artSub}>
+                    <span style={{ fontFamily: "monospace" }}>{art.sku}</span>
+                    <span>Stock: <span style={C.artStock}>{art.cantidad_stock ?? 0}</span></span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {!buscando && !busqueda && (
+            <div style={C.empty}>
+              <span style={{ fontSize: 48 }}>🔧</span>
+              <span style={{ fontSize: 16 }}>Buscá un artículo para modificarlo</span>
+            </div>
+          )}
+          {!buscando && busqueda.length >= 2 && resultados.length === 0 && (
+            <div style={{ ...C.empty }}>
+              <span style={{ fontSize: 16 }}>Sin resultados para &quot;{busqueda}&quot;</span>
+            </div>
+          )}
+        </>
       )}
 
-      {!busqueda && (
-        <div className="flex-1 flex items-center justify-center text-gray-600 text-center px-8">
-          <div><div className="text-4xl mb-3">🔧</div><div>Escaneá o buscá el artículo<br />para ajustar su stock</div></div>
-        </div>
+      {/* Artículo seleccionado */}
+      {articulo && (
+        <>
+          <div style={C.artSelected}>
+            <div style={C.artSelectedInfo}>
+              <div style={C.artSelectedName}>{articulo.descripcion}</div>
+              <div style={C.artSelectedSub}>{articulo.sku}{articulo.ean13 ? ` · ${articulo.ean13}` : ""}</div>
+            </div>
+            <div style={C.stockBadge}>Stock: {articulo.cantidad_stock ?? 0}</div>
+            <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda("") }}>Cambiar</button>
+          </div>
+
+          {/* Tabs */}
+          <div style={C.tabs}>
+            <div style={C.tab(seccion === "stock", "#f59e0b")} onClick={() => setSeccion("stock")}>Ajustar Stock</div>
+            <div style={C.tab(seccion === "datos", "#60a5fa")} onClick={() => setSeccion("datos")}>Datos del Artículo</div>
+          </div>
+
+          <div style={C.body}>
+            {/* ── STOCK ─────────────────────────── */}
+            {seccion === "stock" && (
+              <>
+                <div style={C.card}>
+                  <span style={C.label}>Tipo de movimiento</span>
+                  <div style={C.typeGrid}>
+                    {([["entrada", "#16a34a", "📥 Entrada"], ["salida", "#dc2626", "📤 Salida"], ["correccion", "#d97706", "✏️ Corrección"]] as const).map(([t, color, label]) => (
+                      <button key={t} style={C.typeBtn(tipo === t, color)} onClick={() => { setTipo(t); setCantidad(t === "correccion" ? String(articulo.cantidad_stock ?? 0) : "") }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={C.card}>
+                  <span style={C.label}>
+                    {tipo === "correccion" ? "Nuevo stock (valor final)" : tipo === "entrada" ? "Cantidad a ingresar" : "Cantidad a retirar"}
+                  </span>
+                  <input
+                    style={C.bigInput}
+                    type="number" inputMode="decimal"
+                    value={cantidad}
+                    onChange={e => setCantidad(e.target.value)}
+                    autoFocus
+                  />
+                  {stockResultante() !== null && (
+                    <div style={C.resultante}>
+                      Stock resultante: <strong style={{ color: (stockResultante() ?? 0) < 0 ? "#f87171" : "#34d399", fontSize: 18 }}>{stockResultante()}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div style={C.card}>
+                  <span style={C.label}>Motivo (opcional)</span>
+                  <input
+                    style={C.input}
+                    type="text"
+                    placeholder="Ej: conteo físico, rotura, devolución..."
+                    value={motivo}
+                    onChange={e => setMotivo(e.target.value)}
+                  />
+                </div>
+
+                {msgStock && <div style={C.msg(msgStock.ok)}>{msgStock.txt}</div>}
+
+                <button
+                  style={C.saveBtn(tipo === "entrada" ? "#16a34a" : tipo === "salida" ? "#dc2626" : "#d97706", guardandoStock)}
+                  onClick={aplicarStock}
+                  disabled={guardandoStock}
+                >
+                  {guardandoStock ? "Guardando..." : tipo === "entrada" ? "Registrar Entrada" : tipo === "salida" ? "Registrar Salida" : "Aplicar Corrección"}
+                </button>
+              </>
+            )}
+
+            {/* ── DATOS ─────────────────────────── */}
+            {seccion === "datos" && (
+              <>
+                <div style={C.card}>
+                  <span style={C.label}>EAN 13</span>
+                  <input style={C.input} type="text" inputMode="numeric" placeholder="Sin código de barras" value={ean13} onChange={e => setEan13(e.target.value)} />
+                </div>
+
+                <div style={{ ...C.card, ...C.row2 }}>
+                  <div>
+                    <span style={C.label}>Unid. por bulto</span>
+                    <input style={C.input} type="number" inputMode="numeric" placeholder="—" value={unidadesBulto} onChange={e => setUnidadesBulto(e.target.value)} />
+                  </div>
+                  <div>
+                    <span style={C.label}>Unidad de medida</span>
+                    <input style={{ ...C.input, textTransform: "uppercase" }} type="text" placeholder="UN" value={unidadMedida} onChange={e => setUnidadMedida(e.target.value.toUpperCase())} />
+                  </div>
+                </div>
+
+                {msgDatos && <div style={C.msg(msgDatos.ok)}>{msgDatos.txt}</div>}
+
+                <button style={C.saveBtn("#2563eb", guardandoDatos)} onClick={guardarDatos} disabled={guardandoDatos}>
+                  {guardandoDatos ? "Guardando..." : "Guardar Datos"}
+                </button>
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   )
