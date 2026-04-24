@@ -259,7 +259,7 @@ export default function ClientesPedidosPage() {
 
       query = query
         .order("prioridad", { ascending: true })
-        .order("fecha", { ascending: false })
+        .order("numero_pedido", { ascending: false })
 
       const { data, error } = await query
 
