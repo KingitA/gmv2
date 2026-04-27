@@ -11,6 +11,47 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Save, Loader2, ExternalLink, TrendingUp, TrendingDown, Minus } from "lucide-react"
 import Link from "next/link"
 
+function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
+  if (!v) return fallback
+  return map[v.toLowerCase().trim()] ?? map[v.trim()] ?? v
+}
+
+const IVA_MAP: Record<string, string> = {
+  "responsable inscripto": "Responsable Inscripto",
+  "monotributo": "Monotributo",
+  "consumidor final": "Consumidor Final",
+  "sujeto exento": "Sujeto Exento",
+  "no categorizado": "No Categorizado",
+}
+const PAGO_MAP: Record<string, string> = {
+  "efectivo": "Efectivo",
+  "transferencia": "Transferencia",
+  "cheque al día": "Cheque al día",
+  "cheque al dia": "Cheque al día",
+  "cheque 30 días": "Cheque 30 días",
+  "cheque 30 dias": "Cheque 30 días",
+  "cheque 30/60/90": "Cheque 30/60/90",
+}
+const FACTURACION_MAP: Record<string, string> = {
+  "factura": "Factura",
+  "final": "Final",
+  "presupuesto": "Presupuesto",
+  "porsegmento": "PorSegmento",
+  "por segmento": "PorSegmento",
+}
+const CANAL_MAP: Record<string, string> = {
+  "mayorista": "Mayorista",
+  "minorista": "Minorista",
+  "consumidor final": "Consumidor Final",
+}
+const ENTREGA_MAP: Record<string, string> = {
+  "retira_mostrador": "retira_mostrador",
+  "retira mostrador": "retira_mostrador",
+  "transporte": "transporte",
+  "entregamos_nosotros": "entregamos_nosotros",
+  "entregamos nosotros": "entregamos_nosotros",
+}
+
 const ESTADO_COLORS: Record<string, string> = {
   pendiente: "bg-yellow-100 text-yellow-800",
   en_preparacion: "bg-blue-100 text-blue-800",
@@ -85,28 +126,28 @@ export default function ClienteDetailPage() {
         nombre_razon_social: c.nombre_razon_social || "",
         direccion: c.direccion || "",
         cuit: c.cuit || "",
-        condicion_iva: c.condicion_iva || "Consumidor Final",
-        metodo_facturacion: c.metodo_facturacion || "Factura",
+        condicion_iva: normalizeEnum(c.condicion_iva, IVA_MAP, "Consumidor Final"),
+        metodo_facturacion: normalizeEnum(c.metodo_facturacion, FACTURACION_MAP, "Factura"),
         localidad_id: c.localidad_id || "",
         provincia: c.provincia || "",
         telefono: c.telefono || "",
         mail: c.mail || "",
-        condicion_pago: c.condicion_pago || "Efectivo",
+        condicion_pago: normalizeEnum(c.condicion_pago, PAGO_MAP, "Efectivo"),
         nro_iibb: c.nro_iibb || "",
         exento_iibb: c.exento_iibb || false,
         exento_iva: c.exento_iva || false,
         percepcion_iibb: c.percepcion_iibb || 0,
-        tipo_canal: c.tipo_canal || "Minorista",
+        tipo_canal: normalizeEnum(c.tipo_canal, CANAL_MAP, "Minorista"),
         vendedor_id: c.vendedor_id || "",
-        condicion_entrega: c.condicion_entrega || "entregamos_nosotros",
+        condicion_entrega: normalizeEnum(c.condicion_entrega, ENTREGA_MAP, "entregamos_nosotros"),
         lista_precio_id: c.lista_precio_id || "",
         descuento_especial: c.descuento_especial || 0,
         lista_limpieza_id: c.lista_limpieza_id || "",
-        metodo_limpieza: c.metodo_limpieza || "",
+        metodo_limpieza: normalizeEnum(c.metodo_limpieza, FACTURACION_MAP, ""),
         lista_perf0_id: c.lista_perf0_id || "",
-        metodo_perf0: c.metodo_perf0 || "",
+        metodo_perf0: normalizeEnum(c.metodo_perf0, FACTURACION_MAP, ""),
         lista_perf_plus_id: c.lista_perf_plus_id || "",
-        metodo_perf_plus: c.metodo_perf_plus || "",
+        metodo_perf_plus: normalizeEnum(c.metodo_perf_plus, FACTURACION_MAP, ""),
       })
     }
     setVendedores(vendRes.data || [])
