@@ -267,6 +267,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     try {
       const rows = buildRows()
       console.log("[import] buildRows →", rows.length, "filas válidas", rows.slice(0,3))
+      const conOferta = rows.filter(r => r.descuento_propio !== undefined)
+      console.log("[import] filas con descuento_propio:", conOferta.length, conOferta.map(r => ({ sku: r.sku, descuento_propio: r.descuento_propio })))
       if (rows.length === 0) { setError("No se encontraron filas válidas con SKU."); setLoading(false); return }
 
       console.log("[import] enviando preview al servidor...")
