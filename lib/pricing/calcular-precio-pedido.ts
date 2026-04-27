@@ -34,10 +34,14 @@ export interface ArticuloPrecioInput {
 
 export interface PrecioCalculado {
   precioAlCliente: number   // precio final que paga el cliente (IVA incluido para presup, neto para factura)
-  precioNeto: number        // precio antes de IVA
+  precioNeto: number        // precio antes de IVA (para presupuesto: incluye IVA dentro)
   ivaUnitario: number       // IVA por unidad (0 si incluido)
   ivaIncluido: boolean
   vaEnComprobante: "factura" | "presupuesto"
+  // Breakdown para kardex
+  precioLista: number       // precio post-recargo, ANTES de descuento_cliente (pre-IVA adj)
+  descuentoClientePct: number
+  precioConDescuento: number // precioLista * (1 - descuentoCliente/100), pre-IVA adj
 }
 
 function round2(n: number) { return Math.round(n * 100) / 100 }
@@ -64,5 +68,8 @@ export function calcularPrecioPedido(
     ivaUnitario: resultado.montoIvaDiscriminado,
     ivaIncluido: resultado.ivaIncluido,
     vaEnComprobante: resultado.vaEnComprobante,
+    precioLista: resultado.precioLista,
+    descuentoClientePct: resultado.descuentoClientePct,
+    precioConDescuento: resultado.precioConDescuento,
   }
 }

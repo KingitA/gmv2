@@ -7,7 +7,7 @@ import { getNextOrderNumber } from "@/lib/utils/next-order-number"
 import { nowArgentina } from "@/lib/utils"
 import { calcularPrecioPedido } from "@/lib/pricing/calcular-precio-pedido"
 import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/pricing/calculator"
-import { insertarKardex } from "@/lib/kardex/insertar-kardex"
+import { insertarKardex, type DescuentoKardex } from "@/lib/kardex/insertar-kardex"
 
 // ─── Tipos de segmento de proveedor ──────────────────────────────────────────
 type Segmento = "limpieza" | "perf0" | "perf_plus"
@@ -106,12 +106,52 @@ async function fetchListaYMetodo(
 
 async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
   const [{ data: articulo }, { data: descuentosDB }] = await Promise.all([
-    supabase.from("articulos").select("id,precio_compra,precio_base,precio_base_contado,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
+    supabase.from("articulos").select("id,precio_compra,precio_base,precio_base_contado,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
     supabase.from("articulos_descuentos").select("tipo,porcentaje,orden").eq("articulo_id", productoId).order("orden"),
   ])
   if (!articulo) throw new Error("Artículo no encontrado")
   const descuentos: DescuentoTipado[] = (descuentosDB || []).map((d: any) => ({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden }))
   return { ...articulo, descuentos }
+}
+
+function round2(n: number) { return Math.round(n * 100) / 100 }
+
+/**
+ * Calcula precio_unitario_bruto y descuentos_json para el kardex.
+ *
+ * precio_bruto  = precio ANTES de dto_oferta (descuento_propio) Y antes de dto_general (cliente).
+ * descuentos_json contiene cada descuento con su porcentaje y monto unitario (pre-IVA adj).
+ */
+function buildKardexDescuentos(
+  precioLista: number,        // precio post-recargo, pre-cliente (pre-IVA adj)
+  precioConDescuento: number, // precioLista * (1 - descuentoCliente/100)
+  descuentoClientePct: number,
+  descuentoPropioPct: number,
+): { precio_unitario_bruto: number; descuentos_json: DescuentoKardex[] } {
+  // precio bruto: "precio de lista oficial" antes de cualquier descuento comercial al cliente
+  const precio_unitario_bruto = descuentoPropioPct > 0
+    ? round2(precioLista / (1 - descuentoPropioPct / 100))
+    : precioLista
+
+  const descuentos_json: DescuentoKardex[] = []
+
+  if (descuentoPropioPct > 0) {
+    descuentos_json.push({
+      tipo: 'oferta',
+      porcentaje: descuentoPropioPct,
+      monto_unitario: round2(precio_unitario_bruto - precioLista),
+    })
+  }
+
+  if (descuentoClientePct > 0) {
+    descuentos_json.push({
+      tipo: 'general',
+      porcentaje: descuentoClientePct,
+      monto_unitario: round2(precioLista - precioConDescuento),
+    })
+  }
+
+  return { precio_unitario_bruto, descuentos_json }
 }
 
 export async function createPedido(data: {
@@ -175,6 +215,8 @@ export async function createPedido(data: {
     producto_id: string; cantidad: number
     precioAlCliente: number; precioNeto: number; precio_costo: number
     listaUsadaId: string | null; metodoUsado: string
+    descuentoPropioPct: number; precioLista: number
+    descuentoClientePct: number; precioConDescuento: number
   }
   const itemsCalc: ItemCalc[] = []
   for (const item of data.items) {
@@ -192,6 +234,10 @@ export async function createPedido(data: {
       precio_costo: articulo.precio_compra || 0,
       listaUsadaId: listaId,
       metodoUsado: metodoRaw,
+      descuentoPropioPct: articulo.descuento_propio || 0,
+      precioLista: precio.precioLista,
+      descuentoClientePct: precio.descuentoClientePct,
+      precioConDescuento: precio.precioConDescuento,
     })
   }
 
@@ -257,9 +303,11 @@ export async function createPedido(data: {
       ? Math.round((ivaMonto / item.precioNeto) * 10000) / 100
       : 0
     const stockActual = art?.stock_actual ?? null
-    // Usar el metodo efectivo de este ítem (puede ser diferente al general)
     const metodoColor = item.metodoUsado
     const colorDinero = metodoColor === "Factura (21% IVA)" || metodoColor === "Factura" ? "BLANCO" : "NEGRO"
+    const { precio_unitario_bruto, descuentos_json } = buildKardexDescuentos(
+      item.precioLista, item.precioConDescuento, item.descuentoClientePct, item.descuentoPropioPct,
+    )
 
     await insertarKardex(
       supabase,
@@ -269,11 +317,14 @@ export async function createPedido(data: {
         articulo_id: item.producto_id,
         cantidad: item.cantidad,
         precio_costo: item.precio_costo,
+        precio_unitario_bruto,
         precio_unitario_neto: item.precioNeto,
         precio_unitario_final: item.precioAlCliente,
         iva_porcentaje: ivaPct,
         iva_monto_unitario: ivaMonto,
         iva_incluido: ivaIncluido,
+        descuentos_json: descuentos_json.length > 0 ? descuentos_json : undefined,
+        descuento_cliente_pct: item.descuentoClientePct,
         subtotal_neto: Math.round(item.precioNeto * item.cantidad * 100) / 100,
         subtotal_iva: Math.round(ivaMonto * item.cantidad * 100) / 100,
         subtotal_total: Math.round(item.precioAlCliente * item.cantidad * 100) / 100,
@@ -582,6 +633,10 @@ export async function agregarItemPedido(
     ? Math.round((ivaMonto / precio.precioNeto) * 10000) / 100 : 0
   const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
+  const { precio_unitario_bruto, descuentos_json } = buildKardexDescuentos(
+    precio.precioLista, precio.precioConDescuento,
+    precio.descuentoClientePct, articuloConDescuentos.descuento_propio || 0,
+  )
 
   await insertarKardex(
     supabase,
@@ -591,11 +646,14 @@ export async function agregarItemPedido(
       articulo_id: productoId,
       cantidad,
       precio_costo: articuloConDescuentos.precio_compra || 0,
+      precio_unitario_bruto,
       precio_unitario_neto: precio.precioNeto,
       precio_unitario_final: precio.precioAlCliente,
       iva_porcentaje: ivaPct,
       iva_monto_unitario: ivaMonto,
       iva_incluido: ivaIncluido,
+      descuentos_json: descuentos_json.length > 0 ? descuentos_json : undefined,
+      descuento_cliente_pct: precio.descuentoClientePct,
       subtotal_neto: Math.round(precio.precioNeto * cantidad * 100) / 100,
       subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
       subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
@@ -676,6 +734,10 @@ export async function agregarItemBonificado(
     ? Math.round((ivaMonto / precio.precioNeto) * 10000) / 100 : 0
   const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
+  const { precio_unitario_bruto: precioBrutoB, descuentos_json: descuentosB } = buildKardexDescuentos(
+    precio.precioLista, precio.precioConDescuento,
+    precio.descuentoClientePct, articuloConDescuentos.descuento_propio || 0,
+  )
 
   await insertarKardex(
     supabase,
@@ -685,11 +747,14 @@ export async function agregarItemBonificado(
       articulo_id: productoId,
       cantidad,
       precio_costo: articuloConDescuentos.precio_compra || 0,
+      precio_unitario_bruto: precioBrutoB,
       precio_unitario_neto: precio.precioNeto,
       precio_unitario_final: precio.precioAlCliente,
       iva_porcentaje: ivaPct,
       iva_monto_unitario: ivaMonto,
       iva_incluido: ivaIncluido,
+      descuentos_json: descuentosB.length > 0 ? descuentosB : undefined,
+      descuento_cliente_pct: precio.descuentoClientePct,
       subtotal_neto: Math.round(precio.precioNeto * cantidad * 100) / 100,
       subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
       subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,

@@ -24,7 +24,7 @@ export type TipoMovimientoKardex =
   | 'nota_debito_venta'
 
 export interface DescuentoKardex {
-  tipo: 'comercial' | 'financiero' | 'promocional'
+  tipo: 'oferta' | 'general' | 'viajante' | 'mercaderia' | 'comercial' | 'financiero' | 'promocional'
   porcentaje: number
   monto_unitario: number
 }
@@ -58,6 +58,7 @@ export interface KardexMovimientoInput {
   subtotal_iva?: number
 
   // ── Descuentos ─────────────────────────────────────────────────────────────
+  precio_unitario_bruto?: number | null  // precio antes de descuento_propio y descuento_cliente
   descuentos_json?: DescuentoKardex[]
   descuento_cliente_pct?: number
 
@@ -143,6 +144,7 @@ export async function insertarKardex(
     vendedor_id: input.vendedor_id ?? null,
 
     precio_costo: input.precio_costo ?? null,
+    precio_unitario_bruto: input.precio_unitario_bruto ?? null,
     precio_unitario_neto: input.precio_unitario_neto,
     precio_unitario_final: input.precio_unitario_final,
 
