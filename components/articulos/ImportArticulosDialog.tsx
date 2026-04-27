@@ -43,20 +43,22 @@ interface DbFieldDef {
 }
 
 const DB_FIELD_DEFS: DbFieldDef[] = [
-  { id: "sku",                   label: "SKU / Código",               aliases: ["sku", "codigo", "cod", "code"] },
-  { id: "ean13",                 label: "EAN / Código de barras",     aliases: ["ean", "ean13", "barcode", "barra", "codbar"] },
-  { id: "descripcion",           label: "Descripción (auto-quita % oferta al final)", aliases: ["descripcion", "descripción", "nombre", "detalle", "articulo", "artículo", "name", "item"] },
-  { id: "unidades_por_bulto",    label: "Unidades por bulto",         aliases: ["bulto", "unidadesbulto", "unidadesxbulto", "xbulto", "porb", "cant"] },
-  { id: "precio_compra",         label: "Precio de compra / costo",   aliases: ["compra", "costo", "cost", "preciocompra", "preciocosto"] },
-  { id: "descuento_comercial",   label: "Descuento comercial",        aliases: ["dcomer", "desccomercial", "descuento", "desc", "dto", "d1"] },
-  { id: "descuento_financiero",  label: "Descuento financiero",       aliases: ["dfinan", "descfinanciero", "financiero", "d2"] },
-  { id: "descuento_promocional", label: "Descuento promocional",      aliases: ["dpromo", "descpromocional", "promocional", "promo", "d3"] },
-  { id: "porcentaje_ganancia",   label: "% Ganancia / Margen",        aliases: ["ganancia", "margen", "margin", "margin%", "pctgan", "utilidad"] },
-  { id: "precio_base_contado",   label: "Precio base contado",             aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
-  { id: "precio_base",           label: "Precio base (cta cte)",           aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
-  { id: "descuento_propio",      label: "% Oferta / Dto. propio (extrae de 'Texto (15%)')", aliases: ["descuentopropio", "pctoferta", "dtopio", "oferta"] },
-  { id: "marca_codigo",          label: "Marca (código)",                  aliases: ["marca", "brand", "codigomarca", "marcacod"] },
-  { id: "__skip__",              label: "— No importar —",                 aliases: [] },
+  // ── Los 5 más usados van primero ──
+  { id: "sku",                   label: "SKU",                              aliases: ["sku", "codigo", "cod", "code"] },
+  { id: "descripcion",           label: "Descripción (también extrae oferta si tiene '(15%)')", aliases: ["descripcion", "descripción", "nombre", "detalle", "articulo", "artículo", "name", "item"] },
+  { id: "descuento_propio",      label: "Oferta (columna dedicada, ej: '15' o '15%')",          aliases: ["descuentopropio", "pctoferta", "dtopio", "oferta"] },
+  { id: "precio_base_contado",   label: "Base contado",                     aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
+  { id: "precio_base",           label: "Base cuenta corriente",            aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
+  // ── Resto ──
+  { id: "ean13",                 label: "EAN / Código de barras",           aliases: ["ean", "ean13", "barcode", "barra", "codbar"] },
+  { id: "unidades_por_bulto",    label: "Unidades por bulto",               aliases: ["bulto", "unidadesbulto", "unidadesxbulto", "xbulto", "porb", "cant"] },
+  { id: "precio_compra",         label: "Precio de compra / costo",         aliases: ["compra", "costo", "cost", "preciocompra", "preciocosto"] },
+  { id: "descuento_comercial",   label: "Descuento comercial",              aliases: ["dcomer", "desccomercial", "descuento", "desc", "dto", "d1"] },
+  { id: "descuento_financiero",  label: "Descuento financiero",             aliases: ["dfinan", "descfinanciero", "financiero", "d2"] },
+  { id: "descuento_promocional", label: "Descuento promocional",            aliases: ["dpromo", "descpromocional", "promocional", "promo", "d3"] },
+  { id: "porcentaje_ganancia",   label: "% Ganancia / Margen",              aliases: ["ganancia", "margen", "margin", "margin%", "pctgan", "utilidad"] },
+  { id: "marca_codigo",          label: "Marca (código)",                   aliases: ["marca", "brand", "codigomarca", "marcacod"] },
+  { id: "__skip__",              label: "— No importar —",                  aliases: [] },
 ]
 
 const SKIP_ID = "__skip__"
@@ -229,10 +231,12 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             if (!isNaN(n) && n > 0) obj[field] = n
 
           } else if (field === "descripcion") {
-            // Siempre guarda la descripción, pero QUITA el "(XX%)" del final si existe
+            // Quita el "(XX%)" del final y guarda descripción limpia.
+            // Si había porcentaje, también lo guarda como descuento_propio.
             const m = str.match(OFERTA_RE)
             const desc = m ? m[1].trim() : str
             if (desc) obj["descripcion"] = desc
+            if (m) obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
 
           } else if (field === "descuento_propio") {
             // Si la celda es "Texto (15%)" → extrae 15
