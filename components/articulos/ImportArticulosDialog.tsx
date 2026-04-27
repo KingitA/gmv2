@@ -45,8 +45,8 @@ interface DbFieldDef {
 const DB_FIELD_DEFS: DbFieldDef[] = [
   // ── Los 5 más usados van primero ──
   { id: "sku",                   label: "SKU",                              aliases: ["sku", "codigo", "cod", "code"] },
-  { id: "descripcion",           label: "Descripción (también extrae oferta si tiene '(15%)')", aliases: ["descripcion", "descripción", "nombre", "detalle", "articulo", "artículo", "name", "item"] },
-  { id: "descuento_propio",      label: "Oferta (columna dedicada, ej: '15' o '15%')",          aliases: ["descuentopropio", "pctoferta", "dtopio", "oferta"] },
+  { id: "descripcion",           label: "Descripción (quita '(15%)' del texto si tiene)",       aliases: ["descripcion", "descripción", "nombre", "detalle", "articulo", "artículo", "name", "item"] },
+  { id: "descuento_propio",      label: "Oferta (lee '(15%)' del texto)",                        aliases: ["descuentopropio", "pctoferta", "dtopio", "oferta"] },
   { id: "precio_base_contado",   label: "Base contado",                     aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
   { id: "precio_base",           label: "Base cuenta corriente",            aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
   // ── Resto ──
@@ -231,23 +231,22 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             if (!isNaN(n) && n > 0) obj[field] = n
 
           } else if (field === "descripcion") {
-            // Quita el "(XX%)" del final y guarda descripción limpia.
-            // Si había porcentaje, también lo guarda como descuento_propio.
+            // Solo guarda la descripción limpia (sin el porcentaje si lo tiene)
             const m = str.match(OFERTA_RE)
             const desc = m ? m[1].trim() : str
             if (desc) obj["descripcion"] = desc
-            if (m) obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
 
           } else if (field === "descuento_propio") {
-            // Si la celda es "Texto (15%)" → extrae 15
-            // Si la celda es "15" o "15.0" → usa ese número
-            // Si la celda es texto sin porcentaje (ej: "Blanco") → 0
+            // Si la celda tiene "(15%)" → extrae 15
+            // Si la celda es un número puro ("15" o "15.0") → usa ese número
+            // Si la celda es texto sin porcentaje (ej: "Blanco") → no incluir (no pisar valor existente)
             const mPct = str.match(OFERTA_RE)
             if (mPct) {
               obj["descuento_propio"] = parseFloat(mPct[2].replace(",", "."))
             } else {
               const n = parseFloat(str.replace(",", "."))
-              obj["descuento_propio"] = !isNaN(n) && n >= 0 ? n : 0
+              if (!isNaN(n) && n >= 0) obj["descuento_propio"] = n
+              // Si es texto puro sin número, no se agrega → el valor en DB no se modifica
             }
 
           } else {
