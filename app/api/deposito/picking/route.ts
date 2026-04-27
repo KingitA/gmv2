@@ -107,27 +107,29 @@ export async function GET(request: NextRequest) {
 
     if (porEan && porEan.length > 0) return NextResponse.json(porEan)
 
-    const [{ data: textResults, error }, vectorResults] = await Promise.all([
+    const [textRes, vectorResults] = await Promise.all([
       adminSupabase
         .from("articulos")
         .select(SELECT)
         .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
         .eq("activo", true)
         .limit(20),
-      searchProductsByVector(q, 0.35, 20),
+      searchProductsByVector(q, 0.35, 20).catch(() => []),
     ])
 
-    if (error) throw error
+    if (textRes.error) console.error("[picking] text search error:", textRes.error.message)
 
-    const textIds = new Set((textResults || []).map((r: any) => r.id))
+    const textResults = textRes.data || []
+    const textIds = new Set(textResults.map((r: any) => r.id))
     const merged = [
-      ...(textResults || []),
+      ...textResults,
       ...vectorResults.filter((r: any) => !textIds.has(r.id)),
     ].slice(0, 20)
 
     return NextResponse.json(merged)
 
   } catch (error: any) {
-    return NextResponse.json({ error: "Error en búsqueda" }, { status: 500 })
+    console.error("[picking] unexpected error:", error)
+    return NextResponse.json([], { status: 200 })
   }
 }
