@@ -244,6 +244,21 @@ export function calcularTotalesPedido(items: ItemPedidoParaCalculo[], lista: Dat
 }
 
 // Convertir artículo de DB (con descuentos viejos o nuevos) a DatosArticulo
+// Mapea valores legacy del DB ('0', '+') a los valores tipados del motor
+function normalizeIvaCompras(v: any): DatosArticulo["iva_compras"] {
+  if (v === "adquisicion_stock") return "adquisicion_stock"
+  if (v === "mixto") return "mixto"
+  // '0' = perf0 (entra sin IVA = negro) · '+' / 'factura' / anything else = blanco
+  if (v === "0") return "adquisicion_stock"
+  return "factura"
+}
+function normalizeIvaVentas(v: any): DatosArticulo["iva_ventas"] {
+  if (v === "presupuesto") return "presupuesto"
+  // '0' = perf0 (vende en negro, IVA no discriminado en presupuesto) · todo lo demás = blanco
+  if (v === "0") return "presupuesto"
+  return "factura"
+}
+
 export function articuloToDatosArticulo(art: any, descuentosDB?: DescuentoTipado[]): DatosArticulo {
   let descuentos: DescuentoTipado[] = descuentosDB || []
   // Fallback: si no hay descuentos nuevos, usar los viejos descuento1-4
@@ -262,8 +277,8 @@ export function articuloToDatosArticulo(art: any, descuentosDB?: DescuentoTipado
     bonif_recargo: art.bonif_recargo || 0,
     categoria: art.categoria || art.rubro || "",
     rubro_slug: art.rubro_slug || art.rubros?.slug || undefined,
-    iva_compras: art.iva_compras || "factura",
-    iva_ventas: art.iva_ventas || "factura",
+    iva_compras: normalizeIvaCompras(art.iva_compras),
+    iva_ventas: normalizeIvaVentas(art.iva_ventas),
   }
 }
 

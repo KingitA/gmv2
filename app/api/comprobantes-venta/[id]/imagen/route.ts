@@ -204,20 +204,29 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
   const factDesc = 1 - d1pct / 100 - d2pct / 100
 
   // ─── Generar filas HTML de artículos ───
+  const r2 = (n: number) => Math.round(n * 100) / 100
   const allFilas: string[] = [...lineasArt, ...lineasBonifMerc].map((item: any) => {
     const esBonifMerc = Number(item.precio_unitario || 0) < 0
-    const lista = Math.abs(Number(item.precio_unitario || 0))
+    // precio_unitario es el precio DESPUÉS de descuento_propio (oferta), ANTES de BON1/BON2
+    const precioConOferta = Math.abs(Number(item.precio_unitario || 0))
+    const ofPct: number = Number(item.articulos?.descuento_propio || 0)
+    // P. Lista = precio bruto ANTES de descuento_propio
+    const lista = (ofPct > 0 && !esBonifMerc) ? r2(precioConOferta / (1 - ofPct / 100)) : precioConOferta
     const cant = item.cantidad || 0
-    const neto = esBonifMerc ? 0 : lista * factDesc
+    const neto = esBonifMerc ? 0 : precioConOferta * factDesc
     const sub = esBonifMerc ? Math.abs(Number(item.precio_total || 0)) : neto * cant
     const desc = item.articulos?.descripcion || item.descripcion || "—"
     const sku  = item.articulos?.sku || "—"
 
-    const tdOf  = `<td class="c-of z">—</td>`
-    const tdB1  = esBonifMerc
+    const tdOf = esBonifMerc
+      ? `<td class="c-of z">—</td>`
+      : ofPct > 0
+        ? `<td class="c-of" style="color:#b45309;font-weight:700">${ofPct}%</td>`
+        : `<td class="c-of z">—</td>`
+    const tdB1 = esBonifMerc
       ? `<td class="c-b1" style="color:#b45309;font-weight:700">100%</td>`
       : d1pct > 0 ? `<td class="c-b1">${d1pct}%</td>` : `<td class="c-b1 z">—</td>`
-    const tdB2  = esBonifMerc
+    const tdB2 = esBonifMerc
       ? `<td class="c-b2 z">—</td>`
       : d2pct > 0 ? `<td class="c-b2">${d2pct}%</td>` : `<td class="c-b2 z">—</td>`
 
@@ -231,7 +240,7 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
       <td class="c-lst">${esBonifMerc ? "—" : ("$" + fmtARS(lista))}</td>
       ${tdOf}${tdB1}${tdB2}
       <td class="c-net">${esBonifMerc ? "<span style='color:#dc2626'>-$" + fmtARS(sub) + "</span>" : ("$" + fmtARS(neto))}</td>
-      <td class="c-sub">${esBonifMerc ? "<span style='color:#dc2626'>-$" + fmtARS(sub) + "</span>" : ("$" + fmtARS(sub))}</td>
+      <td class="c-sub">${esBonifMerc ? "<span style='color:#dc2626'>-$" + fmtARS(sub) + "</span>" : ("$" + fmtARS(r2(sub)))}</td>
     </tr>`
   })
 

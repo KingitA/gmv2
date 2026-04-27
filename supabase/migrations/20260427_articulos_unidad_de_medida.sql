@@ -1,0 +1,2 @@
+ALTER TABLE articulos
+  ADD COLUMN IF NOT EXISTS unidad_de_medida TEXT DEFAULT NULL;
