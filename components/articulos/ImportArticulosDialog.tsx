@@ -231,10 +231,11 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             if (!isNaN(n) && n > 0) obj[field] = n
 
           } else if (field === "descripcion") {
-            // Solo guarda la descripción limpia (sin el porcentaje si lo tiene)
+            // Guarda descripción limpia; si tenía "(15%)" también setea descuento_propio
             const m = str.match(OFERTA_RE)
             const desc = m ? m[1].trim() : str
             if (desc) obj["descripcion"] = desc
+            if (m) obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
 
           } else if (field === "descuento_propio") {
             // Si la celda tiene "(15%)" → extrae 15
