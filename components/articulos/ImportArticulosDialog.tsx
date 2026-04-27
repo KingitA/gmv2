@@ -238,16 +238,14 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             if (m) obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
 
           } else if (field === "descuento_propio") {
-            // Si la celda tiene "(15%)" → extrae 15
-            // Si la celda es un número puro ("15" o "15.0") → usa ese número
-            // Si la celda es texto sin porcentaje (ej: "Blanco") → no incluir (no pisar valor existente)
-            const mPct = str.match(OFERTA_RE)
-            if (mPct) {
-              obj["descuento_propio"] = parseFloat(mPct[2].replace(",", "."))
+            // Busca (15%) en CUALQUIER posición del texto (no solo al final)
+            // Esto cubre "GRIS (15%)", "(15%)", "15%", "15", etc.
+            const mAnywhere = str.match(/\(\s*(\d+(?:[.,]\d+)?)\s*%\s*\)/)
+            if (mAnywhere) {
+              obj["descuento_propio"] = parseFloat(mAnywhere[1].replace(",", "."))
             } else {
               const n = parseFloat(str.replace(",", "."))
-              if (!isNaN(n) && n >= 0) obj["descuento_propio"] = n
-              // Si es texto puro sin número, no se agrega → el valor en DB no se modifica
+              if (!isNaN(n) && n >= 0 && n <= 100) obj["descuento_propio"] = n
             }
 
           } else {
