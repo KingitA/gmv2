@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import {
   Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical,
   Plus, Upload, ShoppingCart, TrendingUp, Package, ChevronDown, Check,
-  FileDown, FileUp, SlidersHorizontal, X,
+  FileDown, FileUp, SlidersHorizontal, X, Pencil,
 } from "lucide-react"
 import { ImportArticulosDialog } from "@/components/articulos/ImportArticulosDialog"
 import * as XLSX from "xlsx"
@@ -124,6 +124,13 @@ export default function ArticulosPage() {
 
   // Image upload state
   const [imgUploading,setImgUploading] = useState(false)
+
+  // Selección masiva
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [showBulkEdit, setShowBulkEdit] = useState(false)
+  const [bulkFields, setBulkFields] = useState<Set<string>>(new Set())
+  const [bulkVals, setBulkVals] = useState<Record<string,any>>({})
+  const [bulkSaving, setBulkSaving] = useState(false)
 
   // Import/Export
   const [showImpExp,setShowImpExp] = useState(false)
@@ -307,6 +314,43 @@ export default function ArticulosPage() {
   // Helpers
   const fmt=(n:number)=>n>0?`$${n.toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"
   const icC=(v:string)=>v==="factura"?"+":v==="mixto"?"½":"0"
+  // Selección masiva — helpers
+  const pageIds = arts.map(a=>a.id)
+  const allPageSelected = pageIds.length > 0 && pageIds.every(id=>sel.has(id))
+  const somePageSelected = pageIds.some(id=>sel.has(id))
+  const toggleSel = (id:string) => setSel(p=>{ const n=new Set(p); n.has(id)?n.delete(id):n.add(id); return n })
+  const toggleSelAll = () => {
+    if(allPageSelected) setSel(p=>{ const n=new Set(p); pageIds.forEach(id=>n.delete(id)); return n })
+    else setSel(p=>{ const n=new Set(p); pageIds.forEach(id=>n.add(id)); return n })
+  }
+  const clearSel = () => setSel(new Set())
+
+  const bulkSave = async () => {
+    if(sel.size===0||bulkFields.size===0) return
+    setBulkSaving(true)
+    const updates:Record<string,any>={}
+    for(const f of bulkFields) updates[f]=bulkVals[f]??null
+    let ok=0
+    for(const id of sel){
+      const{error}=await sb.from("articulos").update(updates).eq("id",id)
+      if(!error){ ok++; setArts(p=>p.map(a=>a.id===id?{...a,...updates}:a)) }
+    }
+    setBulkSaving(false); setShowBulkEdit(false); setBulkFields(new Set()); setBulkVals({}); clearSel()
+    alert(`${ok} artículo(s) actualizados`)
+  }
+
+  const bulkDelete = async () => {
+    if(sel.size===0) return
+    if(!confirm(`¿Desactivar ${sel.size} artículo(s) seleccionados?`)) return
+    let ok=0
+    for(const id of sel){ const{error}=await sb.from("articulos").update({activo:false}).eq("id",id); if(!error) ok++ }
+    clearSel(); await load(); alert(`${ok} artículo(s) eliminados`)
+  }
+
+  const toggleBulkField = (f:string, defaultVal:any=null) => {
+    setBulkFields(p=>{ const n=new Set(p); if(n.has(f)){n.delete(f)}else{n.add(f);setBulkVals(v=>({...v,[f]:v[f]??defaultVal}))} return n })
+  }
+
   const icV=(v:string)=>v==="factura"?"+":"0"
   const ccC=(v:string)=>v==="factura"?"bg-blue-100 text-blue-700":v==="mixto"?"bg-amber-100 text-amber-700":"bg-neutral-100 text-neutral-500"
   const ccV=(v:string)=>v==="factura"?"bg-blue-100 text-blue-700":"bg-neutral-100 text-neutral-500"
@@ -445,6 +489,23 @@ export default function ArticulosPage() {
         </div>
       </div>
 
+      {/* ═══ BULK ACTION BAR ═══════════════════════════════════════════════════ */}
+      {sel.size>0&&(
+        <div className="bg-indigo-600 text-white px-5 py-2 flex items-center gap-3 flex-shrink-0 shadow-sm">
+          <span className="text-sm font-semibold">{sel.size} artículo{sel.size>1?"s":""} seleccionado{sel.size>1?"s":""}</span>
+          <div className="flex-1"/>
+          <Button size="sm" variant="ghost" className="h-7 text-xs text-white hover:bg-white/20 gap-1.5" onClick={()=>setShowBulkEdit(true)}>
+            <Pencil className="h-3.5 w-3.5"/>Editar seleccionados
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs text-white hover:bg-red-500/70 gap-1.5" onClick={bulkDelete}>
+            <Trash2 className="h-3.5 w-3.5"/>Eliminar seleccionados
+          </Button>
+          <button onClick={clearSel} className="ml-1 p-1 rounded-full hover:bg-white/20 transition-colors">
+            <X className="h-4 w-4"/>
+          </button>
+        </div>
+      )}
+
       {/* ═══ TABLE ════════════════════════════════════════════════════════════ */}
       <div className="flex-1 overflow-hidden">
         <div className="h-full overflow-auto">
@@ -452,6 +513,12 @@ export default function ArticulosPage() {
             {/* ── THEAD ── */}
             <thead className="sticky top-0 z-20">
               <tr style={{height:32}}>
+                {/* Checkbox col */}
+                <th className="sticky left-0 z-30 w-9 px-2 bg-slate-100 border-r border-slate-200">
+                  <input type="checkbox" className="w-3.5 h-3.5 rounded cursor-pointer accent-indigo-600"
+                    checked={allPageSelected} ref={el=>{if(el)el.indeterminate=somePageSelected&&!allPageSelected}}
+                    onChange={toggleSelAll}/>
+                </th>
                 {/* Base col headers */}
                 {visBase.map((c,i)=>(
                   <th key={c.id}
@@ -537,6 +604,11 @@ export default function ArticulosPage() {
                 const stickyBg=ie?"#fffbeb":idx%2===0?"#ffffff":"#f8fafc"
                 return(
                   <tr key={a.id} className={rowCls} style={{height:listRowH}}>
+                    {/* ── Checkbox ── */}
+                    <td className="sticky left-0 z-10 w-9 px-2 border-r border-slate-100" style={{background:stickyBg}}>
+                      <input type="checkbox" className="w-3.5 h-3.5 rounded cursor-pointer accent-indigo-600"
+                        checked={sel.has(a.id)} onChange={()=>toggleSel(a.id)}/>
+                    </td>
                     {/* ── Base cells ── */}
                     {isVis("desc")&&(
                       <td className="px-2.5 py-0 sticky left-0 z-10 border-r border-slate-100 overflow-hidden" style={{width:cw.desc,maxWidth:cw.desc,background:stickyBg}}>
@@ -907,6 +979,154 @@ export default function ArticulosPage() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ BULK EDIT DIALOG ════════════════════════════════════════════════ */}
+      <Dialog open={showBulkEdit} onOpenChange={o=>{if(!o){setShowBulkEdit(false);setBulkFields(new Set());setBulkVals({})}}}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-indigo-600"/>
+              Editar {sel.size} artículo{sel.size>1?"s":""} seleccionado{sel.size>1?"s":""}
+            </DialogTitle>
+            <p className="text-xs text-slate-400 mt-1">Marcá los campos que querés cambiar. Solo se modifican los campos tildados.</p>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-2">
+            {/* PRECIOS */}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Precios</p>
+              <div className="space-y-2">
+                {[
+                  {f:"precio_base",       label:"P. Base",         type:"number", def:0},
+                  {f:"precio_base_contado",label:"P. Base Contado",type:"number", def:0},
+                  {f:"precio_compra",     label:"P. Compra (lista)",type:"number",def:0},
+                  {f:"porcentaje_ganancia",label:"Margen %",       type:"number", def:0},
+                  {f:"bonif_recargo",     label:"Bonif/Recargo %", type:"number", def:0},
+                  {f:"descuento_propio",  label:"Oferta %",        type:"number", def:0},
+                ].map(({f,label,type,def})=>(
+                  <div key={f} className="flex items-center gap-3">
+                    <button onClick={()=>toggleBulkField(f,def)}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has(f)?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                      {bulkFields.has(f)&&<Check className="h-3 w-3 text-white"/>}
+                    </button>
+                    <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has(f)?"text-slate-800 font-semibold":"text-slate-400"}`}>{label}</Label>
+                    <Input type="number" step="0.01" disabled={!bulkFields.has(f)}
+                      value={bulkFields.has(f)?(bulkVals[f]??def):""}
+                      placeholder={bulkFields.has(f)?"Valor nuevo":"—"}
+                      className={`h-7 text-xs flex-1 ${!bulkFields.has(f)?"opacity-30":""}`}
+                      onChange={e=>setBulkVals(v=>({...v,[f]:parseFloat(e.target.value)||0}))}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* IVA */}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">IVA</p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>toggleBulkField("iva_compras","factura")}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has("iva_compras")?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                    {bulkFields.has("iva_compras")&&<Check className="h-3 w-3 text-white"/>}
+                  </button>
+                  <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has("iva_compras")?"text-slate-800 font-semibold":"text-slate-400"}`}>IVA Compras</Label>
+                  <Select disabled={!bulkFields.has("iva_compras")} value={bulkVals["iva_compras"]??"factura"} onValueChange={v=>setBulkVals(bv=>({...bv,iva_compras:v}))}>
+                    <SelectTrigger className={`h-7 text-xs flex-1 ${!bulkFields.has("iva_compras")?"opacity-30":""}`}><SelectValue/></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="factura">Blanco (+IVA 21%)</SelectItem>
+                      <SelectItem value="adquisicion_stock">Negro (sin IVA)</SelectItem>
+                      <SelectItem value="mixto">Mixto (10.5%)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>toggleBulkField("iva_ventas","factura")}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has("iva_ventas")?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                    {bulkFields.has("iva_ventas")&&<Check className="h-3 w-3 text-white"/>}
+                  </button>
+                  <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has("iva_ventas")?"text-slate-800 font-semibold":"text-slate-400"}`}>IVA Ventas</Label>
+                  <Select disabled={!bulkFields.has("iva_ventas")} value={bulkVals["iva_ventas"]??"factura"} onValueChange={v=>setBulkVals(bv=>({...bv,iva_ventas:v}))}>
+                    <SelectTrigger className={`h-7 text-xs flex-1 ${!bulkFields.has("iva_ventas")?"opacity-30":""}`}><SelectValue/></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="factura">Blanco (factura)</SelectItem>
+                      <SelectItem value="presupuesto">Negro (presupuesto)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* CLASIFICACIÓN */}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Clasificación</p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>toggleBulkField("proveedor_id",null)}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has("proveedor_id")?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                    {bulkFields.has("proveedor_id")&&<Check className="h-3 w-3 text-white"/>}
+                  </button>
+                  <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has("proveedor_id")?"text-slate-800 font-semibold":"text-slate-400"}`}>Proveedor</Label>
+                  <Select disabled={!bulkFields.has("proveedor_id")} value={bulkVals["proveedor_id"]??""} onValueChange={v=>setBulkVals(bv=>({...bv,proveedor_id:v||null}))}>
+                    <SelectTrigger className={`h-7 text-xs flex-1 ${!bulkFields.has("proveedor_id")?"opacity-30":""}`}><SelectValue placeholder="Seleccionar"/></SelectTrigger>
+                    <SelectContent>{provs.map(p=><SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>toggleBulkField("marca_id",null)}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has("marca_id")?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                    {bulkFields.has("marca_id")&&<Check className="h-3 w-3 text-white"/>}
+                  </button>
+                  <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has("marca_id")?"text-slate-800 font-semibold":"text-slate-400"}`}>Marca</Label>
+                  <Select disabled={!bulkFields.has("marca_id")} value={bulkVals["marca_id"]??""} onValueChange={v=>setBulkVals(bv=>({...bv,marca_id:v||null}))}>
+                    <SelectTrigger className={`h-7 text-xs flex-1 ${!bulkFields.has("marca_id")?"opacity-30":""}`}><SelectValue placeholder="Seleccionar"/></SelectTrigger>
+                    <SelectContent>{marcas.map(m=><SelectItem key={m.id} value={m.id}>{m.descripcion}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                {[
+                  {f:"categoria",  label:"Categoría",   def:""},
+                  {f:"subcategoria",label:"Subcategoría",def:""},
+                ].map(({f,label,def})=>(
+                  <div key={f} className="flex items-center gap-3">
+                    <button onClick={()=>toggleBulkField(f,def)}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has(f)?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                      {bulkFields.has(f)&&<Check className="h-3 w-3 text-white"/>}
+                    </button>
+                    <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has(f)?"text-slate-800 font-semibold":"text-slate-400"}`}>{label}</Label>
+                    <Input disabled={!bulkFields.has(f)} value={bulkFields.has(f)?(bulkVals[f]??def):""}
+                      placeholder={bulkFields.has(f)?"Valor nuevo":"—"}
+                      className={`h-7 text-xs flex-1 ${!bulkFields.has(f)?"opacity-30":""}`}
+                      onChange={e=>setBulkVals(v=>({...v,[f]:e.target.value}))}/>
+                  </div>
+                ))}
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>toggleBulkField("unidades_por_bulto",1)}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has("unidades_por_bulto")?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                    {bulkFields.has("unidades_por_bulto")&&<Check className="h-3 w-3 text-white"/>}
+                  </button>
+                  <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has("unidades_por_bulto")?"text-slate-800 font-semibold":"text-slate-400"}`}>Unid/Bulto</Label>
+                  <Input type="number" min={1} disabled={!bulkFields.has("unidades_por_bulto")}
+                    value={bulkFields.has("unidades_por_bulto")?(bulkVals["unidades_por_bulto"]??1):""}
+                    placeholder={bulkFields.has("unidades_por_bulto")?"Valor nuevo":"—"}
+                    className={`h-7 text-xs flex-1 ${!bulkFields.has("unidades_por_bulto")?"opacity-30":""}`}
+                    onChange={e=>setBulkVals(v=>({...v,unidades_por_bulto:parseInt(e.target.value)||1}))}/>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-100">
+            <span className="text-xs text-slate-400">
+              {bulkFields.size===0?"Tildá al menos un campo para continuar":`${bulkFields.size} campo${bulkFields.size>1?"s":""} a modificar`}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={()=>{setShowBulkEdit(false);setBulkFields(new Set());setBulkVals({})}}>Cancelar</Button>
+              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={bulkSave} disabled={bulkSaving||bulkFields.size===0}>
+                {bulkSaving?"Guardando...":bulkFields.size===0?"Seleccioná campos":`Aplicar a ${sel.size} artículo${sel.size>1?"s":""}`}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
