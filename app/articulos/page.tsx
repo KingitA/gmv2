@@ -93,9 +93,10 @@ const COL_DB: Record<string, string> = {
   ivav_v: "iva_ventas",
 }
 // Map column ID → foreign table sort (joined columns)
+// "table" must match the alias used in the select(), not the real table name
 const COL_FOREIGN: Record<string, {field: string; table: string}> = {
-  prov:  { field: "nombre",      table: "proveedores" },
-  marca: { field: "descripcion", table: "marcas"      },
+  prov:  { field: "nombre",      table: "proveedor" },
+  marca: { field: "descripcion", table: "marca"     },
 }
 const isSortable = (col: string) => !!(COL_DB[col] || COL_FOREIGN[col])
 // Value extractor for client-side sort (search results)
