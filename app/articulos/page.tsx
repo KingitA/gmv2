@@ -73,10 +73,11 @@ const TC: Record<string,{bg:string;text:string}> = {
 const ALL_EXPORT_FIELDS = ["SKU","EAN13","Descripción","Unid/Bulto","Proveedor","Marca","Categoría","Subcategoría","P. Lista","Margen %","B/R %","IVA Compras","IVA Ventas","P. Base","P. Contado"]
 const PS = 50
 
-// Map column ID → DB field name (only sortable columns)
+// Map column ID → DB field name (direct articulos fields)
 const COL_DB: Record<string, string> = {
   desc:   "descripcion",
   sku:    "sku",
+  ean13:  "ean13",
   ubulto: "unidades_por_bulto",
   cat:    "categoria",
   subcat: "subcategoria",
@@ -90,6 +91,19 @@ const COL_DB: Record<string, string> = {
   pbcont: "precio_base_contado",
   ivac_v: "iva_compras",
   ivav_v: "iva_ventas",
+}
+// Map column ID → foreign table sort (joined columns)
+const COL_FOREIGN: Record<string, {field: string; table: string}> = {
+  prov:  { field: "nombre",      table: "proveedores" },
+  marca: { field: "descripcion", table: "marcas"      },
+}
+const isSortable = (col: string) => !!(COL_DB[col] || COL_FOREIGN[col])
+// Value extractor for client-side sort (search results)
+const clientSortVal = (art: any, col: string): any => {
+  if (col === "prov")  return art.proveedor?.nombre ?? ""
+  if (col === "marca") return art.marca?.descripcion ?? ""
+  if (col === "ean13") return (Array.isArray(art.ean13) ? art.ean13[0] : (art.ean13 ?? ""))
+  const f = COL_DB[col]; return f ? (art[f] ?? "") : ""
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -219,11 +233,10 @@ export default function ArticulosPage() {
         let results=res.ok?await res.json():[]
         if(pf!=="todos") results=results.filter((x:any)=>x.proveedor_id===pf)
         // Client-side sort for search results
-        if(sortCol && COL_DB[sortCol]) {
-          const field=COL_DB[sortCol]
+        if(sortCol && isSortable(sortCol)) {
           results.sort((a:any,b:any)=>{
-            const av=a[field]??""
-            const bv=b[field]??""
+            const av=clientSortVal(a,sortCol)
+            const bv=clientSortVal(b,sortCol)
             if(typeof av==="number"&&typeof bv==="number") return sortDir==="asc"?av-bv:bv-av
             return sortDir==="asc"?String(av).localeCompare(String(bv),"es"):String(bv).localeCompare(String(av),"es")
           })
@@ -233,9 +246,11 @@ export default function ArticulosPage() {
     } else {
       let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)",{count:"exact"}).eq("activo",true)
       if(pf!=="todos") q=q.eq("proveedor_id",pf)
-      const orderField=sortCol&&COL_DB[sortCol]?COL_DB[sortCol]:"descripcion"
       const ascending=!sortCol||sortDir==="asc"
-      const{data,count}=await q.order(orderField,{ascending}).range(pg*PS,(pg+1)*PS-1)
+      const foreign=sortCol?COL_FOREIGN[sortCol]:null
+      if(foreign) q=q.order(foreign.field,{referencedTable:foreign.table,ascending})
+      else q=q.order(sortCol&&COL_DB[sortCol]?COL_DB[sortCol]:"descripcion",{ascending})
+      const{data,count}=await q.range(pg*PS,(pg+1)*PS-1)
       a=data||[]; total=count||0
     }
 
@@ -361,13 +376,13 @@ export default function ArticulosPage() {
   const clearSel = () => setSel(new Set())
 
   const handleSort = (colId: string) => {
-    if(!COL_DB[colId]) return
+    if(!isSortable(colId)) return
     if(sortCol===colId) setSortDir(d=>d==="asc"?"desc":"asc")
     else { setSortCol(colId); setSortDir("asc") }
     setPg(0)
   }
   const SortIcon = ({col}:{col:string}) => {
-    if(!COL_DB[col]) return null
+    if(!isSortable(col)) return null
     if(sortCol!==col) return <ArrowUpDown className="h-2.5 w-2.5 opacity-0 group-hover:opacity-40 transition-opacity flex-shrink-0"/>
     return sortDir==="asc"
       ? <ArrowUp className="h-2.5 w-2.5 text-indigo-600 flex-shrink-0"/>
@@ -575,7 +590,7 @@ export default function ArticulosPage() {
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)} title="Doble click para ocultar"
                   >
-                    <div className={`flex items-center gap-1 group ${COL_DB[c.id]?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                    <div className={`flex items-center gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
                       {c.label}<SortIcon col={c.id}/>
                     </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
@@ -588,7 +603,7 @@ export default function ArticulosPage() {
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)}
                   >
-                    <div className={`flex items-center justify-end gap-1 group ${COL_DB[c.id]?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                    <div className={`flex items-center justify-end gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
                       {c.label}<SortIcon col={c.id}/>
                     </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-amber-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
@@ -601,7 +616,7 @@ export default function ArticulosPage() {
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)}
                   >
-                    <div className={`flex items-center justify-end gap-1 group ${COL_DB[c.id]?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                    <div className={`flex items-center justify-end gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
                       {c.label}<SortIcon col={c.id}/>
                     </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
