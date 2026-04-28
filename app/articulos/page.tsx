@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import {
   Search, Save, ChevronLeft, ChevronRight, Trash2, Download, GripVertical,
   Plus, Upload, ShoppingCart, TrendingUp, Package, ChevronDown, Check,
-  FileDown, FileUp, SlidersHorizontal, X, Pencil,
+  FileDown, FileUp, SlidersHorizontal, X, Pencil, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react"
 import { ImportArticulosDialog } from "@/components/articulos/ImportArticulosDialog"
 import * as XLSX from "xlsx"
@@ -73,6 +73,25 @@ const TC: Record<string,{bg:string;text:string}> = {
 const ALL_EXPORT_FIELDS = ["SKU","EAN13","Descripción","Unid/Bulto","Proveedor","Marca","Categoría","Subcategoría","P. Lista","Margen %","B/R %","IVA Compras","IVA Ventas","P. Base","P. Contado"]
 const PS = 50
 
+// Map column ID → DB field name (only sortable columns)
+const COL_DB: Record<string, string> = {
+  desc:   "descripcion",
+  sku:    "sku",
+  ubulto: "unidades_por_bulto",
+  cat:    "categoria",
+  subcat: "subcategoria",
+  oferta: "descuento_propio",
+  plista: "precio_compra",
+  marg:   "porcentaje_ganancia",
+  br:     "bonif_recargo",
+  ivac:   "iva_compras",
+  ivav:   "iva_ventas",
+  pbase:  "precio_base",
+  pbcont: "precio_base_contado",
+  ivac_v: "iva_compras",
+  ivav_v: "iva_ventas",
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function ArticulosPage() {
   const sb = createClient()
@@ -132,6 +151,10 @@ export default function ArticulosPage() {
   const [bulkVals, setBulkVals] = useState<Record<string,any>>({})
   const [bulkSaving, setBulkSaving] = useState(false)
 
+  // Sort
+  const [sortCol, setSortCol] = useState<string|null>(null)
+  const [sortDir, setSortDir] = useState<"asc"|"desc">("asc")
+
   // Import/Export
   const [showImpExp,setShowImpExp] = useState(false)
   const [ieTab,setIeTab]           = useState<"export"|"import">("export")
@@ -155,7 +178,7 @@ export default function ArticulosPage() {
     })()
   },[])
   useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0)},400); return()=>clearTimeout(t) },[st])
-  useEffect(()=>{ load() },[pf,sd,pg])
+  useEffect(()=>{ load() },[pf,sd,pg,sortCol,sortDir])
 
   // Close panels on outside click
   useEffect(()=>{
@@ -195,12 +218,24 @@ export default function ArticulosPage() {
         const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}`)
         let results=res.ok?await res.json():[]
         if(pf!=="todos") results=results.filter((x:any)=>x.proveedor_id===pf)
+        // Client-side sort for search results
+        if(sortCol && COL_DB[sortCol]) {
+          const field=COL_DB[sortCol]
+          results.sort((a:any,b:any)=>{
+            const av=a[field]??""
+            const bv=b[field]??""
+            if(typeof av==="number"&&typeof bv==="number") return sortDir==="asc"?av-bv:bv-av
+            return sortDir==="asc"?String(av).localeCompare(String(bv),"es"):String(bv).localeCompare(String(av),"es")
+          })
+        }
         a=results; total=results.length
       } catch { a=[]; total=0 }
     } else {
       let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)",{count:"exact"}).eq("activo",true)
       if(pf!=="todos") q=q.eq("proveedor_id",pf)
-      const{data,count}=await q.order("descripcion").range(pg*PS,(pg+1)*PS-1)
+      const orderField=sortCol&&COL_DB[sortCol]?COL_DB[sortCol]:"descripcion"
+      const ascending=!sortCol||sortDir==="asc"
+      const{data,count}=await q.order(orderField,{ascending}).range(pg*PS,(pg+1)*PS-1)
       a=data||[]; total=count||0
     }
 
@@ -324,6 +359,20 @@ export default function ArticulosPage() {
     else setSel(p=>{ const n=new Set(p); pageIds.forEach(id=>n.add(id)); return n })
   }
   const clearSel = () => setSel(new Set())
+
+  const handleSort = (colId: string) => {
+    if(!COL_DB[colId]) return
+    if(sortCol===colId) setSortDir(d=>d==="asc"?"desc":"asc")
+    else { setSortCol(colId); setSortDir("asc") }
+    setPg(0)
+  }
+  const SortIcon = ({col}:{col:string}) => {
+    if(!COL_DB[col]) return null
+    if(sortCol!==col) return <ArrowUpDown className="h-2.5 w-2.5 opacity-0 group-hover:opacity-40 transition-opacity flex-shrink-0"/>
+    return sortDir==="asc"
+      ? <ArrowUp className="h-2.5 w-2.5 text-indigo-600 flex-shrink-0"/>
+      : <ArrowDown className="h-2.5 w-2.5 text-indigo-600 flex-shrink-0"/>
+  }
 
   const bulkSave = async () => {
     if(sel.size===0||bulkFields.size===0) return
@@ -522,33 +571,39 @@ export default function ArticulosPage() {
                 {/* Base col headers */}
                 {visBase.map((c,i)=>(
                   <th key={c.id}
-                    className={`relative px-2 py-1.5 font-semibold text-[10px] uppercase tracking-wider text-slate-500 bg-slate-100 border-r border-slate-200 select-none whitespace-nowrap ${i===0?"sticky left-0 z-30 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]":""}`}
+                    className={`relative px-2 py-1.5 font-semibold text-[10px] uppercase tracking-wider border-r border-slate-200 select-none whitespace-nowrap ${i===0?"sticky left-0 z-30 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]":""} ${sortCol===c.id?"bg-indigo-50 text-indigo-700":"bg-slate-100 text-slate-500"}`}
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)} title="Doble click para ocultar"
                   >
-                    {c.label}
+                    <div className={`flex items-center gap-1 group ${COL_DB[c.id]?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                      {c.label}<SortIcon col={c.id}/>
+                    </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
                   </th>
                 ))}
                 {/* Compras col headers */}
                 {mode==="compras"&&visCompras.map(c=>(
                   <th key={c.id}
-                    className="relative px-2 py-1.5 text-right font-semibold text-[10px] uppercase tracking-wider text-amber-700 bg-amber-50 border-r border-amber-100 select-none whitespace-nowrap"
+                    className={`relative px-2 py-1.5 text-right font-semibold text-[10px] uppercase tracking-wider text-amber-700 bg-amber-50 border-r border-amber-100 select-none whitespace-nowrap ${sortCol===c.id?"!bg-amber-100":""}`}
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)}
                   >
-                    {c.label}
+                    <div className={`flex items-center justify-end gap-1 group ${COL_DB[c.id]?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                      {c.label}<SortIcon col={c.id}/>
+                    </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-amber-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
                   </th>
                 ))}
                 {/* Ventas fixed col headers */}
                 {mode==="ventas"&&visVentas.map(c=>(
                   <th key={c.id}
-                    className={`relative px-2 py-1.5 text-right font-semibold text-[10px] uppercase tracking-wider text-indigo-700 bg-indigo-50 border-r border-indigo-100 select-none whitespace-nowrap ${c.id==="pbcont"?"border-r-2 border-indigo-200":""}`}
+                    className={`relative px-2 py-1.5 text-right font-semibold text-[10px] uppercase tracking-wider text-indigo-700 bg-indigo-50 border-r border-indigo-100 select-none whitespace-nowrap ${c.id==="pbcont"?"border-r-2 border-indigo-200":""} ${sortCol===c.id?"!bg-indigo-100":""}`}
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)}
                   >
-                    {c.label}
+                    <div className={`flex items-center justify-end gap-1 group ${COL_DB[c.id]?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                      {c.label}<SortIcon col={c.id}/>
+                    </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
                   </th>
                 ))}
