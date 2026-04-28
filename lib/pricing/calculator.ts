@@ -190,8 +190,10 @@ export function calcularPrecioFinal(
   else if (metodoFacturacion === "Factura") vaEnComprobante = "factura"
   else vaEnComprobante = "presupuesto"
 
-  // Coeficiente de ajuste según IVA compras/ventas del artículo
-  const coefIva = obtenerCoeficienteIva(art.iva_compras, art.iva_ventas)
+  // Coeficiente de ajuste según cómo entró el artículo y cómo EFECTIVAMENTE sale (comprobante real).
+  // Se usa vaEnComprobante (no art.iva_ventas) porque el cliente puede forzar el comprobante opuesto
+  // al modo natural del artículo (ej: artículo negro/negro en Factura A → coef 0.90 para base*.9).
+  const coefIva = obtenerCoeficienteIva(art.iva_compras, vaEnComprobante)
 
   let coefAjusteAplicado = 0
   let precioAntesIva = precioConDescuento
