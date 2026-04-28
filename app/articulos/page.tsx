@@ -309,10 +309,10 @@ export default function ArticulosPage() {
   }
 
   // Ficha (unificado crear + editar)
-  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null}
+  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
   const normIvaC=(v:any)=>v==="adquisicion_stock"?"adquisicion_stock":v==="mixto"?"mixto":v==="0"?"adquisicion_stock":"factura"
   const normIvaV=(v:any)=>v==="presupuesto"?"presupuesto":v==="0"?"presupuesto":"factura"
-  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null}) }
+  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null,segmento_precio:a.segmento_precio??null}) }
   const openNew=()=>{ setFa({id:"__new__"}); setFf({...BLANK_FF}) }
   const sfa=async()=>{
     if(!fa) return; setFs(true)
@@ -351,7 +351,7 @@ export default function ArticulosPage() {
   // Sublista columns
   const tglSublista=(c:SublistaCodigo)=>setActiveSublistas(p=>p.includes(c)?p.filter(x=>x!==c):[...p,c])
   const getFormulasParaArticulo=(art:any):Record<string,string>|null=>{
-    const grupo=determinarGrupoPrecio(art.categoria||art.rubro||"")
+    const grupo=determinarGrupoPrecio(art.categoria||art.rubro||"",art.rubro_slug||art.rubros?.slug,art.segmento_precio)
     const regla=reglasFormulas.find(r=>r.grupo_precio===grupo&&r.iva_compras===(art.iva_compras||"factura")&&r.iva_ventas===(art.iva_ventas||"factura"))
     if(!regla) return null
     const has=Object.values(regla.formulas).some((f:any)=>f&&String(f).trim()!=="")
@@ -988,6 +988,20 @@ export default function ArticulosPage() {
                 </Select>
               </div>
               <div><Label className="text-xs">Orden Depósito</Label><Input type="number" className="h-8 text-xs" value={ff.orden_deposito||""} onChange={e=>setFf(p=>({...p,orden_deposito:parseInt(e.target.value)||0}))}/></div>
+            </div>
+
+            {/* Segmento de precio */}
+            <div>
+              <Label className="text-xs">Segmento de precio</Label>
+              <Select value={ff.segmento_precio??""} onValueChange={v=>setFf(p=>({...p,segmento_precio:v===""?null:v}))}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Auto (detectado por rubro/categoría)"/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Auto (detectado por rubro/categoría)</SelectItem>
+                  <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
+                  <SelectItem value="perfumeria">Perfumería</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-slate-400 mt-0.5">Override explícito del coeficiente de precio. Útil cuando el artículo pertenece a un rubro diferente al de su proveedor.</p>
             </div>
 
             {/* Precios */}

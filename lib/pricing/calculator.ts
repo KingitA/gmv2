@@ -21,6 +21,9 @@ export interface DatosArticulo {
   categoria: string
   /** Slug del rubro relacional: 'limpieza' | 'bazar' | 'perfumeria'. Tiene prioridad sobre categoria para detectar segmento. */
   rubro_slug?: string
+  /** Override explícito del segmento de precio. Tiene prioridad sobre rubro_slug y categoria.
+   *  Permite que un artículo aparezca en catálogo bajo un rubro distinto al que determina su precio. */
+  segmento_precio?: "limpieza_bazar" | "perfumeria" | null
   iva_compras: "factura" | "adquisicion_stock" | "mixto"
   iva_ventas: "factura" | "presupuesto"
 }
@@ -108,7 +111,13 @@ export function calcularPrecioBase(art: DatosArticulo): { costoNeto: number; pre
 // ─── Paso 2: Recargo de Lista ──────────────────────────
 
 export function obtenerRecargoLista(art: DatosArticulo, lista: DatosLista): number {
-  // Nuevo: usar rubro_slug si está disponible (más preciso que string de categoria)
+  // Prioridad 0: segmento_precio explícito (override independiente del rubro de catálogo)
+  if (art.segmento_precio === 'perfumeria') {
+    return art.iva_ventas === 'presupuesto' ? lista.recargo_perfumeria_negro : lista.recargo_perfumeria_blanco
+  }
+  if (art.segmento_precio === 'limpieza_bazar') return lista.recargo_limpieza_bazar
+
+  // Prioridad 1: rubro_slug relacional (más preciso que string de categoria)
   if (art.rubro_slug) {
     if (art.rubro_slug === 'perfumeria') {
       // perf0 = presupuesto (negro), perf+ = factura (blanco)
@@ -277,6 +286,7 @@ export function articuloToDatosArticulo(art: any, descuentosDB?: DescuentoTipado
     bonif_recargo: art.bonif_recargo || 0,
     categoria: art.categoria || art.rubro || "",
     rubro_slug: art.rubro_slug || art.rubros?.slug || undefined,
+    segmento_precio: (art.segmento_precio as DatosArticulo["segmento_precio"]) ?? null,
     iva_compras: normalizeIvaCompras(art.iva_compras),
     iva_ventas: normalizeIvaVentas(art.iva_ventas),
   }
@@ -291,7 +301,11 @@ function round2(n: number): number { return Math.round(n * 100) / 100 }
 export function determinarGrupoPrecio(
   categoria: string,
   rubro_slug?: string,
+  segmento_precio?: string | null,
 ): "LIMPIEZA_BAZAR" | "PERFUMERIA" {
+  // Override explícito tiene máxima prioridad
+  if (segmento_precio === 'perfumeria') return "PERFUMERIA"
+  if (segmento_precio === 'limpieza_bazar') return "LIMPIEZA_BAZAR"
   if (rubro_slug) return rubro_slug === 'perfumeria' ? "PERFUMERIA" : "LIMPIEZA_BAZAR"
   const cat = (categoria || "").toUpperCase()
   if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA")) return "PERFUMERIA"
