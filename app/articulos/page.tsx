@@ -245,14 +245,36 @@ export default function ArticulosPage() {
         a=results; total=results.length
       } catch { a=[]; total=0 }
     } else {
-      let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)",{count:"exact"}).eq("activo",true)
-      if(pf!=="todos") q=q.eq("proveedor_id",pf)
       const ascending=!sortCol||sortDir==="asc"
-      const foreign=sortCol?COL_FOREIGN[sortCol]:null
-      if(foreign) q=q.order(foreign.field,{referencedTable:foreign.table,ascending})
-      else q=q.order(sortCol&&COL_DB[sortCol]?COL_DB[sortCol]:"descripcion",{ascending})
-      const{data,count}=await q.range(pg*PS,(pg+1)*PS-1)
-      a=data||[]; total=count||0
+
+      if(sortCol==="prov"||sortCol==="marca") {
+        // Supabase no soporta ORDER BY por columna de tabla joinada desde el query builder.
+        // Solución: cargar solo id+FK para todos los artículos del filtro (payload pequeño),
+        // ordenar en memoria con los datos de provs/marcas ya cargados, luego cargar la página.
+        let qSlim=sb.from("articulos").select("id,proveedor_id,marca_id").eq("activo",true)
+        if(pf!=="todos") qSlim=qSlim.eq("proveedor_id",pf)
+        const{data:slim}=await qSlim
+        const provMap=Object.fromEntries(provs.map((p:any)=>[p.id,p.nombre]))
+        const marcaMap=Object.fromEntries(marcas.map((m:any)=>[m.id,m.descripcion]))
+        const sorted=(slim||[]).sort((x:any,y:any)=>{
+          const av=sortCol==="prov"?(provMap[x.proveedor_id]??""):(marcaMap[x.marca_id]??"")
+          const bv=sortCol==="prov"?(provMap[y.proveedor_id]??""):(marcaMap[y.marca_id]??"")
+          return ascending?av.localeCompare(bv,"es"):bv.localeCompare(av,"es")
+        })
+        total=sorted.length
+        const pageIds=sorted.slice(pg*PS,(pg+1)*PS).map((x:any)=>x.id)
+        if(pageIds.length>0){
+          const{data}=await sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)").in("id",pageIds)
+          const orderMap=Object.fromEntries(pageIds.map((id:string,i:number)=>[id,i]))
+          a=(data||[]).sort((x:any,y:any)=>orderMap[x.id]-orderMap[y.id])
+        }
+      } else {
+        let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)",{count:"exact"}).eq("activo",true)
+        if(pf!=="todos") q=q.eq("proveedor_id",pf)
+        q=q.order(sortCol&&COL_DB[sortCol]?COL_DB[sortCol]:"descripcion",{ascending})
+        const{data,count}=await q.range(pg*PS,(pg+1)*PS-1)
+        a=data||[]; total=count||0
+      }
     }
 
     setArts(a); setTc(total)
