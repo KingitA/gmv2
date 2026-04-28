@@ -993,10 +993,10 @@ export default function ArticulosPage() {
             {/* Segmento de precio */}
             <div>
               <Label className="text-xs">Segmento de precio</Label>
-              <Select value={ff.segmento_precio??""} onValueChange={v=>setFf(p=>({...p,segmento_precio:v===""?null:v}))}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Auto (detectado por rubro/categoría)"/></SelectTrigger>
+              <Select value={ff.segmento_precio??"auto"} onValueChange={v=>setFf(p=>({...p,segmento_precio:v==="auto"?null:v}))}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Auto (detectado por rubro/categoría)</SelectItem>
+                  <SelectItem value="auto">Auto (detectado por rubro/categoría)</SelectItem>
                   <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
                   <SelectItem value="perfumeria">Perfumería</SelectItem>
                 </SelectContent>
