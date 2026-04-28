@@ -341,9 +341,9 @@ export default function ArticulosPage() {
 
   const bulkDelete = async () => {
     if(sel.size===0) return
-    if(!confirm(`¿Desactivar ${sel.size} artículo(s) seleccionados?`)) return
+    if(!confirm(`¿Eliminar permanentemente ${sel.size} artículo(s) seleccionados? Esta acción no se puede deshacer.`)) return
     let ok=0
-    for(const id of sel){ const{error}=await sb.from("articulos").update({activo:false}).eq("id",id); if(!error) ok++ }
+    for(const id of sel){ const{error}=await sb.from("articulos").delete().eq("id",id); if(!error) ok++ }
     clearSel(); await load(); alert(`${ok} artículo(s) eliminados`)
   }
 
