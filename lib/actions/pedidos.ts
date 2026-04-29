@@ -12,7 +12,26 @@ import { insertarKardex, type DescuentoKardex } from "@/lib/kardex/insertar-kard
 // ─── Tipos de segmento de proveedor ──────────────────────────────────────────
 type Segmento = "limpieza" | "perf0" | "perf_plus"
 
-function detectarSegmento(articulo: { categoria?: string | null; iva_compras?: string | null }): Segmento {
+function detectarSegmento(articulo: {
+  categoria?: string | null
+  iva_compras?: string | null
+  segmento_precio?: string | null
+  rubros?: { slug: string } | null
+}): Segmento {
+  // 1. Override explícito
+  if (articulo.segmento_precio === "perfumeria") {
+    return articulo.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
+  }
+  if (articulo.segmento_precio === "limpieza_bazar") return "limpieza"
+
+  // 2. Slug relacional del rubro
+  const slug = articulo.rubros?.slug
+  if (slug === "perfumeria") {
+    return articulo.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
+  }
+  if (slug === "limpieza" || slug === "bazar") return "limpieza"
+
+  // 3. Fallback: texto de categoría
   const cat = (articulo.categoria || "").toUpperCase()
   if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA")) {
     return articulo.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
@@ -106,7 +125,7 @@ async function fetchListaYMetodo(
 
 async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
   const [{ data: articulo }, { data: descuentosDB }] = await Promise.all([
-    supabase.from("articulos").select("id,precio_compra,precio_base,precio_base_contado,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
+    supabase.from("articulos").select("id,precio_compra,precio_base,precio_base_contado,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
     supabase.from("articulos_descuentos").select("tipo,porcentaje,orden").eq("articulo_id", productoId).order("orden"),
   ])
   if (!articulo) throw new Error("Artículo no encontrado")

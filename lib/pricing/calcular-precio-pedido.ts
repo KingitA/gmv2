@@ -28,6 +28,8 @@ export interface ArticuloPrecioInput {
   categoria?: string
   iva_compras?: string
   iva_ventas?: string
+  segmento_precio?: "limpieza_bazar" | "perfumeria" | null
+  rubros?: { slug: string } | null
   descuentos: DescuentoTipado[]
   proveedor?: { tipo_descuento?: string } | null
 }
