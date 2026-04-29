@@ -35,7 +35,7 @@ export async function POST(request: Request) {
           cuit, direccion, exento_iva
         ),
         detalle:pedidos_detalle(
-          id, articulo_id, cantidad, precio_final, precio_base, es_bonificado,
+          id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
             id, descripcion, sku, iva_ventas, categoria, iva_compras
           )
@@ -82,6 +82,7 @@ export async function POST(request: Request) {
     for (const det of pedido.detalle) {
       const art = det.articulo
       if (!art) continue
+      if (det.estado_item === "FALTANTE" || (det.cantidad ?? 0) <= 0) continue
 
       const esPresupuesto = art.iva_ventas === "presupuesto" || metodoFacturacion === "Presupuesto"
       const vaEnComprobante: "factura" | "presupuesto" =

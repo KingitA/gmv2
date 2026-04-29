@@ -193,7 +193,7 @@ export async function generarBonificacionContado(
     const { numero, puntoVenta, nextNum } = await getNextNumero(supabase, "REV")
 
     const lineas = presupuestos.map(c => ({
-      descripcion: `Bonificacion ${DESCUENTO_CONTADO_PCT}% comprobante ${c.numero_comprobante}`,
+      descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
       precio_neto: r2(Math.abs(c.total_factura) * DESCUENTO_CONTADO_PCT / 100),
     }))
 
@@ -226,7 +226,7 @@ export async function generarBonificacionContado(
     const { numero, puntoVenta, nextNum } = await getNextNumero(supabase, tipoNC)
 
     const lineas = facturas.map(c => ({
-      descripcion: `Bonificacion ${DESCUENTO_CONTADO_PCT}% comprobante ${c.numero_comprobante}`,
+      descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
       // Para facturas: la bonificación se calcula sobre total_neto (sin IVA)
       precio_neto: r2(Math.abs(c.total_neto) * DESCUENTO_CONTADO_PCT / 100),
     }))

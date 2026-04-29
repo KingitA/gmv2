@@ -133,22 +133,43 @@ export async function POST(request: NextRequest) {
       const imputacionesData = listaImputaciones.map((imp: any) => ({
         pago_id: pago.id,
         comprobante_id: imp.comprobante_id,
-        tipo_comprobante: imp.tipo_documento || "venta", // Usamos el tipo enviado o default
+        tipo_comprobante: imp.tipo_documento || "venta",
         monto_imputado: imp.monto_imputado,
-        estado: "pendiente", // Se confirmará junto con el pago
+        estado: "confirmado",
       }))
 
       const { error: impError } = await supabase.from("imputaciones").insert(imputacionesData)
-
       if (impError) {
         console.error("[v0] Error guardando imputaciones:", impError)
       }
+
+      // Aplicar cada imputación al saldo_pendiente del comprobante
+      for (const imp of listaImputaciones) {
+        if (!imp.comprobante_id) continue
+        const { data: comp } = await supabase
+          .from("comprobantes_venta")
+          .select("saldo_pendiente")
+          .eq("id", imp.comprobante_id)
+          .single()
+        if (!comp) continue
+        const nuevoSaldo = Number(comp.saldo_pendiente) - Number(imp.monto_imputado)
+        await supabase
+          .from("comprobantes_venta")
+          .update({
+            saldo_pendiente: Math.max(0, nuevoSaldo),
+            estado_pago: nuevoSaldo <= 0 ? "pagado" : "parcial",
+          })
+          .eq("id", imp.comprobante_id)
+      }
     }
+
+    // Marcar el pago como confirmado directamente
+    await supabase.from("pagos_clientes").update({ estado: "confirmado" }).eq("id", pago.id)
 
     return NextResponse.json({
       success: true,
       pago,
-      mensaje: "Pago registrado. Pendiente de confirmación por el ERP.",
+      mensaje: "Pago registrado y aplicado.",
     })
   } catch (error: any) {
     console.error("[v0] Error registrando pago:", error)
