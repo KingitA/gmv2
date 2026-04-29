@@ -578,7 +578,8 @@ async function assertPedidoEditable(supabase: any, pedidoId: string) {
     .single()
   if (error || !data) throw new Error("Pedido no encontrado")
   if (data.estado === "eliminado") throw new Error("El pedido está eliminado y no puede modificarse")
-  if (data.estado !== "pendiente") throw new Error("Solo se pueden editar pedidos en estado 'pendiente'")
+  if (data.estado === "facturado" || data.estado === "entregado")
+    throw new Error("El pedido ya fue facturado/entregado y no puede modificarse")
   return data
 }
 
@@ -819,6 +820,42 @@ export async function eliminarItemPedido(itemId: string, pedidoId: string) {
 
   const { error } = await supabase.from("pedidos_detalle").delete().eq("id", itemId)
   if (error) throw error
+
+  revalidatePath("/clientes-pedidos")
+  return { success: true }
+}
+
+export async function guardarItemsPedido(
+  pedidoId: string,
+  changes: Array<{ id: string; cantidad: number; precio_final: number; estado_item: string }>
+) {
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+
+  for (const change of changes) {
+    const { error } = await supabase
+      .from("pedidos_detalle")
+      .update({
+        cantidad: change.cantidad,
+        precio_final: change.precio_final,
+        subtotal: Math.round(change.precio_final * change.cantidad * 100) / 100,
+        estado_item: change.estado_item,
+      })
+      .eq("id", change.id)
+      .eq("pedido_id", pedidoId)
+    if (error) throw error
+  }
+
+  const { data: allItems } = await supabase
+    .from("pedidos_detalle")
+    .select("subtotal, es_bonificado")
+    .eq("pedido_id", pedidoId)
+
+  const total = Math.round(
+    (allItems || []).filter(i => !i.es_bonificado).reduce((s, i) => s + (i.subtotal || 0), 0) * 100
+  ) / 100
+
+  await supabase.from("pedidos").update({ total }).eq("id", pedidoId)
 
   revalidatePath("/clientes-pedidos")
   return { success: true }

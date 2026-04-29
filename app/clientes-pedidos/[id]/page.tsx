@@ -3,16 +3,18 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { agregarItemPedido, agregarItemBonificado, actualizarCantidadItem, eliminarItemPedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido } from "@/lib/actions/pedidos"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Loader2, Plus, Trash2, Search, Package, Save, ChevronDown, ChevronRight } from "lucide-react"
-import Link from "next/link"
+import { ArrowLeft, Loader2, Plus, Trash2, Search, Package, Save, ChevronDown, ChevronRight, Undo2 } from "lucide-react"
+
+type ItemEdit = { precio_final: number; cantidad: number; estado_item: string }
 
 const ESTADO_COLORS: Record<string, string> = {
   pendiente: "bg-yellow-100 text-yellow-800 border-yellow-300",
+  impreso: "bg-sky-100 text-sky-800 border-sky-300",
   en_preparacion: "bg-blue-100 text-blue-800 border-blue-300",
   facturado: "bg-emerald-100 text-emerald-800 border-emerald-300",
   entregado: "bg-green-100 text-green-800 border-green-300",
@@ -21,6 +23,7 @@ const ESTADO_COLORS: Record<string, string> = {
 
 const ESTADOS_PEDIDO = [
   { value: "pendiente", label: "Pendiente" },
+  { value: "impreso", label: "Impreso" },
   { value: "en_preparacion", label: "En Preparación" },
   { value: "pendiente_facturacion", label: "Pendiente Facturación" },
   { value: "facturado", label: "Facturado" },
@@ -42,8 +45,8 @@ export default function PedidoEditPage() {
   const [found, setFound] = useState<any[]>([])
   const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
+  const [savingAdd, setSavingAdd] = useState(false)
   const [savingBonif, setSavingBonif] = useState(false)
-  const [savingHeader, setSavingHeader] = useState(false)
   const [bonifMercaderia, setBonifMercaderia] = useState<any[]>([])
   const [queryBonif, setQueryBonif] = useState("")
   const [foundBonif, setFoundBonif] = useState<any[]>([])
@@ -51,6 +54,7 @@ export default function PedidoEditPage() {
   const [headerOpen, setHeaderOpen] = useState(true)
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [vendedores, setVendedores] = useState<any[]>([])
+  const [itemEdits, setItemEdits] = useState<Record<string, ItemEdit>>({})
   const [headerForm, setHeaderForm] = useState({
     estado: "",
     metodo_facturacion_pedido: "",
@@ -91,6 +95,7 @@ export default function PedidoEditPage() {
     const p = pedRes.data as any
     setPedido(p)
     setItems(itemsRes.data || [])
+    setItemEdits({})
     setListasPrecio(listasRes.data || [])
     setVendedores(vendRes.data || [])
     if (p?.cliente_id) {
@@ -121,10 +126,47 @@ export default function PedidoEditPage() {
     setLoading(false)
   }
 
-  async function saveHeader() {
-    setSavingHeader(true)
+  function getDisplayItem(item: any) {
+    const edit = itemEdits[item.id]
+    if (!edit) return item
+    return { ...item, precio_final: edit.precio_final, cantidad: edit.cantidad, estado_item: edit.estado_item }
+  }
+
+  function getBaseEdit(item: any): ItemEdit {
+    return itemEdits[item.id] || {
+      precio_final: item.precio_final ?? 0,
+      cantidad: item.cantidad ?? 0,
+      estado_item: item.estado_item || "PENDIENTE",
+    }
+  }
+
+  function revertItem(itemId: string) {
+    setItemEdits(prev => { const n = { ...prev }; delete n[itemId]; return n })
+  }
+
+  function toggleFaltante(origItem: any, displayItem: any) {
+    const isFaltante = displayItem.estado_item === "FALTANTE"
+    if (isFaltante) {
+      setItemEdits(prev => ({
+        ...prev,
+        [origItem.id]: {
+          precio_final: displayItem.precio_final,
+          cantidad: origItem.cantidad ?? 1,
+          estado_item: origItem.estado_item === "FALTANTE" ? "PENDIENTE" : (origItem.estado_item || "PENDIENTE"),
+        },
+      }))
+    } else {
+      setItemEdits(prev => ({
+        ...prev,
+        [origItem.id]: { precio_final: displayItem.precio_final, cantidad: 0, estado_item: "FALTANTE" },
+      }))
+    }
+  }
+
+  async function savePedido() {
+    setSaving(true)
     try {
-      const update: any = {
+      const headerUpdate: any = {
         estado: headerForm.estado,
         metodo_facturacion_pedido: headerForm.metodo_facturacion_pedido || null,
         condicion_entrega: headerForm.condicion_entrega || null,
@@ -138,13 +180,17 @@ export default function PedidoEditPage() {
         metodo_perf_plus_pedido: headerForm.metodo_perf_plus_pedido || null,
         observaciones: headerForm.observaciones || null,
       }
-      const { error } = await supabase.from("pedidos").update(update).eq("id", id)
-      if (error) throw error
+      const { error: hErr } = await supabase.from("pedidos").update(headerUpdate).eq("id", id)
+      if (hErr) throw hErr
+
+      const changes = Object.entries(itemEdits).map(([itemId, edit]) => ({ id: itemId, ...edit }))
+      if (changes.length > 0) await guardarItemsPedido(id, changes)
+
       await loadAll()
     } catch (err: any) {
-      alert(err.message || "Error al guardar encabezado")
+      alert(err.message || "Error al guardar")
     } finally {
-      setSavingHeader(false)
+      setSaving(false)
     }
   }
 
@@ -152,22 +198,19 @@ export default function PedidoEditPage() {
     setQuery(q)
     if (q.length < 2) { setFound([]); return }
     const { searchProductos } = await import("@/lib/actions/productos")
-    const res = await searchProductos(q)
-    setFound(res || [])
+    setFound((await searchProductos(q)) || [])
   }
 
   async function agregarItem(producto: any) {
-    setSaving(true)
+    setSavingAdd(true)
     try {
       await agregarItemPedido(id, producto.id, qty)
-      setQuery("")
-      setFound([])
-      setQty(1)
+      setQuery(""); setFound([]); setQty(1)
       await loadAll()
     } catch (err: any) {
       alert(err.message || "Error al agregar artículo")
     } finally {
-      setSaving(false)
+      setSavingAdd(false)
     }
   }
 
@@ -175,17 +218,14 @@ export default function PedidoEditPage() {
     setQueryBonif(q)
     if (q.length < 2) { setFoundBonif([]); return }
     const { searchProductos } = await import("@/lib/actions/productos")
-    const res = await searchProductos(q)
-    setFoundBonif(res || [])
+    setFoundBonif((await searchProductos(q)) || [])
   }
 
   async function agregarItemBonif(producto: any) {
     setSavingBonif(true)
     try {
       await agregarItemBonificado(id, producto.id, qtyBonif)
-      setQueryBonif("")
-      setFoundBonif([])
-      setQtyBonif(1)
+      setQueryBonif(""); setFoundBonif([]); setQtyBonif(1)
       await loadAll()
     } catch (err: any) {
       alert(err.message || "Error al agregar artículo bonificado")
@@ -194,20 +234,12 @@ export default function PedidoEditPage() {
     }
   }
 
-  async function actualizarCantidad(itemId: string, cantidad: number) {
-    try {
-      await actualizarCantidadItem(itemId, id, cantidad)
-      setItems(prev => prev.map(i => i.id === itemId ? { ...i, cantidad } : i))
-    } catch (err: any) {
-      alert(err.message || "Error al actualizar")
-    }
-  }
-
   async function eliminarItem(itemId: string, descripcion: string) {
     if (!confirm(`¿Quitar "${descripcion}" del pedido?`)) return
     try {
       await eliminarItemPedido(itemId, id)
       setItems(prev => prev.filter(i => i.id !== itemId))
+      revertItem(itemId)
     } catch (err: any) {
       alert(err.message || "Error al eliminar")
     }
@@ -222,7 +254,8 @@ export default function PedidoEditPage() {
   }
 
   const estadoColor = ESTADO_COLORS[pedido?.estado] || "bg-slate-100 text-slate-700 border-slate-300"
-  const totalItems = items.reduce((sum, i) => sum + (i.subtotal || 0), 0)
+  const liveTotal = items.map(i => getDisplayItem(i)).reduce((sum, i) => sum + (i.precio_final ?? 0) * (i.cantidad ?? 0), 0)
+  const hasUnsaved = Object.keys(itemEdits).length > 0
 
   const c = pedido?.clientes as any
   const listaName = (listId: string | null | undefined) => listasPrecio.find(lp => lp.id === listId)?.nombre || null
@@ -241,7 +274,7 @@ export default function PedidoEditPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
+      {/* Sticky header */}
       <header className="sticky top-0 z-10 border-b bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -261,15 +294,20 @@ export default function PedidoEditPage() {
               {pedido?.estado}
             </span>
             <span className="text-xl font-bold text-slate-800">
-              ${(pedido?.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}
+              ${liveTotal.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
+            <Button onClick={savePedido} disabled={saving} className="gap-2">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Guardar pedido
+              {hasUnsaved && <span className="ml-1 h-2 w-2 rounded-full bg-amber-400 inline-block" />}
+            </Button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
 
-        {/* ─── Encabezado del pedido ─── */}
+        {/* Encabezado del pedido */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <button
             type="button"
@@ -283,7 +321,7 @@ export default function PedidoEditPage() {
           {headerOpen && (
             <div className="border-t border-slate-100 px-5 py-5 space-y-5">
 
-              {/* Row 1: Estado, Facturación, Entrega, Vendedor */}
+              {/* Row 1 */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <Label className="text-xs text-slate-500 mb-1 block">Estado</Label>
@@ -333,7 +371,7 @@ export default function PedidoEditPage() {
                 </div>
               </div>
 
-              {/* Row 2: Lista general */}
+              {/* Row 2 */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="md:col-span-2">
                   <Label className="text-xs text-slate-500 mb-1 block">Lista de Precio General</Label>
@@ -396,18 +434,11 @@ export default function PedidoEditPage() {
                   ))}
                 </div>
               </div>
-
-              <div className="flex justify-end pt-1">
-                <Button onClick={saveHeader} disabled={savingHeader} className="gap-2">
-                  {savingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Guardar encabezado
-                </Button>
-              </div>
             </div>
           )}
         </div>
 
-        {/* ─── Banner + sección artículos bonificados ─── */}
+        {/* Banner + artículos bonificados */}
         {bonifMercaderia.length > 0 && (
           <>
             <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
@@ -460,7 +491,7 @@ export default function PedidoEditPage() {
           </>
         )}
 
-        {/* ─── Agregar artículo ─── */}
+        {/* Agregar artículo */}
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
           <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
             <Plus className="h-4 w-4 text-indigo-600" />
@@ -495,19 +526,19 @@ export default function PedidoEditPage() {
               />
               <span className="text-sm text-slate-400">uds.</span>
             </div>
-            {saving && <Loader2 className="h-5 w-5 animate-spin text-indigo-600 self-center" />}
+            {savingAdd && <Loader2 className="h-5 w-5 animate-spin text-indigo-600 self-center" />}
           </div>
         </div>
 
-        {/* ─── Lista de artículos ─── */}
+        {/* Lista de artículos */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           {/* Table header */}
           <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50 grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-            <div className="col-span-5">Artículo</div>
+            <div className="col-span-3">Artículo</div>
             <div className="col-span-2 text-right">Precio Unit.</div>
             <div className="col-span-2 text-center">Cantidad</div>
             <div className="col-span-2 text-right">Subtotal</div>
-            <div className="col-span-1"></div>
+            <div className="col-span-3"></div>
           </div>
 
           {items.length === 0 ? (
@@ -519,18 +550,23 @@ export default function PedidoEditPage() {
           ) : (
             <div className="divide-y divide-slate-100">
               {items.map((item) => {
-                const estadoItem = item.estado_item
-                const barColor = estadoItem === "COMPLETO" ? "bg-green-500" :
-                  estadoItem === "FALTANTE" ? "bg-red-500" :
-                  estadoItem === "PARCIAL" ? "bg-orange-500" : "bg-yellow-400"
-                const subtotalItem = (item.precio_final || 0) * (item.cantidad || 0)
+                const displayItem = getDisplayItem(item)
+                const hasEdit = !!itemEdits[item.id]
+                const isFaltante = displayItem.estado_item === "FALTANTE"
+                const barColor = displayItem.estado_item === "COMPLETO" ? "bg-green-500" :
+                  isFaltante ? "bg-red-500" :
+                  displayItem.estado_item === "PARCIAL" ? "bg-orange-500" : "bg-yellow-400"
+                const subtotalDisplay = (displayItem.precio_final ?? 0) * (displayItem.cantidad ?? 0)
 
                 return (
-                  <div key={item.id} className="grid grid-cols-12 gap-2 items-center px-5 py-3 hover:bg-slate-50/50 transition-colors">
-                    <div className="col-span-5 flex items-center gap-3 min-w-0">
+                  <div key={item.id} className={`grid grid-cols-12 gap-2 items-center px-5 py-3 transition-colors ${isFaltante ? "bg-red-50/40" : "hover:bg-slate-50/50"}`}>
+                    {/* Artículo */}
+                    <div className="col-span-3 flex items-center gap-2 min-w-0">
                       <div className={`w-1 h-9 rounded-full shrink-0 ${barColor}`} />
                       <div className="min-w-0">
-                        <p className="font-medium text-slate-800 text-sm leading-tight truncate">{item.articulos?.descripcion}</p>
+                        <p className={`font-medium text-sm leading-tight truncate ${isFaltante ? "text-slate-400 line-through" : "text-slate-800"}`}>
+                          {item.articulos?.descripcion}
+                        </p>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">
                           {item.articulos?.sku}
                           {item.articulos?.proveedores?.nombre ? ` · ${item.articulos.proveedores.nombre}` : ""}
@@ -538,44 +574,86 @@ export default function PedidoEditPage() {
                       </div>
                     </div>
 
-                    <div className="col-span-2 text-right">
-                      <p className="text-sm font-semibold text-slate-700">
-                        ${(item.precio_final || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </p>
+                    {/* Precio editable */}
+                    <div className="col-span-2">
+                      <div className="relative">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                        <Input
+                          key={`p-${item.id}-${displayItem.precio_final ?? 0}`}
+                          type="number" step="0.01" min={0}
+                          className="h-8 pl-5 text-right text-sm font-semibold"
+                          defaultValue={displayItem.precio_final ?? 0}
+                          onBlur={(e) => {
+                            const val = parseFloat(e.target.value)
+                            if (!isNaN(val)) {
+                              const base = getBaseEdit(item)
+                              setItemEdits(prev => ({ ...prev, [item.id]: { ...base, precio_final: val } }))
+                            }
+                          }}
+                        />
+                      </div>
                       {item.es_bonificado && (
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">BONIF</span>
                       )}
                     </div>
 
+                    {/* Cantidad */}
                     <div className="col-span-2 flex items-center justify-center gap-1">
                       <Input
-                        type="number" min={1}
+                        key={`q-${item.id}-${displayItem.cantidad ?? 0}`}
+                        type="number" min={0}
                         className="h-8 w-20 text-center font-semibold text-sm"
-                        defaultValue={item.cantidad}
+                        defaultValue={displayItem.cantidad ?? 0}
                         onBlur={(e) => {
-                          const newQty = parseInt(e.target.value)
-                          if (newQty !== item.cantidad && newQty > 0) actualizarCantidad(item.id, newQty)
+                          const val = parseInt(e.target.value)
+                          if (!isNaN(val) && val >= 0) {
+                            const base = getBaseEdit(item)
+                            setItemEdits(prev => ({ ...prev, [item.id]: { ...base, cantidad: val } }))
+                          }
                         }}
                       />
                       <span className="text-xs text-slate-400">u.</span>
                     </div>
 
+                    {/* Subtotal */}
                     <div className="col-span-2 text-right">
-                      <p className="text-sm font-bold text-slate-800">
-                        ${subtotalItem.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <p className={`text-sm font-bold ${isFaltante ? "text-slate-400 line-through" : "text-slate-800"}`}>
+                        ${subtotalDisplay.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
-                      {item.cantidad_preparada != null && item.cantidad_preparada > 0 && (
+                      {displayItem.cantidad_preparada != null && displayItem.cantidad_preparada > 0 && (
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                          item.cantidad_preparada >= item.cantidad ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
+                          displayItem.cantidad_preparada >= displayItem.cantidad ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
                         }`}>
-                          {item.cantidad_preparada} prep.
+                          {displayItem.cantidad_preparada} prep.
                         </span>
                       )}
                     </div>
 
-                    <div className="col-span-1 flex justify-end">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50"
-                        onClick={() => eliminarItem(item.id, item.articulos?.descripcion || "artículo")}>
+                    {/* Acciones */}
+                    <div className="col-span-3 flex items-center justify-end gap-1">
+                      <Button
+                        variant={isFaltante ? "destructive" : "outline"}
+                        size="sm"
+                        className="h-7 px-2 text-[11px] font-bold"
+                        onClick={() => toggleFaltante(item, displayItem)}
+                      >
+                        {isFaltante ? "✓ Faltante" : "Faltante"}
+                      </Button>
+                      {hasEdit && (
+                        <Button
+                          variant="ghost" size="icon"
+                          className="h-7 w-7 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+                          title="Revertir cambios"
+                          onClick={() => revertItem(item.id)}
+                        >
+                          <Undo2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost" size="icon"
+                        className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50"
+                        onClick={() => eliminarItem(item.id, item.articulos?.descripcion || "artículo")}
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -591,11 +669,12 @@ export default function PedidoEditPage() {
               <div className="flex justify-between items-center">
                 <div className="text-white/60 text-sm">
                   {items.length} artículo{items.length !== 1 ? "s" : ""}
+                  {hasUnsaved && <span className="ml-2 text-amber-400 text-xs font-semibold">· cambios sin guardar</span>}
                 </div>
                 <div className="text-right">
                   <p className="text-white/50 text-xs">Total del pedido</p>
                   <p className="text-2xl font-bold">
-                    ${(pedido?.total || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    ${liveTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                   </p>
                 </div>
               </div>
