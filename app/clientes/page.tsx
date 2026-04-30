@@ -81,6 +81,7 @@ export default function ClientesPage() {
     condicion_iva: "Consumidor Final",
     metodo_facturacion: "Factura",
     localidad_id: "",
+    localidad: "",
     provincia: "",
     telefono: "",
     mail: "",
@@ -347,6 +348,7 @@ export default function ClientesPage() {
       condicion_iva: cliente.condicion_iva,
       metodo_facturacion: cliente.metodo_facturacion,
       localidad_id: cliente.localidad_id || "",
+      localidad: (cliente as any).localidad || cliente.localidades?.nombre || "",
       provincia: cliente.provincia || "",
       telefono: cliente.telefono || "",
       mail: cliente.mail || "",
@@ -377,6 +379,7 @@ export default function ClientesPage() {
     setFormData({
       ...formData,
       localidad_id: localidadId,
+      localidad: localidad?.nombre || "",
       provincia: localidad?.provincia || "",
     })
   }

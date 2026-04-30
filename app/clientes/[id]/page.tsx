@@ -83,6 +83,7 @@ export default function ClienteDetailPage() {
     condicion_iva: "Consumidor Final",
     metodo_facturacion: "Factura",
     localidad_id: "",
+    localidad: "",
     provincia: "",
     telefono: "",
     mail: "",
@@ -129,6 +130,7 @@ export default function ClienteDetailPage() {
         condicion_iva: normalizeEnum(c.condicion_iva, IVA_MAP, "Consumidor Final"),
         metodo_facturacion: normalizeEnum(c.metodo_facturacion, FACTURACION_MAP, "Factura"),
         localidad_id: c.localidad_id || "",
+        localidad: c.localidad || c.localidades?.nombre || "",
         provincia: c.provincia || "",
         telefono: c.telefono || "",
         mail: c.mail || "",
@@ -266,7 +268,7 @@ export default function ClienteDetailPage() {
 
   function handleLocalidadChange(localidadId: string) {
     const loc = localidades.find((l) => l.id === localidadId)
-    setFormData({ ...formData, localidad_id: localidadId, provincia: loc?.provincia || "" })
+    setFormData({ ...formData, localidad_id: localidadId, localidad: loc?.nombre || "", provincia: loc?.provincia || "" })
   }
 
   if (loading) {
