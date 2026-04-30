@@ -162,6 +162,7 @@ export default function NuevoViajePage() {
           tipo_transporte: tipoTransporte,
           transporte_id: tipoTransporte === "transporte" ? transporteId : null,
           chofer_id: tipoTransporte === "chofer_propio" ? choferId : null,
+          chofer: tipoTransporte === "chofer_propio" ? (choferes.find(c => c.id === choferId)?.nombre ?? null) : null,
           vehiculo: tipoTransporte === "chofer_propio" ? vehiculo : null,
           porcentaje_flete: Number.parseFloat(porcentajeFlete) || 0,
           dinero_nafta: Number.parseFloat(dineroNafta) || 0,
