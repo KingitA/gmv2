@@ -101,8 +101,15 @@ export async function POST(request: NextRequest) {
       marcasMap.set(m.codigo.toUpperCase(), m.id)
     }
 
-    // Obtener todos los SKUs de la importación
-    const skus = [...new Set(rows.map(r => r.sku.trim().toUpperCase()))]
+    // Obtener todos los SKUs de la importación.
+    // Para cada SKU del Excel también incluimos la versión sin ceros iniciales,
+    // así "000370" (texto en Excel) puede matchear "370" (en DB) y viceversa.
+    const skusRaw = rows.map(r => r.sku.trim().toUpperCase())
+    const stripLeadingZeros = (s: string) => s.replace(/^0+/, "") || s
+    const skus = [...new Set(skusRaw.flatMap(s => {
+      const stripped = stripLeadingZeros(s)
+      return stripped !== s ? [s, stripped] : [s]
+    }))]
 
     // Cargar artículos existentes en chunks
     const articulosMap: Map<string, any> = new Map()
@@ -148,7 +155,12 @@ export async function POST(request: NextRequest) {
 
     for (const row of rows) {
       const skuNorm = row.sku.trim().toUpperCase()
-      const existente = articulosMap.get(skuNorm) || null
+      const skuStripped = stripLeadingZeros(skuNorm)
+      // Buscar primero por coincidencia exacta, luego sin ceros iniciales
+      // (cubre "000370" en Excel vs "370" en DB, y también "370" en Excel vs "000370" en DB)
+      const existente = articulosMap.get(skuNorm)
+        ?? (skuStripped !== skuNorm ? articulosMap.get(skuStripped) : undefined)
+        ?? null
       const articuloId = existente?.id || null
 
       // Campos directos
