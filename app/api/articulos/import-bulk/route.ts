@@ -158,6 +158,8 @@ export async function POST(request: NextRequest) {
       const skuStripped = stripLeadingZeros(skuNorm)
       // Buscar primero por coincidencia exacta, luego sin ceros iniciales
       // (cubre "000370" en Excel vs "370" en DB, y también "370" en Excel vs "000370" en DB)
+      // Fallback solo cuando el Excel tiene ceros iniciales ("000370" → busca "370").
+      // Si el Excel tiene "370" y DB tiene "000370", NO matchea (no hay inverso).
       const existente = articulosMap.get(skuNorm)
         ?? (skuStripped !== skuNorm ? articulosMap.get(skuStripped) : undefined)
         ?? null
