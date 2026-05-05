@@ -32,7 +32,8 @@ const BASE_COLS = [
   { id:"marca",  label:"Marca",        dw:90,  mw:60  },
   { id:"cat",    label:"Categoría",    dw:100, mw:60  },
   { id:"subcat", label:"Subcategoría", dw:100, mw:60  },
-  { id:"oferta", label:"Oferta",       dw:60,  mw:45  },
+  { id:"oferta",    label:"Oferta",       dw:60,  mw:45  },
+  { id:"segprecio", label:"Seg. Precio",  dw:90,  mw:60  },
 ]
 const COMPRAS_COLS = [
   { id:"plista",  label:"P. Lista",    dw:90,  mw:60 },
@@ -89,8 +90,9 @@ const COL_DB: Record<string, string> = {
   ivav:   "iva_ventas",
   pbase:  "precio_base",
   pbcont: "precio_base_contado",
-  ivac_v: "iva_compras",
-  ivav_v: "iva_ventas",
+  ivac_v:    "iva_compras",
+  ivav_v:    "iva_ventas",
+  segprecio: "segmento_precio",
 }
 // Map column ID → foreign table sort (joined columns)
 // "table" must match the alias used in the select(), not the real table name
@@ -444,6 +446,8 @@ export default function ArticulosPage() {
   const visBase=BASE_COLS.filter(c=>isVis(c.id))
   const visCompras=COMPRAS_COLS.filter(c=>isVis(c.id))
   const visVentas=VENTAS_COLS.filter(c=>isVis(c.id))
+  const isVisIvaC=isVis("ivac")&&isVis("ivac_v")
+  const isVisIvaV=isVis("ivav")&&isVis("ivav_v")
   const listRowH=mode==="ventas"&&activeSublistas.length>0?46:34
 
   return (
@@ -568,6 +572,21 @@ export default function ArticulosPage() {
                       {isVis(c.id)&&<Check className="h-2.5 w-2.5 text-white"/>}
                     </div>
                     <span className="text-xs font-medium">{c.label}</span>
+                  </button>
+                ))}
+                <div className="px-3 pt-2 pb-1 mt-0.5 border-t border-slate-100">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IVA / Seg. Precio</span>
+                </div>
+                {[
+                  {vis:isVisIvaC, label:"IVA Compras", fn:()=>setHid(p=>{const n=new Set(p);isVisIvaC?(n.add("ivac"),n.add("ivac_v")):(n.delete("ivac"),n.delete("ivac_v"));return n})},
+                  {vis:isVisIvaV, label:"IVA Ventas",  fn:()=>setHid(p=>{const n=new Set(p);isVisIvaV?(n.add("ivav"),n.add("ivav_v")):(n.delete("ivav"),n.delete("ivav_v"));return n})},
+                  {vis:isVis("segprecio"), label:"Seg. Precio", fn:()=>tglCol("segprecio")},
+                ].map(({vis,label,fn})=>(
+                  <button key={label} onClick={fn} className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-slate-50 transition-colors">
+                    <div className={`w-4 h-4 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${vis?"bg-slate-800 border-slate-800":"border-slate-300"}`}>
+                      {vis&&<Check className="h-2.5 w-2.5 text-white"/>}
+                    </div>
+                    <span className="text-xs font-medium">{label}</span>
                   </button>
                 ))}
               </div>
@@ -719,6 +738,13 @@ export default function ArticulosPage() {
                     {isVis("cat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.cat,maxWidth:cw.cat}}><span className="text-[10px] text-slate-500 truncate block">{a.categoria||"—"}</span></td>}
                     {isVis("subcat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.subcat,maxWidth:cw.subcat}}><span className="text-[10px] text-slate-500 truncate block">{a.subcategoria||"—"}</span></td>}
                     {isVis("oferta")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.oferta,maxWidth:cw.oferta}}>{a.descuento_propio>0?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700">{a.descuento_propio}%</span>:<span className="text-[10px] text-slate-300">—</span>}</td>}
+                    {isVis("segprecio")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.segprecio,maxWidth:cw.segprecio}}>
+                      {a.segmento_precio==="limpieza_bazar"
+                        ?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">L/B</span>
+                        :a.segmento_precio==="perfumeria"
+                        ?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-pink-100 text-pink-700">Perf</span>
+                        :<span className="text-[10px] text-slate-300">auto</span>}
+                    </td>}
 
                     {/* ── Compras cells ── */}
                     {mode==="compras"&&<>
@@ -1159,6 +1185,21 @@ export default function ArticulosPage() {
                     <SelectContent>
                       <SelectItem value="factura">Blanco (factura)</SelectItem>
                       <SelectItem value="presupuesto">Negro (presupuesto)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>toggleBulkField("segmento_precio",null)}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has("segmento_precio")?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                    {bulkFields.has("segmento_precio")&&<Check className="h-3 w-3 text-white"/>}
+                  </button>
+                  <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has("segmento_precio")?"text-slate-800 font-semibold":"text-slate-400"}`}>Seg. Precio</Label>
+                  <Select disabled={!bulkFields.has("segmento_precio")} value={bulkVals["segmento_precio"]??"auto"} onValueChange={v=>setBulkVals(bv=>({...bv,segmento_precio:v==="auto"?null:v}))}>
+                    <SelectTrigger className={`h-7 text-xs flex-1 ${!bulkFields.has("segmento_precio")?"opacity-30":""}`}><SelectValue/></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto (por rubro)</SelectItem>
+                      <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
+                      <SelectItem value="perfumeria">Perfumería</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
