@@ -2,8 +2,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin"
 
-const SELECT_SEARCH = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, proveedor_id"
-const SELECT_FULL   = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, proveedor_id"
+const SELECT_SEARCH = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
+const SELECT_FULL   = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
 
 export async function buscarArticulosDeposito(
   query: string,
@@ -114,20 +114,20 @@ export async function ajustarStock(
   const sb = createAdminClient()
   const { data: art, error: fetchErr } = await sb
     .from("articulos")
-    .select("cantidad_stock")
+    .select("stock_actual")
     .eq("id", articuloId)
     .single()
   if (fetchErr) throw new Error(fetchErr.message)
 
   let nuevoStock: number
-  const stockActual = art.cantidad_stock ?? 0
+  const stockActual = art.stock_actual ?? 0
   if (tipo === "correccion") nuevoStock = cantidad
   else if (tipo === "entrada") nuevoStock = stockActual + cantidad
   else nuevoStock = stockActual - cantidad
 
   const { error } = await sb
     .from("articulos")
-    .update({ cantidad_stock: nuevoStock })
+    .update({ stock_actual: nuevoStock })
     .eq("id", articuloId)
   if (error) throw new Error(error.message)
   return { success: true, nuevoStock }

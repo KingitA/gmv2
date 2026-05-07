@@ -12,7 +12,7 @@ interface Articulo {
   sku: string
   descripcion: string
   ean13: string[] | null
-  cantidad_stock: number | null
+  stock_actual: number | null
   unidades_por_bulto: number | null
   unidad_de_medida: string | null
   tipo_fraccion: string | null
@@ -131,7 +131,7 @@ export default function ModificacionArticulosPage() {
     setTipoFraccion("")
     setCantidadFraccion("")
     setTipo("correccion")
-    setCantidad(String(art.cantidad_stock ?? 0))
+    setCantidad(String(art.stock_actual ?? 0))
     setMotivo("")
     setMsgDatos(null)
     setMsgStock(null)
@@ -165,7 +165,7 @@ export default function ModificacionArticulosPage() {
     setUnidadesBulto(art.unidades_por_bulto ? String(art.unidades_por_bulto) : "")
     setUnidadMedida(art.unidad_de_medida || "")
     setTipoFraccion(""); setCantidadFraccion("")
-    setCantidad(tipo === "correccion" ? String(art.cantidad_stock ?? 0) : "")
+    setCantidad(tipo === "correccion" ? String(art.stock_actual ?? 0) : "")
     setMotivo(""); setMsgDatos(null); setMsgStock(null)
     setBusqueda(""); setResultados([]); setPanelFiltro(null)
     try {
@@ -206,9 +206,9 @@ export default function ModificacionArticulosPage() {
       const res = await ajustarStock(articulo.id, parseFloat(cantidad), tipo, motivo)
       // Actualizar el artículo en la cola de sesión también
       if (modoSesion) {
-        setSesionArts(prev => prev.map((a, i) => i === sesionIdx ? { ...a, cantidad_stock: res.nuevoStock } : a))
+        setSesionArts(prev => prev.map((a, i) => i === sesionIdx ? { ...a, stock_actual: res.nuevoStock } : a))
       }
-      setArticulo(a => a ? { ...a, cantidad_stock: res.nuevoStock } : a)
+      setArticulo(a => a ? { ...a, stock_actual: res.nuevoStock } : a)
       setCantidad(tipo === "correccion" ? String(res.nuevoStock) : "")
       setMotivo("")
       setMsgStock({ ok: true, txt: `✓ Stock: ${res.nuevoStock} ${articulo.unidad_de_medida || "UN"}` })
@@ -223,7 +223,7 @@ export default function ModificacionArticulosPage() {
 
   const stockResultante = () => {
     if (!articulo || !cantidad) return null
-    const c = parseFloat(cantidad) || 0, s = articulo.cantidad_stock ?? 0
+    const c = parseFloat(cantidad) || 0, s = articulo.stock_actual ?? 0
     if (tipo === "correccion") return c
     if (tipo === "entrada") return s + c
     return s - c
@@ -416,7 +416,7 @@ export default function ModificacionArticulosPage() {
                   <div style={C.artName}>{art.descripcion}</div>
                   <div style={C.artSub}>
                     <span style={{ fontFamily: "monospace" }}>{art.sku}</span>
-                    <span>Stock: <span style={C.artStock}>{art.cantidad_stock ?? 0}</span></span>
+                    <span>Stock: <span style={C.artStock}>{art.stock_actual ?? 0}</span></span>
                     {art.orden_deposito != null && <span style={{ color: "#6366f1" }}>#{art.orden_deposito}</span>}
                     {(art as any).proveedor?.nombre && <span style={{ color: "#6b7280" }}>{(art as any).proveedor.nombre}</span>}
                   </div>
@@ -484,7 +484,7 @@ export default function ModificacionArticulosPage() {
                     {articulo.orden_deposito != null && <span style={{ color: "#6366f1", marginLeft: 8 }}>Pos #{articulo.orden_deposito}</span>}
                   </div>
                 </div>
-                <div style={C.stockBadge}>Stock: {articulo.cantidad_stock ?? 0}</div>
+                <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
               </div>
 
               {/* Tabs */}
@@ -500,7 +500,7 @@ export default function ModificacionArticulosPage() {
                       <span style={C.label}>Tipo</span>
                       <div style={C.typeGrid}>
                         {([["entrada", "#16a34a", "📥 Entrada"], ["salida", "#dc2626", "📤 Salida"], ["correccion", "#d97706", "✏️ Corrección"]] as const).map(([t, color, label]) => (
-                          <button key={t} style={C.typeBtn(tipo === t, color)} onClick={() => { setTipo(t); setCantidad(t === "correccion" ? String(articulo.cantidad_stock ?? 0) : "") }}>
+                          <button key={t} style={C.typeBtn(tipo === t, color)} onClick={() => { setTipo(t); setCantidad(t === "correccion" ? String(articulo.stock_actual ?? 0) : "") }}>
                             {label}
                           </button>
                         ))}
@@ -572,7 +572,7 @@ export default function ModificacionArticulosPage() {
               <div style={C.artSelectedName}>{articulo.descripcion}</div>
               <div style={C.artSelectedSub}>{articulo.sku}{articulo.ean13?.length ? ` · ${articulo.ean13.join(', ')}` : ""}</div>
             </div>
-            <div style={C.stockBadge}>Stock: {articulo.cantidad_stock ?? 0}</div>
+            <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
             <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda("") }}>Cambiar</button>
           </div>
           <div style={C.tabs}>
@@ -586,7 +586,7 @@ export default function ModificacionArticulosPage() {
                   <span style={C.label}>Tipo de movimiento</span>
                   <div style={C.typeGrid}>
                     {([["entrada","#16a34a","📥 Entrada"],["salida","#dc2626","📤 Salida"],["correccion","#d97706","✏️ Corrección"]] as const).map(([t,color,label])=>(
-                      <button key={t} style={C.typeBtn(tipo===t,color)} onClick={()=>{setTipo(t);setCantidad(t==="correccion"?String(articulo.cantidad_stock??0):"")}}>
+                      <button key={t} style={C.typeBtn(tipo===t,color)} onClick={()=>{setTipo(t);setCantidad(t==="correccion"?String(articulo.stock_actual??0):"")}}>
                         {label}
                       </button>
                     ))}
