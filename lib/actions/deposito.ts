@@ -54,6 +54,20 @@ export async function getCategoriasDeposito() {
   return cats.sort()
 }
 
+// Carga TODOS los artículos de un filtro ordenados por orden_deposito (para sesión de conteo)
+export async function cargarSesionDeposito(opciones: { proveedorId?: string; categoria?: string }) {
+  const sb = createAdminClient()
+  let qb = sb.from("articulos").select(SELECT).eq("activo", true)
+  if (opciones.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
+  if (opciones.categoria) qb = qb.ilike("categoria", opciones.categoria)
+  // Artículos con orden definido primero, luego sin orden (por descripción)
+  const { data } = await qb
+    .order("orden_deposito", { ascending: true, nullsFirst: false })
+    .order("descripcion", { ascending: true })
+    .limit(500)
+  return data || []
+}
+
 export async function actualizarDatosArticulo(id: string, datos: {
   ean13?: string[] | null
   unidades_por_bulto?: number | null
