@@ -195,6 +195,8 @@ export default function ModificacionArticulosPage() {
         cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null,
       })
       setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
+      // Volver a la lista: si hay filtros activos se mantienen, sino pantalla principal
+      setTimeout(() => { setArticulo(null); setBusqueda("") }, 600)
     } catch (e: any) { setMsgDatos({ ok: false, txt: e.message || "Error al guardar" }) }
     setGuardandoDatos(false)
   }
@@ -487,64 +489,27 @@ export default function ModificacionArticulosPage() {
                 <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
               </div>
 
-              {/* Tabs */}
-              <div style={C.tabs}>
-                <div style={C.tab(seccion === "stock", "#f59e0b")} onClick={() => setSeccion("stock")}>Ajustar Stock</div>
-                <div style={C.tab(seccion === "datos", "#60a5fa")} onClick={() => setSeccion("datos")}>Datos</div>
-              </div>
-
               <div style={C.body}>
-                {seccion === "stock" && (
-                  <>
-                    <div style={C.card}>
-                      <span style={C.label}>Tipo</span>
-                      <div style={C.typeGrid}>
-                        {([["entrada", "#16a34a", "📥 Entrada"], ["salida", "#dc2626", "📤 Salida"], ["correccion", "#d97706", "✏️ Corrección"]] as const).map(([t, color, label]) => (
-                          <button key={t} style={C.typeBtn(tipo === t, color)} onClick={() => { setTipo(t); setCantidad(t === "correccion" ? String(articulo.stock_actual ?? 0) : "") }}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
+                <div style={C.card}>
+                  <span style={C.label}>Tipo</span>
+                  <div style={C.typeGrid}>
+                    {([["entrada", "#16a34a", "📥 Entrada"], ["salida", "#dc2626", "📤 Salida"], ["correccion", "#d97706", "✏️ Corrección"]] as const).map(([t, color, label]) => (
+                      <button key={t} style={C.typeBtn(tipo === t, color)} onClick={() => { setTipo(t); setCantidad(t === "correccion" ? String(articulo.stock_actual ?? 0) : "") }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={C.card}>
+                  <span style={C.label}>{tipo === "correccion" ? "Nuevo stock (valor final)" : tipo === "entrada" ? "Cantidad a ingresar" : "Cantidad a retirar"}</span>
+                  <input style={C.bigInput} type="number" inputMode="decimal" value={cantidad} onChange={e => setCantidad(e.target.value)} autoFocus />
+                  {stockResultante() !== null && (
+                    <div style={C.resultante}>
+                      Stock resultante: <strong style={{ color: (stockResultante() ?? 0) < 0 ? "#f87171" : "#34d399", fontSize: 20 }}>{stockResultante()}</strong>
                     </div>
-                    <div style={C.card}>
-                      <span style={C.label}>{tipo === "correccion" ? "Nuevo stock (valor final)" : tipo === "entrada" ? "Cantidad a ingresar" : "Cantidad a retirar"}</span>
-                      <input style={C.bigInput} type="number" inputMode="decimal" value={cantidad} onChange={e => setCantidad(e.target.value)} autoFocus />
-                      {stockResultante() !== null && (
-                        <div style={C.resultante}>
-                          Stock resultante: <strong style={{ color: (stockResultante() ?? 0) < 0 ? "#f87171" : "#34d399", fontSize: 20 }}>{stockResultante()}</strong>
-                        </div>
-                      )}
-                    </div>
-                    {msgStock && <div style={C.msg(msgStock.ok)}>{msgStock.txt}</div>}
-                  </>
-                )}
-
-                {seccion === "datos" && (
-                  <>
-                    <div style={C.card}>
-                      <span style={C.label}>EAN 13</span>
-                      <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 8, background: "#374151", border: "1px solid #4b5563", borderRadius: 12, padding: "10px 12px", minHeight: 44 }}>
-                        {ean13.map((e, i) => (
-                          <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#1f2937", border: "1px solid #4b5563", borderRadius: 20, padding: "4px 10px", color: "#e5e7eb", fontSize: 13, fontFamily: "monospace" }}>
-                            {e}<button type="button" onClick={() => setEan13(p => p.filter((_,j)=>j!==i))} style={{ color: "#9ca3af", background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
-                          </span>
-                        ))}
-                        <input type="text" inputMode="numeric" value={eanInput} onChange={e=>setEanInput(e.target.value)} placeholder={ean13.length===0?"EAN...":"Otro EAN..."} style={{ flex:1, minWidth:110, background:"transparent", border:"none", outline:"none", color:"#f9fafb", fontSize:15 }}
-                          onKeyDown={e=>{ if((e.key==="Enter"||e.key===",")&&eanInput.trim()){e.preventDefault();const v=eanInput.trim();if(!ean13.includes(v))setEan13(p=>[...p,v]);setEanInput("")}}}
-                          onBlur={()=>{if(eanInput.trim()){const v=eanInput.trim();if(!ean13.includes(v))setEan13(p=>[...p,v]);setEanInput("")}}}
-                        />
-                      </div>
-                    </div>
-                    <div style={{ ...C.card, ...C.row2 }}>
-                      <div><span style={C.label}>Unid/bulto</span><input style={C.input} type="number" inputMode="numeric" placeholder="—" value={unidadesBulto} onChange={e=>setUnidadesBulto(e.target.value)}/></div>
-                      <div><span style={C.label}>Unidad</span><input style={{...C.input,textTransform:"uppercase"}} type="text" placeholder="UN" value={unidadMedida} onChange={e=>setUnidadMedida(e.target.value.toUpperCase())}/></div>
-                    </div>
-                    {msgDatos && <div style={C.msg(msgDatos.ok)}>{msgDatos.txt}</div>}
-                    <button style={C.saveBtn("#2563eb", guardandoDatos)} onClick={guardarDatos} disabled={guardandoDatos}>
-                      {guardandoDatos ? "Guardando..." : "Guardar Datos"}
-                    </button>
-                  </>
-                )}
+                  )}
+                </div>
+                {msgStock && <div style={C.msg(msgStock.ok)}>{msgStock.txt}</div>}
               </div>
 
               {/* Barra de navegación de sesión (sticky bottom) */}
