@@ -88,11 +88,12 @@ export default function ModificacionArticulosPage() {
       setBuscando(true)
       setErrorBusqueda(null)
       try {
-        const data = await buscarArticulosDeposito(busqueda, {
+        const res = await buscarArticulosDeposito(busqueda, {
           proveedorId: filtroProveedor?.id,
           categoria: filtroCategoria ?? undefined,
         })
-        setResultados(data as Articulo[])
+        if (res.error) setErrorBusqueda(res.error)
+        setResultados(res.data as Articulo[])
       } catch (e: any) {
         setResultados([])
         setErrorBusqueda(e?.message || "Error al buscar")
@@ -107,16 +108,17 @@ export default function ModificacionArticulosPage() {
     if (!filtroProveedor && !filtroCategoria) return
     setCargandoSesion(true)
     try {
-      const arts = await cargarSesionDeposito({
+      const res = await cargarSesionDeposito({
         proveedorId: filtroProveedor?.id,
         categoria: filtroCategoria ?? undefined,
       })
-      if (arts.length === 0) { alert("No hay artículos con ese filtro"); return }
-      setSesionArts(arts as Articulo[])
+      if (res.error) { alert("Error al cargar: " + res.error); return }
+      if (res.data.length === 0) { alert("No hay artículos con ese filtro"); return }
+      setSesionArts(res.data as Articulo[])
       setSesionIdx(0)
       setSesionDone(false)
       setModoSesion(true)
-      cargarArticuloSesion(arts[0] as Articulo)
+      cargarArticuloSesion(res.data[0] as Articulo)
     } finally { setCargandoSesion(false) }
   }
 

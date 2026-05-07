@@ -8,35 +8,40 @@ const SELECT_FULL   = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_d
 export async function buscarArticulosDeposito(
   query: string,
   opciones?: { proveedorId?: string; categoria?: string }
-) {
-  const sb = createAdminClient()
-  const q = query.trim()
+): Promise<{ data: any[]; error?: string }> {
+  try {
+    const sb = createAdminClient()
+    const q = query.trim()
 
-  const base = () => {
-    let qb = sb.from("articulos").select(SELECT_SEARCH).eq("activo", true)
-    if (opciones?.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
-    if (opciones?.categoria) qb = qb.ilike("categoria", opciones.categoria)
-    return qb
+    const base = () => {
+      let qb = sb.from("articulos").select(SELECT_SEARCH).eq("activo", true)
+      if (opciones?.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
+      if (opciones?.categoria) qb = qb.ilike("categoria", opciones.categoria)
+      return qb
+    }
+
+    if (!q) {
+      const { data, error } = await base().order("descripcion").limit(50)
+      if (error) { console.error("[deposito] buscar sin q:", error.message); return { data: [], error: error.message } }
+      return { data: data || [] }
+    }
+
+    // EAN13 exact match si es solo dígitos de 8-14 caracteres
+    if (/^\d{8,14}$/.test(q)) {
+      const { data: byEan } = await base().contains("ean13", [q]).limit(5)
+      if (byEan && byEan.length > 0) return { data: byEan }
+    }
+
+    const { data, error } = await base()
+      .or(`descripcion.ilike.%${q}%,sku.ilike.%${q}%`)
+      .order("descripcion")
+      .limit(30)
+    if (error) { console.error("[deposito] buscar texto:", error.message); return { data: [], error: error.message } }
+    return { data: data || [] }
+  } catch (e: any) {
+    console.error("[deposito] buscar exception:", e?.message)
+    return { data: [], error: e?.message || "Error inesperado" }
   }
-
-  if (!q) {
-    const { data, error } = await base().order("descripcion").limit(50)
-    if (error) throw new Error(error.message)
-    return data || []
-  }
-
-  // EAN13 exact match si es solo dígitos de 8-14 caracteres
-  if (/^\d{8,14}$/.test(q)) {
-    const { data: byEan } = await base().contains("ean13", [q]).limit(5)
-    if (byEan && byEan.length > 0) return byEan
-  }
-
-  const { data, error } = await base()
-    .or(`descripcion.ilike.%${q}%,sku.ilike.%${q}%`)
-    .order("descripcion")
-    .limit(30)
-  if (error) throw new Error(error.message)
-  return data || []
 }
 
 export async function getProveedoresDeposito() {
@@ -58,18 +63,22 @@ export async function getCategoriasDeposito() {
 }
 
 // Carga TODOS los artículos de un filtro ordenados por orden_deposito (para sesión de conteo)
-export async function cargarSesionDeposito(opciones: { proveedorId?: string; categoria?: string }) {
-  const sb = createAdminClient()
-  let qb = sb.from("articulos").select(SELECT_FULL).eq("activo", true)
-  if (opciones.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
-  if (opciones.categoria) qb = qb.ilike("categoria", opciones.categoria)
-  // Artículos con orden definido primero, luego sin orden (por descripción)
-  const { data, error } = await qb
-    .order("orden_deposito", { ascending: true, nullsFirst: false })
-    .order("descripcion", { ascending: true })
-    .limit(500)
-  if (error) throw new Error(error.message)
-  return data || []
+export async function cargarSesionDeposito(opciones: { proveedorId?: string; categoria?: string }): Promise<{ data: any[]; error?: string }> {
+  try {
+    const sb = createAdminClient()
+    let qb = sb.from("articulos").select(SELECT_FULL).eq("activo", true)
+    if (opciones.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
+    if (opciones.categoria) qb = qb.ilike("categoria", opciones.categoria)
+    const { data, error } = await qb
+      .order("orden_deposito", { ascending: true, nullsFirst: false })
+      .order("descripcion", { ascending: true })
+      .limit(500)
+    if (error) { console.error("[deposito] sesion:", error.message); return { data: [], error: error.message } }
+    return { data: data || [] }
+  } catch (e: any) {
+    console.error("[deposito] sesion exception:", e?.message)
+    return { data: [], error: e?.message || "Error inesperado" }
+  }
 }
 
 export async function actualizarDatosArticulo(id: string, datos: {
