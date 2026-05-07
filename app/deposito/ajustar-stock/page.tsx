@@ -1,7 +1,10 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
-import { actualizarDatosArticulo, ajustarStock, getArticuloExtra } from "@/lib/actions/deposito"
+import { useState, useRef, useCallback, useEffect } from "react"
+import {
+  actualizarDatosArticulo, ajustarStock, getArticuloExtra,
+  buscarArticulosDeposito, getProveedoresDeposito, getCategoriasDeposito,
+} from "@/lib/actions/deposito"
 
 interface Articulo {
   id: string
@@ -17,6 +20,7 @@ interface Articulo {
 
 type TipoAjuste = "entrada" | "salida" | "correccion"
 type Seccion = "datos" | "stock"
+type FiltroPanel = "prov" | "cat" | null
 
 export default function ModificacionArticulosPage() {
   const [busqueda, setBusqueda] = useState("")
@@ -25,7 +29,15 @@ export default function ModificacionArticulosPage() {
   const [articulo, setArticulo] = useState<Articulo | null>(null)
   const [seccion, setSeccion] = useState<Seccion>("stock")
 
-  // datos
+  // Filtros
+  const [proveedores, setProveedores] = useState<{id:string;nombre:string}[]>([])
+  const [categorias, setCategorias] = useState<string[]>([])
+  const [filtroProveedor, setFiltroProveedor] = useState<{id:string;nombre:string}|null>(null)
+  const [filtroCategoria, setFiltroCategoria] = useState<string|null>(null)
+  const [panelFiltro, setPanelFiltro] = useState<FiltroPanel>(null)
+  const [busqFiltro, setBusqFiltro] = useState("")
+
+  // datos artículo
   const [ean13, setEan13] = useState<string[]>([])
   const [eanInput, setEanInput] = useState("")
   const [unidadesBulto, setUnidadesBulto] = useState("")
@@ -42,22 +54,35 @@ export default function ModificacionArticulosPage() {
   const [guardandoStock, setGuardandoStock] = useState(false)
   const [msgStock, setMsgStock] = useState<{ ok: boolean; txt: string } | null>(null)
 
-  const timeout = useRef<NodeJS.Timeout>()
+  const debounce = useRef<NodeJS.Timeout>()
 
-  const buscar = useCallback((q: string) => {
-    setBusqueda(q)
-    setResultados([])
-    if (!q || q.length < 2) return
-    clearTimeout(timeout.current)
-    timeout.current = setTimeout(async () => {
+  // Cargar listas de filtros al montar
+  useEffect(() => {
+    getProveedoresDeposito().then(setProveedores)
+    getCategoriasDeposito().then(setCategorias)
+  }, [])
+
+  // Re-buscar cuando cambian los filtros o la query
+  useEffect(() => {
+    const hayFiltro = !!(filtroProveedor || filtroCategoria)
+    if (!busqueda && !hayFiltro) { setResultados([]); return }
+    if (busqueda.length > 0 && busqueda.length < 2 && !hayFiltro) return
+
+    clearTimeout(debounce.current)
+    debounce.current = setTimeout(async () => {
       setBuscando(true)
       try {
-        const r = await fetch(`/api/deposito/picking?q=${encodeURIComponent(q)}`)
-        const data = await r.json()
-        setResultados(Array.isArray(data) ? data : [])
-      } finally { setBuscando(false) }
-    }, 300)
-  }, [])
+        const data = await buscarArticulosDeposito(busqueda, {
+          proveedorId: filtroProveedor?.id,
+          categoria: filtroCategoria ?? undefined,
+        })
+        setResultados(data as Articulo[])
+      } catch { setResultados([]) }
+      finally { setBuscando(false) }
+    }, 250)
+
+    return () => clearTimeout(debounce.current)
+  }, [busqueda, filtroProveedor, filtroCategoria])
 
   const seleccionar = async (art: Articulo) => {
     setArticulo(art)
@@ -73,20 +98,24 @@ export default function ModificacionArticulosPage() {
     setMsgStock(null)
     setBusqueda("")
     setResultados([])
-    // Cargar campos extra (tipo_fraccion, cantidad_fraccion) en background
+    setPanelFiltro(null)
     try {
       const extra = await getArticuloExtra(art.id)
       if (extra) {
         setTipoFraccion(extra.tipo_fraccion || "")
         setCantidadFraccion(extra.cantidad_fraccion ? String(extra.cantidad_fraccion) : "")
       }
-    } catch { /* columnas aún no migradas, ignorar */ }
+    } catch { /* columnas opcionales */ }
+  }
+
+  const limpiarTodo = () => {
+    setBusqueda(""); setResultados([]); setArticulo(null)
+    setFiltroProveedor(null); setFiltroCategoria(null); setPanelFiltro(null)
   }
 
   const guardarDatos = async () => {
     if (!articulo) return
-    setGuardandoDatos(true)
-    setMsgDatos(null)
+    setGuardandoDatos(true); setMsgDatos(null)
     try {
       await actualizarDatosArticulo(articulo.id, {
         ean13: ean13.length > 0 ? ean13 : null,
@@ -96,42 +125,65 @@ export default function ModificacionArticulosPage() {
         cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null,
       })
       setArticulo(a => a ? { ...a, ean13: ean13.length > 0 ? ean13 : null, unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : null, unidad_de_medida: unidadMedida || null, tipo_fraccion: tipoFraccion || null, cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null } : a)
-    } catch (e: any) {
-      setMsgDatos({ ok: false, txt: e.message || "Error al guardar" })
-    }
+      setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
+    } catch (e: any) { setMsgDatos({ ok: false, txt: e.message || "Error al guardar" }) }
     setGuardandoDatos(false)
   }
 
   const aplicarStock = async () => {
     if (!articulo || !cantidad) { setMsgStock({ ok: false, txt: "Ingresá una cantidad" }); return }
-    setGuardandoStock(true)
-    setMsgStock(null)
+    setGuardandoStock(true); setMsgStock(null)
     try {
       const res = await ajustarStock(articulo.id, parseFloat(cantidad), tipo, motivo)
       setArticulo(a => a ? { ...a, cantidad_stock: res.nuevoStock } : a)
       setCantidad(tipo === "correccion" ? String(res.nuevoStock) : "")
       setMotivo("")
       setMsgStock({ ok: true, txt: `✓ Stock actualizado: ${res.nuevoStock} ${articulo.unidad_de_medida || "UN"}` })
-    } catch (e: any) {
-      setMsgStock({ ok: false, txt: e.message || "Error al guardar" })
-    }
+    } catch (e: any) { setMsgStock({ ok: false, txt: e.message || "Error al guardar" }) }
     setGuardandoStock(false)
   }
 
   const stockResultante = () => {
     if (!articulo || !cantidad) return null
-    const c = parseFloat(cantidad) || 0
-    const s = articulo.cantidad_stock ?? 0
+    const c = parseFloat(cantidad) || 0, s = articulo.cantidad_stock ?? 0
     if (tipo === "correccion") return c
     if (tipo === "entrada") return s + c
     return s - c
   }
 
+  const mostrarResultados = busqueda.length >= 2 || !!(filtroProveedor || filtroCategoria)
+  const hayFiltroActivo = !!(filtroProveedor || filtroCategoria)
+
+  // ── Estilo (igual que antes + nuevos) ──────────────────
   const C = {
     page: { minHeight: "calc(100dvh - 64px)", background: "#111827", color: "#f9fafb", display: "flex", flexDirection: "column" as const },
-    searchBar: { background: "#1f2937", borderBottom: "1px solid #374151", padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 },
+    searchBar: { background: "#1f2937", borderBottom: "1px solid #374151", padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 },
     searchInput: { flex: 1, background: "#374151", border: "1px solid #4b5563", borderRadius: 14, padding: "14px 18px", color: "#f9fafb", fontSize: 17, outline: "none" },
     clearBtn: { width: 44, height: 44, borderRadius: 12, background: "#374151", border: "1px solid #4b5563", color: "#9ca3af", fontSize: 20, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 as const },
+
+    filterBar: { background: "#1f2937", borderBottom: "1px solid #374151", padding: "10px 14px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const },
+    filterChip: (active: boolean) => ({
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "8px 14px", borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: "pointer",
+      background: active ? "#312e81" : "#374151",
+      border: `1px solid ${active ? "#6366f1" : "#4b5563"}`,
+      color: active ? "#a5b4fc" : "#9ca3af",
+    }),
+    chipX: { marginLeft: 2, color: "#a5b4fc", fontSize: 15, lineHeight: 1 },
+
+    filterPanel: { position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0, background: "#111827", zIndex: 50, display: "flex", flexDirection: "column" as const },
+    filterSearch: { background: "#374151", border: "1px solid #4b5563", borderRadius: 12, padding: "12px 16px", color: "#f9fafb", fontSize: 16, outline: "none", margin: "12px 14px 4px" },
+    filterHeader: { padding: "14px 14px 6px", display: "flex", alignItems: "center", justifyContent: "space-between" },
+    filterTitle: { color: "#f9fafb", fontWeight: 700, fontSize: 17 },
+    filterList: { flex: 1, overflowY: "auto" as const, padding: "4px 10px 20px" },
+    filterItem: (active: boolean) => ({
+      padding: "14px 16px", borderRadius: 12, margin: "4px 0", cursor: "pointer",
+      background: active ? "#312e81" : "transparent",
+      color: active ? "#a5b4fc" : "#e5e7eb",
+      fontWeight: active ? 700 : 400, fontSize: 15,
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+    }),
+
     results: { flex: 1, overflowY: "auto" as const, padding: "12px 16px", display: "flex", flexDirection: "column" as const, gap: 8 },
     artBtn: { background: "#1f2937", border: "1px solid #374151", borderRadius: 16, padding: "16px 18px", textAlign: "left" as const, cursor: "pointer", width: "100%" },
     artName: { color: "#f9fafb", fontWeight: 700, fontSize: 17, lineHeight: 1.3 },
@@ -152,7 +204,6 @@ export default function ModificacionArticulosPage() {
       color: active ? color : "#6b7280",
       borderBottom: active ? `3px solid ${color}` : "3px solid transparent",
     }),
-
     body: { flex: 1, overflowY: "auto" as const, padding: "16px", display: "flex", flexDirection: "column" as const, gap: 14 },
     card: { background: "#1f2937", border: "1px solid #374151", borderRadius: 16, padding: "18px" },
     label: { color: "#9ca3af", fontSize: 13, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: 8, display: "block" },
@@ -177,9 +228,17 @@ export default function ModificacionArticulosPage() {
     empty: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" as const, gap: 12, color: "#4b5563" },
   }
 
-  // ── BUSQUEDA ─────────────────────────────────────────────
+  // ── Listas filtradas para el panel ──────────────────────
+  const provsFiltrados = busqFiltro
+    ? proveedores.filter(p => p.nombre.toLowerCase().includes(busqFiltro.toLowerCase()))
+    : proveedores
+  const catsFiltradas = busqFiltro
+    ? categorias.filter(c => c.toLowerCase().includes(busqFiltro.toLowerCase()))
+    : categorias
+
   return (
-    <div style={C.page}>
+    <div style={{ ...C.page, position: "relative" }}>
+
       {/* Barra de búsqueda */}
       <div style={C.searchBar}>
         <input
@@ -187,16 +246,102 @@ export default function ModificacionArticulosPage() {
           type="text" inputMode="search"
           placeholder="Escanear EAN o buscar SKU / descripción..."
           value={busqueda}
-          onChange={e => buscar(e.target.value)}
+          onChange={e => setBusqueda(e.target.value)}
           autoFocus={!articulo}
         />
-        {(busqueda || articulo) && (
-          <button style={C.clearBtn} onClick={() => { setBusqueda(""); setResultados([]); setArticulo(null) }}>✕</button>
+        {(busqueda || articulo || hayFiltroActivo) && (
+          <button style={C.clearBtn} onClick={limpiarTodo}>✕</button>
         )}
       </div>
 
-      {/* Resultados de búsqueda — se muestran siempre que haya texto, aunque haya artículo cargado */}
-      {busqueda.length >= 2 && (
+      {/* Barra de filtros */}
+      <div style={C.filterBar}>
+        <button
+          style={C.filterChip(!!filtroProveedor)}
+          onClick={() => { setPanelFiltro(panelFiltro === "prov" ? null : "prov"); setBusqFiltro("") }}
+        >
+          🏭 {filtroProveedor ? filtroProveedor.nombre : "Proveedor"}
+          {filtroProveedor && (
+            <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroProveedor(null) }}>×</span>
+          )}
+        </button>
+        <button
+          style={C.filterChip(!!filtroCategoria)}
+          onClick={() => { setPanelFiltro(panelFiltro === "cat" ? null : "cat"); setBusqFiltro("") }}
+        >
+          🗂 {filtroCategoria ?? "Categoría"}
+          {filtroCategoria && (
+            <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroCategoria(null) }}>×</span>
+          )}
+        </button>
+        {hayFiltroActivo && (
+          <button
+            style={{ ...C.filterChip(false), background: "transparent", border: "none", color: "#ef4444", fontSize: 12 }}
+            onClick={() => { setFiltroProveedor(null); setFiltroCategoria(null) }}
+          >
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
+      {/* Panel de filtro (overlay absoluto) */}
+      {panelFiltro && (
+        <div style={C.filterPanel}>
+          <div style={C.filterHeader}>
+            <span style={C.filterTitle}>
+              {panelFiltro === "prov" ? "Filtrar por Proveedor" : "Filtrar por Categoría"}
+            </span>
+            <button style={{ ...C.clearBtn, width: 36, height: 36 }} onClick={() => setPanelFiltro(null)}>✕</button>
+          </div>
+          <input
+            style={C.filterSearch}
+            type="text" inputMode="search"
+            placeholder={panelFiltro === "prov" ? "Buscar proveedor..." : "Buscar categoría..."}
+            value={busqFiltro}
+            onChange={e => setBusqFiltro(e.target.value)}
+            autoFocus
+          />
+          <div style={C.filterList}>
+            {/* Opción "Todos" */}
+            <div
+              style={C.filterItem(panelFiltro === "prov" ? !filtroProveedor : !filtroCategoria)}
+              onClick={() => {
+                if (panelFiltro === "prov") setFiltroProveedor(null)
+                else setFiltroCategoria(null)
+                setPanelFiltro(null); setBusqFiltro("")
+              }}
+            >
+              <span>— Todos —</span>
+              {(panelFiltro === "prov" ? !filtroProveedor : !filtroCategoria) && <span>✓</span>}
+            </div>
+            {panelFiltro === "prov"
+              ? provsFiltrados.map(p => (
+                  <div
+                    key={p.id}
+                    style={C.filterItem(filtroProveedor?.id === p.id)}
+                    onClick={() => { setFiltroProveedor(p); setPanelFiltro(null); setBusqFiltro("") }}
+                  >
+                    <span>{p.nombre}</span>
+                    {filtroProveedor?.id === p.id && <span>✓</span>}
+                  </div>
+                ))
+              : catsFiltradas.map(cat => (
+                  <div
+                    key={cat}
+                    style={C.filterItem(filtroCategoria === cat)}
+                    onClick={() => { setFiltroCategoria(cat); setPanelFiltro(null); setBusqFiltro("") }}
+                  >
+                    <span>{cat}</span>
+                    {filtroCategoria === cat && <span>✓</span>}
+                  </div>
+                ))
+            }
+          </div>
+        </div>
+      )}
+
+      {/* Resultados de búsqueda */}
+      {mostrarResultados && !panelFiltro && !articulo && (
         <>
           {buscando && <div style={{ padding: "16px", color: "#6b7280", fontSize: 15, textAlign: "center" }}>Buscando...</div>}
           {resultados.length > 0 && (
@@ -207,6 +352,9 @@ export default function ModificacionArticulosPage() {
                   <div style={C.artSub}>
                     <span style={{ fontFamily: "monospace" }}>{art.sku}</span>
                     <span>Stock: <span style={C.artStock}>{art.cantidad_stock ?? 0}</span></span>
+                    {(art as any).proveedor?.nombre && (
+                      <span style={{ color: "#6b7280" }}>{(art as any).proveedor.nombre}</span>
+                    )}
                   </div>
                 </button>
               ))}
@@ -214,22 +362,26 @@ export default function ModificacionArticulosPage() {
           )}
           {!buscando && resultados.length === 0 && (
             <div style={C.empty}>
-              <span style={{ fontSize: 16 }}>Sin resultados para &quot;{busqueda}&quot;</span>
+              <span style={{ fontSize: 16 }}>
+                Sin resultados{busqueda ? ` para "${busqueda}"` : ""}
+                {hayFiltroActivo ? " con los filtros activos" : ""}
+              </span>
             </div>
           )}
         </>
       )}
 
       {/* Estado vacío inicial */}
-      {!articulo && busqueda.length < 2 && (
+      {!articulo && !mostrarResultados && !panelFiltro && (
         <div style={C.empty}>
           <span style={{ fontSize: 48 }}>🔧</span>
           <span style={{ fontSize: 16 }}>Buscá un artículo para modificarlo</span>
+          <span style={{ fontSize: 13, color: "#374151" }}>o usá los filtros de proveedor / categoría</span>
         </div>
       )}
 
-      {/* Artículo seleccionado — solo visible cuando no hay búsqueda activa */}
-      {articulo && busqueda.length < 2 && (
+      {/* Artículo seleccionado */}
+      {articulo && !panelFiltro && (
         <>
           <div style={C.artSelected}>
             <div style={C.artSelectedInfo}>
@@ -240,14 +392,12 @@ export default function ModificacionArticulosPage() {
             <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda("") }}>Cambiar</button>
           </div>
 
-          {/* Tabs */}
           <div style={C.tabs}>
             <div style={C.tab(seccion === "stock", "#f59e0b")} onClick={() => setSeccion("stock")}>Ajustar Stock</div>
             <div style={C.tab(seccion === "datos", "#60a5fa")} onClick={() => setSeccion("datos")}>Datos del Artículo</div>
           </div>
 
           <div style={C.body}>
-            {/* ── STOCK ─────────────────────────── */}
             {seccion === "stock" && (
               <>
                 <div style={C.card}>
@@ -260,7 +410,6 @@ export default function ModificacionArticulosPage() {
                     ))}
                   </div>
                 </div>
-
                 <div style={C.card}>
                   <span style={C.label}>
                     {tipo === "correccion" ? "Nuevo stock (valor final)" : tipo === "entrada" ? "Cantidad a ingresar" : "Cantidad a retirar"}
@@ -278,7 +427,6 @@ export default function ModificacionArticulosPage() {
                     </div>
                   )}
                 </div>
-
                 <div style={C.card}>
                   <span style={C.label}>Motivo (opcional)</span>
                   <input
@@ -289,9 +437,7 @@ export default function ModificacionArticulosPage() {
                     onChange={e => setMotivo(e.target.value)}
                   />
                 </div>
-
                 {msgStock && <div style={C.msg(msgStock.ok)}>{msgStock.txt}</div>}
-
                 <button
                   style={C.saveBtn(tipo === "entrada" ? "#16a34a" : tipo === "salida" ? "#dc2626" : "#d97706", guardandoStock)}
                   onClick={aplicarStock}
@@ -302,7 +448,6 @@ export default function ModificacionArticulosPage() {
               </>
             )}
 
-            {/* ── DATOS ─────────────────────────── */}
             {seccion === "datos" && (
               <>
                 <div style={C.card}>
@@ -339,7 +484,6 @@ export default function ModificacionArticulosPage() {
                   </div>
                   <div style={{ color: "#6b7280", fontSize: 12, marginTop: 6 }}>Enter o coma para agregar · × para quitar</div>
                 </div>
-
                 <div style={{ ...C.card, ...C.row2 }}>
                   <div>
                     <span style={C.label}>Unid. por bulto</span>
@@ -350,7 +494,6 @@ export default function ModificacionArticulosPage() {
                     <input style={{ ...C.input, textTransform: "uppercase" }} type="text" placeholder="UN" value={unidadMedida} onChange={e => setUnidadMedida(e.target.value.toUpperCase())} />
                   </div>
                 </div>
-
                 <div style={{ ...C.card, ...C.row2 }}>
                   <div>
                     <span style={C.label}>Tipo de fracción</span>
@@ -361,9 +504,7 @@ export default function ModificacionArticulosPage() {
                     <input style={C.input} type="number" inputMode="numeric" placeholder="—" value={cantidadFraccion} onChange={e => setCantidadFraccion(e.target.value)} />
                   </div>
                 </div>
-
-                {msgDatos && !msgDatos.ok && <div style={C.msg(false)}>{msgDatos.txt}</div>}
-
+                {msgDatos && <div style={C.msg(msgDatos.ok)}>{msgDatos.txt}</div>}
                 <button style={C.saveBtn("#2563eb", guardandoDatos)} onClick={guardarDatos} disabled={guardandoDatos}>
                   {guardandoDatos ? "Guardando..." : "Guardar Datos"}
                 </button>

@@ -4,38 +4,54 @@ import { createAdminClient } from "@/lib/supabase/admin"
 
 const SELECT = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, imagen_url, proveedor:proveedores(nombre), marca:marca_id(descripcion)"
 
-export async function buscarArticulosDeposito(query: string) {
+export async function buscarArticulosDeposito(
+  query: string,
+  opciones?: { proveedorId?: string; categoria?: string }
+) {
   const sb = createAdminClient()
   const q = query.trim()
+
+  const base = () => {
+    let qb = sb.from("articulos").select(SELECT).eq("activo", true)
+    if (opciones?.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
+    if (opciones?.categoria) qb = qb.ilike("categoria", opciones.categoria)
+    return qb
+  }
+
   if (!q) {
-    const { data } = await sb
-      .from("articulos")
-      .select(SELECT)
-      .eq("activo", true)
-      .order("descripcion")
-      .limit(30)
+    const { data } = await base().order("descripcion").limit(50)
     return data || []
   }
 
   // EAN13 exact match si es solo dígitos de 8-14 caracteres
   if (/^\d{8,14}$/.test(q)) {
-    const { data: byEan } = await sb
-      .from("articulos")
-      .select(SELECT)
-      .contains("ean13", [q])
-      .eq("activo", true)
-      .limit(5)
+    const { data: byEan } = await base().contains("ean13", [q]).limit(5)
     if (byEan && byEan.length > 0) return byEan
   }
 
-  const { data } = await sb
-    .from("articulos")
-    .select(SELECT)
-    .eq("activo", true)
+  const { data } = await base()
     .or(`descripcion.ilike.%${q}%,sku.ilike.%${q}%`)
     .order("descripcion")
-    .limit(20)
+    .limit(30)
   return data || []
+}
+
+export async function getProveedoresDeposito() {
+  const sb = createAdminClient()
+  const { data } = await sb.from("proveedores").select("id, nombre").eq("activo", true).order("nombre")
+  return data || []
+}
+
+export async function getCategoriasDeposito() {
+  const sb = createAdminClient()
+  const { data } = await sb
+    .from("articulos")
+    .select("categoria")
+    .eq("activo", true)
+    .not("categoria", "is", null)
+    .neq("categoria", "")
+  const cats = [...new Set((data || []).map((a: any) => a.categoria).filter(Boolean))] as string[]
+  return cats.sort()
 }
 
 export async function actualizarDatosArticulo(id: string, datos: {
