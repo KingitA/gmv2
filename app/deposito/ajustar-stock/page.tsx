@@ -48,6 +48,9 @@ export default function ModificacionArticulosPage() {
   const [cargandoSesion, setCargandoSesion] = useState(false)
   const [sesionDone, setSesionDone] = useState(false)
 
+  // ── Error búsqueda ────────────────────────────────────
+  const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null)
+
   // ── Datos artículo ────────────────────────────────────
   const [ean13, setEan13] = useState<string[]>([])
   const [eanInput, setEanInput] = useState("")
@@ -83,13 +86,17 @@ export default function ModificacionArticulosPage() {
     clearTimeout(debounce.current)
     debounce.current = setTimeout(async () => {
       setBuscando(true)
+      setErrorBusqueda(null)
       try {
         const data = await buscarArticulosDeposito(busqueda, {
           proveedorId: filtroProveedor?.id,
           categoria: filtroCategoria ?? undefined,
         })
         setResultados(data as Articulo[])
-      } catch { setResultados([]) }
+      } catch (e: any) {
+        setResultados([])
+        setErrorBusqueda(e?.message || "Error al buscar")
+      }
       finally { setBuscando(false) }
     }, 250)
     return () => clearTimeout(debounce.current)
@@ -399,6 +406,7 @@ export default function ModificacionArticulosPage() {
       {mostrarResultados && !panelFiltro && !articulo && (
         <>
           {buscando && <div style={{ padding: "16px", color: "#6b7280", textAlign: "center" }}>Buscando...</div>}
+          {errorBusqueda && <div style={{ padding: "12px 16px", background: "#7f1d1d", color: "#fca5a5", fontSize: 13, margin: "8px 14px", borderRadius: 10 }}>Error: {errorBusqueda}</div>}
           {resultados.length > 0 && (
             <div style={C.results}>
               {resultados.map(art => (

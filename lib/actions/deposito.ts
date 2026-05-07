@@ -2,7 +2,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin"
 
-const SELECT = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, imagen_url, proveedor:proveedores(nombre), marca:marca_id(descripcion)"
+const SELECT_SEARCH = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, proveedor_id"
+const SELECT_FULL   = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, cantidad_stock, proveedor_id"
 
 export async function buscarArticulosDeposito(
   query: string,
@@ -12,14 +13,15 @@ export async function buscarArticulosDeposito(
   const q = query.trim()
 
   const base = () => {
-    let qb = sb.from("articulos").select(SELECT).eq("activo", true)
+    let qb = sb.from("articulos").select(SELECT_SEARCH).eq("activo", true)
     if (opciones?.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
     if (opciones?.categoria) qb = qb.ilike("categoria", opciones.categoria)
     return qb
   }
 
   if (!q) {
-    const { data } = await base().order("descripcion").limit(50)
+    const { data, error } = await base().order("descripcion").limit(50)
+    if (error) throw new Error(error.message)
     return data || []
   }
 
@@ -29,10 +31,11 @@ export async function buscarArticulosDeposito(
     if (byEan && byEan.length > 0) return byEan
   }
 
-  const { data } = await base()
+  const { data, error } = await base()
     .or(`descripcion.ilike.%${q}%,sku.ilike.%${q}%`)
     .order("descripcion")
     .limit(30)
+  if (error) throw new Error(error.message)
   return data || []
 }
 
@@ -57,14 +60,15 @@ export async function getCategoriasDeposito() {
 // Carga TODOS los artículos de un filtro ordenados por orden_deposito (para sesión de conteo)
 export async function cargarSesionDeposito(opciones: { proveedorId?: string; categoria?: string }) {
   const sb = createAdminClient()
-  let qb = sb.from("articulos").select(SELECT).eq("activo", true)
+  let qb = sb.from("articulos").select(SELECT_FULL).eq("activo", true)
   if (opciones.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
   if (opciones.categoria) qb = qb.ilike("categoria", opciones.categoria)
   // Artículos con orden definido primero, luego sin orden (por descripción)
-  const { data } = await qb
+  const { data, error } = await qb
     .order("orden_deposito", { ascending: true, nullsFirst: false })
     .order("descripcion", { ascending: true })
     .limit(500)
+  if (error) throw new Error(error.message)
   return data || []
 }
 
