@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from "react"
 import {
   actualizarDatosArticulo, ajustarStock, getArticuloExtra,
   buscarArticulosDeposito, getProveedoresDeposito, getCategoriasDeposito,
-  cargarSesionDeposito,
 } from "@/lib/actions/deposito"
 
 interface Articulo {
@@ -18,18 +17,18 @@ interface Articulo {
   tipo_fraccion: string | null
   cantidad_fraccion: number | null
   orden_deposito?: number | null
-  proveedor?: { nombre: string } | null
 }
 
 type TipoAjuste = "entrada" | "salida" | "correccion"
-type Seccion   = "datos" | "stock"
+type Seccion    = "datos" | "stock"
 type FiltroPanel = "prov" | "cat" | null
 
 export default function ModificacionArticulosPage() {
-  // ── Búsqueda individual ───────────────────────────────
+  // ── Búsqueda ──────────────────────────────────────────
   const [busqueda, setBusqueda] = useState("")
   const [resultados, setResultados] = useState<Articulo[]>([])
   const [buscando, setBuscando] = useState(false)
+  const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null)
   const [articulo, setArticulo] = useState<Articulo | null>(null)
   const [seccion, setSeccion] = useState<Seccion>("stock")
 
@@ -40,16 +39,6 @@ export default function ModificacionArticulosPage() {
   const [filtroCategoria, setFiltroCategoria] = useState<string|null>(null)
   const [panelFiltro, setPanelFiltro] = useState<FiltroPanel>(null)
   const [busqFiltro, setBusqFiltro] = useState("")
-
-  // ── Sesión de conteo ──────────────────────────────────
-  const [modoSesion, setModoSesion] = useState(false)
-  const [sesionArts, setSesionArts] = useState<Articulo[]>([])
-  const [sesionIdx, setSesionIdx] = useState(0)
-  const [cargandoSesion, setCargandoSesion] = useState(false)
-  const [sesionDone, setSesionDone] = useState(false)
-
-  // ── Error búsqueda ────────────────────────────────────
-  const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null)
 
   // ── Datos artículo ────────────────────────────────────
   const [ean13, setEan13] = useState<string[]>([])
@@ -70,15 +59,13 @@ export default function ModificacionArticulosPage() {
 
   const debounce = useRef<NodeJS.Timeout>()
 
-  // ── Init ─────────────────────────────────────────────
   useEffect(() => {
     getProveedoresDeposito().then(setProveedores)
     getCategoriasDeposito().then(setCategorias)
   }, [])
 
-  // Búsqueda reactiva (modo individual)
+  // Búsqueda reactiva
   useEffect(() => {
-    if (modoSesion) return
     const hayFiltro = !!(filtroProveedor || filtroCategoria)
     if (!busqueda && !hayFiltro) { setResultados([]); return }
     if (busqueda.length > 0 && busqueda.length < 2 && !hayFiltro) return
@@ -97,67 +84,11 @@ export default function ModificacionArticulosPage() {
       } catch (e: any) {
         setResultados([])
         setErrorBusqueda(e?.message || "Error al buscar")
-      }
-      finally { setBuscando(false) }
+      } finally { setBuscando(false) }
     }, 250)
     return () => clearTimeout(debounce.current)
-  }, [busqueda, filtroProveedor, filtroCategoria, modoSesion])
+  }, [busqueda, filtroProveedor, filtroCategoria])
 
-  // ── Helpers de sesión ─────────────────────────────────
-  const iniciarSesion = async () => {
-    if (!filtroProveedor && !filtroCategoria) return
-    setCargandoSesion(true)
-    try {
-      const res = await cargarSesionDeposito({
-        proveedorId: filtroProveedor?.id,
-        categoria: filtroCategoria ?? undefined,
-      })
-      if (res.error) { alert("Error al cargar: " + res.error); return }
-      if (res.data.length === 0) { alert("No hay artículos con ese filtro"); return }
-      setSesionArts(res.data as Articulo[])
-      setSesionIdx(0)
-      setSesionDone(false)
-      setModoSesion(true)
-      cargarArticuloSesion(res.data[0] as Articulo)
-    } finally { setCargandoSesion(false) }
-  }
-
-  const cargarArticuloSesion = async (art: Articulo) => {
-    setArticulo(art)
-    setEan13(Array.isArray(art.ean13) ? art.ean13 : (art.ean13 ? [art.ean13] : []))
-    setEanInput("")
-    setUnidadesBulto(art.unidades_por_bulto ? String(art.unidades_por_bulto) : "")
-    setUnidadMedida(art.unidad_de_medida || "")
-    setTipoFraccion("")
-    setCantidadFraccion("")
-    setTipo("correccion")
-    setCantidad(String(art.stock_actual ?? 0))
-    setMotivo("")
-    setMsgDatos(null)
-    setMsgStock(null)
-    try {
-      const extra = await getArticuloExtra(art.id)
-      if (extra) {
-        setTipoFraccion(extra.tipo_fraccion || "")
-        setCantidadFraccion(extra.cantidad_fraccion ? String(extra.cantidad_fraccion) : "")
-      }
-    } catch { /* columnas opcionales */ }
-  }
-
-  const avanzarSesion = (delta: 1 | -1) => {
-    const next = sesionIdx + delta
-    if (next < 0 || next >= sesionArts.length) return
-    setSesionIdx(next)
-    cargarArticuloSesion(sesionArts[next])
-    setMsgStock(null)
-  }
-
-  const salirSesion = () => {
-    setModoSesion(false); setSesionArts([]); setSesionIdx(0); setSesionDone(false)
-    setArticulo(null); setBusqueda("")
-  }
-
-  // ── Helpers modo individual ───────────────────────────
   const seleccionar = async (art: Articulo) => {
     setArticulo(art)
     setEan13(Array.isArray(art.ean13) ? art.ean13 : (art.ean13 ? [art.ean13] : []))
@@ -167,7 +98,8 @@ export default function ModificacionArticulosPage() {
     setTipoFraccion(""); setCantidadFraccion("")
     setCantidad(tipo === "correccion" ? String(art.stock_actual ?? 0) : "")
     setMotivo(""); setMsgDatos(null); setMsgStock(null)
-    setBusqueda(""); setResultados([]); setPanelFiltro(null)
+    // NO limpiar resultados — se necesitan al volver
+    setBusqueda(""); setPanelFiltro(null)
     try {
       const extra = await getArticuloExtra(art.id)
       if (extra) {
@@ -180,7 +112,6 @@ export default function ModificacionArticulosPage() {
   const limpiarTodo = () => {
     setBusqueda(""); setResultados([]); setArticulo(null)
     setFiltroProveedor(null); setFiltroCategoria(null); setPanelFiltro(null)
-    if (modoSesion) salirSesion()
   }
 
   const guardarDatos = async () => {
@@ -195,30 +126,21 @@ export default function ModificacionArticulosPage() {
         cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null,
       })
       setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
-      // Volver a la lista: si hay filtros activos se mantienen, sino pantalla principal
+      // Volver a la lista (con filtros si había, o pantalla principal si no)
       setTimeout(() => { setArticulo(null); setBusqueda("") }, 600)
     } catch (e: any) { setMsgDatos({ ok: false, txt: e.message || "Error al guardar" }) }
     setGuardandoDatos(false)
   }
 
-  const aplicarStock = async (yAvanzar = false) => {
+  const aplicarStock = async () => {
     if (!articulo || !cantidad) { setMsgStock({ ok: false, txt: "Ingresá una cantidad" }); return }
     setGuardandoStock(true); setMsgStock(null)
     try {
       const res = await ajustarStock(articulo.id, parseFloat(cantidad), tipo, motivo)
-      // Actualizar el artículo en la cola de sesión también
-      if (modoSesion) {
-        setSesionArts(prev => prev.map((a, i) => i === sesionIdx ? { ...a, stock_actual: res.nuevoStock } : a))
-      }
       setArticulo(a => a ? { ...a, stock_actual: res.nuevoStock } : a)
       setCantidad(tipo === "correccion" ? String(res.nuevoStock) : "")
       setMotivo("")
       setMsgStock({ ok: true, txt: `✓ Stock: ${res.nuevoStock} ${articulo.unidad_de_medida || "UN"}` })
-      if (yAvanzar) {
-        const next = sesionIdx + 1
-        if (next >= sesionArts.length) { setSesionDone(true); return }
-        setTimeout(() => avanzarSesion(1), 400)
-      }
     } catch (e: any) { setMsgStock({ ok: false, txt: e.message || "Error al guardar" }) }
     setGuardandoStock(false)
   }
@@ -231,8 +153,8 @@ export default function ModificacionArticulosPage() {
     return s - c
   }
 
-  const mostrarResultados = !modoSesion && (busqueda.length >= 2 || !!(filtroProveedor || filtroCategoria))
-  const hayFiltroActivo  = !!(filtroProveedor || filtroCategoria)
+  const mostrarResultados = busqueda.length >= 2 || !!(filtroProveedor || filtroCategoria)
+  const hayFiltroActivo   = !!(filtroProveedor || filtroCategoria)
 
   // ── Estilos ───────────────────────────────────────────
   const C = {
@@ -250,7 +172,6 @@ export default function ModificacionArticulosPage() {
       color: active ? "#a5b4fc" : "#9ca3af",
     }),
     chipX: { marginLeft: 2, color: "#a5b4fc", fontSize: 15, lineHeight: 1 },
-    startBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: "pointer", background: "#16a34a", border: "none", color: "#fff", marginLeft: "auto" },
 
     filterPanel: { position: "absolute" as const, top: 0, left: 0, right: 0, bottom: 0, background: "#111827", zIndex: 50, display: "flex", flexDirection: "column" as const },
     filterSearch: { background: "#374151", border: "1px solid #4b5563", borderRadius: 12, padding: "12px 16px", color: "#f9fafb", fontSize: 16, outline: "none", margin: "12px 14px 4px" },
@@ -263,23 +184,6 @@ export default function ModificacionArticulosPage() {
       color: active ? "#a5b4fc" : "#e5e7eb",
       fontWeight: active ? 700 : 400, fontSize: 15,
       display: "flex", alignItems: "center", justifyContent: "space-between",
-    }),
-
-    // Sesión
-    sesionHeader: { background: "#1f2937", borderBottom: "1px solid #374151", padding: "10px 14px" },
-    sesionLabel: { color: "#6b7280", fontSize: 12, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.08em" },
-    sesionProgress: { marginTop: 6, height: 4, background: "#374151", borderRadius: 99 },
-    sesionBar: (pct: number) => ({ height: 4, borderRadius: 99, background: "#16a34a", width: `${pct}%`, transition: "width 0.3s" }),
-    sesionNav: { display: "flex", gap: 8, padding: "10px 14px", background: "#1f2937", borderBottom: "1px solid #374151" },
-    navBtn: (disabled: boolean) => ({
-      flex: 1, padding: "12px", borderRadius: 12, fontWeight: 700, fontSize: 14, border: "none", cursor: disabled ? "not-allowed" : "pointer",
-      background: disabled ? "#1f2937" : "#374151", color: disabled ? "#374151" : "#9ca3af",
-      border: `1px solid ${disabled ? "#1f2937" : "#4b5563"}` as any,
-    }),
-    skipBtn: { flex: 1, padding: "12px", borderRadius: 12, fontWeight: 700, fontSize: 14, border: "1px solid #4b5563", cursor: "pointer", background: "transparent", color: "#9ca3af" },
-    saveNextBtn: (disabled: boolean) => ({
-      flex: 2, padding: "12px", borderRadius: 12, fontWeight: 700, fontSize: 15, border: "none", cursor: disabled ? "not-allowed" : "pointer",
-      background: disabled ? "#374151" : "#16a34a", color: disabled ? "#6b7280" : "#fff",
     }),
 
     results: { flex: 1, overflowY: "auto" as const, padding: "12px 16px", display: "flex", flexDirection: "column" as const, gap: 8 },
@@ -326,14 +230,12 @@ export default function ModificacionArticulosPage() {
 
   const provsFiltrados = busqFiltro ? proveedores.filter(p => p.nombre.toLowerCase().includes(busqFiltro.toLowerCase())) : proveedores
   const catsFiltradas  = busqFiltro ? categorias.filter(c => c.toLowerCase().includes(busqFiltro.toLowerCase())) : categorias
-  const sesionPct = sesionArts.length > 0 ? Math.round((sesionIdx / sesionArts.length) * 100) : 0
-  const sesionLabel = filtroProveedor?.nombre ?? filtroCategoria ?? "Sesión"
 
   return (
     <div style={{ ...C.page, position: "relative" }}>
 
       {/* ── Barra de búsqueda ── */}
-      {!modoSesion && (
+      {!articulo && (
         <div style={C.searchBar}>
           <input
             style={C.searchInput}
@@ -341,16 +243,16 @@ export default function ModificacionArticulosPage() {
             placeholder="Escanear EAN o buscar SKU / descripción..."
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            autoFocus={!articulo}
+            autoFocus
           />
-          {(busqueda || articulo || hayFiltroActivo) && (
+          {(busqueda || hayFiltroActivo) && (
             <button style={C.clearBtn} onClick={limpiarTodo}>✕</button>
           )}
         </div>
       )}
 
       {/* ── Barra de filtros ── */}
-      {!modoSesion && (
+      {!articulo && (
         <div style={C.filterBar}>
           <button style={C.filterChip(!!filtroProveedor)} onClick={() => { setPanelFiltro(panelFiltro === "prov" ? null : "prov"); setBusqFiltro("") }}>
             🏭 {filtroProveedor ? filtroProveedor.nombre : "Proveedor"}
@@ -361,12 +263,7 @@ export default function ModificacionArticulosPage() {
             {filtroCategoria && <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroCategoria(null) }}>×</span>}
           </button>
           {hayFiltroActivo && (
-            <button style={C.startBtn as any} onClick={iniciarSesion} disabled={cargandoSesion}>
-              {cargandoSesion ? "Cargando..." : "▶ Iniciar conteo"}
-            </button>
-          )}
-          {hayFiltroActivo && !cargandoSesion && (
-            <button style={{ ...C.filterChip(false) as any, border: "none", color: "#ef4444", fontSize: 12, marginLeft: 0 }} onClick={() => { setFiltroProveedor(null); setFiltroCategoria(null) }}>
+            <button style={{ ...C.filterChip(false) as any, border: "none", color: "#ef4444", fontSize: 12, marginLeft: "auto" }} onClick={() => { setFiltroProveedor(null); setFiltroCategoria(null) }}>
               Limpiar
             </button>
           )}
@@ -406,7 +303,7 @@ export default function ModificacionArticulosPage() {
         </div>
       )}
 
-      {/* ── Resultados búsqueda individual ── */}
+      {/* ── Resultados ── */}
       {mostrarResultados && !panelFiltro && !articulo && (
         <>
           {buscando && <div style={{ padding: "16px", color: "#6b7280", textAlign: "center" }}>Buscando...</div>}
@@ -420,117 +317,28 @@ export default function ModificacionArticulosPage() {
                     <span style={{ fontFamily: "monospace" }}>{art.sku}</span>
                     <span>Stock: <span style={C.artStock}>{art.stock_actual ?? 0}</span></span>
                     {art.orden_deposito != null && <span style={{ color: "#6366f1" }}>#{art.orden_deposito}</span>}
-                    {(art as any).proveedor?.nombre && <span style={{ color: "#6b7280" }}>{(art as any).proveedor.nombre}</span>}
                   </div>
                 </button>
               ))}
             </div>
           )}
-          {!buscando && resultados.length === 0 && (
+          {!buscando && resultados.length === 0 && !errorBusqueda && (
             <div style={C.empty}><span>Sin resultados{busqueda ? ` para "${busqueda}"` : ""}{ hayFiltroActivo ? " con filtros activos" : ""}</span></div>
           )}
         </>
       )}
 
       {/* ── Estado vacío ── */}
-      {!modoSesion && !articulo && !mostrarResultados && !panelFiltro && (
+      {!articulo && !mostrarResultados && !panelFiltro && (
         <div style={C.empty}>
           <span style={{ fontSize: 48 }}>🔧</span>
           <span style={{ fontSize: 16 }}>Buscá un artículo para modificarlo</span>
-          <span style={{ fontSize: 13 }}>o usá los filtros → "Iniciar conteo" para recorrer el depósito en orden</span>
+          <span style={{ fontSize: 13, textAlign: "center" as const }}>o filtrá por proveedor / categoría para ver el listado</span>
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════
-          MODO SESIÓN
-      ═══════════════════════════════════════════════════ */}
-      {modoSesion && (
-        <>
-          {/* Header sesión */}
-          <div style={C.sesionHeader}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={C.sesionLabel}>{sesionLabel}</span>
-              <button style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer" }} onClick={salirSesion}>✕ Salir</button>
-            </div>
-            <div style={{ marginTop: 4, fontSize: 13, color: sesionDone ? "#34d399" : "#9ca3af" }}>
-              {sesionDone
-                ? `✓ Sesión completada — ${sesionArts.length} artículos`
-                : `${sesionIdx + 1} / ${sesionArts.length} artículos`}
-            </div>
-            <div style={C.sesionProgress}>
-              <div style={C.sesionBar(sesionDone ? 100 : sesionPct)} />
-            </div>
-          </div>
-
-          {/* Pantalla de completado */}
-          {sesionDone && (
-            <div style={C.empty}>
-              <span style={{ fontSize: 56 }}>✅</span>
-              <span style={{ fontSize: 20, fontWeight: 700, color: "#34d399" }}>¡Sesión completada!</span>
-              <span style={{ fontSize: 14, color: "#6b7280" }}>{sesionArts.length} artículos revisados</span>
-              <button style={{ ...C.saveBtn("#16a34a", false), width: "auto", padding: "14px 32px", marginTop: 16 }} onClick={salirSesion}>
-                Nueva sesión
-              </button>
-            </div>
-          )}
-
-          {/* Artículo de sesión */}
-          {!sesionDone && articulo && (
-            <>
-              {/* Info artículo */}
-              <div style={C.artSelected}>
-                <div style={C.artSelectedInfo}>
-                  <div style={C.artSelectedName}>{articulo.descripcion}</div>
-                  <div style={C.artSelectedSub}>
-                    {articulo.sku}
-                    {articulo.orden_deposito != null && <span style={{ color: "#6366f1", marginLeft: 8 }}>Pos #{articulo.orden_deposito}</span>}
-                  </div>
-                </div>
-                <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
-              </div>
-
-              <div style={C.body}>
-                <div style={C.card}>
-                  <span style={C.label}>Tipo</span>
-                  <div style={C.typeGrid}>
-                    {([["entrada", "#16a34a", "📥 Entrada"], ["salida", "#dc2626", "📤 Salida"], ["correccion", "#d97706", "✏️ Corrección"]] as const).map(([t, color, label]) => (
-                      <button key={t} style={C.typeBtn(tipo === t, color)} onClick={() => { setTipo(t); setCantidad(t === "correccion" ? String(articulo.stock_actual ?? 0) : "") }}>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div style={C.card}>
-                  <span style={C.label}>{tipo === "correccion" ? "Nuevo stock (valor final)" : tipo === "entrada" ? "Cantidad a ingresar" : "Cantidad a retirar"}</span>
-                  <input style={C.bigInput} type="number" inputMode="decimal" value={cantidad} onChange={e => setCantidad(e.target.value)} autoFocus />
-                  {stockResultante() !== null && (
-                    <div style={C.resultante}>
-                      Stock resultante: <strong style={{ color: (stockResultante() ?? 0) < 0 ? "#f87171" : "#34d399", fontSize: 20 }}>{stockResultante()}</strong>
-                    </div>
-                  )}
-                </div>
-                {msgStock && <div style={C.msg(msgStock.ok)}>{msgStock.txt}</div>}
-              </div>
-
-              {/* Barra de navegación de sesión (sticky bottom) */}
-              <div style={C.sesionNav}>
-                <button style={C.navBtn(sesionIdx === 0) as any} disabled={sesionIdx === 0} onClick={() => avanzarSesion(-1)}>← Anterior</button>
-                <button style={C.skipBtn as any} onClick={() => avanzarSesion(1)}>Omitir →</button>
-                <button
-                  style={C.saveNextBtn(guardandoStock) as any}
-                  disabled={guardandoStock}
-                  onClick={() => aplicarStock(true)}
-                >
-                  {guardandoStock ? "Guardando..." : sesionIdx === sesionArts.length - 1 ? "✓ Guardar y Finalizar" : "✓ Guardar y Siguiente →"}
-                </button>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {/* ── Artículo individual (modo búsqueda) ── */}
-      {!modoSesion && articulo && !panelFiltro && (
+      {/* ── Artículo seleccionado ── */}
+      {articulo && !panelFiltro && (
         <>
           <div style={C.artSelected}>
             <div style={C.artSelectedInfo}>
@@ -569,7 +377,7 @@ export default function ModificacionArticulosPage() {
                   <input style={C.input} type="text" placeholder="Ej: conteo físico, rotura..." value={motivo} onChange={e=>setMotivo(e.target.value)}/>
                 </div>
                 {msgStock&&<div style={C.msg(msgStock.ok)}>{msgStock.txt}</div>}
-                <button style={C.saveBtn(tipo==="entrada"?"#16a34a":tipo==="salida"?"#dc2626":"#d97706",guardandoStock)} onClick={()=>aplicarStock(false)} disabled={guardandoStock}>
+                <button style={C.saveBtn(tipo==="entrada"?"#16a34a":tipo==="salida"?"#dc2626":"#d97706",guardandoStock)} onClick={aplicarStock} disabled={guardandoStock}>
                   {guardandoStock?"Guardando...":tipo==="entrada"?"Registrar Entrada":tipo==="salida"?"Registrar Salida":"Aplicar Corrección"}
                 </button>
               </>
@@ -599,7 +407,7 @@ export default function ModificacionArticulosPage() {
                   <div><span style={C.label}>Tipo de fracción</span><input style={C.input} type="text" placeholder="pack, blister..." value={tipoFraccion} onChange={e=>setTipoFraccion(e.target.value)}/></div>
                   <div><span style={C.label}>Unidades / fracción</span><input style={C.input} type="number" inputMode="numeric" placeholder="—" value={cantidadFraccion} onChange={e=>setCantidadFraccion(e.target.value)}/></div>
                 </div>
-                {msgDatos&&!msgDatos.ok&&<div style={C.msg(false)}>{msgDatos.txt}</div>}
+                {msgDatos&&<div style={C.msg(msgDatos.ok)}>{msgDatos.txt}</div>}
                 <button style={C.saveBtn("#2563eb",guardandoDatos)} onClick={guardarDatos} disabled={guardandoDatos}>
                   {guardandoDatos?"Guardando...":"Guardar Datos"}
                 </button>
