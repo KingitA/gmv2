@@ -118,6 +118,7 @@ export default function ArticulosPage() {
   const [dm,setDm]       = useState<Record<string,DescuentoTipado[]>>({})
   const [tc,setTc]       = useState(0)
   const [pg,setPg]       = useState(0)
+  const searchCache = useRef<{q:string; pf:string; results:any[]}|null>(null)
   const [provs,setProvs] = useState<any[]>([])
   const [marcas,setMarcas] = useState<any[]>([])
   const [listas,setListas] = useState<LP[]>([])
@@ -194,7 +195,8 @@ export default function ArticulosPage() {
       if(r) setReglasFormulas(r as ReglaPrecioFila[])
     })()
   },[])
-  useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0)},400); return()=>clearTimeout(t) },[st])
+  useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0);searchCache.current=null},400); return()=>clearTimeout(t) },[st])
+  useEffect(()=>{ if(sortCol||sortDir) searchCache.current=null },[sortCol,sortDir])
   useEffect(()=>{ load() },[pf,sd,pg,sortCol,sortDir])
 
   // Close panels on outside click
@@ -230,21 +232,26 @@ export default function ArticulosPage() {
     let a:any[]=[], total=0
 
     if(sd.trim()){
-      // Vector + text search via API (no pagination when searching)
       try {
-        const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}`)
-        let results=res.ok?await res.json():[]
-        if(pf!=="todos") results=results.filter((x:any)=>x.proveedor_id===pf)
-        // Client-side sort for search results
-        if(sortCol && isSortable(sortCol)) {
-          results.sort((a:any,b:any)=>{
-            const av=clientSortVal(a,sortCol)
-            const bv=clientSortVal(b,sortCol)
-            if(typeof av==="number"&&typeof bv==="number") return sortDir==="asc"?av-bv:bv-av
-            return sortDir==="asc"?String(av).localeCompare(String(bv),"es"):String(bv).localeCompare(String(av),"es")
-          })
+        // Usar caché si la query y el filtro no cambiaron (solo cambió la página)
+        let results:any[]
+        if(searchCache.current?.q===sd.trim()&&searchCache.current?.pf===pf){
+          results=searchCache.current.results
+        } else {
+          const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}`)
+          results=res.ok?await res.json():[]
+          if(pf!=="todos") results=results.filter((x:any)=>x.proveedor_id===pf)
+          if(sortCol && isSortable(sortCol)){
+            results.sort((a:any,b:any)=>{
+              const av=clientSortVal(a,sortCol)
+              const bv=clientSortVal(b,sortCol)
+              if(typeof av==="number"&&typeof bv==="number") return sortDir==="asc"?av-bv:bv-av
+              return sortDir==="asc"?String(av).localeCompare(String(bv),"es"):String(bv).localeCompare(String(av),"es")
+            })
+          }
+          searchCache.current={q:sd.trim(),pf,results}
         }
-        a=results; total=results.length
+        a=results.slice(pg*PS,(pg+1)*PS); total=results.length
       } catch { a=[]; total=0 }
     } else {
       const ascending=!sortCol||sortDir==="asc"
