@@ -435,10 +435,15 @@ export default function ArticulosPage() {
     const updates:Record<string,any>={}
     for(const f of bulkFields) updates[f]=bulkVals[f]??null
     let ok=0
+    const updatedIds=new Set<string>()
     for(const id of sel){
       const{error}=await sb.from("articulos").update(updates).eq("id",id)
-      if(!error){ ok++; setArts(p=>p.map(a=>a.id===id?{...a,...updates}:a)) }
+      if(!error){ ok++; updatedIds.add(id) }
     }
+    // Actualizar arts y caché de búsqueda con los nuevos valores
+    const applyUpdates=(list:any[])=>list.map(a=>updatedIds.has(a.id)?{...a,...updates}:a)
+    setArts(p=>applyUpdates(p))
+    if(searchCache.current) searchCache.current={...searchCache.current,results:applyUpdates(searchCache.current.results)}
     setBulkSaving(false); setShowBulkEdit(false); setBulkFields(new Set()); setBulkVals({}); clearSel()
     alert(`${ok} artículo(s) actualizados`)
   }
