@@ -253,9 +253,19 @@ export default function ArticulosPage() {
         // Supabase no soporta ORDER BY por columna de tabla joinada desde el query builder.
         // Solución: cargar solo id+FK para todos los artículos del filtro (payload pequeño),
         // ordenar en memoria con los datos de provs/marcas ya cargados, luego cargar la página.
-        let qSlim=sb.from("articulos").select("id,proveedor_id,marca_id,proveedor:proveedores(nombre),marca:marca_id(descripcion)").eq("activo",true).limit(10000)
-        if(pf!=="todos") qSlim=qSlim.eq("proveedor_id",pf)
-        const{data:slim}=await qSlim
+        // Supabase tiene un límite hardcodeado de 1000 filas por request.
+        // Traemos todos los artículos en tandas de 1000 en paralelo.
+        const{count:totalCount}=await sb.from("articulos").select("*",{count:"exact",head:true}).eq("activo",true)
+        const batchSize=1000
+        const numBatches=Math.ceil((totalCount||0)/batchSize)
+        const batches=await Promise.all(
+          Array.from({length:numBatches},(_,i)=>{
+            let q=sb.from("articulos").select("id,proveedor_id,marca_id,proveedor:proveedores(nombre),marca:marca_id(descripcion)").eq("activo",true).range(i*batchSize,(i+1)*batchSize-1)
+            if(pf!=="todos") q=q.eq("proveedor_id",pf)
+            return q
+          })
+        )
+        const slim=batches.flatMap(b=>b.data||[])
         const sorted=(slim||[]).sort((x:any,y:any)=>{
           const av=sortCol==="prov"?(x.proveedor?.nombre??""):(x.marca?.descripcion??"")
           const bv=sortCol==="prov"?(y.proveedor?.nombre??""):(y.marca?.descripcion??"")
