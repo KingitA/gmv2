@@ -15,14 +15,28 @@ export async function GET(request: NextRequest) {
 
         const supabase = createAdminClient()
 
+        // Buscar proveedores y marcas que coincidan con el término
+        const [provRes, marcaRes] = await Promise.all([
+            supabase.from("proveedores").select("id").ilike("nombre", `%${q}%`),
+            supabase.from("marcas").select("id").or(`descripcion.ilike.%${q}%,codigo.ilike.%${q}%`),
+        ])
+
+        const provIds = (provRes.data || []).map((r: any) => r.id)
+        const marcaIds = (marcaRes.data || []).map((r: any) => r.id)
+
+        // Construir filtro OR: descripcion, sku, proveedor, marca
+        let orParts = [`descripcion.ilike.%${q}%`, `sku.ilike.%${q}%`]
+        if (provIds.length > 0) orParts.push(`proveedor_id.in.(${provIds.join(",")})`)
+        if (marcaIds.length > 0) orParts.push(`marca_id.in.(${marcaIds.join(",")})`)
+
         const [{ data: textResults, error }, vectorResults] = await Promise.all([
             supabase
                 .from("articulos")
                 .select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)")
-                .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
+                .or(orParts.join(","))
                 .eq("activo", true)
-                .limit(30),
-            searchProductsByVector(q, 0.35, 20),
+                .order("descripcion", { ascending: true }),
+            searchProductsByVector(q, 0.35, 50),
         ])
 
         if (error) {
@@ -30,11 +44,20 @@ export async function GET(request: NextRequest) {
             throw error
         }
 
-        const textIds = new Set((textResults || []).map((r: any) => r.id))
+        // Relevancia: primero los que empiezan con el término, luego el resto
+        const qLower = q.toLowerCase()
+        const sorted = (textResults || []).sort((a: any, b: any) => {
+            const aStarts = a.descripcion?.toLowerCase().startsWith(qLower) ? 0 : 1
+            const bStarts = b.descripcion?.toLowerCase().startsWith(qLower) ? 0 : 1
+            if (aStarts !== bStarts) return aStarts - bStarts
+            return (a.descripcion || "").localeCompare(b.descripcion || "")
+        })
+
+        const textIds = new Set(sorted.map((r: any) => r.id))
         const merged = [
-            ...(textResults || []),
+            ...sorted,
             ...vectorResults.filter((r: any) => !textIds.has(r.id)),
-        ].slice(0, 20)
+        ]
 
         return NextResponse.json(merged)
     } catch (error: any) {
