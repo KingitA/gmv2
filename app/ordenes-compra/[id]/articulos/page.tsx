@@ -121,10 +121,17 @@ export default function CargarArticulosPage() {
       .select("*")
       .or(`sku.ilike.%${busqueda}%,ean13.ilike.%${busqueda}%,descripcion.ilike.%${busqueda}%`)
       .eq("activo", true)
-      .limit(10)
+      .order("descripcion", { ascending: true })
 
     if (data) {
-      setResultadosBusqueda(data)
+      const q = busqueda.toLowerCase()
+      const sorted = data.sort((a: any, b: any) => {
+        const aStarts = a.descripcion?.toLowerCase().startsWith(q) ? 0 : 1
+        const bStarts = b.descripcion?.toLowerCase().startsWith(q) ? 0 : 1
+        if (aStarts !== bStarts) return aStarts - bStarts
+        return (a.descripcion || "").localeCompare(b.descripcion || "")
+      })
+      setResultadosBusqueda(sorted)
     }
   }
 

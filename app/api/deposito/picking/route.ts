@@ -95,15 +95,14 @@ export async function GET(request: NextRequest) {
     if (!q || q.length < 2) return NextResponse.json([])
 
     const adminSupabase = createAdminClient()
-    const SELECT = "id, sku, descripcion, ean13, cantidad_stock, unidades_por_bulto, unidad_de_medida"
+    const SELECT = "id, sku, descripcion, ean13, stock_actual, unidades_por_bulto, unidad_de_medida"
 
     // EAN13 exacto primero (scanner — máxima prioridad, no mezclar con vector)
-    const { data: porEan } = await supabase
+    const { data: porEan } = await adminSupabase
       .from("articulos")
       .select(SELECT)
       .contains("ean13", [q])
       .eq("activo", true)
-      .limit(5)
 
     if (porEan && porEan.length > 0) return NextResponse.json(porEan)
 
@@ -113,18 +112,25 @@ export async function GET(request: NextRequest) {
         .select(SELECT)
         .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
         .eq("activo", true)
-        .limit(20),
-      searchProductsByVector(q, 0.35, 20).catch(() => []),
+        .order("descripcion", { ascending: true }),
+      searchProductsByVector(q, 0.35, 50).catch(() => []),
     ])
 
     if (textRes.error) console.error("[picking] text search error:", textRes.error.message)
 
-    const textResults = textRes.data || []
-    const textIds = new Set(textResults.map((r: any) => r.id))
+    const qLower = q.toLowerCase()
+    const sorted = (textRes.data || []).sort((a: any, b: any) => {
+      const aStarts = a.descripcion?.toLowerCase().startsWith(qLower) ? 0 : 1
+      const bStarts = b.descripcion?.toLowerCase().startsWith(qLower) ? 0 : 1
+      if (aStarts !== bStarts) return aStarts - bStarts
+      return (a.descripcion || "").localeCompare(b.descripcion || "")
+    })
+
+    const textIds = new Set(sorted.map((r: any) => r.id))
     const merged = [
-      ...textResults,
+      ...sorted,
       ...vectorResults.filter((r: any) => !textIds.has(r.id)),
-    ].slice(0, 20)
+    ]
 
     return NextResponse.json(merged)
 
