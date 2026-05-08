@@ -253,14 +253,12 @@ export default function ArticulosPage() {
         // Supabase no soporta ORDER BY por columna de tabla joinada desde el query builder.
         // Solución: cargar solo id+FK para todos los artículos del filtro (payload pequeño),
         // ordenar en memoria con los datos de provs/marcas ya cargados, luego cargar la página.
-        let qSlim=sb.from("articulos").select("id,proveedor_id,marca_id").eq("activo",true)
+        let qSlim=sb.from("articulos").select("id,proveedor_id,marca_id,proveedor:proveedores(nombre),marca:marca_id(descripcion)").eq("activo",true)
         if(pf!=="todos") qSlim=qSlim.eq("proveedor_id",pf)
         const{data:slim}=await qSlim
-        const provMap=Object.fromEntries(provs.map((p:any)=>[p.id,p.nombre]))
-        const marcaMap=Object.fromEntries(marcas.map((m:any)=>[m.id,m.descripcion]))
         const sorted=(slim||[]).sort((x:any,y:any)=>{
-          const av=sortCol==="prov"?(provMap[x.proveedor_id]??""):(marcaMap[x.marca_id]??"")
-          const bv=sortCol==="prov"?(provMap[y.proveedor_id]??""):(marcaMap[y.marca_id]??"")
+          const av=sortCol==="prov"?(x.proveedor?.nombre??""):(x.marca?.descripcion??"")
+          const bv=sortCol==="prov"?(y.proveedor?.nombre??""):(y.marca?.descripcion??"")
           return ascending?av.localeCompare(bv,"es"):bv.localeCompare(av,"es")
         })
         total=sorted.length
