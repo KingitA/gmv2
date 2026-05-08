@@ -54,12 +54,20 @@ export async function GET(request: NextRequest) {
         })
 
         const textIds = new Set(sorted.map((r: any) => r.id))
-        const merged = [
-            ...sorted,
-            ...vectorResults.filter((r: any) => !textIds.has(r.id)),
-        ]
+        const vectorOnly = vectorResults.filter((r: any) => !textIds.has(r.id))
 
-        return NextResponse.json(merged)
+        // Los resultados vectoriales no traen joins — completarlos con una sola query
+        let vectorFull: any[] = []
+        if (vectorOnly.length > 0) {
+            const { data } = await supabase
+                .from("articulos")
+                .select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)")
+                .in("id", vectorOnly.map((r: any) => r.id))
+                .eq("activo", true)
+            vectorFull = data || []
+        }
+
+        return NextResponse.json([...sorted, ...vectorFull])
     } catch (error: any) {
         console.error("[articulos/buscar] Error:", error)
         return NextResponse.json({ error: error.message || "Error buscando artículos" }, { status: 500 })
