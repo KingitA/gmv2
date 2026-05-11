@@ -10,7 +10,7 @@ import {
   type DescuentoTipado,
 } from "@/lib/pricing/calculator"
 import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
-import { vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
+import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 
 export async function POST(request: Request) {
@@ -32,12 +32,12 @@ export async function POST(request: Request) {
         *,
         cliente:clientes!pedidos_cliente_id_fkey(
           id, nombre_razon_social, condicion_iva, metodo_facturacion,
-          cuit, direccion, exento_iva
+          cuit, direccion, exento_iva, provincia
         ),
         detalle:pedidos_detalle(
           id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
-            id, descripcion, sku, iva_ventas, categoria, iva_compras
+            id, descripcion, sku, iva_ventas, categoria, iva_compras, marca_id, proveedor_id
           )
         )
       `)
@@ -65,6 +65,8 @@ export async function POST(request: Request) {
       cantidad: number
       precioUnitario: number    // precio en la línea del comprobante
       precioAntesIva: number    // neto (= precioUnitario para factura)
+      precioBase: number        // precio neto real antes de IVA (det.precio_base)
+      precioFinal: number       // precio con IVA al cliente (det.precio_final)
       ivaUnitario: number       // IVA por unidad
       ivaIncluido: boolean
       subtotalNeto: number
@@ -74,6 +76,10 @@ export async function POST(request: Request) {
       vaEnComprobante: "factura" | "presupuesto"
       segmento: string
       esBonificado: boolean
+      marcaId: string | null
+      proveedorId: string | null
+      ivaCompras: string | null
+      ivaVentas: string | null
     }
 
     const IVA_RATE = 0.21
@@ -119,6 +125,7 @@ export async function POST(request: Request) {
       const subtotalFinal = round2(subtotalNeto + subtotalIva)
 
       const segmento = detectarSegmento(art)
+      const precioBase = det.precio_base > 0 ? det.precio_base : round2(precioAlCliente / (1 + IVA_RATE))
       itemsCalculados.push({
         detalle_id: det.id,
         articulo_id: det.articulo_id,
@@ -127,6 +134,8 @@ export async function POST(request: Request) {
         cantidad: det.cantidad,
         precioUnitario,
         precioAntesIva: precioUnitario,
+        precioBase,
+        precioFinal: precioAlCliente,
         ivaUnitario,
         ivaIncluido,
         subtotalNeto,
@@ -136,6 +145,10 @@ export async function POST(request: Request) {
         vaEnComprobante,
         segmento,
         esBonificado: det.es_bonificado === true,
+        marcaId: (art as any).marca_id ?? null,
+        proveedorId: (art as any).proveedor_id ?? null,
+        ivaCompras: art.iva_compras ?? null,
+        ivaVentas: art.iva_ventas ?? null,
       })
     }
 
@@ -171,21 +184,67 @@ export async function POST(request: Request) {
       comprobantesGenerados.push({ ...resultado, _segmento: segmentoGrupo, _bonifs: bonifAplicables, _items: grupoItems })
     }
 
-    // ── Vincular kardex al comprobante generado ───────────────────────────────
-    // Cada comprobante puede cubrir un subconjunto de ítems; vinculamos por tipo
-    for (const comp of comprobantesGenerados) {
-      if (!comp.id) continue
-      const colorComp = comp.tipo_comprobante === "PRES" ? "NEGRO" : "BLANCO"
-      const metodoComp = comp.tipo_comprobante === "PRES" ? "Presupuesto" : "Factura"
-      await vincularKardexAComprobante(
-        supabase,
-        pedido_id,
-        comp.id,
-        comp.tipo_comprobante,
-        comp.numero,
-        metodoComp,
-        colorComp,
-      )
+    // ── Kardex: vincular entradas existentes o crear si no existen ────────────
+    // Entries may already exist from createPedido (session client, may have failed
+    // silently due to RLS). Here we use admin client so it always succeeds.
+    const { count: kardexCount } = await supabase
+      .from('kardex')
+      .select('id', { count: 'exact', head: true })
+      .eq('pedido_id', pedido_id)
+
+    if ((kardexCount ?? 0) > 0) {
+      // Entries exist: just link them to the comprobante
+      for (const comp of comprobantesGenerados) {
+        if (!comp.id) continue
+        const esP = comp.tipo_comprobante === 'PRES'
+        await vincularKardexAComprobante(
+          supabase, pedido_id, comp.id, comp.tipo_comprobante,
+          comp.numero, esP ? 'Presupuesto' : 'Factura', esP ? 'NEGRO' : 'BLANCO',
+        )
+      }
+    } else {
+      // No entries: create them now with full comprobante data (admin client bypasses RLS)
+      for (const comp of comprobantesGenerados) {
+        if (!comp.id) continue
+        const esP = comp.tipo_comprobante === 'PRES'
+        const colorDinero = esP ? 'NEGRO' : 'BLANCO'
+        const metodoFact = esP ? 'Presupuesto' : 'Factura'
+        for (const item of (comp._items as ItemCalculado[])) {
+          const ivaPct = !item.ivaIncluido && item.ivaUnitario > 0 ? 21 : 0
+          await insertarKardex(supabase, {
+            tipo_movimiento: 'venta',
+            fecha: nowArgentina(),
+            articulo_id: item.articulo_id,
+            cantidad: item.cantidad,
+            precio_unitario_neto: item.precioBase,
+            precio_unitario_final: item.precioFinal,
+            iva_porcentaje: ivaPct,
+            iva_monto_unitario: item.ivaUnitario,
+            iva_incluido: item.ivaIncluido,
+            subtotal_neto: round2(item.precioBase * item.cantidad),
+            subtotal_iva: item.subtotalIva,
+            subtotal_total: item.subtotalFinal,
+            cliente_id: pedido.cliente.id,
+            vendedor_id: (pedido as any).viajante_id ?? null,
+            pedido_id: pedido_id,
+            comprobante_venta_id: comp.id,
+            tipo_comprobante: comp.tipo_comprobante,
+            numero_comprobante: comp.numero,
+            metodo_facturacion: metodoFact,
+            color_dinero: colorDinero,
+            va_en_comprobante: item.vaEnComprobante,
+            provincia_destino: (pedido.cliente as any).provincia ?? null,
+          }, {
+            sku: item.sku,
+            descripcion: item.descripcion,
+            categoria: item.segmento,
+            marca_id: item.marcaId,
+            proveedor_id: item.proveedorId,
+            iva_compras: item.ivaCompras,
+            iva_ventas: item.ivaVentas,
+          })
+        }
+      }
     }
 
     // ── Distribuir percepciones IVA/IIBB del comprobante entre ítems del kardex
