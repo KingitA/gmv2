@@ -20,6 +20,7 @@ interface DataTableProps<T extends Record<string, any>> {
   exportFilename?: string
   loading?: boolean
   emptyMessage?: string
+  onRowClick?: (row: T) => void
 }
 
 export default function DataTable<T extends Record<string, any>>({
@@ -29,6 +30,7 @@ export default function DataTable<T extends Record<string, any>>({
   exportFilename = 'playroom_export',
   loading = false,
   emptyMessage = 'Sin datos para mostrar',
+  onRowClick,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -163,8 +165,9 @@ export default function DataTable<T extends Record<string, any>>({
               paginated.map((row, i) => (
                 <tr
                   key={i}
-                  style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}
-                  onMouseEnter={e => ((e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)')}
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', cursor: onRowClick ? 'pointer' : 'default' }}
+                  onClick={() => onRowClick?.(row)}
+                  onMouseEnter={e => ((e.currentTarget as HTMLTableRowElement).style.background = onRowClick ? 'rgba(124,58,237,0.06)' : 'rgba(255,255,255,0.02)')}
                   onMouseLeave={e => ((e.currentTarget as HTMLTableRowElement).style.background = 'transparent')}
                 >
                   {columns.map(col => (

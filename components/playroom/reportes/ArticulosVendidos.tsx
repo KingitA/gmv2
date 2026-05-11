@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { X } from 'lucide-react'
 import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
 import PlayroomFilters, { defaultFilters } from '@/components/playroom/PlayroomFilters'
@@ -30,6 +31,15 @@ interface ArticuloRow {
 interface ApiResponse {
   rows: ArticuloRow[]
   meta: { dateFrom: string; dateTo: string; prevFrom: string; prevTo: string; totalRevenue: number }
+}
+
+interface ClienteDetalleRow {
+  cliente_id: string
+  nombre: string
+  localidad: string
+  unidades: number
+  revenue: number
+  porcentaje: number
 }
 
 const ABC_COLOR: Record<string, string> = { A: '#7c3aed', B: '#06b6d4', C: '#6b7280' }
@@ -127,6 +137,20 @@ export default function ArticulosVendidos() {
   const [abcFiltro, setAbcFiltro] = useState('Todos')
   const [rubroFiltro, setRubroFiltro] = useState('Todos')
   const [searchText, setSearchText] = useState('')
+  const [selectedArticulo, setSelectedArticulo] = useState<ArticuloRow | null>(null)
+  const [clienteDetalle, setClienteDetalle] = useState<{ clientes: ClienteDetalleRow[]; totales: { unidades: number; revenue: number } } | null>(null)
+  const [clienteLoading, setClienteLoading] = useState(false)
+
+  useEffect(() => {
+    if (!selectedArticulo) { setClienteDetalle(null); return }
+    setClienteLoading(true)
+    const params = new URLSearchParams({ articulo_id: selectedArticulo.articulo_id, from: filters.dateFrom, to: filters.dateTo })
+    fetch(`/api/playroom/articulos-vendidos/clientes?${params}`)
+      .then(r => r.json())
+      .then(d => setClienteDetalle(d))
+      .catch(() => setClienteDetalle(null))
+      .finally(() => setClienteLoading(false))
+  }, [selectedArticulo])
 
   const load = async (f = filters) => {
     setLoading(true)
@@ -303,7 +327,109 @@ export default function ArticulosVendidos() {
         exportFilename="articulos_vendidos"
         emptyMessage="No hay artículos vendidos para el período seleccionado"
         pageSize={30}
+        onRowClick={row => setSelectedArticulo(row)}
       />
+
+      {/* Cliente detail modal */}
+      {selectedArticulo && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-end"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={() => setSelectedArticulo(null)}
+        >
+          <div
+            className="h-full w-full max-w-lg flex flex-col overflow-hidden"
+            style={{ background: '#111827', borderLeft: '1px solid rgba(255,255,255,0.08)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  Clientes que compraron
+                </p>
+                <p className="text-sm font-semibold text-white">{selectedArticulo.descripcion}</p>
+                <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                  SKU {selectedArticulo.sku} · {filters.dateFrom} → {filters.dateTo}
+                </p>
+              </div>
+              <button onClick={() => setSelectedArticulo(null)} className="p-1.5 rounded-lg mt-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Totales */}
+            {clienteDetalle && !clienteLoading && (
+              <div className="flex gap-6 px-5 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Total unidades</p>
+                  <p className="text-base font-semibold text-white font-mono">{clienteDetalle.totales.unidades.toLocaleString('es-AR')}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Venta neta total</p>
+                  <p className="text-base font-semibold text-white font-mono">{ars(clienteDetalle.totales.revenue)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Clientes</p>
+                  <p className="text-base font-semibold text-white font-mono">{clienteDetalle.clientes.length}</p>
+                </div>
+              </div>
+            )}
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto">
+              {clienteLoading ? (
+                <div className="space-y-2 p-5">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="h-12 rounded-lg animate-pulse" style={{ background: 'rgba(255,255,255,0.04)' }} />
+                  ))}
+                </div>
+              ) : clienteDetalle?.clientes.length === 0 ? (
+                <p className="px-5 py-10 text-center text-sm" style={{ color: 'rgba(255,255,255,0.25)' }}>Sin datos para el período</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      {['Cliente', 'Localidad', 'Ud.', 'Venta', '%'].map(h => (
+                        <th key={h} className={`px-4 py-2.5 ${h === 'Ud.' || h === 'Venta' || h === '%' ? 'text-right' : 'text-left'}`}
+                          style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clienteDetalle?.clientes.map((c, i) => (
+                      <tr key={c.cliente_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                        <td className="px-4 py-2.5" style={{ color: 'rgba(255,255,255,0.8)', maxWidth: 160 }}>
+                          <span className="block truncate" title={c.nombre}>{c.nombre}</span>
+                        </td>
+                        <td className="px-4 py-2.5" style={{ color: 'rgba(255,255,255,0.4)' }}>{c.localidad}</td>
+                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: 'rgba(255,255,255,0.75)' }}>
+                          {c.unidades.toLocaleString('es-AR')}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: '#a78bfa' }}>
+                          {ars(c.revenue)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <div className="w-14 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                              <div className="h-full rounded-full" style={{ width: `${Math.min(100, c.porcentaje)}%`, background: i < 3 ? '#7c3aed' : 'rgba(124,58,237,0.4)' }} />
+                            </div>
+                            <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.5)', minWidth: 32, textAlign: 'right' }}>
+                              {c.porcentaje.toFixed(1)}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
