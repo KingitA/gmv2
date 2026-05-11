@@ -75,3 +75,11 @@ vercel_*.txt
 test*.xlsx
 geminilog*.txt
 gemmap.*
+.env*.local
+
+# Archivos fiscales con datos reales (ARCA/AFIP)
+IVAV*.CSV
+IVAV*.TXT
+IVAV*.csv
+IVAV*.txt
+comprobantes_distribuidora*.html

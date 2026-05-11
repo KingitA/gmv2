@@ -89,7 +89,7 @@ export async function POST(
                 // Datos del artículo para denormalizar
                 const { data: artInfo } = await supabase
                     .from("articulos")
-                    .select("sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, stock_actual")
+                    .select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual")
                     .eq("id", item.articulo_id)
                     .single()
 
@@ -115,6 +115,7 @@ export async function POST(
                         sku: artInfo?.sku,
                         descripcion: artInfo?.descripcion,
                         categoria: artInfo?.categoria,
+                        marca_id: artInfo?.marca_id,
                         proveedor_id: artInfo?.proveedor_id,
                         iva_compras: artInfo?.iva_compras,
                         iva_ventas: artInfo?.iva_ventas,

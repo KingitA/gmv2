@@ -207,7 +207,7 @@ export async function createPedido(data: {
       id, vendedor_id, metodo_facturacion, lista_precio_id, descuento_especial,
       lista_limpieza_id, metodo_limpieza,
       lista_perf0_id, metodo_perf0,
-      lista_perf_plus_id, metodo_perf_plus
+      lista_perf_plus_id, metodo_perf_plus, provincia
     `)
     .eq("id", data.cliente_id)
     .single()
@@ -296,7 +296,7 @@ export async function createPedido(data: {
   const productIds = itemsCalc.map(i => i.producto_id)
   const { data: articulosInfo } = await supabase
     .from("articulos")
-    .select("id, sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, stock_actual")
+    .select("id, sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual")
     .in("id", productIds)
   const articulosMap = Object.fromEntries((articulosInfo || []).map((a: any) => [a.id, a]))
 
@@ -349,6 +349,7 @@ export async function createPedido(data: {
         subtotal_total: Math.round(item.precioAlCliente * item.cantidad * 100) / 100,
         cliente_id: data.cliente_id,
         vendedor_id: clienteInfo.vendedor_id ?? null,
+        provincia_destino: clienteInfo.provincia ?? null,
         pedido_id: pedido.id,
         lista_precio_id: item.listaUsadaId,
         metodo_facturacion: metodoColor,
@@ -361,6 +362,7 @@ export async function createPedido(data: {
         sku: art?.sku,
         descripcion: art?.descripcion,
         categoria: art?.categoria,
+        marca_id: art?.marca_id,
         proveedor_id: art?.proveedor_id,
         iva_compras: art?.iva_compras,
         iva_ventas: art?.iva_ventas,
@@ -615,7 +617,7 @@ export async function agregarItemPedido(
   // Fetch pedido to get lista + metodo + cliente
   const { data: pedido } = await supabase
     .from("pedidos")
-    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id)")
+    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,provincia)")
     .eq("id", pedidoId)
     .single()
   if (!pedido) throw new Error("Pedido no encontrado")
@@ -643,7 +645,7 @@ export async function agregarItemPedido(
   // ── Insertar en kardex ──────────────────────────────────────────────────
   const { data: artInfo } = await supabase
     .from("articulos")
-    .select("sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, stock_actual")
+    .select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual")
     .eq("id", productoId)
     .single()
 
@@ -678,6 +680,8 @@ export async function agregarItemPedido(
       subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
       subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
       cliente_id: pedido.cliente_id,
+      vendedor_id: (pedido.clientes as any)?.vendedor_id ?? null,
+      provincia_destino: (pedido.clientes as any)?.provincia ?? null,
       pedido_id: pedidoId,
       lista_precio_id: pedido.lista_precio_pedido_id || (pedido.clientes as any)?.lista_precio_id || null,
       metodo_facturacion: metodoRaw,
@@ -690,6 +694,7 @@ export async function agregarItemPedido(
       sku: artInfo?.sku,
       descripcion: artInfo?.descripcion,
       categoria: artInfo?.categoria,
+      marca_id: artInfo?.marca_id,
       proveedor_id: artInfo?.proveedor_id,
       iva_compras: artInfo?.iva_compras,
       iva_ventas: artInfo?.iva_ventas,
@@ -717,7 +722,7 @@ export async function agregarItemBonificado(
 
   const { data: pedido } = await supabase
     .from("pedidos")
-    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id)")
+    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,provincia)")
     .eq("id", pedidoId)
     .single()
   if (!pedido) throw new Error("Pedido no encontrado")
@@ -744,7 +749,7 @@ export async function agregarItemBonificado(
 
   const { data: artInfo } = await supabase
     .from("articulos")
-    .select("sku, descripcion, categoria, proveedor_id, iva_compras, iva_ventas, stock_actual")
+    .select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual")
     .eq("id", productoId)
     .single()
 
@@ -779,6 +784,8 @@ export async function agregarItemBonificado(
       subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
       subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
       cliente_id: pedido.cliente_id,
+      vendedor_id: (pedido.clientes as any)?.vendedor_id ?? null,
+      provincia_destino: (pedido.clientes as any)?.provincia ?? null,
       pedido_id: pedidoId,
       lista_precio_id: pedido.lista_precio_pedido_id || (pedido.clientes as any)?.lista_precio_id || null,
       metodo_facturacion: metodoRaw,
@@ -791,6 +798,7 @@ export async function agregarItemBonificado(
       sku: artInfo?.sku,
       descripcion: artInfo?.descripcion,
       categoria: artInfo?.categoria,
+      marca_id: artInfo?.marca_id,
       proveedor_id: artInfo?.proveedor_id,
       iva_compras: artInfo?.iva_compras,
       iva_ventas: artInfo?.iva_ventas,

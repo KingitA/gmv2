@@ -3,6 +3,7 @@ import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
+import { insertarKardex } from '@/lib/kardex/insertar-kardex'
 
 export async function POST(request: Request) {
   try {
@@ -34,13 +35,20 @@ export async function POST(request: Request) {
           nombre_razon_social,
           condicion_iva,
           metodo_facturacion,
-          exento_iva
+          exento_iva,
+          vendedor_id,
+          provincia
         ),
         detalle:devoluciones_detalle(
           *,
           articulo:articulos!devoluciones_detalle_articulo_id_fkey(
             id,
             descripcion,
+            sku,
+            categoria,
+            marca_id,
+            proveedor_id,
+            iva_compras,
             iva_ventas
           ),
           comprobante_original:comprobantes_venta!devoluciones_detalle_comprobante_venta_id_fkey(
@@ -165,6 +173,65 @@ export async function POST(request: Request) {
           error: "Error creando detalle del comprobante",
         },
         { status: 500 },
+      )
+    }
+
+    // Kardex: registrar movimiento por cada ítem de la NC/Reversa
+    const esNC = tipoFinal.startsWith("NC")
+    const colorDinero = esNC ? "BLANCO" : "NEGRO"
+    const metodoFact = esNC ? "Factura" : "Presupuesto"
+    for (const item of devolucion.detalle) {
+      const subtotal = Math.abs(item.subtotal || 0)
+      const cantidadAbs = Math.abs(item.cantidad || 1)
+      let precioNeto: number
+      let ivaMonto: number
+      let ivaPct: number
+      if (esNC && !devolucion.cliente.exento_iva) {
+        precioNeto = subtotal / 1.21
+        ivaMonto = subtotal - precioNeto
+        ivaPct = 21
+      } else {
+        precioNeto = subtotal
+        ivaMonto = 0
+        ivaPct = 0
+      }
+      const precioUnitNeto = cantidadAbs > 0 ? precioNeto / cantidadAbs : 0
+      const art = item.articulo
+      await insertarKardex(
+        supabase,
+        {
+          tipo_movimiento: 'nota_credito_venta',
+          fecha: todayArgentina(),
+          articulo_id: item.articulo_id,
+          cantidad: cantidadAbs,
+          precio_unitario_neto: precioUnitNeto,
+          precio_unitario_final: precioUnitNeto,
+          iva_porcentaje: ivaPct,
+          iva_monto_unitario: cantidadAbs > 0 ? ivaMonto / cantidadAbs : 0,
+          iva_incluido: !esNC,
+          subtotal_neto: precioNeto,
+          subtotal_iva: ivaMonto,
+          subtotal_total: subtotal,
+          cliente_id: devolucion.cliente_id,
+          vendedor_id: devolucion.cliente?.vendedor_id ?? null,
+          provincia_destino: devolucion.cliente?.provincia ?? null,
+          pedido_id: devolucion.pedido_id ?? null,
+          comprobante_venta_id: comprobante.id,
+          tipo_comprobante: tipoFinal,
+          numero_comprobante: numeroComprobante,
+          metodo_facturacion: metodoFact,
+          color_dinero: colorDinero,
+          operador_id: auth.user.id,
+        },
+        {
+          sku: art?.sku,
+          descripcion: art?.descripcion,
+          categoria: art?.categoria,
+          marca_id: art?.marca_id,
+          proveedor_id: art?.proveedor_id,
+          iva_compras: art?.iva_compras,
+          iva_ventas: art?.iva_ventas,
+        },
       )
     }
 

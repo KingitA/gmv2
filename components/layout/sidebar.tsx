@@ -9,6 +9,7 @@ interface NavItem {
   label: string
   href: string
   icon: string
+  badge?: string
 }
 
 interface NavSection {
@@ -53,6 +54,12 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    title: 'Analytics',
+    items: [
+      { label: 'PLAYROOM', href: '/playroom', icon: '📈', badge: 'BI' },
+    ],
+  },
+  {
     title: 'Configuración',
     items: [
       { label: 'Tablas', href: '/tablas', icon: '⚙️' },
@@ -71,7 +78,6 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // No mostrar sidebar en rutas de auth ni en app depósito
   const isAuthRoute = pathname?.startsWith('/auth')
   const isDepositoRoute = pathname?.startsWith('/deposito')
   if (isAuthRoute || isDepositoRoute) return null
@@ -124,7 +130,18 @@ export function Sidebar() {
                       }`}
                   >
                     <span className="text-[15px] w-[18px] text-center">{item.icon}</span>
-                    <span className="truncate">{item.label}</span>
+                    <span className="truncate flex-1">{item.label}</span>
+                    {item.badge && (
+                      <span
+                        className="text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+                        style={{
+                          background: 'linear-gradient(135deg, #7c3aed, #06b6d4)',
+                          color: '#fff',
+                        }}
+                      >
+                        {item.badge}
+                      </span>
+                    )}
                   </Link>
                 )
               })}
