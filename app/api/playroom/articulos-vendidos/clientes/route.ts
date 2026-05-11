@@ -1,9 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 
-const TIPOS_VENTA = ['FA', 'FB', 'FC']
-const TIPOS_NC = ['NCA', 'NCB', 'NCC']
-
 export async function GET(req: NextRequest) {
   try {
     const supabase = await createClient()
@@ -13,62 +10,38 @@ export async function GET(req: NextRequest) {
     if (!articuloId) return NextResponse.json({ error: 'articulo_id requerido' }, { status: 400 })
 
     const dateFrom = searchParams.get('from') ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-    const dateTo = searchParams.get('to') ?? new Date().toISOString().slice(0, 10)
+    const dateTo   = searchParams.get('to')   ?? new Date().toISOString().slice(0, 10)
 
-    // Comprobantes del período → mapa pedido_id → signo
-    const { data: comprobantes } = await supabase
-      .from('comprobantes_venta')
-      .select('pedido_id, tipo_comprobante, fecha')
+    // Leer directamente del kardex — única fuente de verdad
+    const { data: movimientos, error } = await supabase
+      .from('kardex')
+      .select('cliente_id, cantidad, subtotal_total, precio_unitario_final, tipo_movimiento')
+      .eq('articulo_id', articuloId)
       .gte('fecha', dateFrom)
       .lte('fecha', dateTo)
-      .in('tipo_comprobante', [...TIPOS_VENTA, ...TIPOS_NC])
+      .in('tipo_movimiento', ['venta', 'nota_credito_venta'])
+      .not('cliente_id', 'is', null)
 
-    if (!comprobantes?.length) return NextResponse.json({ clientes: [], totales: { unidades: 0, revenue: 0 } })
-
-    const pedidoSignoMap = new Map<string, number>()
-    for (const c of comprobantes) {
-      if (!c.pedido_id) continue
-      const signo = TIPOS_NC.includes(c.tipo_comprobante) ? -1 : 1
-      // Si el mismo pedido tiene FA y NC, el último gana (edge case raro)
-      pedidoSignoMap.set(c.pedido_id, signo)
+    if (error) throw error
+    if (!movimientos?.length) {
+      return NextResponse.json({ clientes: [], totales: { unidades: 0, revenue: 0 } })
     }
 
-    const pedidoIds = [...pedidoSignoMap.keys()]
-
-    // Detalles del artículo en esos pedidos
-    const { data: detalles } = await supabase
-      .from('pedidos_detalle')
-      .select('pedido_id, cantidad, precio_final')
-      .eq('articulo_id', articuloId)
-      .in('pedido_id', pedidoIds)
-
-    if (!detalles?.length) return NextResponse.json({ clientes: [], totales: { unidades: 0, revenue: 0 } })
-
-    // Pedidos → cliente_id
-    const detPedidoIds = [...new Set(detalles.map(d => d.pedido_id))]
-    const { data: pedidos } = await supabase
-      .from('pedidos')
-      .select('id, cliente_id')
-      .in('id', detPedidoIds)
-
-    const pedidoClienteMap = new Map((pedidos ?? []).map(p => [p.id, p.cliente_id]))
-
-    // Agregar por cliente
+    // Agregar por cliente — NC resta unidades y revenue
     const aggMap = new Map<string, { unidades: number; revenue: number }>()
-    for (const d of detalles) {
-      const clienteId = pedidoClienteMap.get(d.pedido_id)
-      if (!clienteId) continue
-      const signo = pedidoSignoMap.get(d.pedido_id) ?? 1
-      const qty = Number(d.cantidad ?? 0) * signo
-      const rev = Number(d.precio_final ?? 0) * Number(d.cantidad ?? 0) * signo
+    for (const m of movimientos) {
+      if (!m.cliente_id) continue
+      const signo = m.tipo_movimiento === 'nota_credito_venta' ? -1 : 1
+      const qty = Number(m.cantidad ?? 0) * signo
+      const rev = Number(m.subtotal_total ?? 0) * signo
 
-      if (!aggMap.has(clienteId)) aggMap.set(clienteId, { unidades: 0, revenue: 0 })
-      const agg = aggMap.get(clienteId)!
+      if (!aggMap.has(m.cliente_id)) aggMap.set(m.cliente_id, { unidades: 0, revenue: 0 })
+      const agg = aggMap.get(m.cliente_id)!
       agg.unidades += qty
-      agg.revenue += rev
+      agg.revenue  += rev
     }
 
-    // Clientes
+    // Nombres de clientes
     const clienteIds = [...aggMap.keys()]
     const { data: clientes } = await supabase
       .from('clientes')
@@ -76,18 +49,23 @@ export async function GET(req: NextRequest) {
       .in('id', clienteIds)
     const clienteMap = new Map((clientes ?? []).map(c => [c.id, c]))
 
-    const totalRevenue = [...aggMap.values()].reduce((s, a) => s + a.revenue, 0)
+    const totalRevenue  = [...aggMap.values()].reduce((s, a) => s + a.revenue, 0)
     const totalUnidades = [...aggMap.values()].reduce((s, a) => s + a.unidades, 0)
 
     const rows = [...aggMap.entries()]
       .map(([clienteId, agg]) => {
         const cl = clienteMap.get(clienteId)
+        // precio unitario promedio ponderado por las ventas del período
+        const precioUnitario = agg.unidades !== 0
+          ? Math.abs(agg.revenue / agg.unidades)
+          : 0
         return {
           cliente_id: clienteId,
           nombre: cl?.nombre_razon_social ?? cl?.nombre ?? clienteId,
           localidad: cl?.localidad ?? '—',
           unidades: Math.round(agg.unidades),
           revenue: agg.revenue,
+          precio_unitario: precioUnitario,
           porcentaje: totalRevenue > 0 ? (agg.revenue / totalRevenue) * 100 : 0,
         }
       })

@@ -39,6 +39,7 @@ interface ClienteDetalleRow {
   localidad: string
   unidades: number
   revenue: number
+  precio_unitario: number
   porcentaje: number
 }
 
@@ -390,8 +391,8 @@ export default function ArticulosVendidos() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      {['Cliente', 'Localidad', 'Ud.', 'Venta', '%'].map(h => (
-                        <th key={h} className={`px-4 py-2.5 ${h === 'Ud.' || h === 'Venta' || h === '%' ? 'text-right' : 'text-left'}`}
+                      {['Cliente', 'Localidad', 'Ud.', 'P. Unit.', 'Venta', '%'].map(h => (
+                        <th key={h} className={`px-4 py-2.5 ${h === 'Ud.' || h === 'P. Unit.' || h === 'Venta' || h === '%' ? 'text-right' : 'text-left'}`}
                           style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                           {h}
                         </th>
@@ -407,6 +408,9 @@ export default function ArticulosVendidos() {
                         <td className="px-4 py-2.5" style={{ color: 'rgba(255,255,255,0.4)' }}>{c.localidad}</td>
                         <td className="px-4 py-2.5 text-right font-mono" style={{ color: 'rgba(255,255,255,0.75)' }}>
                           {c.unidades.toLocaleString('es-AR')}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                          {c.precio_unitario > 0 ? ars(c.precio_unitario) : '—'}
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: '#a78bfa' }}>
                           {ars(c.revenue)}

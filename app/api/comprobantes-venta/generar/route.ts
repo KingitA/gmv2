@@ -32,7 +32,7 @@ export async function POST(request: Request) {
         *,
         cliente:clientes!pedidos_cliente_id_fkey(
           id, nombre_razon_social, condicion_iva, metodo_facturacion,
-          cuit, direccion, exento_iva, provincia
+          cuit, direccion, exento_iva, provincia, vendedor_id
         ),
         detalle:pedidos_detalle(
           id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item,
@@ -225,7 +225,7 @@ export async function POST(request: Request) {
             subtotal_iva: item.subtotalIva,
             subtotal_total: item.subtotalFinal,
             cliente_id: pedido.cliente.id,
-            vendedor_id: (pedido as any).viajante_id ?? null,
+            vendedor_id: (pedido.cliente as any).vendedor_id ?? null,
             pedido_id: pedido_id,
             comprobante_venta_id: comp.id,
             tipo_comprobante: comp.tipo_comprobante,
