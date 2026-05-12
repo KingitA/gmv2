@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     else if (tipoComp === 'presupuesto') query = query.in('tipo_comprobante', ['PRES', 'REV'])
     if (fuente === 'comprobante') query = query.not('comprobante_venta_id', 'is', null)
 
-    const { data: movimientos, error } = await query
+    const { data: movimientos, error } = await query.limit(10000)
 
     if (error) throw error
     if (!movimientos?.length) {
