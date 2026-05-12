@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     // Datos adicionales que no están denormalizados en kardex
     const articuloIds = [...new Set(movimientos.map(m => m.articulo_id))]
     const [{ data: articulos }, { data: rubros }, { data: marcas }, { data: proveedores }] = await Promise.all([
-      supabase.from('articulos').select('id, rubro_id, rubro, precio_compra, ultimo_costo').in('id', articuloIds),
+      supabase.from('articulos').select('id, rubro_id, rubro, precio_compra, ultimo_costo, marca_id').in('id', articuloIds),
       supabase.from('rubros').select('id, nombre'),
       supabase.from('marcas').select('id, descripcion'),
       supabase.from('proveedores').select('id, sigla, nombre'),
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
     const artMap   = new Map((articulos   ?? []).map(a => [a.id, a]))
     const rubroMap = new Map((rubros      ?? []).map(r => [r.id, r.nombre]))
     const marcaMap = new Map((marcas      ?? []).map(m => [m.id, m.descripcion]))
-    const provMap  = new Map((proveedores ?? []).map(p => [p.id, p.sigla || p.nombre]))
+    const provMap  = new Map((proveedores ?? []).map(p => [p.id, p.nombre]))
 
     type Agg = {
       units: number; unitsPrev: number
@@ -148,7 +148,7 @@ export async function GET(req: NextRequest) {
           sku: agg.sku,
           descripcion: agg.descripcion,
           rubro: rubroMap.get(art?.rubro_id) ?? art?.rubro ?? '—',
-          marca: marcaMap.get(agg.marcaId ?? '') ?? '—',
+          marca: marcaMap.get(agg.marcaId ?? art?.marca_id ?? '') ?? '—',
           proveedor: provMap.get(agg.proveedorId ?? '') ?? '—',
           unidades: Math.round(agg.units),
           unidades_anterior: Math.round(agg.unitsPrev),

@@ -360,12 +360,13 @@ export default function ClientesPedidosPage() {
           estado_item,
           cantidad_preparada,
           articulos (
-            sku, 
-            descripcion, 
-            sigla, 
+            sku,
+            descripcion,
+            sigla,
             iva_ventas,
             orden_deposito,
-            proveedores:proveedor_id (nombre)
+            proveedores:proveedor_id (nombre),
+            marcas:marca_id (descripcion)
           )
         `)
         .eq("pedido_id", pedidoId)
@@ -468,12 +469,13 @@ export default function ClientesPedidosPage() {
           .select(`
           *,
           articulos (
-            sku, 
-            descripcion, 
-            sigla, 
+            sku,
+            descripcion,
+            sigla,
             iva_ventas,
             orden_deposito,
-            proveedores:proveedor_id (nombre)
+            proveedores:proveedor_id (nombre),
+            marcas:marca_id (descripcion)
           )
         `)
           .eq("pedido_id", pedido.id)
@@ -598,7 +600,7 @@ export default function ClientesPedidosPage() {
                 <tr>
                   <th width="120">Código</th>
                   <th>Descripción</th>
-                  <th>Proveedor</th>
+                  <th>Marca</th>
                   <th width="80" class="text-right">Cant.</th>
                 </tr>
               </thead>
@@ -614,7 +616,7 @@ export default function ClientesPedidosPage() {
                     <td style="background-color: ${bgCode}; color: ${textCode}; font-weight: bold; padding-left: 8px;">${d.articulos?.sku || "-"}</td>
                     <td>${d.articulos?.descripcion || "Sin descripción"}</td>
                     <td style="color: #666; font-size: 11px;">
-                      ${d.articulos?.proveedores?.nombre || "Sin proveedor"}
+                      ${(d.articulos as any)?.marcas?.descripcion || "—"}
                     </td>
                     <td class="text-right"><strong>${d.cantidad}</strong></td>
                   </tr>
