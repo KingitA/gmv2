@@ -1,0 +1,23 @@
+import { createClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+
+export async function GET() {
+  try {
+    const supabase = await createClient()
+
+    const { data } = await supabase
+      .from('clientes')
+      .select('localidad, zona')
+      .not('localidad', 'is', null)
+
+    const localidades = [...new Set((data ?? []).map((r: any) => r.localidad).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'es'))
+
+    const zonas = [...new Set((data ?? []).map((r: any) => r.zona).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'es'))
+
+    return NextResponse.json({ localidades, zonas })
+  } catch (err: any) {
+    return NextResponse.json({ localidades: [], zonas: [] })
+  }
+}

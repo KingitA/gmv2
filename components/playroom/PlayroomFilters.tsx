@@ -15,17 +15,18 @@ const now = new Date()
 export const defaultFilters: PlayroomFiltersState = {
   dateFrom: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
   dateTo: now.toISOString().slice(0, 10),
-  comparePeriod: 'previous',
+  comparePeriod: 'none',
 }
 
 const inputStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.05)',
+  background: '#1f2937',
   border: '1px solid rgba(255,255,255,0.08)',
   borderRadius: '8px',
   padding: '6px 12px',
   color: '#fff',
   fontSize: '13px',
   outline: 'none',
+  colorScheme: 'dark',
 }
 
 export default function PlayroomFilters({

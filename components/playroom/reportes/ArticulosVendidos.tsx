@@ -74,13 +74,14 @@ function ars(n: number) {
 }
 
 const sel: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.05)',
+  background: '#1f2937',
   border: '1px solid rgba(255,255,255,0.08)',
   borderRadius: 8,
   padding: '4px 10px',
   color: '#fff',
   fontSize: 12,
   outline: 'none',
+  colorScheme: 'dark',
 }
 
 function Sel({ value, onChange, children }: { value: string; onChange: (v: string) => void; children: React.ReactNode }) {
@@ -204,10 +205,16 @@ export default function ArticulosVendidos() {
   const panelRef = useRef<HTMLDivElement>(null)
 
   // Filter options
-  const [vendedores, setVendedores] = useState<{ id: string; nombre: string }[]>([])
+  const [vendedores, setVendedores]   = useState<{ id: string; nombre: string }[]>([])
+  const [localidades, setLocalidades] = useState<string[]>([])
+  const [zonas, setZonas]             = useState<string[]>([])
 
   useEffect(() => {
     fetch('/api/vendedores').then(r => r.json()).then(d => Array.isArray(d) ? setVendedores(d) : null)
+    fetch('/api/playroom/filter-options').then(r => r.json()).then(d => {
+      if (d.localidades) setLocalidades(d.localidades)
+      if (d.zonas)       setZonas(d.zonas)
+    })
   }, [])
 
   // Resize handle
@@ -459,12 +466,18 @@ export default function ArticulosVendidos() {
 
           <div className="flex items-center gap-1.5">
             <FieldLabel>Localidad</FieldLabel>
-            <TextInput value={advFilters.localidad} onChange={v => setAdvFilters(f => ({ ...f, localidad: v }))} placeholder="ej. Bahía Blanca" width={130} />
+            <Sel value={advFilters.localidad} onChange={v => setAdvFilters(f => ({ ...f, localidad: v }))}>
+              <option value="">Todas</option>
+              {localidades.map(l => <option key={l} value={l}>{l}</option>)}
+            </Sel>
           </div>
 
           <div className="flex items-center gap-1.5">
             <FieldLabel>Zona</FieldLabel>
-            <TextInput value={advFilters.zona} onChange={v => setAdvFilters(f => ({ ...f, zona: v }))} placeholder="ej. Zona 1" width={100} />
+            <Sel value={advFilters.zona} onChange={v => setAdvFilters(f => ({ ...f, zona: v }))}>
+              <option value="">Todas</option>
+              {zonas.map(z => <option key={z} value={z}>{z}</option>)}
+            </Sel>
           </div>
 
           <div className="flex items-center gap-1.5">

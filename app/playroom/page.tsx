@@ -10,20 +10,13 @@ import CuentasCorrientes from '@/components/playroom/reportes/CuentasCorrientes'
 import ArticulosVendidos from '@/components/playroom/reportes/ArticulosVendidos'
 import ComisionesViajantes from '@/components/playroom/reportes/ComisionesViajantes'
 import ComprobantesFiscal from '@/components/playroom/reportes/ComprobantesFiscal'
-import ComprobantesOperativo from '@/components/playroom/reportes/ComprobantesOperativo'
 
 const TABS = [
   {
-    id: 'rotacion',
-    label: 'Rotación & Stock Muerto',
-    icon: '📦',
-    description: 'Capital inmovilizado, SKUs sin movimiento, sugerencias de liquidación',
-  },
-  {
-    id: 'clientes-abc',
-    label: 'Clientes ABC',
-    icon: '👥',
-    description: 'Ranking por facturación, variaciones, estado de cartera',
+    id: 'articulos',
+    label: 'Artículos Vendidos',
+    icon: '🏷️',
+    description: 'Venta neta, márgenes, comparativos',
   },
   {
     id: 'cuentas',
@@ -32,10 +25,10 @@ const TABS = [
     description: 'Antigüedad de saldos, mora, DSO',
   },
   {
-    id: 'articulos',
-    label: 'Artículos Vendidos',
-    icon: '🏷️',
-    description: 'Venta neta, márgenes, comparativos',
+    id: 'clientes-abc',
+    label: 'Clientes ABC',
+    icon: '👥',
+    description: 'Ranking por facturación, variaciones, estado de cartera',
   },
   {
     id: 'comisiones',
@@ -44,31 +37,30 @@ const TABS = [
     description: 'Devengadas y performance por viajante',
   },
   {
+    id: 'rotacion',
+    label: 'Rotación & Stock Muerto',
+    icon: '📦',
+    description: 'Capital inmovilizado, SKUs sin movimiento, sugerencias de liquidación',
+  },
+  {
     id: 'fiscal',
     label: 'Fiscal ARCA',
     icon: '📑',
     description: 'Libro IVA ventas, exportación ARCA',
   },
-  {
-    id: 'control-nc',
-    label: 'Control NC',
-    icon: '🔍',
-    description: 'NC por motivo, diferencias contra remito',
-  },
 ]
 
 const REPORTS: Record<string, React.ComponentType> = {
-  rotacion: RotacionStockMuerto,
-  'clientes-abc': RankingClientesABC,
-  cuentas: CuentasCorrientes,
   articulos: ArticulosVendidos,
+  cuentas: CuentasCorrientes,
+  'clientes-abc': RankingClientesABC,
   comisiones: ComisionesViajantes,
+  rotacion: RotacionStockMuerto,
   fiscal: ComprobantesFiscal,
-  'control-nc': ComprobantesOperativo,
 }
 
 export default function PlayroomPage() {
-  const [activeTab, setActiveTab] = useState('rotacion')
+  const [activeTab, setActiveTab] = useState('articulos')
   const [chatOpen, setChatOpen] = useState(false)
   const [chatInitialMsg, setChatInitialMsg] = useState<string | undefined>()
   const ReportComponent = REPORTS[activeTab]
