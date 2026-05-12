@@ -39,13 +39,26 @@ function round2(n: number) {
 async function migrarVentas(): Promise<{ ok: number; err: number }> {
   console.log("\n📦 Migrando VENTAS desde pedidos_detalle...")
 
-  // Verificar qué pedidos ya fueron migrados
+  // Pedidos ya en kardex con datos reales (cantidad > 0): saltear
   const { data: yaKardex } = await supabase
     .from("kardex")
     .select("pedido_id")
     .eq("tipo_movimiento", "venta")
     .not("pedido_id", "is", null)
+    .gt("cantidad", 0)
   const pedidosMigrados = new Set((yaKardex || []).map((r: any) => r.pedido_id))
+
+  // Pedidos con rows en kardex pero cantidad = 0: borrarlos para reinsertar correctamente
+  if (!DRY_RUN) {
+    const { error: delErr } = await supabase
+      .from("kardex")
+      .delete()
+      .eq("tipo_movimiento", "venta")
+      .not("pedido_id", "is", null)
+      .eq("cantidad", 0)
+    if (delErr) console.warn("  ⚠️  No se pudieron limpiar rows vacíos:", delErr.message)
+    else console.log("  🧹 Rows con cantidad=0 eliminados para reinserción")
+  }
 
   let offset = 0
   let totalOk = 0
