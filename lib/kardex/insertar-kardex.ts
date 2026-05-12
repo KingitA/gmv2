@@ -219,6 +219,7 @@ export async function vincularKardexAComprobante(
       numero_comprobante,
       metodo_facturacion,
       color_dinero,
+      fecha: new Date().toISOString(), // fecha de facturación, no de pedido
     })
     .eq('pedido_id', pedido_id)
     .is('comprobante_venta_id', null)

@@ -101,8 +101,9 @@ export async function GET(req: NextRequest) {
       }
 
       const signo = m.tipo_movimiento === 'nota_credito_venta' ? -1 : 1
-      const inCurrent = m.fecha >= dateFrom && m.fecha <= dateTo
-      const inPrev    = m.fecha >= prev.from && m.fecha <= prev.to
+      const fechaDate = m.fecha.slice(0, 10)  // "2026-05-05" from any timestamp format
+      const inCurrent = fechaDate >= dateFrom && fechaDate <= dateTo
+      const inPrev    = fechaDate >= prev.from && fechaDate <= prev.to
 
       if (!aggMap.has(m.articulo_id)) {
         aggMap.set(m.articulo_id, {
