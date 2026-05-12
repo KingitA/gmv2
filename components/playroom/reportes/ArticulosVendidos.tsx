@@ -241,6 +241,7 @@ export default function ArticulosVendidos() {
     if (!selectedArticulo) { setClienteDetalle(null); return }
     setClienteLoading(true)
     const params = new URLSearchParams({ articulo_id: selectedArticulo.articulo_id, from: filters.dateFrom, to: filters.dateTo })
+    if (fuente) params.set('fuente', fuente)
     fetch(`/api/playroom/articulos-vendidos/clientes?${params}`)
       .then(r => r.json())
       .then(d => setClienteDetalle(d))

@@ -11,9 +11,10 @@ export async function GET(req: NextRequest) {
 
     const dateFrom = searchParams.get('from') ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
     const dateTo   = searchParams.get('to')   ?? new Date().toISOString().slice(0, 10)
+    const fuente   = searchParams.get('fuente') // 'comprobante' | ''
 
     // Leer directamente del kardex — única fuente de verdad
-    const { data: movimientos, error } = await supabase
+    let query = supabase
       .from('kardex')
       .select('cliente_id, cantidad, subtotal_total, precio_unitario_final, tipo_movimiento')
       .eq('articulo_id', articuloId)
@@ -21,6 +22,10 @@ export async function GET(req: NextRequest) {
       .lte('fecha', dateTo)
       .in('tipo_movimiento', ['venta', 'nota_credito_venta'])
       .not('cliente_id', 'is', null)
+
+    if (fuente === 'comprobante') query = query.not('comprobante_venta_id', 'is', null)
+
+    const { data: movimientos, error } = await query
 
     if (error) throw error
     if (!movimientos?.length) {
