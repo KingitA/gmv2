@@ -11,18 +11,51 @@ export async function GET(req: NextRequest) {
     const dateTo   = searchParams.get('to')   ?? new Date().toISOString().slice(0, 10)
     const comparePeriod = searchParams.get('compare') ?? 'previous'
 
+    // ── Filtros backend ────────────────────────────────────────────────────────
+    const vendedorId      = searchParams.get('vendedor_id')      // kardex directo
+    const provincia       = searchParams.get('provincia')         // kardex directo
+    const clienteId       = searchParams.get('cliente_id')        // kardex directo
+    const tipoComp        = searchParams.get('tipo_comprobante')  // 'factura'|'presupuesto'|''
+    const conDescuento    = searchParams.get('con_descuento')     // tipo o 'sin_descuento'|''
+    const condicionIva    = searchParams.get('condicion_iva')     // necesita lookup clientes
+    const localidad       = searchParams.get('localidad')         // necesita lookup clientes
+    const zona            = searchParams.get('zona')              // necesita lookup clientes
+
     const prev = comparePeriod === 'year_ago'
       ? getSameLastYear(dateFrom, dateTo)
       : getPreviousPeriod(dateFrom, dateTo)
 
-    // Leer directamente del kardex — única fuente de verdad de movimientos
-    const { data: movimientos, error } = await supabase
+    // ── Lookup de clientes para filtros que no están en kardex ─────────────────
+    let clienteIdsFiltro: string[] | null = null
+    if (condicionIva || localidad || zona) {
+      let q = supabase.from('clientes').select('id')
+      if (condicionIva) q = q.ilike('condicion_iva', `%${condicionIva}%`)
+      if (localidad)    q = q.ilike('localidad', `%${localidad}%`)
+      if (zona)         q = q.eq('zona', zona)
+      const { data: matchingClientes } = await q
+      clienteIdsFiltro = (matchingClientes ?? []).map((c: any) => c.id)
+      if (clienteIdsFiltro.length === 0) {
+        return NextResponse.json({ rows: [], meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, totalRevenue: 0 } })
+      }
+    }
+
+    // ── Query kardex con filtros dinámicos ─────────────────────────────────────
+    let query = supabase
       .from('kardex')
-      .select('articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, articulo_marca_id, articulo_proveedor_id, cantidad, subtotal_total, precio_costo, tipo_movimiento, fecha')
+      .select('articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, articulo_marca_id, articulo_proveedor_id, cantidad, subtotal_total, precio_costo, tipo_movimiento, fecha, descuentos_json')
       .gte('fecha', prev.from)
       .lte('fecha', dateTo)
       .in('tipo_movimiento', ['venta', 'nota_credito_venta'])
       .not('articulo_id', 'is', null)
+
+    if (vendedorId)  query = query.eq('vendedor_id', vendedorId)
+    if (provincia)   query = query.eq('provincia_destino', provincia)
+    if (clienteId)   query = query.eq('cliente_id', clienteId)
+    if (clienteIdsFiltro !== null) query = query.in('cliente_id', clienteIdsFiltro)
+    if (tipoComp === 'factura')    query = query.in('tipo_comprobante', ['FA', 'FB', 'FC'])
+    else if (tipoComp === 'presupuesto') query = query.in('tipo_comprobante', ['PRES', 'REV'])
+
+    const { data: movimientos, error } = await query
 
     if (error) throw error
     if (!movimientos?.length) {
@@ -38,9 +71,9 @@ export async function GET(req: NextRequest) {
       supabase.from('proveedores').select('id, sigla, nombre'),
     ])
 
-    const artMap  = new Map((articulos   ?? []).map(a => [a.id, a]))
-    const rubroMap = new Map((rubros     ?? []).map(r => [r.id, r.nombre]))
-    const marcaMap = new Map((marcas     ?? []).map(m => [m.id, m.descripcion]))
+    const artMap   = new Map((articulos   ?? []).map(a => [a.id, a]))
+    const rubroMap = new Map((rubros      ?? []).map(r => [r.id, r.nombre]))
+    const marcaMap = new Map((marcas      ?? []).map(m => [m.id, m.descripcion]))
     const provMap  = new Map((proveedores ?? []).map(p => [p.id, p.sigla || p.nombre]))
 
     type Agg = {
@@ -54,7 +87,17 @@ export async function GET(req: NextRequest) {
 
     for (const m of movimientos) {
       if (!m.articulo_id) continue
-      // NC/REV tienen tipo_movimiento='nota_credito_venta' → restan unidades y revenue
+
+      // ── Filtro descuento en el loop JS ────────────────────────────────────
+      if (conDescuento) {
+        const desc: any[] = Array.isArray(m.descuentos_json) ? m.descuentos_json : []
+        if (conDescuento === 'sin_descuento') {
+          if (desc.some(d => d.porcentaje > 0)) continue
+        } else {
+          if (!desc.some(d => d.tipo === conDescuento && d.porcentaje > 0)) continue
+        }
+      }
+
       const signo = m.tipo_movimiento === 'nota_credito_venta' ? -1 : 1
       const inCurrent = m.fecha >= dateFrom && m.fecha <= dateTo
       const inPrev    = m.fecha >= prev.from && m.fecha <= prev.to
@@ -73,7 +116,6 @@ export async function GET(req: NextRequest) {
       const qty = Number(m.cantidad ?? 0) * signo
       const rev = Number(m.subtotal_total ?? 0) * signo
 
-      // Costo: usa el registrado en kardex al momento de la venta, fallback a articulo
       const art = artMap.get(m.articulo_id)
       const costoUnit = Number(m.precio_costo ?? 0) > 0
         ? Number(m.precio_costo)
