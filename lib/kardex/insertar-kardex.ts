@@ -9,8 +9,8 @@
  *   'devolucion_compra'→ signo -1
  *   'ajuste_entrada'   → signo +1
  *   'ajuste_salida'    → signo -1
- *   'nota_credito_venta' → signo -1 (reversa de venta)
- *   'nota_debito_venta'  → signo -1
+ *   'nota_credito_venta' → signo +1 (mercadería vuelve al stock, solo vendible)
+ *   'nota_debito_venta'  → signo -1 (cargo financiero, sin impacto en stock físico)
  */
 
 export type TipoMovimientoKardex =
@@ -99,8 +99,10 @@ export interface KardexMovimientoInput {
 // Tipos que reducen stock (signo -1)
 const TIPOS_SALIDA: TipoMovimientoKardex[] = [
   'venta', 'devolucion_compra', 'ajuste_salida',
-  'nota_credito_venta', 'nota_debito_venta',
+  'nota_debito_venta',
 ]
+// nota_credito_venta tiene signo +1: la mercadería vuelve al stock (si es vendible)
+// Para no-vendible, generar-nc-reversa directamente no crea entrada en kardex
 
 function round2(n: number) {
   return Math.round(n * 100) / 100

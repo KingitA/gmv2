@@ -177,10 +177,12 @@ export async function POST(request: Request) {
     }
 
     // Kardex: registrar movimiento por cada ítem de la NC/Reversa
+    // No-vendible: no afecta stock, no se registra en kardex
     const esNC = tipoFinal.startsWith("NC")
     const colorDinero = esNC ? "BLANCO" : "NEGRO"
     const metodoFact = esNC ? "Factura" : "Presupuesto"
     for (const item of devolucion.detalle) {
+      if (item.es_vendible === false) continue
       const subtotal = Math.abs(item.subtotal || 0)
       const cantidadAbs = Math.abs(item.cantidad || 1)
       let precioNeto: number

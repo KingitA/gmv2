@@ -15,10 +15,25 @@ export async function GET(req: NextRequest) {
       ? getSameLastYear(dateFrom, dateTo)
       : getPreviousPeriod(dateFrom, dateTo)
 
-    // Comisiones con pedido y comprobante
+    // Comisiones cuyo pedido cae en el rango ampliado (actual + anterior)
+    // Primero obtenemos los pedido_ids del rango, luego filtramos comisiones
+    const { data: pedidosEnRango } = await supabase
+      .from('pedidos')
+      .select('id, fecha, cliente_id')
+      .gte('fecha', prev.from)
+      .lte('fecha', dateTo)
+
+    const pedidoMap = new Map((pedidosEnRango ?? []).map(p => [p.id, p]))
+    const pedidoIds = [...pedidoMap.keys()]
+
+    if (!pedidoIds.length) {
+      return NextResponse.json({ rows: [], summary: { total_devengado: 0, total_cobrable: 0, total_pagado: 0, total_pendiente: 0 }, meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to } })
+    }
+
     const { data: comisiones, error } = await supabase
       .from('comisiones')
-      .select('id, monto, porcentaje, pagado, comprobante_cobrado, viajante_id, pedido_id, comprobante_venta_id, pedidos(fecha, total, cliente_id)')
+      .select('id, monto, porcentaje, pagado, comprobante_cobrado, viajante_id, pedido_id, comprobante_venta_id')
+      .in('pedido_id', pedidoIds)
 
     if (error) throw error
 
@@ -36,7 +51,7 @@ export async function GET(req: NextRequest) {
 
     for (const c of comisiones ?? []) {
       const vid = c.viajante_id ?? 'sin_vendedor'
-      const pedido = (c as any).pedidos
+      const pedido = pedidoMap.get(c.pedido_id)
       const fechaPedido = pedido?.fecha?.slice(0, 10) ?? ''
       const monto = Number(c.monto ?? 0)
 
@@ -57,7 +72,7 @@ export async function GET(req: NextRequest) {
         if (c.pagado) agg.pagado += monto
         if (c.comprobante_cobrado && !c.pagado) agg.pendiente += monto
         if (c.pedido_id) agg.pedidos.add(c.pedido_id)
-        const clienteId = pedido?.cliente_id
+        const clienteId = pedido?.cliente_id ?? null
         if (clienteId) agg.clientes.add(clienteId)
       }
       if (inPrev) {

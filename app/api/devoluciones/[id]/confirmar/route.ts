@@ -39,13 +39,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
       if (devolucionError) throw devolucionError
 
-      // Devolver stock a los artículos
+      // Devolver stock solo a artículos vendibles
       for (const item of items) {
+        if (item.es_vendible === false) continue
         const { error: stockError } = await supabase.rpc("incrementar_stock", {
           p_articulo_id: item.articulo_id,
           p_cantidad: item.cantidad,
         })
-
         if (stockError) {
           console.error("[v0] Error devolviendo stock:", stockError)
         }
