@@ -329,7 +329,7 @@ export async function createPedido(data: {
     )
 
     await insertarKardex(
-      supabase,
+      createAdminClient(),
       {
         tipo_movimiento: "venta",
         fecha: nowArgentina(),
@@ -661,7 +661,7 @@ export async function agregarItemPedido(
   )
 
   await insertarKardex(
-    supabase,
+    createAdminClient(),
     {
       tipo_movimiento: "venta",
       fecha: nowArgentina(),
@@ -765,7 +765,7 @@ export async function agregarItemBonificado(
   )
 
   await insertarKardex(
-    supabase,
+    createAdminClient(),
     {
       tipo_movimiento: "venta",
       fecha: nowArgentina(),

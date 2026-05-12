@@ -194,6 +194,7 @@ export default function ArticulosVendidos() {
   const [marcaFiltro, setMarcaFiltro] = useState('Todos')
   const [searchText, setSearchText] = useState('')
   const [fuente, setFuente] = useState<'' | 'pedido' | 'comprobante'>('')
+  const [sortBy, setSortBy] = useState<'revenue' | 'unidades'>('revenue')
 
   // Sidebar
   const [selectedArticulo, setSelectedArticulo] = useState<ArticuloRow | null>(null)
@@ -273,17 +274,21 @@ export default function ArticulosVendidos() {
   const proveedores = useMemo(() => ['Todos', ...new Set(rows.map(r => r.proveedor).filter(r => r !== '—'))], [rows])
   const marcas     = useMemo(() => ['Todos', ...new Set(rows.map(r => r.marca).filter(r => r !== '—'))], [rows])
 
-  const filtered = useMemo(() => rows.filter(r => {
-    if (abcFiltro !== 'Todos' && r.clasificacion !== abcFiltro) return false
-    if (rubroFiltro !== 'Todos' && r.rubro !== rubroFiltro) return false
-    if (proveedorFiltro !== 'Todos' && r.proveedor !== proveedorFiltro) return false
-    if (marcaFiltro !== 'Todos' && r.marca !== marcaFiltro) return false
-    if (searchText) {
-      const q = searchText.toLowerCase()
-      if (!r.descripcion.toLowerCase().includes(q) && !r.sku.toLowerCase().includes(q)) return false
-    }
-    return true
-  }), [rows, abcFiltro, rubroFiltro, proveedorFiltro, marcaFiltro, searchText])
+  const filtered = useMemo(() => {
+    const base = rows.filter(r => {
+      if (abcFiltro !== 'Todos' && r.clasificacion !== abcFiltro) return false
+      if (rubroFiltro !== 'Todos' && r.rubro !== rubroFiltro) return false
+      if (proveedorFiltro !== 'Todos' && r.proveedor !== proveedorFiltro) return false
+      if (marcaFiltro !== 'Todos' && r.marca !== marcaFiltro) return false
+      if (searchText) {
+        const q = searchText.toLowerCase()
+        if (!r.descripcion.toLowerCase().includes(q) && !r.sku.toLowerCase().includes(q)) return false
+      }
+      return true
+    })
+    if (sortBy === 'unidades') return [...base].sort((a, b) => b.unidades - a.unidades)
+    return base // ya viene ordenado por revenue desde la API
+  }, [rows, abcFiltro, rubroFiltro, proveedorFiltro, marcaFiltro, searchText, sortBy])
 
   const kpis = useMemo(() => {
     const totalRevenue = apiData?.meta.totalRevenue ?? 0
@@ -297,8 +302,13 @@ export default function ArticulosVendidos() {
   }, [rows, filtered, apiData])
 
   const chartData = useMemo(() =>
-    filtered.slice(0, 20).map(r => ({ name: r.sku, desc: r.descripcion, revenue: r.revenue, clasificacion: r.clasificacion }))
-  , [filtered])
+    filtered.slice(0, 15).map(r => ({
+      name: r.sku,
+      desc: r.descripcion,
+      value: sortBy === 'unidades' ? r.unidades : r.revenue,
+      clasificacion: r.clasificacion,
+    }))
+  , [filtered, sortBy])
 
   // Cantidad de filtros avanzados activos
   const advCount = Object.values(advFilters).filter(Boolean).length
@@ -364,6 +374,27 @@ export default function ArticulosVendidos() {
               }
             >
               <span style={{ fontSize: 11 }}>{opt.icon}</span>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Toggle monto / cantidad */}
+        <div className="flex items-center gap-1" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '3px' }}>
+          {([
+            { val: 'revenue' as const,  label: 'Monto',    icon: '$' },
+            { val: 'unidades' as const, label: 'Cantidad',  icon: '#' },
+          ] as const).map(opt => (
+            <button
+              key={opt.val}
+              onClick={() => setSortBy(opt.val)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
+              style={sortBy === opt.val
+                ? { background: 'linear-gradient(135deg, #059669, #06b6d4)', color: '#fff', boxShadow: '0 1px 6px rgba(5,150,105,0.4)' }
+                : { color: 'rgba(255,255,255,0.35)' }
+              }
+            >
+              <span style={{ fontSize: 11, fontWeight: 700 }}>{opt.icon}</span>
               {opt.label}
             </button>
           ))}
@@ -495,18 +526,25 @@ export default function ArticulosVendidos() {
         <KPICard label="Concentración top 10" value={loading ? '...' : `${kpis.concPct.toFixed(1)}%`} subLabel="del total vendido" loading={loading} />
       </div>
 
-      {/* Chart top 20 */}
+      {/* Chart top 15 */}
       {!loading && chartData.length > 0 && (
         <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
           <p className="text-[10px] font-semibold uppercase tracking-widest mb-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            Top {chartData.length} artículos — Venta neta · {ars(kpis.totalRevenue)} total
+            Top {chartData.length} artículos — {sortBy === 'unidades' ? 'por Cantidad vendida' : `Venta neta · ${ars(kpis.totalRevenue)} total`}
           </p>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData} margin={{ left: 10, right: 10, top: 0, bottom: 60 }}>
               <XAxis dataKey="name" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9 }} axisLine={{ stroke: 'rgba(255,255,255,0.05)' }} tickLine={false} angle={-45} textAnchor="end" interval={0} />
-              <YAxis tickFormatter={v => `$${(v / 1000000).toFixed(1)}M`} tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} axisLine={false} tickLine={false} />
-              <Tooltip formatter={(v: number) => [ars(v), 'Venta neta']} labelFormatter={(_l, p) => p?.[0]?.payload?.desc || _l} contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }} />
-              <Bar dataKey="revenue" radius={[4, 4, 0, 0]} maxBarSize={36}>
+              <YAxis
+                tickFormatter={sortBy === 'unidades' ? (v: number) => v.toLocaleString('es-AR') : (v: number) => `$${(v / 1000000).toFixed(1)}M`}
+                tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} axisLine={false} tickLine={false}
+              />
+              <Tooltip
+                formatter={(v: number) => sortBy === 'unidades' ? [v.toLocaleString('es-AR'), 'Unidades'] : [ars(v), 'Venta neta']}
+                labelFormatter={(_l, p) => p?.[0]?.payload?.desc || _l}
+                contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
+              />
+              <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36}>
                 {chartData.map((e, i) => <Cell key={i} fill={ABC_COLOR[e.clasificacion]} fillOpacity={0.85} />)}
               </Bar>
             </BarChart>
