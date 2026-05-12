@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     const condicionIva    = searchParams.get('condicion_iva')     // necesita lookup clientes
     const localidad       = searchParams.get('localidad')         // necesita lookup clientes
     const zona            = searchParams.get('zona')              // necesita lookup clientes
+    const fuente          = searchParams.get('fuente')            // 'pedido'|'comprobante'|''
 
     const prev = comparePeriod === 'year_ago'
       ? getSameLastYear(dateFrom, dateTo)
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest) {
     if (clienteIdsFiltro !== null) query = query.in('cliente_id', clienteIdsFiltro)
     if (tipoComp === 'factura')    query = query.in('tipo_comprobante', ['FA', 'FB', 'FC'])
     else if (tipoComp === 'presupuesto') query = query.in('tipo_comprobante', ['PRES', 'REV'])
+    if (fuente === 'comprobante') query = query.not('comprobante_venta_id', 'is', null)
 
     const { data: movimientos, error } = await query
 

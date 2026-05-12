@@ -193,6 +193,7 @@ export default function ArticulosVendidos() {
   const [proveedorFiltro, setProveedorFiltro] = useState('Todos')
   const [marcaFiltro, setMarcaFiltro] = useState('Todos')
   const [searchText, setSearchText] = useState('')
+  const [fuente, setFuente] = useState<'' | 'pedido' | 'comprobante'>('')
 
   // Sidebar
   const [selectedArticulo, setSelectedArticulo] = useState<ArticuloRow | null>(null)
@@ -239,7 +240,7 @@ export default function ArticulosVendidos() {
       .finally(() => setClienteLoading(false))
   }, [selectedArticulo])
 
-  const load = useCallback(async (f = filters, adv = advFilters) => {
+  const load = useCallback(async (f = filters, adv = advFilters, fuenteVal = fuente) => {
     setLoading(true)
     setError(null)
     try {
@@ -252,6 +253,7 @@ export default function ArticulosVendidos() {
       if (adv.zona)           params.set('zona', adv.zona)
       if (adv.con_descuento)  params.set('con_descuento', adv.con_descuento)
       if (adv.cliente_id)     params.set('cliente_id', adv.cliente_id)
+      if (fuenteVal)          params.set('fuente', fuenteVal)
       const res = await fetch(`/api/playroom/articulos-vendidos?${params}`)
       if (!res.ok) throw new Error(`Error ${res.status}`)
       setApiData(await res.json())
@@ -260,7 +262,7 @@ export default function ArticulosVendidos() {
     } finally {
       setLoading(false)
     }
-  }, [filters, advFilters])
+  }, [filters, advFilters, fuente])
 
   useEffect(() => { load() }, [])
 
@@ -344,6 +346,27 @@ export default function ArticulosVendidos() {
           <Sel value={marcaFiltro} onChange={setMarcaFiltro}>
             {marcas.map(m => <option key={m} value={m}>{m}</option>)}
           </Sel>
+        </div>
+
+        {/* Toggle vendida / facturada */}
+        <div className="flex items-center gap-1" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '3px' }}>
+          {([
+            { val: '' as const,            label: 'Vendida',   icon: '🛒' },
+            { val: 'comprobante' as const, label: 'Facturada', icon: '🧾' },
+          ] as const).map(opt => (
+            <button
+              key={opt.val}
+              onClick={() => { setFuente(opt.val); load(filters, advFilters, opt.val) }}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
+              style={fuente === opt.val
+                ? { background: 'linear-gradient(135deg, #7c3aed, #06b6d4)', color: '#fff', boxShadow: '0 1px 6px rgba(124,58,237,0.4)' }
+                : { color: 'rgba(255,255,255,0.35)' }
+              }
+            >
+              <span style={{ fontSize: 11 }}>{opt.icon}</span>
+              {opt.label}
+            </button>
+          ))}
         </div>
 
         {/* Toggle filtros avanzados */}
