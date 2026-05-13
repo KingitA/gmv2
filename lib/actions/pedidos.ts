@@ -8,6 +8,7 @@ import { nowArgentina } from "@/lib/utils"
 import { calcularPrecioPedido } from "@/lib/pricing/calcular-precio-pedido"
 import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/pricing/calculator"
 import { insertarKardex, type DescuentoKardex } from "@/lib/kardex/insertar-kardex"
+import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
 
 // ─── Tipos de segmento de proveedor ──────────────────────────────────────────
 type Segmento = "limpieza" | "perf0" | "perf_plus"
@@ -142,35 +143,59 @@ function round2(n: number) { return Math.round(n * 100) / 100 }
  * descuentos_json contiene cada descuento con su porcentaje y monto unitario (pre-IVA adj).
  */
 function buildKardexDescuentos(
-  precioLista: number,        // precio post-recargo, pre-cliente (pre-IVA adj)
+  precioLista: number,        // P.Lista mostrado en comprobante (post-recargo, pre-descuento, pre-IVA adj)
   precioConDescuento: number, // precioLista * (1 - descuentoCliente/100)
   descuentoClientePct: number,
   descuentoPropioPct: number,
-): { precio_unitario_bruto: number; descuentos_json: DescuentoKardex[] } {
-  // precio bruto: "precio de lista oficial" antes de cualquier descuento comercial al cliente
+): {
+  precio_lista: number
+  precio_unitario_bruto: number
+  descuentos_json: DescuentoKardex[]
+  descuento_mercaderia_pct: number | null
+  descuento_mercaderia_monto: number | null
+  descuento_general_pct: number | null
+  descuento_general_monto: number | null
+} {
+  // precio bruto: precio antes del dto_oferta (mercadería) y del dto_general (cliente)
   const precio_unitario_bruto = descuentoPropioPct > 0
     ? round2(precioLista / (1 - descuentoPropioPct / 100))
     : precioLista
 
   const descuentos_json: DescuentoKardex[] = []
 
+  let descuento_mercaderia_pct: number | null = null
+  let descuento_mercaderia_monto: number | null = null
   if (descuentoPropioPct > 0) {
+    descuento_mercaderia_pct = descuentoPropioPct
+    descuento_mercaderia_monto = round2(precio_unitario_bruto - precioLista)
     descuentos_json.push({
       tipo: 'oferta',
       porcentaje: descuentoPropioPct,
-      monto_unitario: round2(precio_unitario_bruto - precioLista),
+      monto_unitario: descuento_mercaderia_monto,
     })
   }
 
+  let descuento_general_pct: number | null = null
+  let descuento_general_monto: number | null = null
   if (descuentoClientePct > 0) {
+    descuento_general_pct = descuentoClientePct
+    descuento_general_monto = round2(precioLista - precioConDescuento)
     descuentos_json.push({
       tipo: 'general',
       porcentaje: descuentoClientePct,
-      monto_unitario: round2(precioLista - precioConDescuento),
+      monto_unitario: descuento_general_monto,
     })
   }
 
-  return { precio_unitario_bruto, descuentos_json }
+  return {
+    precio_lista: precioLista,
+    precio_unitario_bruto,
+    descuentos_json,
+    descuento_mercaderia_pct,
+    descuento_mercaderia_monto,
+    descuento_general_pct,
+    descuento_general_monto,
+  }
 }
 
 export async function createPedido(data: {
@@ -324,7 +349,7 @@ export async function createPedido(data: {
     const stockActual = art?.stock_actual ?? null
     const metodoColor = item.metodoUsado
     const colorDinero = metodoColor === "Factura (21% IVA)" || metodoColor === "Factura" ? "BLANCO" : "NEGRO"
-    const { precio_unitario_bruto, descuentos_json } = buildKardexDescuentos(
+    const kardexDesc = buildKardexDescuentos(
       item.precioLista, item.precioConDescuento, item.descuentoClientePct, item.descuentoPropioPct,
     )
 
@@ -336,14 +361,19 @@ export async function createPedido(data: {
         articulo_id: item.producto_id,
         cantidad: item.cantidad,
         precio_costo: item.precio_costo,
-        precio_unitario_bruto,
+        precio_lista: kardexDesc.precio_lista,
+        precio_unitario_bruto: kardexDesc.precio_unitario_bruto,
         precio_unitario_neto: item.precioNeto,
         precio_unitario_final: item.precioAlCliente,
         iva_porcentaje: ivaPct,
         iva_monto_unitario: ivaMonto,
         iva_incluido: ivaIncluido,
-        descuentos_json: descuentos_json.length > 0 ? descuentos_json : undefined,
+        descuentos_json: kardexDesc.descuentos_json.length > 0 ? kardexDesc.descuentos_json : undefined,
         descuento_cliente_pct: item.descuentoClientePct,
+        descuento_mercaderia_pct: kardexDesc.descuento_mercaderia_pct,
+        descuento_mercaderia_monto: kardexDesc.descuento_mercaderia_monto,
+        descuento_general_pct: kardexDesc.descuento_general_pct,
+        descuento_general_monto: kardexDesc.descuento_general_monto,
         subtotal_neto: Math.round(item.precioNeto * item.cantidad * 100) / 100,
         subtotal_iva: Math.round(ivaMonto * item.cantidad * 100) / 100,
         subtotal_total: Math.round(item.precioAlCliente * item.cantidad * 100) / 100,
@@ -404,28 +434,49 @@ export async function createPedido(data: {
     console.error("Non-critical error updating account balance:", ctaError)
   }
 
-  // Commission
+  // Commission — por artículo según segmento y tasa del viajante
   console.log("Calculating commission...")
   try {
-    const { data: article } = await supabase.from("articulos").select("proveedor_id").eq("id", itemsCalc[0].producto_id).single()
-
-    if (article && article.proveedor_id && clienteInfo.vendedor_id) {
-      const { data: proveedor } = await supabase
-        .from("proveedores")
-        .select("comision_viajante")
-        .eq("id", article.proveedor_id)
+    if (clienteInfo.vendedor_id) {
+      const { data: vendedor } = await supabase
+        .from("vendedores")
+        .select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus")
+        .eq("id", clienteInfo.vendedor_id)
         .single()
 
-      if (proveedor) {
-        console.log("Inserting into 'comisiones'...")
-        const { error: commError } = await supabase.from("comisiones").insert({
-          viajante_id: clienteInfo.vendedor_id,
-          pedido_id: pedido.id,
-          monto: total * (proveedor.comision_viajante / 100),
-          porcentaje: proveedor.comision_viajante,
-          pagado: false,
-        })
-        if (commError) console.error("Error inserting into 'comisiones':", commError)
+      if (vendedor) {
+        const { data: items } = await supabase
+          .from("pedidos_detalle")
+          .select("articulo_id, cantidad, precio_final, metodo_facturacion_item, articulos(segmento_precio, iva_ventas)")
+          .eq("pedido_id", pedido.id)
+
+        const comisionesItems = (items ?? [])
+          .filter((item: any) => item.articulos?.segmento_precio)
+          .map((item: any) => {
+            const { segmento_precio, iva_ventas } = item.articulos
+            const porcentaje = getComisionPorcentaje(vendedor, segmento_precio, iva_ventas)
+            const precioNeto = getPrecioNeto(Number(item.precio_final), item.metodo_facturacion_item, iva_ventas)
+            const monto = (precioNeto * Number(item.cantidad) * porcentaje) / 100
+            return {
+              viajante_id: clienteInfo.vendedor_id,
+              pedido_id: pedido.id,
+              tipo: "vendida",
+              articulo_id: item.articulo_id,
+              segmento: segmento_precio,
+              cantidad: Number(item.cantidad),
+              precio_neto_unitario: precioNeto,
+              porcentaje,
+              monto,
+              pagado: false,
+            }
+          })
+          .filter((c: any) => c.porcentaje > 0)
+
+        if (comisionesItems.length > 0) {
+          console.log(`Inserting ${comisionesItems.length} comisiones into 'comisiones'...`)
+          const { error: commError } = await supabase.from("comisiones").insert(comisionesItems)
+          if (commError) console.error("Error inserting into 'comisiones':", commError)
+        }
       }
     }
   } catch (commErr) {
@@ -655,7 +706,7 @@ export async function agregarItemPedido(
     ? Math.round((ivaMonto / precio.precioNeto) * 10000) / 100 : 0
   const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
-  const { precio_unitario_bruto, descuentos_json } = buildKardexDescuentos(
+  const kardexDesc = buildKardexDescuentos(
     precio.precioLista, precio.precioConDescuento,
     precio.descuentoClientePct, articuloConDescuentos.descuento_propio || 0,
   )
@@ -668,14 +719,19 @@ export async function agregarItemPedido(
       articulo_id: productoId,
       cantidad,
       precio_costo: articuloConDescuentos.precio_compra || 0,
-      precio_unitario_bruto,
+      precio_lista: kardexDesc.precio_lista,
+      precio_unitario_bruto: kardexDesc.precio_unitario_bruto,
       precio_unitario_neto: precio.precioNeto,
       precio_unitario_final: precio.precioAlCliente,
       iva_porcentaje: ivaPct,
       iva_monto_unitario: ivaMonto,
       iva_incluido: ivaIncluido,
-      descuentos_json: descuentos_json.length > 0 ? descuentos_json : undefined,
+      descuentos_json: kardexDesc.descuentos_json.length > 0 ? kardexDesc.descuentos_json : undefined,
       descuento_cliente_pct: precio.descuentoClientePct,
+      descuento_mercaderia_pct: kardexDesc.descuento_mercaderia_pct,
+      descuento_mercaderia_monto: kardexDesc.descuento_mercaderia_monto,
+      descuento_general_pct: kardexDesc.descuento_general_pct,
+      descuento_general_monto: kardexDesc.descuento_general_monto,
       subtotal_neto: Math.round(precio.precioNeto * cantidad * 100) / 100,
       subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
       subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
@@ -759,7 +815,7 @@ export async function agregarItemBonificado(
     ? Math.round((ivaMonto / precio.precioNeto) * 10000) / 100 : 0
   const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
-  const { precio_unitario_bruto: precioBrutoB, descuentos_json: descuentosB } = buildKardexDescuentos(
+  const kardexDescB = buildKardexDescuentos(
     precio.precioLista, precio.precioConDescuento,
     precio.descuentoClientePct, articuloConDescuentos.descuento_propio || 0,
   )
@@ -772,14 +828,19 @@ export async function agregarItemBonificado(
       articulo_id: productoId,
       cantidad,
       precio_costo: articuloConDescuentos.precio_compra || 0,
-      precio_unitario_bruto: precioBrutoB,
+      precio_lista: kardexDescB.precio_lista,
+      precio_unitario_bruto: kardexDescB.precio_unitario_bruto,
       precio_unitario_neto: precio.precioNeto,
       precio_unitario_final: precio.precioAlCliente,
       iva_porcentaje: ivaPct,
       iva_monto_unitario: ivaMonto,
       iva_incluido: ivaIncluido,
-      descuentos_json: descuentosB.length > 0 ? descuentosB : undefined,
+      descuentos_json: kardexDescB.descuentos_json.length > 0 ? kardexDescB.descuentos_json : undefined,
       descuento_cliente_pct: precio.descuentoClientePct,
+      descuento_mercaderia_pct: kardexDescB.descuento_mercaderia_pct,
+      descuento_mercaderia_monto: kardexDescB.descuento_mercaderia_monto,
+      descuento_general_pct: kardexDescB.descuento_general_pct,
+      descuento_general_monto: kardexDescB.descuento_general_monto,
       subtotal_neto: Math.round(precio.precioNeto * cantidad * 100) / 100,
       subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
       subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
 import { insertarKardex } from '@/lib/kardex/insertar-kardex'
+import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
 
 export async function POST(request: Request) {
   try {
@@ -253,6 +254,63 @@ export async function POST(request: Request) {
       concepto: "Devolución",
       descripcion: motivo_ajuste,
     })
+
+    // Comisiones negativas tipo='cobrada' para la NC/Reversa
+    try {
+      if (devolucion.pedido_id) {
+        const { data: pedidoData } = await supabase
+          .from("pedidos")
+          .select("clientes(vendedor_id)")
+          .eq("id", devolucion.pedido_id)
+          .single()
+        const viajanteId = (pedidoData?.clientes as any)?.vendedor_id as string | null
+
+        if (viajanteId) {
+          const { data: ncItems } = await supabase
+            .from("comprobantes_venta_detalle")
+            .select("articulo_id, cantidad, precio_unitario, articulos(segmento_precio, iva_ventas)")
+            .eq("comprobante_id", comprobante.id)
+
+          const { data: vendedor } = await supabase
+            .from("vendedores")
+            .select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus")
+            .eq("id", viajanteId)
+            .single()
+
+          const metodo = tipoFinal === "REV" ? "presupuesto" : "factura"
+          const negativas = (ncItems ?? [])
+            .filter((item: any) => item.articulos?.segmento_precio && vendedor)
+            .map((item: any) => {
+              const { segmento_precio, iva_ventas } = item.articulos
+              const porcentaje = getComisionPorcentaje(vendedor!, segmento_precio, iva_ventas)
+              const precioNeto = getPrecioNeto(Math.abs(Number(item.precio_unitario)), metodo, iva_ventas)
+              const cantAbs = Math.abs(Number(item.cantidad))
+              return {
+                viajante_id: viajanteId,
+                pedido_id: devolucion.pedido_id,
+                comprobante_venta_id: comprobante.id,
+                tipo: "cobrada",
+                articulo_id: item.articulo_id,
+                segmento: segmento_precio,
+                cantidad: -cantAbs,
+                precio_neto_unitario: precioNeto,
+                porcentaje,
+                monto: -((precioNeto * cantAbs * porcentaje) / 100),
+                comprobante_cobrado: true,
+                fecha_comprobante_cobrado: nowArgentina(),
+                pagado: false,
+              }
+            })
+            .filter((c: any) => c.porcentaje > 0)
+
+          if (negativas.length) {
+            await supabase.from("comisiones").insert(negativas)
+          }
+        }
+      }
+    } catch (comErr) {
+      console.error("Error creando comisiones negativas NC:", comErr)
+    }
 
     return NextResponse.json({
       success: true,

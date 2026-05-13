@@ -37,7 +37,24 @@ export interface Vendedor {
   telefono: string | null
   comision_perfumeria: number
   comision_bazar_limpieza: number
+  comision_limpieza_bazar: number
+  comision_perfumeria_0: number
+  comision_perfumeria_plus: number
   activo: boolean
+  created_at: string
+}
+
+export interface BilleteraMovimiento {
+  id: string
+  viajante_id: string
+  tipo: 'cobro_cliente' | 'retiro_comision' | 'debito' | 'credito'
+  medio: 'efectivo' | 'cheque' | 'transferencia' | null
+  monto: number
+  concepto: string | null
+  referencia_id: string | null
+  referencia_tipo: string | null
+  fecha: string
+  creado_por: string | null
   created_at: string
 }
 

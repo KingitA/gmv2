@@ -31,6 +31,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Clientes', href: '/clientes', icon: '👥' },
       { label: 'Comprobantes Venta', href: '/comprobantes-venta', icon: '🧾' },
       { label: 'Viajes', href: '/viajes', icon: '🚚' },
+      { label: 'Viajantes', href: '/viajantes', icon: '👔' },
       { label: 'Revisión Pagos', href: '/revision-pagos', icon: '💳' },
       { label: 'Revisión Devoluciones', href: '/revision-devoluciones', icon: '↩️' },
     ],
