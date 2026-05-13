@@ -58,9 +58,19 @@ export interface KardexMovimientoInput {
   subtotal_iva?: number
 
   // ── Descuentos ─────────────────────────────────────────────────────────────
-  precio_unitario_bruto?: number | null  // precio antes de descuento_propio y descuento_cliente
+  precio_lista?: number | null            // P.Lista crudo antes de cualquier descuento ni IVA
+  precio_unitario_bruto?: number | null   // precio antes de descuento_propio y descuento_cliente
   descuentos_json?: DescuentoKardex[]
   descuento_cliente_pct?: number
+  // Columnas individuales por tipo (para filtros SQL directos en reportes)
+  descuento_mercaderia_pct?: number | null
+  descuento_mercaderia_monto?: number | null
+  descuento_general_pct?: number | null
+  descuento_general_monto?: number | null
+  descuento_viajante_pct?: number | null
+  descuento_viajante_monto?: number | null
+  descuento_financiero_pct?: number | null
+  descuento_financiero_monto?: number | null
 
   // ── Partes involucradas ────────────────────────────────────────────────────
   cliente_id?: string | null
@@ -146,6 +156,7 @@ export async function insertarKardex(
     vendedor_id: input.vendedor_id ?? null,
 
     precio_costo: input.precio_costo ?? null,
+    precio_lista: input.precio_lista ?? null,
     precio_unitario_bruto: input.precio_unitario_bruto ?? null,
     precio_unitario_neto: input.precio_unitario_neto,
     precio_unitario_final: input.precio_unitario_final,
@@ -156,6 +167,14 @@ export async function insertarKardex(
 
     descuentos_json: input.descuentos_json ?? null,
     descuento_cliente_pct: input.descuento_cliente_pct ?? 0,
+    descuento_mercaderia_pct: input.descuento_mercaderia_pct ?? null,
+    descuento_mercaderia_monto: input.descuento_mercaderia_monto ?? null,
+    descuento_general_pct: input.descuento_general_pct ?? null,
+    descuento_general_monto: input.descuento_general_monto ?? null,
+    descuento_viajante_pct: input.descuento_viajante_pct ?? null,
+    descuento_viajante_monto: input.descuento_viajante_monto ?? null,
+    descuento_financiero_pct: input.descuento_financiero_pct ?? null,
+    descuento_financiero_monto: input.descuento_financiero_monto ?? null,
 
     subtotal_neto: input.subtotal_neto,
     subtotal_iva: input.subtotal_iva ?? 0,
@@ -264,5 +283,37 @@ export async function distribuirPercepcionesKardex(
       .eq('id', item.id)
 
     if (error) console.error('[Kardex] Error distribuyendo percepciones:', error.message)
+  }
+}
+
+/**
+ * Marca el descuento financiero (10% pago contado) en los ítems de kardex
+ * asociados a los comprobantes incluidos en la bonificación.
+ * Se llama después de crear la NC/REV de bonificación contado.
+ */
+export async function actualizarDescuentoFinancieroKardex(
+  supabase: any,
+  comprobante_ids: string[],
+): Promise<void> {
+  if (!comprobante_ids.length) return
+
+  const { data: items, error } = await supabase
+    .from('kardex')
+    .select('id, precio_unitario_neto')
+    .in('comprobante_venta_id', comprobante_ids)
+    .eq('tipo_movimiento', 'venta')
+
+  if (error || !items?.length) return
+
+  for (const item of items) {
+    const monto = round2(Number(item.precio_unitario_neto) * 0.10)
+    const { error: updErr } = await supabase
+      .from('kardex')
+      .update({
+        descuento_financiero_pct: 10,
+        descuento_financiero_monto: monto,
+      })
+      .eq('id', item.id)
+    if (updErr) console.error('[Kardex] Error actualizando descuento financiero:', updErr.message)
   }
 }

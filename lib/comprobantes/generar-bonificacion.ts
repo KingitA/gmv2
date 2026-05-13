@@ -15,6 +15,7 @@
 import { SupabaseClient } from "@supabase/supabase-js"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { todayArgentina } from "@/lib/utils"
+import { actualizarDescuentoFinancieroKardex } from "@/lib/kardex/insertar-kardex"
 
 const DESCUENTO_CONTADO_PCT = 10
 const IVA_PCT = 0.21
@@ -258,6 +259,9 @@ export async function generarBonificacionContado(
   await procesarFacturas(facturasA, "NCA")
   await procesarFacturas(facturasB, "NCB")
   await procesarFacturas(facturasC, "NCC")
+
+  // Marcar descuento financiero en kardex de los comprobantes bonificados
+  await actualizarDescuentoFinancieroKardex(supabase, comprobante_ids)
 
   return {
     total_bonificacion: r2(totalBonificacion),
