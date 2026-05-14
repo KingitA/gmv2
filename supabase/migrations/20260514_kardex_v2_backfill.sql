@@ -62,10 +62,21 @@ WHERE k.comprobante_venta_id = sub.comprobante_venta_id
   AND (k.comprobante_cobrado IS NULL OR k.comprobante_cobrado = false);
 
 -- -----------------------------------------------------------------------------
--- 4. Descuentos de proveedor — OMITIDO
---    recepciones_items no tiene columnas de descuento en el schema actual.
---    Los descuentos se guardarán en kardex a partir de nuevas recepciones.
+-- 4. Descuentos de proveedor en kardex  ← desde recepciones_items
+--    Requiere haber corrido 20260514_recepciones_items_descuentos.sql primero.
+--    Datos históricos = 0 (DEFAULT), solo tiene efecto en recepciones futuras.
 -- -----------------------------------------------------------------------------
+UPDATE kardex k
+SET
+  descuento_proveedor_pct            = NULLIF(ri.descuento_pct, 0),
+  descuento_proveedor_financiero_pct = NULLIF(ri.descuento_financiero_pct, 0),
+  descuento_proveedor_comercial_pct  = NULLIF(ri.descuento_comercial_pct, 0)
+FROM recepciones_items ri
+WHERE k.recepcion_id  = ri.recepcion_id
+  AND k.articulo_id   = ri.articulo_id
+  AND k.tipo_movimiento = 'compra'
+  AND k.descuento_proveedor_pct IS NULL
+  AND (ri.descuento_pct > 0 OR ri.descuento_financiero_pct > 0 OR ri.descuento_comercial_pct > 0);
 
 -- -----------------------------------------------------------------------------
 -- 5. comprador_id en kardex  ← desde ordenes_compra.creado_por

@@ -81,7 +81,7 @@ export async function POST(
                 // Kardex unificado — precio y descuentos desde recepciones_items
                 const { data: recItem } = await supabase
                     .from("recepciones_items")
-                    .select("precio_real, precio_oc, precio_documentado, articulo_id")
+                    .select("precio_real, precio_oc, precio_documentado, articulo_id, descuento_pct, descuento_financiero_pct, descuento_comercial_pct")
                     .eq("recepcion_id", recepcion_id)
                     .eq("articulo_id", item.articulo_id)
                     .single()
@@ -113,6 +113,9 @@ export async function POST(
                         operador_id: auth.user.id,
                         receptor_id: auth.user.id,
                         comprador_id: (Array.isArray(reception.orden_compra) ? reception.orden_compra[0] : reception.orden_compra)?.creado_por ?? null,
+                        ...(recItem?.descuento_pct ? { descuento_proveedor_pct: recItem.descuento_pct } : {}),
+                        ...(recItem?.descuento_financiero_pct ? { descuento_proveedor_financiero_pct: recItem.descuento_financiero_pct } : {}),
+                        ...(recItem?.descuento_comercial_pct ? { descuento_proveedor_comercial_pct: recItem.descuento_comercial_pct } : {}),
                     },
                     {
                         sku: artInfo?.sku,
