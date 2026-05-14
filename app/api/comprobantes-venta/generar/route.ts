@@ -200,6 +200,7 @@ export async function POST(request: Request) {
         await vincularKardexAComprobante(
           supabase, pedido_id, comp.id, comp.tipo_comprobante,
           comp.numero, esP ? 'Presupuesto' : 'Factura', esP ? 'NEGRO' : 'BLANCO',
+          auth.user.id,
         )
       }
     } else {
@@ -234,6 +235,7 @@ export async function POST(request: Request) {
             color_dinero: colorDinero,
             va_en_comprobante: item.vaEnComprobante,
             provincia_destino: (pedido.cliente as any).provincia ?? null,
+            facturador_id: auth.user.id,
           }, {
             sku: item.sku,
             descripcion: item.descripcion,

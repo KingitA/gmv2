@@ -51,117 +51,72 @@ export async function GET(req: NextRequest) {
       return aggMap.get(vid)!
     }
 
-    // ── VENDIDA: filtramos por pedido.fecha ───────────────────────────────────
-    if (tipoFiltro === 'vendida') {
-      let pedidosQuery = supabase
-        .from('pedidos')
-        .select('id, fecha, cliente_id')
-        .gte('fecha', prev.from)
-        .lte('fecha', dateTo)
-        .is('eliminado_at', null)
+    // ── Base kardex query: todas las filas de venta con comisión ─────────────
+    function buildKardexQuery(dateField: string, from: string, to: string) {
+      let q = supabase
+        .from('kardex')
+        .select('id, vendedor_id, fecha, fecha_comprobante_cobrado, comprobante_cobrado, comision_viajante_pct, comision_viajante_monto, pedido_id, cliente_id, articulo_id, comprobante_venta_id, articulo_categoria')
+        .eq('tipo_movimiento', 'venta')
+        .not('comision_viajante_monto', 'is', null)
+        .gt('comision_viajante_monto', 0)
+        .gte(dateField, from)
+        .lte(dateField, to)
 
-      if (clienteId) pedidosQuery = pedidosQuery.eq('cliente_id', clienteId)
-      if (pedidoId) pedidosQuery = pedidosQuery.eq('id', pedidoId)
+      if (viajanteId) q = q.eq('vendedor_id', viajanteId)
+      if (articuloId) q = q.eq('articulo_id', articuloId)
+      if (pedidoId) q = q.eq('pedido_id', pedidoId)
+      if (comprobanteId) q = q.eq('comprobante_venta_id', comprobanteId)
+      if (clienteId) q = q.eq('cliente_id', clienteId)
 
-      const { data: pedidosData } = await pedidosQuery
-      if (!pedidosData?.length) return NextResponse.json(empty)
-
-      const pedidoMap = new Map(pedidosData.map(p => [p.id, p]))
-      const pedidoIds = [...pedidoMap.keys()]
-
-      let comisionesQuery = supabase
-        .from('comisiones')
-        .select('id, monto, porcentaje, pagado, comprobante_cobrado, viajante_id, pedido_id, comprobante_venta_id, tipo, segmento, articulo_id')
-        .eq('tipo', 'vendida')
-        .in('pedido_id', pedidoIds)
-
-      if (viajanteId) comisionesQuery = comisionesQuery.eq('viajante_id', viajanteId)
-      if (articuloId) comisionesQuery = comisionesQuery.eq('articulo_id', articuloId)
-      if (comprobanteId) comisionesQuery = comisionesQuery.eq('comprobante_venta_id', comprobanteId)
-
-      const { data: comisiones, error } = await comisionesQuery
-      if (error) throw error
-
-      for (const c of comisiones ?? []) {
-        const pedido = pedidoMap.get(c.pedido_id)
-        const fechaPedido = pedido?.fecha?.slice(0, 10) ?? ''
-        const monto = Number(c.monto ?? 0)
-        const vid = c.viajante_id ?? 'sin_vendedor'
-
-        const inCurrent = fechaPedido >= dateFrom && fechaPedido <= dateTo
-        const inPrev = fechaPedido >= prev.from && fechaPedido <= prev.to
-        if (!inCurrent && !inPrev) continue
-
-        const agg = ensureAgg(vid)
-        if (inCurrent) {
-          agg.devengado += monto
-          if (c.comprobante_cobrado) agg.cobrable += monto
-          if (c.pagado) agg.pagado += monto
-          if (c.comprobante_cobrado && !c.pagado) agg.pendiente += monto
-          if (c.pedido_id) agg.pedidos.add(c.pedido_id)
-          if (pedido?.cliente_id) agg.clientes.add(pedido.cliente_id)
-          const seg = c.segmento ?? 'sin_segmento'
-          agg.por_segmento[seg] = (agg.por_segmento[seg] ?? 0) + monto
-        }
-        if (inPrev) agg.devengadoPrev += monto
-      }
+      return q
     }
 
-    // ── COBRADA: filtramos por fecha_comprobante_cobrado ─────────────────────
+    // ── VENDIDA: comisiones por fecha de creación del movimiento ─────────────
+    // ── COBRADA: comisiones donde el cliente ya pagó el comprobante ──────────
+    const dateField = tipoFiltro === 'cobrada' ? 'fecha_comprobante_cobrado' : 'fecha'
+
+    let kardexQuery = buildKardexQuery(dateField, prev.from, dateTo)
     if (tipoFiltro === 'cobrada') {
-      let comisionesQuery = supabase
-        .from('comisiones')
-        .select('id, monto, porcentaje, pagado, comprobante_cobrado, viajante_id, pedido_id, comprobante_venta_id, tipo, segmento, articulo_id, fecha_comprobante_cobrado')
-        .eq('tipo', 'cobrada')
-        .gte('fecha_comprobante_cobrado', prev.from)
-        .lte('fecha_comprobante_cobrado', dateTo)
+      kardexQuery = kardexQuery.eq('comprobante_cobrado', true)
+    }
 
-      if (viajanteId) comisionesQuery = comisionesQuery.eq('viajante_id', viajanteId)
-      if (articuloId) comisionesQuery = comisionesQuery.eq('articulo_id', articuloId)
-      if (comprobanteId) comisionesQuery = comisionesQuery.eq('comprobante_venta_id', comprobanteId)
-      if (pedidoId) comisionesQuery = comisionesQuery.eq('pedido_id', pedidoId)
+    const { data: kardexRows, error: kardexError } = await kardexQuery
+    if (kardexError) throw kardexError
+    if (!kardexRows?.length) return NextResponse.json(empty)
 
-      const { data: comisiones, error } = await comisionesQuery
-      if (error) throw error
+    // Obtener flag pagado desde tabla comisiones (join por kardex_id)
+    const kardexIds = kardexRows.map(r => r.id)
+    const { data: comisionesRows } = await supabase
+      .from('comisiones')
+      .select('kardex_id, pagado')
+      .in('kardex_id', kardexIds)
 
-      // Para cliente_id necesitamos los pedidos
-      const pedidoIds = [...new Set((comisiones ?? []).map(c => c.pedido_id).filter(Boolean))]
-      const pedidoMap = new Map<string, { cliente_id: string }>()
-      if (pedidoIds.length) {
-        let pq = supabase.from('pedidos').select('id, cliente_id').in('id', pedidoIds)
-        if (clienteId) pq = pq.eq('cliente_id', clienteId)
-        const { data: pedidosData } = await pq
-        for (const p of pedidosData ?? []) pedidoMap.set(p.id, p)
+    const pagadoMap = new Map<string, boolean>(
+      (comisionesRows ?? []).map(c => [c.kardex_id, c.pagado])
+    )
+
+    for (const k of kardexRows) {
+      const monto = Number(k.comision_viajante_monto ?? 0)
+      const vid = k.vendedor_id ?? 'sin_vendedor'
+      const fechaFiltro = (tipoFiltro === 'cobrada' ? k.fecha_comprobante_cobrado : k.fecha)?.slice(0, 10) ?? ''
+      const pagado = pagadoMap.get(k.id) ?? false
+
+      const inCurrent = fechaFiltro >= dateFrom && fechaFiltro <= dateTo
+      const inPrev = fechaFiltro >= prev.from && fechaFiltro <= prev.to
+      if (!inCurrent && !inPrev) continue
+
+      const agg = ensureAgg(vid)
+      if (inCurrent) {
+        agg.devengado += monto
+        if (k.comprobante_cobrado) agg.cobrable += monto
+        if (pagado) agg.pagado += monto
+        if (k.comprobante_cobrado && !pagado) agg.pendiente += monto
+        if (k.pedido_id) agg.pedidos.add(k.pedido_id)
+        if (k.cliente_id) agg.clientes.add(k.cliente_id)
+        const seg = k.articulo_categoria ?? 'sin_segmento'
+        agg.por_segmento[seg] = (agg.por_segmento[seg] ?? 0) + monto
       }
-
-      // Si hay filtro de cliente, excluir comisiones cuyo pedido no pertenece a ese cliente
-      const comisionesFinales = clienteId
-        ? (comisiones ?? []).filter(c => !c.pedido_id || pedidoMap.has(c.pedido_id))
-        : (comisiones ?? [])
-
-      for (const c of comisionesFinales) {
-        const fecha = c.fecha_comprobante_cobrado?.slice(0, 10) ?? ''
-        const monto = Number(c.monto ?? 0)
-        const vid = c.viajante_id ?? 'sin_vendedor'
-
-        const inCurrent = fecha >= dateFrom && fecha <= dateTo
-        const inPrev = fecha >= prev.from && fecha <= prev.to
-        if (!inCurrent && !inPrev) continue
-
-        const agg = ensureAgg(vid)
-        if (inCurrent) {
-          agg.devengado += monto
-          if (c.comprobante_cobrado) agg.cobrable += monto
-          if (c.pagado) agg.pagado += monto
-          if (c.comprobante_cobrado && !c.pagado) agg.pendiente += monto
-          if (c.pedido_id) agg.pedidos.add(c.pedido_id)
-          const pedido = pedidoMap.get(c.pedido_id)
-          if (pedido?.cliente_id) agg.clientes.add(pedido.cliente_id)
-          const seg = c.segmento ?? 'sin_segmento'
-          agg.por_segmento[seg] = (agg.por_segmento[seg] ?? 0) + monto
-        }
-        if (inPrev) agg.devengadoPrev += monto
-      }
+      if (inPrev) agg.devengadoPrev += monto
     }
 
     const rows = [...aggMap.entries()]

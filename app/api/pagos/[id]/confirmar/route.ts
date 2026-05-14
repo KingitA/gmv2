@@ -158,6 +158,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
               .eq("comprobante_venta_id", imp.comprobante_id)
               .eq("tipo", "vendida")
               .eq("comprobante_cobrado", false)
+
+            // Registrar cobrador_id en kardex para trazabilidad
+            await supabase
+              .from("kardex")
+              .update({ cobrador_id: auth.user.id })
+              .eq("comprobante_venta_id", imp.comprobante_id)
+              .is("cobrador_id", null)
           } catch (comErr) {
             console.error("Error creando comisiones cobradas:", comErr)
           }

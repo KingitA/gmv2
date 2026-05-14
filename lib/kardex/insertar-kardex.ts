@@ -93,17 +93,47 @@ export interface KardexMovimientoInput {
   va_en_comprobante?: string | null     // 'factura' | 'presupuesto'
 
   // ── Impuestos extra (para reporte IVA del contador) ───────────────────────
+  percepcion_iva_pct?: number
   percepcion_iva_monto?: number
+  percepcion_iibb_pct?: number
   percepcion_iibb_monto?: number
+  percepcion_ganancias_pct?: number
   percepcion_ganancias_monto?: number
   provincia_destino?: string | null     // zona del cliente al momento de la venta
+
+  // ── Descuentos de proveedor (solo tipo_movimiento = 'compra') ──────────────
+  descuento_proveedor_pct?: number | null
+  descuento_proveedor_monto?: number | null
+  descuento_proveedor_financiero_pct?: number | null
+  descuento_proveedor_financiero_monto?: number | null
+  descuento_proveedor_comercial_pct?: number | null
+  descuento_proveedor_comercial_monto?: number | null
+
+  // ── Comisión del viajante (solo tipo_movimiento = 'venta') ─────────────────
+  // Calculado con getComisionPorcentaje(vendedor, segmento_precio, iva_ventas)
+  comision_viajante_pct?: number | null
+  comision_viajante_monto?: number | null
 
   // ── Stock snapshot ─────────────────────────────────────────────────────────
   stock_antes?: number | null
   stock_despues?: number | null
 
-  // ── Auditoría ──────────────────────────────────────────────────────────────
+  // ── Actores responsables del proceso ──────────────────────────────────────
   operador_id?: string | null             // user.id de quien registró el movimiento
+  comprador_id?: string | null            // creó la OC
+  receptor_id?: string | null             // recibió en depósito
+  controlador_id?: string | null          // controló la recepción
+  pagador_id?: string | null              // pagó la OC
+  preparadores_ids?: string[] | null      // array: puede haber múltiples preparadores
+  facturador_id?: string | null           // generó el comprobante de venta
+  entregador_id?: string | null           // entregó al cliente
+  cobrador_id?: string | null             // cobró del cliente
+  modificador_deposito_id?: string | null // hizo ajuste de stock en depósito
+
+  // ── Comisiones (para auto-insertar registro en tabla comisiones) ───────────
+  // Si se provee viajante_id_comision y comision_viajante_monto > 0,
+  // se inserta automáticamente una fila en comisiones con pagado=false
+  viajante_id_comision?: string | null
 }
 
 // Tipos que reducen stock (signo -1)
@@ -135,7 +165,7 @@ export async function insertarKardex(
     }
   }
 
-  const { error } = await supabase.from('kardex').insert({
+  const { data: kardexData, error } = await supabase.from('kardex').insert({
     fecha: input.fecha,
     tipo_movimiento: input.tipo_movimiento,
     signo,
@@ -189,10 +219,23 @@ export async function insertarKardex(
     color_dinero: input.color_dinero ?? null,
     va_en_comprobante: input.va_en_comprobante ?? null,
 
+    percepcion_iva_pct: input.percepcion_iva_pct ?? 0,
     percepcion_iva_monto: input.percepcion_iva_monto ?? 0,
+    percepcion_iibb_pct: input.percepcion_iibb_pct ?? 0,
     percepcion_iibb_monto: input.percepcion_iibb_monto ?? 0,
+    percepcion_ganancias_pct: input.percepcion_ganancias_pct ?? 0,
     percepcion_ganancias_monto: input.percepcion_ganancias_monto ?? 0,
     provincia_destino: input.provincia_destino ?? null,
+
+    descuento_proveedor_pct: input.descuento_proveedor_pct ?? null,
+    descuento_proveedor_monto: input.descuento_proveedor_monto ?? null,
+    descuento_proveedor_financiero_pct: input.descuento_proveedor_financiero_pct ?? null,
+    descuento_proveedor_financiero_monto: input.descuento_proveedor_financiero_monto ?? null,
+    descuento_proveedor_comercial_pct: input.descuento_proveedor_comercial_pct ?? null,
+    descuento_proveedor_comercial_monto: input.descuento_proveedor_comercial_monto ?? null,
+
+    comision_viajante_pct: input.comision_viajante_pct ?? null,
+    comision_viajante_monto: input.comision_viajante_monto ?? null,
 
     comprobante_venta_id: input.comprobante_venta_id ?? null,
     comprobante_compra_id: input.comprobante_compra_id ?? null,
@@ -205,7 +248,16 @@ export async function insertarKardex(
     stock_despues: input.stock_despues ?? null,
 
     operador_id: input.operador_id ?? null,
-  })
+    comprador_id: input.comprador_id ?? null,
+    receptor_id: input.receptor_id ?? null,
+    controlador_id: input.controlador_id ?? null,
+    pagador_id: input.pagador_id ?? null,
+    preparadores_ids: input.preparadores_ids ?? null,
+    facturador_id: input.facturador_id ?? null,
+    entregador_id: input.entregador_id ?? null,
+    cobrador_id: input.cobrador_id ?? null,
+    modificador_deposito_id: input.modificador_deposito_id ?? null,
+  }).select('id').single()
 
   if (error) {
     // No-throw: el kardex no debe romper el flujo principal
@@ -214,6 +266,21 @@ export async function insertarKardex(
       articulo_id: input.articulo_id,
       error: error.message,
     })
+    return
+  }
+
+  // Auto-insertar en comisiones si hay comisión del viajante
+  if (kardexData?.id && input.comision_viajante_monto && input.comision_viajante_monto > 0 && input.viajante_id_comision) {
+    const { error: comErr } = await supabase.from('comisiones').insert({
+      kardex_id: kardexData.id,
+      viajante_id: input.viajante_id_comision,
+      pedido_id: input.pedido_id ?? null,
+      comprobante_venta_id: input.comprobante_venta_id ?? null,
+      pagado: false,
+    })
+    if (comErr) {
+      console.error('[Kardex] Error insertando comisión:', comErr.message)
+    }
   }
 }
 
@@ -229,6 +296,7 @@ export async function vincularKardexAComprobante(
   numero_comprobante: string,
   metodo_facturacion: string,
   color_dinero: string,
+  facturador_id?: string | null,
 ): Promise<void> {
   const { error } = await supabase
     .from('kardex')
@@ -238,7 +306,8 @@ export async function vincularKardexAComprobante(
       numero_comprobante,
       metodo_facturacion,
       color_dinero,
-      fecha: new Date().toISOString(), // fecha de facturación, no de pedido
+      fecha: new Date().toISOString(),
+      ...(facturador_id ? { facturador_id } : {}),
     })
     .eq('pedido_id', pedido_id)
     .is('comprobante_venta_id', null)

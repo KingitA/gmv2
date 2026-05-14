@@ -321,9 +321,20 @@ export async function createPedido(data: {
   const productIds = itemsCalc.map(i => i.producto_id)
   const { data: articulosInfo } = await supabase
     .from("articulos")
-    .select("id, sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual")
+    .select("id, sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, segmento_precio, stock_actual")
     .in("id", productIds)
   const articulosMap = Object.fromEntries((articulosInfo || []).map((a: any) => [a.id, a]))
+
+  // Obtener tasas de comisión del viajante antes del loop
+  let vendedorComisiones: { comision_limpieza_bazar: number; comision_perfumeria_0: number; comision_perfumeria_plus: number } | null = null
+  if (clienteInfo.vendedor_id) {
+    const { data: vd } = await supabase
+      .from("vendedores")
+      .select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus")
+      .eq("id", clienteInfo.vendedor_id)
+      .single()
+    vendedorComisiones = vd ?? null
+  }
 
   for (const item of itemsCalc) {
     const { error: itemError } = await supabase.from("pedidos_detalle").insert({
@@ -387,6 +398,19 @@ export async function createPedido(data: {
         stock_antes: stockActual,
         stock_despues: stockActual !== null ? stockActual - item.cantidad : null,
         operador_id: user.id,
+        // Comisión del viajante embebida en kardex
+        ...(() => {
+          if (!vendedorComisiones || !art?.segmento_precio) return {}
+          const pct = getComisionPorcentaje(vendedorComisiones, art.segmento_precio, art.iva_ventas)
+          if (pct <= 0) return {}
+          const precioNeto = getPrecioNeto(item.precioNeto, item.metodoUsado, art.iva_ventas)
+          const monto = Math.round(precioNeto * item.cantidad * pct) / 100
+          return {
+            comision_viajante_pct: pct,
+            comision_viajante_monto: monto,
+            viajante_id_comision: clienteInfo.vendedor_id,
+          }
+        })(),
       },
       {
         sku: art?.sku,
@@ -432,55 +456,6 @@ export async function createPedido(data: {
     console.log("Account balance updated successfully")
   } catch (ctaError) {
     console.error("Non-critical error updating account balance:", ctaError)
-  }
-
-  // Commission — por artículo según segmento y tasa del viajante
-  console.log("Calculating commission...")
-  try {
-    if (clienteInfo.vendedor_id) {
-      const { data: vendedor } = await supabase
-        .from("vendedores")
-        .select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus")
-        .eq("id", clienteInfo.vendedor_id)
-        .single()
-
-      if (vendedor) {
-        const { data: items } = await supabase
-          .from("pedidos_detalle")
-          .select("articulo_id, cantidad, precio_final, metodo_facturacion_item, articulos(segmento_precio, iva_ventas)")
-          .eq("pedido_id", pedido.id)
-
-        const comisionesItems = (items ?? [])
-          .filter((item: any) => item.articulos?.segmento_precio)
-          .map((item: any) => {
-            const { segmento_precio, iva_ventas } = item.articulos
-            const porcentaje = getComisionPorcentaje(vendedor, segmento_precio, iva_ventas)
-            const precioNeto = getPrecioNeto(Number(item.precio_final), item.metodo_facturacion_item, iva_ventas)
-            const monto = (precioNeto * Number(item.cantidad) * porcentaje) / 100
-            return {
-              viajante_id: clienteInfo.vendedor_id,
-              pedido_id: pedido.id,
-              tipo: "vendida",
-              articulo_id: item.articulo_id,
-              segmento: segmento_precio,
-              cantidad: Number(item.cantidad),
-              precio_neto_unitario: precioNeto,
-              porcentaje,
-              monto,
-              pagado: false,
-            }
-          })
-          .filter((c: any) => c.porcentaje > 0)
-
-        if (comisionesItems.length > 0) {
-          console.log(`Inserting ${comisionesItems.length} comisiones into 'comisiones'...`)
-          const { error: commError } = await supabase.from("comisiones").insert(comisionesItems)
-          if (commError) console.error("Error inserting into 'comisiones':", commError)
-        }
-      }
-    }
-  } catch (commErr) {
-    console.warn("Commission creation failed, but order is safe:", commErr)
   }
 
   revalidatePath("/clientes-pedidos")
