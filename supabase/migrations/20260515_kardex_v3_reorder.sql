@@ -234,23 +234,27 @@ ALTER TABLE comisiones
     FOREIGN KEY (kardex_id) REFERENCES kardex(id) ON DELETE SET NULL;
 
 -- 6. Recrear todos los índices
+--    Los índices sobre kardex se borran solos al hacer DROP TABLE kardex.
+--    El índice sobre comisiones persiste, por eso DROP IF EXISTS explícito.
 -- -----------------------------------------------------------------------------
-CREATE INDEX idx_kardex_fecha            ON kardex(fecha DESC);
-CREATE INDEX idx_kardex_articulo_fecha   ON kardex(articulo_id, fecha DESC);
+DROP INDEX IF EXISTS idx_comisiones_kardex;
+
+CREATE INDEX idx_kardex_fecha             ON kardex(fecha DESC);
+CREATE INDEX idx_kardex_articulo_fecha    ON kardex(articulo_id, fecha DESC);
 CREATE INDEX idx_kardex_articulo_fecha_desc ON kardex(articulo_id, fecha DESC, created_at DESC);
-CREATE INDEX idx_kardex_cliente_fecha    ON kardex(cliente_id, fecha DESC);
-CREATE INDEX idx_kardex_proveedor_fecha  ON kardex(proveedor_id, fecha DESC);
-CREATE INDEX idx_kardex_vendedor_fecha   ON kardex(vendedor_id, fecha DESC);
-CREATE INDEX idx_kardex_tipo_fecha       ON kardex(tipo_movimiento, fecha DESC);
-CREATE INDEX idx_kardex_categoria_fecha  ON kardex(articulo_categoria, fecha DESC);
+CREATE INDEX idx_kardex_cliente_fecha     ON kardex(cliente_id, fecha DESC);
+CREATE INDEX idx_kardex_proveedor_fecha   ON kardex(proveedor_id, fecha DESC);
+CREATE INDEX idx_kardex_vendedor_fecha    ON kardex(vendedor_id, fecha DESC);
+CREATE INDEX idx_kardex_tipo_fecha        ON kardex(tipo_movimiento, fecha DESC);
+CREATE INDEX idx_kardex_categoria_fecha   ON kardex(articulo_categoria, fecha DESC);
 CREATE INDEX idx_kardex_comprobante_venta ON kardex(comprobante_venta_id);
-CREATE INDEX idx_kardex_pedido           ON kardex(pedido_id);
-CREATE INDEX idx_kardex_recepcion        ON kardex(recepcion_id);
-CREATE INDEX idx_kardex_operador         ON kardex(operador_id);
-CREATE INDEX idx_kardex_cobrado          ON kardex(comprobante_venta_id) WHERE comprobante_cobrado = true;
+CREATE INDEX idx_kardex_pedido            ON kardex(pedido_id);
+CREATE INDEX idx_kardex_recepcion         ON kardex(recepcion_id);
+CREATE INDEX idx_kardex_operador          ON kardex(operador_id);
+CREATE INDEX idx_kardex_cobrado           ON kardex(comprobante_venta_id) WHERE comprobante_cobrado = true;
 CREATE INDEX idx_kardex_comision_viajante ON kardex(vendedor_id, fecha)
   WHERE comision_viajante_monto IS NOT NULL AND comision_viajante_monto > 0;
-CREATE INDEX idx_comisiones_kardex       ON comisiones(kardex_id) WHERE kardex_id IS NOT NULL;
+CREATE INDEX idx_comisiones_kardex        ON comisiones(kardex_id) WHERE kardex_id IS NOT NULL;
 
 -- 7. Verificación final
 -- -----------------------------------------------------------------------------
