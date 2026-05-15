@@ -154,7 +154,7 @@ export async function DELETE(request: Request) {
 
     const { error } = await supabase
         .from('vencimientos')
-        .update({ estado: 'cancelado', updated_at: new Date().toISOString() })
+        .update({ estado: 'cancelado', updated_at: nowArgentina() })
         .eq('id', id)
 
     if (error) {

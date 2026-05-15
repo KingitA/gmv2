@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { nowArgentina } from "@/lib/utils"
 
 // PATCH: Actualizar cantidad_preparada y estado_item en pedidos_detalle
 export async function PATCH(request: NextRequest) {
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
     // Cerrar sesión de picking
     await supabase
       .from("picking_sesiones")
-      .update({ estado: "TERMINADO", fin_at: new Date().toISOString() })
+      .update({ estado: "TERMINADO", fin_at: nowArgentina() })
       .eq("pedido_id", pedido_id)
       .eq("estado", "EN_PROGRESO")
 

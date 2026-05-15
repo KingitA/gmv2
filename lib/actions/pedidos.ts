@@ -602,7 +602,7 @@ export async function softDeletePedido(pedidoId: string) {
     .from("pedidos")
     .update({
       estado: "eliminado",
-      eliminado_at: new Date().toISOString(),
+      eliminado_at: nowArgentina(),
     })
     .eq("id", pedidoId)
 
@@ -643,7 +643,7 @@ export async function agregarItemPedido(
   // Fetch pedido to get lista + metodo + cliente
   const { data: pedido } = await supabase
     .from("pedidos")
-    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,provincia)")
+    .select("cliente_id,numero_pedido,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,provincia)")
     .eq("id", pedidoId)
     .single()
   if (!pedido) throw new Error("Pedido no encontrado")
@@ -694,8 +694,6 @@ export async function agregarItemPedido(
       articulo_id: productoId,
       cantidad,
       precio_costo: articuloConDescuentos.precio_compra || 0,
-      precio_lista: kardexDesc.precio_lista,
-      precio_unitario_bruto: kardexDesc.precio_unitario_bruto,
       precio_lista: precio.precioNeto,
       precio_unitario_final: precio.precioAlCliente,
       iva_porcentaje: ivaPct,
@@ -714,6 +712,7 @@ export async function agregarItemPedido(
       vendedor_id: (pedido.clientes as any)?.vendedor_id ?? null,
       provincia_destino: (pedido.clientes as any)?.provincia ?? null,
       pedido_id: pedidoId,
+      numero_pedido: (pedido as any).numero_pedido ?? null,
       lista_precio_id: pedido.lista_precio_pedido_id || (pedido.clientes as any)?.lista_precio_id || null,
       metodo_facturacion: metodoRaw,
       color_dinero: colorDinero,
@@ -753,7 +752,7 @@ export async function agregarItemBonificado(
 
   const { data: pedido } = await supabase
     .from("pedidos")
-    .select("cliente_id,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,provincia)")
+    .select("cliente_id,numero_pedido,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,provincia)")
     .eq("id", pedidoId)
     .single()
   if (!pedido) throw new Error("Pedido no encontrado")
@@ -803,8 +802,6 @@ export async function agregarItemBonificado(
       articulo_id: productoId,
       cantidad,
       precio_costo: articuloConDescuentos.precio_compra || 0,
-      precio_lista: kardexDescB.precio_lista,
-      precio_unitario_bruto: kardexDescB.precio_unitario_bruto,
       precio_lista: precio.precioNeto,
       precio_unitario_final: precio.precioAlCliente,
       iva_porcentaje: ivaPct,
@@ -823,6 +820,7 @@ export async function agregarItemBonificado(
       vendedor_id: (pedido.clientes as any)?.vendedor_id ?? null,
       provincia_destino: (pedido.clientes as any)?.provincia ?? null,
       pedido_id: pedidoId,
+      numero_pedido: (pedido as any).numero_pedido ?? null,
       lista_precio_id: pedido.lista_precio_pedido_id || (pedido.clientes as any)?.lista_precio_id || null,
       metodo_facturacion: metodoRaw,
       color_dinero: colorDinero,

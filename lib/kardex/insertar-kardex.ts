@@ -79,6 +79,7 @@ export interface KardexMovimientoInput {
 
   // ── Referencias a entidades originales ────────────────────────────────────
   pedido_id?: string | null
+  numero_pedido?: string | null
   recepcion_id?: string | null
   orden_compra_id?: string | null
   comprobante_venta_id?: string | null
@@ -238,6 +239,7 @@ export async function insertarKardex(
     comprobante_venta_id: input.comprobante_venta_id ?? null,
     comprobante_compra_id: input.comprobante_compra_id ?? null,
     pedido_id: input.pedido_id ?? null,
+    numero_pedido: input.numero_pedido ?? null,
     recepcion_id: input.recepcion_id ?? null,
     orden_compra_id: input.orden_compra_id ?? null,
     lista_precio_id: input.lista_precio_id ?? null,
