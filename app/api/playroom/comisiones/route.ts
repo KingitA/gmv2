@@ -81,14 +81,22 @@ export async function GET(req: NextRequest) {
     // ── COBRADA: comisiones donde el cliente ya pagó el comprobante ──────────
     const dateField = tipoFiltro === 'cobrada' ? 'fecha_comprobante_cobrado' : 'fecha'
 
-    let kardexQuery = buildKardexQuery(dateField, prev.from, dateTo)
-    if (tipoFiltro === 'cobrada') {
-      kardexQuery = kardexQuery.eq('comprobante_cobrado', true)
+    // Paginate to bypass Supabase PostgREST max_rows server-side cap (default 1000)
+    const PAGE_SIZE = 1000
+    const kardexRows: any[] = []
+    let offset = 0
+    while (true) {
+      let q = buildKardexQuery(dateField, prev.from, dateTo)
+      if (tipoFiltro === 'cobrada') q = q.eq('comprobante_cobrado', true)
+      const { data: page, error: pageError } = await q.range(offset, offset + PAGE_SIZE - 1)
+      if (pageError) throw pageError
+      if (!page?.length) break
+      kardexRows.push(...page)
+      if (page.length < PAGE_SIZE) break
+      offset += PAGE_SIZE
     }
 
-    const { data: kardexRows, error: kardexError } = await kardexQuery.limit(10000)
-    if (kardexError) throw kardexError
-    if (!kardexRows?.length) return NextResponse.json(empty)
+    if (!kardexRows.length) return NextResponse.json(empty)
 
     // Obtener flag pagado desde tabla comisiones (join por kardex_id)
     const kardexIds = kardexRows.map(r => r.id)

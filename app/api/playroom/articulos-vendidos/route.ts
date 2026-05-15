@@ -58,10 +58,20 @@ export async function GET(req: NextRequest) {
     else if (tipoComp === 'presupuesto') query = query.in('tipo_comprobante', ['PRES', 'REV'])
     if (fuente === 'comprobante') query = query.not('comprobante_venta_id', 'is', null)
 
-    const { data: movimientos, error } = await query.limit(10000)
+    // Paginate to bypass Supabase PostgREST max_rows server-side cap (default 1000)
+    const PAGE_SIZE = 1000
+    const movimientos: any[] = []
+    let offset = 0
+    while (true) {
+      const { data: page, error: pageError } = await query.range(offset, offset + PAGE_SIZE - 1)
+      if (pageError) throw pageError
+      if (!page?.length) break
+      movimientos.push(...page)
+      if (page.length < PAGE_SIZE) break
+      offset += PAGE_SIZE
+    }
 
-    if (error) throw error
-    if (!movimientos?.length) {
+    if (!movimientos.length) {
       return NextResponse.json({ rows: [], meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, totalRevenue: 0 } })
     }
 
