@@ -276,7 +276,14 @@ export async function insertarKardex(
       viajante_id: input.viajante_id_comision,
       pedido_id: input.pedido_id ?? null,
       comprobante_venta_id: input.comprobante_venta_id ?? null,
+      monto: round2(input.comision_viajante_monto),
+      porcentaje: input.comision_viajante_pct ?? 0,
       pagado: false,
+      comprobante_cobrado: false,
+      tipo: 'vendida',
+      articulo_id: input.articulo_id,
+      cantidad: input.cantidad,
+      precio_neto_unitario: input.precio_lista ?? null,
     })
     if (comErr) {
       console.error('[Kardex] Error insertando comisión:', comErr.message)

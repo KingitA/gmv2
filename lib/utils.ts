@@ -15,13 +15,11 @@ export function formatCurrency(value: number) {
 const ARGENTINA_TZ = 'America/Argentina/Buenos_Aires'
 
 /**
- * Returns the current date/time as an ISO string adjusted to Argentina timezone.
- * Use this instead of `new Date().toISOString()` for storing dates.
+ * Returns the current UTC timestamp as ISO string for TIMESTAMPTZ DB columns.
+ * PostgreSQL TIMESTAMPTZ stores UTC and handles timezone display correctly.
  */
 export function nowArgentina(): string {
-  const now = new Date()
-  const argDate = new Date(now.toLocaleString('en-US', { timeZone: ARGENTINA_TZ }))
-  return argDate.toISOString()
+  return new Date().toISOString()
 }
 
 /**

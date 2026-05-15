@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
 import { getNextOrderNumber } from "@/lib/utils/next-order-number"
-import { nowArgentina } from "@/lib/utils"
+import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { calcularPrecioPedido } from "@/lib/pricing/calcular-precio-pedido"
 import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/pricing/calculator"
 import { insertarKardex, type DescuentoKardex } from "@/lib/kardex/insertar-kardex"
@@ -294,7 +294,7 @@ export async function createPedido(data: {
       numero_pedido: numeroPedido,
       cliente_id: data.cliente_id,
       vendedor_id: clienteInfo.vendedor_id,
-      fecha: nowArgentina(),
+      fecha: todayArgentina(),
       estado: "pendiente",
       subtotal: total,
       descuento_general: 0,
@@ -373,8 +373,6 @@ export async function createPedido(data: {
         cantidad: item.cantidad,
         precio_costo: item.precio_costo,
         precio_lista: kardexDesc.precio_lista,
-        precio_unitario_bruto: kardexDesc.precio_unitario_bruto,
-        precio_lista: item.precioNeto,
         precio_unitario_final: item.precioAlCliente,
         iva_porcentaje: ivaPct,
         iva_monto_unitario: ivaMonto,
