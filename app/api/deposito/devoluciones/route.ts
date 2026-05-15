@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { nowArgentina } from "@/lib/utils"
 
 // GET: Devoluciones pendientes de recibir físicamente
 export async function GET() {
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
       .update({
         estado: "confirmado",
         confirmado_por: userName,
-        fecha_confirmacion: new Date().toISOString(),
+        fecha_confirmacion: nowArgentina(),
       })
       .eq("id", devolucion_id)
 

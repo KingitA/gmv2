@@ -101,7 +101,7 @@ export async function POST(
                         fecha: nowArgentina(),
                         articulo_id: item.articulo_id,
                         cantidad: totalUnits,
-                        precio_unitario_neto: precioCompra,
+                        precio_lista: precioCompra,
                         precio_unitario_final: precioCompra,
                         subtotal_neto: Math.round(precioCompra * totalUnits * 100) / 100,
                         subtotal_total: Math.round(precioCompra * totalUnits * 100) / 100,

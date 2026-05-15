@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
+import { todayArgentina } from '@/lib/utils'
 
 const TIPOS_VENTA = ['FA', 'FB', 'FC']
 const TIPOS_NC = ['NCA', 'NCB', 'NCC']
@@ -10,8 +11,8 @@ export async function GET(req: NextRequest) {
     const supabase = await createClient()
     const { searchParams } = new URL(req.url)
 
-    const dateFrom = searchParams.get('from') ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-    const dateTo = searchParams.get('to') ?? new Date().toISOString().slice(0, 10)
+    const dateFrom = searchParams.get('from') ?? todayArgentina()
+    const dateTo = searchParams.get('to') ?? todayArgentina()
     const comparePeriod = searchParams.get('compare') ?? 'previous'
 
     const prev = comparePeriod === 'year_ago'

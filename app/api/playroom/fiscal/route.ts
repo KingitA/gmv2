@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
+import { todayArgentina } from '@/lib/utils'
 
 const TIPO_LABELS: Record<string, string> = {
   FA: 'Fact. A', FB: 'Fact. B', FC: 'Fact. C',
@@ -38,8 +39,8 @@ export async function GET(req: NextRequest) {
     const supabase = await createClient()
     const { searchParams } = new URL(req.url)
 
-    const dateFrom = searchParams.get('from') ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-    const dateTo = searchParams.get('to') ?? new Date().toISOString().slice(0, 10)
+    const dateFrom = searchParams.get('from') ?? todayArgentina()
+    const dateTo = searchParams.get('to') ?? todayArgentina()
     const soloARCA = searchParams.get('solo_arca') === 'true'
     const provincia = searchParams.get('provincia') // 'BA' | 'RN' | 'LP' | null
 

@@ -207,7 +207,7 @@ export async function POST(request: Request) {
           fecha: todayArgentina(),
           articulo_id: item.articulo_id,
           cantidad: cantidadAbs,
-          precio_unitario_neto: precioUnitNeto,
+          precio_lista: precioUnitNeto,
           precio_unitario_final: precioUnitNeto,
           iva_porcentaje: ivaPct,
           iva_monto_unitario: cantidadAbs > 0 ? ivaMonto / cantidadAbs : 0,

@@ -1,3 +1,5 @@
+import { nowArgentina } from '@/lib/utils'
+
 /**
  * Helper central para insertar movimientos en el kardex unificado.
  * No recalcula precios — consume datos ya calculados por el pricing engine.
@@ -45,9 +47,9 @@ export interface KardexMovimientoInput {
   fecha: string                         // ISO string
   articulo_id: string
   cantidad: number                      // siempre positivo
-  precio_unitario_neto: number          // sin IVA
+  precio_lista: number                  // precio base sin IVA ni descuentos de venta
   precio_unitario_final: number         // lo que se cobra/paga
-  subtotal_neto: number                 // cantidad × precio_unitario_neto
+  subtotal_neto: number                 // cantidad × precio_lista
   subtotal_total: number                // subtotal_neto + subtotal_iva
 
   // ── Precios / márgenes ─────────────────────────────────────────────────────
@@ -58,8 +60,6 @@ export interface KardexMovimientoInput {
   subtotal_iva?: number
 
   // ── Descuentos ─────────────────────────────────────────────────────────────
-  precio_lista?: number | null            // P.Lista crudo antes de cualquier descuento ni IVA
-  precio_unitario_bruto?: number | null   // precio antes de descuento_propio y descuento_cliente
   descuentos_json?: DescuentoKardex[]
   descuento_cliente_pct?: number
   // Columnas individuales por tipo (para filtros SQL directos en reportes)
@@ -159,9 +159,9 @@ export async function insertarKardex(
   let margen_unitario: number | null = null
   let margen_porcentaje: number | null = null
   if (input.precio_costo != null && input.precio_costo > 0 && signo === -1) {
-    margen_unitario = round2(input.precio_unitario_neto - input.precio_costo)
-    if (input.precio_unitario_neto > 0) {
-      margen_porcentaje = round2((margen_unitario / input.precio_unitario_neto) * 100)
+    margen_unitario = round2(input.precio_lista - input.precio_costo)
+    if (input.precio_lista > 0) {
+      margen_porcentaje = round2((margen_unitario / input.precio_lista) * 100)
     }
   }
 
@@ -186,9 +186,7 @@ export async function insertarKardex(
     vendedor_id: input.vendedor_id ?? null,
 
     precio_costo: input.precio_costo ?? null,
-    precio_lista: input.precio_lista ?? null,
-    precio_unitario_bruto: input.precio_unitario_bruto ?? null,
-    precio_unitario_neto: input.precio_unitario_neto,
+    precio_lista: input.precio_lista,
     precio_unitario_final: input.precio_unitario_final,
 
     iva_porcentaje: input.iva_porcentaje ?? 0,
@@ -306,7 +304,7 @@ export async function vincularKardexAComprobante(
       numero_comprobante,
       metodo_facturacion,
       color_dinero,
-      fecha: new Date().toISOString(),
+      fecha: nowArgentina(),
       ...(facturador_id ? { facturador_id } : {}),
     })
     .eq('pedido_id', pedido_id)
@@ -368,14 +366,14 @@ export async function actualizarDescuentoFinancieroKardex(
 
   const { data: items, error } = await supabase
     .from('kardex')
-    .select('id, precio_unitario_neto')
+    .select('id, precio_lista')
     .in('comprobante_venta_id', comprobante_ids)
     .eq('tipo_movimiento', 'venta')
 
   if (error || !items?.length) return
 
   for (const item of items) {
-    const monto = round2(Number(item.precio_unitario_neto) * 0.10)
+    const monto = round2(Number(item.precio_lista) * 0.10)
     const { error: updErr } = await supabase
       .from('kardex')
       .update({

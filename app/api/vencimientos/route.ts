@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { nowArgentina, todayArgentina } from '@/lib/utils'
 
 // GET /api/vencimientos - Listar vencimientos con filtros
 export async function GET(request: Request) {
@@ -38,11 +39,11 @@ export async function GET(request: Request) {
         query = query.lte('fecha_vencimiento', hasta)
     }
     if (proximosNDias) {
-        const hoy = new Date()
+        const hoy = todayArgentina()
         const limite = new Date(hoy)
         limite.setDate(limite.getDate() + parseInt(proximosNDias))
         query = query
-            .gte('fecha_vencimiento', hoy.toISOString().split('T')[0])
+            .gte('fecha_vencimiento', hoy)
             .lte('fecha_vencimiento', limite.toISOString().split('T')[0])
             .in('estado', ['pendiente', 'vencido'])
     }
@@ -122,7 +123,7 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'ID es obligatorio' }, { status: 400 })
     }
 
-    updateData.updated_at = new Date().toISOString()
+    updateData.updated_at = nowArgentina()
 
     const { data, error } = await supabase
         .from('vencimientos')

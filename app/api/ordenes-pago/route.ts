@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { nowArgentina } from '@/lib/utils'
+import { nowArgentina, todayArgentina } from '@/lib/utils'
 
 // GET /api/ordenes-pago
 export async function GET(request: Request) {
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
         .insert({
             numero_op: numeroOp,
             proveedor_id,
-            fecha: fecha || new Date().toISOString().split('T')[0],
+            fecha: fecha || todayArgentina(),
             monto_total: montoTotal + totalRetenciones,
             estado: 'pendiente',
             observaciones: observaciones || null,

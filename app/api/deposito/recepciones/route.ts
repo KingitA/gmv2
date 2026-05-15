@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { insertarKardex } from "@/lib/kardex/insertar-kardex"
+import { nowArgentina } from "@/lib/utils"
 
 // GET: Órdenes de compra pendientes de recibir
 export async function GET() {
@@ -177,10 +178,10 @@ export async function PATCH(request: NextRequest) {
             supabase,
             {
               tipo_movimiento: "compra",
-              fecha: new Date().toISOString(),
+              fecha: nowArgentina(),
               articulo_id: item.articulo_id,
               cantidad: item.cantidad_fisica,
-              precio_unitario_neto: 0,   // sin precio en este flujo simplificado
+              precio_lista: 0,   // sin precio en este flujo simplificado
               precio_unitario_final: 0,
               subtotal_neto: 0,
               subtotal_total: 0,
@@ -203,7 +204,7 @@ export async function PATCH(request: NextRequest) {
       // Cerrar recepción
       await supabase
         .from("recepciones")
-        .update({ estado: "finalizada", fecha_fin: new Date().toISOString() })
+        .update({ estado: "finalizada", fecha_fin: nowArgentina() })
         .eq("id", recepcion_id)
 
       // Update OC

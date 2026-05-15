@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import { todayArgentina } from '@/lib/utils'
 
 export async function GET(req: NextRequest) {
   try {
@@ -9,8 +10,8 @@ export async function GET(req: NextRequest) {
     const articuloId = searchParams.get('articulo_id')
     if (!articuloId) return NextResponse.json({ error: 'articulo_id requerido' }, { status: 400 })
 
-    const dateFrom = searchParams.get('from') ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-    const dateTo   = searchParams.get('to')   ?? new Date().toISOString().slice(0, 10)
+    const dateFrom = searchParams.get('from') ?? todayArgentina()
+    const dateTo   = searchParams.get('to')   ?? todayArgentina()
     const fuente   = searchParams.get('fuente') // 'comprobante' | ''
 
     // Leer directamente del kardex — única fuente de verdad

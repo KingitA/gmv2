@@ -1,14 +1,15 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
+import { todayArgentina } from '@/lib/utils'
 
 export async function GET(req: NextRequest) {
   try {
     const supabase = createAdminClient()
     const { searchParams } = new URL(req.url)
 
-    const dateFrom = searchParams.get('from') ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-    const dateTo   = searchParams.get('to')   ?? new Date().toISOString().slice(0, 10)
+    const dateFrom = searchParams.get('from') ?? todayArgentina()
+    const dateTo   = searchParams.get('to')   ?? todayArgentina()
     const comparePeriod = searchParams.get('compare') ?? 'previous'
 
     // ── Filtros backend ────────────────────────────────────────────────────────

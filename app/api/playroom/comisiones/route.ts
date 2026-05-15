@@ -1,14 +1,20 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
+import { todayArgentina } from '@/lib/utils'
+
+function firstDayOfMonthArgentina(): string {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }))
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+}
 
 export async function GET(req: NextRequest) {
   try {
     const supabase = await createClient()
     const { searchParams } = new URL(req.url)
 
-    const dateFrom = searchParams.get('from') ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-    const dateTo = searchParams.get('to') ?? new Date().toISOString().slice(0, 10)
+    const dateFrom = searchParams.get('from') ?? firstDayOfMonthArgentina()
+    const dateTo = searchParams.get('to') ?? todayArgentina()
     const comparePeriod = searchParams.get('compare') ?? 'previous'
     const tipoFiltro = searchParams.get('tipo') ?? 'cobrada'
     const clienteId = searchParams.get('cliente_id')

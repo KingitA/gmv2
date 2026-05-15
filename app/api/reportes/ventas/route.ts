@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
         articulo_iva_compras, articulo_iva_ventas,
         cantidad,
         cliente_id, vendedor_id,
-        precio_costo, precio_unitario_neto, precio_unitario_final,
+        precio_costo, precio_lista, precio_unitario_final,
         iva_porcentaje, iva_monto_unitario, iva_incluido,
         descuento_cliente_pct,
         subtotal_neto, subtotal_iva, subtotal_total,
