@@ -1,11 +1,11 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
 const TIPOS_VENTA = ['FA', 'FB', 'FC']
 
 export async function GET() {
   try {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
     // Comprobantes con saldo pendiente
     const { data: comprobantes, error } = await supabase

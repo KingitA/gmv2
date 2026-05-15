@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { todayArgentina } from '@/lib/utils'
 
@@ -36,7 +36,7 @@ function provinciaToCol(provincia: string): 'percba' | 'percrn' | 'perclp' | nul
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await createClient()
+    const supabase = createAdminClient()
     const { searchParams } = new URL(req.url)
 
     const dateFrom = searchParams.get('from') ?? todayArgentina()
