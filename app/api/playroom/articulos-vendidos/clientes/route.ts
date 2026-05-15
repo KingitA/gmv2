@@ -2,6 +2,12 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { todayArgentina } from '@/lib/utils'
 
+function nextDayUTC(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
 export async function GET(req: NextRequest) {
   try {
     const supabase = createAdminClient()
@@ -20,7 +26,7 @@ export async function GET(req: NextRequest) {
       .select('cliente_id, cantidad, subtotal_total, precio_unitario_final, tipo_movimiento')
       .eq('articulo_id', articuloId)
       .gte('fecha', dateFrom)
-      .lte('fecha', dateTo)
+      .lt('fecha', nextDayUTC(dateTo))
       .in('tipo_movimiento', ['venta', 'nota_credito_venta'])
       .not('cliente_id', 'is', null)
 

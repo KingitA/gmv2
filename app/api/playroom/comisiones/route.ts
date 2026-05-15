@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
 import { todayArgentina } from '@/lib/utils'
 
+function nextDayUTC(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
 function firstDayOfMonthArgentina(): string {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }))
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
@@ -66,7 +72,7 @@ export async function GET(req: NextRequest) {
         .not('comision_viajante_monto', 'is', null)
         .gt('comision_viajante_monto', 0)
         .gte(dateField, from)
-        .lte(dateField, to)
+        .lt(dateField, nextDayUTC(to))
 
       if (viajanteId) q = q.eq('vendedor_id', viajanteId)
       if (articuloId) q = q.eq('articulo_id', articuloId)
