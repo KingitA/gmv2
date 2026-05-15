@@ -1,14 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
-import { todayArgentina } from '@/lib/utils'
-
-// Returns the start of the next day (UTC) so .lt() covers the full day in Argentina timezone
-function nextDayUTC(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00Z')
-  d.setUTCDate(d.getUTCDate() + 1)
-  return d.toISOString().slice(0, 10)
-}
+import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
 
 export async function GET(req: NextRequest) {
   try {
@@ -52,8 +45,8 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('kardex')
       .select('articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, articulo_marca_id, articulo_proveedor_id, cantidad, subtotal_total, precio_costo, tipo_movimiento, fecha, descuentos_json')
-      .gte('fecha', prev.from)
-      .lt('fecha', nextDayUTC(dateTo))
+      .gte('fecha', startOfDayArgentina(prev.from))
+      .lte('fecha', endOfDayArgentina(dateTo))
       .in('tipo_movimiento', ['venta', 'nota_credito_venta'])
       .not('articulo_id', 'is', null)
 

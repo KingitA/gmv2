@@ -1,12 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
-import { todayArgentina } from '@/lib/utils'
-
-function nextDayUTC(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00Z')
-  d.setUTCDate(d.getUTCDate() + 1)
-  return d.toISOString().slice(0, 10)
-}
+import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
 
 export async function GET(req: NextRequest) {
   try {
@@ -25,8 +19,8 @@ export async function GET(req: NextRequest) {
       .from('kardex')
       .select('cliente_id, cantidad, subtotal_total, precio_unitario_final, tipo_movimiento')
       .eq('articulo_id', articuloId)
-      .gte('fecha', dateFrom)
-      .lt('fecha', nextDayUTC(dateTo))
+      .gte('fecha', startOfDayArgentina(dateFrom))
+      .lte('fecha', endOfDayArgentina(dateTo))
       .in('tipo_movimiento', ['venta', 'nota_credito_venta'])
       .not('cliente_id', 'is', null)
 

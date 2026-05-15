@@ -1,13 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
-import { todayArgentina } from '@/lib/utils'
-
-function nextDayUTC(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00Z')
-  d.setUTCDate(d.getUTCDate() + 1)
-  return d.toISOString().slice(0, 10)
-}
+import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
 
 function firstDayOfMonthArgentina(): string {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }))
@@ -71,8 +65,8 @@ export async function GET(req: NextRequest) {
         .eq('tipo_movimiento', 'venta')
         .not('comision_viajante_monto', 'is', null)
         .gt('comision_viajante_monto', 0)
-        .gte(dateField, from)
-        .lt(dateField, nextDayUTC(to))
+        .gte(dateField, startOfDayArgentina(from))
+        .lte(dateField, endOfDayArgentina(to))
 
       if (viajanteId) q = q.eq('vendedor_id', viajanteId)
       if (articuloId) q = q.eq('articulo_id', articuloId)
