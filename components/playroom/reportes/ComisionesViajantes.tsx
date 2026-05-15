@@ -6,6 +6,7 @@ import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
 import PlayroomFilters, { defaultFilters } from '@/components/playroom/PlayroomFilters'
 import ComparativoBadge from '@/components/playroom/ComparativoBadge'
+import ComisionesDrawer from '@/components/playroom/reportes/ComisionesDrawer'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
 import * as XLSX from 'xlsx'
@@ -49,6 +50,7 @@ export default function ComisionesViajantes() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tipo, setTipo] = useState<'vendida' | 'cobrada'>('cobrada')
+  const [drawerViajante, setDrawerViajante] = useState<ComisionRow | null>(null)
 
   const load = async (f = filters, t = tipo) => {
     setLoading(true)
@@ -287,6 +289,16 @@ export default function ComisionesViajantes() {
         exportFilename={`comisiones_${tipo}`}
         emptyMessage="No hay comisiones en el período seleccionado"
         pageSize={30}
+        onRowClick={row => setDrawerViajante(row)}
+      />
+
+      <ComisionesDrawer
+        open={drawerViajante !== null}
+        onClose={() => setDrawerViajante(null)}
+        viajante={drawerViajante}
+        tipo={tipo}
+        dateFrom={filters.dateFrom}
+        dateTo={filters.dateTo}
       />
     </div>
   )
