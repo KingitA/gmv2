@@ -86,14 +86,9 @@ export async function GET(req: NextRequest) {
       kardexQuery = kardexQuery.eq('comprobante_cobrado', true)
     }
 
-    const { data: kardexRows, error: kardexError } = await kardexQuery
+    const { data: kardexRows, error: kardexError } = await kardexQuery.limit(10000)
     if (kardexError) throw kardexError
-    if (!kardexRows?.length) return NextResponse.json({ ...empty, _debug: { kardexRows: 0, dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, startFilter: startOfDayArgentina(prev.from), endFilter: endOfDayArgentina(dateTo) } })
-
-    // DEBUG: muestra primeras 3 filas para ver formato de fecha
-    const _debugSample = kardexRows.slice(0, 3).map(k => ({
-      id: k.id, fecha: k.fecha, fechaSlice: k.fecha?.slice(0, 10), vendedor_id: k.vendedor_id, monto: k.comision_viajante_monto
-    }))
+    if (!kardexRows?.length) return NextResponse.json(empty)
 
     // Obtener flag pagado desde tabla comisiones (join por kardex_id)
     const kardexIds = kardexRows.map(r => r.id)
@@ -159,7 +154,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       rows, summary,
       meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, tipo: tipoFiltro },
-      _debug: { totalFetched: kardexRows.length, inCurrentCount: rows.reduce((s,r)=>s+r.cantidad_pedidos,0), sample: _debugSample, startFilter: startOfDayArgentina(prev.from), endFilter: endOfDayArgentina(dateTo) }
     })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
