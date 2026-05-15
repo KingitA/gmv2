@@ -13,19 +13,12 @@ export function formatCurrency(value: number) {
 }
 
 const ARGENTINA_TZ = 'America/Argentina/Buenos_Aires'
-const AR_OFFSET = '-03:00'
 
 /**
- * Returns the current timestamp as ISO string with explicit Argentina offset.
- * Use for TIMESTAMPTZ DB columns — PostgreSQL stores UTC, offset makes intent explicit.
+ * Returns current UTC timestamp for TIMESTAMPTZ DB columns.
  */
 export function nowArgentina(): string {
-  const now = new Date()
-  // Format as Argentina local time with explicit -03:00 offset
-  const ar = new Date(now.toLocaleString('en-US', { timeZone: ARGENTINA_TZ }))
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const ms = String(now.getMilliseconds()).padStart(3, '0')
-  return `${ar.getFullYear()}-${pad(ar.getMonth() + 1)}-${pad(ar.getDate())}T${pad(ar.getHours())}:${pad(ar.getMinutes())}:${pad(ar.getSeconds())}.${ms}${AR_OFFSET}`
+  return new Date().toISOString()
 }
 
 /**
@@ -36,21 +29,26 @@ export function todayArgentina(): string {
 }
 
 /**
- * Returns the start of a day in Argentina timezone as an ISO string with offset.
+ * Returns start of a given Argentina calendar day expressed in UTC.
+ * Argentina is UTC-3 (no DST), so midnight ART = 03:00 UTC.
  * Use for .gte() filters on TIMESTAMPTZ columns.
- * e.g. '2026-05-15' → '2026-05-15T00:00:00.000-03:00'
+ * e.g. '2026-05-15' → '2026-05-15T03:00:00.000Z'
  */
 export function startOfDayArgentina(dateStr: string): string {
-  return `${dateStr}T00:00:00.000${AR_OFFSET}`
+  return `${dateStr}T03:00:00.000Z`
 }
 
 /**
- * Returns the end of a day in Argentina timezone as an ISO string with offset.
+ * Returns end of a given Argentina calendar day expressed in UTC.
+ * 23:59:59.999 ART = 02:59:59.999 UTC the following day.
  * Use for .lte() filters on TIMESTAMPTZ columns.
- * e.g. '2026-05-15' → '2026-05-15T23:59:59.999-03:00'
+ * e.g. '2026-05-15' → '2026-05-16T02:59:59.999Z'
  */
 export function endOfDayArgentina(dateStr: string): string {
-  return `${dateStr}T23:59:59.999${AR_OFFSET}`
+  const d = new Date(dateStr + 'T03:00:00.000Z')
+  d.setUTCDate(d.getUTCDate() + 1)
+  d.setUTCMilliseconds(d.getUTCMilliseconds() - 1)
+  return d.toISOString()
 }
 
 /**
