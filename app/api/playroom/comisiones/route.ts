@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
         .eq('tipo_movimiento', 'venta')
         .not('comision_viajante_monto', 'is', null)
         .gt('comision_viajante_monto', 0)
+        .eq('pedido_eliminado', false)
         .gte(dateField, startOfDayArgentina(from))
         .lte(dateField, endOfDayArgentina(to))
 

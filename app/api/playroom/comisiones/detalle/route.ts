@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
       .eq('tipo_movimiento', 'venta')
       .not('comision_viajante_monto', 'is', null)
       .gt('comision_viajante_monto', 0)
+      .eq('pedido_eliminado', false)
 
     if (viajanteId) q = q.eq('vendedor_id', viajanteId)
     if (tipo === 'cobrada') q = q.eq('comprobante_cobrado', true)

@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
       .lte('fecha', endOfDayArgentina(dateTo))
       .in('tipo_movimiento', ['venta', 'nota_credito_venta'])
       .not('articulo_id', 'is', null)
+      .eq('pedido_eliminado', false)
 
     if (vendedorId)  query = query.eq('vendedor_id', vendedorId)
     if (provincia)   query = query.eq('provincia_destino', provincia)

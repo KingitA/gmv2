@@ -609,6 +609,12 @@ export async function softDeletePedido(pedidoId: string) {
     throw new Error("Error al eliminar el pedido")
   }
 
+  // Excluir las entradas de kardex de los reportes de ventas y comisiones
+  await supabase
+    .from("kardex")
+    .update({ pedido_eliminado: true })
+    .eq("pedido_id", pedidoId)
+
   revalidatePath("/clientes-pedidos")
   return { success: true, numero_pedido: pedido.numero_pedido }
 }
