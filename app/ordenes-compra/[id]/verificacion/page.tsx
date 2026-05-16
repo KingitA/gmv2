@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, FileText } from "lucide-react"
+import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, FileText, CreditCard } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 
@@ -191,6 +191,16 @@ export default function VerificacionOCPage() {
         router.push("/ordenes-compra")
     }
 
+    async function generarOrdenPago() {
+        // Pre-fill the OP with OC data and navigate
+        const params = new URLSearchParams({
+            proveedor_id: orden?.proveedor_id || '',
+            orden_compra_id: ordenId,
+            monto: String(totalFacturado),
+        })
+        router.push(`/ordenes-pago/nueva?${params}`)
+    }
+
     const tieneComps = comprobantes.length > 0
     const tieneOCR = comprobantes.some(c => Object.keys(c.items).length > 0)
     const totalOC = rows.reduce((s, r) => s + r.precio_oc * r.cant_oc, 0)
@@ -214,11 +224,18 @@ export default function VerificacionOCPage() {
                         {orden?.proveedor?.sigla || orden?.proveedor?.nombre} — Triple verificación
                     </p>
                 </div>
-                {allOK && (
-                    <Button onClick={finalizarOC} className="gap-2 bg-green-600 hover:bg-green-700">
-                        <CheckCircle2 className="h-4 w-4" /> Finalizar OC
-                    </Button>
-                )}
+                <div className="flex gap-2">
+                    {allOK && (
+                        <>
+                            <Button onClick={finalizarOC} className="gap-2 bg-green-600 hover:bg-green-700">
+                                <CheckCircle2 className="h-4 w-4" /> Finalizar OC
+                            </Button>
+                            <Button onClick={generarOrdenPago} variant="outline" className="gap-2">
+                                <CreditCard className="h-4 w-4" /> Generar Orden de Pago
+                            </Button>
+                        </>
+                    )}
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">

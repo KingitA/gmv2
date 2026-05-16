@@ -87,6 +87,36 @@ export async function POST(
                     .single()
                 const precioCompra = recItem?.precio_real || recItem?.precio_documentado || recItem?.precio_oc || 0
 
+                // Check if there is a pending kardex entry for this OC + articulo — if so, UPDATE instead of INSERT
+                const ocId = (Array.isArray(reception.orden_compra) ? reception.orden_compra[0] : reception.orden_compra)?.id
+                if (ocId) {
+                    const { data: kardexPendiente } = await supabase
+                        .from("kardex")
+                        .select("id")
+                        .eq("orden_compra_id", ocId)
+                        .eq("articulo_id", item.articulo_id)
+                        .eq("estado", "pendiente")
+                        .maybeSingle()
+
+                    if (kardexPendiente?.id) {
+                        // Update existing pending entry to confirmed with real data
+                        await supabase.from("kardex").update({
+                            estado: "confirmado",
+                            fecha: nowArgentina(),
+                            cantidad: totalUnits,
+                            precio_lista: precioCompra,
+                            precio_unitario_final: precioCompra,
+                            subtotal_neto: Math.round(precioCompra * totalUnits * 100) / 100,
+                            subtotal_total: Math.round(precioCompra * totalUnits * 100) / 100,
+                            recepcion_id,
+                            stock_antes: stockAntes,
+                            stock_despues: stockAntes + totalUnits,
+                            receptor_id: auth.user.id,
+                        }).eq("id", kardexPendiente.id)
+                        continue // Skip insertarKardex below
+                    }
+                }
+
                 // Datos del artículo para denormalizar
                 const { data: artInfo } = await supabase
                     .from("articulos")

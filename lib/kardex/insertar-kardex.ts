@@ -115,6 +115,9 @@ export interface KardexMovimientoInput {
   comision_viajante_pct?: number | null
   comision_viajante_monto?: number | null
 
+  // ── Estado del movimiento ──────────────────────────────────────────────────
+  estado?: 'confirmado' | 'pendiente'   // 'pendiente' para OC en camino; default 'confirmado'
+
   // ── Stock snapshot ─────────────────────────────────────────────────────────
   stock_antes?: number | null
   stock_despues?: number | null
@@ -243,6 +246,8 @@ export async function insertarKardex(
     recepcion_id: input.recepcion_id ?? null,
     orden_compra_id: input.orden_compra_id ?? null,
     lista_precio_id: input.lista_precio_id ?? null,
+
+    estado: input.estado ?? 'confirmado',
 
     stock_antes: input.stock_antes ?? null,
     stock_despues: input.stock_despues ?? null,

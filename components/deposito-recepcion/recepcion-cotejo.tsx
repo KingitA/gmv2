@@ -1,293 +1,315 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle, AlertTriangle, XCircle, Loader2 } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { CheckCircle, AlertTriangle, Loader2 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "@/components/ui/dialog"
+import { createClient } from "@/lib/supabase/client"
 
 interface RecepcionCotejoProps {
     recepcion: any
     onUpdate: () => void
 }
 
+interface ItemDecision {
+    tipo?: 'precio' | 'mercaderia'
+    accion?: 'A' | 'B' | 'C'
+    transporte_id?: string
+    valor_real?: number
+    descripcion?: string
+}
+
 export function RecepcionCotejo({ recepcion, onUpdate }: RecepcionCotejoProps) {
     const { toast } = useToast()
     const router = useRouter()
+    const supabase = createClient()
     const [isFinalizing, setIsFinalizing] = useState(false)
+    const [transportes, setTransportes] = useState<any[]>([])
+    const [decisions, setDecisions] = useState<Record<string, ItemDecision>>({})
+
+    useEffect(() => {
+        supabase.from('transportes').select('id, nombre').eq('activo', true).order('nombre')
+            .then(({ data }) => setTransportes(data || []))
+    }, [])
+
+    const setDecision = (itemId: string, patch: Partial<ItemDecision>) => {
+        setDecisions(prev => ({ ...prev, [itemId]: { ...prev[itemId], ...patch } }))
+    }
+
+    const getFisicoUnidades = (item: any) => {
+        const fisica = Number(item.cantidad_fisica || 0)
+        if (item.tipo_cantidad === 'bulto') return fisica * (item.articulo?.unidades_por_bulto || 1)
+        return fisica
+    }
+
+    const hasPriceDiff = (item: any) => {
+        const pOC = Number(item.precio_oc || 0)
+        const pDoc = Number(item.precio_documentado || 0)
+        return pOC > 0 && Math.abs((pDoc - pOC) / pOC) > 0.005
+    }
+
+    const hasQtyDiff = (item: any) => {
+        const fisico = getFisicoUnidades(item)
+        const doc = Number(item.cantidad_documentada || 0)
+        return Math.abs(fisico - doc) >= 0.01
+    }
+
+    const itemsConDiferencia = (recepcion.items || []).filter((i: any) => hasPriceDiff(i) || hasQtyDiff(i))
+    const itemsOk = (recepcion.items || []).filter((i: any) => !hasPriceDiff(i) && !hasQtyDiff(i))
+
+    const handleApplyDecisions = async () => {
+        const decisionList = Object.entries(decisions).map(([item_id, d]) => ({
+            item_id, ...d
+        })).filter(d => d.accion)
+
+        if (decisionList.length > 0) {
+            const res = await fetch(`/api/recepciones/${recepcion.id}/cerrar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ decisions: decisionList }),
+            })
+            if (!res.ok) {
+                const err = await res.json()
+                toast({ variant: 'destructive', title: 'Error aplicando decisiones', description: err.error })
+                return false
+            }
+        }
+        return true
+    }
 
     const handleFinalize = async () => {
+        // Check all items with differences have decisions
+        const pendientes = itemsConDiferencia.filter((i: any) => !decisions[i.id]?.accion && !i.precio_verificado && !i.cantidad_diferencia_destino)
+        if (pendientes.length > 0) {
+            toast({ variant: 'destructive', title: 'Faltan decisiones', description: `${pendientes.length} ítem(s) con diferencias sin resolver` })
+            return
+        }
+
         setIsFinalizing(true)
         try {
-            const response = await fetch(`/api/recepciones/${recepcion.id}/finalizar`, {
-                method: "POST"
-            })
+            const ok = await handleApplyDecisions()
+            if (!ok) return
 
-            if (!response.ok) throw new Error("Error al finalizar")
+            const response = await fetch(`/api/recepciones/${recepcion.id}/finalizar`, { method: 'POST' })
+            if (!response.ok) throw new Error('Error al finalizar')
 
-            toast({
-                title: "Recepción Finalizada",
-                description: "El stock ha sido actualizado correctamente.",
-            })
-
-            // Redirect to dashboard
-            router.push("/deposito/recepcion")
+            toast({ title: 'Recepción Finalizada', description: 'El stock fue actualizado correctamente.' })
+            router.push('/deposito/recepcion')
         } catch (error) {
-            console.error(error)
-            toast({
-                variant: "destructive",
-                title: "Error",
-                description: "No se pudo finalizar la recepción.",
-            })
+            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo finalizar la recepción.' })
         } finally {
             setIsFinalizing(false)
         }
     }
 
-    const getStatusColor = (item: any) => {
-        // Convert fisica to the same unit as OC for fair comparison
-        let fisico = Number(item.cantidad_fisica)
-        if (item.tipo_cantidad === 'unidad' && item.articulo?.unidades_por_bulto > 1) {
-            // If ordered in units, convert packs to units
-            fisico = fisico * item.articulo.unidades_por_bulto
-        }
-
-        const oc = Number(item.cantidad_oc)
-        const doc = Number(item.cantidad_documentada)
-
-        // Perfect match
-        if (fisico === oc && fisico === doc) return "bg-green-100 text-green-800 border-green-200"
-
-        // Physical matches OC but Doc is different (Price/Doc issue)
-        if (fisico === oc && fisico !== doc) return "bg-yellow-100 text-yellow-800 border-yellow-200"
-
-        // Physical matches Doc but not OC (Order mismatch)
-        if (fisico === doc && fisico !== oc) return "bg-orange-100 text-orange-800 border-orange-200"
-
-        // Nothing matches or major issues
-        return "bg-red-100 text-red-800 border-red-200"
-    }
-
-    // Helper to get display value for fisica
-    const getFisicoDisplay = (item: any) => {
-        let fisico = Number(item.cantidad_fisica)
-        if (item.tipo_cantidad === 'unidad' && item.articulo?.unidades_por_bulto > 1) {
-            fisico = fisico * item.articulo.unidades_por_bulto
-        }
-        return fisico
-    }
-
-    // START of Price Verification Component
-    function PrecioVerificationDialog({
-        item,
-        recepcionId,
-        onVerified
-    }: {
-        item: any,
-        recepcionId: string,
-        onVerified: () => void
-    }) {
-        const [isOpen, setIsOpen] = useState(false)
-        const [loading, setLoading] = useState(false)
-        const { toast } = useToast()
-
-        const precioOC = item.precio_oc || 0
-        const precioDoc = item.precio_documentado || 0
-        const diffPercent = precioOC > 0 ? ((precioDoc - precioOC) / precioOC) * 100 : 0
-        const hasPriceDiff = Math.abs(diffPercent) > 1 // tolerate 1%?
-
-        // Determine status display
-        // Use logic from existing getStatusColor but prioritized
-        const fisicoDisplay = Number(item.cantidad_fisica) // simplified access
-        const isQtyCorrect = fisicoDisplay === Number(item.cantidad_oc) // Assuming basic unit match logic is maintained outside or here
-
-        // Correct Qty but Wrong Price?
-        const needsPriceVerify = isQtyCorrect && hasPriceDiff
-
-        const handleVerify = async (accion: 'actualizar_costo' | 'imputar_diferencia') => {
-            setLoading(true)
-            try {
-                await fetch(`/api/recepciones/${recepcionId}/items/${item.id}/verificar-precio`, {
-                    method: 'POST',
-                    body: JSON.stringify({ accion, precio_nuevo: precioDoc })
-                })
-                toast({ title: "Precio Verificado" })
-                setIsOpen(false)
-                onVerified()
-            } catch (e) {
-                toast({ variant: "destructive", title: "Error" })
-            } finally {
-                setLoading(false)
-            }
-        }
-
-        if (needsPriceVerify && !item.precio_verificado) {
-            return (
-                <Dialog open={isOpen} onOpenChange={setIsOpen}>
-                    <DialogTrigger asChild>
-                        <Button variant="outline" size="sm" className="bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-200">
-                            ⚠️ Diferencia Precio
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Verificar Diferencia de Precio</DialogTitle>
-                        </DialogHeader>
-                        <div className="py-4 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="p-3 bg-muted rounded">
-                                    <div className="text-xs">Precio Orden Compra</div>
-                                    <div className="text-lg font-mono">${precioOC}</div>
-                                </div>
-                                <div className="p-3 bg-blue-50 rounded border-blue-200 border">
-                                    <div className="text-xs text-blue-800">Precio Factura</div>
-                                    <div className="text-lg font-bold font-mono text-blue-700">${precioDoc}</div>
-                                </div>
-                            </div>
-                            <p className="text-sm text-gray-600">
-                                El precio de la factura es diferente al de la orden de compra.
-                                ¿Qué acción desea tomar?
-                            </p>
-                            <div className="flex flex-col gap-2">
-                                <Button onClick={() => handleVerify('actualizar_costo')} disabled={loading}>
-                                    Actualizar Costo Base a ${precioDoc}
-                                </Button>
-                                <Button variant="secondary" onClick={() => handleVerify('imputar_diferencia')} disabled={loading}>
-                                    Imputar Diferencia a Cuenta (Deuda/Crédito)
-                                </Button>
-                            </div>
-                        </div>
-                    </DialogContent>
-                </Dialog>
-            )
-        }
-
-        // Default Status Badge (Qty Logic)
-        const getStatusColor = () => {
-            // ... existing logic simplified reuse or duplicate ...
-            // For brevity, using simple logic matching existing code
-            // NOTE: Accessing item properties again
-
-            // ... copy logic from component ...
-            return "bg-green-100 text-green-800 border-green-200" // Placeholder, see logic below
-        }
-
-        // Re-use logic for Badge
-        // Convert fisica to the same unit as OC for fair comparison
-        let fisico = Number(item.cantidad_fisica)
-        if (item.tipo_cantidad === 'unidad' && item.articulo?.unidades_por_bulto > 1) {
-            fisico = fisico * item.articulo.unidades_por_bulto
-        }
-        const oc = Number(item.cantidad_oc)
-        const doc = Number(item.cantidad_documentada)
-
-        let color = "bg-red-100 text-red-800 border-red-200"
-        let text = "Revisar"
-
-        if (fisico === oc && fisico === doc) {
-            color = "bg-green-100 text-green-800 border-green-200"
-            text = "Correcto"
-        } else if (fisico === oc && fisico !== doc) {
-            // Price covered above, but if not verified?
-            color = "bg-yellow-100 text-yellow-800 border-yellow-200"
-            text = "Dif. Doc"
-        } else if (fisico === doc && fisico !== oc) {
-            color = "bg-orange-100 text-orange-800 border-orange-200"
-            text = "Dif. Física"
-        }
-
-        if (item.precio_verificado) {
-            return <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200">Verificado ✅</Badge>
-        }
-
-        return (
-            <Badge variant="outline" className={color}>{text}</Badge>
-        )
-    }
-
     return (
-        <div className="flex flex-col h-full gap-6 pb-20">
-            {/* ... Summary Cards ... (unchanged) */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Resumen de Cotejo</CardTitle>
-                </CardHeader>
-                {/* ... (Keep existing Summary content or Replace whole file? Too big. Just replace render) */}
-                {/* I will assume I am replacing the TABLE BODY content primarily or the Helper Function? */}
-                {/* Wait, the instruction is to replace end region? NO. */}
-                {/* Strategy: Replace the TableCell containing the Status Badge with the new Component call */}
-            </Card>
+        <div className="flex flex-col gap-6 pb-20">
+            {/* Summary */}
+            <div className="grid grid-cols-3 gap-4">
+                <Card>
+                    <CardContent className="pt-4">
+                        <div className="text-2xl font-bold text-green-600">{itemsOk.length}</div>
+                        <p className="text-sm text-muted-foreground">Ítems sin diferencias</p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="pt-4">
+                        <div className="text-2xl font-bold text-amber-600">{itemsConDiferencia.length}</div>
+                        <p className="text-sm text-muted-foreground">Con diferencias</p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="pt-4">
+                        <div className="text-2xl font-bold text-blue-600">
+                            {Object.values(decisions).filter(d => d.accion).length}
+                        </div>
+                        <p className="text-sm text-muted-foreground">Decisiones tomadas</p>
+                    </CardContent>
+                </Card>
+            </div>
 
-            <Card className="flex-1 overflow-hidden flex flex-col">
-                <CardHeader>
-                    <CardTitle>Detalle por Artículo</CardTitle>
-                </CardHeader>
-                <CardContent className="flex-1 overflow-auto p-0">
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Artículo</TableHead>
-                                <TableHead className="text-center">OC (cant)</TableHead>
-                                <TableHead className="text-center">Doc (cant)</TableHead>
-                                <TableHead className="text-center">Físico</TableHead>
-                                <TableHead className="text-center">Precio OC</TableHead>
-                                <TableHead className="text-center">Precio Doc</TableHead>
-                                <TableHead className="text-center">Dif %</TableHead>
-                                <TableHead className="text-right">Acción</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {recepcion.items?.map((item: any) => (
-                                <TableRow key={item.id}>
-                                    <TableCell>
-                                        <div className="font-medium">{item.articulo?.descripcion}</div>
-                                        <div className="text-xs text-muted-foreground">{item.articulo?.sku}</div>
-                                    </TableCell>
-                                    <TableCell className="text-center font-mono">{item.cantidad_oc}</TableCell>
-                                    <TableCell className="text-center font-mono">{item.cantidad_documentada}</TableCell>
-                                    <TableCell className="text-center font-bold font-mono text-lg">
-                                        {getFisicoDisplay(item)}
-                                        {/* ... abbreviated unit visual ... */}
-                                    </TableCell>
-                                    <TableCell className="text-center font-mono">${(item.precio_oc || 0).toFixed(2)}</TableCell>
-                                    <TableCell className="text-center font-mono">${(item.precio_documentado || 0).toFixed(2)}</TableCell>
-                                    <TableCell className="text-center font-mono">
-                                        {(() => {
-                                            const precioOC = item.precio_oc || 0;
-                                            const precioDoc = item.precio_documentado || 0;
-                                            if (precioOC === 0) return '-';
-                                            const diff = ((precioDoc - precioOC) / precioOC) * 100;
-                                            const color = diff === 0 ? 'text-green-700' : Math.abs(diff) < 5 ? 'text-yellow-700' : 'text-red-700';
-                                            return <span className={color}>{diff > 0 ? '+' : ''}{diff.toFixed(1)}%</span>;
-                                        })()}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <PrecioVerificationDialog
-                                            item={item}
-                                            recepcionId={recepcion.id}
-                                            onVerified={onUpdate}
-                                        />
-                                    </TableCell>
+            {/* Items without differences */}
+            {itemsOk.length > 0 && (
+                <Card>
+                    <CardHeader><CardTitle className="text-green-700">Ítems correctos ({itemsOk.length})</CardTitle></CardHeader>
+                    <CardContent className="p-0">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Artículo</TableHead>
+                                    <TableHead className="text-center">OC</TableHead>
+                                    <TableHead className="text-center">Comprobante</TableHead>
+                                    <TableHead className="text-center">Físico</TableHead>
+                                    <TableHead className="text-center">Estado</TableHead>
                                 </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
-                </CardContent>
-            </Card>
+                            </TableHeader>
+                            <TableBody>
+                                {itemsOk.map((item: any) => (
+                                    <TableRow key={item.id}>
+                                        <TableCell>
+                                            <div className="font-medium">{item.articulo?.descripcion}</div>
+                                            <div className="text-xs text-muted-foreground">{item.articulo?.sku}</div>
+                                        </TableCell>
+                                        <TableCell className="text-center font-mono">{item.cantidad_oc}</TableCell>
+                                        <TableCell className="text-center font-mono">{item.cantidad_documentada || '-'}</TableCell>
+                                        <TableCell className="text-center font-mono font-bold">{getFisicoUnidades(item)}</TableCell>
+                                        <TableCell className="text-center">
+                                            <Badge className="bg-green-100 text-green-800 border-green-200">OK</Badge>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Items with differences */}
+            {itemsConDiferencia.length > 0 && (
+                <Card>
+                    <CardHeader><CardTitle className="text-amber-700">Diferencias a resolver ({itemsConDiferencia.length})</CardTitle></CardHeader>
+                    <CardContent className="p-0">
+                        <div className="space-y-4 p-4">
+                            {itemsConDiferencia.map((item: any) => {
+                                const fisico = getFisicoUnidades(item)
+                                const pOC = Number(item.precio_oc || 0)
+                                const pDoc = Number(item.precio_documentado || 0)
+                                const pDiffPct = pOC > 0 ? ((pDoc - pOC) / pOC * 100) : 0
+                                const qDiff = fisico - Number(item.cantidad_documentada || 0)
+                                const dec = decisions[item.id] || {}
+                                const resolved = item.precio_verificado || item.cantidad_diferencia_destino || dec.accion
+
+                                return (
+                                    <div key={item.id} className={`border rounded-lg p-4 space-y-3 ${resolved ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                                        <div className="flex items-start justify-between">
+                                            <div>
+                                                <div className="font-medium">{item.articulo?.descripcion}</div>
+                                                <div className="text-xs text-muted-foreground">{item.articulo?.sku}</div>
+                                            </div>
+                                            {resolved ? (
+                                                <Badge className="bg-green-100 text-green-700">Resuelto</Badge>
+                                            ) : (
+                                                <Badge className="bg-amber-100 text-amber-700"><AlertTriangle className="h-3 w-3 mr-1" />Pendiente</Badge>
+                                            )}
+                                        </div>
+
+                                        {/* Columns: OC | Comprobante | Físico */}
+                                        <div className="grid grid-cols-3 gap-2 text-sm">
+                                            <div className="text-center">
+                                                <div className="text-xs text-muted-foreground mb-1">Orden de Compra</div>
+                                                <div className="font-mono font-medium">{item.cantidad_oc} u</div>
+                                                <div className="font-mono text-xs text-muted-foreground">${pOC.toFixed(2)}/u</div>
+                                            </div>
+                                            <div className="text-center">
+                                                <div className="text-xs text-muted-foreground mb-1">Comprobante</div>
+                                                <div className={`font-mono font-medium ${Math.abs(qDiff) > 0.01 ? 'text-amber-700' : ''}`}>{item.cantidad_documentada || '—'} u</div>
+                                                <div className={`font-mono text-xs ${Math.abs(pDiffPct) > 0.5 ? 'text-amber-700 font-medium' : 'text-muted-foreground'}`}>
+                                                    ${pDoc.toFixed(2)}/u {Math.abs(pDiffPct) > 0.5 && `(${pDiffPct > 0 ? '+' : ''}${pDiffPct.toFixed(1)}%)`}
+                                                </div>
+                                            </div>
+                                            <div className="text-center">
+                                                <div className="text-xs text-muted-foreground mb-1">Físico</div>
+                                                <div className="font-mono font-bold text-lg">{fisico} u</div>
+                                                {qDiff !== 0 && (
+                                                    <div className={`text-xs font-medium ${qDiff < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                                                        {qDiff > 0 ? '+' : ''}{qDiff} vs comprobante
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Price difference actions */}
+                                        {hasPriceDiff(item) && !item.precio_verificado && (
+                                            <div className="border-t pt-3">
+                                                <div className="text-xs font-medium mb-2 text-amber-800">Diferencia de precio — elegí una acción:</div>
+                                                <div className="flex gap-2 flex-wrap">
+                                                    <Button
+                                                        size="sm"
+                                                        variant={dec.tipo === 'precio' && dec.accion === 'A' ? 'default' : 'outline'}
+                                                        onClick={() => setDecision(item.id, { tipo: 'precio', accion: 'A', valor_real: pDoc })}
+                                                        className="text-xs"
+                                                    >
+                                                        A - Asumir (actualizar costo a ${pDoc.toFixed(2)})
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant={dec.tipo === 'precio' && dec.accion === 'B' ? 'default' : 'outline'}
+                                                        onClick={() => setDecision(item.id, { tipo: 'precio', accion: 'B', valor_real: pDoc })}
+                                                        className="text-xs"
+                                                    >
+                                                        B - NC al proveedor (no asumir diferencia)
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Quantity difference actions */}
+                                        {hasQtyDiff(item) && !item.cantidad_diferencia_destino && (
+                                            <div className="border-t pt-3">
+                                                <div className="text-xs font-medium mb-2 text-amber-800">
+                                                    Diferencia de mercadería ({Math.abs(qDiff)} u {qDiff < 0 ? 'faltante' : 'sobrante'}) — destino:
+                                                </div>
+                                                <div className="flex gap-2 flex-wrap items-center">
+                                                    <Button
+                                                        size="sm"
+                                                        variant={dec.tipo === 'mercaderia' && dec.accion === 'A' ? 'default' : 'outline'}
+                                                        onClick={() => setDecision(item.id, { tipo: 'mercaderia', accion: 'A', valor_real: Math.abs(qDiff) })}
+                                                        className="text-xs"
+                                                    >
+                                                        A - Empresa absorbe
+                                                    </Button>
+                                                    <div className="flex items-center gap-1">
+                                                        <Button
+                                                            size="sm"
+                                                            variant={dec.tipo === 'mercaderia' && dec.accion === 'B' ? 'default' : 'outline'}
+                                                            onClick={() => setDecision(item.id, { tipo: 'mercaderia', accion: 'B', valor_real: Math.abs(qDiff) })}
+                                                            className="text-xs"
+                                                            disabled={!dec.transporte_id && dec.accion !== 'B'}
+                                                        >
+                                                            B - Transporte
+                                                        </Button>
+                                                        {(dec.tipo === 'mercaderia' && dec.accion === 'B') && (
+                                                            <Select value={dec.transporte_id || ''} onValueChange={v => setDecision(item.id, { transporte_id: v })}>
+                                                                <SelectTrigger className="w-40 h-7 text-xs"><SelectValue placeholder="Elegir transporte" /></SelectTrigger>
+                                                                <SelectContent>
+                                                                    {transportes.map((t: any) => (
+                                                                        <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        )}
+                                                    </div>
+                                                    <Button
+                                                        size="sm"
+                                                        variant={dec.tipo === 'mercaderia' && dec.accion === 'C' ? 'default' : 'outline'}
+                                                        onClick={() => setDecision(item.id, { tipo: 'mercaderia', accion: 'C', valor_real: Math.abs(qDiff) })}
+                                                        className="text-xs"
+                                                    >
+                                                        C - Proveedor (devolucion kardex)
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
             <div className="flex justify-end gap-4">
-                <Button variant="outline">Reportar Incidencias</Button>
-                <Button size="lg" className="gap-2" onClick={handleFinalize} disabled={isFinalizing}>
+                <Button
+                    size="lg"
+                    className="gap-2"
+                    onClick={handleFinalize}
+                    disabled={isFinalizing}
+                >
                     {isFinalizing ? <Loader2 className="h-5 w-5 animate-spin" /> : <CheckCircle className="h-5 w-5" />}
                     Finalizar Recepción
                 </Button>

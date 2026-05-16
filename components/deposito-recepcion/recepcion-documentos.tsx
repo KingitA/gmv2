@@ -137,10 +137,11 @@ export function RecepcionDocumentos({ recepcion, onUpdate, onNext }: RecepcionDo
                         ) : (
                             <>
                                 <Upload className="h-10 w-10 text-muted-foreground mb-4" />
-                                <p className="font-medium text-center mb-2">Arrastrá una imagen o hacé click</p>
+                                <p className="font-medium text-center mb-2">Imagen, PDF o Excel</p>
+                                <p className="text-xs text-muted-foreground mb-3">jpg, png, webp, pdf, xlsx, xls, csv</p>
                                 <input
                                     type="file"
-                                    accept="image/*"
+                                    accept="image/*,.pdf,.xlsx,.xls,.csv"
                                     className="absolute inset-0 opacity-0 cursor-pointer"
                                     onChange={handleFileUpload}
                                     disabled={isUploading}
@@ -195,6 +196,14 @@ export function RecepcionDocumentos({ recepcion, onUpdate, onNext }: RecepcionDo
                                         <p className="text-xs text-muted-foreground mt-1">
                                             {new Date(doc.created_at).toLocaleString()}
                                         </p>
+                                        {doc.url_imagen && (
+                                            <a href={doc.url_imagen} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline mt-1 inline-block">
+                                                Ver archivo
+                                            </a>
+                                        )}
+                                        {doc.datos_ocr?.items?.length > 0 && (
+                                            <p className="text-xs text-muted-foreground">{doc.datos_ocr.items.length} ítems detectados</p>
+                                        )}
                                     </div>
 
                                     <Button

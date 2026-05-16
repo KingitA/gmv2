@@ -334,6 +334,19 @@ export default function OrdenesCompraPage() {
   const [ordenParaEliminar, setOrdenParaEliminar] = useState<OrdenCompra | null>(null)
   const [ordenParaEditar, setOrdenParaEditar] = useState<OrdenCompra | null>(null)
 
+  // Sugerencia
+  const [sugerenciaData, setSugerenciaData] = useState<any[]>([])
+  const [loadingSugerencia, setLoadingSugerencia] = useState(false)
+  const [fechaDesde, setFechaDesde] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 3); return d.toISOString().split('T')[0] })
+  const [fechaHasta, setFechaHasta] = useState(() => new Date().toISOString().split('T')[0])
+  const [tipoVenta, setTipoVenta] = useState<'vendida' | 'facturada'>('vendida')
+
+  // External article search
+  const [showBuscarArticulo, setShowBuscarArticulo] = useState(false)
+  const [searchArticuloExterno, setSearchArticuloExterno] = useState("")
+  const [articulosExternos, setArticulosExternos] = useState<any[]>([])
+  const [loadingArticulosExternos, setLoadingArticulosExternos] = useState(false)
+
   useEffect(() => {
     loadOrdenes()
     loadProveedores()
@@ -394,6 +407,59 @@ export default function OrdenesCompraPage() {
     }
   }
 
+  const cargarSugerencia = async () => {
+    if (!selectedProveedor) return
+    setLoadingSugerencia(true)
+    try {
+      const params = new URLSearchParams({ proveedor_id: selectedProveedor, fecha_desde: fechaDesde, fecha_hasta: fechaHasta, tipo_venta: tipoVenta, dias_objetivo: '45' })
+      const res = await fetch(`/api/ordenes-compra/sugerencia?${params}`)
+      const data = await res.json()
+      if (res.ok && data.items) {
+        setSugerenciaData(data.items)
+        const porId: Record<string, number> = {}
+        for (const s of data.items) porId[s.articulo_id] = s.cantidad_sugerida
+        setArticulosTabla(prev => prev.map(a => ({ ...a, cantidad_sugerida: porId[a.articulo_id] ?? 0 })))
+      }
+    } finally {
+      setLoadingSugerencia(false)
+    }
+  }
+
+  const buscarArticulosExternos = async (term: string) => {
+    if (!term || term.length < 2) { setArticulosExternos([]); return }
+    setLoadingArticulosExternos(true)
+    try {
+      const { data } = await supabase
+        .from('articulos')
+        .select('id, sku, descripcion, precio_compra, unidades_por_bulto, descuento1, descuento2, descuento3, descuento4')
+        .eq('activo', true)
+        .or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%`)
+        .limit(20)
+      setArticulosExternos(data || [])
+    } finally {
+      setLoadingArticulosExternos(false)
+    }
+  }
+
+  const agregarArticuloExterno = (art: any) => {
+    if (articulosTabla.some(a => a.articulo_id === art.id)) { alert('Este artículo ya está en la tabla'); return }
+    setArticulosTabla(prev => [...prev, {
+      articulo_id: art.id,
+      articulo: art,
+      cantidad_pedida: 0,
+      tipo_cantidad: 'bulto',
+      precio_unitario: art.precio_compra || 0,
+      descuento1: art.descuento1 || 0,
+      descuento2: art.descuento2 || 0,
+      descuento3: art.descuento3 || 0,
+      descuento4: art.descuento4 || 0,
+      esExterno: true,
+    }])
+    setShowBuscarArticulo(false)
+    setSearchArticuloExterno("")
+    setArticulosExternos([])
+  }
+
   const actualizarArticulo = (index: number, campo: string, valor: any) => {
     const nuevosArticulos = [...articulosTabla]
     nuevosArticulos[index][campo] = valor
@@ -425,84 +491,34 @@ export default function OrdenesCompraPage() {
       return
     }
 
-    const { data: ultimaOrden } = await supabase
-      .from("ordenes_compra")
-      .select("numero_orden")
-      .order("numero_orden", { ascending: false })
-      .limit(1)
-
-    const numeroOrden =
-      ultimaOrden && ultimaOrden[0]
-        ? `OC-${String(Number.parseInt(ultimaOrden[0].numero_orden.split("-")[1]) + 1).padStart(6, "0")}`
-        : "OC-000001"
-
-    const { data: orden, error: errorOrden } = await supabase
-      .from("ordenes_compra")
-      .insert({
-        numero_orden: numeroOrden,
+    const res = await fetch('/api/ordenes-compra/crear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         proveedor_id: selectedProveedor,
-        fecha_orden: nowArgentina(),
-        estado: "pendiente",
-        observaciones: observaciones,
-        usuario_creador: "admin",
-      })
-      .select()
-      .single()
-
-    if (errorOrden || !orden) {
-      alert("Error al crear la orden")
-      return
-    }
-
-    const detalleParaInsertar = articulosConCantidad.map((item) => ({
-      orden_compra_id: orden.id,
-      articulo_id: item.articulo_id,
-      cantidad_pedida: item.cantidad_pedida,
-      tipo_cantidad: item.tipo_cantidad,
-      precio_unitario: item.precio_unitario,
-      descuento1: item.descuento1,
-      descuento2: item.descuento2,
-      descuento3: item.descuento3,
-      descuento4: item.descuento4,
-    }))
-
-    const { error: errorDetalle } = await supabase.from("ordenes_compra_detalle").insert(detalleParaInsertar)
-
-    if (errorDetalle) {
-      alert("Error al crear el detalle de la orden")
-      return
-    }
-
-    // --- AGREGAR A CUENTA CORRIENTE ---
-    await supabase.from("cuenta_corriente_proveedores").insert({
-      proveedor_id: selectedProveedor,
-      tipo_movimiento: "orden_compra",
-      monto: totalOrden,
-      descripcion: `Provisión OC: ${numeroOrden}`,
-      referencia_id: orden.id,
-      referencia_tipo: "orden_compra",
-      fecha: nowArgentina(),
-    })
-    // ----------------------------------
-
-    for (const item of articulosConCantidad) {
-      await supabase
-        .from("articulos")
-        .update({
-          precio_compra: item.precio_unitario,
+        observaciones,
+        items: articulosConCantidad.map(item => ({
+          articulo_id: item.articulo_id,
+          cantidad_pedida: item.cantidad_pedida,
+          tipo_cantidad: item.tipo_cantidad,
+          precio_unitario: item.precio_unitario,
           descuento1: item.descuento1,
           descuento2: item.descuento2,
           descuento3: item.descuento3,
           descuento4: item.descuento4,
-        })
-        .eq("id", item.articulo_id)
-    }
+          articulo: { unidades_por_bulto: item.articulo?.unidades_por_bulto || 1 },
+        }))
+      })
+    })
+    const data = await res.json()
+    if (!res.ok) { alert(`Error al crear la orden: ${data.error}`); return }
 
-    alert(`Orden ${numeroOrden} creada exitosamente`)
+    alert(`Orden ${data.numeroOrden} creada. Recepción estimada: ${data.fechaEstimada}`)
     setIsCreating(false)
     setSelectedProveedor("")
     setArticulosTabla([])
     setObservaciones("")
+    setSugerenciaData([])
     loadOrdenes()
   }
 
@@ -624,6 +640,9 @@ export default function OrdenesCompraPage() {
   }
 
   const eliminarOrden = async (orden: OrdenCompra) => {
+    // Clean up kardex pendiente entries for this OC
+    await supabase.from("kardex").delete().eq("orden_compra_id", orden.id).eq("estado", "pendiente")
+
     const { error } = await supabase.from("ordenes_compra").delete().eq("id", orden.id)
 
     if (error) {
@@ -780,6 +799,35 @@ export default function OrdenesCompraPage() {
                     </Select>
                   </div>
 
+                  {selectedProveedor && (
+                    <div className="bg-blue-50 border border-blue-200 p-3 rounded-md flex flex-wrap gap-3 items-end">
+                      <div>
+                        <Label className="text-xs">Desde</Label>
+                        <Input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className="w-36 h-8 text-sm" />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Hasta</Label>
+                        <Input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className="w-36 h-8 text-sm" />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Vendida / Facturada</Label>
+                        <Select value={tipoVenta} onValueChange={(v: any) => setTipoVenta(v)}>
+                          <SelectTrigger className="w-32 h-8 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="vendida">Vendida</SelectItem>
+                            <SelectItem value="facturada">Facturada</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={cargarSugerencia} disabled={loadingSugerencia}>
+                        {loadingSugerencia ? 'Calculando...' : 'Cargar sugerencia'}
+                      </Button>
+                      {sugerenciaData.length > 0 && (
+                        <span className="text-xs text-blue-700 self-center">{sugerenciaData.length} artículos con historial de venta</span>
+                      )}
+                    </div>
+                  )}
+
                   {selectedProveedor && articulosTabla.length > 0 && (
                     <>
                       <div className="bg-muted p-3 rounded-md flex items-center justify-between sticky top-0 z-10">
@@ -792,10 +840,10 @@ export default function OrdenesCompraPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => alert("Próximamente: buscar artículo fuera del proveedor")}
+                            onClick={() => setShowBuscarArticulo(true)}
                           >
                             <Plus className="mr-2 h-4 w-4" />
-                            Buscar artículo fuera del proveedor
+                            Buscar artículo externo
                           </Button>
                         </div>
                       </div>
@@ -820,6 +868,7 @@ export default function OrdenesCompraPage() {
                               <TableRow>
                                 <TableHead className="min-w-[300px]">Artículo</TableHead>
                                 <TableHead className="w-36">Tipo</TableHead>
+                                {sugerenciaData.length > 0 && <TableHead className="w-24 text-blue-700">Sugerido</TableHead>}
                                 <TableHead className="w-36">Cantidad</TableHead>
                                 <TableHead className="w-28">Precio Unit.</TableHead>
                                 <TableHead className="w-24">D1%</TableHead>
@@ -835,7 +884,10 @@ export default function OrdenesCompraPage() {
                                 return (
                                   <TableRow key={item.articulo_id} className={item.cantidad_pedida > 0 ? "bg-accent/50" : ""}>
                                     <TableCell className="min-w-[300px]">
-                                      <div className="font-medium">{item.articulo.descripcion}</div>
+                                      <div className="font-medium flex items-center gap-1">
+                                        {item.articulo.descripcion}
+                                        {item.esExterno && <span className="text-xs bg-amber-100 text-amber-700 px-1 rounded">externo</span>}
+                                      </div>
                                       <div className="text-sm text-muted-foreground">
                                         SKU: {item.articulo.sku} | {item.articulo.unidades_por_bulto} unid/bulto
                                         {item.articulo.ean13 && ` | EAN: ${item.articulo.ean13}`}
@@ -855,6 +907,21 @@ export default function OrdenesCompraPage() {
                                         </SelectContent>
                                       </Select>
                                     </TableCell>
+                                    {sugerenciaData.length > 0 && (
+                                      <TableCell className="w-24">
+                                        {item.cantidad_sugerida != null && item.cantidad_sugerida > 0 ? (
+                                          <div className="flex flex-col items-center gap-1">
+                                            <span className="text-blue-700 font-medium">{item.cantidad_sugerida}</span>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-5 text-xs text-blue-600 p-0"
+                                              onClick={() => actualizarArticulo(indexReal, "cantidad_pedida", item.cantidad_sugerida)}
+                                            >usar</Button>
+                                          </div>
+                                        ) : <span className="text-muted-foreground text-xs">—</span>}
+                                      </TableCell>
+                                    )}
                                     <TableCell className="w-36">
                                       <Input
                                         type="number"
@@ -958,11 +1025,11 @@ export default function OrdenesCompraPage() {
                   )}
 
                   {selectedProveedor && articulosTabla.length === 0 && (
-                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-md text-center">
-                      <p className="text-amber-800">
-                        No hay artículos asignados a este proveedor. Asigná artículos al proveedor desde la sección de
-                        Artículos.
-                      </p>
+                    <div className="bg-amber-50 border border-amber-200 p-4 rounded-md text-center space-y-2">
+                      <p className="text-amber-800">No hay artículos asignados a este proveedor.</p>
+                      <Button variant="outline" size="sm" onClick={() => setShowBuscarArticulo(true)}>
+                        <Plus className="mr-2 h-4 w-4" /> Agregar artículo del catálogo
+                      </Button>
                     </div>
                   )}
 
@@ -1150,6 +1217,50 @@ export default function OrdenesCompraPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* External article search dialog */}
+      <Dialog open={showBuscarArticulo} onOpenChange={setShowBuscarArticulo}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Buscar artículo del catálogo</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+              <Input
+                placeholder="Buscar por descripción o SKU..."
+                value={searchArticuloExterno}
+                onChange={(e) => { setSearchArticuloExterno(e.target.value); buscarArticulosExternos(e.target.value) }}
+                className="pl-10"
+                autoFocus
+              />
+            </div>
+            {loadingArticulosExternos && <p className="text-sm text-muted-foreground text-center">Buscando...</p>}
+            {articulosExternos.length > 0 && (
+              <div className="border rounded-md max-h-80 overflow-y-auto">
+                <Table>
+                  <TableBody>
+                    {articulosExternos.map((art: any) => (
+                      <TableRow key={art.id} className="cursor-pointer hover:bg-accent" onClick={() => agregarArticuloExterno(art)}>
+                        <TableCell>
+                          <div className="font-medium text-sm">{art.descripcion}</div>
+                          <div className="text-xs text-muted-foreground">SKU: {art.sku} | ${art.precio_compra?.toFixed(2) || '0.00'}</div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm">Agregar</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            {searchArticuloExterno.length >= 2 && !loadingArticulosExternos && articulosExternos.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center">Sin resultados</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
