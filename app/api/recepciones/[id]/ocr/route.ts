@@ -26,16 +26,7 @@ export async function POST(
             );
         }
 
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!,
-            {
-                auth: {
-                    persistSession: false,
-                    autoRefreshToken: false,
-                },
-            }
-        );
+        const supabase = createAdminClient();
 
         // Fetch reception context for OCR
         const { data: recepcion } = await supabase
@@ -277,16 +268,7 @@ export async function DELETE(
             );
         }
 
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!,
-            {
-                auth: {
-                    persistSession: false,
-                    autoRefreshToken: false,
-                },
-            }
-        );
+        const supabase = createAdminClient();
 
         const { data: doc, error: fetchError } = await supabase
             .from("recepciones_documentos")
