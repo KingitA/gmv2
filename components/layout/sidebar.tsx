@@ -82,7 +82,8 @@ export function Sidebar() {
 
   const isAuthRoute = pathname?.startsWith('/auth')
   const isDepositoRoute = pathname?.startsWith('/deposito')
-  if (isAuthRoute || isDepositoRoute) return null
+  const isWarehouseRoute = pathname?.startsWith('/warehouse')
+  if (isAuthRoute || isDepositoRoute || isWarehouseRoute) return null
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/'
