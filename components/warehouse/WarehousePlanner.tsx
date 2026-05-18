@@ -1,117 +1,107 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Stage, Layer, Rect, Text, Line, Group, Transformer } from 'react-konva'
-import type Konva from 'konva'
-import type { KonvaEventObject } from 'konva/lib/Node'
 
-const PX_PER_M = 20
-const W_METERS = 30
-const H_METERS = 40
+const PX_M = 20       // pixels per meter at scale=1
+const W_M = 30        // warehouse width (meters)
+const H_M = 40        // warehouse height (meters)
 
 type ElemType = 'estanteria' | 'rack_3' | 'rack_4'
+type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 
-const TYPE_CFG: Record<ElemType, { label: string; w: number; h: number; color: string; bg: string }> = {
-  estanteria: { label: 'Estantería',    w: 3,   h: 1,   color: '#2563eb', bg: '#dbeafe' },
-  rack_3:     { label: 'Rack 3 Niv.',  w: 2,   h: 0.8, color: '#ea580c', bg: '#ffedd5' },
-  rack_4:     { label: 'Rack 4 Niv.',  w: 2,   h: 0.8, color: '#dc2626', bg: '#fee2e2' },
+const TYPE_CFG: Record<ElemType, { label: string; w: number; h: number; color: string; bg: string; stripe: string }> = {
+  estanteria: { label: 'Estantería',   w: 3,   h: 1,   color: '#2563eb', bg: '#dbeafe', stripe: '#93c5fd' },
+  rack_3:     { label: 'Rack 3 Niv.', w: 2,   h: 0.8, color: '#ea580c', bg: '#ffedd5', stripe: '#fdba74' },
+  rack_4:     { label: 'Rack 4 Niv.', w: 2,   h: 0.8, color: '#dc2626', bg: '#fee2e2', stripe: '#fca5a5' },
 }
 
 interface WElem {
-  id: string
-  type: ElemType
-  x: number
-  y: number
-  w: number
-  h: number
-  rotation: number
-  label: string
+  id: string; type: ElemType
+  x: number; y: number; w: number; h: number
+  rotation: number; label: string
 }
 
 interface LayoutData { id?: string; elements: WElem[] }
 
-function clamp(val: number, min: number, max: number) { return Math.max(min, Math.min(max, val)) }
+type Op =
+  | { kind: 'drag';   id: string; sx: number; sy: number; ex: number; ey: number }
+  | { kind: 'resize'; id: string; handle: ResizeHandle; sx: number; sy: number; ex: number; ey: number; ew: number; eh: number }
+  | { kind: 'pan';    sx: number; sy: number; px: number; py: number }
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
+const HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+function handleStyle(h: ResizeHandle, pw: number, ph: number): React.CSSProperties {
+  const SIZE = 8
+  const HALF = SIZE / 2
+  const midX = pw / 2 - HALF, midY = ph / 2 - HALF
+  const left = h.includes('e') ? pw - HALF : h.includes('w') ? -HALF : midX
+  const top  = h.includes('s') ? ph - HALF : h.includes('n') ? -HALF : midY
+  const cursors: Record<ResizeHandle, string> = {
+    nw: 'nw-resize', n: 'n-resize', ne: 'ne-resize',
+    e: 'e-resize', se: 'se-resize', s: 's-resize',
+    sw: 'sw-resize', w: 'w-resize',
+  }
+  return {
+    position: 'absolute', width: SIZE, height: SIZE, left, top,
+    background: '#fff', border: '1.5px solid #0f172a', borderRadius: 2,
+    cursor: cursors[h], zIndex: 10,
+  }
+}
 
 export default function WarehousePlanner() {
-  const stageRef = useRef<Konva.Stage>(null)
-  const trRef = useRef<Konva.Transformer>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-
   const [elements, setElements] = useState<WElem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [scale, setScale] = useState(1)
-  const [stagePos, setStagePos] = useState({ x: 40, y: 40 })
-  const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 })
+  const [pan, setPan] = useState({ x: 40, y: 40 })
   const [showGrid, setShowGrid] = useState(true)
+  const [labelEdit, setLabelEdit] = useState('')
   const [layoutId, setLayoutId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  const [labelEdit, setLabelEdit] = useState('')
   const [saved, setSaved] = useState(false)
 
-  // Load layout
+  const opRef = useRef<Op | null>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const scaleRef = useRef(scale)
+  const panRef = useRef(pan)
+  useEffect(() => { scaleRef.current = scale }, [scale])
+  useEffect(() => { panRef.current = pan }, [pan])
+
+  // Load layout on mount
   useEffect(() => {
     fetch('/api/warehouse/layout')
       .then(r => r.ok ? r.json() : null)
       .then((data: LayoutData | null) => {
-        if (data) {
-          setLayoutId(data.id ?? null)
-          setElements(data.elements ?? [])
-        }
+        if (data) { setLayoutId(data.id ?? null); setElements(data.elements ?? []) }
       })
       .catch(console.error)
   }, [])
 
-  // Canvas resize observer
+  // Sync label editor when selection changes
   useEffect(() => {
-    if (!containerRef.current) return
-    const obs = new ResizeObserver(entries => {
-      const { width, height } = entries[0].contentRect
-      setCanvasSize({ w: width, h: height })
-    })
-    obs.observe(containerRef.current)
-    return () => obs.disconnect()
+    setLabelEdit(elements.find(e => e.id === selectedId)?.label ?? '')
+  }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateElem = useCallback((id: string, patch: Partial<WElem>) => {
+    setElements(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e))
   }, [])
-
-  // Sync transformer to selected node
-  useEffect(() => {
-    if (!trRef.current || !stageRef.current) return
-    if (selectedId) {
-      const node = stageRef.current.findOne(`#elem-${selectedId}`)
-      if (node) { trRef.current.nodes([node]); trRef.current.getLayer()?.batchDraw() }
-    } else {
-      trRef.current.nodes([])
-      trRef.current.getLayer()?.batchDraw()
-    }
-  }, [selectedId, elements])
-
-  // Sync label editor to selected element
-  useEffect(() => {
-    const el = elements.find(e => e.id === selectedId)
-    setLabelEdit(el?.label ?? '')
-  }, [selectedId])
 
   const addElement = (type: ElemType) => {
     const cfg = TYPE_CFG[type]
-    const cx = (-stagePos.x + canvasSize.w / 2) / (scale * PX_PER_M)
-    const cy = (-stagePos.y + canvasSize.h / 2) / (scale * PX_PER_M)
+    const s = scaleRef.current; const p = panRef.current
+    const cx = (-p.x + (canvasRef.current?.clientWidth ?? 800) / 2) / (PX_M * s)
+    const cy = (-p.y + (canvasRef.current?.clientHeight ?? 600) / 2) / (PX_M * s)
     const count = elements.filter(e => e.type === type).length + 1
     const el: WElem = {
-      id: crypto.randomUUID(),
-      type,
-      x: clamp(cx - cfg.w / 2, 0, W_METERS - cfg.w),
-      y: clamp(cy - cfg.h / 2, 0, H_METERS - cfg.h),
-      w: cfg.w,
-      h: cfg.h,
-      rotation: 0,
+      id: crypto.randomUUID(), type,
+      x: clamp(cx - cfg.w / 2, 0, W_M - cfg.w),
+      y: clamp(cy - cfg.h / 2, 0, H_M - cfg.h),
+      w: cfg.w, h: cfg.h, rotation: 0,
       label: `${cfg.label} ${count}`,
     }
     setElements(prev => [...prev, el])
     setSelectedId(el.id)
   }
-
-  const updateElem = useCallback((id: string, patch: Partial<WElem>) => {
-    setElements(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e))
-  }, [])
 
   const deleteSelected = () => {
     if (!selectedId) return
@@ -122,8 +112,7 @@ export default function WarehousePlanner() {
   const rotateSelected = () => {
     if (!selectedId) return
     const el = elements.find(e => e.id === selectedId)
-    if (!el) return
-    updateElem(selectedId, { rotation: (el.rotation + 90) % 360 })
+    if (el) updateElem(selectedId, { rotation: (el.rotation + 90) % 360 })
   }
 
   const handleSave = async () => {
@@ -136,77 +125,101 @@ export default function WarehousePlanner() {
       })
       const data = await res.json()
       if (data?.id) setLayoutId(data.id)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      setSaved(true); setTimeout(() => setSaved(false), 2000)
     } catch (e) { console.error(e) }
     finally { setIsSaving(false) }
   }
 
-  const handleWheel = (e: KonvaEventObject<WheelEvent>) => {
-    e.evt.preventDefault()
-    const stage = stageRef.current
-    if (!stage) return
-    const pointer = stage.getPointerPosition()
-    if (!pointer) return
-    const factor = e.evt.deltaY < 0 ? 1.1 : 1 / 1.1
+  // ── Pointer events (all captured on the canvas container) ──────────────
+  const handleCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    canvasRef.current?.setPointerCapture(e.pointerId)
+
+    const target = e.target as HTMLElement
+    const handle = target.dataset.handle as ResizeHandle | undefined
+    const elemId = target.closest<HTMLElement>('[data-elemid]')?.dataset.elemid
+
+    if (handle && elemId) {
+      const el = elements.find(x => x.id === elemId)!
+      opRef.current = { kind: 'resize', id: elemId, handle, sx: e.clientX, sy: e.clientY, ex: el.x, ey: el.y, ew: el.w, eh: el.h }
+    } else if (elemId) {
+      const el = elements.find(x => x.id === elemId)!
+      setSelectedId(elemId)
+      opRef.current = { kind: 'drag', id: elemId, sx: e.clientX, sy: e.clientY, ex: el.x, ey: el.y }
+    } else {
+      setSelectedId(null)
+      opRef.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y }
+    }
+  }
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const op = opRef.current
+    if (!op) return
+    const s = scaleRef.current
+
+    if (op.kind === 'pan') {
+      setPan({ x: op.px + e.clientX - op.sx, y: op.py + e.clientY - op.sy })
+    } else if (op.kind === 'drag') {
+      const dx = (e.clientX - op.sx) / (PX_M * s)
+      const dy = (e.clientY - op.sy) / (PX_M * s)
+      setElements(prev => prev.map(el => el.id === op.id
+        ? { ...el, x: Math.max(0, op.ex + dx), y: Math.max(0, op.ey + dy) }
+        : el))
+    } else if (op.kind === 'resize') {
+      const dx = (e.clientX - op.sx) / (PX_M * s)
+      const dy = (e.clientY - op.sy) / (PX_M * s)
+      setElements(prev => prev.map(el => {
+        if (el.id !== op.id) return el
+        let { x, y, w, h } = { x: op.ex, y: op.ey, w: op.ew, h: op.eh }
+        if (op.handle.includes('e')) w = Math.max(0.5, op.ew + dx)
+        if (op.handle.includes('s')) h = Math.max(0.5, op.eh + dy)
+        if (op.handle.includes('w')) { x = op.ex + dx; w = Math.max(0.5, op.ew - dx) }
+        if (op.handle.includes('n')) { y = op.ey + dy; h = Math.max(0.5, op.eh - dy) }
+        return { ...el, x, y, w, h }
+      }))
+    }
+  }
+
+  const handlePointerUp = () => { opRef.current = null }
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const rect = canvasRef.current!.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
     const newScale = clamp(scale * factor, 0.2, 5)
-    const mousePointTo = { x: (pointer.x - stagePos.x) / scale, y: (pointer.y - stagePos.y) / scale }
+    setPan(p => ({ x: mx - (mx - p.x) * newScale / scale, y: my - (my - p.y) * newScale / scale }))
     setScale(newScale)
-    setStagePos({ x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale })
   }
 
-  const handleTransformEnd = (el: WElem) => {
-    const node = stageRef.current?.findOne(`#elem-${el.id}`) as Konva.Group | undefined
-    if (!node) return
-    const sx = node.scaleX()
-    const sy = node.scaleY()
-    node.scaleX(1)
-    node.scaleY(1)
-    updateElem(el.id, {
-      x: node.x() / PX_PER_M,
-      y: node.y() / PX_PER_M,
-      w: Math.max(0.5, el.w * sx),
-      h: Math.max(0.5, el.h * sy),
-      rotation: node.rotation(),
-    })
-  }
-
+  // ── Derived ────────────────────────────────────────────────────────────
   const selectedEl = elements.find(e => e.id === selectedId)
   const counts = { estanteria: 0, rack_3: 0, rack_4: 0 }
   elements.forEach(e => counts[e.type]++)
+  const pw = W_M * PX_M
+  const ph = H_M * PX_M
 
-  // Grid lines (computed once per showGrid change — stable for render)
+  // ── Grid SVG (memoized via static render) ──────────────────────────────
   const gridLines: React.ReactNode[] = []
   if (showGrid) {
-    for (let i = 0; i <= W_METERS; i++) {
+    for (let i = 0; i <= W_M; i++) {
       const major = i % 5 === 0
-      gridLines.push(
-        <Line key={`v${i}`}
-          points={[i * PX_PER_M, 0, i * PX_PER_M, H_METERS * PX_PER_M]}
-          stroke={major ? '#94a3b8' : '#e2e8f0'}
-          strokeWidth={major ? 0.6 : 0.3} />
-      )
-      if (major)
-        gridLines.push(<Text key={`vl${i}`} x={i * PX_PER_M + 2} y={3} text={`${i}m`} fontSize={7} fill="#94a3b8" />)
+      gridLines.push(<line key={`v${i}`} x1={i*PX_M} y1={0} x2={i*PX_M} y2={ph} stroke={major ? '#94a3b8' : '#e2e8f0'} strokeWidth={major ? 0.6 : 0.3} />)
+      if (major) gridLines.push(<text key={`vt${i}`} x={i*PX_M+2} y={9} fontSize={7} fill="#94a3b8">{i}m</text>)
     }
-    for (let j = 0; j <= H_METERS; j++) {
+    for (let j = 0; j <= H_M; j++) {
       const major = j % 5 === 0
-      gridLines.push(
-        <Line key={`h${j}`}
-          points={[0, j * PX_PER_M, W_METERS * PX_PER_M, j * PX_PER_M]}
-          stroke={major ? '#94a3b8' : '#e2e8f0'}
-          strokeWidth={major ? 0.6 : 0.3} />
-      )
-      if (major && j > 0)
-        gridLines.push(<Text key={`hl${j}`} x={3} y={j * PX_PER_M + 2} text={`${j}m`} fontSize={7} fill="#94a3b8" />)
+      gridLines.push(<line key={`h${j}`} x1={0} y1={j*PX_M} x2={pw} y2={j*PX_M} stroke={major ? '#94a3b8' : '#e2e8f0'} strokeWidth={major ? 0.6 : 0.3} />)
+      if (major && j > 0) gridLines.push(<text key={`ht${j}`} x={2} y={j*PX_M+9} fontSize={7} fill="#94a3b8">{j}m</text>)
     }
   }
 
   return (
     <div style={{ display: 'flex', height: '100dvh', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', background: '#f1f5f9' }}>
-      {/* ── Sidebar ── */}
+
+      {/* ── Sidebar ─────────────────────────────────────────── */}
       <div style={{ width: 268, flexShrink: 0, background: '#fff', borderRight: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Header */}
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb' }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>Planner Depósito</div>
           <div style={{ fontSize: 12, color: '#6b7280', marginTop: 1 }}>30 m × 40 m · {elements.length} elementos</div>
@@ -215,13 +228,14 @@ export default function WarehousePlanner() {
         <div style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
           {/* Add elements */}
           <div style={{ marginBottom: 16 }}>
-            <div style={S.sectionLabel}>Agregar</div>
+            <SectionLabel>Agregar elemento</SectionLabel>
             {(Object.entries(TYPE_CFG) as [ElemType, typeof TYPE_CFG[ElemType]][]).map(([type, cfg]) => (
-              <button key={type} onClick={() => addElement(type)} style={{ ...S.addBtn, borderColor: `${cfg.color}33`, background: cfg.bg }}>
+              <button key={type} onClick={() => addElement(type)}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, border: `1px solid ${cfg.color}33`, background: cfg.bg, cursor: 'pointer', marginBottom: 7, textAlign: 'left' }}>
                 <div style={{ width: 34, height: 34, borderRadius: 9, background: cfg.color, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><rect x="2" y="2" width="9" height="9" rx="1.5"/><rect x="13" y="2" width="9" height="9" rx="1.5"/><rect x="2" y="13" width="9" height="9" rx="1.5"/><rect x="13" y="13" width="9" height="9" rx="1.5"/></svg>
                 </div>
-                <div style={{ flex: 1, textAlign: 'left' as const }}>
+                <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{cfg.label}</div>
                   <div style={{ fontSize: 11, color: '#6b7280' }}>{cfg.w}m × {cfg.h}m · <span style={{ color: cfg.color, fontWeight: 600 }}>{counts[type]} en plano</span></div>
                 </div>
@@ -230,64 +244,38 @@ export default function WarehousePlanner() {
             ))}
           </div>
 
-          {/* Properties panel */}
+          {/* Properties */}
           {selectedEl && (
             <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 14 }}>
-              <div style={S.sectionLabel}>Propiedades seleccionadas</div>
-              <div style={{ background: '#f9fafb', borderRadius: 10, padding: '12px', border: '1px solid #e5e7eb' }}>
+              <SectionLabel>Propiedades</SectionLabel>
+              <div style={{ background: '#f9fafb', borderRadius: 10, padding: 12, border: '1px solid #e5e7eb' }}>
                 <div style={{ marginBottom: 10 }}>
-                  <div style={S.fieldLabel}>Etiqueta</div>
-                  <input
-                    value={labelEdit}
+                  <FieldLabel>Etiqueta</FieldLabel>
+                  <input value={labelEdit}
                     onChange={e => setLabelEdit(e.target.value)}
                     onBlur={() => updateElem(selectedEl.id, { label: labelEdit })}
-                    onKeyDown={e => { if (e.key === 'Enter') updateElem(selectedEl.id, { label: labelEdit }) }}
-                    style={S.input}
-                  />
+                    onKeyDown={e => e.key === 'Enter' && updateElem(selectedEl.id, { label: labelEdit })}
+                    style={S.input} />
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-                  <div>
-                    <div style={S.fieldLabel}>Largo (m)</div>
-                    <input type="number" min={0.5} max={20} step={0.5}
-                      value={selectedEl.w}
-                      onChange={e => updateElem(selectedEl.id, { w: parseFloat(e.target.value) || 1 })}
-                      style={S.input}
-                    />
-                  </div>
-                  <div>
-                    <div style={S.fieldLabel}>Ancho (m)</div>
-                    <input type="number" min={0.5} max={20} step={0.5}
-                      value={selectedEl.h}
-                      onChange={e => updateElem(selectedEl.id, { h: parseFloat(e.target.value) || 1 })}
-                      style={S.input}
-                    />
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-                  <div>
-                    <div style={S.fieldLabel}>Pos X (m)</div>
-                    <input type="number" min={0} max={W_METERS} step={0.5}
-                      value={Math.round(selectedEl.x * 10) / 10}
-                      onChange={e => updateElem(selectedEl.id, { x: parseFloat(e.target.value) || 0 })}
-                      style={S.input}
-                    />
-                  </div>
-                  <div>
-                    <div style={S.fieldLabel}>Pos Y (m)</div>
-                    <input type="number" min={0} max={H_METERS} step={0.5}
-                      value={Math.round(selectedEl.y * 10) / 10}
-                      onChange={e => updateElem(selectedEl.id, { y: parseFloat(e.target.value) || 0 })}
-                      style={S.input}
-                    />
-                  </div>
+                  {[
+                    { label: 'Largo (m)', key: 'w', val: selectedEl.w },
+                    { label: 'Ancho (m)', key: 'h', val: selectedEl.h },
+                    { label: 'Pos X (m)', key: 'x', val: Math.round(selectedEl.x * 10) / 10 },
+                    { label: 'Pos Y (m)', key: 'y', val: Math.round(selectedEl.y * 10) / 10 },
+                  ].map(f => (
+                    <div key={f.key}>
+                      <FieldLabel>{f.label}</FieldLabel>
+                      <input type="number" min={0.5} max={f.key === 'w' || f.key === 'x' ? W_M : H_M} step={0.5}
+                        value={f.val}
+                        onChange={e => updateElem(selectedEl.id, { [f.key]: parseFloat(e.target.value) || 0.5 })}
+                        style={S.input} />
+                    </div>
+                  ))}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={rotateSelected} style={S.actionBtn}>
-                    <RotateIcon /> Rotar 90°
-                  </button>
-                  <button onClick={deleteSelected} style={{ ...S.actionBtn, borderColor: '#fca5a5', background: '#fef2f2', color: '#dc2626' }}>
-                    <TrashIcon /> Eliminar
-                  </button>
+                  <button onClick={rotateSelected} style={S.actionBtn}>↻ Rotar 90°</button>
+                  <button onClick={deleteSelected} style={{ ...S.actionBtn, borderColor: '#fca5a5', background: '#fef2f2', color: '#dc2626' }}>✕ Eliminar</button>
                 </div>
               </div>
             </div>
@@ -295,19 +283,19 @@ export default function WarehousePlanner() {
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '12px', borderTop: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ padding: 12, borderTop: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => setShowGrid(g => !g)}
               style={{ flex: 1, padding: '7px', borderRadius: 8, border: `1px solid ${showGrid ? '#bae6fd' : '#d1d5db'}`, background: showGrid ? '#f0f9ff' : '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: showGrid ? '#0284c7' : '#6b7280' }}>
               ⊞ {showGrid ? 'Grilla ON' : 'Grilla OFF'}
             </button>
-            <button onClick={() => { setScale(1); setStagePos({ x: 40, y: 40 }) }}
-              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 12, color: '#374151', fontWeight: 600 }}>
+            <button onClick={() => { setScale(1); setPan({ x: 40, y: 40 }) }}
+              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#374151' }}>
               Centrar
             </button>
           </div>
           <button onClick={handleSave} disabled={isSaving}
-            style={{ width: '100%', padding: '10px', borderRadius: 10, border: 'none', background: saved ? '#16a34a' : isSaving ? '#9ca3af' : '#111827', color: '#fff', cursor: isSaving ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 700, transition: 'background 0.2s' }}>
+            style={{ width: '100%', padding: 10, borderRadius: 10, border: 'none', background: saved ? '#16a34a' : isSaving ? '#9ca3af' : '#111827', color: '#fff', cursor: isSaving ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 700, transition: 'background 0.2s' }}>
             {saved ? '✓ Guardado' : isSaving ? 'Guardando...' : 'Guardar Layout'}
           </button>
           <div style={{ textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
@@ -316,122 +304,111 @@ export default function WarehousePlanner() {
         </div>
       </div>
 
-      {/* ── Canvas ── */}
-      <div ref={containerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#cbd5e1' }}>
-        <Stage
-          ref={stageRef}
-          width={canvasSize.w}
-          height={canvasSize.h}
-          scaleX={scale}
-          scaleY={scale}
-          x={stagePos.x}
-          y={stagePos.y}
-          draggable
-          onDragEnd={e => setStagePos({ x: e.target.x(), y: e.target.y() })}
-          onWheel={handleWheel}
-          onClick={e => { if (e.target === e.target.getStage() || e.target.getParent() === e.target.getLayer()) setSelectedId(null) }}
-        >
-          {/* Floor + grid layer */}
-          <Layer>
-            <Rect x={0} y={0}
-              width={W_METERS * PX_PER_M}
-              height={H_METERS * PX_PER_M}
-              fill="#f8fafc" stroke="#475569" strokeWidth={2}
-            />
+      {/* ── Canvas ──────────────────────────────────────────── */}
+      <div
+        ref={canvasRef}
+        style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#cbd5e1', cursor: opRef.current?.kind === 'pan' ? 'grabbing' : 'grab' }}
+        onPointerDown={handleCanvasPointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onWheel={handleWheel}
+      >
+        {/* World container */}
+        <div style={{
+          position: 'absolute', left: 0, top: 0,
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+          transformOrigin: '0 0',
+          width: pw, height: ph,
+        }}>
+          {/* Floor */}
+          <div style={{ position: 'absolute', inset: 0, background: '#f8fafc', border: '2px solid #475569', boxSizing: 'border-box' }} />
+
+          {/* Grid SVG */}
+          <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
             {gridLines}
-            {/* Dimension labels on edges */}
-            <Text x={W_METERS * PX_PER_M / 2 - 20} y={H_METERS * PX_PER_M + 6} text="30 m" fontSize={9} fill="#64748b" fontStyle="bold" />
-            <Text x={W_METERS * PX_PER_M + 6} y={H_METERS * PX_PER_M / 2 - 12} text="40 m" fontSize={9} fill="#64748b" fontStyle="bold" rotation={90} />
-          </Layer>
+          </svg>
 
-          {/* Elements layer */}
-          <Layer>
-            {elements.map(el => {
-              const cfg = TYPE_CFG[el.type]
-              const px = el.x * PX_PER_M
-              const py = el.y * PX_PER_M
-              const pw = el.w * PX_PER_M
-              const ph = el.h * PX_PER_M
-              const isSelected = selectedId === el.id
-              return (
-                <Group
-                  key={el.id}
-                  id={`elem-${el.id}`}
-                  x={px} y={py}
-                  width={pw} height={ph}
-                  rotation={el.rotation}
-                  draggable
-                  onClick={e => { e.cancelBubble = true; setSelectedId(el.id) }}
-                  onDragEnd={e => updateElem(el.id, {
-                    x: Math.max(0, e.target.x() / PX_PER_M),
-                    y: Math.max(0, e.target.y() / PX_PER_M),
-                  })}
-                  onTransformEnd={() => handleTransformEnd(el)}
-                >
-                  <Rect
-                    width={pw} height={ph}
-                    fill={cfg.bg}
-                    stroke={isSelected ? '#0f172a' : cfg.color}
-                    strokeWidth={isSelected ? 2 / scale : 1 / scale}
-                    cornerRadius={2}
-                    shadowEnabled={isSelected}
-                    shadowColor="#000"
-                    shadowBlur={12}
-                    shadowOpacity={0.25}
-                  />
-                  {/* Stripe lines for visual depth */}
+          {/* Dimension labels */}
+          <div style={{ position: 'absolute', bottom: -18, left: pw/2 - 16, fontSize: 9, color: '#64748b', fontWeight: 700, pointerEvents: 'none' }}>30 m</div>
+          <div style={{ position: 'absolute', right: -18, top: ph/2 - 10, fontSize: 9, color: '#64748b', fontWeight: 700, pointerEvents: 'none', transform: 'rotate(90deg)', transformOrigin: 'center' }}>40 m</div>
+
+          {/* Elements */}
+          {elements.map(el => {
+            const cfg = TYPE_CFG[el.type]
+            const epw = el.w * PX_M
+            const eph = el.h * PX_M
+            const isSelected = selectedId === el.id
+            return (
+              <div
+                key={el.id}
+                data-elemid={el.id}
+                style={{
+                  position: 'absolute',
+                  left: el.x * PX_M, top: el.y * PX_M,
+                  width: epw, height: eph,
+                  transform: `rotate(${el.rotation}deg)`,
+                  transformOrigin: 'top left',
+                  background: cfg.bg,
+                  border: `${isSelected ? 2 : 1}px solid ${isSelected ? '#0f172a' : cfg.color}`,
+                  borderRadius: 2,
+                  boxSizing: 'border-box',
+                  cursor: 'move',
+                  userSelect: 'none',
+                  boxShadow: isSelected ? '0 4px 14px rgba(0,0,0,0.22)' : '0 1px 3px rgba(0,0,0,0.1)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                {/* Stripe lines */}
+                <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', borderRadius: 2, pointerEvents: 'none' }}>
                   {Array.from({ length: Math.floor(el.w / 0.5) - 1 }, (_, i) => (
-                    <Line key={i}
-                      points={[(i + 1) * 0.5 * PX_PER_M, 0, (i + 1) * 0.5 * PX_PER_M, ph]}
-                      stroke={cfg.color} strokeWidth={0.4} opacity={0.3}
-                    />
+                    <div key={i} style={{ position: 'absolute', left: (i + 1) * 0.5 * PX_M, top: 0, bottom: 0, width: 1, background: cfg.stripe, opacity: 0.5 }} />
                   ))}
-                  <Text
-                    text={el.label}
-                    width={pw} height={ph}
-                    align="center" verticalAlign="middle"
-                    fontSize={clamp(pw / (el.label.length * 0.6), 6, 11)}
-                    fill={cfg.color}
-                    fontStyle="bold"
-                    fontFamily="'DM Sans', system-ui"
-                    wrap="word"
-                    padding={2}
+                </div>
+                {/* Label */}
+                <span style={{
+                  pointerEvents: 'none', textAlign: 'center', padding: 3,
+                  fontSize: clamp(epw / (el.label.length * 0.65), 6, 11),
+                  color: cfg.color, fontWeight: 700, wordBreak: 'break-word',
+                  lineHeight: 1.2, position: 'relative', zIndex: 1,
+                }}>
+                  {el.label}
+                </span>
+                {/* Resize handles (only when selected) */}
+                {isSelected && HANDLES.map(h => (
+                  <div
+                    key={h}
+                    data-handle={h}
+                    data-elemid={el.id}
+                    style={handleStyle(h, epw, eph)}
                   />
-                </Group>
-              )
-            })}
-            <Transformer
-              ref={trRef}
-              anchorSize={clamp(7 / scale, 4, 12)}
-              borderStrokeWidth={1.5 / scale}
-              rotateEnabled={false}
-              boundBoxFunc={(_, newBox) => ({
-                ...newBox,
-                width: Math.max(PX_PER_M * 0.5, newBox.width),
-                height: Math.max(PX_PER_M * 0.5, newBox.height),
-              })}
-            />
-          </Layer>
-        </Stage>
+                ))}
+              </div>
+            )
+          })}
+        </div>
 
-        {/* Zoom controls */}
+        {/* Zoom buttons */}
         <div style={{ position: 'absolute', bottom: 16, right: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <ZoomBtn label="+" onClick={() => setScale(s => clamp(s * 1.2, 0.2, 5))} />
-          <ZoomBtn label="−" onClick={() => setScale(s => clamp(s / 1.2, 0.2, 5))} />
+          {['+', '−'].map((lbl, i) => (
+            <button key={lbl} onClick={() => setScale(s => clamp(i === 0 ? s * 1.2 : s / 1.2, 0.2, 5))}
+              style={{ width: 36, height: 36, borderRadius: 9, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 20, fontWeight: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.1)', color: '#374151' }}>
+              {lbl}
+            </button>
+          ))}
         </div>
 
         {/* Zoom indicator */}
         <div style={{ position: 'absolute', bottom: 16, left: 16, background: 'rgba(255,255,255,0.92)', borderRadius: 8, padding: '4px 10px', fontSize: 12, color: '#64748b', border: '1px solid #e2e8f0' }}>
-          {Math.round(scale * 100)}% · {W_METERS}m × {H_METERS}m
+          {Math.round(scale * 100)}% · {W_M}m × {H_M}m
         </div>
 
         {/* Legend */}
-        <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(255,255,255,0.95)', borderRadius: 10, padding: '8px 12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(255,255,255,0.95)', borderRadius: 10, padding: '8px 12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 5 }}>
           {(Object.entries(TYPE_CFG) as [ElemType, typeof TYPE_CFG[ElemType]][]).map(([type, cfg]) => (
             <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
-              <div style={{ width: 12, height: 12, borderRadius: 3, background: cfg.bg, border: `1.5px solid ${cfg.color}` }} />
+              <div style={{ width: 12, height: 12, borderRadius: 3, background: cfg.bg, border: `1.5px solid ${cfg.color}`, flexShrink: 0 }} />
               <span style={{ color: '#374151', fontWeight: 600 }}>{cfg.label}</span>
-              <span style={{ color: cfg.color, fontWeight: 700 }}>{counts[type]}</span>
+              <span style={{ color: cfg.color, fontWeight: 700, marginLeft: 2 }}>{counts[type]}</span>
             </div>
           ))}
         </div>
@@ -440,36 +417,14 @@ export default function WarehousePlanner() {
   )
 }
 
-// ── Shared styles ──────────────────────────────────────────────
+// ── Shared styles & tiny components ──────────────────────────
 const S = {
-  sectionLabel: { fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.1em', marginBottom: 8 },
-  addBtn: { width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 10, border: '1px solid', cursor: 'pointer', marginBottom: 7, textAlign: 'left' as const },
-  fieldLabel: { fontSize: 11, color: '#6b7280', marginBottom: 3, fontWeight: 500 },
   input: { width: '100%', padding: '6px 8px', borderRadius: 7, border: '1px solid #d1d5db', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' as const, color: '#111827' },
-  actionBtn: { flex: 1, padding: '7px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  actionBtn: { flex: 1, padding: '7px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#374151' },
 }
-
-// ── Small icon components ──────────────────────────────────────
-function ZoomBtn({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button onClick={onClick} style={{ width: 36, height: 36, borderRadius: 9, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.1)', color: '#374151', fontWeight: 300 }}>
-      {label}
-    </button>
-  )
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>{children}</div>
 }
-
-function RotateIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-      <path d="M21 2v6h-6"/><path d="M21 13a9 9 0 1 1-3-7.7L21 8"/>
-    </svg>
-  )
-}
-
-function TrashIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
-    </svg>
-  )
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 3, fontWeight: 500 }}>{children}</div>
 }
