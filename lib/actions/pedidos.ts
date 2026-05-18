@@ -136,6 +136,28 @@ async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
 
 function round2(n: number) { return Math.round(n * 100) / 100 }
 
+// Mapeo entre Segmento interno y clave de bonificaciones en DB
+const SEGMENTO_BONIF: Record<Segmento, string> = {
+  limpieza:  "limpieza_bazar",
+  perf0:     "perf0",
+  perf_plus: "perf_plus",
+}
+
+/**
+ * Devuelve el descuento_viajante (%) aplicable al segmento dado.
+ * Prioriza segmento específico sobre segmento NULL (todos).
+ */
+function getDescuentoViajante(
+  bonifs: Array<{ segmento: string | null; porcentaje: number }>,
+  segmento: Segmento,
+): number {
+  const key = SEGMENTO_BONIF[segmento]
+  const especifico = bonifs.find(b => b.segmento === key)
+  if (especifico) return especifico.porcentaje
+  const general = bonifs.find(b => b.segmento === null || b.segmento === "")
+  return general?.porcentaje ?? 0
+}
+
 /**
  * Calcula precio_unitario_bruto y descuentos_json para el kardex.
  *
@@ -261,6 +283,7 @@ export async function createPedido(data: {
     listaUsadaId: string | null; metodoUsado: string
     descuentoPropioPct: number; precioLista: number
     descuentoClientePct: number; precioConDescuento: number
+    segmento: Segmento
   }
   const itemsCalc: ItemCalc[] = []
   for (const item of data.items) {
@@ -282,6 +305,7 @@ export async function createPedido(data: {
       precioLista: precio.precioLista,
       descuentoClientePct: precio.descuentoClientePct,
       precioConDescuento: precio.precioConDescuento,
+      segmento,
     })
   }
 
@@ -335,6 +359,15 @@ export async function createPedido(data: {
       .single()
     vendedorComisiones = vd ?? null
   }
+
+  // Obtener descuentos viajante del cliente (afectan la comisión)
+  const { data: bonifViajante } = await supabase
+    .from("bonificaciones")
+    .select("segmento, porcentaje")
+    .eq("cliente_id", data.cliente_id)
+    .eq("tipo", "viajante")
+    .eq("activo", true)
+  const bonificacionesViajante: Array<{ segmento: string | null; porcentaje: number }> = bonifViajante ?? []
 
   for (const item of itemsCalc) {
     const { error: itemError } = await supabase.from("pedidos_detalle").insert({
@@ -396,17 +429,22 @@ export async function createPedido(data: {
         stock_antes: stockActual,
         stock_despues: stockActual !== null ? stockActual - item.cantidad : null,
         operador_id: user.id,
-        // Comisión del viajante embebida en kardex
+        // Comisión del viajante embebida en kardex (reducida por descuento_viajante)
         ...(() => {
           if (!vendedorComisiones || !art?.segmento_precio) return {}
           const pct = getComisionPorcentaje(vendedorComisiones, art.segmento_precio, art.iva_ventas)
-          if (pct <= 0) return {}
+          const dtoViajante = getDescuentoViajante(bonificacionesViajante, item.segmento)
+          if (pct <= 0 && dtoViajante <= 0) return {}
+          const comisionEfectivaPct = round2(pct - dtoViajante)
           const precioNeto = getPrecioNeto(item.precioNeto, item.metodoUsado, art.iva_ventas)
-          const monto = Math.round(precioNeto * item.cantidad * pct) / 100
+          const comisionMonto = round2(precioNeto * item.cantidad * comisionEfectivaPct / 100)
           return {
-            comision_viajante_pct: pct,
-            comision_viajante_monto: monto,
-            viajante_id_comision: clienteInfo.vendedor_id,
+            comision_viajante_pct: comisionEfectivaPct,
+            comision_viajante_monto: comisionMonto,
+            ...(dtoViajante > 0 ? {
+              descuento_viajante_pct: dtoViajante,
+              descuento_viajante_monto: round2(precioNeto * item.cantidad * dtoViajante / 100),
+            } : {}),
           }
         })(),
       },
@@ -673,11 +711,19 @@ export async function agregarItemPedido(
   if (error) throw error
 
   // ── Insertar en kardex ──────────────────────────────────────────────────
-  const { data: artInfo } = await supabase
-    .from("articulos")
-    .select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual")
-    .eq("id", productoId)
-    .single()
+  const [{ data: artInfo }, { data: clienteVendedor }, { data: bonifData }] = await Promise.all([
+    supabase.from("articulos").select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual, segmento_precio").eq("id", productoId).single(),
+    supabase.from("clientes").select("vendedor_id, descuento_especial").eq("id", pedido.cliente_id).single(),
+    supabase.from("bonificaciones").select("segmento, porcentaje").eq("cliente_id", pedido.cliente_id).eq("tipo", "viajante").eq("activo", true),
+  ])
+  const vendedorId = (clienteVendedor as any)?.vendedor_id ?? (pedido.clientes as any)?.vendedor_id ?? null
+  let vendedorComisionesAgregar: { comision_limpieza_bazar: number; comision_perfumeria_0: number; comision_perfumeria_plus: number } | null = null
+  if (vendedorId) {
+    const { data: vd } = await supabase.from("vendedores").select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus").eq("id", vendedorId).single()
+    vendedorComisionesAgregar = vd ?? null
+  }
+  const bonificacionesViajanteAgregar: Array<{ segmento: string | null; porcentaje: number }> = bonifData ?? []
+  const segmentoArt = detectarSegmento({ ...articuloConDescuentos, segmento_precio: artInfo?.segmento_precio })
 
   const ivaIncluido = precio.precioAlCliente === precio.precioNeto
   const ivaMonto = ivaIncluido ? 0 : Math.round((precio.precioAlCliente - precio.precioNeto) * 100) / 100
@@ -689,6 +735,24 @@ export async function agregarItemPedido(
     precio.precioLista, precio.precioConDescuento,
     precio.descuentoClientePct, articuloConDescuentos.descuento_propio || 0,
   )
+
+  const comisionBlockAgregar = (() => {
+    if (!vendedorComisionesAgregar || !artInfo?.segmento_precio) return {}
+    const pct = getComisionPorcentaje(vendedorComisionesAgregar, artInfo.segmento_precio, artInfo.iva_ventas)
+    const dtoViajante = getDescuentoViajante(bonificacionesViajanteAgregar, segmentoArt)
+    if (pct <= 0 && dtoViajante <= 0) return {}
+    const comisionEfectivaPct = round2(pct - dtoViajante)
+    const precioNeto = getPrecioNeto(precio.precioNeto, metodoRaw, artInfo.iva_ventas)
+    const comisionMonto = round2(precioNeto * cantidad * comisionEfectivaPct / 100)
+    return {
+      comision_viajante_pct: comisionEfectivaPct,
+      comision_viajante_monto: comisionMonto,
+      ...(dtoViajante > 0 ? {
+        descuento_viajante_pct: dtoViajante,
+        descuento_viajante_monto: round2(precioNeto * cantidad * dtoViajante / 100),
+      } : {}),
+    }
+  })()
 
   await insertarKardex(
     createAdminClient(),
@@ -713,7 +777,7 @@ export async function agregarItemPedido(
       subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
       subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
       cliente_id: pedido.cliente_id,
-      vendedor_id: (pedido.clientes as any)?.vendedor_id ?? null,
+      vendedor_id: vendedorId,
       provincia_destino: (pedido.clientes as any)?.provincia ?? null,
       pedido_id: pedidoId,
       numero_pedido: (pedido as any).numero_pedido ?? null,
@@ -723,6 +787,7 @@ export async function agregarItemPedido(
       stock_antes: artInfo?.stock_actual ?? null,
       stock_despues: artInfo?.stock_actual != null ? artInfo.stock_actual - cantidad : null,
       operador_id: user?.id ?? null,
+      ...comisionBlockAgregar,
     },
     {
       sku: artInfo?.sku,
