@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
+import { formatDateAR } from "@/lib/utils"
 
 const C = {
   bg:"#f4f6f9", white:"#ffffff", border:"#e5e7eb",
@@ -254,7 +255,7 @@ export default function PrepararPedidosPage() {
                               {pedido.clientes?.razon_social || pedido.clientes?.nombre}
                             </div>
                             <div style={{ fontSize:12, color:C.light, fontFamily:"monospace", marginTop:2 }}>
-                              {pedido.numero_pedido} · {new Date(pedido.fecha).toLocaleDateString("es-AR")}
+                              {pedido.numero_pedido} · {formatDateAR(pedido.fecha)}
                             </div>
                           </div>
                           <span style={{ fontSize:11, fontWeight:700, padding:"4px 10px", borderRadius:999, whiteSpace:"nowrap", flexShrink:0,

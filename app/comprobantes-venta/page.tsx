@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { formatDateAR } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -352,7 +353,7 @@ export default function ComprobantesVentaPage() {
                 pedidosSinFacturar.map((pedido) => (
                   <TableRow key={pedido.id}>
                     <TableCell className="font-medium">{pedido.numero_pedido}</TableCell>
-                    <TableCell>{new Date(pedido.fecha).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</TableCell>
+                    <TableCell>{formatDateAR(pedido.fecha)}</TableCell>
                     <TableCell>
                       <div>
                         <div className="font-medium">{pedido.clientes?.nombre_razon_social}</div>

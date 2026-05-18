@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { formatDateAR } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -652,7 +653,7 @@ export default function ClienteDetailPage() {
                           <div className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors cursor-pointer">
                             <div>
                               <p className="text-sm font-semibold text-slate-700">#{p.numero_pedido}</p>
-                              <p className="text-xs text-slate-400">{p.fecha ? new Date(p.fecha).toLocaleDateString("es-AR") : "—"}</p>
+                              <p className="text-xs text-slate-400">{p.fecha ? formatDateAR(p.fecha) : "—"}</p>
                             </div>
                             <div className="text-right">
                               <p className="text-sm font-bold text-slate-700">${(p.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</p>

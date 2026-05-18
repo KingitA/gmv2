@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, X, ExternalLink } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
+import { formatDateAR } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface Cliente {
@@ -1044,7 +1045,7 @@ export default function ClientesPage() {
                       <div key={p.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-3.5 py-2.5 border border-slate-100 hover:border-slate-200 transition-colors">
                         <div>
                           <span className="text-sm font-bold text-slate-800">#{p.numero_pedido}</span>
-                          <span className="text-xs text-slate-400 ml-2">{new Date(p.fecha).toLocaleDateString("es-AR")}</span>
+                          <span className="text-xs text-slate-400 ml-2">{formatDateAR(p.fecha)}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-bold text-slate-700">${(p.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>

@@ -56,7 +56,11 @@ export function endOfDayArgentina(dateStr: string): string {
  */
 export function formatDateAR(date: string | Date): string {
   if (!date) return ''
-  return new Date(date).toLocaleDateString('es-AR', { timeZone: ARGENTINA_TZ })
+  const str = typeof date === 'string' ? date : date.toISOString()
+  // DATE-only strings (YYYY-MM-DD) parsed by JS as UTC midnight → shows previous day in Argentina.
+  // Using noon UTC avoids the shift entirely (12:00Z = 09:00 ART, same calendar day).
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(str) ? str + 'T12:00:00Z' : str)
+  return d.toLocaleDateString('es-AR', { timeZone: ARGENTINA_TZ })
 }
 
 /**
