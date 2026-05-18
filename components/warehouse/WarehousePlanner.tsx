@@ -6,13 +6,17 @@ const PX_M = 20       // pixels per meter at scale=1
 const W_M = 30        // warehouse width (meters)
 const H_M = 40        // warehouse height (meters)
 
-type ElemType = 'estanteria' | 'rack_3' | 'rack_4'
+type ElemType = 'estanteria' | 'rack_3' | 'rack_4' | 'pasillo' | 'recepcion' | 'preparacion' | 'oficina'
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 
 const TYPE_CFG: Record<ElemType, { label: string; w: number; h: number; color: string; bg: string; stripe: string }> = {
-  estanteria: { label: 'Estantería',   w: 3,   h: 1,   color: '#2563eb', bg: '#dbeafe', stripe: '#93c5fd' },
-  rack_3:     { label: 'Rack 3 Niv.', w: 2,   h: 0.8, color: '#ea580c', bg: '#ffedd5', stripe: '#fdba74' },
-  rack_4:     { label: 'Rack 4 Niv.', w: 2,   h: 0.8, color: '#dc2626', bg: '#fee2e2', stripe: '#fca5a5' },
+  estanteria:  { label: 'Estantería',    w: 3,  h: 1,  color: '#2563eb', bg: '#dbeafe', stripe: '#93c5fd' },
+  rack_3:      { label: 'Rack 3 Niv.',   w: 2,  h: 0.8,color: '#ea580c', bg: '#ffedd5', stripe: '#fdba74' },
+  rack_4:      { label: 'Rack 4 Niv.',   w: 2,  h: 0.8,color: '#dc2626', bg: '#fee2e2', stripe: '#fca5a5' },
+  pasillo:     { label: 'Pasillo',        w: 10, h: 2,  color: '#64748b', bg: '#f1f5f9', stripe: '#cbd5e1' },
+  recepcion:   { label: 'Recepción',      w: 6,  h: 5,  color: '#059669', bg: '#d1fae5', stripe: '#6ee7b7' },
+  preparacion: { label: 'Preparación',    w: 6,  h: 5,  color: '#d97706', bg: '#fef3c7', stripe: '#fcd34d' },
+  oficina:     { label: 'Oficina',        w: 4,  h: 3,  color: '#7c3aed', bg: '#ede9fe', stripe: '#c4b5fd' },
 }
 
 interface WElem {
@@ -195,7 +199,7 @@ export default function WarehousePlanner() {
 
   // ── Derived ────────────────────────────────────────────────────────────
   const selectedEl = elements.find(e => e.id === selectedId)
-  const counts = { estanteria: 0, rack_3: 0, rack_4: 0 }
+  const counts = Object.fromEntries(Object.keys(TYPE_CFG).map(k => [k, 0])) as Record<ElemType, number>
   elements.forEach(e => counts[e.type]++)
   const pw = W_M * PX_M
   const ph = H_M * PX_M
