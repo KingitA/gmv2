@@ -56,32 +56,57 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       .eq("id", comprobante.pedido_id)
       .single()
 
-    const { data: detalleArray } = await supabase
-      .from("comprobantes_venta_detalle")
-      .select(`
-        *,
-        articulos (
-          descripcion,
-          sku,
-          descuento_propio,
-          categoria,
-          iva_compras
-        )
-      `)
-      .eq("comprobante_id", comprobanteId)
+    const [
+      { data: detalleArray },
+      { data: bonificacionesCliente },
+      { data: rubros },
+      { data: categoriasTbl },
+      { data: subcategoriasTbl },
+      { data: marcasTbl },
+    ] = await Promise.all([
+      supabase
+        .from("comprobantes_venta_detalle")
+        .select(`*, articulos(descripcion, sku, descuento_propio, categoria, iva_compras, rubro_id, categoria_id, subcategoria_id, marca_id)`)
+        .eq("comprobante_id", comprobanteId),
+      supabase
+        .from("bonificaciones")
+        .select("tipo, porcentaje, segmento")
+        .eq("cliente_id", comprobante.cliente_id)
+        .eq("activo", true)
+        .in("tipo", ["general", "viajante"]),
+      supabase.from("rubros").select("id, orden"),
+      supabase.from("categorias").select("id, orden"),
+      supabase.from("subcategorias").select("id, orden"),
+      supabase.from("marcas").select("id, descripcion").eq("activo", true),
+    ])
 
-    const { data: bonificacionesCliente } = await supabase
-      .from("bonificaciones")
-      .select("tipo, porcentaje, segmento")
-      .eq("cliente_id", comprobante.cliente_id)
-      .eq("activo", true)
-      .in("tipo", ["general", "viajante"])
+    // Build ordering and marca lookup maps
+    const rubroOrden  = new Map((rubros        || []).map((r: any) => [r.id, r.orden  ?? 999]))
+    const catOrden    = new Map((categoriasTbl || []).map((c: any) => [c.id, c.orden  ?? 999]))
+    const subcatOrden = new Map((subcategoriasTbl || []).map((s: any) => [s.id, s.orden ?? 999]))
+    const marcaDesc   = new Map((marcasTbl     || []).map((m: any) => [m.id, m.descripcion || ""]))
+
+    // Sort items by rubro → categoria → subcategoria order, then enrich with marca
+    const detalleSorted = [...(detalleArray || [])].sort((a, b) => {
+      const artA = (a.articulos as any) || {}
+      const artB = (b.articulos as any) || {}
+      const ro = (rubroOrden.get(artA.rubro_id)   ?? 999) - (rubroOrden.get(artB.rubro_id)   ?? 999)
+      if (ro !== 0) return ro
+      const co = (catOrden.get(artA.categoria_id)    ?? 999) - (catOrden.get(artB.categoria_id)    ?? 999)
+      if (co !== 0) return co
+      const so = (subcatOrden.get(artA.subcategoria_id) ?? 999) - (subcatOrden.get(artB.subcategoria_id) ?? 999)
+      if (so !== 0) return so
+      return (artA.descripcion || "").localeCompare(artB.descripcion || "", "es")
+    }).map(item => ({
+      ...item,
+      marca_descripcion: marcaDesc.get((item.articulos as any)?.marca_id) || "",
+    }))
 
     const comprobanteCompleto = {
       ...comprobante,
       cliente,
       pedido,
-      detalle: detalleArray || [],
+      detalle: detalleSorted,
       bonificaciones: bonificacionesCliente || [],
     }
 
@@ -215,8 +240,9 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
     const cant = item.cantidad || 0
     const neto = esBonifMerc ? 0 : precioConOferta * factDesc
     const sub = esBonifMerc ? Math.abs(Number(item.precio_total || 0)) : neto * cant
-    const desc = item.articulos?.descripcion || item.descripcion || "—"
-    const sku  = item.articulos?.sku || "—"
+    const desc  = item.articulos?.descripcion || item.descripcion || "—"
+    const sku   = item.articulos?.sku || "—"
+    const marca = (item as any).marca_descripcion || ""
 
     const tdOf = esBonifMerc
       ? `<td class="c-of z">—</td>`
@@ -236,6 +262,7 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
     return `<tr${rowStyle}>
       <td class="c-cod">${esBonifMerc ? "" : sku}</td>
       <td class="c-desc"${descStyle}>${desc}</td>
+      <td class="c-marca">${esBonifMerc ? "" : marca}</td>
       <td class="c-cant">${esBonifMerc ? "—" : cant}</td>
       <td class="c-lst">${esBonifMerc ? "—" : ("$" + fmtARS(lista))}</td>
       ${tdOf}${tdB1}${tdB2}
@@ -370,13 +397,14 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
     const zonaTabla = `<div class="zona-tabla">
       <table class="art">
         <colgroup>
-          <col class="c-cod"><col class="c-desc"><col class="c-cant">
+          <col class="c-cod"><col class="c-desc"><col class="c-marca"><col class="c-cant">
           <col class="c-lst"><col class="c-of"><col class="c-b1"><col class="c-b2">
           <col class="c-net"><col class="c-sub">
         </colgroup>
         <thead><tr>
           <th class="l">Código</th>
           <th class="l">Descripción del artículo</th>
+          <th class="l">Marca</th>
           <th>Cant.</th>
           <th>P. Lista</th>
           <th>% Of.</th>
@@ -491,6 +519,7 @@ body{font-family:var(--f);background:#bbb;color:#111;font-size:10px}
 table.art{width:100%;border-collapse:collapse;table-layout:fixed}
 table.art col.c-cod{width:42px}
 table.art col.c-desc{width:auto}
+table.art col.c-marca{width:52px}
 table.art col.c-cant{width:30px}
 table.art col.c-lst{width:58px}
 table.art col.c-of{width:28px}
@@ -507,6 +536,7 @@ table.art tbody tr:nth-child(even){background:#f5f5f5}
 table.art tbody td{padding:3.5px 4px;font-size:9.5px;text-align:right;vertical-align:middle;color:#444;border-right:1px solid #e0e0e0;line-height:1.3}
 table.art tbody td:last-child{border-right:none}
 td.c-desc{text-align:left;color:#111;font-weight:600;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td.c-marca{text-align:left;font-family:var(--fc);font-size:8px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 td.c-cod{text-align:center;font-family:var(--fc);font-size:8.5px;color:#888}
 td.c-cant{text-align:center;font-family:var(--fc);font-size:11px;font-weight:700;color:#111}
 td.c-lst{font-family:var(--fc);font-size:9px;color:#777}
