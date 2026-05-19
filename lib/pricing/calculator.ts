@@ -192,7 +192,9 @@ export function calcularPrecioFinal(
   // Coeficiente de ajuste según cómo entró el artículo y cómo EFECTIVAMENTE sale (comprobante real).
   // Se usa vaEnComprobante (no art.iva_ventas) porque el cliente puede forzar el comprobante opuesto
   // al modo natural del artículo (ej: artículo negro/negro en Factura A → coef 0.90 para base*.9).
-  const coefIva = obtenerCoeficienteIva(art.iva_compras, vaEnComprobante)
+  // Para perfumería el iva_compras no afecta el precio de venta — solo importa si sale en factura o presupuesto
+  const esPerf = art.segmento_precio === 'perfumeria' || art.rubro_slug === 'perfumeria'
+  const coefIva = esPerf ? 1.00 : obtenerCoeficienteIva(art.iva_compras, vaEnComprobante)
 
   let coefAjusteAplicado = 0
   let precioAntesIva = precioConDescuento

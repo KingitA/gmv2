@@ -114,8 +114,11 @@ export async function POST(request: Request) {
         ivaUnitario    = round2(precioAlCliente - precioNeto)
         ivaIncluido    = false
       } else {
-        // Presupuesto/Reversa: precio final con IVA incluido, sin discriminar
-        precioUnitario = precioAlCliente
+        // Presupuesto/Reversa: precio final con IVA incluido, sin discriminar.
+        // Para perfumería se usa precio_base porque precio_final puede estar mal guardado
+        // en pedidos anteriores al fix del coeficiente IVA (iva_compras no afecta perfumería).
+        const esPerf = art.segmento_precio === "perfumeria"
+        precioUnitario = esPerf ? precioNeto : precioAlCliente
         ivaUnitario    = 0
         ivaIncluido    = true
       }
