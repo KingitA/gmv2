@@ -380,14 +380,14 @@ export async function actualizarDescuentoFinancieroKardex(
 
   const { data: items, error } = await supabase
     .from('kardex')
-    .select('id, precio_lista')
+    .select('id, precio_unitario_final')
     .in('comprobante_venta_id', comprobante_ids)
     .eq('tipo_movimiento', 'venta')
 
   if (error || !items?.length) return
 
   for (const item of items) {
-    const monto = round2(Number(item.precio_lista) * 0.10)
+    const monto = round2(Number(item.precio_unitario_final) * 0.10)
     const { error: updErr } = await supabase
       .from('kardex')
       .update({

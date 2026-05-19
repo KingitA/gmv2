@@ -852,16 +852,10 @@ export async function agregarItemBonificado(
     .eq("id", productoId)
     .single()
 
-  const ivaIncluido = precio.precioAlCliente === precio.precioNeto
-  const ivaMonto = ivaIncluido ? 0 : Math.round((precio.precioAlCliente - precio.precioNeto) * 100) / 100
-  const ivaPct = ivaMonto > 0 && precio.precioNeto > 0
-    ? Math.round((ivaMonto / precio.precioNeto) * 10000) / 100 : 0
   const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
-  const kardexDescB = buildKardexDescuentos(
-    precio.precioLista, precio.precioConDescuento,
-    precio.descuentoClientePct, articuloConDescuentos.descuento_propio || 0,
-  )
+  // Bonified item: real list price shown but goods are free (100% mercadería discount)
+  const precioListaRef = precio.precioLista
 
   await insertarKardex(
     createAdminClient(),
@@ -871,20 +865,20 @@ export async function agregarItemBonificado(
       articulo_id: productoId,
       cantidad,
       precio_costo: articuloConDescuentos.precio_compra || 0,
-      precio_lista: precio.precioNeto,
-      precio_unitario_final: precio.precioAlCliente,
-      iva_porcentaje: ivaPct,
-      iva_monto_unitario: ivaMonto,
-      iva_incluido: ivaIncluido,
-      descuentos_json: kardexDescB.descuentos_json.length > 0 ? kardexDescB.descuentos_json : undefined,
-      descuento_cliente_pct: precio.descuentoClientePct,
-      descuento_mercaderia_pct: kardexDescB.descuento_mercaderia_pct,
-      descuento_mercaderia_monto: kardexDescB.descuento_mercaderia_monto,
-      descuento_general_pct: kardexDescB.descuento_general_pct,
-      descuento_general_monto: kardexDescB.descuento_general_monto,
-      subtotal_neto: Math.round(precio.precioNeto * cantidad * 100) / 100,
-      subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
-      subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
+      precio_lista: precioListaRef,
+      precio_unitario_final: 0,
+      iva_porcentaje: 0,
+      iva_monto_unitario: 0,
+      iva_incluido: false,
+      descuentos_json: [{ tipo: 'mercaderia' as const, porcentaje: 100, monto_unitario: precioListaRef }],
+      descuento_cliente_pct: 0,
+      descuento_mercaderia_pct: 100,
+      descuento_mercaderia_monto: precioListaRef,
+      descuento_general_pct: null,
+      descuento_general_monto: null,
+      subtotal_neto: 0,
+      subtotal_iva: 0,
+      subtotal_total: 0,
       cliente_id: pedido.cliente_id,
       vendedor_id: (pedido.clientes as any)?.vendedor_id ?? null,
       provincia_destino: (pedido.clientes as any)?.provincia ?? null,
