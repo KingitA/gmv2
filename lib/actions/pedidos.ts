@@ -11,33 +11,34 @@ import { insertarKardex, type DescuentoKardex } from "@/lib/kardex/insertar-kard
 import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
 
 // ─── Tipos de segmento de proveedor ──────────────────────────────────────────
-type Segmento = "limpieza" | "perf0" | "perf_plus"
+type Segmento = "limpieza" | "perf0" | "perf_medio" | "perf_plus"
 
 function detectarSegmento(articulo: {
   categoria?: string | null
   iva_compras?: string | null
+  iva_ventas?: string | null
   segmento_precio?: string | null
   rubros?: { slug: string } | null
 }): Segmento {
   // 1. Override explícito
-  if (articulo.segmento_precio === "perfumeria") {
-    return articulo.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
-  }
+  if (articulo.segmento_precio === "perfumeria") return _segPerf(articulo)
   if (articulo.segmento_precio === "limpieza_bazar") return "limpieza"
 
   // 2. Slug relacional del rubro
   const slug = articulo.rubros?.slug
-  if (slug === "perfumeria") {
-    return articulo.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
-  }
+  if (slug === "perfumeria") return _segPerf(articulo)
   if (slug === "limpieza" || slug === "bazar") return "limpieza"
 
   // 3. Fallback: texto de categoría
   const cat = (articulo.categoria || "").toUpperCase()
-  if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA")) {
-    return articulo.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
-  }
+  if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA")) return _segPerf(articulo)
   return "limpieza"
+}
+
+function _segPerf(a: { iva_compras?: string | null; iva_ventas?: string | null }): Segmento {
+  if (a.iva_ventas !== "presupuesto") return "perf_plus"  // vende en factura → blanco
+  if (a.iva_compras === "factura")    return "perf_medio"  // compra blanco, vende negro
+  return "perf0"                                           // compra negro, vende negro
 }
 
 function toMetodoFacturacion(raw: string | null | undefined): MetodoFacturacion {
@@ -52,16 +53,18 @@ function toMetodoFacturacion(raw: string | null | undefined): MetodoFacturacion 
 function resolverListaSegmento(
   segmento: Segmento,
   overrides: {
-    lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
-    lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
-    lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
-    lista_precio_pedido_id?: string;   metodo_facturacion_pedido?: string
+    lista_limpieza_pedido_id?: string;   metodo_limpieza_pedido?: string
+    lista_perf0_pedido_id?: string;      metodo_perf0_pedido?: string
+    lista_perf_medio_pedido_id?: string; metodo_perf_medio_pedido?: string
+    lista_perf_plus_pedido_id?: string;  metodo_perf_plus_pedido?: string
+    lista_precio_pedido_id?: string;     metodo_facturacion_pedido?: string
   },
   cliente: {
-    lista_limpieza_id?: string; metodo_limpieza?: string
-    lista_perf0_id?: string;    metodo_perf0?: string
-    lista_perf_plus_id?: string; metodo_perf_plus?: string
-    lista_precio_id?: string;   metodo_facturacion?: string
+    lista_limpieza_id?: string;   metodo_limpieza?: string
+    lista_perf0_id?: string;      metodo_perf0?: string
+    lista_perf_medio_id?: string; metodo_perf_medio?: string
+    lista_perf_plus_id?: string;  metodo_perf_plus?: string
+    lista_precio_id?: string;     metodo_facturacion?: string
   },
 ): { listaId: string | null; metodoRaw: string } {
   const general = {
@@ -81,6 +84,12 @@ function resolverListaSegmento(
       metodoRaw: overrides.metodo_perf0_pedido || cliente.metodo_perf0 || general.metodoRaw,
     }
   }
+  if (segmento === "perf_medio") {
+    return {
+      listaId: overrides.lista_perf_medio_pedido_id || cliente.lista_perf_medio_id || general.listaId,
+      metodoRaw: overrides.metodo_perf_medio_pedido || cliente.metodo_perf_medio || general.metodoRaw,
+    }
+  }
   // perf_plus
   return {
     listaId: overrides.lista_perf_plus_pedido_id || cliente.lista_perf_plus_id || general.listaId,
@@ -94,16 +103,16 @@ async function fetchListaDatos(
   listaId: string | null,
   cache: Record<string, DatosLista>,
 ): Promise<DatosLista> {
-  const empty: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }
+  const empty: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_medio: 0, recargo_perfumeria_blanco: 0 }
   if (!listaId) return empty
   if (cache[listaId]) return cache[listaId]
   const { data } = await supabase
     .from("listas_precio")
-    .select("recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_blanco")
+    .select("recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_medio,recargo_perfumeria_blanco")
     .eq("id", listaId)
     .single()
   const result: DatosLista = data
-    ? { recargo_limpieza_bazar: data.recargo_limpieza_bazar || 0, recargo_perfumeria_negro: data.recargo_perfumeria_negro || 0, recargo_perfumeria_blanco: data.recargo_perfumeria_blanco || 0 }
+    ? { recargo_limpieza_bazar: data.recargo_limpieza_bazar || 0, recargo_perfumeria_negro: data.recargo_perfumeria_negro || 0, recargo_perfumeria_medio: data.recargo_perfumeria_medio || 0, recargo_perfumeria_blanco: data.recargo_perfumeria_blanco || 0 }
     : empty
   cache[listaId] = result
   return result
@@ -138,9 +147,10 @@ function round2(n: number) { return Math.round(n * 100) / 100 }
 
 // Mapeo entre Segmento interno y clave de bonificaciones en DB
 const SEGMENTO_BONIF: Record<Segmento, string> = {
-  limpieza:  "limpieza_bazar",
-  perf0:     "perf0",
-  perf_plus: "perf_plus",
+  limpieza:   "limpieza_bazar",
+  perf0:      "perf0",
+  perf_medio: "perf_medio",
+  perf_plus:  "perf_plus",
 }
 
 /**
@@ -238,6 +248,8 @@ export async function createPedido(data: {
   metodo_limpieza_pedido?: string
   lista_perf0_pedido_id?: string
   metodo_perf0_pedido?: string
+  lista_perf_medio_pedido_id?: string
+  metodo_perf_medio_pedido?: string
   lista_perf_plus_pedido_id?: string
   metodo_perf_plus_pedido?: string
 }) {
@@ -254,6 +266,7 @@ export async function createPedido(data: {
       id, vendedor_id, metodo_facturacion, lista_precio_id, descuento_especial,
       lista_limpieza_id, metodo_limpieza,
       lista_perf0_id, metodo_perf0,
+      lista_perf_medio_id, metodo_perf_medio,
       lista_perf_plus_id, metodo_perf_plus, provincia
     `)
     .eq("id", data.cliente_id)
@@ -268,12 +281,14 @@ export async function createPedido(data: {
   const segmentoOverrides = {
     lista_precio_pedido_id:    data.lista_precio_pedido_id,
     metodo_facturacion_pedido: data.metodo_facturacion_pedido,
-    lista_limpieza_pedido_id:  data.lista_limpieza_pedido_id,
-    metodo_limpieza_pedido:    data.metodo_limpieza_pedido,
-    lista_perf0_pedido_id:     data.lista_perf0_pedido_id,
-    metodo_perf0_pedido:       data.metodo_perf0_pedido,
-    lista_perf_plus_pedido_id: data.lista_perf_plus_pedido_id,
-    metodo_perf_plus_pedido:   data.metodo_perf_plus_pedido,
+    lista_limpieza_pedido_id:   data.lista_limpieza_pedido_id,
+    metodo_limpieza_pedido:     data.metodo_limpieza_pedido,
+    lista_perf0_pedido_id:      data.lista_perf0_pedido_id,
+    metodo_perf0_pedido:        data.metodo_perf0_pedido,
+    lista_perf_medio_pedido_id: data.lista_perf_medio_pedido_id,
+    metodo_perf_medio_pedido:   data.metodo_perf_medio_pedido,
+    lista_perf_plus_pedido_id:  data.lista_perf_plus_pedido_id,
+    metodo_perf_plus_pedido:    data.metodo_perf_plus_pedido,
   }
 
   // ── Calculate real price for each item ──────────────────────────────────

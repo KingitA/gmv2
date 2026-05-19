@@ -31,6 +31,7 @@ export interface DatosArticulo {
 export interface DatosLista {
   recargo_limpieza_bazar: number
   recargo_perfumeria_negro: number
+  recargo_perfumeria_medio: number
   recargo_perfumeria_blanco: number
 }
 
@@ -113,25 +114,26 @@ export function calcularPrecioBase(art: DatosArticulo): { costoNeto: number; pre
 export function obtenerRecargoLista(art: DatosArticulo, lista: DatosLista): number {
   // Prioridad 0: segmento_precio explícito (override independiente del rubro de catálogo)
   if (art.segmento_precio === 'perfumeria') {
-    return art.iva_ventas === 'presupuesto' ? lista.recargo_perfumeria_negro : lista.recargo_perfumeria_blanco
+    return _recargoPerf(art, lista)
   }
   if (art.segmento_precio === 'limpieza_bazar') return lista.recargo_limpieza_bazar
 
   // Prioridad 1: rubro_slug relacional (más preciso que string de categoria)
   if (art.rubro_slug) {
-    if (art.rubro_slug === 'perfumeria') {
-      // perf0 = presupuesto (negro), perf+ = factura (blanco)
-      return art.iva_ventas === 'presupuesto' ? lista.recargo_perfumeria_negro : lista.recargo_perfumeria_blanco
-    }
+    if (art.rubro_slug === 'perfumeria') return _recargoPerf(art, lista)
     return lista.recargo_limpieza_bazar
   }
   // Fallback legacy: detección por string de categoria
   const esPerfumeria = (art.categoria || "").toUpperCase().includes("PERFUMERIA")
     || (art.categoria || "").toUpperCase().includes("PERFUMERÍA")
-  if (esPerfumeria) {
-    return art.iva_compras === "adquisicion_stock" ? lista.recargo_perfumeria_negro : lista.recargo_perfumeria_blanco
-  }
+  if (esPerfumeria) return _recargoPerf(art, lista)
   return lista.recargo_limpieza_bazar
+}
+
+function _recargoPerf(art: DatosArticulo, lista: DatosLista): number {
+  if (art.iva_ventas !== 'presupuesto') return lista.recargo_perfumeria_blanco  // perf_plus: iva_ventas=factura
+  if (art.iva_compras === 'factura')    return lista.recargo_perfumeria_medio   // perf_medio: +/0
+  return lista.recargo_perfumeria_negro                                          // perf0: 0/0 o ½/0
 }
 
 // ─── Coeficiente IVA según combinación compras/ventas ──

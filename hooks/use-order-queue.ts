@@ -15,6 +15,8 @@ export type PedidoOverrides = {
   metodo_limpieza_pedido?: string
   lista_perf0_pedido_id?: string
   metodo_perf0_pedido?: string
+  lista_perf_medio_pedido_id?: string
+  metodo_perf_medio_pedido?: string
   lista_perf_plus_pedido_id?: string
   metodo_perf_plus_pedido?: string
 }

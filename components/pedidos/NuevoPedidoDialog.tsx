@@ -42,9 +42,10 @@ const BONIF_TIPOS = [
 ] as const
 
 const SEGMENTOS = [
-  { key: "limpieza_bazar", label: "LIMPIEZA / BAZAR",  listaState: "listaLimpieza",  metodoState: "metodoLimpieza"  },
-  { key: "perf0",          label: "PERFUMERÍA PERF0",  listaState: "listaPerf0",     metodoState: "metodoPerf0"     },
-  { key: "perf_plus",      label: "PERFUMERÍA PLUS",   listaState: "listaPerfPlus",  metodoState: "metodoPerfPlus"  },
+  { key: "limpieza_bazar", label: "LIMPIEZA / BAZAR",   listaState: "listaLimpieza",  metodoState: "metodoLimpieza"  },
+  { key: "perf0",          label: "PERFUMERÍA PERF 0",  listaState: "listaPerf0",     metodoState: "metodoPerf0"     },
+  { key: "perf_medio",     label: "PERFUMERÍA ½",       listaState: "listaPerfMedio", metodoState: "metodoPerfMedio" },
+  { key: "perf_plus",      label: "PERFUMERÍA PLUS",    listaState: "listaPerfPlus",  metodoState: "metodoPerfPlus"  },
 ] as const
 
 export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
@@ -68,6 +69,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const [metodoLimpieza, setMetodoLimpieza] = useState("")
   const [listaPerf0, setListaPerf0]         = useState("")
   const [metodoPerf0, setMetodoPerf0]       = useState("")
+  const [listaPerfMedio, setListaPerfMedio] = useState("")
+  const [metodoPerfMedio, setMetodoPerfMedio] = useState("")
   const [listaPerfPlus, setListaPerfPlus]   = useState("")
   const [metodoPerfPlus, setMetodoPerfPlus] = useState("")
 
@@ -95,11 +98,13 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     const c = cliente as any
     setMetodo(c.metodo_facturacion || "")
     setListaId(c.lista_precio_id || "")
-    setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
+    setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_medio_id || c.lista_perf_plus_id))
     setListaLimpieza(c.lista_limpieza_id || "")
     setMetodoLimpieza(c.metodo_limpieza || "")
     setListaPerf0(c.lista_perf0_id || "")
     setMetodoPerf0(c.metodo_perf0 || "")
+    setListaPerfMedio(c.lista_perf_medio_id || "")
+    setMetodoPerfMedio(c.metodo_perf_medio || "")
     setListaPerfPlus(c.lista_perf_plus_id || "")
     setMetodoPerfPlus(c.metodo_perf_plus || "")
     setSaveMode(null)
@@ -138,10 +143,12 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     (listaPorSegmento ? (c?.lista_precio_id || "") !== "" : listaId !== (c?.lista_precio_id || "")) ||
     listaLimpieza  !== (c?.lista_limpieza_id || "") ||
     metodoLimpieza !== (c?.metodo_limpieza   || "") ||
-    listaPerf0     !== (c?.lista_perf0_id    || "") ||
-    metodoPerf0    !== (c?.metodo_perf0      || "") ||
-    listaPerfPlus  !== (c?.lista_perf_plus_id || "") ||
-    metodoPerfPlus !== (c?.metodo_perf_plus  || "") ||
+    listaPerf0     !== (c?.lista_perf0_id     || "") ||
+    metodoPerf0    !== (c?.metodo_perf0       || "") ||
+    listaPerfMedio  !== (c?.lista_perf_medio_id || "") ||
+    metodoPerfMedio !== (c?.metodo_perf_medio   || "") ||
+    listaPerfPlus  !== (c?.lista_perf_plus_id  || "") ||
+    metodoPerfPlus !== (c?.metodo_perf_plus    || "") ||
     bonifChanged
   )
 
@@ -206,10 +213,12 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       if (!listaPorSegmento && listaId !== (c?.lista_precio_id || "")) overrides.lista_precio_pedido_id = listaId || undefined
       if (listaLimpieza  !== (c?.lista_limpieza_id || ""))  overrides.lista_limpieza_pedido_id  = listaLimpieza  || undefined
       if (metodoLimpieza !== (c?.metodo_limpieza   || ""))  overrides.metodo_limpieza_pedido    = metodoLimpieza || undefined
-      if (listaPerf0     !== (c?.lista_perf0_id    || ""))  overrides.lista_perf0_pedido_id     = listaPerf0     || undefined
-      if (metodoPerf0    !== (c?.metodo_perf0      || ""))  overrides.metodo_perf0_pedido       = metodoPerf0    || undefined
-      if (listaPerfPlus  !== (c?.lista_perf_plus_id || "")) overrides.lista_perf_plus_pedido_id = listaPerfPlus  || undefined
-      if (metodoPerfPlus !== (c?.metodo_perf_plus  || ""))  overrides.metodo_perf_plus_pedido   = metodoPerfPlus || undefined
+      if (listaPerf0      !== (c?.lista_perf0_id     || ""))  overrides.lista_perf0_pedido_id      = listaPerf0      || undefined
+      if (metodoPerf0     !== (c?.metodo_perf0       || ""))  overrides.metodo_perf0_pedido        = metodoPerf0     || undefined
+      if (listaPerfMedio  !== (c?.lista_perf_medio_id || "")) overrides.lista_perf_medio_pedido_id = listaPerfMedio  || undefined
+      if (metodoPerfMedio !== (c?.metodo_perf_medio   || "")) overrides.metodo_perf_medio_pedido   = metodoPerfMedio || undefined
+      if (listaPerfPlus   !== (c?.lista_perf_plus_id  || "")) overrides.lista_perf_plus_pedido_id  = listaPerfPlus   || undefined
+      if (metodoPerfPlus  !== (c?.metodo_perf_plus    || "")) overrides.metodo_perf_plus_pedido    = metodoPerfPlus  || undefined
 
       if (saveMode === "permanent") {
         const upd: any = {}
@@ -217,10 +226,12 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
         if (!listaPorSegmento && listaId !== (c?.lista_precio_id || ""))  upd.lista_precio_id = listaId || null
         if (listaLimpieza  !== (c?.lista_limpieza_id || "")) upd.lista_limpieza_id  = listaLimpieza  || null
         if (metodoLimpieza !== (c?.metodo_limpieza   || "")) upd.metodo_limpieza    = metodoLimpieza || null
-        if (listaPerf0     !== (c?.lista_perf0_id    || "")) upd.lista_perf0_id     = listaPerf0     || null
-        if (metodoPerf0    !== (c?.metodo_perf0      || "")) upd.metodo_perf0       = metodoPerf0    || null
-        if (listaPerfPlus  !== (c?.lista_perf_plus_id || "")) upd.lista_perf_plus_id = listaPerfPlus || null
-        if (metodoPerfPlus !== (c?.metodo_perf_plus  || "")) upd.metodo_perf_plus   = metodoPerfPlus || null
+        if (listaPerf0      !== (c?.lista_perf0_id     || "")) upd.lista_perf0_id      = listaPerf0      || null
+        if (metodoPerf0     !== (c?.metodo_perf0       || "")) upd.metodo_perf0        = metodoPerf0     || null
+        if (listaPerfMedio  !== (c?.lista_perf_medio_id || "")) upd.lista_perf_medio_id = listaPerfMedio  || null
+        if (metodoPerfMedio !== (c?.metodo_perf_medio   || "")) upd.metodo_perf_medio   = metodoPerfMedio || null
+        if (listaPerfPlus   !== (c?.lista_perf_plus_id  || "")) upd.lista_perf_plus_id  = listaPerfPlus   || null
+        if (metodoPerfPlus  !== (c?.metodo_perf_plus    || "")) upd.metodo_perf_plus    = metodoPerfPlus  || null
         if (Object.keys(upd).length > 0) await sb.from("clientes").update(upd).eq("id", cliente.id)
 
         // Guardar descuentos si cambiaron
@@ -228,7 +239,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
           await sb.from("bonificaciones").delete()
             .eq("cliente_id", cliente.id).in("tipo", ["general", "mercaderia", "viajante"])
           const toInsert: any[] = []
-          const segs = ["limpieza_bazar", "perf0", "perf_plus"]
+          const segs = ["limpieza_bazar", "perf0", "perf_medio", "perf_plus"]
           for (const seg of segs) {
             for (const tipo of BONIF_TIPOS) {
               const pct = bonifGrid[`${seg}__${tipo.key}`] || 0
@@ -253,6 +264,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     if (stateKey === "metodoLimpieza") return metodoLimpieza
     if (stateKey === "listaPerf0")     return listaPerf0
     if (stateKey === "metodoPerf0")    return metodoPerf0
+    if (stateKey === "listaPerfMedio") return listaPerfMedio
+    if (stateKey === "metodoPerfMedio") return metodoPerfMedio
     if (stateKey === "listaPerfPlus")  return listaPerfPlus
     if (stateKey === "metodoPerfPlus") return metodoPerfPlus
     return ""
@@ -262,6 +275,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     if (stateKey === "metodoLimpieza") setMetodoLimpieza(v)
     if (stateKey === "listaPerf0")     setListaPerf0(v)
     if (stateKey === "metodoPerf0")    setMetodoPerf0(v)
+    if (stateKey === "listaPerfMedio") setListaPerfMedio(v)
+    if (stateKey === "metodoPerfMedio") setMetodoPerfMedio(v)
     if (stateKey === "listaPerfPlus")  setListaPerfPlus(v)
     if (stateKey === "metodoPerfPlus") setMetodoPerfPlus(v)
   }

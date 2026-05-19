@@ -100,6 +100,8 @@ export default function ClientesPage() {
     metodo_limpieza: "",
     lista_perf0_id: "",
     metodo_perf0: "",
+    lista_perf_medio_id: "",
+    metodo_perf_medio: "",
     lista_perf_plus_id: "",
     metodo_perf_plus: "",
   })
@@ -213,6 +215,8 @@ export default function ClientesPage() {
       metodo_limpieza: formData.metodo_limpieza || null,
       lista_perf0_id: formData.lista_perf0_id || null,
       metodo_perf0: formData.metodo_perf0 || null,
+      lista_perf_medio_id: formData.lista_perf_medio_id || null,
+      metodo_perf_medio: formData.metodo_perf_medio || null,
       lista_perf_plus_id: formData.lista_perf_plus_id || null,
       metodo_perf_plus: formData.metodo_perf_plus || null,
     }
@@ -367,6 +371,8 @@ export default function ClientesPage() {
       metodo_limpieza: (cliente as any).metodo_limpieza || "",
       lista_perf0_id: (cliente as any).lista_perf0_id || "",
       metodo_perf0: (cliente as any).metodo_perf0 || "",
+      lista_perf_medio_id: (cliente as any).lista_perf_medio_id || "",
+      metodo_perf_medio: (cliente as any).metodo_perf_medio || "",
       lista_perf_plus_id: (cliente as any).lista_perf_plus_id || "",
       metodo_perf_plus: (cliente as any).metodo_perf_plus || "",
     })
@@ -707,11 +713,12 @@ export default function ClientesPage() {
                       {/* ── Segmentos ── */}
                       <div>
                         <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Condiciones por Segmento</p>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                           {[
-                            { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza" },
-                            { label: "Perfumería Perf0", listaKey: "lista_perf0_id", metodoKey: "metodo_perf0" },
-                            { label: "Perfumería Plus", listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus" },
+                            { label: "Limpieza / Bazar",  listaKey: "lista_limpieza_id",    metodoKey: "metodo_limpieza"   },
+                            { label: "Perfumería Perf 0", listaKey: "lista_perf0_id",        metodoKey: "metodo_perf0"      },
+                            { label: "Perfumería ½",      listaKey: "lista_perf_medio_id",   metodoKey: "metodo_perf_medio" },
+                            { label: "Perfumería Plus",   listaKey: "lista_perf_plus_id",    metodoKey: "metodo_perf_plus"  },
                           ].map(({ label, listaKey, metodoKey }) => (
                             <div key={listaKey} className="border rounded-md p-2.5 bg-slate-50 space-y-1.5">
                               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>

@@ -65,6 +65,8 @@ export default function PedidoEditPage() {
     metodo_limpieza_pedido: "",
     lista_perf0_pedido_id: "",
     metodo_perf0_pedido: "",
+    lista_perf_medio_pedido_id: "",
+    metodo_perf_medio_pedido: "",
     lista_perf_plus_pedido_id: "",
     metodo_perf_plus_pedido: "",
     observaciones: "",
@@ -80,9 +82,10 @@ export default function PedidoEditPage() {
         metodo_facturacion_pedido, condicion_entrega, observaciones,
         lista_precio_pedido_id, lista_limpieza_pedido_id, metodo_limpieza_pedido,
         lista_perf0_pedido_id, metodo_perf0_pedido,
+        lista_perf_medio_pedido_id, metodo_perf_medio_pedido,
         lista_perf_plus_pedido_id, metodo_perf_plus_pedido,
         vendedor_id,
-        clientes (nombre_razon_social, cuit, direccion, metodo_facturacion, lista_precio_id, condicion_entrega, vendedor_id, lista_limpieza_id, lista_perf0_id, lista_perf_plus_id),
+        clientes (nombre_razon_social, cuit, direccion, metodo_facturacion, lista_precio_id, condicion_entrega, vendedor_id, lista_limpieza_id, lista_perf0_id, lista_perf_medio_id, lista_perf_plus_id),
         vendedores (nombre)
       `).eq("id", id).single(),
       supabase.from("pedidos_detalle").select(`
@@ -118,6 +121,8 @@ export default function PedidoEditPage() {
         metodo_limpieza_pedido: p.metodo_limpieza_pedido || "",
         lista_perf0_pedido_id: p.lista_perf0_pedido_id || "",
         metodo_perf0_pedido: p.metodo_perf0_pedido || "",
+        lista_perf_medio_pedido_id: (p as any).lista_perf_medio_pedido_id || "",
+        metodo_perf_medio_pedido: (p as any).metodo_perf_medio_pedido || "",
         lista_perf_plus_pedido_id: p.lista_perf_plus_pedido_id || "",
         metodo_perf_plus_pedido: p.metodo_perf_plus_pedido || "",
         observaciones: p.observaciones || "",
@@ -176,6 +181,8 @@ export default function PedidoEditPage() {
         metodo_limpieza_pedido: headerForm.metodo_limpieza_pedido || null,
         lista_perf0_pedido_id: headerForm.lista_perf0_pedido_id || null,
         metodo_perf0_pedido: headerForm.metodo_perf0_pedido || null,
+        lista_perf_medio_pedido_id: (headerForm as any).lista_perf_medio_pedido_id || null,
+        metodo_perf_medio_pedido: (headerForm as any).metodo_perf_medio_pedido || null,
         lista_perf_plus_pedido_id: headerForm.lista_perf_plus_pedido_id || null,
         metodo_perf_plus_pedido: headerForm.metodo_perf_plus_pedido || null,
         observaciones: headerForm.observaciones || null,
@@ -268,9 +275,10 @@ export default function PedidoEditPage() {
   const defaultLista    = listaName(c?.lista_precio_id) || "Sin lista"
   const defaultEntrega  = entregaLabel(c?.condicion_entrega) || "—"
   const defaultVendedor = vendedores.find(v => v.id === c?.vendedor_id)?.nombre || "Sin vendedor"
-  const defaultLimpiezaLista = listaName(c?.lista_limpieza_id) || defaultLista
-  const defaultPerf0Lista    = listaName(c?.lista_perf0_id)    || defaultLista
-  const defaultPerfPlusLista = listaName(c?.lista_perf_plus_id) || defaultLista
+  const defaultLimpiezaLista  = listaName(c?.lista_limpieza_id)   || defaultLista
+  const defaultPerf0Lista     = listaName(c?.lista_perf0_id)      || defaultLista
+  const defaultPerfMedioLista = listaName(c?.lista_perf_medio_id) || defaultLista
+  const defaultPerfPlusLista  = listaName(c?.lista_perf_plus_id)  || defaultLista
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -400,11 +408,12 @@ export default function PedidoEditPage() {
               {/* Row 3: Segmentos */}
               <div>
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Condiciones por Segmento</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   {[
-                    { label: "Limpieza / Bazar", listaKey: "lista_limpieza_pedido_id", metodoKey: "metodo_limpieza_pedido", defLista: defaultLimpiezaLista },
-                    { label: "Perfumería Perf0",  listaKey: "lista_perf0_pedido_id",    metodoKey: "metodo_perf0_pedido",    defLista: defaultPerf0Lista },
-                    { label: "Perfumería Plus",   listaKey: "lista_perf_plus_pedido_id", metodoKey: "metodo_perf_plus_pedido", defLista: defaultPerfPlusLista },
+                    { label: "Limpieza / Bazar", listaKey: "lista_limpieza_pedido_id",   metodoKey: "metodo_limpieza_pedido",   defLista: defaultLimpiezaLista  },
+                    { label: "Perfumería Perf 0", listaKey: "lista_perf0_pedido_id",      metodoKey: "metodo_perf0_pedido",      defLista: defaultPerf0Lista     },
+                    { label: "Perfumería ½",      listaKey: "lista_perf_medio_pedido_id", metodoKey: "metodo_perf_medio_pedido", defLista: defaultPerfMedioLista },
+                    { label: "Perfumería Plus",   listaKey: "lista_perf_plus_pedido_id",  metodoKey: "metodo_perf_plus_pedido",  defLista: defaultPerfPlusLista  },
                   ].map(({ label, listaKey, metodoKey, defLista }) => (
                     <div key={listaKey} className="border rounded-lg p-3 bg-slate-50 space-y-2">
                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>

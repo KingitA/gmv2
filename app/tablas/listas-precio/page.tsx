@@ -104,6 +104,17 @@ const DEFAULTS: Record<string, Record<string, string>> = {
     neco_con_iva:      "Base*1.09",
     viajante:          "Base*1.09",
   },
+  "PERFUMERIA|factura|presupuesto": {
+    bahia_presupuesto: "Base*1.21",
+    bahia_final:       "Base*1.21",
+    bahia_sin_iva:     "Base",
+    bahia_con_iva:     "Base*1.21",
+    neco_presupuesto:  "Base*1.21*1.09",
+    neco_final:        "Base*1.21*1.09",
+    neco_sin_iva:      "Base*1.09",
+    neco_con_iva:      "Base*1.21*1.09",
+    viajante:          "Base*1.21*1.09",
+  },
 }
 
 // ─── Helpers de display ───────────────────────────────
