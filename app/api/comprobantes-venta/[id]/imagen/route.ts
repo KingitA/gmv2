@@ -66,7 +66,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     ] = await Promise.all([
       supabase
         .from("comprobantes_venta_detalle")
-        .select(`*, articulos(descripcion, sku, descuento_propio, categoria, iva_compras, rubro_id, categoria_id, subcategoria_id, marca_id)`)
+        .select(`*, articulos(descripcion, sku, descuento_propio, categoria, iva_ventas, segmento_precio, rubro_id, categoria_id, subcategoria_id, marca_id)`)
         .eq("comprobante_id", comprobanteId),
       supabase
         .from("bonificaciones")
@@ -139,13 +139,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 // ─── Helpers ───────────────────────────────────────────
 
-function detectarSegmento(art: { categoria?: string | null; iva_compras?: string | null; segmento_precio?: string | null }): string {
-  const esPerfumeria =
-    art.segmento_precio === "perfumeria" ||
-    (art.categoria || "").toUpperCase().includes("PERFUMERIA") ||
-    (art.categoria || "").toUpperCase().includes("PERFUMERÍA")
-  if (esPerfumeria)
-    return art.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
+function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: string | null }): string {
+  if (art.segmento_precio === "perfumeria")
+    return art.iva_ventas === "presupuesto" ? "perf0" : "perf_plus"
   return "limpieza_bazar"
 }
 

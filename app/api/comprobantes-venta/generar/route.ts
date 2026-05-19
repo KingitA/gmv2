@@ -362,15 +362,9 @@ export async function POST(request: Request) {
 
 // ─── Helpers ───────────────────────────────────────────
 
-function detectarSegmento(art: { categoria?: string | null; iva_compras?: string | null; segmento_precio?: string | null }): string {
-  // segmento_precio is the canonical field. Falling back to the legacy categoria string
-  // only handles the edge case where segmento_precio is not yet set on an article.
-  const esPerfumeria =
-    art.segmento_precio === "perfumeria" ||
-    (art.categoria || "").toUpperCase().includes("PERFUMERIA") ||
-    (art.categoria || "").toUpperCase().includes("PERFUMERÍA")
-  if (esPerfumeria)
-    return art.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
+function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: string | null }): string {
+  if (art.segmento_precio === "perfumeria")
+    return art.iva_ventas === "presupuesto" ? "perf0" : "perf_plus"
   return "limpieza_bazar"
 }
 
