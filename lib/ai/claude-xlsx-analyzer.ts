@@ -123,13 +123,19 @@ async function parseXlsxToStructuredData(buffer: Buffer, filename: string): Prom
             )
         }
 
-        // Detect PEDIDO columns (there can be multiple panels side by side)
+        // Detect PEDIDO columns — scan header row + first 3 data rows
+        // (many supplier Excel files have multi-row headers where PEDIDO appears on a secondary row)
         const pedidoColumnIndices: number[] = []
-        for (let i = 0; i < headers.length; i++) {
-            if (/^pedido$/i.test(headers[i]) || /^cant\.?\s*pedid/i.test(headers[i]) || /^solicitado$/i.test(headers[i])) {
-                pedidoColumnIndices.push(i)
+        const foundPedidoCols = new Set<number>()
+        const rowsToScanForPedido = [headers, ...dataRows.slice(0, 3)]
+        for (const scanRow of rowsToScanForPedido) {
+            for (let i = 0; i < scanRow.length; i++) {
+                if (/^pedido$/i.test(scanRow[i]) || /^cant\.?\s*pedid/i.test(scanRow[i]) || /^solicitado$/i.test(scanRow[i])) {
+                    foundPedidoCols.add(i)
+                }
             }
         }
+        pedidoColumnIndices.push(...foundPedidoCols)
 
         // NO row cap — store ALL data rows
         sheets.push({
@@ -211,8 +217,14 @@ function formatSheetsForClaude(sheets: ParsedSheetData[], filename: string, mode
                 }
             }
             console.log(`[ClaudeXlsx] Sheet "${sheet.sheetName}": separated candidate columns [${sheet.pedidoColumnIndices.join(', ')}]. Result: ${generatedRows} independent rows with qty > 0`)
+        } else if (mode === 'order') {
+            // ORDER MODE but no PEDIDO column found — skip sheet entirely to avoid hallucinated quantities.
+            // Sending all rows to Claude without a clear PEDIDO column causes it to invent quantities
+            // from price/cant columns that look numeric.
+            console.log(`[ClaudeXlsx] Sheet "${sheet.sheetName}": no PEDIDO column detected in order mode — skipping`)
+            continue
         } else {
-            // FULL MODE or no PEDIDO columns detected: send all rows
+            // FULL MODE: send all rows (price lists, invoices, etc.)
             rowsToSend = sheet.dataRows
         }
 
