@@ -31,7 +31,6 @@ export interface DatosArticulo {
 export interface DatosLista {
   recargo_limpieza_bazar: number
   recargo_perfumeria_negro: number
-  recargo_perfumeria_medio: number
   recargo_perfumeria_blanco: number
 }
 
@@ -131,9 +130,7 @@ export function obtenerRecargoLista(art: DatosArticulo, lista: DatosLista): numb
 }
 
 function _recargoPerf(art: DatosArticulo, lista: DatosLista): number {
-  if (art.iva_ventas !== 'presupuesto') return lista.recargo_perfumeria_blanco  // perf_plus: iva_ventas=factura
-  if (art.iva_compras === 'factura')    return lista.recargo_perfumeria_medio   // perf_medio: +/0
-  return lista.recargo_perfumeria_negro                                          // perf0: 0/0 o ½/0
+  return art.iva_ventas === 'presupuesto' ? lista.recargo_perfumeria_negro : lista.recargo_perfumeria_blanco
 }
 
 // ─── Coeficiente IVA según combinación compras/ventas ──

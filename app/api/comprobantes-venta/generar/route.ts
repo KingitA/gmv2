@@ -362,12 +362,9 @@ export async function POST(request: Request) {
 
 // ─── Helpers ───────────────────────────────────────────
 
-function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: string | null; iva_compras?: string | null }): string {
-  if (art.segmento_precio === "perfumeria") {
-    if (art.iva_ventas !== "presupuesto") return "perf_plus"
-    if (art.iva_compras === "factura")    return "perf_medio"
-    return "perf0"
-  }
+function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: string | null }): string {
+  if (art.segmento_precio === "perfumeria")
+    return art.iva_ventas === "presupuesto" ? "perf0" : "perf_plus"
   return "limpieza_bazar"
 }
 

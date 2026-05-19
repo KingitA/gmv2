@@ -75,8 +75,6 @@ type Pedido = {
   metodo_limpieza_pedido?: string | null
   lista_perf0_pedido_id?: string | null
   metodo_perf0_pedido?: string | null
-  lista_perf_medio_pedido_id?: string | null
-  metodo_perf_medio_pedido?: string | null
   lista_perf_plus_pedido_id?: string | null
   metodo_perf_plus_pedido?: string | null
   clientes?: {
@@ -90,8 +88,6 @@ type Pedido = {
     metodo_limpieza?: string | null
     lista_perf0_id?: string | null
     metodo_perf0?: string | null
-    lista_perf_medio_id?: string | null
-    metodo_perf_medio?: string | null
     lista_perf_plus_id?: string | null
     metodo_perf_plus?: string | null
     listas_precio?: { nombre: string } | null
@@ -192,7 +188,7 @@ export default function ClientesPedidosPage() {
   const [addProductsFound, setAddProductsFound] = useState<any[]>([])
   const [addProductQty, setAddProductQty] = useState(1)
   const [savingItem, setSavingItem] = useState(false)
-  const [listasPrecio, setListasPrecio] = useState<{ id: string; nombre: string; recargo_limpieza_bazar?: number; recargo_perfumeria_negro?: number; recargo_perfumeria_medio?: number; recargo_perfumeria_blanco?: number }[]>([])
+  const [listasPrecio, setListasPrecio] = useState<{ id: string; nombre: string; recargo_limpieza_bazar?: number; recargo_perfumeria_negro?: number; recargo_perfumeria_blanco?: number }[]>([])
   const [sheetWidth, setSheetWidth] = useState(680)
   const resizingRef = useRef(false)
 
@@ -208,7 +204,7 @@ export default function ClientesPedidosPage() {
   }, [searchParams])
 
   useEffect(() => {
-    supabase.from("listas_precio").select("id, nombre, recargo_limpieza_bazar, recargo_perfumeria_negro, recargo_perfumeria_medio, recargo_perfumeria_blanco").eq("activo", true).then(({ data }) => setListasPrecio(data || []))
+    supabase.from("listas_precio").select("id, nombre, recargo_limpieza_bazar, recargo_perfumeria_negro, recargo_perfumeria_blanco").eq("activo", true).then(({ data }) => setListasPrecio(data || []))
     cargarPedidos()
     cargarViajes()
     cargarPickingStatus()
@@ -251,7 +247,7 @@ export default function ClientesPedidosPage() {
         .from("pedidos")
         .select(`
           *,
-          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_medio_id, metodo_perf_medio, lista_perf_plus_id, metodo_perf_plus, listas_precio:lista_precio_id (nombre)),
+          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, listas_precio:lista_precio_id (nombre)),
           vendedores (nombre),
           viajes (nombre, fecha)
         `)
@@ -558,11 +554,9 @@ export default function ClientesPedidosPage() {
                   const c = pedido.clientes as any
                   const hasSegmentos = (pedido as any).lista_limpieza_pedido_id || c?.lista_limpieza_id ||
                     (pedido as any).lista_perf0_pedido_id || c?.lista_perf0_id ||
-                    (pedido as any).lista_perf_medio_pedido_id || c?.lista_perf_medio_id ||
                     (pedido as any).lista_perf_plus_pedido_id || c?.lista_perf_plus_id ||
                     (pedido as any).metodo_limpieza_pedido || c?.metodo_limpieza ||
                     (pedido as any).metodo_perf0_pedido || c?.metodo_perf0 ||
-                    (pedido as any).metodo_perf_medio_pedido || c?.metodo_perf_medio ||
                     (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus
 
                   if (hasSegmentos) {
@@ -573,9 +567,6 @@ export default function ClientesPedidosPage() {
                       { label: "Perfumería 0", segKey: "perf0",
                         listaId: (pedido as any).lista_perf0_pedido_id || c?.lista_perf0_id,
                         metodo: (pedido as any).metodo_perf0_pedido || c?.metodo_perf0 },
-                      { label: "Perfumería ½", segKey: "perf_medio",
-                        listaId: (pedido as any).lista_perf_medio_pedido_id || c?.lista_perf_medio_id,
-                        metodo: (pedido as any).metodo_perf_medio_pedido || c?.metodo_perf_medio },
                       { label: "Perfumería +", segKey: "perf_plus",
                         listaId: (pedido as any).lista_perf_plus_pedido_id || c?.lista_perf_plus_id,
                         metodo: (pedido as any).metodo_perf_plus_pedido || c?.metodo_perf_plus },
@@ -847,9 +838,8 @@ export default function ClientesPedidosPage() {
     // Effective segment lists: pedido-level override OR client-level
     const limpieza = pedido.lista_limpieza_pedido_id || c?.lista_limpieza_id || null
     const perf0    = pedido.lista_perf0_pedido_id    || c?.lista_perf0_id    || null
-    const perfMedio = (pedido as any).lista_perf_medio_pedido_id || c?.lista_perf_medio_id || null
     const perfPlus = pedido.lista_perf_plus_pedido_id || c?.lista_perf_plus_id || null
-    const segIds   = [limpieza, perf0, perfMedio, perfPlus].filter(Boolean) as string[]
+    const segIds   = [limpieza, perf0, perfPlus].filter(Boolean) as string[]
 
     const generalId = pedido.lista_precio_pedido_id || c?.lista_precio_id || null
     const generalNombre = listaName(generalId) || "Sin lista"

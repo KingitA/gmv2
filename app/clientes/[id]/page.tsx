@@ -102,8 +102,6 @@ export default function ClienteDetailPage() {
     metodo_limpieza: "",
     lista_perf0_id: "",
     metodo_perf0: "",
-    lista_perf_medio_id: "",
-    metodo_perf_medio: "",
     lista_perf_plus_id: "",
     metodo_perf_plus: "",
   })
@@ -151,8 +149,6 @@ export default function ClienteDetailPage() {
         metodo_limpieza: normalizeEnum(c.metodo_limpieza, FACTURACION_MAP, ""),
         lista_perf0_id: c.lista_perf0_id || "",
         metodo_perf0: normalizeEnum(c.metodo_perf0, FACTURACION_MAP, ""),
-        lista_perf_medio_id: c.lista_perf_medio_id || "",
-        metodo_perf_medio: normalizeEnum(c.metodo_perf_medio, FACTURACION_MAP, ""),
         lista_perf_plus_id: c.lista_perf_plus_id || "",
         metodo_perf_plus: normalizeEnum(c.metodo_perf_plus, FACTURACION_MAP, ""),
       })
@@ -165,7 +161,7 @@ export default function ClienteDetailPage() {
     setPedidosCliente(pedRes.data || [])
     if (clienteRes.data) {
       const c = clienteRes.data as any
-      setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_medio_id || c.lista_perf_plus_id))
+      setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
     }
     loadBonificaciones()
     setLoading(false)
@@ -174,8 +170,7 @@ export default function ClienteDetailPage() {
   const BONIF_SEGMENTS = [
     { key: "todos",          label: "Todos" },
     { key: "limpieza_bazar", label: "Limpieza / Bazar" },
-    { key: "perf0",          label: "Perfumería Perf 0" },
-    { key: "perf_medio",     label: "Perfumería ½" },
+    { key: "perf0",          label: "Perfumería Perf0" },
     { key: "perf_plus",      label: "Perfumería Plus" },
   ]
   const BONIF_TIPOS = [
@@ -203,11 +198,9 @@ export default function ClienteDetailPage() {
       lista_precio_id:    listaPorSegmento ? null : (formData.lista_precio_id || null),
       lista_limpieza_id:  formData.lista_limpieza_id || null,
       metodo_limpieza:    formData.metodo_limpieza || null,
-      lista_perf0_id:      formData.lista_perf0_id || null,
-      metodo_perf0:        formData.metodo_perf0 || null,
-      lista_perf_medio_id: formData.lista_perf_medio_id || null,
-      metodo_perf_medio:   formData.metodo_perf_medio || null,
-      lista_perf_plus_id:  formData.lista_perf_plus_id || null,
+      lista_perf0_id:     formData.lista_perf0_id || null,
+      metodo_perf0:       formData.metodo_perf0 || null,
+      lista_perf_plus_id: formData.lista_perf_plus_id || null,
       metodo_perf_plus:    formData.metodo_perf_plus || null,
     }).eq("id", id)
     if (updErr) { alert(`Error al guardar cliente: ${updErr.message}`); setSavingBonif(false); return }
@@ -441,7 +434,7 @@ export default function ClienteDetailPage() {
                             setFormData({ ...formData, metodo_facturacion: "PorSegmento" })
                           } else {
                             // Al salir de PorSegmento, limpiar métodos de segmento
-                            setFormData({ ...formData, metodo_facturacion: v, metodo_limpieza: "", metodo_perf0: "", metodo_perf_medio: "", metodo_perf_plus: "" })
+                            setFormData({ ...formData, metodo_facturacion: v, metodo_limpieza: "", metodo_perf0: "", metodo_perf_plus: "" })
                           }
                         }}
                       >
@@ -465,7 +458,7 @@ export default function ClienteDetailPage() {
                           } else {
                             // Al salir de PorSegmento, limpiar listas de segmento
                             setListaPorSegmento(false)
-                            setFormData({ ...formData, lista_precio_id: v === "__none__" ? "" : v, lista_limpieza_id: "", lista_perf0_id: "", lista_perf_medio_id: "", lista_perf_plus_id: "" })
+                            setFormData({ ...formData, lista_precio_id: v === "__none__" ? "" : v, lista_limpieza_id: "", lista_perf0_id: "", lista_perf_plus_id: "" })
                           }
                         }}
                       >
@@ -492,12 +485,11 @@ export default function ClienteDetailPage() {
                     <CardTitle className="text-sm font-semibold text-indigo-700 uppercase tracking-wide">Condiciones por Segmento</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                       {[
-                        { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id",   metodoKey: "metodo_limpieza",   segKey: "limpieza_bazar" },
-                        { label: "Perfumería Perf 0", listaKey: "lista_perf0_id",      metodoKey: "metodo_perf0",      segKey: "perf0" },
-                        { label: "Perfumería ½",      listaKey: "lista_perf_medio_id", metodoKey: "metodo_perf_medio", segKey: "perf_medio" },
-                        { label: "Perfumería Plus",   listaKey: "lista_perf_plus_id",  metodoKey: "metodo_perf_plus",  segKey: "perf_plus" },
+                        { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id",  metodoKey: "metodo_limpieza",  segKey: "limpieza_bazar" },
+                        { label: "Perfumería Perf0", listaKey: "lista_perf0_id",     metodoKey: "metodo_perf0",     segKey: "perf0" },
+                        { label: "Perfumería Plus",  listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus", segKey: "perf_plus" },
                       ].map(({ label, listaKey, metodoKey, segKey }) => (
                         <div key={listaKey} className="border border-indigo-200 rounded-lg p-3 bg-white space-y-2">
                           <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wide">{label}</p>

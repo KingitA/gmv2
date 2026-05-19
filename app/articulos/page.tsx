@@ -19,7 +19,7 @@ import { calcularPreciosConFormulas, SUBLISTA_CODIGOS, SUBLISTA_META, type Subli
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Mode = "compras" | "ventas" | "gestion"
-interface LP { id:string; nombre:string; codigo:string; recargo_limpieza_bazar:number; recargo_perfumeria_negro:number; recargo_perfumeria_medio:number; recargo_perfumeria_blanco:number }
+interface LP { id:string; nombre:string; codigo:string; recargo_limpieza_bazar:number; recargo_perfumeria_negro:number; recargo_perfumeria_blanco:number }
 interface ReglaPrecioFila { grupo_precio:string; iva_compras:string; iva_ventas:string; formulas:Record<string,string> }
 
 // ─── Column definitions ───────────────────────────────────────────────────────
@@ -833,7 +833,7 @@ export default function ArticulosPage() {
                           if(leg){
                             const lista=listas.find(l=>l.codigo===leg.listaCodigo)
                             if(lista){
-                              const ld2:DatosLista={recargo_limpieza_bazar:lista.recargo_limpieza_bazar,recargo_perfumeria_negro:lista.recargo_perfumeria_negro,recargo_perfumeria_medio:lista.recargo_perfumeria_medio??0,recargo_perfumeria_blanco:lista.recargo_perfumeria_blanco}
+                              const ld2:DatosLista={recargo_limpieza_bazar:lista.recargo_limpieza_bazar,recargo_perfumeria_negro:lista.recargo_perfumeria_negro,recargo_perfumeria_blanco:lista.recargo_perfumeria_blanco}
                               const r=calcularPrecioFinal({...dt,precio_base_stored:base},ld2,leg.fac,0)
                               precio=r.ivaIncluido?r.precioUnitarioFinal:r.precioUnitarioFinal+r.montoIvaDiscriminado
                               isLegacy=true
