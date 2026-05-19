@@ -548,7 +548,7 @@ td.z{color:#ccc}
 td.c-net{font-family:var(--fc);font-size:10px;font-weight:600;color:#333}
 td.c-sub{font-family:var(--fc);font-size:11px;font-weight:700;color:#111;border-left:2px solid #bbb}
 /* ── ZONA TABLA + FOOTER ── */
-.zona-tabla{flex:1 1 0;min-height:0;overflow:hidden}
+.zona-tabla{overflow:hidden;flex-shrink:0}
 .zona-footer{flex-shrink:0}
 .sub-parcial{border-top:2px solid var(--borde);padding:4px 10px;display:flex;justify-content:flex-end;gap:16px;align-items:baseline;background:#f5f5f5}
 .sub-parcial .lbl{font-family:var(--fc);font-size:8.5px;color:#666;text-transform:uppercase;letter-spacing:.05em}
@@ -584,10 +584,25 @@ td.c-sub{font-family:var(--fc);font-size:11px;font-weight:700;color:#111;border-
   body{background:white}
 }
 </style>
+<script>
+function fitFooters() {
+  document.querySelectorAll('.doc').forEach(function(doc) {
+    var tabla = doc.querySelector('.zona-tabla')
+    var footer = doc.querySelector('.zona-footer')
+    if (!tabla || !footer) return
+    tabla.style.height = ''
+    var available = doc.clientHeight - tabla.offsetTop - footer.offsetHeight
+    if (available > 0) tabla.style.height = available + 'px'
+  })
+}
+document.addEventListener('DOMContentLoaded', fitFooters)
+window.addEventListener('resize', fitFooters)
+window.addEventListener('beforeprint', fitFooters)
+</script>
 </head>
 <body>
 <nav class="nav">
-  <button class="btn-print" onclick="window.print()">🖨 Imprimir</button>
+  <button class="btn-print" onclick="fitFooters();window.print()">🖨 Imprimir</button>
   <span class="nav-info">${cfg.nombre} ${cfg.letra} · N° ${nro} · ${fecha}</span>
 </nav>
 <div class="pw">
