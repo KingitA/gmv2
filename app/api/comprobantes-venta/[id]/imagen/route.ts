@@ -145,7 +145,7 @@ function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: s
   return "limpieza_bazar"
 }
 
-const FILAS_POR_HOJA = 35
+const FILAS_POR_HOJA = 28
 
 function generarHTMLComprobante(comprobante: any, empresa: any): string {
   const fmtARS = (n: number) =>
@@ -420,13 +420,15 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
     let pieHTML = ""
     if (!esUltima) {
       pieHTML = `
-        <div class="sub-parcial">
-          <span class="lbl">Ítems ${desde + 1} al ${hasta} de ${allFilas.length}</span>
-          <span style="flex:1"></span>
-          <span class="cont">→ CONTINÚA EN HOJA ${h + 1}</span>
-        </div>
-        <div class="pie">
-          <div class="pie-legal">${cfg.nombre} ${cfg.letra} · N° ${nro} · Hoja ${h} de ${totalHojas} — continúa en hoja siguiente</div>
+        <div class="zona-footer">
+          <div class="sub-parcial">
+            <span class="lbl">Ítems ${desde + 1} al ${hasta} de ${allFilas.length}</span>
+            <span style="flex:1"></span>
+            <span class="cont">→ CONTINÚA EN HOJA ${h + 1}</span>
+          </div>
+          <div class="pie">
+            <div class="pie-legal">${cfg.nombre} ${cfg.letra} · N° ${nro} · Hoja ${h} de ${totalHojas} — continúa en hoja siguiente</div>
+          </div>
         </div>`
     } else {
       const obsHTML = comprobante.observaciones
@@ -434,21 +436,23 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
         : `<p>—</p>`
 
       pieHTML = `
-        <div class="zona-tot">
-          <div class="tot-obs">
-            <div class="t">Observaciones</div>
-            ${obsHTML}
-            <p class="lg">Crédito fiscal computable solo por Resp. Inscriptos en IVA (RG ARCA 1415). Emitido conforme RG 4291.</p>
+        <div class="zona-footer">
+          <div class="zona-tot">
+            <div class="tot-obs">
+              <div class="t">Observaciones</div>
+              ${obsHTML}
+              <p class="lg">Crédito fiscal computable solo por Resp. Inscriptos en IVA (RG ARCA 1415). Emitido conforme RG 4291.</p>
+            </div>
+            <div class="tot-nums">${totalesHTML}</div>
           </div>
-          <div class="tot-nums">${totalesHTML}</div>
-        </div>
-        <div class="transp"><strong>Transparencia Fiscal — Ley 27.743:</strong> ${transpTxt}</div>
-        <div class="pie">
-          <div class="pie-legal">
-            Emitido conforme RG ARCA 1415${cae ? ` · CAE: ${cae}` : ""}. <strong>Original para el cliente.</strong><br>
-            ${empresa.email || ""} · ${empresa.telefono || ""}
+          <div class="transp"><strong>Transparencia Fiscal — Ley 27.743:</strong> ${transpTxt}</div>
+          <div class="pie">
+            <div class="pie-legal">
+              Emitido conforme RG ARCA 1415${cae ? ` · CAE: ${cae}` : ""}. <strong>Original para el cliente.</strong><br>
+              ${empresa.email || ""} · ${empresa.telefono || ""}
+            </div>
+            <div class="firma"><div class="linea"></div><div class="lbl">FIRMA Y SELLO — VENDEDOR</div></div>
           </div>
-          <div class="firma"><div class="linea"></div><div class="lbl">FIRMA Y SELLO — VENDEDOR</div></div>
         </div>`
     }
 
@@ -468,7 +472,7 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
 <style>
 :root{--f:'Barlow',sans-serif;--fc:'Barlow Condensed',sans-serif;--borde:#111}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--f);background:#bbb;color:#111;font-size:10px}
+body{font-family:var(--f);background:#bbb;color:#111;font-size:11px}
 .nav{position:fixed;top:0;left:0;right:0;z-index:100;background:#0a0a0a;display:flex;gap:6px;padding:6px 12px;align-items:center}
 .btn-print{font-family:var(--fc);font-size:11px;font-weight:600;color:#ffc000;background:#181818;border:1px solid #4a3a00;padding:4px 14px;cursor:pointer;border-radius:2px}
 .btn-print:hover{background:#ffc000;color:#000;border-color:#ffc000}
@@ -477,106 +481,106 @@ body{font-family:var(--f);background:#bbb;color:#111;font-size:10px}
 .doc{width:210mm;height:297mm;background:#fff;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,.22);display:flex;flex-direction:column;position:relative;overflow:hidden;page-break-after:always;break-after:page}
 .stripe{position:absolute;left:0;top:0;bottom:0;width:5px}
 .body{margin-left:5px;flex:1;display:flex;flex-direction:column;min-height:0}
-/* ── ENCABEZADO ── */
-.enc-top{display:grid;grid-template-columns:1fr 80px 152px;border-bottom:2px solid var(--borde)}
-.em{padding:8px 10px 7px;border-right:1.5px solid #ccc}
-.em-nombre{font-family:var(--fc);font-size:17px;font-weight:700;text-transform:uppercase;letter-spacing:.01em;line-height:1}
-.em-rubro{font-family:var(--fc);font-size:8px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:#888;margin-bottom:5px}
+/* ── ENCABEZADO EMPRESA ── */
+.enc-top{display:grid;grid-template-columns:1fr 88px 168px;border-bottom:2px solid var(--borde)}
+.em{padding:10px 12px 9px;border-right:1.5px solid #ccc}
+.em-nombre{font-family:var(--fc);font-size:22px;font-weight:700;text-transform:uppercase;letter-spacing:.01em;line-height:1}
+.em-rubro{font-family:var(--fc);font-size:9px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:#888;margin:3px 0 6px}
 .em-tabla,.comp-tabla,.cli-tabla{border-collapse:collapse;width:100%}
-.em-tabla td,.comp-tabla td{font-size:9px;padding:1.2px 0;vertical-align:top;line-height:1.4;color:#333}
+.em-tabla td,.comp-tabla td{font-size:10px;padding:1.5px 0;vertical-align:top;line-height:1.4;color:#333}
 .em-tabla td.lbl,.comp-tabla td.lbl{font-weight:700;color:#111;white-space:nowrap;padding-right:6px;width:1%}
-.tipo-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:5px 4px;border-right:1.5px solid #ccc;gap:2px}
-.letra{font-family:var(--fc);font-size:46px;font-weight:700;line-height:1;width:60px;height:60px;border:3px solid currentColor;display:flex;align-items:center;justify-content:center}
-.tipo-nombre{font-family:var(--fc);font-size:8px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#666;text-align:center;line-height:1.2}
-.tipo-cod{font-size:7.5px;color:#aaa;font-family:var(--fc)}
-.comp{padding:8px 10px 7px}
-.comp-nro{font-family:var(--fc);font-size:16px;font-weight:700;line-height:1;margin-bottom:4px}
-.comp-nro span{font-size:10px;color:#888;font-weight:400}
-.cae-box{margin-top:5px;padding:3px 6px;border:1.5px solid #bbb;border-radius:2px;background:#f8f8f8}
-.cae-box .cl{font-size:7px;text-transform:uppercase;letter-spacing:.08em;color:#999;font-weight:700}
-.cae-box .cv{font-family:var(--fc);font-size:10px;font-weight:700;color:#111;letter-spacing:.04em}
-.cae-box .cv2{font-size:8px;color:#555}
+.tipo-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 4px;border-right:1.5px solid #ccc;gap:3px}
+.letra{font-family:var(--fc);font-size:52px;font-weight:700;line-height:1;width:66px;height:66px;border:3px solid currentColor;display:flex;align-items:center;justify-content:center;color:inherit}
+.tipo-nombre{font-family:var(--fc);font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#666;text-align:center;line-height:1.2}
+.tipo-cod{font-size:8px;color:#aaa;font-family:var(--fc)}
+.comp{padding:10px 12px 9px}
+.comp-nro{font-family:var(--fc);font-size:18px;font-weight:700;line-height:1;margin-bottom:5px}
+.comp-nro span{font-size:11px;color:#888;font-weight:400}
+.cae-box{margin-top:6px;padding:4px 7px;border:1.5px solid #bbb;border-radius:2px;background:#f8f8f8}
+.cae-box .cl{font-size:7.5px;text-transform:uppercase;letter-spacing:.08em;color:#999;font-weight:700}
+.cae-box .cv{font-family:monospace;font-size:11px;font-weight:700;color:#111;letter-spacing:.04em}
+.cae-box .cv2{font-size:9px;color:#555}
 /* ── CLIENTE ── */
-.enc-cli{display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid var(--borde)}
-.cli-col{padding:6px 10px}
+.enc-cli{display:grid;grid-template-columns:3fr 2fr;border-bottom:2px solid var(--borde)}
+.cli-col{padding:9px 12px}
 .cli-col:first-child{border-right:1.5px solid #ccc}
-.cli-col-tit{font-family:var(--fc);font-size:7.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#aaa;margin-bottom:2px;padding-bottom:2px;border-bottom:1px solid #e8e8e8}
-.cli-razon{font-family:var(--fc);font-size:13px;font-weight:700;color:#111;line-height:1;margin-bottom:3px}
-.cli-tabla td{font-size:9px;padding:1px 0;vertical-align:top;color:#333;line-height:1.4}
+.cli-col-tit{font-family:var(--fc);font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#aaa;margin-bottom:3px;padding-bottom:2px;border-bottom:1px solid #e8e8e8}
+.cli-razon{font-family:var(--fc);font-size:18px;font-weight:700;color:#111;line-height:1;margin-bottom:4px}
+.cli-tabla td{font-size:10.5px;padding:1.5px 0;vertical-align:top;color:#333;line-height:1.4}
 .cli-tabla td.lbl{font-weight:700;color:#111;white-space:nowrap;padding-right:6px;width:1%}
 /* ── CONDICIONES ── */
 .enc-cond{display:flex;border-bottom:2px solid var(--borde);background:#f2f2f2}
-.cond-item{flex:1;padding:3px 8px;border-right:1px solid #ccc}
+.cond-item{flex:1;padding:4px 10px;border-right:1px solid #ccc}
 .cond-item:last-child{border-right:none}
-.cond-lbl{font-family:var(--fc);font-size:6.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#888;display:block}
-.cond-val{font-family:var(--fc);font-size:9px;font-weight:700;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.cond-lbl{font-family:var(--fc);font-size:7.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#888;display:block}
+.cond-val{font-family:var(--fc);font-size:10px;font-weight:700;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 /* ── NOVAL ── */
-.noval{padding:3px 10px;background:#eee;border-bottom:2px solid #555;font-family:var(--fc);font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#333;text-align:center}
+.noval{padding:4px 10px;background:#eee;border-bottom:2px solid #555;font-family:var(--fc);font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#333;text-align:center}
 /* ── BANNER hoja adicional ── */
-.hoja-banner{padding:4px 10px;background:#111;color:#fff;font-family:var(--fc);font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+.hoja-banner{padding:5px 10px;background:#111;color:#fff;font-family:var(--fc);font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
 /* ── TABLA ARTÍCULOS ── */
 table.art{width:100%;border-collapse:collapse;table-layout:fixed}
-table.art col.c-cod{width:42px}
+table.art col.c-cod{width:44px}
 table.art col.c-desc{width:auto}
-table.art col.c-marca{width:52px}
-table.art col.c-cant{width:30px}
-table.art col.c-lst{width:58px}
-table.art col.c-of{width:28px}
-table.art col.c-b1{width:30px}
-table.art col.c-b2{width:30px}
-table.art col.c-net{width:58px}
-table.art col.c-sub{width:64px}
+table.art col.c-marca{width:54px}
+table.art col.c-cant{width:32px}
+table.art col.c-lst{width:62px}
+table.art col.c-of{width:30px}
+table.art col.c-b1{width:32px}
+table.art col.c-b2{width:32px}
+table.art col.c-net{width:62px}
+table.art col.c-sub{width:68px}
 table.art thead tr{color:#fff;background:#111}
 table.art thead th{padding:5px 4px;font-family:var(--fc);font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;text-align:right;white-space:nowrap;border-right:1px solid rgba(255,255,255,.15)}
 table.art thead th:last-child{border-right:none}
 table.art thead th.l{text-align:left}
 table.art tbody tr{border-bottom:1px solid #ddd}
 table.art tbody tr:nth-child(even){background:#f5f5f5}
-table.art tbody td{padding:3.5px 4px;font-size:9.5px;text-align:right;vertical-align:middle;color:#444;border-right:1px solid #e0e0e0;line-height:1.3}
+table.art tbody td{padding:4px 4px;font-size:10px;text-align:right;vertical-align:middle;color:#444;border-right:1px solid #e0e0e0;line-height:1.3}
 table.art tbody td:last-child{border-right:none}
-td.c-desc{text-align:left;color:#111;font-weight:600;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-td.c-marca{text-align:left;font-family:var(--fc);font-size:8px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-td.c-cod{text-align:center;font-family:var(--fc);font-size:8.5px;color:#888}
-td.c-cant{text-align:center;font-family:var(--fc);font-size:11px;font-weight:700;color:#111}
-td.c-lst{font-family:var(--fc);font-size:9px;color:#777}
-td.c-of,td.c-b1,td.c-b2{text-align:center;font-family:var(--fc);font-size:9px;color:#777}
+td.c-desc{text-align:left;color:#111;font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td.c-marca{text-align:left;font-family:var(--fc);font-size:8.5px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+td.c-cod{text-align:center;font-family:var(--fc);font-size:9px;color:#888}
+td.c-cant{text-align:center;font-family:var(--fc);font-size:12px;font-weight:700;color:#111}
+td.c-lst{font-family:var(--fc);font-size:9.5px;color:#777}
+td.c-of,td.c-b1,td.c-b2{text-align:center;font-family:var(--fc);font-size:9.5px;color:#777}
 td.z{color:#ccc}
-td.c-net{font-family:var(--fc);font-size:9.5px;font-weight:600;color:#333}
-td.c-sub{font-family:var(--fc);font-size:10.5px;font-weight:700;color:#111;border-left:2px solid #bbb}
-/* ── TOTALES ── */
-.zona-tabla{flex:1;overflow:hidden}
+td.c-net{font-family:var(--fc);font-size:10px;font-weight:600;color:#333}
+td.c-sub{font-family:var(--fc);font-size:11px;font-weight:700;color:#111;border-left:2px solid #bbb}
+/* ── ZONA TABLA + FOOTER ── */
+.zona-tabla{flex:1 1 0;min-height:0;overflow:hidden}
+.zona-footer{flex-shrink:0}
 .sub-parcial{border-top:2px solid var(--borde);padding:4px 10px;display:flex;justify-content:flex-end;gap:16px;align-items:baseline;background:#f5f5f5}
 .sub-parcial .lbl{font-family:var(--fc);font-size:8.5px;color:#666;text-transform:uppercase;letter-spacing:.05em}
 .sub-parcial .cont{font-family:var(--fc);font-size:9px;font-weight:700;color:#555;border:1.5px solid #555;padding:1px 8px;border-radius:2px;letter-spacing:.06em}
-.zona-tot{border-top:2px solid var(--borde);display:grid;grid-template-columns:1fr 195px}
-.tot-obs{padding:6px 10px;border-right:1.5px solid #ccc;font-size:8px;color:#666;line-height:1.55}
-.tot-obs .t{font-family:var(--fc);font-size:7.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#bbb;margin-bottom:2px}
-.tot-obs .lg{font-size:7px;color:#bbb;margin-top:3px}
-.tot-nums{padding:6px 10px}
-.tf{display:flex;justify-content:space-between;align-items:baseline;padding:2px 0;border-bottom:1px solid #eee}
+.zona-tot{border-top:2px solid var(--borde);display:grid;grid-template-columns:1fr 210px}
+.tot-obs{padding:7px 12px;border-right:1.5px solid #ccc;font-size:8.5px;color:#666;line-height:1.55}
+.tot-obs .t{font-family:var(--fc);font-size:8px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#bbb;margin-bottom:2px}
+.tot-obs .lg{font-size:7.5px;color:#bbb;margin-top:4px}
+.tot-nums{padding:7px 12px}
+.tf{display:flex;justify-content:space-between;align-items:baseline;padding:2.5px 0;border-bottom:1px solid #eee}
 .tf:last-child{border-bottom:none}
-.tf .tl{font-size:8.5px;color:#555}
-.tf .tv{font-family:var(--fc);font-size:9px;font-weight:600;color:#111}
+.tf .tl{font-size:9px;color:#555}
+.tf .tv{font-family:var(--fc);font-size:10px;font-weight:600;color:#111}
 .tf.dim .tl{color:#aaa}
 .tf.dim .tv{font-weight:400;color:#777}
-.tg{display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;padding-top:6px;border-top:2.5px solid var(--borde)}
-.tg .tl{font-family:var(--fc);font-size:14px;font-weight:700}
-.tg .tv{font-family:var(--fc);font-size:17px;font-weight:700}
-.transp{padding:3px 10px;font-size:8px;color:#777;background:#f5f5f5;border-top:1px solid #e0e0e0;text-align:center}
+.tg{display:flex;justify-content:space-between;align-items:baseline;margin-top:7px;padding-top:7px;border-top:2.5px solid var(--borde)}
+.tg .tl{font-family:var(--fc);font-size:16px;font-weight:700}
+.tg .tv{font-family:var(--fc);font-size:20px;font-weight:700}
+.transp{padding:4px 10px;font-size:8.5px;color:#777;background:#f5f5f5;border-top:1px solid #e0e0e0;text-align:center}
 .transp strong{color:#333}
-.pie{margin-top:auto;border-top:1px solid #ccc;padding:5px 10px;display:flex;justify-content:space-between;align-items:flex-end}
-.pie-legal{font-size:7.5px;color:#aaa;line-height:1.55}
+.pie{border-top:1px solid #ccc;padding:6px 12px;display:flex;justify-content:space-between;align-items:flex-end}
+.pie-legal{font-size:8px;color:#aaa;line-height:1.55}
 .pie-legal strong{color:#888}
 .firma{text-align:center;min-width:160px}
-.firma .linea{border-top:1px solid #111;margin-top:18px;margin-bottom:2px}
-.firma .lbl{font-size:7.5px;color:#888;letter-spacing:.04em}
-/* Color de letra según tipo */
-.letra{color:inherit}
+.firma .linea{border-top:1px solid #111;margin-top:20px;margin-bottom:2px}
+.firma .lbl{font-size:8px;color:#888;letter-spacing:.04em}
 @media print{
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  @page{size:A4 portrait;margin:0}
   .nav{display:none}
   .pw{display:block!important;padding:0;background:none}
-  .doc{width:210mm;height:297mm;box-shadow:none;margin:0}
+  .doc{width:210mm;height:297mm;box-shadow:none;margin:0;overflow:hidden}
   body{background:white}
 }
 </style>
