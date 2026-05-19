@@ -139,9 +139,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 // ─── Helpers ───────────────────────────────────────────
 
-function detectarSegmento(art: { categoria?: string | null; iva_compras?: string | null }): string {
-  const cat = (art.categoria || "").toUpperCase()
-  if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA"))
+function detectarSegmento(art: { categoria?: string | null; iva_compras?: string | null; segmento_precio?: string | null }): string {
+  const esPerfumeria =
+    art.segmento_precio === "perfumeria" ||
+    (art.categoria || "").toUpperCase().includes("PERFUMERIA") ||
+    (art.categoria || "").toUpperCase().includes("PERFUMERÍA")
+  if (esPerfumeria)
     return art.iva_compras === "adquisicion_stock" ? "perf0" : "perf_plus"
   return "limpieza_bazar"
 }
