@@ -96,6 +96,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       if (co !== 0) return co
       const so = (subcatOrden.get(artA.subcategoria_id) ?? 999) - (subcatOrden.get(artB.subcategoria_id) ?? 999)
       if (so !== 0) return so
+      const mo = (marcaDesc.get(artA.marca_id) || "").localeCompare(marcaDesc.get(artB.marca_id) || "", "es")
+      if (mo !== 0) return mo
       return (artA.descripcion || "").localeCompare(artB.descripcion || "", "es")
     }).map(item => ({
       ...item,
@@ -307,13 +309,15 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
 
   // ─── Multipágina ───
   const totalHojas = Math.max(1, Math.ceil(allFilas.length / FILAS_POR_HOJA))
+  // Distribuir filas uniformemente entre todas las hojas para evitar última hoja vacía
+  const filasPorHoja = Math.ceil(allFilas.length / totalHojas)
 
   let paginasHTML = ""
   for (let h = 1; h <= totalHojas; h++) {
     const esHoja1  = h === 1
     const esUltima = h === totalHojas
-    const desde = (h - 1) * FILAS_POR_HOJA
-    const hasta = Math.min(desde + FILAS_POR_HOJA, allFilas.length)
+    const desde = (h - 1) * filasPorHoja
+    const hasta = Math.min(desde + filasPorHoja, allFilas.length)
     const filasHoja = allFilas.slice(desde, hasta)
 
     // ── Encabezado ──

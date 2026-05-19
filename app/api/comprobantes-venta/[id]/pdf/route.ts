@@ -13,21 +13,33 @@ export async function GET(
     const { id } = await params;
 
     // Fetch voucher data
-    const { data: comprobante, error } = await supabase
-      .from("comprobantes_venta")
-      .select(`
-        *,
-        clientes!inner(razon_social, nombre, cuit, direccion),
-        pedidos(numero_pedido),
-        comprobantes_venta_detalle(
-          cantidad,
-          precio_unitario,
-          subtotal,
-          articulos(descripcion, sku, descuento_propio)
-        )
-      `)
-      .eq("id", id)
-      .single();
+    const [
+      { data: comprobante, error },
+      { data: rubros },
+      { data: categoriasTbl },
+      { data: subcategoriasTbl },
+      { data: marcasTbl },
+    ] = await Promise.all([
+      supabase
+        .from("comprobantes_venta")
+        .select(`
+          *,
+          clientes!inner(razon_social, nombre, cuit, direccion),
+          pedidos(numero_pedido),
+          comprobantes_venta_detalle(
+            cantidad,
+            precio_unitario,
+            subtotal,
+            articulos(descripcion, sku, descuento_propio, rubro_id, categoria_id, subcategoria_id, marca_id)
+          )
+        `)
+        .eq("id", id)
+        .single(),
+      supabase.from("rubros").select("id, orden"),
+      supabase.from("categorias").select("id, orden"),
+      supabase.from("subcategorias").select("id, orden"),
+      supabase.from("marcas").select("id, descripcion").eq("activo", true),
+    ]);
 
     if (error || !comprobante) {
       return NextResponse.json(
@@ -36,9 +48,26 @@ export async function GET(
       );
     }
 
+    const rubroOrden  = new Map((rubros           || []).map((r: any) => [r.id, r.orden  ?? 999]))
+    const catOrden    = new Map((categoriasTbl    || []).map((c: any) => [c.id, c.orden  ?? 999]))
+    const subcatOrden = new Map((subcategoriasTbl || []).map((s: any) => [s.id, s.orden ?? 999]))
+    const marcaDesc   = new Map((marcasTbl        || []).map((m: any) => [m.id, m.descripcion || ""]))
+
     // Generate simple HTML for PDF (browser will handle PDF printing)
     const cliente = comprobante.clientes;
-    const detalle = comprobante.comprobantes_venta_detalle || [];
+    const detalle = [...(comprobante.comprobantes_venta_detalle || [])].sort((a: any, b: any) => {
+      const artA = a.articulos || {}
+      const artB = b.articulos || {}
+      const ro = (rubroOrden.get(artA.rubro_id) ?? 999) - (rubroOrden.get(artB.rubro_id) ?? 999)
+      if (ro !== 0) return ro
+      const co = (catOrden.get(artA.categoria_id) ?? 999) - (catOrden.get(artB.categoria_id) ?? 999)
+      if (co !== 0) return co
+      const so = (subcatOrden.get(artA.subcategoria_id) ?? 999) - (subcatOrden.get(artB.subcategoria_id) ?? 999)
+      if (so !== 0) return so
+      const mo = (marcaDesc.get(artA.marca_id) || "").localeCompare(marcaDesc.get(artB.marca_id) || "", "es")
+      if (mo !== 0) return mo
+      return (artA.descripcion || "").localeCompare(artB.descripcion || "", "es")
+    });
 
     const fmtARS = (n: number) => Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const hayDescuentos = detalle.some((i: any) => (i.articulos?.descuento_propio || 0) > 0)
