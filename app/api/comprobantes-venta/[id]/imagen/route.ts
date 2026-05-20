@@ -147,7 +147,22 @@ function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: s
   return "limpieza_bazar"
 }
 
-const FILAS_POR_HOJA = 28
+// Página 1 tiene encabezado alto (empresa + cliente + condiciones).
+// Páginas siguientes tienen solo el banner compacto → caben más filas.
+const FILAS_HOJA1    = 14
+const FILAS_HOJA_REST = 26
+
+function calcularTotalHojas(nFilas: number): number {
+  if (nFilas <= FILAS_HOJA1) return 1
+  return 1 + Math.ceil((nFilas - FILAS_HOJA1) / FILAS_HOJA_REST)
+}
+
+function sliceHoja(allFilas: string[], h: number): string[] {
+  if (h === 1) return allFilas.slice(0, FILAS_HOJA1)
+  const desde = FILAS_HOJA1 + (h - 2) * FILAS_HOJA_REST
+  const hasta  = desde + FILAS_HOJA_REST
+  return allFilas.slice(desde, hasta)
+}
 
 function generarHTMLComprobante(comprobante: any, empresa: any): string {
   const fmtARS = (n: number) =>
@@ -308,17 +323,15 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
       : `Impuestos no discriminados`
 
   // ─── Multipágina ───
-  const totalHojas = Math.max(1, Math.ceil(allFilas.length / FILAS_POR_HOJA))
-  // Distribuir filas uniformemente entre todas las hojas para evitar última hoja vacía
-  const filasPorHoja = Math.ceil(allFilas.length / totalHojas)
+  const totalHojas = calcularTotalHojas(allFilas.length)
 
   let paginasHTML = ""
   for (let h = 1; h <= totalHojas; h++) {
     const esHoja1  = h === 1
     const esUltima = h === totalHojas
-    const desde = (h - 1) * filasPorHoja
-    const hasta = Math.min(desde + filasPorHoja, allFilas.length)
-    const filasHoja = allFilas.slice(desde, hasta)
+    const filasHoja = sliceHoja(allFilas, h)
+    const desde = h === 1 ? 0 : FILAS_HOJA1 + (h - 2) * FILAS_HOJA_REST
+    const hasta  = desde + filasHoja.length
 
     // ── Encabezado ──
     let encHTML = ""
@@ -600,8 +613,9 @@ function fitFooters() {
   })
 }
 document.addEventListener('DOMContentLoaded', fitFooters)
+document.fonts.ready.then(fitFooters)
 window.addEventListener('resize', fitFooters)
-window.addEventListener('beforeprint', fitFooters)
+window.addEventListener('beforeprint', function() { setTimeout(fitFooters, 0) })
 </script>
 </head>
 <body>
