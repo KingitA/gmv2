@@ -147,22 +147,9 @@ function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: s
   return "limpieza_bazar"
 }
 
-// Página 1 tiene encabezado alto (empresa + cliente + condiciones).
-// Páginas siguientes tienen solo el banner compacto → caben más filas.
-const FILAS_HOJA1    = 14
-const FILAS_HOJA_REST = 26
-
-function calcularTotalHojas(nFilas: number): number {
-  if (nFilas <= FILAS_HOJA1) return 1
-  return 1 + Math.ceil((nFilas - FILAS_HOJA1) / FILAS_HOJA_REST)
-}
-
-function sliceHoja(allFilas: string[], h: number): string[] {
-  if (h === 1) return allFilas.slice(0, FILAS_HOJA1)
-  const desde = FILAS_HOJA1 + (h - 2) * FILAS_HOJA_REST
-  const hasta  = desde + FILAS_HOJA_REST
-  return allFilas.slice(desde, hasta)
-}
+// Máximo de filas por hoja — calibrado para la hoja 1 (encabezado alto).
+// La distribución es uniforme para que páginas adicionales no queden casi vacías.
+const FILAS_POR_HOJA = 20
 
 function generarHTMLComprobante(comprobante: any, empresa: any): string {
   const fmtARS = (n: number) =>
@@ -323,15 +310,18 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
       : `Impuestos no discriminados`
 
   // ─── Multipágina ───
-  const totalHojas = calcularTotalHojas(allFilas.length)
+  // Distribución uniforme: si necesita 2 páginas, cada una recibe ~mitad
+  // (evita la última hoja casi vacía que se genera con corte fijo).
+  const totalHojas = Math.max(1, Math.ceil(allFilas.length / FILAS_POR_HOJA))
+  const filasPorHoja = Math.ceil(allFilas.length / totalHojas)
 
   let paginasHTML = ""
   for (let h = 1; h <= totalHojas; h++) {
     const esHoja1  = h === 1
     const esUltima = h === totalHojas
-    const filasHoja = sliceHoja(allFilas, h)
-    const desde = h === 1 ? 0 : FILAS_HOJA1 + (h - 2) * FILAS_HOJA_REST
-    const hasta  = desde + filasHoja.length
+    const desde = (h - 1) * filasPorHoja
+    const hasta  = Math.min(desde + filasPorHoja, allFilas.length)
+    const filasHoja = allFilas.slice(desde, hasta)
 
     // ── Encabezado ──
     let encHTML = ""
