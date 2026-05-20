@@ -43,6 +43,7 @@ export default function PedidoEditPage() {
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
   const [found, setFound] = useState<any[]>([])
+  const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
   const [savingAdd, setSavingAdd] = useState(false)
@@ -203,11 +204,11 @@ export default function PedidoEditPage() {
     setFound((await searchProductos(q)) || [])
   }
 
-  async function agregarItem(producto: any) {
+  async function agregarItem(producto: any, cantidad: number) {
     setSavingAdd(true)
     try {
-      await agregarItemPedido(id, producto.id, qty)
-      setQuery(""); setFound([]); setQty(1)
+      await agregarItemPedido(id, producto.id, cantidad)
+      setQuery(""); setFound([]); setQty(1); setSelectedProduct(null)
       await loadAll()
     } catch (err: any) {
       alert(err.message || "Error al agregar artículo")
@@ -509,7 +510,7 @@ export default function PedidoEditPage() {
             <Button
               size="sm"
               className="gap-1.5 shrink-0"
-              onClick={() => { setShowAddPanel(o => !o); setQuery(""); setFound([]) }}
+              onClick={() => { setShowAddPanel(o => !o); setQuery(""); setFound([]); setSelectedProduct(null); setQty(1) }}
             >
               <Plus className="h-4 w-4" />
               Agregar artículo
@@ -518,12 +519,13 @@ export default function PedidoEditPage() {
 
           {/* Panel agregar artículo (colapsable) */}
           {showAddPanel && (
-            <div className="border-b border-indigo-100 bg-indigo-50/40 px-5 py-4">
-              <div className="flex gap-3 items-start">
-                <div className="relative flex-1">
+            <div className="border-b border-indigo-100 bg-indigo-50/40 px-5 py-4 space-y-3">
+              {/* Paso 1: buscar artículo */}
+              {!selectedProduct ? (
+                <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <Input
-                    placeholder="Buscar por SKU, descripción..."
+                    placeholder="Buscar artículo por SKU o descripción..."
                     className="pl-9 h-10 bg-white"
                     value={query}
                     onChange={(e) => buscarProductos(e.target.value)}
@@ -533,8 +535,8 @@ export default function PedidoEditPage() {
                     <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
                       {found.map((p: any) => (
                         <div key={p.id}
-                          className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
-                          onClick={() => agregarItem(p)}>
+                          className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
+                          onClick={() => { setSelectedProduct(p); setFound([]); setQuery(""); setQty(1) }}>
                           <div className="font-medium text-slate-800">{p.descripcion}</div>
                           <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
                         </div>
@@ -542,15 +544,38 @@ export default function PedidoEditPage() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+              ) : (
+                /* Paso 2: confirmar cantidad */
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0 bg-white border border-indigo-200 rounded-lg px-3 py-2">
+                    <p className="font-medium text-sm text-slate-800 truncate">{selectedProduct.descripcion}</p>
+                    <p className="text-xs text-slate-400 font-mono">{selectedProduct.sku}</p>
+                  </div>
+                  <button
+                    className="text-xs text-slate-400 hover:text-slate-600 shrink-0 underline"
+                    onClick={() => { setSelectedProduct(null); setQty(1) }}
+                  >
+                    Cambiar
+                  </button>
                   <Input
-                    type="number" min={1} className="h-10 w-20 text-center font-semibold bg-white"
-                    value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 1)}
+                    type="number" min={1}
+                    className="h-10 w-24 text-center font-bold text-lg bg-white shrink-0"
+                    value={qty}
+                    onChange={(e) => setQty(parseInt(e.target.value) || 1)}
+                    onKeyDown={(e) => { if (e.key === "Enter") agregarItem(selectedProduct, qty) }}
+                    autoFocus
                   />
-                  <span className="text-sm text-slate-500">uds.</span>
+                  <span className="text-sm text-slate-500 shrink-0">uds.</span>
+                  <Button
+                    size="sm" className="shrink-0 gap-1.5"
+                    disabled={savingAdd}
+                    onClick={() => agregarItem(selectedProduct, qty)}
+                  >
+                    {savingAdd ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    Agregar
+                  </Button>
                 </div>
-                {savingAdd && <Loader2 className="h-5 w-5 animate-spin text-indigo-600 self-center shrink-0" />}
-              </div>
+              )}
             </div>
           )}
 
