@@ -52,6 +52,8 @@ export default function PedidoEditPage() {
   const [foundBonif, setFoundBonif] = useState<any[]>([])
   const [qtyBonif, setQtyBonif] = useState(1)
   const [headerOpen, setHeaderOpen] = useState(true)
+  const [filterQuery, setFilterQuery] = useState("")
+  const [showAddPanel, setShowAddPanel] = useState(false)
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [vendedores, setVendedores] = useState<any[]>([])
   const [itemEdits, setItemEdits] = useState<Record<string, ItemEdit>>({})
@@ -491,63 +493,67 @@ export default function PedidoEditPage() {
           </>
         )}
 
-        {/* Agregar artículo */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
-            <Plus className="h-4 w-4 text-indigo-600" />
-            Agregar artículo
-          </h2>
-          <div className="flex gap-3">
+        {/* Lista de artículos */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {/* Toolbar: búsqueda dentro del pedido + botón agregar */}
+          <div className="px-5 py-3 border-b border-slate-100 bg-white flex items-center gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
-                placeholder="Buscar por SKU, descripción..."
-                className="pl-9 h-10"
-                value={query}
-                onChange={(e) => buscarProductos(e.target.value)}
+                placeholder="Buscar artículo en el pedido..."
+                className="pl-9 h-9 text-sm"
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
               />
-              {found.length > 0 && (() => {
-                const idsEnPedido = new Set(items.map((i: any) => i.articulos?.id))
-                return (
-                  <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
-                    {found.map((p: any) => {
-                      const yaEsta = idsEnPedido.has(p.id)
-                      return (
-                        <div key={p.id}
-                          className="px-4 py-2.5 flex items-center gap-3 border-b border-slate-100 last:border-0 transition-colors hover:bg-slate-50">
-                          <div className="flex-1 min-w-0">
-                            <div className={`font-medium text-sm leading-tight truncate ${yaEsta ? "text-slate-400" : "text-slate-800"}`}>{p.descripcion}</div>
-                            <div className="text-xs text-slate-400 font-mono mt-0.5">{p.sku}</div>
-                          </div>
-                          {yaEsta ? (
-                            <span className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 border border-slate-200">En pedido</span>
-                          ) : (
-                            <button
-                              onClick={() => agregarItem(p)}
-                              className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white transition-colors">
-                              <Plus className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              })()}
             </div>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number" min={1} className="h-10 w-24 text-center font-semibold"
-                value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 1)}
-              />
-              <span className="text-sm text-slate-400">uds.</span>
-            </div>
-            {savingAdd && <Loader2 className="h-5 w-5 animate-spin text-indigo-600 self-center" />}
+            <Button
+              size="sm"
+              className="gap-1.5 shrink-0"
+              onClick={() => { setShowAddPanel(o => !o); setQuery(""); setFound([]) }}
+            >
+              <Plus className="h-4 w-4" />
+              Agregar artículo
+            </Button>
           </div>
-        </div>
 
-        {/* Lista de artículos */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {/* Panel agregar artículo (colapsable) */}
+          {showAddPanel && (
+            <div className="border-b border-indigo-100 bg-indigo-50/40 px-5 py-4">
+              <div className="flex gap-3 items-start">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    placeholder="Buscar por SKU, descripción..."
+                    className="pl-9 h-10 bg-white"
+                    value={query}
+                    onChange={(e) => buscarProductos(e.target.value)}
+                    autoFocus
+                  />
+                  {found.length > 0 && (
+                    <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
+                      {found.map((p: any) => (
+                        <div key={p.id}
+                          className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
+                          onClick={() => agregarItem(p)}>
+                          <div className="font-medium text-slate-800">{p.descripcion}</div>
+                          <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Input
+                    type="number" min={1} className="h-10 w-20 text-center font-semibold bg-white"
+                    value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 1)}
+                  />
+                  <span className="text-sm text-slate-500">uds.</span>
+                </div>
+                {savingAdd && <Loader2 className="h-5 w-5 animate-spin text-indigo-600 self-center shrink-0" />}
+              </div>
+            </div>
+          )}
+
           {/* Table header */}
           <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50 grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
             <div className="col-span-3">Artículo</div>
@@ -557,15 +563,22 @@ export default function PedidoEditPage() {
             <div className="col-span-3"></div>
           </div>
 
-          {items.length === 0 ? (
+          {(() => {
+            const filteredItems = filterQuery.trim()
+              ? items.filter(i =>
+                  i.articulos?.descripcion?.toLowerCase().includes(filterQuery.toLowerCase()) ||
+                  i.articulos?.sku?.toLowerCase().includes(filterQuery.toLowerCase())
+                )
+              : items
+            return filteredItems.length === 0 ? (
             <div className="py-16 text-center">
               <Package className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500 font-medium">Sin artículos</p>
-              <p className="text-slate-400 text-sm mt-1">Usá el buscador de arriba para agregar artículos</p>
+              <p className="text-slate-500 font-medium">{filterQuery.trim() ? "Sin resultados" : "Sin artículos"}</p>
+              <p className="text-slate-400 text-sm mt-1">{filterQuery.trim() ? "Probá con otro término" : "Usá el botón Agregar para sumar artículos al pedido"}</p>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {items.map((item) => {
+              {filteredItems.map((item) => {
                 const displayItem = getDisplayItem(item)
                 const hasEdit = !!itemEdits[item.id]
                 const isFaltante = displayItem.estado_item === "FALTANTE"
@@ -679,7 +692,8 @@ export default function PedidoEditPage() {
                 )
               })}
             </div>
-          )}
+          )
+          })()}
 
           {/* Totales */}
           {items.length > 0 && (
