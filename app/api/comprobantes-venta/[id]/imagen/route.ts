@@ -147,9 +147,10 @@ function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: s
   return "limpieza_bazar"
 }
 
-// Máximo de filas por hoja — calibrado para la hoja 1 (encabezado alto).
-// La distribución es uniforme para que páginas adicionales no queden casi vacías.
-const FILAS_POR_HOJA = 20
+// Corte fijo: exactamente 30 filas por página.
+// ≤30 ítems → 1 página. 31+ → primera hoja 30, resto en la siguiente.
+// El espacio libre (spacer flex) aparece SOLO en la última hoja.
+const FILAS_POR_HOJA = 30
 
 function generarHTMLComprobante(comprobante: any, empresa: any): string {
   const fmtARS = (n: number) =>
@@ -310,17 +311,14 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
       : `Impuestos no discriminados`
 
   // ─── Multipágina ───
-  // Distribución uniforme: si necesita 2 páginas, cada una recibe ~mitad
-  // (evita la última hoja casi vacía que se genera con corte fijo).
   const totalHojas = Math.max(1, Math.ceil(allFilas.length / FILAS_POR_HOJA))
-  const filasPorHoja = Math.ceil(allFilas.length / totalHojas)
 
   let paginasHTML = ""
   for (let h = 1; h <= totalHojas; h++) {
     const esHoja1  = h === 1
     const esUltima = h === totalHojas
-    const desde = (h - 1) * filasPorHoja
-    const hasta  = Math.min(desde + filasPorHoja, allFilas.length)
+    const desde = (h - 1) * FILAS_POR_HOJA
+    const hasta  = Math.min(desde + FILAS_POR_HOJA, allFilas.length)
     const filasHoja = allFilas.slice(desde, hasta)
 
     // ── Encabezado ──
@@ -463,7 +461,9 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
         </div>`
     }
 
-    paginasHTML += `<div class="pw doc"><div class="stripe" style="background:${cfg.colorVar}"></div><div class="body">${encHTML}${zonaTabla}${pieHTML}</div></div>\n`
+    // Spacer solo en la última hoja: empuja el pie al fondo dejando espacio libre
+    const spacer = esUltima ? `<div style="flex:1"></div>` : ""
+    paginasHTML += `<div class="pw doc"><div class="stripe" style="background:${cfg.colorVar}"></div><div class="body">${encHTML}${zonaTabla}${spacer}${pieHTML}</div></div>\n`
   }
 
   // ─── HTML final ───
@@ -541,9 +541,9 @@ table.art thead tr{color:#fff;background:#111}
 table.art thead th{padding:5px 4px;font-family:var(--fc);font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;text-align:right;white-space:nowrap;border-right:1px solid rgba(255,255,255,.15)}
 table.art thead th:last-child{border-right:none}
 table.art thead th.l{text-align:left}
-table.art tbody tr{border-bottom:1px solid #ddd}
+table.art tbody tr{border-bottom:1px solid #ddd;height:0.5cm;overflow:hidden}
 table.art tbody tr:nth-child(even){background:#f5f5f5}
-table.art tbody td{padding:4px 4px;font-size:10px;text-align:right;vertical-align:middle;color:#444;border-right:1px solid #e0e0e0;line-height:1.3}
+table.art tbody td{padding:0 4px;font-size:10px;text-align:right;vertical-align:middle;color:#444;border-right:1px solid #e0e0e0;line-height:1;overflow:hidden}
 table.art tbody td:last-child{border-right:none}
 td.c-desc{text-align:left;color:#111;font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 td.c-marca{text-align:left;font-family:var(--fc);font-size:8.5px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -555,7 +555,7 @@ td.z{color:#ccc}
 td.c-net{font-family:var(--fc);font-size:10px;font-weight:600;color:#333}
 td.c-sub{font-family:var(--fc);font-size:11px;font-weight:700;color:#111;border-left:2px solid #bbb}
 /* ── ZONA TABLA + FOOTER ── */
-.zona-tabla{overflow:hidden;flex-shrink:0}
+.zona-tabla{flex-shrink:0}
 .zona-footer{flex-shrink:0}
 .sub-parcial{border-top:2px solid var(--borde);padding:4px 10px;display:flex;justify-content:flex-end;gap:16px;align-items:baseline;background:#f5f5f5}
 .sub-parcial .lbl{font-family:var(--fc);font-size:8.5px;color:#666;text-transform:uppercase;letter-spacing:.05em}
@@ -592,25 +592,13 @@ td.c-sub{font-family:var(--fc);font-size:11px;font-weight:700;color:#111;border-
 }
 </style>
 <script>
-function fitFooters() {
-  document.querySelectorAll('.doc').forEach(function(doc) {
-    var tabla = doc.querySelector('.zona-tabla')
-    var footer = doc.querySelector('.zona-footer')
-    if (!tabla || !footer) return
-    tabla.style.height = ''
-    var available = doc.clientHeight - tabla.offsetTop - footer.offsetHeight
-    if (available > 0) tabla.style.height = available + 'px'
-  })
-}
-document.addEventListener('DOMContentLoaded', fitFooters)
-document.fonts.ready.then(fitFooters)
-window.addEventListener('resize', fitFooters)
-window.addEventListener('beforeprint', function() { setTimeout(fitFooters, 0) })
+// Sin fitFooters — el layout es completamente CSS:
+// filas de altura fija 0.5cm + spacer flex en última hoja empuja el pie al fondo.
 </script>
 </head>
 <body>
 <nav class="nav">
-  <button class="btn-print" onclick="fitFooters();window.print()">🖨 Imprimir</button>
+  <button class="btn-print" onclick="window.print()">🖨 Imprimir</button>
   <span class="nav-info">${cfg.nombre} ${cfg.letra} · N° ${nro} · ${fecha}</span>
 </nav>
 <div class="pw">
