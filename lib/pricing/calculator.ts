@@ -3,6 +3,9 @@
 // =====================================================
 // Soporta N descuentos tipados (comercial/financiero/promocional)
 // + bonificación/recargo ocasional
+// + sistema de fórmulas configurables por lista/grupo/iva (listas_precio_reglas)
+
+import { evaluarFormula } from "@/lib/pricing/formula-evaluator"
 
 export interface DescuentoTipado {
   tipo: "comercial" | "financiero" | "promocional"
@@ -32,6 +35,14 @@ export interface DatosLista {
   recargo_limpieza_bazar: number
   recargo_perfumeria_negro: number
   recargo_perfumeria_blanco: number
+  /** Código de la lista: "bahia" | "neco" | "viajante" */
+  lista_codigo?: string
+  /**
+   * Mapa de reglas de fórmulas indexado por "GRUPO|iva_compras|iva_ventas".
+   * Valor: objeto con claves de sublista → fórmula (string).
+   * Ej: { "LIMPIEZA_BAZAR|factura|factura": { viajante: "Base*1.3*1.21" } }
+   */
+  formulas_reglas?: Record<string, Record<string, string>>
 }
 
 export type MetodoFacturacion = "Factura" | "Presupuesto" | "Final"
@@ -172,15 +183,33 @@ export function obtenerCoeficienteIva(
   return 1.00 // fallback
 }
 
+// ─── Resolución de clave de fórmula por lista/metodo ─
+//
+// Convierte lista_codigo + metodoFacturacion → clave de sublista usada en las fórmulas.
+// "viajante" → "viajante"
+// Otros: "{lista_codigo}_{sufijo_metodo}" donde sufijo es:
+//   Factura    → "final"       (precio con IVA incluido: neto = result/1.21)
+//   Presupuesto→ "presupuesto" (precio final directo)
+//   Final      → depende del vaEnComprobante del artículo (se resuelve post-calculo)
+
+function resolveSublistaKey(
+  lista_codigo: string | undefined,
+  vaEnComprobante: "factura" | "presupuesto",
+): string | null {
+  if (!lista_codigo) return null
+  const code = lista_codigo.toLowerCase()
+  if (code === "viajante") return "viajante"
+  // bahia / neco
+  const sufijo = vaEnComprobante === "factura" ? "final" : "presupuesto"
+  return `${code}_${sufijo}`
+}
+
 // ─── Paso 3 + 4: Precio Final ─────────────────────────
 
 export function calcularPrecioFinal(
   art: DatosArticulo, lista: DatosLista, metodoFacturacion: MetodoFacturacion, descuentoCliente: number = 0,
 ): ResultadoPrecio {
   const { costoNeto, precioBase } = calcularPrecioBase(art)
-  const recargoListaPct = obtenerRecargoLista(art, lista)
-  const precioLista = round2(precioBase * (1 + recargoListaPct / 100))
-  const precioConDescuento = round2(precioLista * (1 - (descuentoCliente || 0) / 100))
 
   // Determinar comprobante según método del cliente
   const esNegro = art.iva_ventas === "presupuesto"
@@ -189,34 +218,79 @@ export function calcularPrecioFinal(
   else if (metodoFacturacion === "Factura") vaEnComprobante = "factura"
   else vaEnComprobante = "presupuesto"
 
-  // Coeficiente de ajuste según cómo entró el artículo y cómo EFECTIVAMENTE sale (comprobante real).
-  // Se usa vaEnComprobante (no art.iva_ventas) porque el cliente puede forzar el comprobante opuesto
-  // al modo natural del artículo (ej: artículo negro/negro en Factura A → coef 0.90 para base*.9).
-  // Para perfumería el iva_compras no afecta el precio de venta — solo importa si sale en factura o presupuesto
-  const esPerf = art.segmento_precio === 'perfumeria' || art.rubro_slug === 'perfumeria'
-  const coefIva = esPerf ? 1.00 : obtenerCoeficienteIva(art.iva_compras, vaEnComprobante)
+  // ─── Sistema de fórmulas configurables ───────────────
+  // Si la lista tiene fórmulas, calcular precio directamente desde la fórmula.
+  // La fórmula devuelve el precio CON IVA incluido (precio final bruto).
+  // Para factura: neto = formulaResult / 1.21
+  // Para presupuesto: total = formulaResult (IVA ya incluido)
+  let precioListaFormula: number | null = null
+  if (lista.formulas_reglas && lista.lista_codigo) {
+    const grupo = determinarGrupoPrecio(art.categoria, art.rubro_slug, art.segmento_precio)
+    const reglaKey = `${grupo}|${art.iva_compras}|${art.iva_ventas}`
+    const formulas = lista.formulas_reglas[reglaKey]
+    if (formulas) {
+      const sublistaKey = resolveSublistaKey(lista.lista_codigo, vaEnComprobante)
+      if (sublistaKey && formulas[sublistaKey]) {
+        precioListaFormula = evaluarFormula(formulas[sublistaKey], { Base: precioBase })
+      }
+    }
+  }
 
+  let recargoListaPct: number
+  let precioLista: number
+  let precioConDescuento: number
   let coefAjusteAplicado = 0
-  let precioAntesIva = precioConDescuento
+  let precioAntesIva: number
   let ivaIncluido = false
   let ivaPct = 0
   let montoIvaDiscriminado = 0
-  let precioUnitarioFinal = precioConDescuento
+  let precioUnitarioFinal: number
 
-  if (vaEnComprobante === "factura") {
-    // Sale en Factura A: precio neto + IVA 21% discriminado abajo
-    precioAntesIva = round2(precioConDescuento * coefIva)
-    if (coefIva !== 1.00) coefAjusteAplicado = round2((1 - coefIva) * 100)
-    ivaPct = 21
-    montoIvaDiscriminado = round2(precioAntesIva * 0.21)
-    precioUnitarioFinal = precioAntesIva
-  } else {
-    // Sale en Presupuesto: precio final con IVA incluido (no discriminado)
-    precioAntesIva = precioConDescuento
-    precioUnitarioFinal = round2(precioConDescuento * coefIva)
-    if (coefIva !== 1.00) {
+  if (precioListaFormula !== null) {
+    // Precio viene de fórmula — ya incluye IVA
+    // recargoListaPct se calcula retroactivamente para mostrar en UI
+    recargoListaPct = precioBase > 0 ? round2((precioListaFormula / precioBase - 1) * 100) : 0
+
+    if (vaEnComprobante === "factura") {
+      // La fórmula da precio con IVA → neto = formula / 1.21
+      const netoFormula = round2(precioListaFormula / 1.21)
+      precioLista = netoFormula
+      precioConDescuento = round2(netoFormula * (1 - (descuentoCliente || 0) / 100))
+      precioAntesIva = precioConDescuento
+      ivaPct = 21
+      montoIvaDiscriminado = round2(precioAntesIva * 0.21)
+      precioUnitarioFinal = precioAntesIva
+    } else {
+      // Sale en Presupuesto: fórmula da precio final con IVA incluido
+      precioLista = precioListaFormula
+      precioConDescuento = round2(precioListaFormula * (1 - (descuentoCliente || 0) / 100))
+      precioAntesIva = precioConDescuento
+      precioUnitarioFinal = precioConDescuento
       ivaIncluido = true
-      ivaPct = coefIva > 1 ? round2((coefIva - 1) * 100) : 0
+    }
+  } else {
+    // Fallback al sistema legacy de recargo porcentual
+    recargoListaPct = obtenerRecargoLista(art, lista)
+    precioLista = round2(precioBase * (1 + recargoListaPct / 100))
+    precioConDescuento = round2(precioLista * (1 - (descuentoCliente || 0) / 100))
+
+    // Coeficiente de ajuste según cómo entró el artículo y cómo EFECTIVAMENTE sale (comprobante real).
+    const esPerf = art.segmento_precio === 'perfumeria' || art.rubro_slug === 'perfumeria'
+    const coefIva = esPerf ? 1.00 : obtenerCoeficienteIva(art.iva_compras, vaEnComprobante)
+
+    if (vaEnComprobante === "factura") {
+      precioAntesIva = round2(precioConDescuento * coefIva)
+      if (coefIva !== 1.00) coefAjusteAplicado = round2((1 - coefIva) * 100)
+      ivaPct = 21
+      montoIvaDiscriminado = round2(precioAntesIva * 0.21)
+      precioUnitarioFinal = precioAntesIva
+    } else {
+      precioAntesIva = precioConDescuento
+      precioUnitarioFinal = round2(precioConDescuento * coefIva)
+      if (coefIva !== 1.00) {
+        ivaIncluido = true
+        ivaPct = coefIva > 1 ? round2((coefIva - 1) * 100) : 0
+      }
     }
   }
 

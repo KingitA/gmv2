@@ -87,22 +87,45 @@ function resolverListaSegmento(
   }
 }
 
+// ─── Helper: fetch todas las reglas de fórmulas (una sola vez por request) ────
+async function fetchFormulasReglas(
+  supabase: any,
+): Promise<Record<string, Record<string, string>>> {
+  const { data } = await supabase
+    .from("listas_precio_reglas")
+    .select("grupo_precio,iva_compras,iva_ventas,formulas")
+  if (!data) return {}
+  const map: Record<string, Record<string, string>> = {}
+  for (const row of data) {
+    const key = `${row.grupo_precio}|${row.iva_compras}|${row.iva_ventas}`
+    map[key] = row.formulas || {}
+  }
+  return map
+}
+
 // ─── Helper: fetch lista datos por id (con caché en-memoria por llamada) ──────
 async function fetchListaDatos(
   supabase: any,
   listaId: string | null,
   cache: Record<string, DatosLista>,
+  formulasReglas?: Record<string, Record<string, string>>,
 ): Promise<DatosLista> {
   const empty: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }
   if (!listaId) return empty
   if (cache[listaId]) return cache[listaId]
   const { data } = await supabase
     .from("listas_precio")
-    .select("recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_blanco")
+    .select("codigo,recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_blanco")
     .eq("id", listaId)
     .single()
   const result: DatosLista = data
-    ? { recargo_limpieza_bazar: data.recargo_limpieza_bazar || 0, recargo_perfumeria_negro: data.recargo_perfumeria_negro || 0, recargo_perfumeria_blanco: data.recargo_perfumeria_blanco || 0 }
+    ? {
+        recargo_limpieza_bazar: data.recargo_limpieza_bazar || 0,
+        recargo_perfumeria_negro: data.recargo_perfumeria_negro || 0,
+        recargo_perfumeria_blanco: data.recargo_perfumeria_blanco || 0,
+        lista_codigo: data.codigo || undefined,
+        formulas_reglas: formulasReglas,
+      }
     : empty
   cache[listaId] = result
   return result
@@ -116,7 +139,8 @@ async function fetchListaYMetodo(
   lista_precio_pedido_id?: string,
 ): Promise<{ listaDatos: DatosLista; metodo: MetodoFacturacion; descuentoCliente: number }> {
   const listaId = lista_precio_pedido_id || clienteInfo.lista_precio_id
-  const listaDatos = await fetchListaDatos(supabase, listaId || null, {})
+  const [formulasReglas] = await Promise.all([fetchFormulasReglas(supabase)])
+  const listaDatos = await fetchListaDatos(supabase, listaId || null, {}, formulasReglas)
   const metodoRaw = metodo_facturacion_pedido || clienteInfo.metodo_facturacion || "Final"
   const metodo = toMetodoFacturacion(metodoRaw)
   const descuentoCliente = clienteInfo.descuento_especial || 0
@@ -262,6 +286,8 @@ export async function createPedido(data: {
   // Cache de listas para evitar múltiples queries a la misma lista
   const listasCache: Record<string, DatosLista> = {}
   const descuentoCliente = clienteInfo.descuento_especial || 0
+  // Cargar todas las reglas de fórmulas una sola vez para el pedido
+  const formulasReglas = await fetchFormulasReglas(supabase)
 
   // Overrides de segmento del pedido (vienen del formulario)
   const segmentoOverrides = {
@@ -289,7 +315,7 @@ export async function createPedido(data: {
     const articulo = await fetchArticuloConDescuentos(supabase, item.producto_id)
     const segmento = detectarSegmento(articulo)
     const { listaId, metodoRaw } = resolverListaSegmento(segmento, segmentoOverrides, clienteInfo)
-    const listaDatos = await fetchListaDatos(supabase, listaId, listasCache)
+    const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
     const metodo = toMetodoFacturacion(metodoRaw)
     const precio = calcularPrecioPedido(articulo, listaDatos, metodo, descuentoCliente)
     itemsCalc.push({
