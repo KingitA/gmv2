@@ -506,18 +506,34 @@ export default function PedidoEditPage() {
                 value={query}
                 onChange={(e) => buscarProductos(e.target.value)}
               />
-              {found.length > 0 && (
-                <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
-                  {found.map((p: any) => (
-                    <div key={p.id}
-                      className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
-                      onClick={() => agregarItem(p)}>
-                      <div className="font-medium text-slate-800">{p.descripcion}</div>
-                      <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {found.length > 0 && (() => {
+                const idsEnPedido = new Set(items.map((i: any) => i.articulos?.id))
+                return (
+                  <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
+                    {found.map((p: any) => {
+                      const yaEsta = idsEnPedido.has(p.id)
+                      return (
+                        <div key={p.id}
+                          className="px-4 py-2.5 flex items-center gap-3 border-b border-slate-100 last:border-0 transition-colors hover:bg-slate-50">
+                          <div className="flex-1 min-w-0">
+                            <div className={`font-medium text-sm leading-tight truncate ${yaEsta ? "text-slate-400" : "text-slate-800"}`}>{p.descripcion}</div>
+                            <div className="text-xs text-slate-400 font-mono mt-0.5">{p.sku}</div>
+                          </div>
+                          {yaEsta ? (
+                            <span className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 border border-slate-200">En pedido</span>
+                          ) : (
+                            <button
+                              onClick={() => agregarItem(p)}
+                              className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white transition-colors">
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </div>
             <div className="flex items-center gap-2">
               <Input
@@ -583,6 +599,7 @@ export default function PedidoEditPage() {
                           type="number" step="0.01" min={0}
                           className="h-8 pl-5 text-right text-sm font-semibold"
                           defaultValue={displayItem.precio_final ?? 0}
+                          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur() }}
                           onBlur={(e) => {
                             const val = parseFloat(e.target.value)
                             if (!isNaN(val)) {
@@ -604,6 +621,7 @@ export default function PedidoEditPage() {
                         type="number" min={0}
                         className="h-8 w-20 text-center font-semibold text-sm"
                         defaultValue={displayItem.cantidad ?? 0}
+                        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur() }}
                         onBlur={(e) => {
                           const val = parseInt(e.target.value)
                           if (!isNaN(val) && val >= 0) {
