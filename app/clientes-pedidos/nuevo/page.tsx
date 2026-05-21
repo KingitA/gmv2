@@ -90,6 +90,7 @@ export default function NuevoPedidoPage() {
   const [artQ, setArtQ]                 = useState("")
   const [artFound, setArtFound]         = useState<any[]>([])
   const [selectedArt, setSelectedArt]   = useState<any>(null)
+  const [selectedPreview, setSelectedPreview] = useState<{ precio: number; descripcion: string; sku: string; unidades_por_bulto: number } | null>(null)
   const [qty, setQty]                   = useState(1)
   const [loadingPrice, setLoadingPrice] = useState(false)
 
@@ -158,44 +159,60 @@ export default function NuevoPedidoPage() {
     setArtFound(res || [])
   }, [])
 
-  const seleccionarArticulo = (art: any) => {
+  const seleccionarArticulo = async (art: any) => {
     setSelectedArt(art)
+    setSelectedPreview(null)
     setArtFound([])
     setArtQ(art.descripcion)
     setQty(1)
+    // Calcular precio inmediatamente al seleccionar
+    setLoadingPrice(true)
+    try {
+      const preview = await previewPrecioArticulo(cliente!.id, art.id, buildOverrides())
+      setSelectedPreview(preview)
+    } catch {
+      // si falla, se reintenta al agregar
+    } finally {
+      setLoadingPrice(false)
+    }
   }
 
   const agregarAlCarrito = async () => {
     if (!selectedArt || !cliente) return
-    setLoadingPrice(true)
-    try {
-      const overrides = buildOverrides()
-      const preview = await previewPrecioArticulo(cliente.id, selectedArt.id, overrides)
-      setCart(prev => {
-        const idx = prev.findIndex(i => i.articuloId === selectedArt.id)
-        if (idx >= 0) {
-          const updated = [...prev]
-          updated[idx] = { ...updated[idx], cantidad: updated[idx].cantidad + qty }
-          return updated
-        }
-        return [...prev, {
-          articuloId: selectedArt.id,
-          descripcion: preview.descripcion || selectedArt.descripcion,
-          sku: preview.sku || selectedArt.sku,
-          unidades_por_bulto: preview.unidades_por_bulto,
-          cantidad: qty,
-          precio: preview.precio,
-        }]
-      })
-      setSelectedArt(null)
-      setArtQ("")
-      setArtFound([])
-      setQty(1)
-    } catch (err: any) {
-      alert(err.message || "Error al calcular precio")
-    } finally {
-      setLoadingPrice(false)
+    let preview = selectedPreview
+    if (!preview) {
+      setLoadingPrice(true)
+      try {
+        preview = await previewPrecioArticulo(cliente.id, selectedArt.id, buildOverrides())
+      } catch (err: any) {
+        alert(err.message || "Error al calcular precio")
+        setLoadingPrice(false)
+        return
+      } finally {
+        setLoadingPrice(false)
+      }
     }
+    setCart(prev => {
+      const idx = prev.findIndex(i => i.articuloId === selectedArt.id)
+      if (idx >= 0) {
+        const updated = [...prev]
+        updated[idx] = { ...updated[idx], cantidad: updated[idx].cantidad + qty }
+        return updated
+      }
+      return [...prev, {
+        articuloId: selectedArt.id,
+        descripcion: preview!.descripcion || selectedArt.descripcion,
+        sku: preview!.sku || selectedArt.sku,
+        unidades_por_bulto: preview!.unidades_por_bulto,
+        cantidad: qty,
+        precio: preview!.precio,
+      }]
+    })
+    setSelectedArt(null)
+    setSelectedPreview(null)
+    setArtQ("")
+    setArtFound([])
+    setQty(1)
   }
 
   const quitarDelCarrito = (articuloId: string) => {
@@ -483,12 +500,32 @@ export default function NuevoPedidoPage() {
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 min-w-0 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
-                    <p className="font-medium text-sm text-slate-800 truncate">{selectedArt.descripcion}</p>
-                    <p className="text-xs text-slate-400 font-mono">{selectedArt.sku}</p>
+                  {/* Info artículo + precio */}
+                  <div className="flex-1 min-w-0 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5 flex items-center gap-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-sm text-slate-800 leading-tight truncate">{selectedArt.descripcion}</p>
+                      <p className="text-xs text-slate-400 font-mono mt-0.5">{selectedArt.sku}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      {loadingPrice ? (
+                        <div className="flex items-center gap-1.5 text-indigo-400">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span className="text-xs">Calculando...</span>
+                        </div>
+                      ) : selectedPreview ? (
+                        <div>
+                          <p className="text-[11px] text-slate-400 leading-none mb-0.5">Precio unitario</p>
+                          <p className="text-xl font-bold text-indigo-700 leading-none">${fmt(selectedPreview.precio)}</p>
+                          {qty > 1 && (
+                            <p className="text-xs text-slate-500 mt-0.5">= ${fmt(selectedPreview.precio * qty)} × {qty} u.</p>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
+
                   <button className="text-xs text-slate-400 hover:text-slate-600 shrink-0 underline"
-                    onClick={() => { setSelectedArt(null); setArtQ(""); setQty(1) }}>
+                    onClick={() => { setSelectedArt(null); setSelectedPreview(null); setArtQ(""); setQty(1) }}>
                     Cambiar
                   </button>
                   <Input
@@ -503,7 +540,7 @@ export default function NuevoPedidoPage() {
                   <Button size="sm" className="shrink-0 gap-1.5 bg-indigo-600 hover:bg-indigo-700"
                     disabled={loadingPrice}
                     onClick={agregarAlCarrito}>
-                    {loadingPrice ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    <Plus className="h-4 w-4" />
                     Agregar
                   </Button>
                 </div>
