@@ -243,6 +243,55 @@ function buildKardexDescuentos(
   }
 }
 
+// ─── Preview precio (sin escribir a DB) — para mostrador ─────────────────────
+export async function previewPrecioArticulo(
+  clienteId: string,
+  articuloId: string,
+  overrides: {
+    metodo_facturacion_pedido?: string
+    lista_precio_pedido_id?: string
+    lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
+    lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
+    lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
+  } = {},
+): Promise<{ precio: number; descripcion: string; sku: string; unidades_por_bulto: number }> {
+  const supabase = await createClient()
+
+  const [clienteRes, articuloRes] = await Promise.all([
+    supabase.from("clientes").select(`
+      id, vendedor_id, metodo_facturacion, lista_precio_id, descuento_especial,
+      lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0,
+      lista_perf_plus_id, metodo_perf_plus
+    `).eq("id", clienteId).single(),
+    fetchArticuloConDescuentos(supabase, articuloId),
+  ])
+
+  if (!clienteRes.data) throw new Error("Cliente no encontrado")
+  const clienteInfo = clienteRes.data
+  const articulo = articuloRes
+
+  const { data: artMeta } = await supabase
+    .from("articulos").select("descripcion, sku, unidades_por_bulto").eq("id", articuloId).single()
+
+  const formulasReglas = await fetchFormulasReglas(supabase)
+  const listasCache: Record<string, DatosLista> = {}
+
+  const segmento = detectarSegmento(articulo)
+  const { listaId, metodoRaw } = resolverListaSegmento(segmento, overrides, clienteInfo)
+  const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
+  const metodo = toMetodoFacturacion(metodoRaw)
+  const descuentoCliente = clienteInfo.descuento_especial || 0
+
+  const precio = calcularPrecioPedido(articulo, listaDatos, metodo, descuentoCliente)
+
+  return {
+    precio: precio.precioAlCliente,
+    descripcion: artMeta?.descripcion || "",
+    sku: artMeta?.sku || "",
+    unidades_por_bulto: artMeta?.unidades_por_bulto || 1,
+  }
+}
+
 export async function createPedido(data: {
   cliente_id: string
   items: Array<{

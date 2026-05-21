@@ -871,6 +871,12 @@ export default function ClientesPedidosPage() {
             <Plus className="h-4 w-4" />
             Nuevo Pedido
           </Button>
+          <Button variant="outline" className="gap-2" asChild>
+            <Link href="/clientes-pedidos/nuevo">
+              <Plus className="h-4 w-4" />
+              Mostrador
+            </Link>
+          </Button>
           <Button variant="outline" asChild>
             <a href="/viajes">
               <Truck className="h-4 w-4 mr-2" />
