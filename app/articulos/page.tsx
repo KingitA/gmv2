@@ -122,6 +122,12 @@ export default function ArticulosPage() {
   const [provs,setProvs] = useState<any[]>([])
   const [marcas,setMarcas] = useState<any[]>([])
   const [listas,setListas] = useState<LP[]>([])
+  const [rubrosData,setRubrosData]       = useState<any[]>([])
+  const [categoriasData,setCategoriasData] = useState<any[]>([])
+  const [subcategoriasData,setSubcategoriasData] = useState<any[]>([])
+  const [rubroQ,setRubroQ]   = useState(""); const [rubroOpen,setRubroOpen]   = useState(false)
+  const [catQ,setCatQ]       = useState(""); const [catOpen,setCatOpen]       = useState(false)
+  const [subcatQ,setSubcatQ] = useState(""); const [subcatOpen,setSubcatOpen] = useState(false)
   const [ld,setLd]       = useState(true)
   const [st,setSt]       = useState("")
   const [sd,setSd]       = useState("")
@@ -183,16 +189,22 @@ export default function ArticulosPage() {
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(()=>{
     (async()=>{
-      const [{data:p},{data:m},{data:l},{data:r}] = await Promise.all([
+      const [{data:p},{data:m},{data:l},{data:r},{data:rub},{data:cat},{data:sub}] = await Promise.all([
         sb.from("proveedores").select("id,nombre").eq("activo",true).order("nombre"),
         sb.from("marcas").select("id,codigo,descripcion").eq("activo",true).order("descripcion"),
         sb.from("listas_precio").select("*").eq("activo",true).order("nombre"),
         sb.from("listas_precio_reglas").select("grupo_precio,iva_compras,iva_ventas,formulas"),
+        sb.from("rubros").select("id,nombre,slug").order("orden"),
+        sb.from("categorias").select("id,rubro_id,nombre").order("orden"),
+        sb.from("subcategorias").select("id,categoria_id,nombre").order("orden"),
       ])
       if(p) setProvs(p)
       if(m) setMarcas(m)
       if(l) setListas(l)
       if(r) setReglasFormulas(r as ReglaPrecioFila[])
+      if(rub) setRubrosData(rub)
+      if(cat) setCategoriasData(cat)
+      if(sub) setSubcategoriasData(sub)
     })()
   },[])
   useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0);searchCache.current=null},400); return()=>clearTimeout(t) },[st])
@@ -326,10 +338,10 @@ export default function ArticulosPage() {
   }
 
   // Ficha (unificado crear + editar)
-  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
+  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",rubro_id:null as string|null,precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
   const normIvaC=(v:any)=>v==="adquisicion_stock"?"adquisicion_stock":v==="mixto"?"mixto":v==="0"?"adquisicion_stock":"factura"
   const normIvaV=(v:any)=>v==="presupuesto"?"presupuesto":v==="0"?"presupuesto":"factura"
-  const ofa=(a:any)=>{ setFa(a); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null,segmento_precio:a.segmento_precio??null}) }
+  const ofa=(a:any)=>{ setFa(a); setRubroQ(""); setCatQ(""); setSubcatQ(""); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",rubro_id:a.rubro_id||null,precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null,segmento_precio:a.segmento_precio??null}) }
   const openNew=()=>{ setFa({id:"__new__"}); setFf({...BLANK_FF}) }
   const sfa=async()=>{
     if(!fa) return; setFs(true)
@@ -966,10 +978,10 @@ export default function ArticulosPage() {
             <div>
               <Label className="text-xs">EAN 13 <span className="text-slate-400 font-normal">(puede tener varios)</span></Label>
               <div className="flex flex-wrap gap-1.5 mt-1 min-h-[32px] border rounded-md px-2 py-1.5 bg-white">
-                {ff.ean13.map((e,i)=>(
+                {ff.ean13.map((e:string,i:number)=>(
                   <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 text-[11px] font-mono px-2 py-0.5 rounded-full">
                     {e}
-                    <button type="button" className="text-slate-400 hover:text-red-500 leading-none" onClick={()=>setFf(p=>({...p,ean13:p.ean13.filter((_,j)=>j!==i)}))}>×</button>
+                    <button type="button" className="text-slate-400 hover:text-red-500 leading-none" onClick={()=>setFf(p=>({...p,ean13:p.ean13.filter((_:string,j:number)=>j!==i)}))}>×</button>
                   </span>
                 ))}
                 <input
@@ -1012,12 +1024,128 @@ export default function ArticulosPage() {
               </div>
             </div>
 
-            {/* Rubro / Categoría / Subcategoría */}
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">Rubro</Label><Input className="h-8 text-xs" value={ff.rubro} onChange={e=>setFf(p=>({...p,rubro:e.target.value}))}/></div>
-              <div><Label className="text-xs">Categoría</Label><Input className="h-8 text-xs" value={ff.categoria} onChange={e=>setFf(p=>({...p,categoria:e.target.value}))}/></div>
-              <div><Label className="text-xs">Subcategoría</Label><Input className="h-8 text-xs" value={ff.subcategoria} onChange={e=>setFf(p=>({...p,subcategoria:e.target.value}))}/></div>
-            </div>
+            {/* Rubro / Categoría / Subcategoría — comboboxes en cascada */}
+            {(()=>{
+              const selRubro = rubrosData.find(r=>r.id===ff.rubro_id)
+              const catsFiltradas = selRubro ? categoriasData.filter(c=>c.rubro_id===selRubro.id) : []
+              const selCat = catsFiltradas.find(c=>c.nombre===ff.categoria)
+              const subcatsFiltradas = selCat ? subcategoriasData.filter(s=>s.categoria_id===selCat.id) : []
+
+              const rubrosOpts = rubrosData.filter(r=>r.nombre.toLowerCase().includes(rubroQ.toLowerCase()))
+              const catsOpts   = catsFiltradas.filter(c=>c.nombre.toLowerCase().includes(catQ.toLowerCase()))
+              const subcatsOpts= subcatsFiltradas.filter(s=>s.nombre.toLowerCase().includes(subcatQ.toLowerCase()))
+
+              return (
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Rubro */}
+                  <div>
+                    <Label className="text-xs">Rubro</Label>
+                    <div className="relative">
+                      <Input
+                        className="h-8 text-xs"
+                        placeholder="Buscar rubro..."
+                        value={rubroOpen ? rubroQ : (ff.rubro||"")}
+                        onFocus={()=>{ setRubroOpen(true); setRubroQ("") }}
+                        onChange={e=>setRubroQ(e.target.value)}
+                        onBlur={()=>setTimeout(()=>setRubroOpen(false),150)}
+                      />
+                      {rubroOpen && (
+                        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-[180px] overflow-auto mt-0.5">
+                          {rubrosOpts.length===0
+                            ? <p className="px-3 py-2 text-xs text-slate-400">Sin resultados</p>
+                            : rubrosOpts.map((r:any)=>(
+                              <div key={r.id}
+                                className={`px-3 py-1.5 text-xs cursor-pointer hover:bg-indigo-50 ${ff.rubro_id===r.id?"font-semibold text-indigo-700":""}`}
+                                onMouseDown={()=>{ setFf(p=>({...p,rubro:r.nombre,rubro_id:r.id,categoria:"",subcategoria:""})); setRubroOpen(false); setRubroQ(""); setCatQ(""); setSubcatQ("") }}>
+                                {r.nombre}
+                              </div>
+                            ))
+                          }
+                          {ff.rubro_id && (
+                            <div className="px-3 py-1.5 text-xs cursor-pointer text-slate-400 hover:bg-red-50 border-t border-slate-100"
+                              onMouseDown={()=>{ setFf(p=>({...p,rubro:"",rubro_id:null,categoria:"",subcategoria:""})); setRubroOpen(false) }}>
+                              × Quitar rubro
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Categoría */}
+                  <div>
+                    <Label className="text-xs">Categoría</Label>
+                    <div className="relative">
+                      <Input
+                        className={`h-8 text-xs ${!selRubro?"opacity-50":""}`}
+                        placeholder={selRubro?"Buscar categoría...":"Seleccioná un rubro"}
+                        disabled={!selRubro}
+                        value={catOpen ? catQ : (ff.categoria||"")}
+                        onFocus={()=>{ setCatOpen(true); setCatQ("") }}
+                        onChange={e=>setCatQ(e.target.value)}
+                        onBlur={()=>setTimeout(()=>setCatOpen(false),150)}
+                      />
+                      {catOpen && selRubro && (
+                        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-[180px] overflow-auto mt-0.5">
+                          {catsOpts.length===0
+                            ? <p className="px-3 py-2 text-xs text-slate-400">Sin categorías</p>
+                            : catsOpts.map((c:any)=>(
+                              <div key={c.id}
+                                className={`px-3 py-1.5 text-xs cursor-pointer hover:bg-indigo-50 ${ff.categoria===c.nombre?"font-semibold text-indigo-700":""}`}
+                                onMouseDown={()=>{ setFf(p=>({...p,categoria:c.nombre,subcategoria:""})); setCatOpen(false); setCatQ(""); setSubcatQ("") }}>
+                                {c.nombre}
+                              </div>
+                            ))
+                          }
+                          {ff.categoria && (
+                            <div className="px-3 py-1.5 text-xs cursor-pointer text-slate-400 hover:bg-red-50 border-t border-slate-100"
+                              onMouseDown={()=>{ setFf(p=>({...p,categoria:"",subcategoria:""})); setCatOpen(false) }}>
+                              × Quitar categoría
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Subcategoría */}
+                  <div>
+                    <Label className="text-xs">Subcategoría</Label>
+                    <div className="relative">
+                      <Input
+                        className={`h-8 text-xs ${!selCat?"opacity-50":""}`}
+                        placeholder={selCat?"Buscar subcategoría...":"Seleccioná una categoría"}
+                        disabled={!selCat}
+                        value={subcatOpen ? subcatQ : (ff.subcategoria||"")}
+                        onFocus={()=>{ setSubcatOpen(true); setSubcatQ("") }}
+                        onChange={e=>setSubcatQ(e.target.value)}
+                        onBlur={()=>setTimeout(()=>setSubcatOpen(false),150)}
+                      />
+                      {subcatOpen && selCat && (
+                        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-[180px] overflow-auto mt-0.5">
+                          {subcatsOpts.length===0
+                            ? <p className="px-3 py-2 text-xs text-slate-400">Sin subcategorías</p>
+                            : subcatsOpts.map((s:any)=>(
+                              <div key={s.id}
+                                className={`px-3 py-1.5 text-xs cursor-pointer hover:bg-indigo-50 ${ff.subcategoria===s.nombre?"font-semibold text-indigo-700":""}`}
+                                onMouseDown={()=>{ setFf(p=>({...p,subcategoria:s.nombre})); setSubcatOpen(false); setSubcatQ("") }}>
+                                {s.nombre}
+                              </div>
+                            ))
+                          }
+                          {ff.subcategoria && (
+                            <div className="px-3 py-1.5 text-xs cursor-pointer text-slate-400 hover:bg-red-50 border-t border-slate-100"
+                              onMouseDown={()=>{ setFf(p=>({...p,subcategoria:""})); setSubcatOpen(false) }}>
+                              × Quitar subcategoría
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* IVA Compras / IVA Ventas / Orden depósito */}
             <div className="grid grid-cols-3 gap-3">
