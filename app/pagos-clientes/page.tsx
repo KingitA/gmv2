@@ -48,6 +48,7 @@ function PagosClientesContent() {
   const [retenciones, setRetenciones] = useState<Retencion[]>([])
   const [pagoACuenta, setPagoACuenta] = useState(false)
   const [comprobantesData, setComprobantesData] = useState<Comprobante[]>([])
+  const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
   const [guardando, setGuardando] = useState(false)
   const [ocrProcesando, setOcrProcesando] = useState(false)
   const [aplicarContado, setAplicarContado] = useState(false)
@@ -90,6 +91,7 @@ function PagosClientesContent() {
     setReciboGenerado(null)
     setAplicarContado(false)
     setComprobantesData([])
+    setDtosHechos(new Set())
   }
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -197,8 +199,10 @@ function PagosClientesContent() {
       // Bonificación pago contado 10%
       if (aplicarContado && Object.keys(seleccionados).length > 0) {
         try {
-          const comprobanteIds = Object.keys(seleccionados)
-          await fetch("/api/pagos/generar-bonificacion", {
+          // Excluir comprobantes que ya tienen el 10% aplicado
+          const comprobanteIds = Object.keys(seleccionados).filter(id => !dtosHechos.has(id))
+          if (comprobanteIds.length === 0) { /* todos ya tienen dto, no hacer nada */ }
+          else await fetch("/api/pagos/generar-bonificacion", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ cliente_id: cliente!.id, comprobante_ids: comprobanteIds, pago_id: pagoId }),
@@ -223,7 +227,7 @@ function PagosClientesContent() {
     try {
       const res = await fetch("/api/pagos-clientes")
       const data = await res.json()
-      setHistorial(data || [])
+      setHistorial(Array.isArray(data) ? data : [])
       setHistorialCargado(true)
     } catch {
       toast.error("Error cargando historial")
@@ -235,7 +239,7 @@ function PagosClientesContent() {
   const calcBonificacion = (): number => {
     if (!aplicarContado) return 0
     return comprobantesData
-      .filter(c => seleccionados[c.id] !== undefined)
+      .filter(c => seleccionados[c.id] !== undefined && !dtosHechos.has(c.id))
       .reduce((sum, c) => {
         if (c.tipo_comprobante === "PRES") {
           return sum + Math.abs(Number(c.total_factura)) * 0.1
@@ -300,6 +304,7 @@ function PagosClientesContent() {
                     seleccionados={seleccionados}
                     onChange={setSeleccionados}
                     onComprobantesLoaded={setComprobantesData}
+                    onDtosHechosLoaded={setDtosHechos}
                   />
                 </section>
               )}

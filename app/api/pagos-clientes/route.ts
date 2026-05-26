@@ -17,14 +17,10 @@ export async function GET(request: NextRequest) {
     const fecha_desde = searchParams.get("fecha_desde")
     const fecha_hasta = searchParams.get("fecha_hasta")
 
+    // Consulta base sin joins de FK potencialmente problemáticos
     let query = supabase
       .from("pagos_clientes")
-      .select(`
-        *,
-        clientes(id, nombre, razon_social, cuit),
-        vendedor:usuarios!pagos_clientes_vendedor_id_fkey(nombre),
-        pagos_detalle(*)
-      `)
+      .select("*")
       .order("created_at", { ascending: false })
 
     if (cliente_id) query = query.eq("cliente_id", cliente_id)
@@ -35,48 +31,77 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query
     if (error) throw error
 
-    // Para cada pago con método depósito, cargar ítems del depósito
-    const pagosConDepositos = await Promise.all(
-      (data || []).map(async (pago: any) => {
-        const detallesConItems = await Promise.all(
-          (pago.pagos_detalle || []).map(async (det: any) => {
-            if (det.tipo_pago === "deposito") {
-              const { data: items } = await supabase
-                .from("pago_deposito_items")
-                .select("*")
-                .eq("pago_detalle_id", det.id)
-              return { ...det, deposito_items: items || [] }
-            }
-            return det
-          })
-        )
-        // Cargar imputaciones
-        const { data: imputaciones } = await supabase
-          .from("imputaciones")
-          .select(`
-            *,
-            comprobante:comprobantes_venta(tipo_comprobante, numero_comprobante, total_factura)
-          `)
-          .eq("pago_id", pago.id)
+    const pagos = data || []
+    if (pagos.length === 0) return NextResponse.json([])
 
-        // Cargar retenciones y recibos por separado (tablas pueden no existir si migración no fue ejecutada)
-        let retenciones: any[] = []
-        let recibos: any[] = []
-        try {
-          const { data } = await supabase.from("retenciones").select("*").eq("pago_id", pago.id)
-          retenciones = data || []
-        } catch { /* tabla no existe aún */ }
-        try {
-          const { data } = await supabase.from("recibos").select("id, numero_recibo, pdf_url, fecha").eq("pago_id", pago.id)
-          recibos = data || []
-        } catch { /* tabla no existe aún */ }
+    const pagoIds = pagos.map((p: any) => p.id)
+    const clienteIds = [...new Set(pagos.map((p: any) => p.cliente_id).filter(Boolean))]
+
+    // Cargar clientes, detalles e imputaciones en batch (3 queries para todos los pagos)
+    const [
+      { data: clientesData },
+      { data: detallesData },
+      { data: imputacionesData },
+    ] = await Promise.all([
+      clienteIds.length
+        ? supabase.from("clientes").select("id, nombre, razon_social, cuit").in("id", clienteIds)
+        : Promise.resolve({ data: [] }),
+      supabase.from("pagos_detalle").select("*").in("pago_id", pagoIds),
+      supabase.from("imputaciones").select("*, comprobante:comprobantes_venta(tipo_comprobante, numero_comprobante, total_factura)").in("pago_id", pagoIds),
+    ])
+
+    // Cargar recibos por batch (tabla puede no existir)
+    let recibosData: any[] = []
+    try {
+      const { data: rd } = await supabase.from("recibos").select("id, numero_recibo, pdf_url, fecha, pago_id").in("pago_id", pagoIds)
+      recibosData = rd || []
+    } catch { /* tabla no existe aún */ }
+
+    // Indexar por pago_id
+    const clientesMap = new Map((clientesData || []).map((c: any) => [c.id, c]))
+    const detallesByPago = new Map<string, any[]>()
+    for (const d of detallesData || []) {
+      if (!detallesByPago.has(d.pago_id)) detallesByPago.set(d.pago_id, [])
+      detallesByPago.get(d.pago_id)!.push(d)
+    }
+    const imputacionesByPago = new Map<string, any[]>()
+    for (const i of imputacionesData || []) {
+      if (!imputacionesByPago.has(i.pago_id)) imputacionesByPago.set(i.pago_id, [])
+      imputacionesByPago.get(i.pago_id)!.push(i)
+    }
+    const recibosByPago = new Map<string, any[]>()
+    for (const r of recibosData) {
+      if (!recibosByPago.has(r.pago_id)) recibosByPago.set(r.pago_id, [])
+      recibosByPago.get(r.pago_id)!.push(r)
+    }
+
+    const pagosConDepositos = await Promise.all(
+      pagos.map(async (pago: any) => {
+        const detalles = detallesByPago.get(pago.id) || []
+
+        // Cargar ítems de depósito si hay alguno
+        const depositoIds = detalles.filter((d) => d.tipo_pago === "deposito").map((d) => d.id)
+        let depositoItemsMap = new Map<string, any[]>()
+        if (depositoIds.length) {
+          const { data: ditems } = await supabase.from("pago_deposito_items").select("*").in("pago_detalle_id", depositoIds)
+          for (const it of ditems || []) {
+            if (!depositoItemsMap.has(it.pago_detalle_id)) depositoItemsMap.set(it.pago_detalle_id, [])
+            depositoItemsMap.get(it.pago_detalle_id)!.push(it)
+          }
+        }
+
+        const detallesConItems = detalles.map((det: any) => ({
+          ...det,
+          deposito_items: depositoItemsMap.get(det.id) || [],
+        }))
 
         return {
           ...pago,
+          clientes: clientesMap.get(pago.cliente_id) || null,
           pagos_detalle: detallesConItems,
-          imputaciones: imputaciones || [],
-          retenciones,
-          recibos,
+          imputaciones: imputacionesByPago.get(pago.id) || [],
+          recibos: recibosByPago.get(pago.id) || [],
+          retenciones: [],
         }
       })
     )

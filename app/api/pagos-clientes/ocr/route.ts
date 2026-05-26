@@ -58,7 +58,7 @@ CHEQUE:
 - fecha_emision: fecha de emisión (formato YYYY-MM-DD)
 - fecha_cheque: fecha de pago/vencimiento (formato YYYY-MM-DD)
 - monto: importe numérico sin simbolos de moneda
-- cuit_emisor: CUIT del titular del cheque si es visible (formato XX-XXXXXXXX-X)
+- cuit_emisor: CUIT del titular del cheque si es visible. Puede aparecer como "CUIT: XX-XXXXXXXX-X", "CT: XX-XXXXXXXX-X", "CT XX-XXXXXXXX-X", o simplemente el número en formato XX-XXXXXXXX-X (11 dígitos con guiones). Extraé el número en formato XX-XXXXXXXX-X.
 - localidad: ciudad/localidad del cheque si es visible
 - color_cheque: "ECHEQ" si es electrónico, sino "BLANCO" (nunca "NEGRO" por OCR)
 
@@ -99,7 +99,18 @@ Devolvé SOLO este JSON:
   if (!jsonMatch) throw new Error("No se pudo extraer JSON de la respuesta OCR")
 
   const parsed = JSON.parse(jsonMatch[0])
-  return { resultados: parsed.resultados || [], raw_text: text }
+  const resultados: OCRResultMetodo[] = parsed.resultados || []
+
+  // Fallback regex: si un cheque no tiene cuit_emisor, buscar patrón XX-XXXXXXXX-X en el texto crudo
+  const cuitRegex = /\b(\d{2}-\d{8}-\d{1})\b/g
+  const cuits = [...text.matchAll(cuitRegex)].map(m => m[1])
+  for (const r of resultados) {
+    if (r.tipo === "cheque" && !r.cuit_emisor && cuits.length > 0) {
+      r.cuit_emisor = cuits[0]
+    }
+  }
+
+  return { resultados, raw_text: text }
 }
 
 export async function POST(request: NextRequest) {

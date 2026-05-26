@@ -22,9 +22,10 @@ interface Props {
   seleccionados: Record<string, number>  // { comprobante_id: monto_a_imputar }
   onChange: (next: Record<string, number>) => void
   onComprobantesLoaded?: (comps: Comprobante[]) => void
+  onDtosHechosLoaded?: (dtosHechos: Set<string>) => void
 }
 
-export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded }: Props) {
+export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded }: Props) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [conDtoHecho, setConDtoHecho] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -65,6 +66,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
         }
       }
       setConDtoHecho(dtosHechos)
+      onDtosHechosLoaded?.(dtosHechos)
       setLoading(false)
     })
   }, [clienteId])
