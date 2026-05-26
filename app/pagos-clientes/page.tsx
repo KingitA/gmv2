@@ -9,7 +9,19 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle } from "lucide-react"
+import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle, Ban } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import { ClienteSearchCombobox } from "@/components/pagos/ClienteSearchCombobox"
 import { ComprobantesSelector, type Comprobante } from "@/components/pagos/ComprobantesSelector"
 import { MetodoPagoForm, type MetodoPago } from "@/components/pagos/MetodoPagoForm"
@@ -63,6 +75,10 @@ function PagosClientesContent() {
   const [reciboGenerado, setReciboGenerado] = useState<{ pagoId: string; numero: string } | null>(null)
   const [showSuccess, setShowSuccess] = useState(false)
   const [lastPagoId, setLastPagoId] = useState<string | null>(null)
+
+  const [anulando, setAnulando] = useState<string | null>(null)   // pagoId que se está anulando
+  const [motivoAnulacion, setMotivoAnulacion] = useState("")
+  const [confirmAnularId, setConfirmAnularId] = useState<string | null>(null)
 
   const ocrFileRef = useRef<HTMLInputElement>(null)
   const searchParams = useSearchParams()
@@ -233,6 +249,29 @@ function PagosClientesContent() {
       toast.error("Error cargando historial")
     } finally {
       setCargandoHistorial(false)
+    }
+  }
+
+  const handleAnular = async () => {
+    if (!confirmAnularId) return
+    setAnulando(confirmAnularId)
+    setConfirmAnularId(null)
+    try {
+      const res = await fetch(`/api/pagos-clientes/${confirmAnularId}/anular`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: motivoAnulacion }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success("Recibo anulado. Los comprobantes volvieron a estado pendiente.")
+      setMotivoAnulacion("")
+      // Actualizar el estado en el historial local sin recargar todo
+      setHistorial(prev => prev.map(p => p.id === confirmAnularId ? { ...p, estado: "anulado" } : p))
+    } catch (err: any) {
+      toast.error("Error anulando: " + err.message)
+    } finally {
+      setAnulando(null)
     }
   }
 
@@ -436,10 +475,11 @@ function PagosClientesContent() {
                     <tbody>
                       {historial.map((p) => {
                         const recibo = Array.isArray(p.recibos) ? p.recibos[0] : p.recibos
+                        const esAnulado = p.estado === "anulado"
                         return (
-                          <tr key={p.id} className="border-t hover:bg-muted/20">
-                            <td className="p-3">{fmtFecha(p.fecha_pago)}</td>
-                            <td className="p-3 font-mono text-xs">{recibo?.numero_recibo || "—"}</td>
+                          <tr key={p.id} className={`border-t ${esAnulado ? "bg-red-50/50 opacity-60" : "hover:bg-muted/20"}`}>
+                            <td className={`p-3 ${esAnulado ? "line-through text-muted-foreground" : ""}`}>{fmtFecha(p.fecha_pago)}</td>
+                            <td className={`p-3 font-mono text-xs ${esAnulado ? "line-through text-muted-foreground" : ""}`}>{recibo?.numero_recibo || "—"}</td>
                             <td className="p-3">{p.clientes?.razon_social || p.clientes?.nombre || "—"}</td>
                             <td className="p-3">
                               <div className="flex gap-1 flex-wrap">
@@ -448,26 +488,46 @@ function PagosClientesContent() {
                                 ))}
                               </div>
                             </td>
-                            <td className="p-3 text-right font-mono font-semibold">${fmtARS(Number(p.monto))}</td>
+                            <td className={`p-3 text-right font-mono font-semibold ${esAnulado ? "line-through text-muted-foreground" : ""}`}>${fmtARS(Number(p.monto))}</td>
                             <td className="p-3 text-center">
                               <Badge
-                                className={p.estado === "confirmado"
-                                  ? "bg-green-100 text-green-700 border-0"
-                                  : "bg-yellow-100 text-yellow-700 border-0"}
+                                className={
+                                  esAnulado
+                                    ? "bg-red-100 text-red-700 border-0"
+                                    : p.estado === "confirmado"
+                                    ? "bg-green-100 text-green-700 border-0"
+                                    : "bg-yellow-100 text-yellow-700 border-0"
+                                }
                               >
-                                {p.estado}
+                                {esAnulado ? "Anulado" : p.estado}
                               </Badge>
                             </td>
                             <td className="p-3 text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => window.open(`/api/pagos-clientes/${p.id}/recibo`, "_blank")}
-                                disabled={!recibo}
-                                className="h-7"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5 mr-1" /> Recibo
-                              </Button>
+                              <div className="flex items-center justify-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => window.open(`/api/pagos-clientes/${p.id}/recibo`, "_blank")}
+                                  disabled={!recibo}
+                                  className="h-7"
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5 mr-1" /> Recibo
+                                </Button>
+                                {!esAnulado && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    disabled={anulando === p.id}
+                                    onClick={() => { setConfirmAnularId(p.id); setMotivoAnulacion("") }}
+                                  >
+                                    {anulando === p.id
+                                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      : <Ban className="h-3.5 w-3.5 mr-1" />}
+                                    Anular
+                                  </Button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         )
@@ -480,6 +540,38 @@ function PagosClientesContent() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* ── Confirmación anulación ── */}
+      <AlertDialog open={!!confirmAnularId} onOpenChange={(open) => { if (!open) setConfirmAnularId(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Anular recibo</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción revertirá las imputaciones y dejará los comprobantes sin saldar nuevamente.
+              El recibo quedará registrado como anulado en el historial.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-2 space-y-1.5">
+            <Label htmlFor="motivo-anulacion" className="text-sm">Motivo (opcional)</Label>
+            <Textarea
+              id="motivo-anulacion"
+              placeholder="Ej: Error en el monto, cheque rechazado, etc."
+              value={motivoAnulacion}
+              onChange={(e) => setMotivoAnulacion(e.target.value)}
+              className="resize-none h-20 text-sm"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={handleAnular}
+            >
+              Anular recibo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Modal éxito ── */}
       <Dialog open={showSuccess} onOpenChange={setShowSuccess}>

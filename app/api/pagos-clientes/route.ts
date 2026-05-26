@@ -169,6 +169,7 @@ export async function POST(request: NextRequest) {
         fecha_pago: fecha_pago || todayArgentina(),
         observaciones: observaciones || null,
         estado: "confirmado",
+        creado_por: auth.user.id,
       })
       .select()
       .single()
