@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Trash2, Plus } from "lucide-react"
 import { DepositoItemsForm } from "./DepositoItemsForm"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 
 export type TipoPago = "efectivo" | "transferencia" | "cheque" | "deposito"
 
@@ -173,7 +174,7 @@ export function MetodoPagoForm({ metodos, onChange }: Props) {
               </div>
               <div>
                 <Label className="text-xs">Fecha transferencia</Label>
-                <Input type="date" value={m.fecha_transferencia || ""} onChange={(e) => updateMetodo(m.id, { fecha_transferencia: e.target.value })} />
+                <DateInputAR value={m.fecha_transferencia || ""} onChange={(v) => updateMetodo(m.id, { fecha_transferencia: v })} />
               </div>
               <div className="col-span-2">
                 <Label className="text-xs">Nro. comprobante / referencia</Label>
@@ -195,11 +196,11 @@ export function MetodoPagoForm({ metodos, onChange }: Props) {
               </div>
               <div>
                 <Label className="text-xs">Fecha emisión</Label>
-                <Input type="date" value={m.fecha_emision || ""} onChange={(e) => updateMetodo(m.id, { fecha_emision: e.target.value })} />
+                <DateInputAR value={m.fecha_emision || ""} onChange={(v) => updateMetodo(m.id, { fecha_emision: v })} />
               </div>
               <div>
                 <Label className="text-xs">Fecha de pago</Label>
-                <Input type="date" value={m.fecha_cheque || ""} onChange={(e) => updateMetodo(m.id, { fecha_cheque: e.target.value })} />
+                <DateInputAR value={m.fecha_cheque || ""} onChange={(v) => updateMetodo(m.id, { fecha_cheque: v })} />
               </div>
               <div>
                 <Label className="text-xs">Localidad</Label>
@@ -241,7 +242,7 @@ export function MetodoPagoForm({ metodos, onChange }: Props) {
                 </div>
                 <div>
                   <Label className="text-xs">Fecha depósito</Label>
-                  <Input type="date" value={m.fecha_deposito || ""} onChange={(e) => updateMetodo(m.id, { fecha_deposito: e.target.value })} />
+                  <DateInputAR value={m.fecha_deposito || ""} onChange={(v) => updateMetodo(m.id, { fecha_deposito: v })} />
                 </div>
               </div>
               <DepositoItemsForm

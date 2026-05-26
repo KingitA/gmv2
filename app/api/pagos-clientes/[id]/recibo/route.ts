@@ -46,15 +46,13 @@ export async function GET(
     const supabase = await createClient()
     const { id } = await params
 
-    // Cargar pago completo
+    // Cargar pago principal + detalles (sin join a tablas que pueden no existir)
     const { data: pago, error } = await supabase
       .from("pagos_clientes")
       .select(`
         *,
         clientes(nombre, razon_social, cuit, direccion),
-        pagos_detalle(*),
-        retenciones(*),
-        recibos(numero_recibo, fecha, monto_total)
+        pagos_detalle(*)
       `)
       .eq("id", id)
       .single()
@@ -62,6 +60,22 @@ export async function GET(
     if (error || !pago) {
       return NextResponse.json({ error: "Pago no encontrado" }, { status: 404 })
     }
+
+    // Cargar retenciones y recibo por separado (tablas pueden no existir si la migración no se ejecutó)
+    let retencionesData: any[] = []
+    let reciboData: any = null
+    try {
+      const { data } = await supabase.from("retenciones").select("*").eq("pago_id", id)
+      retencionesData = data || []
+    } catch { /* tabla no existe aún */ }
+    try {
+      const { data } = await supabase.from("recibos").select("numero_recibo, fecha, monto_total").eq("pago_id", id).maybeSingle()
+      reciboData = data
+    } catch { /* tabla no existe aún */ }
+
+    // Inyectar en el objeto pago para que el resto del código funcione igual
+    pago.retenciones = retencionesData
+    pago.recibos = reciboData ? [reciboData] : []
 
     // Cargar imputaciones con comprobantes
     const { data: imputaciones } = await supabase

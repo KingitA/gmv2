@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Trash2, Plus } from "lucide-react"
 import type { DepositoItem } from "./MetodoPagoForm"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 
 function genId() { return Math.random().toString(36).slice(2) }
 
@@ -67,7 +68,7 @@ export function DepositoItemsForm({ items, onChange }: Props) {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs">Fecha depósito</Label>
-                <Input type="date" value={item.fecha_deposito_efectivo || ""} onChange={(e) => updateItem(item.id, { fecha_deposito_efectivo: e.target.value })} />
+                <DateInputAR value={item.fecha_deposito_efectivo || ""} onChange={(v) => updateItem(item.id, { fecha_deposito_efectivo: v })} />
               </div>
               <div>
                 <Label className="text-xs">Nro. comprobante</Label>
@@ -88,7 +89,7 @@ export function DepositoItemsForm({ items, onChange }: Props) {
               </div>
               <div>
                 <Label className="text-xs">Fecha de pago del cheque</Label>
-                <Input type="date" value={item.fecha_pago_cheque || ""} onChange={(e) => updateItem(item.id, { fecha_pago_cheque: e.target.value })} />
+                <DateInputAR value={item.fecha_pago_cheque || ""} onChange={(v) => updateItem(item.id, { fecha_pago_cheque: v })} />
               </div>
               <div>
                 <Label className="text-xs">Nro. comprobante depósito</Label>

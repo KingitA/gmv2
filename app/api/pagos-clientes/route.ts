@@ -249,6 +249,17 @@ export async function POST(request: NextRequest) {
 
     // ── 4. Imputar a comprobantes ──
     if (imputaciones?.length) {
+      // Si el total imputado supera el pago real, ajustar proporcionalmente (de primero a último)
+      const totalImputado = (imputaciones as any[]).reduce((s: number, i: any) => s + Number(i.monto_imputado), 0)
+      if (totalImputado > montoTotal) {
+        let remaining = montoTotal
+        for (const imp of imputaciones as any[]) {
+          const apply = Math.min(Number(imp.monto_imputado), remaining)
+          imp.monto_imputado = apply
+          remaining = Math.max(0, remaining - apply)
+        }
+      }
+
       const imputData = (imputaciones as any[]).map((imp) => ({
         pago_id: pago.id,
         comprobante_id: imp.comprobante_id,

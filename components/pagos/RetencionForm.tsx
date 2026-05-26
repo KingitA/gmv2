@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Trash2, Plus, Upload, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 
 export interface Retencion {
   id: string
@@ -88,7 +89,7 @@ export function RetencionForm({ retenciones, onChange }: Props) {
             </div>
             <div>
               <Label className="text-xs">Fecha</Label>
-              <Input type="date" value={r.fecha} onChange={(e) => update(r.id, { fecha: e.target.value })} />
+              <DateInputAR value={r.fecha} onChange={(v) => update(r.id, { fecha: v })} />
             </div>
             <div>
               <Label className="text-xs">Nro. comprobante retención</Label>

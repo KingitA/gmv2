@@ -1,8 +1,11 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useRef, useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -46,6 +49,8 @@ export default function PagosClientesPage() {
   const [pagoACuenta, setPagoACuenta] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [ocrProcesando, setOcrProcesando] = useState(false)
+  const [aplicarContado, setAplicarContado] = useState(false)
+  const [activeTab, setActiveTab] = useState("nuevo")
 
   // ── Historial ──
   const [historial, setHistorial] = useState<PagoHistorial[]>([])
@@ -55,8 +60,23 @@ export default function PagosClientesPage() {
   // ── Post-guardado ──
   const [reciboGenerado, setReciboGenerado] = useState<{ pagoId: string; numero: string } | null>(null)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [lastPagoId, setLastPagoId] = useState<string | null>(null)
 
   const ocrFileRef = useRef<HTMLInputElement>(null)
+  const searchParams = useSearchParams()
+  const supabase = createClient()
+
+  // Pre-load client from URL param (e.g. coming from cuenta-corriente)
+  useEffect(() => {
+    const id = searchParams.get("cliente_id")
+    if (!id || cliente) return
+    supabase
+      .from("clientes")
+      .select("id, nombre, razon_social, cuit, codigo_cliente")
+      .eq("id", id)
+      .single()
+      .then(({ data }) => { if (data) setCliente(data) })
+  }, [searchParams])
 
   const totalComprobantes = Object.values(seleccionados).reduce((s, v) => s + v, 0)
 
@@ -67,6 +87,7 @@ export default function PagosClientesPage() {
     setRetenciones([])
     setPagoACuenta(false)
     setReciboGenerado(null)
+    setAplicarContado(false)
   }
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,9 +189,25 @@ export default function PagosClientesPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setReciboGenerado({ pagoId: data.pago.id, numero: data.numero_recibo })
+      const pagoId: string = data.pago.id
+      const numeroRecibo: string = data.numero_recibo
+
+      // Bonificación pago contado 10%
+      if (aplicarContado && Object.keys(seleccionados).length > 0) {
+        try {
+          const comprobanteIds = Object.keys(seleccionados)
+          await fetch("/api/pagos/generar-bonificacion", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cliente_id: cliente!.id, comprobante_ids: comprobanteIds, pago_id: pagoId }),
+          })
+        } catch { /* no bloqueamos el flujo */ }
+      }
+
+      setReciboGenerado({ pagoId, numero: numeroRecibo })
+      setLastPagoId(pagoId)
       setShowSuccess(true)
-      toast.success(`Recibo ${data.numero_recibo} generado correctamente`)
+      toast.success(`Recibo ${numeroRecibo} generado correctamente`)
       setHistorialCargado(false)
     } catch (err: any) {
       toast.error("Error guardando pago: " + err.message)
@@ -207,7 +244,7 @@ export default function PagosClientesPage() {
         <p className="text-sm text-muted-foreground">Registrá cobros, imputá comprobantes y generá recibos</p>
       </div>
 
-      <Tabs defaultValue="nuevo">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-6">
           <TabsTrigger value="nuevo">Nuevo Pago</TabsTrigger>
           <TabsTrigger value="historial" onClick={() => !historialCargado && loadHistorial()}>
@@ -305,6 +342,20 @@ export default function PagosClientesPage() {
                 metodos={metodos}
                 retenciones={retenciones}
               />
+
+              {/* 10% bonificación pago contado */}
+              {Object.keys(seleccionados).length > 0 && (
+                <div
+                  className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${aplicarContado ? "bg-amber-50 border-amber-300" : "bg-muted/30 border-border"}`}
+                  onClick={() => setAplicarContado((v) => !v)}
+                >
+                  <Checkbox checked={aplicarContado} onCheckedChange={(v) => setAplicarContado(!!v)} className="mt-0.5" />
+                  <div className="flex-1 select-none">
+                    <p className="text-sm font-medium">10% descuento pago contado</p>
+                    <p className="text-xs text-muted-foreground">Genera NC automática por cada comprobante seleccionado</p>
+                  </div>
+                </div>
+              )}
 
               <Button
                 className="w-full"
@@ -426,6 +477,18 @@ export default function PagosClientesPage() {
               <Button
                 variant="outline"
                 className="w-full"
+                onClick={() => {
+                  setShowSuccess(false)
+                  resetForm()
+                  setActiveTab("historial")
+                  if (!historialCargado) loadHistorial()
+                }}
+              >
+                Ver Historial
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full text-sm"
                 onClick={() => { setShowSuccess(false); resetForm() }}
               >
                 Nuevo Pago

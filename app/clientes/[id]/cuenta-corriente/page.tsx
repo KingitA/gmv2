@@ -28,6 +28,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import Link from "next/link";
+import { ExternalLink } from "lucide-react";
 
 const ArrowLeftIcon = () => (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -431,9 +432,11 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             <main className="container mx-auto px-6 py-8 space-y-6">
                 {/* Quick Actions */}
                 <div className="flex gap-3">
-                    <Button onClick={() => setShowPaymentModal(true)}>
-                        Registrar Pago
-                    </Button>
+                    <Link href={`/pagos-clientes?cliente_id=${clienteId}`}>
+                        <Button>
+                            Registrar Pago
+                        </Button>
+                    </Link>
                     <Button variant="outline" onClick={() => setShowAdjustmentModal(true)}>
                         Ajustar Saldo
                     </Button>
@@ -506,6 +509,16 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                             onClick={() => window.open(`/api/comprobantes-venta/${doc.id}/imagen`, '_blank')}
                                                         >
                                                             <FileTextIcon />
+                                                        </Button>
+                                                    )}
+                                                    {doc.tipo === "PAGO" && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            title="Ver recibo"
+                                                            onClick={() => window.open(`/api/pagos-clientes/${doc.id}/recibo`, '_blank')}
+                                                        >
+                                                            <ExternalLink className="h-4 w-4" />
                                                         </Button>
                                                     )}
                                                 </TableCell>
