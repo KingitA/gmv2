@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useEffect } from "react"
+import { useRef, useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
@@ -40,7 +40,7 @@ function genId() { return Math.random().toString(36).slice(2) }
 const fmtARS = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2 })
 const fmtFecha = (d: string) => new Date(d).toLocaleDateString("es-AR")
 
-export default function PagosClientesPage() {
+function PagosClientesContent() {
   // ── Formulario ──
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
@@ -498,5 +498,13 @@ export default function PagosClientesPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function PagosClientesPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Cargando...</div>}>
+      <PagosClientesContent />
+    </Suspense>
   )
 }
