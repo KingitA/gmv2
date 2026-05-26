@@ -12,6 +12,7 @@ import {
   DollarSign,
   Bookmark,
   Layers,
+  Building2,
 } from "lucide-react"
 
 const TABLAS = [
@@ -85,6 +86,13 @@ const TABLAS = [
     title: "Categorías",
     desc: "Rubros, categorías y subcategorías de artículos",
   },
+  {
+    href: "/tablas/bancos",
+    icon: Building2,
+    color: "slate",
+    title: "Bancos",
+    desc: "Cuentas bancarias propias — CBU/CVU para matching automático",
+  },
 ]
 
 const colorMap: Record<string, { border: string; bg: string; text: string }> = {
@@ -98,6 +106,7 @@ const colorMap: Record<string, { border: string; bg: string; text: string }> = {
   emerald: { border: "border-l-emerald-500", bg: "bg-emerald-50 group-hover:bg-emerald-100", text: "text-emerald-600" },
   indigo:  { border: "border-l-indigo-500",  bg: "bg-indigo-50 group-hover:bg-indigo-100",  text: "text-indigo-600"  },
   violet:  { border: "border-l-violet-500",  bg: "bg-violet-50 group-hover:bg-violet-100",  text: "text-violet-600"  },
+  slate:   { border: "border-l-slate-500",   bg: "bg-slate-50 group-hover:bg-slate-100",   text: "text-slate-600"   },
 }
 
 export default function TablasPage() {
