@@ -51,12 +51,29 @@ ALTER TABLE cheques
   CHECK (estado IN ('EN_CARTERA', 'DEPOSITADO', 'ACREDITADO', 'RECHAZADO', 'DEVUELTO', 'ANULADO'));
 
 -- ─── 4. FK imputaciones.comprobante_id → comprobantes_venta ──
--- Necesaria para que PostgREST resuelva joins automáticamente
-ALTER TABLE imputaciones
-  ADD CONSTRAINT IF NOT EXISTS imputaciones_comprobante_id_fkey
-  FOREIGN KEY (comprobante_id) REFERENCES comprobantes_venta(id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE table_name = 'imputaciones'
+      AND constraint_name = 'imputaciones_comprobante_id_fkey'
+  ) THEN
+    ALTER TABLE imputaciones
+      ADD CONSTRAINT imputaciones_comprobante_id_fkey
+      FOREIGN KEY (comprobante_id) REFERENCES comprobantes_venta(id);
+  END IF;
+END $$;
 
 -- ─── 5. FK imputaciones.pago_id → pagos_clientes ─────────────
-ALTER TABLE imputaciones
-  ADD CONSTRAINT IF NOT EXISTS imputaciones_pago_id_fkey
-  FOREIGN KEY (pago_id) REFERENCES pagos_clientes(id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE table_name = 'imputaciones'
+      AND constraint_name = 'imputaciones_pago_id_fkey'
+  ) THEN
+    ALTER TABLE imputaciones
+      ADD CONSTRAINT imputaciones_pago_id_fkey
+      FOREIGN KEY (pago_id) REFERENCES pagos_clientes(id);
+  END IF;
+END $$;
