@@ -11,6 +11,7 @@ export interface Comprobante {
   tipo_comprobante: string
   numero_comprobante: string
   fecha: string
+  total_neto: number
   total_factura: number
   saldo_pendiente: number
   estado_pago: string
@@ -20,27 +21,52 @@ interface Props {
   clienteId: string
   seleccionados: Record<string, number>  // { comprobante_id: monto_a_imputar }
   onChange: (next: Record<string, number>) => void
+  onComprobantesLoaded?: (comps: Comprobante[]) => void
 }
 
-export function ComprobantesSelector({ clienteId, seleccionados, onChange }: Props) {
+export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded }: Props) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
+  const [conDtoHecho, setConDtoHecho] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
     if (!clienteId) return
     setLoading(true)
-    supabase
-      .from("comprobantes_venta")
-      .select("id, tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente, estado_pago")
-      .eq("cliente_id", clienteId)
-      .in("estado_pago", ["pendiente", "parcial"])
-      .in("tipo_comprobante", ["FA", "FB", "FC", "PRES"])
-      .order("fecha", { ascending: true })
-      .then(({ data }) => {
-        setComprobantes(data || [])
-        setLoading(false)
-      })
+
+    Promise.all([
+      // Comprobantes pendientes
+      supabase
+        .from("comprobantes_venta")
+        .select("id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago")
+        .eq("cliente_id", clienteId)
+        .in("estado_pago", ["pendiente", "parcial"])
+        .in("tipo_comprobante", ["FA", "FB", "FC", "PRES"])
+        .order("fecha", { ascending: true }),
+
+      // NCs/REVs de pago contado ya generadas para este cliente
+      supabase
+        .from("comprobantes_venta")
+        .select("observaciones")
+        .eq("cliente_id", clienteId)
+        .in("tipo_comprobante", ["REV", "NCA", "NCB", "NCC"])
+        .ilike("observaciones", "%Bonificación contado%"),
+    ]).then(([{ data: comps }, { data: ncs }]) => {
+      const lista = comps || []
+      setComprobantes(lista)
+      onComprobantesLoaded?.(lista)
+
+      // Detectar qué comprobantes ya tienen dto hecho (NC/REV menciona su número)
+      const ncsObs = (ncs || []).map(n => n.observaciones || "")
+      const dtosHechos = new Set<string>()
+      for (const comp of lista) {
+        if (ncsObs.some(obs => obs.includes(comp.numero_comprobante))) {
+          dtosHechos.add(comp.id)
+        }
+      }
+      setConDtoHecho(dtosHechos)
+      setLoading(false)
+    })
   }, [clienteId])
 
   const toggleComprobante = (comp: Comprobante) => {
@@ -59,7 +85,6 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange }: Pro
   }
 
   const fmtARS = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2 })
-
   const totalSeleccionado = Object.values(seleccionados).reduce((s, v) => s + v, 0)
 
   if (loading) return <div className="text-sm text-muted-foreground py-4">Cargando comprobantes...</div>
@@ -86,6 +111,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange }: Pro
           <tbody>
             {comprobantes.map((comp) => {
               const checked = seleccionados[comp.id] !== undefined
+              const dtoHecho = conDtoHecho.has(comp.id)
               return (
                 <tr key={comp.id} className={`border-t ${checked ? "bg-blue-50" : "hover:bg-muted/30"}`}>
                   <td className="p-2 text-center">
@@ -95,8 +121,15 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange }: Pro
                     />
                   </td>
                   <td className="p-2">
-                    <Badge variant="outline" className="mr-1 text-xs">{comp.tipo_comprobante}</Badge>
-                    <span className="font-mono text-xs">{comp.numero_comprobante}</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Badge variant="outline" className="text-xs">{comp.tipo_comprobante}</Badge>
+                      <span className="font-mono text-xs">{comp.numero_comprobante}</span>
+                      {dtoHecho && (
+                        <span className="text-[10px] font-semibold text-green-700 bg-green-100 rounded px-1.5 py-0.5">
+                          Dto. pago ctdo hecho
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-2 text-muted-foreground">
                     {new Date(comp.fecha).toLocaleDateString("es-AR")}

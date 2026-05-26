@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle } from "lucide-react"
 import { ClienteSearchCombobox } from "@/components/pagos/ClienteSearchCombobox"
-import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
+import { ComprobantesSelector, type Comprobante } from "@/components/pagos/ComprobantesSelector"
 import { MetodoPagoForm, type MetodoPago } from "@/components/pagos/MetodoPagoForm"
 import { RetencionForm, type Retencion } from "@/components/pagos/RetencionForm"
 import { ResumenPago } from "@/components/pagos/ResumenPago"
@@ -47,6 +47,7 @@ function PagosClientesContent() {
   const [metodos, setMetodos] = useState<MetodoPago[]>([])
   const [retenciones, setRetenciones] = useState<Retencion[]>([])
   const [pagoACuenta, setPagoACuenta] = useState(false)
+  const [comprobantesData, setComprobantesData] = useState<Comprobante[]>([])
   const [guardando, setGuardando] = useState(false)
   const [ocrProcesando, setOcrProcesando] = useState(false)
   const [aplicarContado, setAplicarContado] = useState(false)
@@ -88,6 +89,7 @@ function PagosClientesContent() {
     setPagoACuenta(false)
     setReciboGenerado(null)
     setAplicarContado(false)
+    setComprobantesData([])
   }
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -230,6 +232,23 @@ function PagosClientesContent() {
     }
   }
 
+  const calcBonificacion = (): number => {
+    if (!aplicarContado) return 0
+    return comprobantesData
+      .filter(c => seleccionados[c.id] !== undefined)
+      .reduce((sum, c) => {
+        if (c.tipo_comprobante === "PRES") {
+          return sum + Math.abs(Number(c.total_factura)) * 0.1
+        }
+        if (["FA", "FB", "FC"].includes(c.tipo_comprobante)) {
+          const neto = Math.abs(Number(c.total_neto) || 0)
+          const bonif = neto * 0.1
+          return sum + bonif + bonif * 0.21
+        }
+        return sum
+      }, 0)
+  }
+
   const tiposBadge: Record<string, string> = {
     efectivo: "💵",
     transferencia: "🏦",
@@ -280,6 +299,7 @@ function PagosClientesContent() {
                     clienteId={cliente.id}
                     seleccionados={seleccionados}
                     onChange={setSeleccionados}
+                    onComprobantesLoaded={setComprobantesData}
                   />
                 </section>
               )}
@@ -341,6 +361,7 @@ function PagosClientesContent() {
                 totalComprobantes={totalComprobantes}
                 metodos={metodos}
                 retenciones={retenciones}
+                bonificacion={calcBonificacion()}
               />
 
               {/* 10% bonificación pago contado */}

@@ -9,6 +9,7 @@ interface Props {
   totalComprobantes: number
   metodos: MetodoPago[]
   retenciones: Retencion[]
+  bonificacion?: number   // monto estimado del 10% dto pago contado
 }
 
 function calcTotalMetodos(metodos: MetodoPago[]): number {
@@ -20,11 +21,13 @@ function calcTotalMetodos(metodos: MetodoPago[]): number {
   }, 0)
 }
 
-export function ResumenPago({ totalComprobantes, metodos, retenciones }: Props) {
+export function ResumenPago({ totalComprobantes, metodos, retenciones, bonificacion = 0 }: Props) {
   const totalMetodos = calcTotalMetodos(metodos)
   const totalRet = retenciones.reduce((s, r) => s + Number(r.monto), 0)
   const totalEfectivo = totalMetodos + totalRet
-  const diferencia = totalComprobantes - totalEfectivo
+  // La bonificación es una NC que el sistema genera aparte — reduce la deuda real del cliente
+  const totalReal = totalComprobantes - bonificacion
+  const diferencia = totalReal - totalEfectivo
 
   const colorDif = diferencia === 0
     ? "text-green-700 bg-green-50 border-green-200"
@@ -39,6 +42,18 @@ export function ResumenPago({ totalComprobantes, metodos, retenciones }: Props) 
         <span className="text-muted-foreground">Comprobantes seleccionados:</span>
         <span className="font-mono">${fmtARS(totalComprobantes)}</span>
       </div>
+      {bonificacion > 0 && (
+        <div className="flex justify-between text-green-700">
+          <span>Dto. pago contado (10%):</span>
+          <span className="font-mono">− ${fmtARS(bonificacion)}</span>
+        </div>
+      )}
+      {bonificacion > 0 && (
+        <div className="flex justify-between font-medium border-t pt-1">
+          <span className="text-muted-foreground">Neto a cobrar:</span>
+          <span className="font-mono">${fmtARS(totalReal)}</span>
+        </div>
+      )}
       <div className="flex justify-between">
         <span className="text-muted-foreground">Total métodos de pago:</span>
         <span className="font-mono">${fmtARS(totalMetodos)}</span>
