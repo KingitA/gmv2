@@ -17,7 +17,9 @@ export async function POST(
     const body = await request.json().catch(() => ({}))
     const motivo: string = body.motivo || ""
 
-    // ── 1. Cargar pago ──
+    const errores: string[] = []
+
+    // ── 1. Verificar que el pago existe ──
     const { data: pago, error: pagoErr } = await supabase
       .from("pagos_clientes")
       .select("*")
@@ -31,66 +33,101 @@ export async function POST(
       return NextResponse.json({ error: "El pago ya está anulado" }, { status: 400 })
     }
 
-    // ── 2. Cargar imputaciones con datos del comprobante ──
-    const { data: imputaciones } = await supabase
+    // ── 2. Cargar imputaciones SIN join (evita dependencia de FK) ──
+    const { data: imputaciones, error: impErr } = await supabase
       .from("imputaciones")
-      .select("id, monto_imputado, comprobante_id, comprobante:comprobantes_venta(id, tipo_comprobante, observaciones, saldo_pendiente, total_factura)")
+      .select("id, monto_imputado, comprobante_id")
       .eq("pago_id", pagoId)
 
-    // ── 3. Revertir impacto en cada comprobante ──
+    if (impErr) errores.push(`imputaciones load: ${impErr.message}`)
+
+    // ── 3. Para cada imputación: restaurar saldo del comprobante ──
     for (const imp of imputaciones || []) {
-      const comp = imp.comprobante as any
-      if (!comp) continue
+      if (!imp.comprobante_id) continue
+
+      // Cargar comprobante directamente por ID
+      const { data: comp, error: compErr } = await supabase
+        .from("comprobantes_venta")
+        .select("id, tipo_comprobante, observaciones, saldo_pendiente, total_factura")
+        .eq("id", imp.comprobante_id)
+        .single()
+
+      if (compErr || !comp) {
+        errores.push(`comprobante ${imp.comprobante_id}: ${compErr?.message || "no encontrado"}`)
+        continue
+      }
 
       const tipo: string = comp.tipo_comprobante || ""
-      const obs: string = comp.observaciones || ""
+      const obs: string = (comp.observaciones || "").toLowerCase()
 
-      // NC/REV auto-generados por bonificación contado: marcar como anulados
+      // NC/REV auto-generados por bonificación → marcar anulados (ya no representan crédito)
       const esAutogenerado =
-        ["REV", "NCA", "NCB", "NCC"].includes(tipo) &&
-        obs.toLowerCase().includes("bonificaci")
+        ["REV", "NCA", "NCB", "NCC"].includes(tipo) && obs.includes("bonificaci")
 
       if (esAutogenerado) {
-        await supabase
+        const { error: e } = await supabase
           .from("comprobantes_venta")
           .update({ estado_pago: "anulado", saldo_pendiente: 0 })
           .eq("id", comp.id)
+        if (e) errores.push(`anular NC/REV ${comp.id}: ${e.message}`)
       } else {
-        // Comprobante normal (FA/FB/FC/PRES): devolver saldo
+        // Comprobante real: devolver el saldo imputado
         const totalFact = Math.abs(Number(comp.total_factura) || 0)
         const saldoActual = Number(comp.saldo_pendiente) || 0
         const montoADevolver = Math.abs(Number(imp.monto_imputado) || 0)
         const nuevoSaldo = Math.min(totalFact, saldoActual + montoADevolver)
         const nuevoEstado =
-          nuevoSaldo <= 0 ? "pagado" :
+          nuevoSaldo <= 0        ? "pagado" :
           nuevoSaldo >= totalFact ? "pendiente" :
-          "parcial"
-        await supabase
+                                    "parcial"
+
+        const { error: e } = await supabase
           .from("comprobantes_venta")
           .update({ saldo_pendiente: nuevoSaldo, estado_pago: nuevoEstado })
           .eq("id", comp.id)
+        if (e) errores.push(`restaurar saldo ${comp.id}: ${e.message}`)
       }
     }
 
     // ── 4. Marcar imputaciones como anuladas ──
     if ((imputaciones || []).length > 0) {
-      await supabase
+      const { error: e } = await supabase
         .from("imputaciones")
         .update({ estado: "anulado" })
         .eq("pago_id", pagoId)
+      // Si falla por CHECK constraint, intentar con "rechazado" como fallback
+      if (e) {
+        const { error: e2 } = await supabase
+          .from("imputaciones")
+          .update({ estado: "rechazado" })
+          .eq("pago_id", pagoId)
+        if (e2) errores.push(`imputaciones estado: ${e2.message}`)
+      }
     }
 
-    // ── 5. Cheques EN_CARTERA → anular (intento, sin bloquear flujo) ──
+    // ── 5. Marcar recibo como anulado ──
+    try {
+      const { error: recErr } = await supabase
+        .from("recibos")
+        .update({
+          estado: "anulado",
+          anulado_at: new Date().toISOString(),
+          anulado_por: auth.user.id,
+        })
+        .eq("pago_id", pagoId)
+      if (recErr) errores.push(`recibos: ${recErr.message}`)
+    } catch { /* tabla no existe o columnas no existen aún */ }
+
+    // ── 6. Cheques EN_CARTERA → ANULADO ──
     try {
       const { data: detalles } = await supabase
         .from("pagos_detalle")
         .select("id, cheque_id")
         .eq("pago_id", pagoId)
 
-      const chequeIds = (detalles || []).map((d: any) => d.cheque_id).filter(Boolean)
-
-      // Cheques de ítems de depósito
+      const chequeIds: string[] = (detalles || []).map((d: any) => d.cheque_id).filter(Boolean)
       const detalleIds = (detalles || []).map((d: any) => d.id)
+
       if (detalleIds.length) {
         const { data: ditems } = await supabase
           .from("pago_deposito_items")
@@ -99,38 +136,39 @@ export async function POST(
         chequeIds.push(...(ditems || []).map((it: any) => it.cheque_id).filter(Boolean))
       }
 
-      if (chequeIds.length) {
-        await admin.from("cheques").update({ estado: "ANULADO" }).in("id", [...new Set(chequeIds)]).eq("estado", "EN_CARTERA")
+      const uniqCheques = [...new Set(chequeIds)]
+      if (uniqCheques.length) {
+        const { error: chqErr } = await admin
+          .from("cheques")
+          .update({ estado: "ANULADO" })
+          .in("id", uniqCheques)
+          .eq("estado", "EN_CARTERA")
+        if (chqErr) errores.push(`cheques: ${chqErr.message}`)
       }
-    } catch { /* continuar aunque no se puedan anular cheques */ }
+    } catch (e: any) { errores.push(`cheques (excepcion): ${e.message}`) }
 
-    // ── 6. Marcar pago como anulado (soft delete) ──
-    const { error: updateErr } = await supabase
-      .from("pagos_clientes")
-      .update({
-        estado: "anulado",
-        anulado_por: auth.user.id,
-        anulado_at: new Date().toISOString(),
-        motivo_anulacion: motivo || null,
-      })
-      .eq("id", pagoId)
-
-    if (updateErr) {
-      // Si las columnas de auditoría no existen aún (migración no ejecutada), fallar solo en eso
-      if (updateErr.message?.includes("anulado_por") || updateErr.message?.includes("anulado_at")) {
-        // Intentar solo con estado
-        await supabase.from("pagos_clientes").update({ estado: "anulado" }).eq("id", pagoId)
-      } else {
-        throw updateErr
+    // ── 7. Marcar pago como anulado (con o sin columnas de auditoría) ──
+    const updatePayload: Record<string, any> = { estado: "anulado" }
+    try {
+      updatePayload.anulado_por = auth.user.id
+      updatePayload.anulado_at = new Date().toISOString()
+      updatePayload.motivo_anulacion = motivo || null
+      const { error: e } = await supabase.from("pagos_clientes").update(updatePayload).eq("id", pagoId)
+      if (e) {
+        // Columnas de auditoría no existen aún — intentar solo con estado
+        const { error: e2 } = await supabase.from("pagos_clientes").update({ estado: "anulado" }).eq("id", pagoId)
+        if (e2) throw e2
+        errores.push(`auditoría no guardada (migración pendiente): ${e.message}`)
       }
-    }
+    } catch (e: any) { throw e }
 
-    // ── 7. Registrar en kardex_contable (tabla puede no existir) ──
+    // ── 8. Registro en kardex_contable ──
     try {
       await supabase.from("kardex_contable").insert({
         tipo_movimiento: "ANULACION_COBRO",
-        concepto: `Anulación recibo — pago ${pagoId.slice(0, 8)}${motivo ? ` — ${motivo}` : ""}`,
+        concepto: `Anulación pago ${pagoId.slice(0, 8)}${motivo ? ` — ${motivo}` : ""}`,
         monto: -Math.abs(Number(pago.monto)),
+        color: null,
         origen_tipo: "CLIENTE",
         origen_id: pago.cliente_id,
         referencia_tipo: "pago_cliente",
@@ -139,9 +177,16 @@ export async function POST(
         cliente_id: pago.cliente_id,
         cobrador_id: auth.user.id,
       })
-    } catch { /* tabla puede no existir todavía */ }
+    } catch { /* kardex_contable puede no existir aún */ }
 
-    return NextResponse.json({ success: true })
+    if (errores.length > 0) {
+      console.warn("[anular] completado con advertencias:", errores)
+    }
+
+    return NextResponse.json({
+      success: true,
+      advertencias: errores.length > 0 ? errores : undefined,
+    })
   } catch (error: any) {
     console.error("[pagos-clientes/anular] POST error:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
