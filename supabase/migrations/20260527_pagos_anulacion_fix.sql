@@ -30,25 +30,9 @@ ALTER TABLE recibos
   ADD COLUMN IF NOT EXISTS anulado_at  TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS anulado_por UUID REFERENCES auth.users(id);
 
--- ─── 3. cheques: agregar 'ANULADO' como estado válido ────────
-DO $$
-DECLARE
-  con_name TEXT;
-BEGIN
-  SELECT conname INTO con_name
-  FROM pg_constraint
-  WHERE conrelid = 'cheques'::regclass AND contype = 'c'
-    AND conname ILIKE '%estado%'
-  LIMIT 1;
-  IF con_name IS NOT NULL THEN
-    EXECUTE 'ALTER TABLE cheques DROP CONSTRAINT ' || quote_ident(con_name);
-  END IF;
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
-
-ALTER TABLE cheques
-  ADD CONSTRAINT cheques_estado_check
-  CHECK (estado IN ('EN_CARTERA', 'DEPOSITADO', 'ACREDITADO', 'RECHAZADO', 'DEVUELTO', 'ANULADO'));
+-- ─── 3. cheques: agregar 'ANULADO' al ENUM cheque_status ─────
+-- cheques.estado es un ENUM type, no VARCHAR — usar ALTER TYPE
+ALTER TYPE cheque_status ADD VALUE IF NOT EXISTS 'ANULADO';
 
 -- ─── 4. FK imputaciones.comprobante_id → comprobantes_venta ──
 DO $$
