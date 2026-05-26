@@ -214,8 +214,14 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
   // Negativas con "Mercad" = bonif mercadería (última línea de artículos)
   // Negativas sin "Mercad" = descuento general/viajante (D1/D2 ya reflejados por línea)
   const todasLineas: any[] = comprobante.detalle || []
-  const lineasArt = todasLineas.filter((i: any) => Number(i.precio_unitario || 0) > 0)
-  const lineasBonifMerc = todasLineas.filter((i: any) => Number(i.precio_unitario || 0) < 0 && (i.descripcion || "").includes("Mercad"))
+  const esCredito = ["REV", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC"].includes(comprobante.tipo_comprobante)
+  // Para NC/REV/ND incluir TODAS las líneas (incluso negativas) — los montos se muestran como valores absolutos
+  const lineasArt = esCredito
+    ? todasLineas
+    : todasLineas.filter((i: any) => Number(i.precio_unitario || 0) > 0)
+  const lineasBonifMerc = esCredito
+    ? []
+    : todasLineas.filter((i: any) => Number(i.precio_unitario || 0) < 0 && (i.descripcion || "").includes("Mercad"))
   // D1/D2 se muestran por columna, no como líneas separadas
 
   // ─── D1 / D2 desde bonificaciones del cliente ───
@@ -235,6 +241,26 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
   // ─── Generar filas HTML de artículos ───
   const r2 = (n: number) => Math.round(n * 100) / 100
   const allFilas: string[] = [...lineasArt, ...lineasBonifMerc].map((item: any) => {
+    // Para NC/REV/ND: mostrar como fila simple con montos en positivo, sin descuentos D1/D2
+    if (esCredito && Number(item.precio_unitario || 0) <= 0) {
+      const monto = Math.abs(Number(item.precio_total || 0))
+      const unitario = Math.abs(Number(item.precio_unitario || 0))
+      const sku = item.articulos?.sku || "—"
+      const desc = item.articulos?.descripcion || item.descripcion || "—"
+      const cant = item.cantidad || 1
+      return `<tr>
+        <td class="c-cod">${sku}</td>
+        <td class="c-desc">${desc}</td>
+        <td class="c-marca"></td>
+        <td class="c-cant">${cant}</td>
+        <td class="c-lst">—</td>
+        <td class="c-of z">—</td>
+        <td class="c-b1 z">—</td>
+        <td class="c-b2 z">—</td>
+        <td class="c-net">$${fmtARS(unitario)}</td>
+        <td class="c-sub">$${fmtARS(monto)}</td>
+      </tr>`
+    }
     const esBonifMerc = Number(item.precio_unitario || 0) < 0
     // precio_unitario es el precio DESPUÉS de descuento_propio (oferta), ANTES de BON1/BON2
     const precioConOferta = Math.abs(Number(item.precio_unitario || 0))
@@ -587,7 +613,8 @@ td.c-sub{font-family:var(--fc);font-size:11px;font-weight:700;color:#111;border-
   @page{size:A4 portrait;margin:0}
   .nav{display:none}
   .pw{display:block!important;padding:0;background:none}
-  .doc{width:210mm;height:297mm;box-shadow:none;margin:0;overflow:hidden}
+  .doc{width:210mm;height:297mm;box-shadow:none;margin:0;overflow:hidden;display:flex;flex-direction:column}
+  .body{flex:1;display:flex;flex-direction:column;min-height:0}
   body{background:white}
 }
 </style>

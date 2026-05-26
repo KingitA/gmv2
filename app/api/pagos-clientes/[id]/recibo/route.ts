@@ -46,20 +46,33 @@ export async function GET(
     const supabase = await createClient()
     const { id } = await params
 
-    // Cargar pago principal + detalles (sin join a tablas que pueden no existir)
+    // Cargar pago principal (sin joins a tablas con FK que pueden no existir)
     const { data: pago, error } = await supabase
       .from("pagos_clientes")
-      .select(`
-        *,
-        clientes(nombre, razon_social, cuit, direccion),
-        pagos_detalle(*)
-      `)
+      .select("*")
       .eq("id", id)
       .single()
 
     if (error || !pago) {
       return NextResponse.json({ error: "Pago no encontrado" }, { status: 404 })
     }
+
+    // Cargar cliente por separado
+    let clienteData: any = null
+    if (pago.cliente_id) {
+      const { data } = await supabase
+        .from("clientes")
+        .select("nombre, razon_social, nombre_razon_social, cuit, direccion")
+        .eq("id", pago.cliente_id)
+        .maybeSingle()
+      clienteData = data
+    }
+
+    // Cargar pagos_detalle por separado (evita fallos por FK no definida en PostgREST)
+    const { data: pagosDetalleData } = await supabase
+      .from("pagos_detalle")
+      .select("*")
+      .eq("pago_id", id)
 
     // Cargar retenciones y recibo por separado (tablas pueden no existir si la migración no se ejecutó)
     let retencionesData: any[] = []
@@ -74,6 +87,8 @@ export async function GET(
     } catch { /* tabla no existe aún */ }
 
     // Inyectar en el objeto pago para que el resto del código funcione igual
+    pago.clientes = clienteData
+    pago.pagos_detalle = pagosDetalleData || []
     pago.retenciones = retencionesData
     pago.recibos = reciboData ? [reciboData] : []
 
@@ -175,7 +190,7 @@ export async function GET(
   <div class="section-title">Datos del cliente</div>
   <table style="border:none;">
     <tr>
-      <td style="border:none; padding:2px 0; width:50%;"><strong>Cliente:</strong> ${cliente?.razon_social || cliente?.nombre || ""}</td>
+      <td style="border:none; padding:2px 0; width:50%;"><strong>Cliente:</strong> ${cliente?.razon_social || cliente?.nombre_razon_social || cliente?.nombre || ""}</td>
       <td style="border:none; padding:2px 0;"><strong>CUIT:</strong> ${cliente?.cuit || "—"}</td>
     </tr>
     ${cliente?.direccion ? `<tr><td colspan="2" style="border:none; padding:2px 0;"><strong>Dirección:</strong> ${cliente.direccion}</td></tr>` : ""}

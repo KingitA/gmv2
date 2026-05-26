@@ -23,9 +23,7 @@ export async function GET(request: NextRequest) {
         *,
         clientes(id, nombre, razon_social, cuit),
         vendedor:usuarios!pagos_clientes_vendedor_id_fkey(nombre),
-        pagos_detalle(*),
-        retenciones(*),
-        recibos(id, numero_recibo, pdf_url, fecha)
+        pagos_detalle(*)
       `)
       .order("created_at", { ascending: false })
 
@@ -61,10 +59,24 @@ export async function GET(request: NextRequest) {
           `)
           .eq("pago_id", pago.id)
 
+        // Cargar retenciones y recibos por separado (tablas pueden no existir si migración no fue ejecutada)
+        let retenciones: any[] = []
+        let recibos: any[] = []
+        try {
+          const { data } = await supabase.from("retenciones").select("*").eq("pago_id", pago.id)
+          retenciones = data || []
+        } catch { /* tabla no existe aún */ }
+        try {
+          const { data } = await supabase.from("recibos").select("id, numero_recibo, pdf_url, fecha").eq("pago_id", pago.id)
+          recibos = data || []
+        } catch { /* tabla no existe aún */ }
+
         return {
           ...pago,
           pagos_detalle: detallesConItems,
           imputaciones: imputaciones || [],
+          retenciones,
+          recibos,
         }
       })
     )

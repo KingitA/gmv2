@@ -154,8 +154,13 @@ async function crearImputacion(
     comprobante_id,
     monto_imputado: Math.abs(monto),
     tipo_comprobante: "venta",
-    estado: "pendiente",
+    estado: "confirmado",
   })
+  // Marcar la NC/REV como pagada: saldo_pendiente=0, estado_pago='pagado'
+  await supabase
+    .from("comprobantes_venta")
+    .update({ saldo_pendiente: 0, estado_pago: "pagado" })
+    .eq("id", comprobante_id)
 }
 
 export async function generarBonificacionContado(
