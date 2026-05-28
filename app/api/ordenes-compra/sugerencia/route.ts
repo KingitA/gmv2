@@ -70,7 +70,8 @@ export async function GET(request: NextRequest) {
     const { data: articulos } = await supabase
         .from('articulos')
         .select('id, sku, descripcion, precio_compra, stock_actual, unidades_por_bulto')
-        .in('id', articuloIds);
+        .in('id', articuloIds)
+        .eq('activo', true);
 
     // 5. Calculate suggestions
     const fechaDesdeDate = new Date(fecha_desde);

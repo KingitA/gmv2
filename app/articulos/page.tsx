@@ -462,10 +462,10 @@ export default function ArticulosPage() {
 
   const bulkDelete = async () => {
     if(sel.size===0) return
-    if(!confirm(`¿Eliminar permanentemente ${sel.size} artículo(s) seleccionados? Esta acción no se puede deshacer.`)) return
+    if(!confirm(`¿Dar de baja ${sel.size} artículo(s) seleccionados? Quedarán inactivos y no aparecerán en búsquedas ni pedidos.`)) return
     let ok=0
-    for(const id of sel){ const{error}=await sb.from("articulos").delete().eq("id",id); if(!error) ok++ }
-    clearSel(); await load(); alert(`${ok} artículo(s) eliminados`)
+    for(const id of sel){ const{error}=await sb.from("articulos").update({activo:false}).eq("id",id); if(!error) ok++ }
+    clearSel(); await load(); alert(`${ok} artículo(s) dado(s) de baja`)
   }
 
   const toggleBulkField = (f:string, defaultVal:any=null) => {

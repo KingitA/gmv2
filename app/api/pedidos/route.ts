@@ -71,6 +71,7 @@ export async function POST(request: Request) {
           proveedores!inner(tipo_descuento)
         `)
         .eq("id", item.articulo_id)
+        .eq("activo", true)
         .single()
 
       if (!articulo) continue

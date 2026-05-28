@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
           descuento_propio, marca_id
         `)
         .in("sku", chunk)
+        .eq("activo", true)
 
       for (const art of data || []) {
         articulosMap.set(art.sku.toUpperCase(), art)
