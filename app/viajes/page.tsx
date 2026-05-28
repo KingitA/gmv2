@@ -77,6 +77,7 @@ type Chofer = {
 const ESTADOS_VIAJE = [
   { value: "pendiente", label: "Pendiente", color: "bg-yellow-500" },
   { value: "en_curso", label: "En Curso", color: "bg-blue-500" },
+  { value: "en_rendicion", label: "En Rendición", color: "bg-orange-500" },
   { value: "completado", label: "Completado", color: "bg-green-500" },
   { value: "cancelado", label: "Cancelado", color: "bg-red-500" },
 ]

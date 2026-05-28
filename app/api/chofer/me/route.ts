@@ -24,7 +24,7 @@ export async function GET() {
       .from("viajes")
       .select("id, nombre, fecha, estado, zona_id, zonas(nombre)")
       .eq("chofer_id", userId)
-      .eq("estado", "en_viaje")
+      .eq("estado", "en_curso")
       .order("fecha", { ascending: false })
       .limit(1)
       .maybeSingle()

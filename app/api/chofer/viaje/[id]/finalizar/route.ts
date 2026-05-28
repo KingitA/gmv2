@@ -24,7 +24,7 @@ export async function POST(
     if (!viaje || viaje.chofer_id !== auth.user.id) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
-    if (viaje.estado !== "en_viaje") {
+    if (viaje.estado !== "en_curso") {
       return NextResponse.json({ error: "El viaje no está en curso" }, { status: 400 })
     }
 
