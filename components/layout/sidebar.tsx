@@ -89,7 +89,8 @@ export function Sidebar({ roles = [] }: SidebarProps) {
   const isDepositoRoute = pathname?.startsWith('/deposito')
   const isWarehouseRoute = pathname?.startsWith('/warehouse')
   const isChoferRoute = pathname?.startsWith('/chofer')
-  if (isAuthRoute || isDepositoRoute || isWarehouseRoute || isChoferRoute) return null
+  const hasErpAccess = roles.includes('admin') || roles.includes('administrativo')
+  if (isAuthRoute || isDepositoRoute || isWarehouseRoute || isChoferRoute || !hasErpAccess) return null
 
   const canSee = (item: NavItem) =>
     !item.roleRequired || item.roleRequired.some(r => roles.includes(r))
