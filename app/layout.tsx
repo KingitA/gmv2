@@ -6,7 +6,6 @@ import { headers } from "next/headers"
 import "./globals.css"
 import { Sidebar } from "@/components/layout/sidebar"
 import { MainContent } from "@/components/layout/main-content"
-import { AiChatWidget } from "@/components/ai/ai-chat-widget"
 import { NavbarWrapper } from "@/components/auth/navbar-wrapper"
 import { Toaster } from "@/components/ui/sonner"
 
@@ -31,9 +30,7 @@ export default async function RootLayout({
       <body className={`${geist.variable} ${geistMono.variable} font-sans antialiased`}>
         <Sidebar roles={roles} />
         <MainContent>{children}</MainContent>
-        <NavbarWrapper>
-          <AiChatWidget />
-        </NavbarWrapper>
+        <NavbarWrapper />
         <Analytics />
         <Toaster richColors position="top-right" />
       </body>
