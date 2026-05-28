@@ -6,7 +6,7 @@ import { requireAuth } from "@/lib/auth"
 export type CrearUsuarioInput = {
     email: string
     nombre: string
-    rolNombre: "admin" | "vendedor"
+    roles: string[]
     passwordTemporal: string
 }
 
@@ -14,14 +14,16 @@ export async function crearUsuario(input: CrearUsuarioInput) {
     const auth = await requireAuth()
     if (auth.error) throw new Error("No autorizado")
 
+    if (!input.roles || input.roles.length === 0) throw new Error("Debe asignar al menos un rol")
+
     // Solo admins pueden crear usuarios
     const adminClient = createAdminClient()
     const { data: rolData } = await adminClient
         .from("usuarios_roles")
         .select("roles(nombre)")
         .eq("usuario_id", auth.user.id)
-    const roles = rolData?.map((r: any) => r.roles?.nombre).filter(Boolean) || []
-    if (!roles.includes("admin")) throw new Error("Solo los administradores pueden crear usuarios")
+    const callerRoles = rolData?.map((r: any) => r.roles?.nombre).filter(Boolean) || []
+    if (!callerRoles.includes("admin")) throw new Error("Solo los administradores pueden crear usuarios")
 
     // 1. Crear en Supabase Auth
     const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
@@ -41,27 +43,23 @@ export async function crearUsuario(input: CrearUsuarioInput) {
         debe_cambiar_password: true,
     })
     if (userError) {
-        // Rollback: eliminar el usuario de Auth
         await adminClient.auth.admin.deleteUser(userId)
         throw new Error(userError.message)
     }
 
-    // 3. Obtener el rol_id por nombre
-    const { data: rolRow, error: rolError } = await adminClient
+    // 3. Obtener ids de los roles solicitados
+    const { data: rolesRows, error: rolesError } = await adminClient
         .from("roles")
-        .select("id")
-        .eq("nombre", input.rolNombre)
-        .single()
-    if (rolError || !rolRow) {
+        .select("id, nombre")
+        .in("nombre", input.roles)
+    if (rolesError || !rolesRows?.length) {
         await adminClient.auth.admin.deleteUser(userId)
-        throw new Error(`Rol "${input.rolNombre}" no encontrado`)
+        throw new Error("Uno o más roles no encontrados")
     }
 
-    // 4. Asignar rol
-    const { error: rolAsignError } = await adminClient.from("usuarios_roles").insert({
-        usuario_id: userId,
-        rol_id: rolRow.id,
-    })
+    // 4. Asignar todos los roles
+    const inserts = rolesRows.map((r: any) => ({ usuario_id: userId, rol_id: r.id }))
+    const { error: rolAsignError } = await adminClient.from("usuarios_roles").insert(inserts)
     if (rolAsignError) throw new Error(rolAsignError.message)
 
     return { success: true, userId }

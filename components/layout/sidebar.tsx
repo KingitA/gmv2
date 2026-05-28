@@ -10,6 +10,7 @@ interface NavItem {
   href: string
   icon: string
   badge?: string
+  roleRequired?: string[]
 }
 
 interface NavSection {
@@ -31,7 +32,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Clientes', href: '/clientes', icon: '👥' },
       { label: 'Comprobantes Venta', href: '/comprobantes-venta', icon: '🧾' },
       { label: 'Viajes', href: '/viajes', icon: '🚚' },
-      { label: 'Viajantes', href: '/viajantes', icon: '👔' },
+      { label: 'Viajantes', href: '/viajantes', icon: '👔', roleRequired: ['admin'] },
       { label: 'Pagos Clientes', href: '/pagos-clientes', icon: '💳' },
       { label: 'Revisión Devoluciones', href: '/revision-devoluciones', icon: '↩️' },
     ],
@@ -52,7 +53,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Finanzas',
     items: [
-      { label: 'Panel Finanzas', href: '/finanzas', icon: '💵' },
+      { label: 'Panel Finanzas', href: '/finanzas', icon: '💵', roleRequired: ['admin'] },
     ],
   },
   {
@@ -65,25 +66,33 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Configuración',
     items: [
       { label: 'Tablas', href: '/tablas', icon: '⚙️' },
-      { label: 'Usuarios', href: '/admin/usuarios', icon: '👤' },
+      { label: 'Usuarios', href: '/admin/usuarios', icon: '👤', roleRequired: ['admin'] },
     ],
   },
   {
     title: 'Apps',
     items: [
-      { label: 'App Depósito', href: '/deposito', icon: '🏭' },
+      { label: 'App Depósito', href: '/deposito', icon: '🏭', roleRequired: ['admin', 'deposito'] },
     ],
   },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  roles?: string[]
+}
+
+export function Sidebar({ roles = [] }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
 
   const isAuthRoute = pathname?.startsWith('/auth')
   const isDepositoRoute = pathname?.startsWith('/deposito')
   const isWarehouseRoute = pathname?.startsWith('/warehouse')
-  if (isAuthRoute || isDepositoRoute || isWarehouseRoute) return null
+  const isChoferRoute = pathname?.startsWith('/chofer')
+  if (isAuthRoute || isDepositoRoute || isWarehouseRoute || isChoferRoute) return null
+
+  const canSee = (item: NavItem) =>
+    !item.roleRequired || item.roleRequired.some(r => roles.includes(r))
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/'
@@ -98,6 +107,10 @@ export function Sidebar() {
     await supabase.auth.signOut()
     router.push('/auth/login')
   }
+
+  const visibleSections = NAV_SECTIONS
+    .map(section => ({ ...section, items: section.items.filter(canSee) }))
+    .filter(section => section.items.length > 0)
 
   return (
     <aside
@@ -114,7 +127,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3">
-        {NAV_SECTIONS.map((section) => (
+        {visibleSections.map((section) => (
           <div key={section.title} className="mb-3">
             <div className="px-5 mb-1.5 text-[10px] uppercase tracking-[1.5px] text-white/25 font-semibold">
               {section.title}

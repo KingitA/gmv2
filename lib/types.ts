@@ -194,7 +194,7 @@ export interface Proveedor {
   updated_at?: string
 }
 
-export type UserRole = 'admin' | 'vendedor' | 'viajante' | 'cliente' | 'chofer' | 'operador'
+export type UserRole = 'admin' | 'administrativo' | 'vendedor' | 'viajante' | 'cliente' | 'chofer' | 'operador'
 
 export interface OrdenCompra {
   id: string

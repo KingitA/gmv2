@@ -54,6 +54,13 @@ export async function loginUser(email: string, password: string) {
 
     const roles = rolesData?.map((r: any) => r.roles?.nombre).filter(Boolean) || []
 
+    // Viajante-only (u otros sin módulo activo): no dejar pasar
+    const erpRoles = ['admin', 'administrativo', 'deposito', 'chofer']
+    if (!roles.some(r => erpRoles.includes(r))) {
+        await supabase.auth.signOut()
+        return { success: false, error: 'Tu módulo aún no está disponible. Contactá al administrador.' }
+    }
+
     return {
         success: true,
         user: {

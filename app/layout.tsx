@@ -2,6 +2,7 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import { headers } from "next/headers"
 import "./globals.css"
 import { Sidebar } from "@/components/layout/sidebar"
 import { MainContent } from "@/components/layout/main-content"
@@ -17,15 +18,18 @@ export const metadata: Metadata = {
   description: "Sistema de gestión de compras, ventas y stock",
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const h = await headers()
+  const roles = h.get("x-user-roles")?.split(",").filter(Boolean) ?? []
+
   return (
     <html lang="es" suppressHydrationWarning>
       <body className={`${geist.variable} ${geistMono.variable} font-sans antialiased`}>
-        <Sidebar />
+        <Sidebar roles={roles} />
         <MainContent>{children}</MainContent>
         <NavbarWrapper>
           <AiChatWidget />

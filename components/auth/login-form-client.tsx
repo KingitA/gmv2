@@ -4,6 +4,7 @@ import type React from "react"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { loginUser } from "@/lib/actions/auth"
+import { getHomeForRoles } from "@/lib/role-utils"
 import { Package, Loader2, AlertCircle, Eye, EyeOff } from "lucide-react"
 
 export function LoginFormClient() {
@@ -34,8 +35,9 @@ export function LoginFormClient() {
         return
       }
 
-      // Login exitoso → ir al dashboard
-      router.push("/")
+      // Login exitoso → redirigir según rol
+      const home = getHomeForRoles(result.user?.roles ?? []) ?? "/"
+      router.push(home)
       router.refresh()
     } catch {
       setError("Error de conexión. Intentá de nuevo.")

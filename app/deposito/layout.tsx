@@ -21,6 +21,7 @@ function getBackHref(pathname: string): string {
 
 export default function DepositoLayout({ children }: { children: React.ReactNode }) {
   const [userName, setUserName] = useState("")
+  const [tieneRolChofer, setTieneRolChofer] = useState(false)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const pathname = usePathname()
@@ -31,12 +32,16 @@ export default function DepositoLayout({ children }: { children: React.ReactNode
   const backHref = getBackHref(pathname || "")
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { router.push("/auth/login"); return }
-      supabase.from("usuarios").select("nombre").eq("id", user.id).single()
-        .then(({ data }) => setUserName(data?.nombre || user.email?.split("@")[0] || "Operario"))
-        .catch(() => setUserName(user.email?.split("@")[0] || "Operario"))
-        .finally(() => setLoading(false))
+      const [{ data: usuarioData }, { data: rolesData }] = await Promise.all([
+        supabase.from("usuarios").select("nombre").eq("id", user.id).single(),
+        supabase.from("usuarios_roles").select("roles(nombre)").eq("usuario_id", user.id),
+      ])
+      setUserName(usuarioData?.nombre || user.email?.split("@")[0] || "Operario")
+      const roles = (rolesData || []).map((r: any) => r.roles?.nombre).filter(Boolean)
+      setTieneRolChofer(roles.includes("chofer"))
+      setLoading(false)
     })
   }, [])
 
@@ -80,6 +85,11 @@ export default function DepositoLayout({ children }: { children: React.ReactNode
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {tieneRolChofer && (
+            <Link href="/chofer" style={{ fontSize: 11, fontWeight: 600, color: "#16a34a", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "4px 10px", textDecoration: "none" }}>
+              🚚 Cambiar a Chofer
+            </Link>
+          )}
           <div style={{ textAlign: "right" as const }}>
             <div style={{ fontSize: 10, color: "#9ca3af", textTransform: "uppercase" as const, letterSpacing: "0.1em" }}>Operario</div>
             <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{userName}</div>
