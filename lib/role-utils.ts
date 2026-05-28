@@ -24,6 +24,7 @@ export const ROUTE_RULES: [string, string[]][] = [
   ['/admin',                ['admin']],
   ['/deposito',             ['admin', 'deposito']],
   ['/chofer',               ['admin', 'chofer']],
+  ['/seleccionar-modulo',   ['admin', 'deposito', 'chofer']],
   ['/viajantes',            ['admin']],
   ['/finanzas',             ['admin']],
   ['/tablas/listas-precio', ['admin']],
