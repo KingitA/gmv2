@@ -8,7 +8,7 @@ import { getHomeForRoles } from "@/lib/role-utils"
 import { Package, Loader2, AlertCircle, Eye, EyeOff } from "lucide-react"
 
 export function LoginFormClient() {
-  const [email, setEmail] = useState("")
+  const [nombreUsuario, setNombreUsuario] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -21,7 +21,7 @@ export function LoginFormClient() {
     setLoading(true)
 
     try {
-      const result = await loginUser(email, password)
+      const result = await loginUser(nombreUsuario, password)
 
       if (!result.success) {
         setError(result.error || "Error al iniciar sesión")
@@ -69,18 +69,18 @@ export function LoginFormClient() {
             )}
 
             <div className="space-y-1.5">
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700">
-                Email
+              <label htmlFor="usuario" className="block text-sm font-medium text-slate-700">
+                Nombre de usuario
               </label>
               <input
-                id="email"
-                type="email"
-                placeholder="tu@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="usuario"
+                type="text"
+                placeholder="Tu nombre de usuario"
+                value={nombreUsuario}
+                onChange={(e) => setNombreUsuario(e.target.value)}
                 required
                 disabled={loading}
-                autoComplete="email"
+                autoComplete="username"
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:bg-slate-50 transition-all"
               />
             </div>
@@ -114,7 +114,7 @@ export function LoginFormClient() {
 
             <button
               type="submit"
-              disabled={loading || !email || !password}
+              disabled={loading || !nombreUsuario || !password}
               className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-sm font-semibold rounded-xl hover:from-indigo-700 hover:to-indigo-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md flex items-center justify-center gap-2"
             >
               {loading ? (

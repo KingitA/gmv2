@@ -75,7 +75,6 @@ export default function UsuariosPage() {
   // Nuevo usuario
   const [openNuevo, setOpenNuevo] = useState(false)
   const [nombre, setNombre] = useState("")
-  const [email, setEmail] = useState("")
   const [rolesNuevo, setRolesNuevo] = useState<string[]>(["administrativo"])
   const [password, setPassword] = useState("")
   const [showPass, setShowPass] = useState(false)
@@ -125,7 +124,7 @@ export default function UsuariosPage() {
   useEffect(() => { fetchUsuarios() }, [])
 
   // Crear usuario
-  const resetNuevo = () => { setNombre(""); setEmail(""); setRolesNuevo(["administrativo"]); setPassword(""); setErrorNuevo(""); setOkNuevo(false) }
+  const resetNuevo = () => { setNombre(""); setRolesNuevo(["administrativo"]); setPassword(""); setErrorNuevo(""); setOkNuevo(false) }
 
   const handleCrear = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -134,7 +133,7 @@ export default function UsuariosPage() {
     if (password.length < 6) { setErrorNuevo("La contraseña temporal debe tener al menos 6 caracteres"); return }
     setSavingNuevo(true)
     try {
-      await crearUsuario({ email, nombre, roles: rolesNuevo, passwordTemporal: password })
+      await crearUsuario({ nombre, roles: rolesNuevo, passwordTemporal: password })
       setOkNuevo(true)
       await fetchUsuarios()
       setTimeout(() => { setOpenNuevo(false); resetNuevo() }, 1200)
@@ -292,12 +291,9 @@ export default function UsuariosPage() {
               </div>
             )}
             <div className="space-y-1.5">
-              <Label>Nombre completo</Label>
-              <Input value={nombre} onChange={e => setNombre(e.target.value)} required disabled={savingNuevo || okNuevo} placeholder="Ej: Karina Laumann" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Email</Label>
-              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} required disabled={savingNuevo || okNuevo} placeholder="usuario@ejemplo.com" />
+              <Label>Nombre de usuario</Label>
+              <Input value={nombre} onChange={e => setNombre(e.target.value)} required disabled={savingNuevo || okNuevo} placeholder="Ej: juancito" autoComplete="off" />
+              <p className="text-xs text-slate-500">Con este nombre va a ingresar al sistema.</p>
             </div>
             <div className="space-y-1.5">
               <Label>Roles</Label>

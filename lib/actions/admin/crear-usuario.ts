@@ -4,8 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuth } from "@/lib/auth"
 
 export type CrearUsuarioInput = {
-    email: string
-    nombre: string
+    nombre: string        // nombre de usuario para login (único)
+    email?: string        // email real opcional
     roles: string[]
     passwordTemporal: string
 }
@@ -15,9 +15,11 @@ export async function crearUsuario(input: CrearUsuarioInput) {
     if (auth.error) throw new Error("No autorizado")
 
     if (!input.roles || input.roles.length === 0) throw new Error("Debe asignar al menos un rol")
+    if (!input.nombre?.trim()) throw new Error("El nombre de usuario es obligatorio")
+
+    const adminClient = createAdminClient()
 
     // Solo admins pueden crear usuarios
-    const adminClient = createAdminClient()
     const { data: rolData } = await adminClient
         .from("usuarios_roles")
         .select("roles(nombre)")
@@ -25,9 +27,21 @@ export async function crearUsuario(input: CrearUsuarioInput) {
     const callerRoles = rolData?.map((r: any) => r.roles?.nombre).filter(Boolean) || []
     if (!callerRoles.includes("admin")) throw new Error("Solo los administradores pueden crear usuarios")
 
+    // Verificar que el nombre no esté en uso
+    const { data: existing } = await adminClient
+        .from("usuarios")
+        .select("id")
+        .ilike("nombre", input.nombre.trim())
+        .maybeSingle()
+    if (existing) throw new Error(`El nombre de usuario "${input.nombre.trim()}" ya está en uso`)
+
+    // Email para Supabase Auth: real si se proveyó, sino generado internamente
+    const nombreSlug = input.nombre.trim().toLowerCase().replace(/\s+/g, '_')
+    const authEmail = input.email?.trim() || `${nombreSlug}@gmv2.internal`
+
     // 1. Crear en Supabase Auth
     const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
-        email: input.email,
+        email: authEmail,
         password: input.passwordTemporal,
         email_confirm: true,
     })
@@ -37,8 +51,8 @@ export async function crearUsuario(input: CrearUsuarioInput) {
     // 2. Insertar en tabla usuarios
     const { error: userError } = await adminClient.from("usuarios").insert({
         id: userId,
-        email: input.email,
-        nombre: input.nombre,
+        email: authEmail,
+        nombre: input.nombre.trim(),
         estado: "activo",
         debe_cambiar_password: true,
     })

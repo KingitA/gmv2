@@ -1,44 +1,40 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 
 /**
- * Login para el ERP principal.
- * Autentica con Supabase Auth y verifica que el usuario exista en la tabla `usuarios`.
+ * Login por nombre de usuario + contraseña.
+ * Busca el usuario en la tabla `usuarios` por nombre (case-insensitive),
+ * obtiene el email interno y autentica con Supabase Auth.
  */
-export async function loginUser(email: string, password: string) {
+export async function loginUser(nombreUsuario: string, password: string) {
     const supabase = await createClient()
+    const adminClient = createAdminClient()
 
+    // Buscar usuario por nombre (case-insensitive)
+    const { data: usuario } = await adminClient
+        .from("usuarios")
+        .select("id, email, nombre, estado, debe_cambiar_password")
+        .ilike("nombre", nombreUsuario.trim())
+        .single()
+
+    if (!usuario) {
+        return { success: false, error: "Usuario o contraseña incorrectos" }
+    }
+
+    if (usuario.estado !== "activo") {
+        return { success: false, error: "Tu cuenta está inactiva. Contactá al administrador." }
+    }
+
+    // Autenticar con Supabase Auth usando el email interno del usuario
     const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: usuario.email,
         password,
     })
 
     if (error) {
-        console.error("[Auth] Login error:", error.message)
-        if (error.message.includes("Invalid login credentials")) {
-            return { success: false, error: "Email o contraseña incorrectos" }
-        }
-        return { success: false, error: error.message }
-    }
-
-    // Verificar que el usuario exista en la tabla usuarios del ERP
-    const { data: usuario, error: userError } = await supabase
-        .from("usuarios")
-        .select("id, email, nombre, estado, debe_cambiar_password")
-        .eq("id", data.user.id)
-        .single()
-
-    if (userError || !usuario) {
-        // El usuario existe en Supabase Auth pero no en la tabla usuarios del ERP
-        console.error("[Auth] Usuario no encontrado en tabla usuarios:", userError?.message)
-        await supabase.auth.signOut()
-        return { success: false, error: "Tu cuenta no tiene acceso al sistema. Contactá al administrador." }
-    }
-
-    if (usuario.estado !== "activo") {
-        await supabase.auth.signOut()
-        return { success: false, error: "Tu cuenta está inactiva. Contactá al administrador." }
+        return { success: false, error: "Usuario o contraseña incorrectos" }
     }
 
     // Forzar cambio de contraseña si corresponde
@@ -54,7 +50,7 @@ export async function loginUser(email: string, password: string) {
 
     const roles = rolesData?.map((r: any) => r.roles?.nombre).filter(Boolean) || []
 
-    // Viajante-only (u otros sin módulo activo): no dejar pasar
+    // Sin módulo activo: no dejar pasar
     const erpRoles = ['admin', 'administrativo', 'deposito', 'chofer']
     if (!roles.some(r => erpRoles.includes(r))) {
         await supabase.auth.signOut()
@@ -65,7 +61,6 @@ export async function loginUser(email: string, password: string) {
         success: true,
         user: {
             id: data.user.id,
-            email: data.user.email,
             nombre: usuario.nombre,
             estado: usuario.estado,
             roles,
