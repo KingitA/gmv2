@@ -59,7 +59,7 @@ export async function POST(
       .insert({
         numero_devolucion: numeroDevolucion,
         cliente_id,
-        vendedor_id: auth.user.id,
+        vendedor_id: null,
         pedido_id: pedido_id || null,
         viaje_id: viajeId,
         retira_viajante: true,
