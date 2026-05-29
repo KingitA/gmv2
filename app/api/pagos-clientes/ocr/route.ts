@@ -39,7 +39,7 @@ async function processPaymentOCR(file: File): Promise<{ resultados: OCRResultMet
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurado")
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" })
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" })
 
   const bytes = await file.arrayBuffer()
   const base64 = Buffer.from(bytes).toString("base64")
@@ -58,7 +58,7 @@ CHEQUE:
 - fecha_emision: fecha de emisión (formato YYYY-MM-DD)
 - fecha_cheque: fecha de pago/vencimiento (formato YYYY-MM-DD)
 - monto: importe numérico sin simbolos de moneda
-- cuit_emisor: CUIT del titular del cheque si es visible. Puede aparecer como "CUIT: XX-XXXXXXXX-X", "CT: XX-XXXXXXXX-X", "CT XX-XXXXXXXX-X", o simplemente el número en formato XX-XXXXXXXX-X (11 dígitos con guiones). Extraé el número en formato XX-XXXXXXXX-X.
+- cuit_emisor: CUIT del titular del cheque. BUSCALO CON PRIORIDAD ALTA — es un número de 11 dígitos que puede aparecer en cualquiera de estos formatos: "CUIT: 20-12345678-9", "C.U.I.T.: 20-12345678-9", "CT: 20-12345678-9", "CT 20-12345678-9", o sin guiones como "20123456789". También puede estar en la línea inferior del cheque junto al número de cuenta. Normalmente empieza con 20, 23, 24, 27 (persona física) o 30, 33, 34 (empresa). Devolvé SIEMPRE en formato XX-XXXXXXXX-X con guiones (ej: "20-12345678-9"). Si aparece sin guiones (11 dígitos seguidos), convertilo al formato con guiones.
 - localidad: ciudad/localidad del cheque si es visible
 - color_cheque: "ECHEQ" si es electrónico, sino "BLANCO" (nunca "NEGRO" por OCR)
 
@@ -101,12 +101,20 @@ Devolvé SOLO este JSON:
   const parsed = JSON.parse(jsonMatch[0])
   const resultados: OCRResultMetodo[] = parsed.resultados || []
 
-  // Fallback regex: si un cheque no tiene cuit_emisor, buscar patrón XX-XXXXXXXX-X en el texto crudo
-  const cuitRegex = /\b(\d{2}-\d{8}-\d{1})\b/g
-  const cuits = [...text.matchAll(cuitRegex)].map(m => m[1])
+  // Fallback regex: busca CUIT con guiones O sin guiones (11 dígitos que empiezan con 20/23/24/27/30/33/34)
+  const cuitConGuiones = /\b(\d{2}-\d{8}-\d)\b/g
+  const cuitSinGuiones = /\b((?:20|23|24|27|30|33|34)\d{9})\b/g
+
+  const cuitsConG = [...text.matchAll(cuitConGuiones)].map(m => m[1])
+  const cuitsSinG = [...text.matchAll(cuitSinGuiones)].map(m => {
+    const n = m[1]
+    return `${n.slice(0, 2)}-${n.slice(2, 10)}-${n.slice(10)}`
+  })
+  const todosLosCuits = [...cuitsConG, ...cuitsSinG]
+
   for (const r of resultados) {
-    if (r.tipo === "cheque" && !r.cuit_emisor && cuits.length > 0) {
-      r.cuit_emisor = cuits[0]
+    if (r.tipo === "cheque" && !r.cuit_emisor && todosLosCuits.length > 0) {
+      r.cuit_emisor = todosLosCuits[0]
     }
   }
 
