@@ -94,6 +94,7 @@ export default function ClienteEntregaPage() {
   const [busquedaArticulo, setBusquedaArticulo] = useState("")
   const [resultadosArticulo, setResultadosArticulo] = useState<any[]>([])
   const [guardandoDev, setGuardandoDev] = useState(false)
+  const [devError, setDevError] = useState<string | null>(null)
 
   // Estado de cobro
   const [comprobantesSeleccionados, setComprobantesSeleccionados] = useState<Record<string, number>>({})
@@ -188,26 +189,49 @@ export default function ClienteEntregaPage() {
   }
 
   // ─── Devoluciones ─────────────────────────────────────────────
+
+  // Agrega un artículo buscado por texto (buscar artículo en sheet)
   const agregarItemDevolucion = async (articulo: any) => {
     setBusquedaArticulo("")
     setResultadosArticulo([])
-    const enPedido = data?.pedido?.detalle.find((d) => d.articulo_id === articulo.id)
-    let precio = 0
+    await agregarItemPorArticulo(articulo.id, articulo.sku, articulo.descripcion)
+  }
+
+  // Agrega un artículo directo desde el pedido (swipe)
+  const agregarItemDesdePedido = async (item: ClienteData["pedido"] extends null ? never : NonNullable<ClienteData["pedido"]>["detalle"][0]) => {
+    await agregarItemPorArticulo(item.articulo_id, item.articulos.sku, item.articulos.descripcion, item.precio_final, item.cantidad)
+    setShowDevolucionSheet(true)
+  }
+
+  const agregarItemPorArticulo = async (
+    articuloId: string,
+    sku: string,
+    descripcion: string,
+    precioOverride?: number,
+    cantidadMax?: number
+  ) => {
+    const enPedido = data?.pedido?.detalle.find((d) => d.articulo_id === articuloId)
+    let precio = precioOverride ?? 0
     let origen: "pedido" | "vieja" = "vieja"
+
     if (enPedido) {
-      precio = enPedido.precio_final
+      precio = precioOverride ?? enPedido.precio_final
       origen = "pedido"
-    } else {
-      const res = await fetch(`/api/chofer/articulo/precio-historico?clienteId=${clienteId}&articuloId=${articulo.id}`)
+    } else if (!precioOverride) {
+      const res = await fetch(`/api/chofer/articulo/precio-historico?clienteId=${clienteId}&articuloId=${articuloId}`)
       const d = await res.json()
       precio = d.precio || 0
     }
+
+    // No agregar duplicado — si ya está, no hacer nada
+    if (devItems.some((x) => x.articulo_id === articuloId)) return
+
     setDevItems((prev) => [
       ...prev,
       {
-        articulo_id: articulo.id,
-        sku: articulo.sku,
-        descripcion: articulo.descripcion,
+        articulo_id: articuloId,
+        sku,
+        descripcion,
         cantidad: 1,
         precio_venta_original: precio,
         motivo: "otro",
@@ -220,6 +244,7 @@ export default function ClienteEntregaPage() {
   const guardarDevolucion = async () => {
     if (!devItems.length) return
     setGuardandoDev(true)
+    setDevError(null)
     try {
       const res = await fetch(`/api/chofer/viaje/${viajeId}/devolucion`, {
         method: "POST",
@@ -227,8 +252,18 @@ export default function ClienteEntregaPage() {
         body: JSON.stringify({ cliente_id: clienteId, pedido_id: data?.pedido?.id || null, items: devItems }),
       })
       const d = await res.json()
-      if (d.success) { setDevItems([]); setShowDevolucionSheet(false); cargarDatos() }
-    } finally { setGuardandoDev(false) }
+      if (d.success) {
+        setDevItems([])
+        setShowDevolucionSheet(false)
+        cargarDatos()
+      } else {
+        setDevError(d.error || "Error al registrar la devolución")
+      }
+    } catch {
+      setDevError("Error de conexión. Intentá de nuevo.")
+    } finally {
+      setGuardandoDev(false)
+    }
   }
 
   // ─── Cobro ────────────────────────────────────────────────────
@@ -308,7 +343,42 @@ export default function ClienteEntregaPage() {
       </div>
 
       <div className="p-4 space-y-4 pb-36">
-        {pedido && (
+        {/* Artículos del pedido — swipe izquierda para devolver */}
+        {pedido && !esReadOnly && (
+          <section className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+              <h3 className="font-bold text-gray-700">Pedido #{pedido.numero}</h3>
+              <span className="text-xs text-gray-400">← deslizá para devolver</span>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {pedido.detalle.map((item) => (
+                <SwipeableItem
+                  key={item.id}
+                  onDevolver={() => agregarItemDesdePedido(item)}
+                  disabled={esReadOnly}
+                >
+                  <div className="flex justify-between items-center text-sm px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-800 truncate">{item.articulos.descripcion}</p>
+                      <p className="text-gray-400 text-xs">{item.articulos.sku}</p>
+                    </div>
+                    <div className="text-right ml-3 flex-shrink-0">
+                      <p className="text-gray-500 text-xs">{item.cantidad} × {formatCurrency(item.precio_final)}</p>
+                      <p className="font-bold text-gray-800">{formatCurrency(item.subtotal)}</p>
+                    </div>
+                  </div>
+                </SwipeableItem>
+              ))}
+            </div>
+            <div className="border-t mx-4 mt-1 py-3 flex justify-between font-bold text-sm">
+              <span className="text-gray-700">Total pedido</span>
+              <span>{formatCurrency(pedido.total)}</span>
+            </div>
+          </section>
+        )}
+
+        {/* Pedido en modo lectura (sin swipe) */}
+        {pedido && esReadOnly && (
           <section className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
             <h3 className="font-bold text-gray-700 mb-3">Pedido #{pedido.numero}</h3>
             <div className="space-y-2">
@@ -319,7 +389,7 @@ export default function ClienteEntregaPage() {
                     <p className="text-gray-400 text-xs">{item.articulos.sku}</p>
                   </div>
                   <div className="text-right ml-3 flex-shrink-0">
-                    <p className="text-gray-600">{item.cantidad} × {formatCurrency(item.precio_final)}</p>
+                    <p className="text-gray-500 text-xs">{item.cantidad} × {formatCurrency(item.precio_final)}</p>
                     <p className="font-bold text-gray-800">{formatCurrency(item.subtotal)}</p>
                   </div>
                 </div>
@@ -331,35 +401,47 @@ export default function ClienteEntregaPage() {
           </section>
         )}
 
-        {comprobantes_pendientes.length > 0 && (
+        {/* Saldo pendiente + devoluciones juntos */}
+        {(comprobantes_pendientes.length > 0 || devoluciones.length > 0) && (
           <section className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
-            <h3 className="font-bold text-gray-700 mb-3">Saldo Pendiente</h3>
+            <h3 className="font-bold text-gray-700 mb-3">Saldo y Devoluciones</h3>
             <div className="space-y-2">
+              {/* Comprobantes pendientes (rojo = debe) */}
               {comprobantes_pendientes.map((c) => (
                 <div key={c.id} className="flex justify-between items-center text-sm">
                   <div>
                     <p className="font-medium text-gray-700">{c.tipo_comprobante} {c.numero_comprobante}</p>
                     <p className="text-gray-400 text-xs">{new Date(c.fecha).toLocaleDateString("es-AR")}</p>
                   </div>
-                  <p className="font-bold text-red-600">{formatCurrency(c.saldo_pendiente)}</p>
+                  <p className="font-bold text-red-600">−{formatCurrency(c.saldo_pendiente)}</p>
                 </div>
               ))}
-            </div>
-          </section>
-        )}
 
-        {devoluciones.length > 0 && (
-          <section className="bg-white rounded-2xl shadow-sm border border-amber-200 p-4">
-            <h3 className="font-bold text-amber-700 mb-3">Devoluciones Registradas</h3>
-            {devoluciones.map((dev: any) => (
-              <div key={dev.id} className="flex justify-between items-center py-2">
-                <div>
-                  <p className="font-medium text-gray-700">{dev.numero_devolucion}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${dev.estado === "pendiente" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}`}>{dev.estado}</span>
+              {/* Devoluciones (verde = crédito a favor) */}
+              {devoluciones.map((dev: any) => (
+                <div key={dev.id} className="flex justify-between items-center text-sm bg-green-50 rounded-xl px-3 py-2">
+                  <div>
+                    <p className="font-medium text-green-800">↩ Devolución {dev.numero_devolucion}</p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      dev.estado === "pendiente" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+                    }`}>
+                      {dev.estado === "pendiente" ? "pendiente confirmación" : "confirmada"}
+                    </span>
+                  </div>
+                  <p className="font-bold text-green-600">+{formatCurrency(dev.monto_total)}</p>
                 </div>
-                <p className="font-bold text-green-600">+{formatCurrency(dev.monto_total)}</p>
-              </div>
-            ))}
+              ))}
+
+              {/* Neto */}
+              {comprobantes_pendientes.length > 0 && devoluciones.length > 0 && (
+                <div className="border-t pt-2 flex justify-between font-bold text-sm">
+                  <span className="text-gray-700">Neto a cobrar</span>
+                  <span className={resumen.total_a_cobrar > 0 ? "text-red-600" : "text-green-600"}>
+                    {formatCurrency(resumen.total_a_cobrar)}
+                  </span>
+                </div>
+              )}
+            </div>
           </section>
         )}
 
@@ -393,11 +475,17 @@ export default function ClienteEntregaPage() {
           <div className="bg-white rounded-t-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white px-5 py-4 border-b flex items-center justify-between">
               <h2 className="text-xl font-bold">Registrar Devolución</h2>
-              <button onClick={() => setShowDevolucionSheet(false)} className="text-gray-400 text-2xl">×</button>
+              <button onClick={() => { setShowDevolucionSheet(false); setDevError(null) }} className="text-gray-400 text-2xl">×</button>
             </div>
             <div className="p-5 space-y-5">
+              {/* Error de API */}
+              {devError && (
+                <div className="bg-red-50 border border-red-300 rounded-xl px-4 py-3 text-red-700 text-sm font-medium">
+                  ⚠️ {devError}
+                </div>
+              )}
               <div>
-                <label className="text-sm font-medium text-gray-600 mb-2 block">Buscar artículo</label>
+                <label className="text-sm font-medium text-gray-600 mb-2 block">Buscar artículo adicional</label>
                 <input type="text" value={busquedaArticulo} onChange={(e) => setBusquedaArticulo(e.target.value)} placeholder="SKU o descripción..." className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:border-blue-500 focus:outline-none" />
                 {resultadosArticulo.length > 0 && (
                   <div className="mt-2 border border-gray-200 rounded-xl overflow-hidden">
@@ -907,6 +995,86 @@ function BcraBadge({ bcra }: { bcra: BcraResult }) {
         <p className="font-bold text-red-700">Situación {sit} — {info.label}</p>
         {bcra.denominacion && <p className="text-red-600 text-sm font-medium mt-1">{bcra.denominacion}</p>}
         <p className="text-red-500 text-xs mt-1">El emisor tiene antecedentes negativos en el BCRA.</p>
+      </div>
+    </div>
+  )
+}
+
+// ─── SwipeableItem ────────────────────────────────────────────
+// Deslizá izquierda para revelar el botón "Devolver"
+
+function SwipeableItem({
+  children,
+  onDevolver,
+  disabled,
+}: {
+  children: React.ReactNode
+  onDevolver: () => void
+  disabled?: boolean
+}) {
+  const [offset, setOffset] = useState(0)
+  const [revealed, setRevealed] = useState(false)
+  const startX = useRef(0)
+  const THRESHOLD = 70 // px para revelar
+  const BUTTON_W = 90  // px del botón
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (disabled) return
+    startX.current = e.touches[0].clientX
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (disabled) return
+    const dx = e.touches[0].clientX - startX.current
+    if (dx < 0) setOffset(Math.max(dx, -BUTTON_W))
+  }
+
+  const handleTouchEnd = () => {
+    if (disabled) return
+    if (offset < -THRESHOLD) {
+      setOffset(-BUTTON_W)
+      setRevealed(true)
+    } else {
+      setOffset(0)
+      setRevealed(false)
+    }
+  }
+
+  const handleDevolver = () => {
+    setOffset(0)
+    setRevealed(false)
+    onDevolver()
+  }
+
+  return (
+    <div className="relative overflow-hidden">
+      {/* Botón detrás (rojo) */}
+      <div
+        className="absolute right-0 top-0 bottom-0 flex items-center justify-center bg-amber-500"
+        style={{ width: BUTTON_W }}
+      >
+        <button
+          onClick={handleDevolver}
+          className="flex flex-col items-center justify-center w-full h-full text-white"
+        >
+          <span className="text-xl">↩</span>
+          <span className="text-xs font-bold">Devolver</span>
+        </button>
+      </div>
+
+      {/* Contenido deslizable */}
+      <div
+        className="relative bg-white transition-transform"
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: offset === 0 || offset === -BUTTON_W ? "transform 0.2s ease" : "none",
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onClick={() => { if (revealed) { setOffset(0); setRevealed(false) } }}
+      >
+        {children}
       </div>
     </div>
   )
