@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback, useRef } from "react"
+import { useEffect, useState, useCallback, useRef, memo } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 
@@ -689,6 +689,25 @@ function CobroSheet({
   )
 }
 
+// ─── Situaciones BCRA ─────────────────────────────────────────
+
+const SITUACIONES_BCRA: Record<number, { label: string; color: string }> = {
+  1: { label: "Normal", color: "green" },
+  2: { label: "Riesgo bajo / Seguimiento especial", color: "yellow" },
+  3: { label: "Riesgo medio / Con problemas", color: "orange" },
+  4: { label: "Alto riesgo de insolvencia", color: "red" },
+  5: { label: "Irrecuperable", color: "red" },
+  6: { label: "Irrecuperable por disposición técnica", color: "red" },
+}
+
+interface BcraResult {
+  situacion_max: number
+  denominacion: string | null
+  apto: boolean
+  sin_antecedentes: boolean
+  error?: string
+}
+
 // ─── Card de método de pago ────────────────────────────────────
 
 function MetodoPagoCard({
@@ -703,10 +722,40 @@ function MetodoPagoCard({
   onFoto: (files: FileList) => void
 }) {
   const fotoRef = useRef<HTMLInputElement>(null)
+  const [bcra, setBcra] = useState<BcraResult | null>(null)
+  const [consultandoBcra, setConsultandoBcra] = useState(false)
+
+  // Consulta BCRA automática al tener CUIT completo (con debounce)
+  useEffect(() => {
+    if (metodo.tipo !== "cheque") return
+    const cuitLimpio = (metodo.cuit_emisor || "").replace(/\D/g, "")
+    if (cuitLimpio.length < 10) { setBcra(null); return }
+
+    const timer = setTimeout(async () => {
+      setConsultandoBcra(true)
+      setBcra(null)
+      try {
+        const res = await fetch(`/api/bcra/deudor/${cuitLimpio}`)
+        const d = await res.json()
+        if (d.error) setBcra({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: d.error })
+        else setBcra(d)
+      } catch {
+        setBcra({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: "Sin conexión con BCRA" })
+      } finally {
+        setConsultandoBcra(false)
+      }
+    }, 800)
+
+    return () => clearTimeout(timer)
+  }, [metodo.cuit_emisor, metodo.tipo])
 
   return (
-    <div className="bg-gray-50 rounded-2xl p-4 space-y-3 border border-gray-200">
-      {/* Tipo + botón foto + quitar */}
+    <div className={`rounded-2xl p-4 space-y-3 border-2 transition-colors ${
+      metodo.tipo === "cheque" && bcra && !bcra.apto
+        ? "bg-red-50 border-red-400"
+        : "bg-gray-50 border-gray-200"
+    }`}>
+      {/* Tipo + quitar */}
       <div className="flex items-center gap-2">
         <div className="flex gap-1 flex-1 flex-wrap">
           {(["efectivo", "transferencia", "cheque"] as const).map((t) => (
@@ -760,9 +809,34 @@ function MetodoPagoCard({
               <input type="date" value={metodo.fecha_cheque || ""} onChange={(e) => onChange({ fecha_cheque: e.target.value })} className="w-full border-2 border-gray-200 rounded-xl px-3 py-2" />
             </div>
           </div>
-          <input type="text" placeholder="CUIT emisor (opcional)" value={metodo.cuit_emisor || ""} onChange={(e) => onChange({ cuit_emisor: e.target.value })} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base" />
 
-          {/* Resumen del cheque si está completo */}
+          {/* CUIT — campo clave que dispara la consulta BCRA */}
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">CUIT emisor</label>
+            <input
+              type="text"
+              placeholder="XX-XXXXXXXX-X"
+              value={metodo.cuit_emisor || ""}
+              onChange={(e) => onChange({ cuit_emisor: e.target.value })}
+              className={`w-full border-2 rounded-xl px-4 py-3 text-base font-mono ${
+                bcra && !bcra.apto ? "border-red-400 bg-red-50" : "border-gray-200"
+              }`}
+            />
+          </div>
+
+          {/* ─── Resultado BCRA ─── */}
+          {consultandoBcra && (
+            <div className="flex items-center gap-2 px-4 py-3 bg-gray-100 rounded-xl text-sm text-gray-500">
+              <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+              Consultando BCRA...
+            </div>
+          )}
+
+          {!consultandoBcra && bcra && (
+            <BcraBadge bcra={bcra} />
+          )}
+
+          {/* Resumen del cheque */}
           {metodo.banco_emisor && metodo.numero_cheque && (
             <div className="bg-white rounded-xl px-3 py-2 text-xs text-gray-500 border border-gray-200">
               {metodo.banco_emisor} · #{metodo.numero_cheque}
@@ -787,6 +861,52 @@ function MetodoPagoCard({
           <input type="text" placeholder="Número de comprobante / referencia" value={metodo.numero_comprobante || ""} onChange={(e) => onChange({ numero_comprobante: e.target.value })} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base" />
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Badge de resultado BCRA ──────────────────────────────────
+
+function BcraBadge({ bcra }: { bcra: BcraResult }) {
+  if (bcra.error) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-3 bg-gray-100 rounded-xl border border-gray-300">
+        <span className="text-gray-500 text-lg">⚠️</span>
+        <div>
+          <p className="text-sm font-medium text-gray-600">No se pudo consultar BCRA</p>
+          <p className="text-xs text-gray-400">{bcra.error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  const sit = bcra.situacion_max
+  const info = SITUACIONES_BCRA[sit] || { label: "Desconocida", color: "gray" }
+
+  if (bcra.apto) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-3 bg-green-50 rounded-xl border-2 border-green-400">
+        <span className="text-3xl">✅</span>
+        <div className="flex-1">
+          <p className="font-bold text-green-800 text-base">Apto — Situación {sit}</p>
+          <p className="text-green-600 text-sm">{info.label}</p>
+          {bcra.denominacion && <p className="text-green-700 text-xs font-medium mt-0.5">{bcra.denominacion}</p>}
+          {bcra.sin_antecedentes && <p className="text-green-500 text-xs">Sin antecedentes en Central de Deudores</p>}
+        </div>
+      </div>
+    )
+  }
+
+  // Situación 2 o superior — NO aceptar cheque
+  return (
+    <div className="flex items-start gap-3 px-4 py-4 bg-red-50 rounded-xl border-2 border-red-500">
+      <span className="text-3xl mt-0.5">🚫</span>
+      <div className="flex-1">
+        <p className="font-bold text-red-800 text-lg">NO ACEPTAR CHEQUE</p>
+        <p className="font-bold text-red-700">Situación {sit} — {info.label}</p>
+        {bcra.denominacion && <p className="text-red-600 text-sm font-medium mt-1">{bcra.denominacion}</p>}
+        <p className="text-red-500 text-xs mt-1">El emisor tiene antecedentes negativos en el BCRA.</p>
+      </div>
     </div>
   )
 }
