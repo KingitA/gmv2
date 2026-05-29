@@ -60,6 +60,7 @@ export async function POST(
         numero_devolucion: numeroDevolucion,
         cliente_id,
         vendedor_id: null,
+        creado_por: auth.user.id,
         pedido_id: pedido_id || null,
         viaje_id: viajeId,
         retira_viajante: true,
