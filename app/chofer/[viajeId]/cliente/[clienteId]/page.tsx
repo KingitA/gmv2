@@ -725,8 +725,8 @@ function MetodoPagoCard({
   const [bcra, setBcra] = useState<BcraResult | null>(null)
   const [consultandoBcra, setConsultandoBcra] = useState(false)
 
-  // Consulta BCRA directamente desde el browser (la BCRA bloquea IPs de datacenters cloud).
-  // La API pública de BCRA tiene Access-Control-Allow-Origin: * → CORS ok desde el cliente.
+  // Consulta via proxy Edge (/api/bcra/deudor/[cuit]).
+  // Edge Runtime usa IPs de Vercel Edge, distintas a AWS Lambda que el BCRA bloqueaba.
   useEffect(() => {
     if (metodo.tipo !== "cheque") return
     const cuitLimpio = (metodo.cuit_emisor || "").replace(/\D/g, "")
@@ -736,39 +736,12 @@ function MetodoPagoCard({
       setConsultandoBcra(true)
       setBcra(null)
       try {
-        const res = await fetch(
-          `https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/${cuitLimpio}`,
-          { headers: { Accept: "application/json" } }
-        )
-
-        if (res.status === 404) {
-          setBcra({ situacion_max: 1, denominacion: null, apto: true, sin_antecedentes: true })
-          return
-        }
-        if (!res.ok) {
-          setBcra({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: `Error BCRA: ${res.status}` })
-          return
-        }
-
-        const data = await res.json()
-        const results = data.results
-        let situacionMax = 1
-
-        for (const periodo of results?.periodos || []) {
-          for (const entidad of periodo.entidades || []) {
-            const sit = Number(entidad.situacion)
-            if (sit > situacionMax) situacionMax = sit
-          }
-        }
-
-        setBcra({
-          situacion_max: situacionMax,
-          denominacion: results?.denominacion || null,
-          apto: situacionMax === 1,
-          sin_antecedentes: false,
-        })
+        const res = await fetch(`/api/bcra/deudor/${cuitLimpio}`)
+        const d = await res.json()
+        if (d.error) setBcra({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: d.error })
+        else setBcra(d)
       } catch {
-        setBcra({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: "No se pudo conectar con BCRA" })
+        setBcra({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: "No se pudo conectar" })
       } finally {
         setConsultandoBcra(false)
       }
