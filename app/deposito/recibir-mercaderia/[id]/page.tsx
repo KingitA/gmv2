@@ -177,13 +177,40 @@ export default function RecibirMercaderiaDetallePage() {
     } finally { setSaving(false) }
   }
 
+  const [verDocumentos, setVerDocumentos] = useState(false)
+  const [tipoDocDeposito, setTipoDocDeposito] = useState<"remito"|"factura"|"foto">("remito")
+
   const subirFoto = async (file:File) => {
     if (!recepcion) return; setSubiendo(true)
     try {
-      const fd = new FormData(); fd.append("file",file); fd.append("recepcion_id",recepcion.id); fd.append("tipo_documento","remito")
-      const r = await fetch("/api/deposito/recepciones/documento",{method:"POST",body:fd})
-      if (r.ok) { const doc=await r.json(); setDocumentos(prev=>[...prev,doc]); showToast("📎 Foto adjuntada","ok") }
+      const fd = new FormData()
+      fd.append("file", file)
+      fd.append("tipo_documento", tipoDocDeposito)
+      const r = await fetch(`/api/recepciones/${recepcion.id}/ocr`, {method:"POST", body:fd})
+      const data = await r.json()
+      if (r.ok) {
+        setDocumentos(prev=>[...prev, data.document])
+        const cnt = data.ocr_processing_results?.length || 0
+        showToast(cnt > 0 ? `📷 OCR: ${cnt} artículo${cnt>1?"s":""} detectados` : "📷 Foto adjuntada","ok")
+      } else {
+        showToast(data.error || "Error al procesar","err")
+      }
     } finally { setSubiendo(false) }
+  }
+
+  const eliminarDocumentoDeposito = async (docId:string) => {
+    if (!recepcion) return
+    const r = await fetch(`/api/recepciones/${recepcion.id}/ocr`, {
+      method:"DELETE",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({document_id: docId})
+    })
+    if (r.ok) {
+      setDocumentos(prev=>prev.filter(d=>d.id!==docId))
+      showToast("Documento eliminado","ok")
+    } else {
+      showToast("Error al eliminar","err")
+    }
   }
 
   const finalizarRecepcion = async () => {
@@ -245,6 +272,72 @@ export default function RecibirMercaderiaDetallePage() {
         style={{ background:C.white, color:C.sub, fontWeight:600, padding:16, borderRadius:18, border:`1.5px solid ${C.border}`, cursor:"pointer", fontSize:16 }}>
         ← Volver al scanner
       </button>
+    </div>
+  )
+
+  // ── PANEL DOCUMENTOS ──
+  if (verDocumentos) return (
+    <div style={{ background:C.bg, minHeight:"calc(100dvh - 64px)", padding:"16px 14px" }}>
+      {Toast}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+        <div style={{ fontSize:18, fontWeight:800, color:C.text }}>Documentos ({documentos.length})</div>
+        <button onClick={()=>setVerDocumentos(false)} style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"8px 16px", fontSize:14, fontWeight:600, cursor:"pointer" }}>← Volver</button>
+      </div>
+      <div style={{ marginBottom:14, display:"flex", gap:8 }}>
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{if(e.target.files?.[0])subirFoto(e.target.files[0]); e.target.value=""}} />
+        <select value={tipoDocDeposito} onChange={e=>setTipoDocDeposito(e.target.value as any)}
+          style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"10px 12px", fontSize:13, color:C.text, fontWeight:600, flex:1 }}>
+          <option value="remito">Remito</option>
+          <option value="factura">Factura</option>
+          <option value="foto">Foto</option>
+        </select>
+        <button onClick={()=>fileRef.current?.click()} disabled={subiendo}
+          style={{ background:C.green, color:"#fff", border:"none", borderRadius:14, padding:"10px 20px", fontSize:15, fontWeight:700, cursor:"pointer", opacity:subiendo?0.6:1 }}>
+          {subiendo?"⏳ OCR...":"📷 Foto"}
+        </button>
+      </div>
+      {documentos.length===0&&(
+        <div style={{ textAlign:"center", padding:"40px 0", color:C.light }}>
+          <div style={{ fontSize:48 }}>📎</div>
+          <div style={{ fontSize:15, marginTop:10 }}>No hay documentos adjuntos</div>
+          <div style={{ fontSize:13, marginTop:6 }}>Tomá una foto de la factura, remito o comprobante</div>
+        </div>
+      )}
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {documentos.filter(Boolean).map((doc:any)=>{
+          const nro = doc.datos_ocr?.comprobante?.numero_comprobante
+          const total = doc.datos_ocr?.comprobante?.total_factura
+          const isImg = doc.url_imagen && !doc.url_imagen.includes('.pdf')
+          return (
+            <div key={doc.id} style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:18, padding:"14px 16px", display:"flex", gap:12, alignItems:"center" }}>
+              <div style={{ fontSize:32 }}>{isImg?"🖼️":"📄"}</div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {doc.nombre_archivo || doc.tipo_documento || "Documento"}
+                </div>
+                <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:11, background:"#e0f2fe", color:"#0369a1", padding:"2px 8px", borderRadius:999, fontWeight:600 }}>
+                    {doc.tipo_documento}
+                  </span>
+                  {nro&&<span style={{ fontSize:11, color:C.sub }}>{nro}</span>}
+                  {total&&<span style={{ fontSize:11, color:C.sub }}>${Number(total).toFixed(2)}</span>}
+                  {doc.procesado&&<span style={{ fontSize:11, background:"#dcfce7", color:"#15803d", padding:"2px 8px", borderRadius:999, fontWeight:600 }}>OCR ✓</span>}
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:6 }}>
+                <a href={doc.url_imagen} target="_blank" rel="noopener noreferrer"
+                  style={{ background:"#f0f9ff", border:"1.5px solid #bae6fd", borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer", textDecoration:"none" }}>
+                  👁️
+                </a>
+                <button onClick={()=>eliminarDocumentoDeposito(doc.id)}
+                  style={{ background:C.redL, border:`1.5px solid ${C.redB}`, borderRadius:10, padding:"8px 10px", fontSize:16, cursor:"pointer" }}>
+                  🗑️
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 
@@ -333,11 +426,25 @@ export default function RecibirMercaderiaDetallePage() {
             <div style={{ color:C.green, fontWeight:600, fontSize:14, marginTop:3 }}>🏭 {orden?.proveedores?.nombre}</div>
           </div>
           <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8 }}>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{if(e.target.files?.[0])subirFoto(e.target.files[0])}} />
-            <button onClick={()=>fileRef.current?.click()} disabled={subiendo}
-              style={{ background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:14, padding:"8px 14px", display:"flex", alignItems:"center", gap:6, cursor:"pointer", fontSize:14, fontWeight:700, color:"#1d4ed8" }}>
-              {subiendo?"⏳":"📷"} {documentos.length>0?`${documentos.length} foto${documentos.length>1?"s":""}`:"Foto"}
-            </button>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{if(e.target.files?.[0])subirFoto(e.target.files[0]); e.target.value=""}} />
+            <div style={{ display:"flex", gap:6 }}>
+              <select value={tipoDocDeposito} onChange={e=>setTipoDocDeposito(e.target.value as any)}
+                style={{ background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:10, padding:"6px 8px", fontSize:12, color:"#1d4ed8", fontWeight:600 }}>
+                <option value="remito">Remito</option>
+                <option value="factura">Factura</option>
+                <option value="foto">Foto</option>
+              </select>
+              <button onClick={()=>fileRef.current?.click()} disabled={subiendo}
+                style={{ background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:14, padding:"8px 14px", display:"flex", alignItems:"center", gap:6, cursor:"pointer", fontSize:14, fontWeight:700, color:"#1d4ed8" }}>
+                {subiendo?"⏳":"📷"} {documentos.length>0?`(${documentos.length})`:""}
+              </button>
+              {documentos.length>0&&(
+                <button onClick={()=>setVerDocumentos(true)}
+                  style={{ background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:12, padding:"8px 12px", fontSize:12, fontWeight:700, color:"#1d4ed8", cursor:"pointer" }}>
+                  📎 {documentos.length}
+                </button>
+              )}
+            </div>
             {faltantesList.length>0&&(
               <button onClick={()=>setVistaFaltantes(true)} style={{ background:C.redL, border:`1.5px solid ${C.redB}`, borderRadius:12, padding:"7px 14px", fontSize:13, fontWeight:700, color:C.red, cursor:"pointer" }}>
                 ✕ {faltantesList.length} faltante{faltantesList.length>1?"s":""}

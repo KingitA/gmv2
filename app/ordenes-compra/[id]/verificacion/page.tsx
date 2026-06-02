@@ -7,9 +7,14 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, FileText, CreditCard } from "lucide-react"
+import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, FileText, CreditCard, Scale } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface CompData {
     id: string
@@ -42,8 +47,23 @@ export default function VerificacionOCPage() {
     const [rows, setRows] = useState<VerRow[]>([])
     const [comprobantes, setComprobantes] = useState<CompData[]>([])
     const [loading, setLoading] = useState(true)
+    const [recepcionId, setRecepcionId] = useState<string | null>(null)
+    const [transportes, setTransportes] = useState<any[]>([])
+
+    // Resolution dialog state
+    const [resolviendoRow, setResolviendoRow] = useState<VerRow | null>(null)
+    const [resolucionTipo, setResolucionTipo] = useState<'mercaderia' | 'precio'>('mercaderia')
+    const [resolucionAccion, setResolucionAccion] = useState<'A' | 'B' | 'C'>('A')
+    const [resolucionTransporte, setResolucionTransporte] = useState<string>('')
+    const [resolucionDesc, setResolucionDesc] = useState<string>('')
+    const [resolviendoItems, setResolviendoItems] = useState<Set<string>>(new Set())
+    const [resoluciones, setResoluciones] = useState<Record<string, string>>({}) // articulo_id → destino
 
     useEffect(() => { if (ordenId) loadAll() }, [ordenId])
+    useEffect(() => {
+        supabase.from('transportes').select('id, nombre').eq('activo', true).order('nombre')
+            .then(({ data }) => setTransportes(data || []))
+    }, [])
 
     async function loadAll() {
         setLoading(true)
@@ -77,11 +97,13 @@ export default function VerificacionOCPage() {
 
         const { data: recepciones } = await supabase
             .from("recepciones").select("id").eq("orden_compra_id", ordenId)
+            .order("created_at", { ascending: false })
 
         let recItems: any[] = []
         if (recepciones && recepciones.length > 0) {
+            setRecepcionId(recepciones[0].id)
             const { data } = await supabase
-                .from("recepciones_items").select("*")
+                .from("recepciones_items").select("*, cantidad_diferencia_destino")
                 .in("recepcion_id", recepciones.map(r => r.id))
             recItems = data || []
         }
@@ -171,18 +193,57 @@ export default function VerificacionOCPage() {
         alert("Precio actualizado")
     }
 
-    async function enviarDifCC(row: VerRow) {
-        if (!orden) return
-        const diff = row.cant_total_facturada - row.cant_recibida
-        const monto = diff * row.precio_oc
-        await supabase.from("cuenta_corriente_proveedores").insert({
-            proveedor_id: orden.proveedor_id,
-            tipo_movimiento: "ajuste_precio",
-            monto, descripcion: `Ajuste ${row.sku} — OC ${orden.numero_orden}`,
-            referencia_id: ordenId, referencia_tipo: "orden_compra",
-            fecha: new Date().toISOString(),
+    function abrirResolucion(row: VerRow) {
+        setResolviendoRow(row)
+        setResolucionTipo('mercaderia')
+        setResolucionAccion('A')
+        setResolucionTransporte(transportes[0]?.id || '')
+        setResolucionDesc('')
+    }
+
+    async function confirmarResolucion() {
+        if (!resolviendoRow || !recepcionId) return
+
+        // Find the recepciones_item for this articulo
+        const { data: recItems } = await supabase
+            .from('recepciones_items')
+            .select('id, cantidad_oc, cantidad_fisica')
+            .eq('recepcion_id', recepcionId)
+            .eq('articulo_id', resolviendoRow.articulo_id)
+            .maybeSingle()
+
+        if (!recItems) {
+            alert('No se encontró el ítem en la recepción')
+            setResolviendoRow(null)
+            return
+        }
+
+        const cantFaltante = resolviendoRow.cant_oc - resolviendoRow.cant_recibida
+
+        const decision = {
+            item_id: recItems.id,
+            tipo: resolucionTipo,
+            accion: resolucionAccion,
+            transporte_id: resolucionAccion === 'B' ? resolucionTransporte : undefined,
+            valor_real: cantFaltante,
+            descripcion: resolucionDesc || undefined,
+        }
+
+        const res = await fetch(`/api/recepciones/${recepcionId}/cerrar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ decisions: [decision] }),
         })
-        alert(`Ajuste de ${formatCurrency(monto)} enviado a CC`)
+
+        const data = await res.json()
+        if (!res.ok) {
+            alert(data.error || 'Error al resolver')
+            return
+        }
+
+        const destino = resolucionAccion === 'A' ? 'empresa' : resolucionAccion === 'B' ? 'transporte' : 'proveedor'
+        setResoluciones(prev => ({ ...prev, [resolviendoRow.articulo_id]: destino }))
+        setResolviendoRow(null)
     }
 
     async function finalizarOC() {
@@ -291,6 +352,90 @@ export default function VerificacionOCPage() {
                 </Card>
             )}
 
+            {/* ── DIALOG RESOLUCIÓN FALTANTES ── */}
+            <Dialog open={!!resolviendoRow} onOpenChange={open => !open && setResolviendoRow(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Scale className="h-5 w-5 text-orange-500" />
+                            Resolver diferencia
+                        </DialogTitle>
+                    </DialogHeader>
+                    {resolviendoRow && (
+                        <div className="space-y-4 py-2">
+                            <div className="p-3 bg-muted rounded-lg text-sm">
+                                <p className="font-semibold truncate">{resolviendoRow.descripcion}</p>
+                                <p className="text-muted-foreground font-mono text-xs mt-1">{resolviendoRow.sku}</p>
+                                <div className="flex gap-4 mt-2 text-xs">
+                                    <span>OC: <strong>{resolviendoRow.cant_oc}</strong></span>
+                                    <span>Recibido: <strong>{resolviendoRow.cant_recibida}</strong></span>
+                                    <span className="text-orange-600">Faltante: <strong>{resolviendoRow.cant_oc - resolviendoRow.cant_recibida}</strong></span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Tipo de diferencia</Label>
+                                <Select value={resolucionTipo} onValueChange={(v: any) => setResolucionTipo(v)}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="mercaderia">Diferencia de mercadería (cantidad)</SelectItem>
+                                        <SelectItem value="precio">Diferencia de precio</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>¿A quién se imputa?</Label>
+                                <div className="grid gap-2">
+                                    {[
+                                        { value: 'A', label: '↩ Empresa absorbe', desc: 'Se desestima la diferencia, sin movimiento en cuentas', color: 'border-gray-300' },
+                                        { value: 'B', label: '🚚 Transporte', desc: 'Se registra en la cuenta corriente del transporte', color: 'border-blue-300' },
+                                        { value: 'C', label: '🏭 Proveedor', desc: 'Se genera devolución y movimiento en CC proveedor', color: 'border-red-300' },
+                                    ].map(opt => (
+                                        <button key={opt.value}
+                                            onClick={() => setResolucionAccion(opt.value as any)}
+                                            className={`text-left p-3 rounded-lg border-2 transition-colors ${resolucionAccion === opt.value ? opt.color + ' bg-muted' : 'border-muted hover:border-muted-foreground/30'}`}>
+                                            <div className="font-semibold text-sm">{opt.label}</div>
+                                            <div className="text-xs text-muted-foreground mt-0.5">{opt.desc}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {resolucionAccion === 'B' && (
+                                <div className="space-y-2">
+                                    <Label>Transporte responsable</Label>
+                                    <Select value={resolucionTransporte} onValueChange={setResolucionTransporte}>
+                                        <SelectTrigger><SelectValue placeholder="Seleccionar transporte..." /></SelectTrigger>
+                                        <SelectContent>
+                                            {transportes.map(t => (
+                                                <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {transportes.length === 0 && (
+                                        <Alert><AlertDescription className="text-xs">No hay transportes activos cargados en el sistema.</AlertDescription></Alert>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="space-y-2">
+                                <Label>Observaciones (opcional)</Label>
+                                <Textarea value={resolucionDesc} onChange={e => setResolucionDesc(e.target.value)}
+                                    placeholder="Detalle adicional..." rows={2} />
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setResolviendoRow(null)}>Cancelar</Button>
+                        <Button onClick={confirmarResolucion}
+                            disabled={resolucionAccion === 'B' && !resolucionTransporte}>
+                            Confirmar resolución
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Card>
                 <CardContent className="p-0 overflow-x-auto">
                     <Table>
@@ -371,12 +516,18 @@ export default function VerificacionOCPage() {
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            {hasDiff && (
-                                                <Button variant="outline" size="sm" className="text-xs h-7 text-orange-600"
-                                                    onClick={() => enviarDifCC(row)}>
-                                                    Dif. a CC
+                                            {hasDiff && resoluciones[row.articulo_id] ? (
+                                                <Badge variant="outline" className="text-xs text-green-700 border-green-300">
+                                                    {resoluciones[row.articulo_id] === 'empresa' ? '↩ Empresa' :
+                                                     resoluciones[row.articulo_id] === 'transporte' ? '🚚 Transporte' :
+                                                     '🏭 Proveedor'}
+                                                </Badge>
+                                            ) : hasDiff ? (
+                                                <Button variant="outline" size="sm" className="text-xs h-7 text-orange-600 gap-1"
+                                                    onClick={() => abrirResolucion(row)}>
+                                                    <Scale className="h-3 w-3" /> Resolver
                                                 </Button>
-                                            )}
+                                            ) : null}
                                         </TableCell>
                                     </TableRow>
                                 )

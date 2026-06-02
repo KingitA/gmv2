@@ -280,6 +280,18 @@ export async function DELETE(
             return NextResponse.json({ error: "Document not found" }, { status: 404 });
         }
 
+        // Delete from Storage if storage_path is known
+        const storagePath = doc.storage_path;
+        if (!storagePath && doc.url_imagen) {
+            // Try to infer path from URL: extract everything after /comprobantes/
+            const match = doc.url_imagen.match(/\/comprobantes\/(.+)$/);
+            if (match) {
+                await supabase.storage.from("comprobantes").remove([match[1]]);
+            }
+        } else if (storagePath) {
+            await supabase.storage.from("comprobantes").remove([storagePath]);
+        }
+
         if (doc.datos_ocr && doc.datos_ocr.items) {
             await revertOCRData(supabase, recepcion_id, doc.datos_ocr);
         }

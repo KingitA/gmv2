@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,10 +8,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Plus, Trash2, Edit, Save, X } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Edit, Save, X, Upload, FileText, FileImage, Loader2, Eye, CheckCircle2 } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+
+const TIPO_DOC_LABELS: Record<string, string> = {
+  factura: 'Factura', remito: 'Remito', adquisicion: 'Adquisición',
+  nota_credito: 'Nota de Crédito', foto: 'Foto', otro: 'Otro'
+}
 
 export default function CargarComprobantesPage() {
   const supabase = createClient()
@@ -23,6 +30,15 @@ export default function CargarComprobantesPage() {
   const [comprobantes, setComprobantes] = useState<any[]>([])
   const [mostrarFormulario, setMostrarFormulario] = useState(false)
   const [editandoId, setEditandoId] = useState<string | null>(null)
+
+  // OCR documents state
+  const [documentos, setDocumentos] = useState<any[]>([])
+  const [subiendoDocumento, setSubiendoDocumento] = useState(false)
+  const [tipoDocumento, setTipoDocumento] = useState<string>('factura')
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [ultimoOCR, setUltimoOCR] = useState<any>(null)
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Formulario
   const [tipoComprobante, setTipoComprobante] = useState<string>("FA")
@@ -62,6 +78,7 @@ export default function CargarComprobantesPage() {
   useEffect(() => {
     loadOrden()
     loadComprobantes()
+    loadDocumentos()
   }, [ordenId])
 
   useEffect(() => {
@@ -88,6 +105,88 @@ export default function CargarComprobantesPage() {
       .order("fecha_comprobante", { ascending: false })
 
     if (data) setComprobantes(data)
+  }
+
+  const loadDocumentos = async () => {
+    try {
+      const res = await fetch(`/api/ordenes-compra/${ordenId}/documentos`)
+      if (res.ok) {
+        const data = await res.json()
+        setDocumentos(data.documentos || [])
+      }
+    } catch (e) {
+      console.error('[Documentos] Error cargando:', e)
+    }
+  }
+
+  const subirDocumento = useCallback(async (file: File) => {
+    setSubiendoDocumento(true)
+    setUploadError(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('tipo_documento', tipoDocumento)
+      const res = await fetch(`/api/ordenes-compra/${ordenId}/documentos`, { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) {
+        setUploadError(data.error || 'Error al subir el archivo')
+        return
+      }
+      setDocumentos(prev => [data.documento, ...prev])
+      setUltimoOCR(data.ocr)
+      // Pre-fill comprobante form if OCR extracted metadata
+      if (data.ocr?.comprobante?.numero_comprobante) {
+        setNumeroComprobante(data.ocr.comprobante.numero_comprobante)
+      }
+      if (data.ocr?.comprobante?.fecha) {
+        setFechaComprobante(data.ocr.comprobante.fecha)
+      }
+      if (data.ocr?.comprobante?.total_factura) {
+        setTotalFacturaDeclarado(data.ocr.comprobante.total_factura)
+      }
+      if (data.ocr?.comprobante?.tipo_comprobante) {
+        const tipoMap: Record<string, string> = {
+          FA: 'FA', FB: 'FB', FC: 'FC', Remito: 'Adquisicion', Adquisicion: 'Adquisicion', NC: 'NC', ND: 'NC'
+        }
+        const tipo = tipoMap[data.ocr.comprobante.tipo_comprobante]
+        if (tipo) setTipoComprobante(tipo)
+      }
+      setMostrarFormulario(true)
+    } finally {
+      setSubiendoDocumento(false)
+    }
+  }, [ordenId, tipoDocumento])
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    files.forEach(f => subirDocumento(f))
+    e.target.value = ''
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    const files = Array.from(e.dataTransfer.files)
+    files.forEach(f => subirDocumento(f))
+  }
+
+  const eliminarDocumento = async (docId: string) => {
+    if (!confirm('¿Eliminar este documento?')) return
+    try {
+      const res = await fetch(`/api/ordenes-compra/${ordenId}/documentos`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documento_id: docId }),
+      })
+      if (res.ok) {
+        setDocumentos(prev => prev.filter(d => d.id !== docId))
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Error al eliminar')
+      }
+    } catch (e) {
+      alert('Error de conexión')
+    }
   }
 
   const calcularConceptos = () => {
@@ -222,6 +321,137 @@ export default function CargarComprobantesPage() {
           </p>
         </div>
       </div>
+
+      {/* ── SECCIÓN DOCUMENTOS OCR ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Upload className="h-5 w-5" />
+            Documentos del Comprobante
+            {documentos.length > 0 && (
+              <Badge variant="secondary">{documentos.length} archivo{documentos.length !== 1 ? 's' : ''}</Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Tipo de documento selector */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <Label className="shrink-0">Tipo de documento a subir:</Label>
+            <Select value={tipoDocumento} onValueChange={setTipoDocumento}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="factura">Factura</SelectItem>
+                <SelectItem value="remito">Remito</SelectItem>
+                <SelectItem value="adquisicion">Adquisición</SelectItem>
+                <SelectItem value="nota_credito">Nota de Crédito</SelectItem>
+                <SelectItem value="otro">Otro</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Drop zone */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => !subiendoDocumento && fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+              dragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/30 hover:border-primary/50 hover:bg-muted/30'
+            } ${subiendoDocumento ? 'opacity-60 cursor-wait' : ''}`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,application/pdf,.xlsx,.xls"
+              className="hidden"
+              onChange={handleFileChange}
+              disabled={subiendoDocumento}
+            />
+            {subiendoDocumento ? (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm font-medium">Procesando con OCR...</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                <Upload className="h-8 w-8" />
+                <p className="text-sm font-medium">Arrastrá archivos aquí o hacé clic para seleccionar</p>
+                <p className="text-xs">Admite imágenes, PDF y Excel. Podés subir varios a la vez.</p>
+              </div>
+            )}
+          </div>
+
+          {uploadError && (
+            <Alert variant="destructive">
+              <AlertDescription>{uploadError}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* OCR result preview */}
+          {ultimoOCR && (
+            <Alert className="border-green-200 bg-green-50">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <AlertDescription className="text-green-800">
+                <strong>OCR completado</strong>
+                {ultimoOCR.comprobante?.numero_comprobante && ` · ${ultimoOCR.comprobante.numero_comprobante}`}
+                {ultimoOCR.comprobante?.total_factura && ` · Total: $${ultimoOCR.comprobante.total_factura.toFixed(2)}`}
+                {ultimoOCR.items_count > 0 && ` · ${ultimoOCR.items_count} artículo${ultimoOCR.items_count !== 1 ? 's' : ''} detectados`}
+                <span className="text-green-700 text-xs block mt-1">Los datos extraídos se pre-llenaron en el formulario de comprobante.</span>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Documents list */}
+          {documentos.length > 0 && (
+            <div className="space-y-2">
+              <Separator />
+              <p className="text-sm font-medium text-muted-foreground">Archivos cargados</p>
+              <div className="grid gap-2">
+                {documentos.map(doc => {
+                  const ocr = doc.datos_ocr
+                  const nroComp = ocr?.comprobante?.numero_comprobante
+                  const totalDoc = ocr?.comprobante?.total_factura
+                  const isImage = doc.tipo_mime?.startsWith('image/') || doc.url_imagen?.match(/\.(jpg|jpeg|png|webp|heic)$/i)
+                  return (
+                    <div key={doc.id} className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20 hover:bg-muted/40 transition-colors">
+                      <div className="shrink-0">
+                        {isImage ? (
+                          <FileImage className="h-5 w-5 text-blue-500" />
+                        ) : (
+                          <FileText className="h-5 w-5 text-orange-500" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{doc.nombre_archivo || 'Documento'}</p>
+                        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                          <Badge variant="outline" className="text-xs">{TIPO_DOC_LABELS[doc.tipo_documento] || doc.tipo_documento}</Badge>
+                          {nroComp && <span className="text-xs text-muted-foreground">{nroComp}</span>}
+                          {totalDoc && <span className="text-xs text-muted-foreground">${Number(totalDoc).toFixed(2)}</span>}
+                          {doc.procesado && <Badge variant="secondary" className="text-xs">OCR ✓</Badge>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
+                          <a href={doc.url_imagen} target="_blank" rel="noopener noreferrer">
+                            <Eye className="h-4 w-4" />
+                          </a>
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
+                          onClick={() => eliminarDocumento(doc.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

@@ -7,15 +7,29 @@ export interface ExtractedItem {
     codigo: string | null;
     cantidad: number;
     precio_unitario: number | null;
-    precio_bulto: number | null; // New field
-    unidades_por_bulto: number | null; // New field
+    precio_bulto: number | null;
+    unidades_por_bulto: number | null;
     descuento: number | null;
     unidad_medida: string | null;
     source_row?: any; // For Excel debugging
 }
 
+export interface ComprobanteMeta {
+    numero_comprobante: string | null;
+    tipo_comprobante: string | null; // 'FA' | 'FB' | 'FC' | 'Remito' | 'Adquisicion' | etc
+    fecha: string | null;
+    total_factura: number | null;
+    subtotal_neto: number | null;
+    total_iva: number | null;
+    percepcion_iva: number | null;
+    percepcion_iibb: number | null;
+    retencion_ganancias: number | null;
+    descuento_global: number | null;
+}
+
 export interface ParseResult {
     items: ExtractedItem[];
+    comprobante?: ComprobanteMeta;
     raw_text?: string;
     metadata?: any;
     error?: string;
@@ -43,35 +57,46 @@ export async function processWithGemini(
         const buffer = Buffer.from(bytes);
         const base64 = buffer.toString('base64');
 
-        const prompt = `Sos un asistente experto en procesamiento de documentos comerciales.
-        
+        const prompt = `Sos un asistente experto en procesamiento de documentos comerciales argentinos.
+
         CONTEXTO:
         - Proveedor: ${context.proveedorNombre || "Desconocido"}
-        - Tipo de documento: ${context.tipoDocumento || "Pedido/Orden"}
+        - Tipo de documento: ${context.tipoDocumento || "Comprobante"}
 
         TAREA:
-        Extraé los ítems de este documento en formato JSON.
-        Importante: Priorizá la exactitud de los códigos y descripciones.
-        Si hay precios por bulto/pack y precios unitarios, extraé ambos si es posible, o indicá las unidades por bulto.
-        
+        Extraé TODA la información del documento: encabezado del comprobante Y los ítems de detalle.
+        Priorizá exactitud en códigos, descripciones y valores monetarios.
+        Si hay precios por bulto/pack y precios unitarios, extraé ambos.
+
         FORMATO JSON ESPERADO:
         {
+            "comprobante": {
+                "numero_comprobante": "string (ej: '0001-00000123', null si no visible)",
+                "tipo_comprobante": "string (FA/FB/FC/Remito/Adquisicion/NC/ND, null si no claro)",
+                "fecha": "string (YYYY-MM-DD, null si no visible)",
+                "total_factura": number (total con impuestos, null si no visible),
+                "subtotal_neto": number (base imponible sin IVA, null si no visible),
+                "total_iva": number (monto de IVA, null si no visible),
+                "percepcion_iva": number (percepción de IVA si hay, null si no),
+                "percepcion_iibb": number (percepción IIBB si hay, null si no),
+                "retencion_ganancias": number (retención ganancias si hay, null si no),
+                "descuento_global": number (descuento general en porcentaje, null si no hay)
+            },
             "items": [
                 {
                     "descripcion": "string (texto exacto de la descripción del producto)",
-                    "codigo": "string (EAN, SKU, o código de proveedor si visible)",
+                    "codigo": "string (EAN, SKU, o código de proveedor si visible, null si no hay)",
                     "cantidad": number (1 si no se especifica),
-                    "precio_unitario": number (null si no hay explícito),
+                    "precio_unitario": number (precio por unidad, null si no hay explícito),
                     "precio_bulto": number (precio por caja/pack/bulto, null si no hay),
-                    "unidades_por_bulto": number (cantidad de unidades que trae el bulto, null si no se deduce),
-                    "descuento": number (porcentaje, null si no hay),
-                    "unidad_medida": "string"
+                    "unidades_por_bulto": number (unidades que trae el bulto, null si no se deduce),
+                    "descuento": number (porcentaje de descuento del ítem, null si no hay),
+                    "unidad_medida": "string (UN/BTO/CJ/etc, null si no visible)"
                 }
-            ],
-            "total_documento": number
+            ]
         }
-        
-        Devolvé SOLO el JSON.`;
+
+        Devolvé SOLO el JSON sin markdown ni explicaciones.`;
 
         const result = await model.generateContent([
             {
@@ -95,10 +120,11 @@ export async function processWithGemini(
 
         return {
             items: parsedData.items || [],
+            comprobante: parsedData.comprobante || null,
             raw_text: text,
             metadata: {
                 model: "gemini-2.0-flash-lite",
-                total_documento: parsedData.total_documento
+                total_documento: parsedData.comprobante?.total_factura ?? parsedData.total_documento
             }
         };
 
