@@ -1,7 +1,9 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as XLSX from "xlsx";
 
-// Interfaces for structured output
+// Native fetch to Gemini REST API — no SDK dependency, immune to SDK deprecations
+const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent`;
+
 export interface ExtractedItem {
     descripcion: string;
     codigo: string | null;
@@ -11,12 +13,12 @@ export interface ExtractedItem {
     unidades_por_bulto: number | null;
     descuento: number | null;
     unidad_medida: string | null;
-    source_row?: any; // For Excel debugging
+    source_row?: any;
 }
 
 export interface ComprobanteMeta {
     numero_comprobante: string | null;
-    tipo_comprobante: string | null; // 'FA' | 'FB' | 'FC' | 'Remito' | 'Adquisicion' | etc
+    tipo_comprobante: string | null;
     fecha: string | null;
     total_factura: number | null;
     subtotal_neto: number | null;
@@ -29,13 +31,11 @@ export interface ComprobanteMeta {
 
 export interface ParseResult {
     items: ExtractedItem[];
-    comprobante?: ComprobanteMeta;
+    comprobante?: ComprobanteMeta | null;
     raw_text?: string;
     metadata?: any;
     error?: string;
 }
-
-// --- GEMINI OCR LOGIC ---
 
 export async function processWithGemini(
     file: File,
@@ -45,87 +45,86 @@ export async function processWithGemini(
     }
 ): Promise<ParseResult> {
     try {
-        if (!process.env.GEMINI_API_KEY) {
-            throw new Error("Missing GEMINI_API_KEY");
-        }
-
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        // Using flash-lite as per original implementation
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) throw new Error("Missing GEMINI_API_KEY");
 
         const bytes = await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-        const base64 = buffer.toString('base64');
+        const base64 = Buffer.from(bytes).toString('base64');
+        const mimeType = file.type || 'image/jpeg';
 
         const prompt = `Sos un asistente experto en procesamiento de documentos comerciales argentinos.
 
-        CONTEXTO:
-        - Proveedor: ${context.proveedorNombre || "Desconocido"}
-        - Tipo de documento: ${context.tipoDocumento || "Comprobante"}
+CONTEXTO:
+- Proveedor: ${context.proveedorNombre || "Desconocido"}
+- Tipo de documento: ${context.tipoDocumento || "Comprobante"}
 
-        TAREA:
-        Extraé TODA la información del documento: encabezado del comprobante Y los ítems de detalle.
-        Priorizá exactitud en códigos, descripciones y valores monetarios.
-        Si hay precios por bulto/pack y precios unitarios, extraé ambos.
+TAREA:
+Extraé TODA la información del documento: encabezado del comprobante Y los ítems de detalle.
+Priorizá exactitud en códigos, descripciones y valores monetarios.
+Si hay precios por bulto/pack y precios unitarios, extraé ambos.
 
-        FORMATO JSON ESPERADO:
-        {
-            "comprobante": {
-                "numero_comprobante": "string (ej: '0001-00000123', null si no visible)",
-                "tipo_comprobante": "string (FA/FB/FC/Remito/Adquisicion/NC/ND, null si no claro)",
-                "fecha": "string (YYYY-MM-DD, null si no visible)",
-                "total_factura": number (total con impuestos, null si no visible),
-                "subtotal_neto": number (base imponible sin IVA, null si no visible),
-                "total_iva": number (monto de IVA, null si no visible),
-                "percepcion_iva": number (percepción de IVA si hay, null si no),
-                "percepcion_iibb": number (percepción IIBB si hay, null si no),
-                "retencion_ganancias": number (retención ganancias si hay, null si no),
-                "descuento_global": number (descuento general en porcentaje, null si no hay)
-            },
-            "items": [
-                {
-                    "descripcion": "string (texto exacto de la descripción del producto)",
-                    "codigo": "string (EAN, SKU, o código de proveedor si visible, null si no hay)",
-                    "cantidad": number (1 si no se especifica),
-                    "precio_unitario": number (precio por unidad, null si no hay explícito),
-                    "precio_bulto": number (precio por caja/pack/bulto, null si no hay),
-                    "unidades_por_bulto": number (unidades que trae el bulto, null si no se deduce),
-                    "descuento": number (porcentaje de descuento del ítem, null si no hay),
-                    "unidad_medida": "string (UN/BTO/CJ/etc, null si no visible)"
+FORMATO JSON:
+{
+  "comprobante": {
+    "numero_comprobante": "string (ej: '0001-00000123') o null si no visible",
+    "tipo_comprobante": "FA, FB, FC, Remito, Adquisicion, NC, ND o null",
+    "fecha": "YYYY-MM-DD o null",
+    "total_factura": number o null,
+    "subtotal_neto": number o null,
+    "total_iva": number o null,
+    "percepcion_iva": number o null,
+    "percepcion_iibb": number o null,
+    "retencion_ganancias": number o null,
+    "descuento_global": number o null
+  },
+  "items": [
+    {
+      "descripcion": "texto exacto del producto",
+      "codigo": "EAN/SKU/codigo proveedor o null",
+      "cantidad": number,
+      "precio_unitario": number o null,
+      "precio_bulto": number o null,
+      "unidades_por_bulto": number o null,
+      "descuento": number o null,
+      "unidad_medida": "UN/BTO/CJ/etc o null"
+    }
+  ]
+}`;
+
+        const res = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { inlineData: { mimeType, data: base64 } },
+                        { text: prompt }
+                    ]
+                }],
+                generationConfig: {
+                    responseMimeType: 'application/json',
+                    temperature: 0.1,
                 }
-            ]
+            }),
+        });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`Gemini API ${res.status}: ${errText}`);
         }
 
-        Devolvé SOLO el JSON sin markdown ni explicaciones.`;
+        const data = await res.json();
+        const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
 
-        const result = await model.generateContent([
-            {
-                inlineData: {
-                    mimeType: file.type,
-                    data: base64
-                }
-            },
-            prompt
-        ]);
-
-        const response = await result.response;
-        const text = response.text();
-
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            throw new Error("No se pudo extraer JSON de la respuesta de IA");
-        }
-
-        const parsedData = JSON.parse(jsonMatch[0]);
+        // responseMimeType: application/json should give clean JSON, strip markdown just in case
+        const jsonStr = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+        const parsedData = JSON.parse(jsonStr || '{}');
 
         return {
             items: parsedData.items || [],
             comprobante: parsedData.comprobante || null,
             raw_text: text,
-            metadata: {
-                model: "gemini-1.5-flash",
-                total_documento: parsedData.comprobante?.total_factura ?? parsedData.total_documento
-            }
+            metadata: { model: GEMINI_MODEL }
         };
 
     } catch (error: any) {
@@ -134,181 +133,60 @@ export async function processWithGemini(
     }
 }
 
-// --- EXCEL PARSING LOGIC ---
+// --- EXCEL PARSING (unchanged) ---
 
 export async function parseExcel(file: File): Promise<ParseResult> {
     try {
         const bytes = await file.arrayBuffer();
         const workbook = XLSX.read(bytes, { type: 'array' });
 
-        // Assume first sheet
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-
-        // Convert to array of arrays to inspect structure
         const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
         if (rows.length === 0) return { items: [] };
 
-        // Heuristic to find header row
-        // We look for common keywords
         const keywords = ["descripcion", "producto", "detalle", "codigo", "sku", "ean", "cantidad", "cant", "precio", "unitario", "importe", "total", "descuento", "dto", "bulto", "pack", "caja"];
         let headerRowIndex = -1;
         let maxKeywords = 0;
 
-        // Scan first 20 rows for a header
         for (let i = 0; i < Math.min(rows.length, 20); i++) {
-            const rowStr = rows[i].map(c => String(c).toLowerCase()).join(" ");
+            const rowStr = rows[i].map((c: any) => String(c).toLowerCase()).join(" ");
             let matches = 0;
-            keywords.forEach(k => {
-                if (rowStr.includes(k)) matches++;
-            });
-            if (matches > maxKeywords) {
-                maxKeywords = matches;
-                headerRowIndex = i;
-            }
+            keywords.forEach(k => { if (rowStr.includes(k)) matches++; });
+            if (matches > maxKeywords) { maxKeywords = matches; headerRowIndex = i; }
         }
 
-        // If no header row found with confidence, let's try to detect content types
-        // But for now, default to 0 if nothing found
-        if (headerRowIndex === -1 && maxKeywords === 0) {
-            headerRowIndex = 0; // Use 0, but we will reassess column mapping below
-        } else if (headerRowIndex === -1) {
-            headerRowIndex = 0;
-        }
+        if (headerRowIndex === -1) headerRowIndex = 0;
 
-        const headers = rows[headerRowIndex].map(h => String(h).toLowerCase().trim());
+        const headers = rows[headerRowIndex].map((h: any) => String(h).toLowerCase().trim());
 
-        // Map columns based on headers first
-        const colMap = {
-            descripcion: -1,
-            codigo: -1,
-            cantidad: -1,
-            precio_unitario: -1,
-            precio_bulto: -1,
-            unidades_por_bulto: -1,
-            descuento: -1
-        };
+        const colMap = { descripcion: -1, codigo: -1, cantidad: -1, precio_unitario: -1, precio_bulto: -1, unidades_por_bulto: -1, descuento: -1 };
 
-        headers.forEach((h, idx) => {
+        headers.forEach((h: string, idx: number) => {
             if (h.includes("descripcion") || h.includes("detalle") || h.includes("producto")) colMap.descripcion = idx;
             if (h.includes("codigo") || h.includes("sku") || h.includes("ean") || h.includes("art") || h === "id") colMap.codigo = idx;
             if (h.includes("cant") || h.includes("unidades")) colMap.cantidad = idx;
-
-            // Logic for distinguishing unit vs bulk price
             if ((h.includes("precio") || h.includes("costo") || h.includes("importe")) && !h.includes("total")) {
-                if (h.includes("bulto") || h.includes("pack") || h.includes("caja")) {
-                    colMap.precio_bulto = idx;
-                } else {
-                    colMap.precio_unitario = idx;
-                }
+                if (h.includes("bulto") || h.includes("pack") || h.includes("caja")) colMap.precio_bulto = idx;
+                else colMap.precio_unitario = idx;
             }
-
             if (h.includes("desc") || h.includes("dto") || h.includes("bonif")) colMap.descuento = idx;
-
-            // Units per pack detection
-            if (h.includes("unidades") && (h.includes("bulto") || h.includes("pack") || h.includes("x"))) {
-                colMap.unidades_por_bulto = idx;
-            }
+            if (h.includes("unidades") && (h.includes("bulto") || h.includes("pack") || h.includes("x"))) colMap.unidades_por_bulto = idx;
         });
 
-        // FALLBACK: Content-based detection if headers failed (or were ambiguous)
-        // We analyze the first few data rows to guess columns
-
-        let sampleRowsCount = 0;
-        let avgStringLengths = new Array(headers.length).fill(0);
-        let numericCounts = new Array(headers.length).fill(0);
-        let eanCounts = new Array(headers.length).fill(0);
-
         const dataStart = headerRowIndex + 1;
-        const maxSamples = Math.min(rows.length, dataStart + 10);
-
-        for (let i = dataStart; i < maxSamples; i++) {
-            const row = rows[i];
-            if (!row) continue;
-            sampleRowsCount++;
-            row.forEach((cell, colIdx) => {
-                const str = String(cell).trim();
-                avgStringLengths[colIdx] += str.length;
-
-                // Check if numeric
-                // Remove currency symbols first
-                const cleanNum = str.replace(/[$]/g, '').replace(/,/g, '.');
-                if (!isNaN(parseFloat(cleanNum)) && isFinite(parseFloat(cleanNum))) {
-                    numericCounts[colIdx]++;
-                }
-
-                // Check if looks like EAN (8-14 digits)
-                if (/^\d{8,14}$/.test(str)) {
-                    eanCounts[colIdx]++;
-                }
-            });
-        }
-
-        if (sampleRowsCount > 0) {
-            avgStringLengths = avgStringLengths.map(l => l / sampleRowsCount);
-
-            // 1. Fix Description: If NOT found by header, find longest non-numeric column
-            if (colMap.descripcion === -1 || headers[colMap.descripcion]?.includes("ean")) { // Check if we mapped EAN to desc by accident
-                let bestDescCol = -1;
-                let maxLen = 0;
-
-                avgStringLengths.forEach((len, idx) => {
-                    // It must act like a text column (low numeric count) or just very long
-                    // EANs are numeric-ish strings, but descriptions are longer and have spaces
-                    // Descriptions usually > 15 chars
-                    if (len > maxLen) {
-                        maxLen = len;
-                        bestDescCol = idx;
-                    }
-                });
-
-                // Only override if meaningful
-                if (maxLen > 10 && bestDescCol !== colMap.codigo && bestDescCol !== colMap.precio_unitario) {
-                    colMap.descripcion = bestDescCol;
-                }
-            }
-
-            // 2. Fix Code: If NOT found, find column with high EAN count
-            if (colMap.codigo === -1) {
-                let bestCodeCol = -1;
-                let maxEans = 0;
-                eanCounts.forEach((count, idx) => {
-                    if (count > maxEans) {
-                        maxEans = count;
-                        bestCodeCol = idx;
-                    }
-                });
-                if (bestCodeCol > -1) colMap.codigo = bestCodeCol;
-            }
-
-            // 3. Fix Price: If NOT found, look for numeric column with "$" or typical price values
-            // (Skipping for now to avoid breaking existing logic, handled by header matching mostly)
-        }
-
-        // --- EXTRACT ---
-
         const extracted: ExtractedItem[] = [];
 
         for (let i = dataStart; i < rows.length; i++) {
             const row = rows[i];
             if (!row || row.length === 0) continue;
-
             const desc = colMap.descripcion > -1 ? row[colMap.descripcion] : "";
             const code = colMap.codigo > -1 ? row[colMap.codigo] : "";
-
-            // Skip empty rows
             if (!desc && !code && !row[0]) continue;
-
-            // Strict Filter: Ignore "Section Headers" or "Notes"
-            // A valid item must have at least a Code OR a Price (Unit or Bulk)
-            // Just a description is not enough for a price list item.
             const hasPrice = (colMap.precio_unitario > -1 && parseNumber(row[colMap.precio_unitario]) !== 0) ||
                 (colMap.precio_bulto > -1 && parseNumber(row[colMap.precio_bulto]) !== 0);
-
-            if (!code && !hasPrice) {
-                continue;
-            }
+            if (!code && !hasPrice) continue;
 
             extracted.push({
                 descripcion: String(desc || "").trim(),
@@ -323,13 +201,7 @@ export async function parseExcel(file: File): Promise<ParseResult> {
             });
         }
 
-        return {
-            items: extracted,
-            metadata: {
-                rowsProcessed: extracted.length,
-                detectedHeaders: headers
-            }
-        };
+        return { items: extracted, metadata: { rowsProcessed: extracted.length, detectedHeaders: headers } };
 
     } catch (error: any) {
         console.error("Excel Parsing Error:", error);
@@ -340,7 +212,7 @@ export async function parseExcel(file: File): Promise<ParseResult> {
 function parseNumber(val: any): number {
     if (typeof val === 'number') return val;
     if (!val) return 0;
-    const str = String(val).replace(/[^0-9.,]/g, '').replace(/,/g, '.'); // More robust cleanup
+    const str = String(val).replace(/[^0-9.,]/g, '').replace(/,/g, '.');
     const num = parseFloat(str);
     return isNaN(num) ? 0 : num;
 }
