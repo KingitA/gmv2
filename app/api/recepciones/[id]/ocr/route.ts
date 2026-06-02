@@ -134,7 +134,7 @@ export async function POST(
                     retencion_ganancias_monto: compMeta?.retencion_ganancias || 0,
                     total_calculado: totalNeto + totalIva + (compMeta?.percepcion_iva || 0) + (compMeta?.percepcion_iibb || 0) + (compMeta?.retencion_ganancias || 0),
                     foto_url: fileUrl,
-                    estado: numeroExtraido ? 'pendiente_recepcion' : 'pendiente_validacion',
+                    estado: 'pendiente_recepcion',
                     ajusta_stock: true,
                     descuento_fuera_factura: compMeta?.descuento_global || 0,
                 }).select().single();

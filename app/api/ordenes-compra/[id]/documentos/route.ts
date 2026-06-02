@@ -225,7 +225,7 @@ export async function POST(
             retencion_ganancias_monto: retGanancias,
             total_calculado: totalNeto + totalIva + percIva + percIibb + retGanancias,
             foto_url: publicUrl || signedUrl,
-            estado: numeroExtraido ? 'pendiente_recepcion' : 'pendiente_validacion',
+            estado: 'pendiente_recepcion',
             ajusta_stock: true,
             descuento_fuera_factura: descGlobal,
         })
