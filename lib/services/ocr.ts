@@ -51,7 +51,7 @@ export async function processWithGemini(
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         // Using flash-lite as per original implementation
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
         const bytes = await file.arrayBuffer();
         const buffer = Buffer.from(bytes);
@@ -123,7 +123,7 @@ export async function processWithGemini(
             comprobante: parsedData.comprobante || null,
             raw_text: text,
             metadata: {
-                model: "gemini-2.0-flash-lite",
+                model: "gemini-2.0-flash",
                 total_documento: parsedData.comprobante?.total_factura ?? parsedData.total_documento
             }
         };

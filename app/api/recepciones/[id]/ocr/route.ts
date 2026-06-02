@@ -1,11 +1,25 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from "next/server";
 import { processWithGemini } from "@/lib/services/ocr";
-import { matchItems as legacyMatchItems } from "@/lib/services/matching";
-import { resolveFactorConversion, UnidadFactura, ConversionResult } from "@/lib/services/conversion";
+import { resolveFactorConversion, UnidadFactura } from "@/lib/services/conversion";
 import { MatchingEngine } from "@/lib/matching/matcher";
 import { ImportItemRaw } from "@/lib/matching/types";
 import { requireAuth } from '@/lib/auth'
+import { todayArgentina } from '@/lib/utils'
+
+function mapTipoComprobante(ocr: string | null | undefined, tipoDocumento: string): string {
+    if (!ocr) {
+        const map: Record<string, string> = { factura: 'FA', remito: 'Adquisicion', adquisicion: 'Adquisicion', nota_credito: 'NC' };
+        return map[tipoDocumento] || 'FA';
+    }
+    const s = ocr.toUpperCase().trim();
+    if (s === 'FA' || s.includes('FACTURA A')) return 'FA';
+    if (s === 'FB' || s.includes('FACTURA B')) return 'FB';
+    if (s === 'FC' || s.includes('FACTURA C')) return 'FC';
+    if (s.includes('REMITO') || s.includes('ADQUIS')) return 'Adquisicion';
+    if (s === 'NC' || s.includes('NOTA DE CR') || s === 'ND' || s.includes('NOTA DE D')) return 'NC';
+    return 'FA';
+}
 
 export async function POST(
     request: NextRequest,
@@ -28,16 +42,21 @@ export async function POST(
 
         const supabase = createAdminClient();
 
-        // Fetch reception context for OCR
+        // Fetch recepcion (no FK joins — query separately)
         const { data: recepcion } = await supabase
             .from("recepciones")
-            .select(`
-                orden_compra:ordenes_compra(
-                    proveedor:proveedores(razon_social)
-                )
-            `)
+            .select("id, orden_compra_id, proveedor_id")
             .eq("id", recepcion_id)
-            .single();
+            .maybeSingle();
+
+        let proveedorNombre: string | undefined;
+        let proveedorId = recepcion?.proveedor_id;
+        let ordenCompraId = recepcion?.orden_compra_id;
+
+        if (proveedorId) {
+            const { data: prv } = await supabase.from("proveedores").select("nombre, razon_social").eq("id", proveedorId).maybeSingle();
+            proveedorNombre = prv?.nombre || prv?.razon_social;
+        }
 
         // 1. Upload image to Storage
         const fileExt = file.name.split(".").pop();
@@ -57,11 +76,7 @@ export async function POST(
         }
 
         // 2. Perform OCR with Gemini AI
-        const context = {
-            proveedorNombre: (recepcion as any)?.orden_compra?.proveedor?.razon_social,
-            tipoDocumento: tipo_documento
-        };
-        const ocrResult = await processWithGemini(file, context);
+        const ocrResult = await processWithGemini(file, { proveedorNombre, tipoDocumento: tipo_documento });
 
         // 3. Save document record
         const { data: doc, error: docError } = await supabase
@@ -81,12 +96,59 @@ export async function POST(
 
         if (docError) throw docError;
 
-        // 4. Update reception items based on OCR
+        // 4. Auto-create comprobante_compra when linked to an orden_compra
+        let comprobante = null;
+        if (ordenCompraId && proveedorId) {
+            const compMeta = ocrResult.comprobante;
+            const numeroExtraido = compMeta?.numero_comprobante;
+
+            // Duplicate check
+            let skipCreate = false;
+            if (numeroExtraido) {
+                const { data: dup } = await supabase
+                    .from('comprobantes_compra')
+                    .select('id')
+                    .eq('orden_compra_id', ordenCompraId)
+                    .eq('numero_comprobante', numeroExtraido)
+                    .maybeSingle();
+                if (dup) skipCreate = true;
+            }
+
+            if (!skipCreate) {
+                const tipoComp = mapTipoComprobante(compMeta?.tipo_comprobante, tipo_documento);
+                const totalFactura = compMeta?.total_factura || 0;
+                const totalNeto = compMeta?.subtotal_neto || (totalFactura > 0 ? totalFactura / 1.21 : 0);
+                const totalIva = compMeta?.total_iva || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0);
+
+                const { data: comp } = await supabase.from('comprobantes_compra').insert({
+                    orden_compra_id: ordenCompraId,
+                    proveedor_id: proveedorId,
+                    tipo_comprobante: tipoComp,
+                    numero_comprobante: numeroExtraido || `PENDIENTE-${Date.now()}`,
+                    fecha_comprobante: compMeta?.fecha || todayArgentina(),
+                    total_factura_declarado: totalFactura,
+                    total_neto: totalNeto,
+                    total_iva: totalIva,
+                    percepcion_iva_monto: compMeta?.percepcion_iva || 0,
+                    percepcion_iibb_monto: compMeta?.percepcion_iibb || 0,
+                    retencion_ganancias_monto: compMeta?.retencion_ganancias || 0,
+                    total_calculado: totalNeto + totalIva + (compMeta?.percepcion_iva || 0) + (compMeta?.percepcion_iibb || 0) + (compMeta?.retencion_ganancias || 0),
+                    foto_url: fileUrl,
+                    estado: numeroExtraido ? 'pendiente_recepcion' : 'pendiente_validacion',
+                    ajusta_stock: true,
+                    descuento_fuera_factura: compMeta?.descuento_global || 0,
+                }).select().single();
+                comprobante = comp;
+            }
+        }
+
+        // 5. Update reception items based on OCR
         const processingResults = await processOCRData(supabase, recepcion_id, ocrResult);
 
         return NextResponse.json({
             success: true,
             document: doc,
+            comprobante,
             ocr_processing_results: processingResults
         });
 
