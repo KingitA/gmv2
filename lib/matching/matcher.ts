@@ -1,11 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { normalizeText, extractFeatures } from './normalizer';
 import { MatchCandidate, MatchResult, ImportItemRaw, MatchSignal } from './types';
 
-// Initialize clients lazily to prevent Vercel build crashes
 const getSupabase = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-const getGenAI = () => new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'dummy');
 
 export class MatchingEngine {
 
@@ -161,15 +158,31 @@ export class MatchingEngine {
 
     private async generateEmbedding(text: any): Promise<number[]> {
         try {
-            const str = String(text || ""); // Force string
-            if (!str.trim()) return [];
+            const str = String(text || "").replace(/\n/g, " ").trim();
+            if (!str) return [];
+            const apiKey = process.env.GEMINI_API_KEY;
+            if (!apiKey) return [];
 
-            const model = getGenAI().getGenerativeModel({ model: "text-embedding-004" });
-            const result = await model.embedContent(str.replace(/\n/g, " "));
-            return result.embedding.values;
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${apiKey}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'models/text-embedding-004',
+                        content: { parts: [{ text: str }] },
+                    }),
+                }
+            );
+            if (!res.ok) {
+                console.warn("Embedding API error:", res.status, await res.text());
+                return [];
+            }
+            const data = await res.json();
+            return data.embedding?.values || [];
         } catch (e) {
             console.error("Error generating embedding:", e);
-            throw e;
+            return []; // Non-fatal: fall back to exact/fuzzy matching
         }
     }
 

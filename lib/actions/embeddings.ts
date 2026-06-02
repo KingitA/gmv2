@@ -1,35 +1,32 @@
 "use server"
 
-import { GoogleGenerativeAI } from "@google/generative-ai"
 import { createAdminClient } from "@/lib/supabase/admin"
 
-// Initialize Google Generative AI with the API key
-// Prioritize GOOGLE_API_KEY if exists, otherwise fallback to others or empty
-const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""
-const genAI = new GoogleGenerativeAI(apiKey)
-// Use the 'models/gemini-embedding-001' model (768 dimensions) for compatibility
-const model = genAI.getGenerativeModel({ model: "models/gemini-embedding-001" })
+const EMBED_MODEL = "text-embedding-004";
+const EMBED_API_URL = `https://generativelanguage.googleapis.com/v1/models/${EMBED_MODEL}:embedContent`;
 
 export async function generateEmbedding(text: string): Promise<number[]> {
-    if (!apiKey) {
-        throw new Error("Missing GOOGLE_API_KEY or GEMINI_API_KEY environment variable.")
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "";
+    if (!apiKey) throw new Error("Missing GEMINI_API_KEY environment variable.");
+
+    const cleanedText = text.replace(/\n/g, " ").trim();
+
+    const res = await fetch(`${EMBED_API_URL}?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: `models/${EMBED_MODEL}`,
+            content: { parts: [{ text: cleanedText }] },
+        }),
+    });
+
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Embedding API ${res.status}: ${err}`);
     }
 
-    // Pre-process text to remove newlines and extra spaces
-    const cleanedText = text.replace(/\n/g, " ").trim()
-
-    try {
-        console.log("Generating embedding using model:", (model as any).model || "unknown");
-        const result = await model.embedContent({
-            content: { parts: [{ text: cleanedText }], role: "user" },
-            outputDimensionality: 768,
-        } as any)
-        const embedding = result.embedding
-        return embedding.values
-    } catch (error) {
-        console.error("Error generating embedding with Gemini:", error)
-        throw error
-    }
+    const data = await res.json();
+    return data.embedding?.values || [];
 }
 
 export async function updateProductEmbedding(productId: string) {
