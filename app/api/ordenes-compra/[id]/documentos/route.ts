@@ -53,11 +53,13 @@ export async function GET(
 
     // Generate signed URLs for each document so they're always viewable
     const docsWithUrls = await Promise.all((documentos || []).map(async (doc: any) => {
-        if (doc.storage_path) {
+        const storagePath = doc.storage_path ||
+            (doc.url_imagen?.includes('/comprobantes/') ? doc.url_imagen.match(/\/comprobantes\/(.+?)(\?|$)/)?.[1] : null);
+        if (storagePath) {
             const { data: signed } = await supabase.storage
                 .from('comprobantes')
-                .createSignedUrl(doc.storage_path, 3600); // 1 hour
-            return { ...doc, signed_url: signed?.signedUrl || doc.url_imagen };
+                .createSignedUrl(storagePath, 3600 * 24); // 24 hours
+            if (signed?.signedUrl) return { ...doc, signed_url: signed.signedUrl };
         }
         return { ...doc, signed_url: doc.url_imagen };
     }));
@@ -83,14 +85,20 @@ export async function POST(
 
     const supabase = createAdminClient();
 
-    // Cargar OC
+    // Cargar OC (no FK defined → separate queries)
     const { data: oc } = await supabase
         .from('ordenes_compra')
-        .select('proveedor_id, numero_orden, proveedor:proveedores(nombre, razon_social)')
+        .select('id, proveedor_id, numero_orden')
         .eq('id', ordenId)
-        .single();
+        .maybeSingle();
 
     if (!oc) return NextResponse.json({ error: 'Orden de compra no encontrada' }, { status: 404 });
+
+    const { data: proveedorData } = await supabase
+        .from('proveedores')
+        .select('nombre, razon_social')
+        .eq('id', oc.proveedor_id)
+        .maybeSingle();
 
     // Obtener o crear recepción draft
     let { data: recepcion } = await supabase
@@ -149,7 +157,7 @@ export async function POST(
     }
 
     // OCR con Gemini
-    const proveedorNombre = (oc.proveedor as any)?.nombre || (oc.proveedor as any)?.razon_social;
+    const proveedorNombre = proveedorData?.nombre || proveedorData?.razon_social;
     const ocrResult = await processWithGemini(file, { proveedorNombre, tipoDocumento: tipo_documento });
 
     const compMeta = ocrResult.comprobante;

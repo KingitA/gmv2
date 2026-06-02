@@ -47,12 +47,14 @@ export async function POST(
             .upload(fileName, file);
 
         if (uploadError) {
-            console.warn("Storage upload failed (bucket might be missing), proceeding with mock URL:", uploadError);
+            console.warn("Storage upload failed:", uploadError.message);
         }
 
-        const publicUrl = uploadError
-            ? `https://mock-storage.com/${fileName}`
-            : supabase.storage.from("comprobantes").getPublicUrl(fileName).data.publicUrl;
+        let fileUrl = '';
+        if (!uploadError) {
+            const { data: signed } = await supabase.storage.from("comprobantes").createSignedUrl(fileName, 3600 * 24 * 7);
+            fileUrl = signed?.signedUrl || '';
+        }
 
         // 2. Perform OCR with Gemini AI
         const context = {
@@ -67,7 +69,10 @@ export async function POST(
             .insert({
                 recepcion_id,
                 tipo_documento,
-                url_imagen: publicUrl,
+                url_imagen: fileUrl,
+                storage_path: uploadError ? null : fileName,
+                nombre_archivo: file.name,
+                tipo_mime: file.type,
                 datos_ocr: ocrResult,
                 procesado: true,
             })
