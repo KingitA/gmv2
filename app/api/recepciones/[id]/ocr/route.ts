@@ -142,7 +142,18 @@ export async function POST(
             }
         }
 
-        // 5. Update reception items based on OCR
+        // 5. Create comprobante_compra_detalle from OCR items (even unmatched, to show in verificacion)
+        if (comprobante && ocrResult.items.length > 0 && proveedorId) {
+            const { matchAndCreateDetalle } = await import('@/app/api/ordenes-compra/[id]/documentos/detalle');
+            await matchAndCreateDetalle(supabase, {
+                comprobante_id: comprobante.id,
+                recepcion_id,
+                proveedor_id: proveedorId,
+                items: ocrResult.items,
+            });
+        }
+
+        // 6. Update reception items based on OCR
         const processingResults = await processOCRData(supabase, recepcion_id, ocrResult);
 
         return NextResponse.json({
