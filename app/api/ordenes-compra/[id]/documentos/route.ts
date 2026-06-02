@@ -2,9 +2,27 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { processWithGemini } from '@/lib/services/ocr';
+import { todayArgentina } from '@/lib/utils';
+
+// Mapeo tipo OCR → tipo interno
+function mapTipoComprobante(ocr: string | null | undefined, tipoDocumento: string): string {
+    if (!ocr) {
+        const map: Record<string, string> = { factura: 'FA', remito: 'Adquisicion', adquisicion: 'Adquisicion', nota_credito: 'NC' };
+        return map[tipoDocumento] || 'FA';
+    }
+    const s = ocr.toUpperCase().trim();
+    if (s === 'FA' || s.includes('FACTURA A')) return 'FA';
+    if (s === 'FB' || s.includes('FACTURA B')) return 'FB';
+    if (s === 'FC' || s.includes('FACTURA C')) return 'FC';
+    if (s.includes('REMITO')) return 'Adquisicion';
+    if (s.includes('ADQUIS')) return 'Adquisicion';
+    if (s === 'NC' || s.includes('NOTA DE CR')) return 'NC';
+    if (s === 'ND' || s.includes('NOTA DE D')) return 'NC';
+    return 'FA';
+}
 
 // GET /api/ordenes-compra/[id]/documentos
-// Returns all documents attached to the reception of this OC
+// Returns documents with signed URLs for viewing
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -23,9 +41,7 @@ export async function GET(
         .limit(1)
         .maybeSingle();
 
-    if (!recepcion) {
-        return NextResponse.json({ documentos: [], recepcion_id: null });
-    }
+    if (!recepcion) return NextResponse.json({ documentos: [], recepcion_id: null });
 
     const { data: documentos, error } = await supabase
         .from('recepciones_documentos')
@@ -35,12 +51,22 @@ export async function GET(
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    return NextResponse.json({ documentos: documentos || [], recepcion_id: recepcion.id });
+    // Generate signed URLs for each document so they're always viewable
+    const docsWithUrls = await Promise.all((documentos || []).map(async (doc: any) => {
+        if (doc.storage_path) {
+            const { data: signed } = await supabase.storage
+                .from('comprobantes')
+                .createSignedUrl(doc.storage_path, 3600); // 1 hour
+            return { ...doc, signed_url: signed?.signedUrl || doc.url_imagen };
+        }
+        return { ...doc, signed_url: doc.url_imagen };
+    }));
+
+    return NextResponse.json({ documentos: docsWithUrls, recepcion_id: recepcion.id });
 }
 
 // POST /api/ordenes-compra/[id]/documentos
-// Upload file + run OCR + save to recepciones_documentos
-// Body: FormData { file, tipo_documento }
+// Upload + OCR → auto-crea comprobante_compra + detalle
 export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -49,18 +75,24 @@ export async function POST(
     if (auth.error) return auth.error;
 
     const { id: ordenId } = await params;
-
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const tipo_documento = (formData.get('tipo_documento') as string) || 'factura';
 
-    if (!file) {
-        return NextResponse.json({ error: 'Se requiere un archivo' }, { status: 400 });
-    }
+    if (!file) return NextResponse.json({ error: 'Se requiere un archivo' }, { status: 400 });
 
     const supabase = createAdminClient();
 
-    // Get or create draft reception for this OC
+    // Cargar OC
+    const { data: oc } = await supabase
+        .from('ordenes_compra')
+        .select('proveedor_id, numero_orden, proveedor:proveedores(nombre, razon_social)')
+        .eq('id', ordenId)
+        .single();
+
+    if (!oc) return NextResponse.json({ error: 'Orden de compra no encontrada' }, { status: 404 });
+
+    // Obtener o crear recepción draft
     let { data: recepcion } = await supabase
         .from('recepciones')
         .select('id, proveedor_id')
@@ -70,17 +102,11 @@ export async function POST(
         .maybeSingle();
 
     if (!recepcion) {
-        const { data: oc } = await supabase
-            .from('ordenes_compra')
-            .select('proveedor_id')
-            .eq('id', ordenId)
-            .single();
-
         const { data: nueva, error: createErr } = await supabase
             .from('recepciones')
             .insert({
                 orden_compra_id: ordenId,
-                proveedor_id: oc?.proveedor_id,
+                proveedor_id: oc.proveedor_id,
                 estado: 'borrador',
                 usuario_id: auth.user.id,
                 actualizado_por: auth.user.id,
@@ -91,7 +117,7 @@ export async function POST(
         if (createErr) return NextResponse.json({ error: createErr.message }, { status: 500 });
         recepcion = nueva;
 
-        // Create reception items from OC detail
+        // Crear items de recepción desde el detalle de la OC
         const { data: ocDetalle } = await supabase
             .from('ordenes_compra_detalle')
             .select('articulo_id, cantidad_pedida, precio_unitario')
@@ -109,64 +135,51 @@ export async function POST(
         }
     }
 
-    // Check for duplicate by numero_comprobante if this is an invoicing document
-    // (Will be validated after OCR)
-
-    // Upload file to Supabase Storage
-    const fileExt = file.name.split('.').pop();
+    // Upload a Storage
     const storagePath = `${recepcion.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const { error: uploadError } = await supabase.storage.from('comprobantes').upload(storagePath, file);
+    if (uploadError) console.warn('[Docs OC] Storage error:', uploadError.message);
 
-    const { error: uploadError } = await supabase.storage
-        .from('comprobantes')
-        .upload(storagePath, file);
-
+    let signedUrl = '';
     let publicUrl = '';
     if (!uploadError) {
+        const { data: signed } = await supabase.storage.from('comprobantes').createSignedUrl(storagePath, 3600);
+        signedUrl = signed?.signedUrl || '';
         publicUrl = supabase.storage.from('comprobantes').getPublicUrl(storagePath).data.publicUrl;
-    } else {
-        console.warn('[Documentos OC] Storage upload error:', uploadError.message);
-        publicUrl = `error-upload/${storagePath}`;
     }
 
-    // Run OCR with Gemini
-    const { data: proveedor } = await supabase
-        .from('proveedores')
-        .select('nombre, razon_social')
-        .eq('id', recepcion.proveedor_id)
-        .maybeSingle();
+    // OCR con Gemini
+    const proveedorNombre = (oc.proveedor as any)?.nombre || (oc.proveedor as any)?.razon_social;
+    const ocrResult = await processWithGemini(file, { proveedorNombre, tipoDocumento: tipo_documento });
 
-    const ocrResult = await processWithGemini(file, {
-        proveedorNombre: proveedor?.nombre || proveedor?.razon_social,
-        tipoDocumento: tipo_documento,
-    });
+    const compMeta = ocrResult.comprobante;
+    const numeroExtraido = compMeta?.numero_comprobante;
 
-    // Duplicate check: if OCR extracted a numero_comprobante, verify it doesn't exist
-    const numeroExtraido = ocrResult.comprobante?.numero_comprobante;
+    // Chequeo de duplicado en comprobantes_compra
     if (numeroExtraido) {
-        const { data: existing } = await supabase
-            .from('recepciones_documentos')
-            .select('id')
-            .eq('recepcion_id', recepcion.id)
-            .filter('datos_ocr->>numero_comprobante', 'eq', numeroExtraido)
+        const { data: dup } = await supabase
+            .from('comprobantes_compra')
+            .select('id, numero_comprobante')
+            .eq('orden_compra_id', ordenId)
+            .eq('numero_comprobante', numeroExtraido)
             .maybeSingle();
 
-        if (existing) {
-            // Clean up uploaded file
+        if (dup) {
             if (!uploadError) await supabase.storage.from('comprobantes').remove([storagePath]);
             return NextResponse.json(
-                { error: `El comprobante ${numeroExtraido} ya fue cargado anteriormente` },
+                { error: `El comprobante ${numeroExtraido} ya está cargado en esta orden` },
                 { status: 409 }
             );
         }
     }
 
-    // Save document record
-    const { data: doc, error: docError } = await supabase
+    // Guardar documento en recepciones_documentos
+    const { data: doc } = await supabase
         .from('recepciones_documentos')
         .insert({
             recepcion_id: recepcion.id,
             tipo_documento,
-            url_imagen: publicUrl,
+            url_imagen: publicUrl || signedUrl,
             storage_path: uploadError ? null : storagePath,
             nombre_archivo: file.name,
             tipo_mime: file.type,
@@ -176,20 +189,66 @@ export async function POST(
         .select()
         .single();
 
-    if (docError) return NextResponse.json({ error: docError.message }, { status: 500 });
+    // Auto-crear comprobante_compra desde los datos del OCR
+    const tipoComp = mapTipoComprobante(compMeta?.tipo_comprobante, tipo_documento);
+    const numeroComp = numeroExtraido || `PENDIENTE-${Date.now()}`;
+    const fechaComp = compMeta?.fecha || todayArgentina();
+    const totalFactura = compMeta?.total_factura || 0;
+    const totalNeto = compMeta?.subtotal_neto || (totalFactura > 0 ? totalFactura / 1.21 : 0);
+    const totalIva = compMeta?.total_iva || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0);
+    const percIva = compMeta?.percepcion_iva || 0;
+    const percIibb = compMeta?.percepcion_iibb || 0;
+    const retGanancias = compMeta?.retencion_ganancias || 0;
+    const descGlobal = compMeta?.descuento_global || 0;
 
-    // Update recepciones_items with OCR data
-    if (ocrResult.items && ocrResult.items.length > 0) {
-        await updateItemsFromOCR(supabase, recepcion.id, ocrResult, recepcion.proveedor_id);
+    const { data: comprobante, error: compError } = await supabase
+        .from('comprobantes_compra')
+        .insert({
+            orden_compra_id: ordenId,
+            proveedor_id: oc.proveedor_id,
+            tipo_comprobante: tipoComp,
+            numero_comprobante: numeroComp,
+            fecha_comprobante: fechaComp,
+            total_factura_declarado: totalFactura,
+            total_neto: totalNeto,
+            total_iva: totalIva,
+            percepcion_iva_monto: percIva,
+            percepcion_iibb_monto: percIibb,
+            retencion_ganancias_monto: retGanancias,
+            total_calculado: totalNeto + totalIva + percIva + percIibb + retGanancias,
+            foto_url: publicUrl || signedUrl,
+            estado: numeroExtraido ? 'pendiente_recepcion' : 'pendiente_validacion',
+            ajusta_stock: true,
+            descuento_fuera_factura: descGlobal,
+        })
+        .select()
+        .single();
+
+    if (compError) {
+        console.error('[Docs OC] Error creando comprobante:', compError.message);
+    }
+
+    // Matching de artículos OCR → comprobantes_compra_detalle + actualizar recepciones_items
+    const detalleCreado: any[] = [];
+    if (ocrResult.items.length > 0 && comprobante) {
+        const matches = await matchAndCreateDetalle(supabase, {
+            comprobante_id: comprobante.id,
+            recepcion_id: recepcion.id,
+            proveedor_id: oc.proveedor_id,
+            items: ocrResult.items,
+        });
+        detalleCreado.push(...matches);
     }
 
     return NextResponse.json({
         success: true,
-        documento: doc,
+        documento: { ...doc, signed_url: signedUrl || publicUrl },
+        comprobante,
         recepcion_id: recepcion.id,
         ocr: {
-            comprobante: ocrResult.comprobante,
-            items_count: ocrResult.items.length,
+            comprobante: compMeta,
+            items_detectados: ocrResult.items.length,
+            items_vinculados: detalleCreado.length,
             items: ocrResult.items,
         },
     });
@@ -206,94 +265,125 @@ export async function DELETE(
 
     const body = await request.json();
     const { documento_id } = body;
-
-    if (!documento_id) {
-        return NextResponse.json({ error: 'documento_id requerido' }, { status: 400 });
-    }
+    if (!documento_id) return NextResponse.json({ error: 'documento_id requerido' }, { status: 400 });
 
     const supabase = createAdminClient();
 
-    const { data: doc, error: fetchErr } = await supabase
+    const { data: doc } = await supabase
         .from('recepciones_documentos')
         .select('id, storage_path, recepcion_id')
         .eq('id', documento_id)
         .single();
 
-    if (fetchErr || !doc) {
-        return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
-    }
+    if (!doc) return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
 
-    // Delete from Storage if we have the path
     if (doc.storage_path) {
-        const { error: storageErr } = await supabase.storage
-            .from('comprobantes')
-            .remove([doc.storage_path]);
-        if (storageErr) console.warn('[Documentos OC] Storage delete error:', storageErr.message);
+        await supabase.storage.from('comprobantes').remove([doc.storage_path]);
     }
 
-    const { error: deleteErr } = await supabase
-        .from('recepciones_documentos')
-        .delete()
-        .eq('id', documento_id);
-
-    if (deleteErr) return NextResponse.json({ error: deleteErr.message }, { status: 500 });
+    await supabase.from('recepciones_documentos').delete().eq('id', documento_id);
 
     return NextResponse.json({ success: true });
 }
 
-// Helper: update recepciones_items quantities/prices from OCR data
-async function updateItemsFromOCR(supabase: any, recepcionId: string, ocrResult: any, proveedorId: string) {
+// Matchea artículos OCR, crea comprobantes_compra_detalle y actualiza recepciones_items
+async function matchAndCreateDetalle(supabase: any, params: {
+    comprobante_id: string;
+    recepcion_id: string;
+    proveedor_id: string;
+    items: any[];
+}) {
     const { MatchingEngine } = await import('@/lib/matching/matcher');
     const { resolveFactorConversion } = await import('@/lib/services/conversion');
 
-    const { data: currentItems } = await supabase
-        .from('recepciones_items')
-        .select('*, articulo:articulos(id, descripcion, sku, unidades_por_bulto, precio_compra)')
-        .eq('recepcion_id', recepcionId);
+    const engine = new MatchingEngine();
 
-    if (!currentItems || currentItems.length === 0) return;
+    const { data: recItems } = await supabase
+        .from('recepciones_items')
+        .select('*, articulo:articulos(id, sku, unidades_por_bulto, precio_compra, iva_compras)')
+        .eq('recepcion_id', params.recepcion_id);
 
     const { data: proveedor } = await supabase
         .from('proveedores')
         .select('default_unidad_factura')
-        .eq('id', proveedorId)
+        .eq('id', params.proveedor_id)
         .maybeSingle();
 
-    const engine = new MatchingEngine();
+    const detalleRows: any[] = [];
+    const matched: any[] = [];
 
-    for (const item of ocrResult.items) {
+    for (const item of params.items) {
         const matchResult = await engine.resolveItem(
             { description: item.descripcion, code: item.codigo, price: item.precio_unitario },
-            proveedorId
+            params.proveedor_id
         );
 
-        if (matchResult.status !== 'matched' || !matchResult.bestCandidate?.sku_id) continue;
+        if (matchResult.status !== 'matched' || !matchResult.bestCandidate?.sku_id) {
+            // Guardar igual sin articulo_id para que aparezca en verificación como "no identificado"
+            detalleRows.push({
+                comprobante_id: params.comprobante_id,
+                articulo_id: null,
+                cantidad_facturada: item.cantidad || 1,
+                precio_unitario: item.precio_unitario || 0,
+                descuento1: item.descuento || 0,
+                descripcion_proveedor: item.descripcion,
+                codigo_proveedor: item.codigo,
+                tipo_cantidad: 'unidad',
+                costo_final: (item.precio_unitario || 0) * (item.cantidad || 1),
+            });
+            continue;
+        }
 
-        const matchedItem = currentItems.find((ci: any) => ci.articulo_id === matchResult.bestCandidate!.sku_id);
-        if (!matchedItem) continue;
+        const articuloId = matchResult.bestCandidate.sku_id;
+        const recItem = (recItems || []).find((ri: any) => ri.articulo_id === articuloId);
+        const articulo = recItem?.articulo;
 
         const conversion = resolveFactorConversion({
             proveedorDefaultUnidad: proveedor?.default_unidad_factura,
-            articuloUnidadesPorBulto: matchedItem.articulo?.unidades_por_bulto,
+            articuloUnidadesPorBulto: articulo?.unidades_por_bulto,
             descripcionOcr: item.descripcion,
             ocrUnidadMedida: item.unidad_medida,
             precioDocumento: item.precio_unitario,
-            costoBaseArticulo: matchedItem.articulo?.precio_compra,
+            costoBaseArticulo: articulo?.precio_compra,
         });
 
-        const cantidadBase = (item.cantidad || 0) * conversion.factor;
+        const cantBase = (item.cantidad || 0) * conversion.factor;
 
-        await supabase
-            .from('recepciones_items')
-            .update({
-                cantidad_documentada: cantidadBase,
-                precio_documentado: item.precio_unitario || 0,
-                precio_real: item.precio_unitario || matchedItem.precio_oc || 0,
-                cantidad_base: cantidadBase,
-                factor_conversion: conversion.factor,
-                conversion_source: conversion.source,
-                requires_review: conversion.requiresReview,
-            })
-            .eq('id', matchedItem.id);
+        detalleRows.push({
+            comprobante_id: params.comprobante_id,
+            articulo_id: articuloId,
+            cantidad_facturada: item.cantidad || 1,
+            precio_unitario: item.precio_unitario || 0,
+            descuento1: item.descuento || 0,
+            descripcion_proveedor: item.descripcion,
+            codigo_proveedor: item.codigo,
+            tipo_cantidad: conversion.factor === 1 ? 'unidad' : 'bulto',
+            costo_final: (item.precio_unitario || 0) * (1 - (item.descuento || 0) / 100),
+        });
+
+        // Actualizar recepciones_items con precio documentado
+        if (recItem) {
+            await supabase
+                .from('recepciones_items')
+                .update({
+                    cantidad_documentada: cantBase,
+                    precio_documentado: item.precio_unitario || 0,
+                    precio_real: item.precio_unitario || recItem.precio_oc || 0,
+                    cantidad_base: cantBase,
+                    factor_conversion: conversion.factor,
+                    conversion_source: conversion.source,
+                    requires_review: conversion.requiresReview,
+                })
+                .eq('id', recItem.id);
+        }
+
+        matched.push({ articulo_id: articuloId, descripcion: item.descripcion });
     }
+
+    // Insertar todos los detalles de una vez
+    if (detalleRows.length > 0) {
+        await supabase.from('comprobantes_compra_detalle').insert(detalleRows);
+    }
+
+    return matched;
 }

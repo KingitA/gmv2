@@ -132,26 +132,9 @@ export default function CargarComprobantesPage() {
         setUploadError(data.error || 'Error al subir el archivo')
         return
       }
-      setDocumentos(prev => [data.documento, ...prev])
       setUltimoOCR(data.ocr)
-      // Pre-fill comprobante form if OCR extracted metadata
-      if (data.ocr?.comprobante?.numero_comprobante) {
-        setNumeroComprobante(data.ocr.comprobante.numero_comprobante)
-      }
-      if (data.ocr?.comprobante?.fecha) {
-        setFechaComprobante(data.ocr.comprobante.fecha)
-      }
-      if (data.ocr?.comprobante?.total_factura) {
-        setTotalFacturaDeclarado(data.ocr.comprobante.total_factura)
-      }
-      if (data.ocr?.comprobante?.tipo_comprobante) {
-        const tipoMap: Record<string, string> = {
-          FA: 'FA', FB: 'FB', FC: 'FC', Remito: 'Adquisicion', Adquisicion: 'Adquisicion', NC: 'NC', ND: 'NC'
-        }
-        const tipo = tipoMap[data.ocr.comprobante.tipo_comprobante]
-        if (tipo) setTipoComprobante(tipo)
-      }
-      setMostrarFormulario(true)
+      // Reload both documents (to get fresh signed URLs) and comprobantes (auto-created by API)
+      await Promise.all([loadDocumentos(), loadComprobantes()])
     } finally {
       setSubiendoDocumento(false)
     }
@@ -395,11 +378,12 @@ export default function CargarComprobantesPage() {
             <Alert className="border-green-200 bg-green-50">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
               <AlertDescription className="text-green-800">
-                <strong>OCR completado</strong>
+                <strong>Comprobante creado automáticamente</strong>
                 {ultimoOCR.comprobante?.numero_comprobante && ` · ${ultimoOCR.comprobante.numero_comprobante}`}
-                {ultimoOCR.comprobante?.total_factura && ` · Total: $${ultimoOCR.comprobante.total_factura.toFixed(2)}`}
-                {ultimoOCR.items_count > 0 && ` · ${ultimoOCR.items_count} artículo${ultimoOCR.items_count !== 1 ? 's' : ''} detectados`}
-                <span className="text-green-700 text-xs block mt-1">Los datos extraídos se pre-llenaron en el formulario de comprobante.</span>
+                {ultimoOCR.comprobante?.total_factura && ` · Total: $${Number(ultimoOCR.comprobante.total_factura).toFixed(2)}`}
+                {ultimoOCR.items_detectados > 0 && ` · ${ultimoOCR.items_detectados} artículo${ultimoOCR.items_detectados !== 1 ? 's' : ''} detectado${ultimoOCR.items_detectados !== 1 ? 's' : ''}`}
+                {ultimoOCR.items_vinculados > 0 && `, ${ultimoOCR.items_vinculados} vinculado${ultimoOCR.items_vinculados !== 1 ? 's' : ''}`}
+                <span className="text-green-700 text-xs block mt-1">El comprobante aparece en la lista de abajo con todos los datos extraídos del OCR.</span>
               </AlertDescription>
             </Alert>
           )}
@@ -435,7 +419,7 @@ export default function CargarComprobantesPage() {
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                          <a href={doc.url_imagen} target="_blank" rel="noopener noreferrer">
+                          <a href={doc.signed_url || doc.url_imagen} target="_blank" rel="noopener noreferrer">
                             <Eye className="h-4 w-4" />
                           </a>
                         </Button>
