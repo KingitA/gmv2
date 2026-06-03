@@ -94,6 +94,7 @@ export async function updateProductEmbedding(productId: string) {
 }
 
 export async function searchProductsByVector(query: string, matchThreshold = 0.35, matchCount = 20) {
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
     if (!apiKey) {
         console.warn("API Key missing, skipping vector search")
         return []
@@ -157,6 +158,7 @@ export async function updateProveedorEmbedding(proveedorId: string) {
 }
 
 export async function searchProveedoresByVector(query: string, matchThreshold = 0.35, matchCount = 10) {
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
     if (!apiKey) return []
 
     try {
@@ -219,6 +221,7 @@ export async function updateClienteEmbedding(clienteId: string) {
 }
 
 export async function searchClientesByVector(query: string, matchThreshold = 0.35, matchCount = 10) {
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
     if (!apiKey) return []
 
     try {
