@@ -6,6 +6,7 @@ import { MatchingEngine } from "@/lib/matching/matcher";
 import { ImportItemRaw } from "@/lib/matching/types";
 import { requireAuth } from '@/lib/auth'
 import { todayArgentina } from '@/lib/utils'
+import { matchAndCreateDetalle } from '@/lib/services/detalle'
 
 function mapTipoComprobante(ocr: string | null | undefined, tipoDocumento: string): string {
     if (!ocr) {
@@ -144,7 +145,6 @@ export async function POST(
 
         // 5. Create comprobante_compra_detalle from OCR items (even unmatched, to show in verificacion)
         if (comprobante && ocrResult.items.length > 0 && proveedorId) {
-            const { matchAndCreateDetalle } = await import('@/app/api/ordenes-compra/[id]/documentos/detalle');
             await matchAndCreateDetalle(supabase, {
                 comprobante_id: comprobante.id,
                 recepcion_id,

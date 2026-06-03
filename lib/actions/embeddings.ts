@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin"
 
-const EMBED_MODEL = "text-embedding-004";
+const EMBED_MODEL = "gemini-embedding-001";
 const EMBED_API_URL = `https://generativelanguage.googleapis.com/v1/models/${EMBED_MODEL}:embedContent`;
 
 export async function generateEmbedding(text: string): Promise<number[]> {

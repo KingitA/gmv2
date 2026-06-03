@@ -239,7 +239,7 @@ export async function POST(
     // Matching de artículos OCR → comprobantes_compra_detalle + actualizar recepciones_items
     const detalleCreado: any[] = [];
     if (ocrResult.items.length > 0 && comprobante) {
-        const { matchAndCreateDetalle } = await import('./detalle');
+        const { matchAndCreateDetalle } = await import('@/lib/services/detalle');
         const matches = await matchAndCreateDetalle(supabase, {
             comprobante_id: comprobante.id,
             recepcion_id: recepcion.id,

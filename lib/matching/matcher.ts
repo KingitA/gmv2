@@ -164,12 +164,12 @@ export class MatchingEngine {
             if (!apiKey) return [];
 
             const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${apiKey}`,
+                `https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key=${apiKey}`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'models/text-embedding-004',
+                        model: 'models/gemini-embedding-001',
                         content: { parts: [{ text: str }] },
                     }),
                 }
