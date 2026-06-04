@@ -1,15 +1,16 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { formatDateAR } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Card, CardContent } from "@/components/ui/card"
-import { Search, FileText, Loader2, CheckCircle2, Plus } from "lucide-react"
+import { Search, FileText, Loader2, CheckCircle2, Plus, AlertTriangle, ExternalLink } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 type Comprobante = {
@@ -75,7 +76,14 @@ export default function ComprobantesVentaPage() {
   const [generandoComprobante, setGenerandoComprobante] = useState<string | null>(null)
   const [descargandoPDF, setDescargandoPDF] = useState<string | null>(null)
   const [modalPedidosAbierto, setModalPedidosAbierto] = useState(false)
+  const [errorCorrecion, setErrorCorrecion] = useState<{
+    mensaje: string
+    clienteId: string
+    clienteNombre: string
+    pedidoId: string
+  } | null>(null)
 
+  const router = useRouter()
   const supabase = createClient()
 
   useEffect(() => {
@@ -152,6 +160,17 @@ export default function ComprobantesVentaPage() {
 
       const result = await response.json()
 
+      if (response.status === 422 && result.error_code) {
+        // Error corregible: el operario puede ir a arreglarlo sin perder el trabajo
+        setErrorCorrecion({
+          mensaje: result.error,
+          clienteId: result.cliente_id,
+          clienteNombre: result.cliente_nombre,
+          pedidoId,
+        })
+        return
+      }
+
       if (!response.ok) {
         throw new Error(result.error || "Error generando comprobantes")
       }
@@ -160,9 +179,7 @@ export default function ComprobantesVentaPage() {
         `Comprobantes generados exitosamente:\n${result.comprobantes.map((c: any) => `- ${c.tipo_comprobante} ${c.numero}`).join("\n")}`,
       )
 
-      // Actualizar estado del pedido a 'facturado'
       await supabase.from("pedidos").update({ estado: "facturado" }).eq("id", pedidoId)
-
       await cargarComprobantes()
       await cargarPedidosSinFacturar()
     } catch (error: any) {
@@ -386,6 +403,41 @@ export default function ComprobantesVentaPage() {
               )}
             </TableBody>
           </Table>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de error corregible: CUIT o condición IVA faltante */}
+      <Dialog open={!!errorCorrecion} onOpenChange={() => setErrorCorrecion(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0" />
+              <DialogTitle>Datos del cliente incompletos</DialogTitle>
+            </div>
+            <DialogDescription className="pt-2 text-left">
+              {errorCorrecion?.mensaje}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setErrorCorrecion(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                const pedidoId = errorCorrecion?.pedidoId
+                router.push(`/clientes/${errorCorrecion?.clienteId}`)
+                setErrorCorrecion(null)
+                setModalPedidosAbierto(false)
+                // El operario vuelve manualmente a generar el comprobante después de corregir
+              }}
+            >
+              <ExternalLink className="h-4 w-4 mr-2" />
+              Ir a corregir cliente
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

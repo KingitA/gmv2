@@ -5,6 +5,7 @@ import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
 import { insertarKardex } from '@/lib/kardex/insertar-kardex'
 import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
+import { determinarTipoNCADesdeOriginal, determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 
 export async function POST(request: Request) {
   try {
@@ -68,32 +69,39 @@ export async function POST(request: Request) {
     let tipoFinal = tipo_comprobante
 
     if (tipo_comprobante === "auto") {
-      // Auto-determinar según método del cliente
-      const metodo = devolucion.cliente.metodo_facturacion?.toLowerCase() || "factura"
+      // Prioridad 1: usar el tipo del comprobante original referenciado
+      const compOriginal = devolucion.detalle.length > 0
+        ? devolucion.detalle[0].comprobante_original
+        : null
 
-      if (metodo.includes("presupuesto") || metodo.includes("remito")) {
-        tipoFinal = "REV" // Reversa
-      } else {
-        // Determinar si es NC A, B o C según condición IVA
-        const condicion = devolucion.cliente.condicion_iva?.toLowerCase() || ""
-
-        if (condicion.includes("responsable inscripto")) {
-          tipoFinal = "NCA"
-        } else if (condicion.includes("monotributo")) {
-          tipoFinal = "NCB"
+      if (compOriginal) {
+        const tipoDesdeOriginal = determinarTipoNCADesdeOriginal(compOriginal.tipo_comprobante)
+        if (tipoDesdeOriginal) {
+          tipoFinal = tipoDesdeOriginal
         } else {
-          tipoFinal = "NCC"
+          return NextResponse.json({
+            error: `No se puede determinar el tipo de NC para el comprobante original tipo "${compOriginal.tipo_comprobante}".`,
+            error_code: "TIPO_ORIGINAL_DESCONOCIDO",
+          }, { status: 422 })
+        }
+      } else {
+        // Sin comprobante original: derivar desde condición IVA del cliente
+        const metodo = devolucion.cliente.metodo_facturacion?.toLowerCase() || "factura"
+        if (metodo.includes("presupuesto") || metodo.includes("remito")) {
+          tipoFinal = "REV"
+        } else {
+          const tipoFactura = determinarTipoFactura(devolucion.cliente.condicion_iva)
+          if (!tipoFactura) {
+            return NextResponse.json({
+              error: mensajeErrorCondicionIva(devolucion.cliente.nombre_razon_social),
+              error_code: "CLIENTE_SIN_CONDICION_IVA",
+              cliente_id: devolucion.cliente_id,
+              cliente_nombre: devolucion.cliente.nombre_razon_social,
+            }, { status: 422 })
+          }
+          tipoFinal = tipoFactura === "FA" ? "NCA" : "NCB"
         }
       }
-    }
-
-    if (devolucion.detalle.length > 0 && devolucion.detalle[0].comprobante_original) {
-      const tipoOriginal = devolucion.detalle[0].comprobante_original.tipo_comprobante
-
-      if (tipoOriginal === "FA") tipoFinal = "NCA"
-      else if (tipoOriginal === "FB") tipoFinal = "NCB"
-      else if (tipoOriginal === "FC") tipoFinal = "NCC"
-      else if (tipoOriginal === "PRES") tipoFinal = "REV"
     }
 
     const { data: numeracion, error: numError } = await supabase

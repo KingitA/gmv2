@@ -12,6 +12,7 @@ import {
 import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
 import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
+import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 
 export async function POST(request: Request) {
   try {
@@ -46,6 +47,16 @@ export async function POST(request: Request) {
 
     if (pedidoError || !pedido) {
       return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 })
+    }
+
+    // ─── Validaciones del cliente antes de continuar ───
+    if (!pedido.cliente.cuit || pedido.cliente.cuit.trim() === "") {
+      return NextResponse.json({
+        error: `El cliente "${pedido.cliente.nombre_razon_social}" no tiene CUIT configurado. Sin CUIT no se puede emitir un comprobante fiscal.`,
+        error_code: "CLIENTE_SIN_CUIT",
+        cliente_id: pedido.cliente.id,
+        cliente_nombre: pedido.cliente.nombre_razon_social,
+      }, { status: 422 })
     }
 
     // ─── 2. Determinar método de facturación ───
@@ -173,7 +184,16 @@ export async function POST(request: Request) {
     }
 
     const comprobantesGenerados: Array<any & { _segmento?: string; _bonifs?: any[] }> = []
+
     const tipoFactura = determinarTipoFactura(pedido.cliente.condicion_iva)
+    if (!tipoFactura) {
+      return NextResponse.json({
+        error: mensajeErrorCondicionIva(pedido.cliente.nombre_razon_social),
+        error_code: "CLIENTE_SIN_CONDICION_IVA",
+        cliente_id: pedido.cliente.id,
+        cliente_nombre: pedido.cliente.nombre_razon_social,
+      }, { status: 422 })
+    }
 
     // ─── 5. Generar un comprobante por grupo ───
     for (const [key, grupoItems] of grupos) {
@@ -379,12 +399,6 @@ function getBonifProfile(itemSegmento: string, bonificaciones: any[]): string {
     .join("|")
 }
 
-function determinarTipoFactura(condicionIva: string): string {
-  const c = (condicionIva || "").toLowerCase()
-  if (c.includes("responsable inscri")) return "FA"
-  if (c.includes("monotributo")) return "FB"
-  return "FC"
-}
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100

@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
 import { requireAuth } from '@/lib/auth'
+import { determinarTipoNDA, mensajeErrorCondicionIva } from '@/lib/comprobantes/tipo-comprobante'
 
 /**
  * Genera Notas de Débito (NDA/NDB/NDC) para ventas.
@@ -46,14 +47,16 @@ export async function POST(request: Request) {
 
     let tipoFinal = tipo_comprobante
     if (!tipoFinal || tipoFinal === 'auto') {
-      const condicion = (cliente.condicion_iva ?? '').toLowerCase()
-      if (condicion.includes('responsable inscripto')) {
-        tipoFinal = 'NDA'
-      } else if (condicion.includes('monotributo')) {
-        tipoFinal = 'NDB'
-      } else {
-        tipoFinal = 'NDC'
+      const tipoND = determinarTipoNDA(cliente.condicion_iva)
+      if (!tipoND) {
+        return NextResponse.json({
+          error: mensajeErrorCondicionIva(cliente.nombre_razon_social ?? cliente.nombre ?? ''),
+          error_code: 'CLIENTE_SIN_CONDICION_IVA',
+          cliente_id,
+          cliente_nombre: cliente.nombre_razon_social ?? cliente.nombre,
+        }, { status: 422 })
       }
+      tipoFinal = tipoND
     }
 
     const { data: numeracion, error: numError } = await supabase
