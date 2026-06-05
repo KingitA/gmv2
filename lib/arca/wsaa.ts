@@ -42,14 +42,39 @@ function crearTRA(servicio: string): string {
   ].join('\n')
 }
 
-// Normaliza PEM que puede llegar con \n literales desde variables de entorno
+/**
+ * Normaliza PEM desde variables de entorno:
+ * - Reemplaza \n literales (Vercel/env) por saltos de línea reales
+ * - Elimina \r (Windows CRLF)
+ * - Acepta tanto PKCS#1 (BEGIN RSA PRIVATE KEY) como PKCS#8 (BEGIN PRIVATE KEY)
+ */
 function normalizarPEM(pem: string): string {
-  return pem.replace(/\\n/g, '\n').trim()
+  return pem
+    .replace(/\\n/g, '\n')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim()
 }
 
 function firmarTRA(tra: string, certPem: string, keyPem: string): string {
-  const cert = forge.pki.certificateFromPem(normalizarPEM(certPem))
-  const key  = forge.pki.privateKeyFromPem(normalizarPEM(keyPem))
+  const certNorm = normalizarPEM(certPem)
+  const keyNorm  = normalizarPEM(keyPem)
+
+  const cert = forge.pki.certificateFromPem(certNorm)
+
+  // PKCS#8 (BEGIN PRIVATE KEY) → extraer la clave RSA interna
+  // PKCS#1 (BEGIN RSA PRIVATE KEY) → parsear directo
+  let key: forge.pki.rsa.PrivateKey
+  if (keyNorm.includes('BEGIN RSA PRIVATE KEY')) {
+    key = forge.pki.privateKeyFromPem(keyNorm)
+  } else {
+    // PKCS#8 sin cifrar: extraer la clave RSA del wrapper
+    const der  = forge.util.decode64(
+      keyNorm.replace(/-----[^-]+-----/g, '').replace(/\s/g, '')
+    )
+    const asn1 = forge.asn1.fromDer(der)
+    key = forge.pki.privateKeyFromAsn1(asn1)
+  }
 
   const p7 = forge.pkcs7.createSignedData()
   p7.content = forge.util.createBuffer(tra, 'utf8')
