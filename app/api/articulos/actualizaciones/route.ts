@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { padEan13, padEanArray } from '@/lib/utils/ean'
 
 // GET — List importaciones with optional filters
 export async function GET(request: NextRequest) {
@@ -108,9 +109,11 @@ export async function PATCH(request: NextRequest) {
                     const tipo = key.replace('descuento_tipado_', '')
                     descuentoUpdates.push({ tipo, porcentajes: value })
                 } else if (key === 'ean13') {
-                    // ean13 es TEXT[] — si llega como string lo envolvemos en array,
-                    // si llega como array lo usamos directamente
-                    articuloUpdates[key] = Array.isArray(value) ? value : (value ? [value] : null)
+                    // ean13 es TEXT[] — normalizar padding y asegurar array
+                    const arr = Array.isArray(value) ? value : (value ? [value] : null)
+                    articuloUpdates[key] = arr ? padEanArray(arr.map(String)) : null
+                } else if (key === 'codigo_bulto') {
+                    articuloUpdates[key] = value ? padEan13(String(value)) : null
                 } else {
                     articuloUpdates[key] = value
                 }

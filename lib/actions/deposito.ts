@@ -1,9 +1,10 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
+import { padEan13, padEanArray } from "@/lib/utils/ean"
 
-const SELECT_SEARCH = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
-const SELECT_FULL   = "id, sku, ean13, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
+const SELECT_SEARCH = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
+const SELECT_FULL   = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
 
 export async function buscarArticulosDeposito(
   query: string,
@@ -26,10 +27,20 @@ export async function buscarArticulosDeposito(
       return { data: data || [] }
     }
 
-    // EAN13 exact match si es solo dígitos de 8-14 caracteres
+    // EAN13 / codigo_bulto exact match si es solo dígitos de 8-14 caracteres
     if (/^\d{8,14}$/.test(q)) {
-      const { data: byEan } = await base().contains("ean13", [q]).limit(5)
+      const qPadded = padEan13(q)
+      const { data: byEan } = await base()
+        .or(`ean13.cs.{"${qPadded}"},codigo_bulto.eq.${qPadded}`)
+        .limit(5)
       if (byEan && byEan.length > 0) return { data: byEan }
+      // fallback: también buscar sin padding por si el código fue guardado sin él
+      if (qPadded !== q) {
+        const { data: byEanRaw } = await base()
+          .or(`ean13.cs.{"${q}"},codigo_bulto.eq.${q}`)
+          .limit(5)
+        if (byEanRaw && byEanRaw.length > 0) return { data: byEanRaw }
+      }
     }
 
     const { data, error } = await base()
@@ -83,6 +94,7 @@ export async function cargarSesionDeposito(opciones: { proveedorId?: string; cat
 
 export async function actualizarDatosArticulo(id: string, datos: {
   ean13?: string[] | null
+  codigo_bulto?: string | null
   unidades_por_bulto?: number | null
   unidad_de_medida?: string | null
   orden_deposito?: number | null
@@ -90,7 +102,12 @@ export async function actualizarDatosArticulo(id: string, datos: {
   cantidad_fraccion?: number | null
 }) {
   const sb = createAdminClient()
-  const { error } = await sb.from("articulos").update(datos).eq("id", id)
+  const normalized = {
+    ...datos,
+    ean13: datos.ean13 ? padEanArray(datos.ean13) : datos.ean13,
+    codigo_bulto: datos.codigo_bulto ? padEan13(datos.codigo_bulto) : datos.codigo_bulto,
+  }
+  const { error } = await sb.from("articulos").update(normalized).eq("id", id)
   if (error) throw new Error(error.message)
   return { success: true }
 }
@@ -112,7 +129,7 @@ export async function getArticulosOrdenDeposito(page: number = 0): Promise<{ dat
     const offset = page * limit
     const { data, error, count } = await sb
       .from("articulos")
-      .select("id, sku, descripcion, ean13, orden_deposito, stock_actual, unidades_por_bulto, unidad_de_medida, marcas!marca_id(descripcion)", { count: "exact" })
+      .select("id, sku, descripcion, ean13, codigo_bulto, orden_deposito, stock_actual, unidades_por_bulto, unidad_de_medida, marcas!marca_id(descripcion)", { count: "exact" })
       .eq("activo", true)
       .not("orden_deposito", "is", null)
       .order("orden_deposito", { ascending: true })

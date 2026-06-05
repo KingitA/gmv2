@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { searchProductsByVector } from "@/lib/actions/embeddings"
+import { padEan13 } from "@/lib/utils/ean"
 
 export async function GET(request: NextRequest) {
     try {
@@ -14,6 +15,20 @@ export async function GET(request: NextRequest) {
         if (!q || q.length < 2) return NextResponse.json([])
 
         const supabase = createAdminClient()
+
+        // EAN / codigo_bulto exacto primero (scanner)
+        if (/^\d{8,14}$/.test(q)) {
+            const qPadded = padEan13(q)
+            const queries = qPadded !== q ? [qPadded, q] : [qPadded]
+            for (const code of queries) {
+                const { data: porEan } = await supabase
+                    .from("articulos")
+                    .select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)")
+                    .or(`ean13.cs.{"${code}"},codigo_bulto.eq.${code}`)
+                    .eq("activo", true)
+                if (porEan && porEan.length > 0) return NextResponse.json(porEan)
+            }
+        }
 
         // Buscar proveedores y marcas que coincidan con el término
         const [provRes, marcaRes] = await Promise.all([

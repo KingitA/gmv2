@@ -12,6 +12,7 @@ interface Articulo {
   sku: string
   descripcion: string
   ean13: string[] | null
+  codigo_bulto?: string | null
   stock_actual: number | null
   unidades_por_bulto: number | null
   unidad_de_medida: string | null
@@ -52,6 +53,7 @@ export default function ModificacionArticulosPage() {
   // ── Datos artículo ────────────────────────────────────
   const [ean13, setEan13] = useState<string[]>([])
   const [eanInput, setEanInput] = useState("")
+  const [codigoBulto, setCodigoBulto] = useState("")
   const [unidadesBulto, setUnidadesBulto] = useState("")
   const [unidadMedida, setUnidadMedida] = useState("")
   const [tipoFraccion, setTipoFraccion] = useState("")
@@ -102,6 +104,7 @@ export default function ModificacionArticulosPage() {
     setArticulo(art)
     setEan13(Array.isArray(art.ean13) ? art.ean13 : (art.ean13 ? [art.ean13] : []))
     setEanInput("")
+    setCodigoBulto(art.codigo_bulto || "")
     setUnidadesBulto(art.unidades_por_bulto ? String(art.unidades_por_bulto) : "")
     setUnidadMedida(art.unidad_de_medida || "")
     setTipoFraccion(""); setCantidadFraccion("")
@@ -170,6 +173,7 @@ export default function ModificacionArticulosPage() {
     try {
       await actualizarDatosArticulo(articulo.id, {
         ean13: ean13.length > 0 ? ean13 : null,
+        codigo_bulto: codigoBulto || null,
         unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : undefined,
         unidad_de_medida: unidadMedida || undefined,
         tipo_fraccion: tipoFraccion || null,
@@ -509,6 +513,19 @@ export default function ModificacionArticulosPage() {
             {seccion === "datos" && (
               <>
                 <div style={C.card}>
+                  <span style={C.label}>Código de Bulto</span>
+                  <input
+                    style={C.input} type="text" inputMode="numeric"
+                    placeholder="Código de barras del bulto/caja..."
+                    value={codigoBulto}
+                    onChange={e => setCodigoBulto(e.target.value)}
+                    onBlur={e => {
+                      const v = e.target.value.trim()
+                      if (/^\d+$/.test(v) && v.length < 13) setCodigoBulto(v.padStart(13, "0"))
+                    }}
+                  />
+                </div>
+                <div style={C.card}>
                   <span style={C.label}>EAN 13 <span style={{color:"#6b7280",fontWeight:400,textTransform:"none" as const}}>— puede tener varios</span></span>
                   <div style={{display:"flex",flexWrap:"wrap" as const,gap:8,background:"#374151",border:"1px solid #4b5563",borderRadius:12,padding:"10px 12px",minHeight:48}}>
                     {ean13.map((e,i)=>(
@@ -517,8 +534,8 @@ export default function ModificacionArticulosPage() {
                       </span>
                     ))}
                     <input type="text" inputMode="numeric" value={eanInput} onChange={e=>setEanInput(e.target.value)} placeholder={ean13.length===0?"Escribí un EAN y presioná Enter...":"Agregar otro..."} style={{flex:1,minWidth:140,background:"transparent",border:"none",outline:"none",color:"#f9fafb",fontSize:15}}
-                      onKeyDown={e=>{if((e.key==="Enter"||e.key===",")&&eanInput.trim()){e.preventDefault();const v=eanInput.trim();if(!ean13.includes(v))setEan13(p=>[...p,v]);setEanInput("")}}}
-                      onBlur={()=>{if(eanInput.trim()){const v=eanInput.trim();if(!ean13.includes(v))setEan13(p=>[...p,v]);setEanInput("")}}}
+                      onKeyDown={e=>{if((e.key==="Enter"||e.key===",")&&eanInput.trim()){e.preventDefault();const raw=eanInput.trim();const v=/^\d+$/.test(raw)&&raw.length<13?raw.padStart(13,"0"):raw;if(!ean13.includes(v))setEan13(p=>[...p,v]);setEanInput("")}}}
+                      onBlur={()=>{if(eanInput.trim()){const raw=eanInput.trim();const v=/^\d+$/.test(raw)&&raw.length<13?raw.padStart(13,"0"):raw;if(!ean13.includes(v))setEan13(p=>[...p,v]);setEanInput("")}}}
                     />
                   </div>
                   <div style={{color:"#6b7280",fontSize:12,marginTop:6}}>Enter o coma para agregar · × para quitar</div>

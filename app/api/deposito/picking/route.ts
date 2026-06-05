@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { searchProductsByVector } from "@/lib/actions/embeddings"
+import { padEan13 } from "@/lib/utils/ean"
 
 // POST: Iniciar o retomar sesión de picking para un pedido
 export async function POST(request: NextRequest) {
@@ -95,16 +96,21 @@ export async function GET(request: NextRequest) {
     if (!q || q.length < 2) return NextResponse.json([])
 
     const adminSupabase = createAdminClient()
-    const SELECT = "id, sku, descripcion, ean13, stock_actual, unidades_por_bulto, unidad_de_medida"
+    const SELECT = "id, sku, descripcion, ean13, codigo_bulto, stock_actual, unidades_por_bulto, unidad_de_medida"
 
-    // EAN13 exacto primero (scanner — máxima prioridad, no mezclar con vector)
-    const { data: porEan } = await adminSupabase
-      .from("articulos")
-      .select(SELECT)
-      .contains("ean13", [q])
-      .eq("activo", true)
-
-    if (porEan && porEan.length > 0) return NextResponse.json(porEan)
+    // EAN13 / codigo_bulto exacto primero (scanner — máxima prioridad)
+    if (/^\d{8,14}$/.test(q)) {
+      const qPadded = padEan13(q)
+      const queries = qPadded !== q ? [qPadded, q] : [qPadded]
+      for (const code of queries) {
+        const { data: porEan } = await adminSupabase
+          .from("articulos")
+          .select(SELECT)
+          .or(`ean13.cs.{"${code}"},codigo_bulto.eq.${code}`)
+          .eq("activo", true)
+        if (porEan && porEan.length > 0) return NextResponse.json(porEan)
+      }
+    }
 
     const [textRes, vectorResults] = await Promise.all([
       adminSupabase
