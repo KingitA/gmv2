@@ -105,6 +105,30 @@ export async function getArticuloExtra(id: string) {
   return data
 }
 
+export async function getArticulosOrdenDeposito(page: number = 0): Promise<{ data: any[]; total: number; error?: string }> {
+  try {
+    const sb = createAdminClient()
+    const limit = 100
+    const offset = page * limit
+    const { data, error, count } = await sb
+      .from("articulos")
+      .select("id, sku, descripcion, ean13, orden_deposito, stock_actual, unidades_por_bulto, unidad_de_medida, marcas!marca_id(descripcion)", { count: "exact" })
+      .eq("activo", true)
+      .not("orden_deposito", "is", null)
+      .order("orden_deposito", { ascending: true })
+      .range(offset, offset + limit - 1)
+    if (error) return { data: [], total: 0, error: error.message }
+    const mapped = (data || []).map((a: any) => ({
+      ...a,
+      marca: (a.marcas as any)?.descripcion ?? null,
+      marcas: undefined,
+    }))
+    return { data: mapped, total: count || 0 }
+  } catch (e: any) {
+    return { data: [], total: 0, error: e?.message || "Error inesperado" }
+  }
+}
+
 export async function ajustarStock(
   articuloId: string,
   cantidad: number,

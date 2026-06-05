@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import {
   actualizarDatosArticulo, ajustarStock, getArticuloExtra,
   buscarArticulosDeposito, getProveedoresDeposito, getCategoriasDeposito,
+  getArticulosOrdenDeposito,
 } from "@/lib/actions/deposito"
 
 interface Articulo {
@@ -19,9 +20,13 @@ interface Articulo {
   orden_deposito?: number | null
 }
 
+interface ArticuloSesion extends Articulo {
+  marca?: string | null
+}
+
 type TipoAjuste = "entrada" | "salida" | "correccion"
 type Seccion    = "datos" | "stock"
-type FiltroPanel = "prov" | "cat" | null
+type FiltroPanel = "prov" | "cat" | "orden" | null
 
 export default function ModificacionArticulosPage() {
   // ── Búsqueda ──────────────────────────────────────────
@@ -39,6 +44,14 @@ export default function ModificacionArticulosPage() {
   const [filtroCategoria, setFiltroCategoria] = useState<string|null>(null)
   const [panelFiltro, setPanelFiltro] = useState<FiltroPanel>(null)
   const [busqFiltro, setBusqFiltro] = useState("")
+
+  // ── Sesión recorrido depósito ─────────────────────────
+  const [sesionOrden, setSesionOrden] = useState<ArticuloSesion[]>([])
+  const [sesionPage, setSesionPage] = useState(0)
+  const [sesionTotal, setSesionTotal] = useState(0)
+  const [sesionIndex, setSesionIndex] = useState<number | null>(null)
+  const [sesionCargando, setSesionCargando] = useState(false)
+  const [sesionError, setSesionError] = useState<string | null>(null)
 
   // ── Datos artículo ────────────────────────────────────
   const [ean13, setEan13] = useState<string[]>([])
@@ -98,7 +111,6 @@ export default function ModificacionArticulosPage() {
     setTipoFraccion(""); setCantidadFraccion("")
     setCantidad(tipo === "correccion" ? String(art.stock_actual ?? 0) : "")
     setMotivo(""); setMsgDatos(null); setMsgStock(null)
-    // NO limpiar resultados — se necesitan al volver
     setBusqueda(""); setPanelFiltro(null)
     try {
       const extra = await getArticuloExtra(art.id)
@@ -109,9 +121,36 @@ export default function ModificacionArticulosPage() {
     } catch { /* columnas opcionales */ }
   }
 
+  const seleccionarSesion = (art: ArticuloSesion, index: number) => {
+    setSesionIndex(index)
+    seleccionar(art)
+  }
+
+  const cargarSesionOrden = async (reset = false) => {
+    setSesionCargando(true)
+    setSesionError(null)
+    const page = reset ? 0 : sesionPage + 1
+    const res = await getArticulosOrdenDeposito(page)
+    if (res.error) {
+      setSesionError(res.error)
+    } else {
+      setSesionOrden(prev => reset ? res.data : [...prev, ...res.data])
+      setSesionTotal(res.total)
+      setSesionPage(page)
+    }
+    setSesionCargando(false)
+  }
+
+  const abrirPanelOrden = async () => {
+    if (panelFiltro === "orden") { setPanelFiltro(null); return }
+    setPanelFiltro("orden")
+    if (sesionOrden.length === 0) await cargarSesionOrden(true)
+  }
+
   const limpiarTodo = () => {
     setBusqueda(""); setResultados([]); setArticulo(null)
     setFiltroProveedor(null); setFiltroCategoria(null); setPanelFiltro(null)
+    setSesionOrden([]); setSesionIndex(null); setSesionTotal(0); setSesionPage(0)
   }
 
   const guardarDatos = async () => {
@@ -126,8 +165,9 @@ export default function ModificacionArticulosPage() {
         cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null,
       })
       setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
-      // Volver a la lista (con filtros si había, o pantalla principal si no)
-      setTimeout(() => { setArticulo(null); setBusqueda("") }, 600)
+      if (sesionIndex === null) {
+        setTimeout(() => { setArticulo(null); setBusqueda("") }, 600)
+      }
     } catch (e: any) { setMsgDatos({ ok: false, txt: e.message || "Error al guardar" }) }
     setGuardandoDatos(false)
   }
@@ -153,8 +193,25 @@ export default function ModificacionArticulosPage() {
     return s - c
   }
 
+  const onCambiar = () => {
+    setArticulo(null)
+    setBusqueda("")
+    if (sesionIndex !== null) setPanelFiltro("orden")
+  }
+
+  const irAnterior = () => {
+    if (sesionIndex === null || sesionIndex <= 0) return
+    seleccionarSesion(sesionOrden[sesionIndex - 1], sesionIndex - 1)
+  }
+
+  const irSiguiente = () => {
+    if (sesionIndex === null || sesionIndex >= sesionOrden.length - 1) return
+    seleccionarSesion(sesionOrden[sesionIndex + 1], sesionIndex + 1)
+  }
+
   const mostrarResultados = busqueda.length >= 2 || !!(filtroProveedor || filtroCategoria)
   const hayFiltroActivo   = !!(filtroProveedor || filtroCategoria)
+  const enSesion          = sesionIndex !== null && sesionOrden.length > 0
 
   // ── Estilos ───────────────────────────────────────────
   const C = {
@@ -198,6 +255,13 @@ export default function ModificacionArticulosPage() {
     artSelectedSub: { color: "#6b7280", fontSize: 12, marginTop: 2 },
     stockBadge: { background: "#065f46", color: "#34d399", borderRadius: 10, padding: "6px 10px", fontWeight: 700, fontSize: 14, whiteSpace: "nowrap" as const },
     changeBtn: { background: "#374151", border: "1px solid #4b5563", borderRadius: 10, padding: "8px 12px", color: "#9ca3af", fontSize: 12, cursor: "pointer" },
+
+    navBar: { background: "#1a2035", borderBottom: "1px solid #374151", padding: "8px 14px", display: "flex", alignItems: "center", gap: 8 },
+    navBtn: (disabled: boolean) => ({
+      flex: 1, padding: "10px 0", borderRadius: 10, fontWeight: 700, fontSize: 14, border: "none", cursor: disabled ? "not-allowed" : "pointer",
+      background: disabled ? "#1f2937" : "#312e81", color: disabled ? "#4b5563" : "#a5b4fc",
+    }),
+    navCounter: { color: "#6b7280", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" as const, textAlign: "center" as const, minWidth: 70 },
 
     tabs: { display: "flex", borderBottom: "1px solid #374151" },
     tab: (active: boolean, color: string) => ({
@@ -245,7 +309,7 @@ export default function ModificacionArticulosPage() {
             onChange={e => setBusqueda(e.target.value)}
             autoFocus
           />
-          {(busqueda || hayFiltroActivo) && (
+          {(busqueda || hayFiltroActivo || sesionOrden.length > 0) && (
             <button style={C.clearBtn} onClick={limpiarTodo}>✕</button>
           )}
         </div>
@@ -262,6 +326,10 @@ export default function ModificacionArticulosPage() {
             🗂 {filtroCategoria ?? "Categoría"}
             {filtroCategoria && <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroCategoria(null) }}>×</span>}
           </button>
+          <button style={C.filterChip(sesionOrden.length > 0)} onClick={abrirPanelOrden}>
+            📦 Recorrido Depósito
+            {sesionOrden.length > 0 && <span style={C.chipX} onClick={e => { e.stopPropagation(); setSesionOrden([]); setSesionIndex(null); setSesionTotal(0); setSesionPage(0) }}>×</span>}
+          </button>
           {hayFiltroActivo && (
             <button style={{ ...C.filterChip(false) as any, border: "none", color: "#ef4444", fontSize: 12, marginLeft: "auto" }} onClick={() => { setFiltroProveedor(null); setFiltroCategoria(null) }}>
               Limpiar
@@ -274,36 +342,89 @@ export default function ModificacionArticulosPage() {
       {panelFiltro && (
         <div style={C.filterPanel}>
           <div style={C.filterHeader}>
-            <span style={C.filterTitle}>{panelFiltro === "prov" ? "Filtrar por Proveedor" : "Filtrar por Categoría"}</span>
+            <span style={C.filterTitle}>
+              {panelFiltro === "prov" ? "Filtrar por Proveedor" : panelFiltro === "cat" ? "Filtrar por Categoría" : "Recorrido por Depósito"}
+            </span>
             <button style={{ ...C.clearBtn, width: 36, height: 36 }} onClick={() => setPanelFiltro(null)}>✕</button>
           </div>
-          <input
-            style={C.filterSearch} type="text" inputMode="search" autoFocus
-            placeholder={panelFiltro === "prov" ? "Buscar proveedor..." : "Buscar categoría..."}
-            value={busqFiltro} onChange={e => setBusqFiltro(e.target.value)}
-          />
-          <div style={C.filterList}>
-            <div style={C.filterItem(panelFiltro === "prov" ? !filtroProveedor : !filtroCategoria)} onClick={() => { if (panelFiltro === "prov") setFiltroProveedor(null); else setFiltroCategoria(null); setPanelFiltro(null); setBusqFiltro("") }}>
-              <span>— Todos —</span>
-              {(panelFiltro === "prov" ? !filtroProveedor : !filtroCategoria) && <span>✓</span>}
-            </div>
-            {panelFiltro === "prov"
-              ? provsFiltrados.map(p => (
-                  <div key={p.id} style={C.filterItem(filtroProveedor?.id === p.id)} onClick={() => { setFiltroProveedor(p); setPanelFiltro(null); setBusqFiltro("") }}>
-                    <span>{p.nombre}</span>{filtroProveedor?.id === p.id && <span>✓</span>}
+
+          {/* Filtros prov/cat con buscador */}
+          {(panelFiltro === "prov" || panelFiltro === "cat") && (
+            <>
+              <input
+                style={C.filterSearch} type="text" inputMode="search" autoFocus
+                placeholder={panelFiltro === "prov" ? "Buscar proveedor..." : "Buscar categoría..."}
+                value={busqFiltro} onChange={e => setBusqFiltro(e.target.value)}
+              />
+              <div style={C.filterList}>
+                <div style={C.filterItem(panelFiltro === "prov" ? !filtroProveedor : !filtroCategoria)} onClick={() => { if (panelFiltro === "prov") setFiltroProveedor(null); else setFiltroCategoria(null); setPanelFiltro(null); setBusqFiltro("") }}>
+                  <span>— Todos —</span>
+                  {(panelFiltro === "prov" ? !filtroProveedor : !filtroCategoria) && <span>✓</span>}
+                </div>
+                {panelFiltro === "prov"
+                  ? provsFiltrados.map(p => (
+                      <div key={p.id} style={C.filterItem(filtroProveedor?.id === p.id)} onClick={() => { setFiltroProveedor(p); setPanelFiltro(null); setBusqFiltro("") }}>
+                        <span>{p.nombre}</span>{filtroProveedor?.id === p.id && <span>✓</span>}
+                      </div>
+                    ))
+                  : catsFiltradas.map(cat => (
+                      <div key={cat} style={C.filterItem(filtroCategoria === cat)} onClick={() => { setFiltroCategoria(cat); setPanelFiltro(null); setBusqFiltro("") }}>
+                        <span>{cat}</span>{filtroCategoria === cat && <span>✓</span>}
+                      </div>
+                    ))
+                }
+              </div>
+            </>
+          )}
+
+          {/* Panel recorrido depósito */}
+          {panelFiltro === "orden" && (
+            <>
+              {sesionTotal > 0 && (
+                <div style={{ padding: "6px 14px 2px", color: "#6b7280", fontSize: 12 }}>
+                  {sesionOrden.length} de {sesionTotal} artículos ordenados por posición
+                </div>
+              )}
+              {sesionError && (
+                <div style={{ margin: "8px 14px", padding: "10px 14px", background: "#7f1d1d", color: "#fca5a5", borderRadius: 10, fontSize: 13 }}>
+                  Error: {sesionError}
+                </div>
+              )}
+              {sesionCargando && sesionOrden.length === 0 && (
+                <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Cargando artículos...</div>
+              )}
+              <div style={C.filterList}>
+                {sesionOrden.map((art, i) => (
+                  <div key={art.id} style={{ ...C.filterItem(sesionIndex === i), flexDirection: "column" as const, alignItems: "flex-start", gap: 2 }}
+                    onClick={() => seleccionarSesion(art, i)}>
+                    <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <span style={{ fontWeight: 700, fontSize: 15, flex: 1, lineHeight: 1.3 }}>{art.descripcion}</span>
+                      <span style={{ color: "#6366f1", fontWeight: 700, fontSize: 13, marginLeft: 8, whiteSpace: "nowrap" as const }}>#{art.orden_deposito}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, color: "#6b7280", fontSize: 12 }}>
+                      {art.marca && <span>{art.marca}</span>}
+                      {art.ean13?.length ? <span style={{ fontFamily: "monospace" }}>{art.ean13[0]}</span> : <span style={{ opacity: 0.5 }}>Sin EAN</span>}
+                    </div>
                   </div>
-                ))
-              : catsFiltradas.map(cat => (
-                  <div key={cat} style={C.filterItem(filtroCategoria === cat)} onClick={() => { setFiltroCategoria(cat); setPanelFiltro(null); setBusqFiltro("") }}>
-                    <span>{cat}</span>{filtroCategoria === cat && <span>✓</span>}
-                  </div>
-                ))
-            }
-          </div>
+                ))}
+                {sesionOrden.length < sesionTotal && !sesionCargando && (
+                  <button
+                    onClick={() => cargarSesionOrden(false)}
+                    style={{ width: "100%", marginTop: 8, padding: "14px", borderRadius: 12, background: "#1f2937", border: "1px solid #374151", color: "#a5b4fc", fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+                  >
+                    Cargar más ({sesionOrden.length}/{sesionTotal})
+                  </button>
+                )}
+                {sesionCargando && sesionOrden.length > 0 && (
+                  <div style={{ padding: "14px", textAlign: "center", color: "#6b7280", fontSize: 13 }}>Cargando...</div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* ── Resultados ── */}
+      {/* ── Resultados búsqueda ── */}
       {mostrarResultados && !panelFiltro && !articulo && (
         <>
           {buscando && <div style={{ padding: "16px", color: "#6b7280", textAlign: "center" }}>Buscando...</div>}
@@ -333,7 +454,7 @@ export default function ModificacionArticulosPage() {
         <div style={C.empty}>
           <span style={{ fontSize: 48 }}>🔧</span>
           <span style={{ fontSize: 16 }}>Buscá un artículo para modificarlo</span>
-          <span style={{ fontSize: 13, textAlign: "center" as const }}>o filtrá por proveedor / categoría para ver el listado</span>
+          <span style={{ fontSize: 13, textAlign: "center" as const }}>o filtrá por proveedor / categoría / recorrido de depósito</span>
         </div>
       )}
 
@@ -346,8 +467,27 @@ export default function ModificacionArticulosPage() {
               <div style={C.artSelectedSub}>{articulo.sku}{articulo.ean13?.length ? ` · ${articulo.ean13.join(', ')}` : ""}</div>
             </div>
             <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
-            <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda("") }}>Cambiar</button>
+            <button style={C.changeBtn} onClick={onCambiar}>
+              {enSesion ? "Listado" : "Cambiar"}
+            </button>
           </div>
+
+          {/* Barra de navegación de sesión */}
+          {enSesion && (
+            <div style={C.navBar}>
+              <button style={C.navBtn(sesionIndex! <= 0)} onClick={irAnterior} disabled={sesionIndex! <= 0}>
+                ← Anterior
+              </button>
+              <span style={C.navCounter}>
+                {sesionIndex! + 1} / {sesionOrden.length}
+                {sesionOrden.length < sesionTotal && "+"}
+              </span>
+              <button style={C.navBtn(sesionIndex! >= sesionOrden.length - 1)} onClick={irSiguiente} disabled={sesionIndex! >= sesionOrden.length - 1}>
+                Siguiente →
+              </button>
+            </div>
+          )}
+
           <div style={C.tabs}>
             <div style={C.tab(seccion === "stock", "#f59e0b")} onClick={() => setSeccion("stock")}>Ajustar Stock</div>
             <div style={C.tab(seccion === "datos", "#60a5fa")} onClick={() => setSeccion("datos")}>Datos del Artículo</div>
