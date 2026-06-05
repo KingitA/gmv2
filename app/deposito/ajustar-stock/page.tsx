@@ -398,6 +398,7 @@ export default function ModificacionArticulosPage() {
                     <div style={{ display: "flex", gap: 10, color: "#6b7280", fontSize: 12 }}>
                       {art.marca && <span>{art.marca}</span>}
                       {art.ean13?.length ? <span style={{ fontFamily: "monospace" }}>{art.ean13[0]}</span> : <span style={{ opacity: 0.5 }}>Sin EAN</span>}
+                      {art.codigo_bulto ? <span style={{ fontFamily: "monospace" }}>DUN: {art.codigo_bulto}</span> : <span style={{ opacity: 0.5 }}>Sin código de bulto</span>}
                     </div>
                   </div>
                 ))}
