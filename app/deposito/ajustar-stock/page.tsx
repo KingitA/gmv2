@@ -18,9 +18,6 @@ interface Articulo {
   tipo_fraccion: string | null
   cantidad_fraccion: number | null
   orden_deposito?: number | null
-}
-
-interface ArticuloSesion extends Articulo {
   marca?: string | null
 }
 
@@ -45,13 +42,12 @@ export default function ModificacionArticulosPage() {
   const [panelFiltro, setPanelFiltro] = useState<FiltroPanel>(null)
   const [busqFiltro, setBusqFiltro] = useState("")
 
-  // ── Sesión recorrido depósito ─────────────────────────
-  const [sesionOrden, setSesionOrden] = useState<ArticuloSesion[]>([])
-  const [sesionPage, setSesionPage] = useState(0)
-  const [sesionTotal, setSesionTotal] = useState(0)
-  const [sesionIndex, setSesionIndex] = useState<number | null>(null)
-  const [sesionCargando, setSesionCargando] = useState(false)
-  const [sesionError, setSesionError] = useState<string | null>(null)
+  // ── Recorrido depósito ────────────────────────────────
+  const [listaOrden, setListaOrden] = useState<Articulo[]>([])
+  const [listaTotal, setListaTotal] = useState(0)
+  const [listaPagina, setListaPagina] = useState(0)
+  const [listaCargando, setListaCargando] = useState(false)
+  const [indiceActual, setIndiceActual] = useState<number | null>(null)
 
   // ── Datos artículo ────────────────────────────────────
   const [ean13, setEan13] = useState<string[]>([])
@@ -121,36 +117,51 @@ export default function ModificacionArticulosPage() {
     } catch { /* columnas opcionales */ }
   }
 
-  const seleccionarSesion = (art: ArticuloSesion, index: number) => {
-    setSesionIndex(index)
+  const abrirOrden = async () => {
+    if (panelFiltro === "orden") { setPanelFiltro(null); return }
+    setPanelFiltro("orden")
+    if (listaOrden.length === 0) {
+      setListaCargando(true)
+      const res = await getArticulosOrdenDeposito(0)
+      setListaOrden(res.data)
+      setListaTotal(res.total)
+      setListaPagina(0)
+      setListaCargando(false)
+    }
+  }
+
+  const cargarMas = async () => {
+    setListaCargando(true)
+    const nextPagina = listaPagina + 1
+    const res = await getArticulosOrdenDeposito(nextPagina)
+    setListaOrden(prev => [...prev, ...res.data])
+    setListaPagina(nextPagina)
+    setListaCargando(false)
+  }
+
+  const seleccionarDeOrden = (art: Articulo, index: number) => {
+    setIndiceActual(index)
     seleccionar(art)
   }
 
-  const cargarSesionOrden = async (reset = false) => {
-    setSesionCargando(true)
-    setSesionError(null)
-    const page = reset ? 0 : sesionPage + 1
-    const res = await getArticulosOrdenDeposito(page)
-    if (res.error) {
-      setSesionError(res.error)
-    } else {
-      setSesionOrden(prev => reset ? res.data : [...prev, ...res.data])
-      setSesionTotal(res.total)
-      setSesionPage(page)
-    }
-    setSesionCargando(false)
+  const irAnterior = () => {
+    if (indiceActual === null || indiceActual <= 0) return
+    const prev = listaOrden[indiceActual - 1]
+    setIndiceActual(indiceActual - 1)
+    seleccionar(prev)
   }
 
-  const abrirPanelOrden = async () => {
-    if (panelFiltro === "orden") { setPanelFiltro(null); return }
-    setPanelFiltro("orden")
-    if (sesionOrden.length === 0) await cargarSesionOrden(true)
+  const irSiguiente = () => {
+    if (indiceActual === null || indiceActual >= listaOrden.length - 1) return
+    const next = listaOrden[indiceActual + 1]
+    setIndiceActual(indiceActual + 1)
+    seleccionar(next)
   }
 
   const limpiarTodo = () => {
     setBusqueda(""); setResultados([]); setArticulo(null)
     setFiltroProveedor(null); setFiltroCategoria(null); setPanelFiltro(null)
-    setSesionOrden([]); setSesionIndex(null); setSesionTotal(0); setSesionPage(0)
+    setListaOrden([]); setListaTotal(0); setListaPagina(0); setIndiceActual(null)
   }
 
   const guardarDatos = async () => {
@@ -165,7 +176,7 @@ export default function ModificacionArticulosPage() {
         cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null,
       })
       setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
-      if (sesionIndex === null) {
+      if (indiceActual === null) {
         setTimeout(() => { setArticulo(null); setBusqueda("") }, 600)
       }
     } catch (e: any) { setMsgDatos({ ok: false, txt: e.message || "Error al guardar" }) }
@@ -193,25 +204,9 @@ export default function ModificacionArticulosPage() {
     return s - c
   }
 
-  const onCambiar = () => {
-    setArticulo(null)
-    setBusqueda("")
-    if (sesionIndex !== null) setPanelFiltro("orden")
-  }
-
-  const irAnterior = () => {
-    if (sesionIndex === null || sesionIndex <= 0) return
-    seleccionarSesion(sesionOrden[sesionIndex - 1], sesionIndex - 1)
-  }
-
-  const irSiguiente = () => {
-    if (sesionIndex === null || sesionIndex >= sesionOrden.length - 1) return
-    seleccionarSesion(sesionOrden[sesionIndex + 1], sesionIndex + 1)
-  }
-
+  const enRecorrido    = indiceActual !== null
   const mostrarResultados = busqueda.length >= 2 || !!(filtroProveedor || filtroCategoria)
   const hayFiltroActivo   = !!(filtroProveedor || filtroCategoria)
-  const enSesion          = sesionIndex !== null && sesionOrden.length > 0
 
   // ── Estilos ───────────────────────────────────────────
   const C = {
@@ -309,7 +304,7 @@ export default function ModificacionArticulosPage() {
             onChange={e => setBusqueda(e.target.value)}
             autoFocus
           />
-          {(busqueda || hayFiltroActivo || sesionOrden.length > 0) && (
+          {(busqueda || hayFiltroActivo || listaOrden.length > 0) && (
             <button style={C.clearBtn} onClick={limpiarTodo}>✕</button>
           )}
         </div>
@@ -326,9 +321,9 @@ export default function ModificacionArticulosPage() {
             🗂 {filtroCategoria ?? "Categoría"}
             {filtroCategoria && <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroCategoria(null) }}>×</span>}
           </button>
-          <button style={C.filterChip(sesionOrden.length > 0)} onClick={abrirPanelOrden}>
-            📦 Recorrido Depósito
-            {sesionOrden.length > 0 && <span style={C.chipX} onClick={e => { e.stopPropagation(); setSesionOrden([]); setSesionIndex(null); setSesionTotal(0); setSesionPage(0) }}>×</span>}
+          <button style={C.filterChip(listaOrden.length > 0)} onClick={abrirOrden}>
+            📦 Orden Depósito
+            {listaOrden.length > 0 && <span style={C.chipX} onClick={e => { e.stopPropagation(); setListaOrden([]); setListaTotal(0); setListaPagina(0); setIndiceActual(null) }}>×</span>}
           </button>
           {hayFiltroActivo && (
             <button style={{ ...C.filterChip(false) as any, border: "none", color: "#ef4444", fontSize: 12, marginLeft: "auto" }} onClick={() => { setFiltroProveedor(null); setFiltroCategoria(null) }}>
@@ -343,12 +338,11 @@ export default function ModificacionArticulosPage() {
         <div style={C.filterPanel}>
           <div style={C.filterHeader}>
             <span style={C.filterTitle}>
-              {panelFiltro === "prov" ? "Filtrar por Proveedor" : panelFiltro === "cat" ? "Filtrar por Categoría" : "Recorrido por Depósito"}
+              {panelFiltro === "prov" ? "Filtrar por Proveedor" : panelFiltro === "cat" ? "Filtrar por Categoría" : "Orden de Depósito"}
             </span>
             <button style={{ ...C.clearBtn, width: 36, height: 36 }} onClick={() => setPanelFiltro(null)}>✕</button>
           </div>
 
-          {/* Filtros prov/cat con buscador */}
           {(panelFiltro === "prov" || panelFiltro === "cat") && (
             <>
               <input
@@ -377,26 +371,22 @@ export default function ModificacionArticulosPage() {
             </>
           )}
 
-          {/* Panel recorrido depósito */}
           {panelFiltro === "orden" && (
             <>
-              {sesionTotal > 0 && (
+              {listaTotal > 0 && (
                 <div style={{ padding: "6px 14px 2px", color: "#6b7280", fontSize: 12 }}>
-                  {sesionOrden.length} de {sesionTotal} artículos ordenados por posición
+                  {listaOrden.length} de {listaTotal} artículos
                 </div>
               )}
-              {sesionError && (
-                <div style={{ margin: "8px 14px", padding: "10px 14px", background: "#7f1d1d", color: "#fca5a5", borderRadius: 10, fontSize: 13 }}>
-                  Error: {sesionError}
-                </div>
-              )}
-              {sesionCargando && sesionOrden.length === 0 && (
-                <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Cargando artículos...</div>
+              {listaCargando && listaOrden.length === 0 && (
+                <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Cargando...</div>
               )}
               <div style={C.filterList}>
-                {sesionOrden.map((art, i) => (
-                  <div key={art.id} style={{ ...C.filterItem(sesionIndex === i), flexDirection: "column" as const, alignItems: "flex-start", gap: 2 }}
-                    onClick={() => seleccionarSesion(art, i)}>
+                {listaOrden.map((art, i) => (
+                  <div key={art.id}
+                    style={{ ...C.filterItem(indiceActual === i), flexDirection: "column" as const, alignItems: "flex-start", gap: 3 }}
+                    onClick={() => seleccionarDeOrden(art, i)}
+                  >
                     <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <span style={{ fontWeight: 700, fontSize: 15, flex: 1, lineHeight: 1.3 }}>{art.descripcion}</span>
                       <span style={{ color: "#6366f1", fontWeight: 700, fontSize: 13, marginLeft: 8, whiteSpace: "nowrap" as const }}>#{art.orden_deposito}</span>
@@ -407,15 +397,12 @@ export default function ModificacionArticulosPage() {
                     </div>
                   </div>
                 ))}
-                {sesionOrden.length < sesionTotal && !sesionCargando && (
-                  <button
-                    onClick={() => cargarSesionOrden(false)}
-                    style={{ width: "100%", marginTop: 8, padding: "14px", borderRadius: 12, background: "#1f2937", border: "1px solid #374151", color: "#a5b4fc", fontWeight: 700, fontSize: 14, cursor: "pointer" }}
-                  >
-                    Cargar más ({sesionOrden.length}/{sesionTotal})
+                {listaOrden.length < listaTotal && !listaCargando && (
+                  <button onClick={cargarMas} style={{ width: "100%", marginTop: 8, padding: "14px", borderRadius: 12, background: "#1f2937", border: "1px solid #374151", color: "#a5b4fc", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                    Cargar más ({listaOrden.length} / {listaTotal})
                   </button>
                 )}
-                {sesionCargando && sesionOrden.length > 0 && (
+                {listaCargando && listaOrden.length > 0 && (
                   <div style={{ padding: "14px", textAlign: "center", color: "#6b7280", fontSize: 13 }}>Cargando...</div>
                 )}
               </div>
@@ -454,7 +441,7 @@ export default function ModificacionArticulosPage() {
         <div style={C.empty}>
           <span style={{ fontSize: 48 }}>🔧</span>
           <span style={{ fontSize: 16 }}>Buscá un artículo para modificarlo</span>
-          <span style={{ fontSize: 13, textAlign: "center" as const }}>o filtrá por proveedor / categoría / recorrido de depósito</span>
+          <span style={{ fontSize: 13, textAlign: "center" as const }}>o filtrá por proveedor / categoría / orden de depósito</span>
         </div>
       )}
 
@@ -467,22 +454,19 @@ export default function ModificacionArticulosPage() {
               <div style={C.artSelectedSub}>{articulo.sku}{articulo.ean13?.length ? ` · ${articulo.ean13.join(', ')}` : ""}</div>
             </div>
             <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
-            <button style={C.changeBtn} onClick={onCambiar}>
-              {enSesion ? "Listado" : "Cambiar"}
+            <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda(""); if (enRecorrido) setPanelFiltro("orden") }}>
+              {enRecorrido ? "Volver" : "Cambiar"}
             </button>
           </div>
 
-          {/* Barra de navegación de sesión */}
-          {enSesion && (
+          {/* Navegación anterior / siguiente */}
+          {enRecorrido && (
             <div style={C.navBar}>
-              <button style={C.navBtn(sesionIndex! <= 0)} onClick={irAnterior} disabled={sesionIndex! <= 0}>
+              <button style={C.navBtn(indiceActual! <= 0)} onClick={irAnterior} disabled={indiceActual! <= 0}>
                 ← Anterior
               </button>
-              <span style={C.navCounter}>
-                {sesionIndex! + 1} / {sesionOrden.length}
-                {sesionOrden.length < sesionTotal && "+"}
-              </span>
-              <button style={C.navBtn(sesionIndex! >= sesionOrden.length - 1)} onClick={irSiguiente} disabled={sesionIndex! >= sesionOrden.length - 1}>
+              <span style={C.navCounter}>{indiceActual! + 1} / {listaOrden.length}{listaOrden.length < listaTotal ? "+" : ""}</span>
+              <button style={C.navBtn(indiceActual! >= listaOrden.length - 1)} onClick={irSiguiente} disabled={indiceActual! >= listaOrden.length - 1}>
                 Siguiente →
               </button>
             </div>
