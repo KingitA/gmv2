@@ -42,9 +42,14 @@ function crearTRA(servicio: string): string {
   ].join('\n')
 }
 
+// Normaliza PEM que puede llegar con \n literales desde variables de entorno
+function normalizarPEM(pem: string): string {
+  return pem.replace(/\\n/g, '\n').trim()
+}
+
 function firmarTRA(tra: string, certPem: string, keyPem: string): string {
-  const cert = forge.pki.certificateFromPem(certPem)
-  const key  = forge.pki.privateKeyFromPem(keyPem)
+  const cert = forge.pki.certificateFromPem(normalizarPEM(certPem))
+  const key  = forge.pki.privateKeyFromPem(normalizarPEM(keyPem))
 
   const p7 = forge.pkcs7.createSignedData()
   p7.content = forge.util.createBuffer(tra, 'utf8')
