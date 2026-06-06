@@ -10,8 +10,15 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Card, CardContent } from "@/components/ui/card"
-import { Search, FileText, Loader2, CheckCircle2, Plus, AlertTriangle, ExternalLink } from "lucide-react"
+import { Search, FileText, Loader2, CheckCircle2, Plus, AlertTriangle, ExternalLink, Ban } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+
+const TIPO_INVERSO_LABEL: Record<string, string> = {
+  FA: 'Nota de Crédito A', FB: 'Nota de Crédito B',
+  NCA: 'Nota de Débito A', NCB: 'Nota de Débito B',
+  NDA: 'Nota de Crédito A', NDB: 'Nota de Crédito B',
+  PRES: 'Reversa', REV: 'Presupuesto',
+}
 
 type Comprobante = {
   id: string
@@ -23,6 +30,7 @@ type Comprobante = {
   total_factura: number
   saldo_pendiente: number
   estado_pago: string
+  anulado_en: string | null
   clientes?: {
     nombre_razon_social: string
     cuit: string
@@ -76,6 +84,8 @@ export default function ComprobantesVentaPage() {
   const [generandoComprobante, setGenerandoComprobante] = useState<string | null>(null)
   const [descargandoPDF, setDescargandoPDF] = useState<string | null>(null)
   const [modalPedidosAbierto, setModalPedidosAbierto] = useState(false)
+  const [anulando, setAnulando] = useState<string | null>(null)
+  const [confirmAnular, setConfirmAnular] = useState<Comprobante | null>(null)
   const [errorCorrecion, setErrorCorrecion] = useState<{
     mensaje: string
     clienteId: string
@@ -89,6 +99,26 @@ export default function ComprobantesVentaPage() {
   useEffect(() => {
     cargarComprobantes()
   }, [])
+
+  const anularComprobante = async (comp: Comprobante) => {
+    setAnulando(comp.id)
+    try {
+      const res = await fetch(`/api/comprobantes-venta/${comp.id}/anular`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error anulando comprobante')
+      setConfirmAnular(null)
+      alert(
+        `Anulación generada correctamente.\n` +
+        `${data.inverso.tipo_comprobante} ${data.inverso.numero}` +
+        (data.inverso.cae ? `\nCAE: ${data.inverso.cae}` : '')
+      )
+      await cargarComprobantes()
+    } catch (e: any) {
+      alert(e.message || 'Error al anular')
+    } finally {
+      setAnulando(null)
+    }
+  }
 
   const cargarComprobantes = async () => {
     try {
@@ -295,9 +325,17 @@ export default function ComprobantesVentaPage() {
                 </TableRow>
               ) : (
                 comprobantesFiltrados.map((comp) => (
-                  <TableRow key={comp.id}>
+                  <TableRow
+                    key={comp.id}
+                    className={comp.anulado_en ? "opacity-50 bg-muted/30" : ""}
+                  >
                     <TableCell>
-                      <Badge variant="outline">{TIPOS_COMPROBANTE_LABELS[comp.tipo_comprobante]}</Badge>
+                      <div className="flex flex-col gap-1">
+                        <Badge variant="outline">{TIPOS_COMPROBANTE_LABELS[comp.tipo_comprobante]}</Badge>
+                        {comp.anulado_en && (
+                          <Badge variant="destructive" className="text-xs w-fit">Anulado</Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="font-medium">{comp.numero_comprobante}</TableCell>
                     <TableCell>{new Date(comp.fecha).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</TableCell>
@@ -316,18 +354,31 @@ export default function ComprobantesVentaPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => descargarPDF(comp.id)}
-                        disabled={descargandoPDF === comp.id}
-                      >
-                        {descargandoPDF === comp.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <FileText className="h-4 w-4" />
+                      <div className="flex gap-1 justify-end">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => descargarPDF(comp.id)}
+                          disabled={descargandoPDF === comp.id}
+                        >
+                          {descargandoPDF === comp.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <FileText className="h-4 w-4" />
+                          )}
+                        </Button>
+                        {!comp.anulado_en && TIPO_INVERSO_LABEL[comp.tipo_comprobante] && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setConfirmAnular(comp)}
+                            disabled={anulando === comp.id}
+                            title={`Anular → ${TIPO_INVERSO_LABEL[comp.tipo_comprobante]}`}
+                          >
+                            <Ban className="h-4 w-4 text-destructive" />
+                          </Button>
                         )}
-                      </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -403,6 +454,50 @@ export default function ComprobantesVentaPage() {
               )}
             </TableBody>
           </Table>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de confirmación de anulación */}
+      <Dialog open={!!confirmAnular} onOpenChange={() => setConfirmAnular(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0" />
+              <DialogTitle>Confirmar anulación</DialogTitle>
+            </div>
+            {confirmAnular && (
+              <DialogDescription className="pt-2 text-left space-y-2">
+                <p>
+                  Se va a generar un <strong>{TIPO_INVERSO_LABEL[confirmAnular.tipo_comprobante]}</strong> que
+                  anula el comprobante <strong>{confirmAnular.numero_comprobante}</strong> por{' '}
+                  <strong>${Math.abs(confirmAnular.total_factura).toFixed(2)}</strong>.
+                </p>
+                <p>
+                  El comprobante original permanece registrado. El movimiento inverso
+                  compensará stock, cuenta corriente y comisiones dejándolos en $0.
+                </p>
+                <p className="font-medium text-destructive">
+                  Esta acción no se puede revertir.
+                </p>
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setConfirmAnular(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!!anulando}
+              onClick={() => confirmAnular && anularComprobante(confirmAnular)}
+            >
+              {anulando ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Anulando...</>
+              ) : (
+                <><Ban className="h-4 w-4 mr-2" />Confirmar anulación</>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -1,0 +1,327 @@
+import { createAdminClient } from '@/lib/supabase/admin'
+import { NextResponse } from 'next/server'
+import { todayArgentina, nowArgentina } from '@/lib/utils'
+import { requireAuth } from '@/lib/auth'
+import {
+  TIPO_INVERSO,
+  ORIGINAL_DECREMENTO_STOCK,
+  CC_MOVIMIENTO,
+  leyendaAnulacion,
+} from '@/lib/comprobantes/anular'
+import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, type AmbienteARCA } from '@/lib/arca/tipos'
+import { obtenerTAConCache } from '@/lib/arca/cache'
+import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
+
+function r2(n: number): number { return Math.round(n * 100) / 100 }
+
+export async function POST(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+
+    const { id } = await params
+    const supabase = createAdminClient()
+
+    // ─── 1. Cargar comprobante original ───
+    const { data: original, error: origErr } = await supabase
+      .from('comprobantes_venta')
+      .select(`
+        *,
+        cliente:clientes!comprobantes_venta_cliente_id_fkey(
+          id, nombre_razon_social, cuit, condicion_iva, exento_iva, vendedor_id, provincia
+        ),
+        detalle:comprobantes_venta_detalle(*)
+      `)
+      .eq('id', id)
+      .single()
+
+    if (origErr || !original) {
+      return NextResponse.json({ error: 'Comprobante no encontrado' }, { status: 404 })
+    }
+
+    // ─── 2. Validaciones ───
+    if (original.anulado_en) {
+      return NextResponse.json({
+        error: 'Este comprobante ya fue anulado. No se puede volver a anular.',
+        error_code: 'YA_ANULADO',
+      }, { status: 422 })
+    }
+
+    const tipoInverso = TIPO_INVERSO[original.tipo_comprobante]
+    if (!tipoInverso) {
+      return NextResponse.json({
+        error: `El tipo de comprobante "${original.tipo_comprobante}" no se puede anular.`,
+      }, { status: 422 })
+    }
+
+    if (!original.cliente?.cuit) {
+      return NextResponse.json({
+        error: 'El cliente no tiene CUIT registrado. No se puede generar el comprobante inverso.',
+      }, { status: 422 })
+    }
+
+    // ─── 3. Determinar punto de venta ───
+    const esFiscal = REQUIERE_CAE.has(tipoInverso)
+
+    const { data: empresaConfig } = await supabase
+      .from('configuracion_empresa')
+      .select('cuit, arca_ambiente, arca_punto_venta')
+      .single()
+
+    const puntoVenta = esFiscal && empresaConfig
+      ? String(empresaConfig.arca_punto_venta ?? 3).padStart(4, '0')
+      : original.punto_venta  // PRES/REV usan el mismo PV que el original
+
+    // ─── 4. Obtener numeración y sincronizar con ARCA ───
+    const { data: numeracion, error: numErr } = await supabase
+      .from('numeracion_comprobantes')
+      .select('*')
+      .eq('tipo_comprobante', tipoInverso)
+      .eq('punto_venta', puntoVenta)
+      .single()
+
+    if (numErr || !numeracion) {
+      return NextResponse.json({
+        error: `No hay numeración configurada para ${tipoInverso} en punto de venta ${puntoVenta}.`,
+      }, { status: 500 })
+    }
+
+    let nuevoNumero = numeracion.ultimo_numero + 1
+
+    // ─── 5. CAE de ARCA si corresponde ───
+    let cae: string | null = null
+    let vencimientoCae: string | null = null
+
+    const certDisponible = !!(process.env.ARCA_CERTIFICADO && process.env.ARCA_CLAVE_PRIVADA)
+
+    if (esFiscal && certDisponible && empresaConfig) {
+      const ambiente = (empresaConfig.arca_ambiente ?? 'testing') as AmbienteARCA
+      const ta = await obtenerTAConCache(supabase, ambiente)
+      const cuitEmpresa = (empresaConfig.cuit ?? '').replace(/-/g, '')
+      const cbteTipo = TIPO_CBTE_ARCA[tipoInverso]
+
+      // Sincronizar con ARCA
+      const ultimoEnArca = await ultimoAutorizado(
+        ambiente, ta.token, ta.sign, cuitEmpresa,
+        parseInt(puntoVenta, 10), cbteTipo,
+      )
+      if (ultimoEnArca !== numeracion.ultimo_numero) {
+        await supabase
+          .from('numeracion_comprobantes')
+          .update({ ultimo_numero: ultimoEnArca })
+          .eq('tipo_comprobante', tipoInverso)
+          .eq('punto_venta', puntoVenta)
+        nuevoNumero = ultimoEnArca + 1
+      }
+
+      // Solicitar CAE con referencia al comprobante original
+      const clienteCuit = original.cliente.cuit.replace(/-/g, '')
+      const fecha = todayArgentina().replace(/-/g, '')
+
+      // Los montos del inverso siempre positivos para ARCA (el tipo ya indica si es NC/ND)
+      const impNeto  = r2(Math.abs(original.total_neto))
+      const impIva   = r2(Math.abs(original.total_iva ?? 0))
+      const impTotal = r2(Math.abs(original.total_factura))
+
+      const respCAE = await solicitarCAE({
+        ambiente,
+        token:    ta.token,
+        sign:     ta.sign,
+        cuit:     cuitEmpresa,
+        ptoVta:   parseInt(puntoVenta, 10),
+        cbteTipo,
+        cbteDesde: nuevoNumero,
+        cbteHasta: nuevoNumero,
+        concepto:  CONCEPTO.PRODUCTOS,
+        docTipo:   DOC_TIPO.CUIT,
+        docNro:    clienteCuit,
+        fecha,
+        impTotal,
+        impTotConc: 0,
+        impNeto,
+        impOpEx:    0,
+        impIva,
+        impTrib:    0,
+        iva: impIva > 0
+          ? [{ id: IVA_ID.IVA_21, baseImp: impNeto, importe: impIva }]
+          : [{ id: IVA_ID.EXENTO,  baseImp: impNeto, importe: 0 }],
+        // Referencia al comprobante original
+        cbteAsoc: [{
+          tipo:   TIPO_CBTE_ARCA[original.tipo_comprobante],
+          ptoVta: parseInt(original.punto_venta ?? '1', 10),
+          nro:    parseInt(original.numero_comprobante.split('-')[1] ?? '1', 10),
+        }],
+      })
+
+      cae            = respCAE.cae
+      vencimientoCae = respCAE.vencimientoCae
+    }
+
+    const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, '0')}`
+
+    // ─── 6. Calcular totales del inverso ───
+    // NC/REV: totales negativos (crédito para el cliente)
+    // ND/PRES-inverso: totales positivos (débito para el cliente)
+    const esCredito = ['NCA', 'NCB', 'REV'].includes(tipoInverso)
+    const signo     = esCredito ? -1 : 1
+
+    const totalNeto    = r2(signo * Math.abs(original.total_neto))
+    const totalIva     = r2(signo * Math.abs(original.total_iva    ?? 0))
+    const percIva      = r2(signo * Math.abs(original.percepcion_iva  ?? 0))
+    const percIibb     = r2(signo * Math.abs(original.percepcion_iibb ?? 0))
+    const totalFactura = r2(signo * Math.abs(original.total_factura))
+
+    const leyenda = leyendaAnulacion(original.numero_comprobante, original.fecha)
+
+    // ─── 7. Crear comprobante inverso ───
+    const { data: inverso, error: invErr } = await supabase
+      .from('comprobantes_venta')
+      .insert({
+        tipo_comprobante:             tipoInverso,
+        numero_comprobante:           numeroComprobante,
+        punto_venta:                  puntoVenta,
+        fecha:                        todayArgentina(),
+        cliente_id:                   original.cliente_id,
+        pedido_id:                    original.pedido_id ?? null,
+        total_neto:                   totalNeto,
+        total_iva:                    totalIva,
+        percepcion_iva:               percIva,
+        percepcion_iibb:              percIibb,
+        total_factura:                totalFactura,
+        saldo_pendiente:              totalFactura,
+        estado_pago:                  'pendiente',
+        motivo_ajuste:                'Anulación',
+        observaciones:                leyenda,
+        comprobantes_relacionados_ids: [original.id],
+        creado_por:                   auth.user.id,
+        ...(cae            ? { cae }                             : {}),
+        ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
+      })
+      .select('id')
+      .single()
+
+    if (invErr || !inverso) {
+      throw new Error('Error creando comprobante inverso: ' + invErr?.message)
+    }
+
+    // ─── 8. Copiar detalle (mismo ítem, mismo precio, misma cantidad) ───
+    // El signo del total del comprobante ya indica si es NC/ND.
+    // El detalle conserva cantidades y precios originales (positivos).
+    const detalleInserts = original.detalle.map((d: any) => ({
+      comprobante_id:  inverso.id,
+      articulo_id:     d.articulo_id,
+      descripcion:     d.descripcion,
+      cantidad:        Math.abs(d.cantidad),
+      precio_unitario: Math.abs(d.precio_unitario),
+      precio_total:    r2(Math.abs(d.precio_total)),
+    }))
+
+    if (detalleInserts.length > 0) {
+      const { error: detErr } = await supabase
+        .from('comprobantes_venta_detalle')
+        .insert(detalleInserts)
+      if (detErr) throw new Error('Error creando detalle inverso: ' + detErr.message)
+    }
+
+    // ─── 9. Marcar original como anulado ───
+    await supabase
+      .from('comprobantes_venta')
+      .update({
+        anulado_en:                   nowArgentina(),
+        comprobantes_relacionados_ids: [...(original.comprobantes_relacionados_ids ?? []), inverso.id],
+      })
+      .eq('id', original.id)
+
+    // ─── 10. Avanzar numeración ───
+    await supabase
+      .from('numeracion_comprobantes')
+      .update({ ultimo_numero: nuevoNumero })
+      .eq('tipo_comprobante', tipoInverso)
+      .eq('punto_venta', puntoVenta)
+
+    // ─── 11. Stock: si el original decrementó stock, lo recuperamos ───
+    if (ORIGINAL_DECREMENTO_STOCK.has(original.tipo_comprobante)) {
+      for (const d of original.detalle) {
+        const cantidad = Math.abs(d.cantidad)
+        if (cantidad <= 0) continue
+
+        await supabase.rpc('increment_stock_actual', {
+          p_articulo_id: d.articulo_id,
+          p_cantidad:    cantidad,   // positivo = entrada de stock
+        }).then(() => {})
+
+        await supabase.from('movimientos_stock').insert({
+          articulo_id:     d.articulo_id,
+          tipo_movimiento: 'entrada',
+          cantidad,
+          precio_unitario: Math.abs(d.precio_unitario),
+          fecha_movimiento: nowArgentina(),
+          observaciones:   `Anulación ${tipoInverso} ${numeroComprobante} → ${original.numero_comprobante}`,
+          comprobante_venta_detalle_id: d.id,
+        })
+      }
+    }
+
+    // ─── 12. CC: si el inverso genera movimiento en cuenta corriente ───
+    const ccMovimiento = CC_MOVIMIENTO[tipoInverso]
+    if (ccMovimiento) {
+      await supabase.from('cuenta_corriente_ajustes').insert({
+        cliente_id:         original.cliente_id,
+        tipo_movimiento:    ccMovimiento,
+        tipo_comprobante:   tipoInverso,
+        numero_comprobante: numeroComprobante,
+        monto:              Math.abs(totalFactura),
+        fecha:              todayArgentina(),
+        concepto:           'Anulación',
+        descripcion:        leyenda,
+      })
+    }
+
+    // ─── 13. Comisiones negativas si el original tenía comisión ───
+    try {
+      const { data: comisiones } = await supabase
+        .from('comisiones')
+        .select('id, monto, porcentaje, viajante_id, articulo_id, segmento, cantidad, precio_neto_unitario')
+        .eq('pedido_id', original.pedido_id ?? '')
+        .eq('comprobante_venta_id', original.id)
+
+      if (comisiones && comisiones.length > 0) {
+        const negativas = comisiones.map((c: any) => ({
+          viajante_id:              c.viajante_id,
+          pedido_id:                original.pedido_id,
+          comprobante_venta_id:     inverso.id,
+          tipo:                     'cobrada',
+          articulo_id:              c.articulo_id,
+          segmento:                 c.segmento,
+          cantidad:                 -(Math.abs(c.cantidad ?? 0)),
+          precio_neto_unitario:     c.precio_neto_unitario,
+          porcentaje:               c.porcentaje,
+          monto:                    -(Math.abs(c.monto)),
+          comprobante_cobrado:      false,
+          pagado:                   false,
+        }))
+        await supabase.from('comisiones').insert(negativas)
+      }
+    } catch (e) {
+      console.error('[Anular] Error revirtiendo comisiones:', e)
+    }
+
+    return NextResponse.json({
+      success: true,
+      inverso: {
+        id:              inverso.id,
+        tipo_comprobante: tipoInverso,
+        numero:           numeroComprobante,
+        total:            totalFactura,
+        cae:              cae ?? null,
+        vencimiento_cae:  vencimientoCae ?? null,
+      },
+    })
+  } catch (error: any) {
+    console.error('[Anular Comprobante] Error:', error)
+    return NextResponse.json({ error: error.message || 'Error anulando comprobante' }, { status: 500 })
+  }
+}
