@@ -197,7 +197,16 @@ export async function POST(request: Request) {
     let arcaParams: ArcaParams | null = null
     const certDisponible = !!(process.env.ARCA_CERTIFICADO && process.env.ARCA_CLAVE_PRIVADA)
 
-    if (certDisponible && empresaConfig) {
+    // Determinar qué tipos de comprobante se van a generar realmente.
+    // PRES y REV son documentos internos — NUNCA deben contactar ARCA.
+    // Solo buscamos el TA si al menos un grupo genera FA o FB.
+    const tiposReales = [...grupos.keys()].map(key => {
+      const vaEnComp = key.split("__")[0]
+      return vaEnComp === "factura" ? tipoFactura : "PRES"
+    })
+    const algunGrupoNecesitaCAE = tiposReales.some(t => t !== null && REQUIERE_CAE.has(t))
+
+    if (certDisponible && empresaConfig && algunGrupoNecesitaCAE) {
       const ambiente = (empresaConfig.arca_ambiente ?? 'testing') as AmbienteARCA
       const ta = await obtenerTAConCache(supabase, ambiente)
       arcaParams = {
