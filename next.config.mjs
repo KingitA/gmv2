@@ -8,6 +8,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // @react-pdf/renderer necesita correr en el runtime de Node.js, no en el bundle del browser
+  serverExternalPackages: ['@react-pdf/renderer'],
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',

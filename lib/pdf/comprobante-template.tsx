@@ -1,6 +1,6 @@
-'use client'
 /**
  * Template PDF de comprobantes de venta.
+ * Solo se ejecuta server-side (API routes). NO agregar 'use client'.
  * Generado server-side con @react-pdf/renderer.
  * Una vez generado se sube a Supabase Storage y queda congelado.
  */
