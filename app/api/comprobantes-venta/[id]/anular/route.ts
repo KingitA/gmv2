@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { generarYSubirPDF, buildPDFData } from '@/lib/pdf/generar'
 import { NextResponse } from 'next/server'
 import { todayArgentina, nowArgentina } from '@/lib/utils'
 import { requireAuth } from '@/lib/auth'
@@ -307,6 +308,43 @@ export async function POST(
       }
     } catch (e) {
       console.error('[Anular] Error revirtiendo comisiones:', e)
+    }
+
+    // ─── PDF del comprobante inverso ───
+    try {
+      const { data: empresaData } = await supabase.from('configuracion_empresa').select('*').single()
+      const { data: marcasTbl }   = await supabase.from('marcas').select('id, descripcion').eq('activo', true)
+      const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
+
+      const pdfData = buildPDFData({
+        comprobante: {
+          id:                  inverso.id,
+          tipo_comprobante:    tipoInverso,
+          numero_comprobante:  numeroComprobante,
+          fecha:               todayArgentina(),
+          total_neto:          totalNeto,
+          total_iva:           totalIva,
+          percepcion_iva:      percIva,
+          percepcion_iibb:     percIibb,
+          total_factura:       totalFactura,
+          cae,
+          vencimiento_cae:     vencimientoCae,
+          observaciones:       leyenda,
+        },
+        cliente:        original.cliente,
+        empresa:        empresaData,
+        detalle:        detalleInserts.map((d: any, i: number) => ({
+          ...d,
+          articulo_id:     original.detalle[i]?.articulo_id,
+          articulos: { descripcion: d.descripcion, sku: '' },
+        })),
+        marcaDesc,
+      })
+
+      const pdfUrl = await generarYSubirPDF(supabase, pdfData)
+      await supabase.from('comprobantes_venta').update({ pdf_url: pdfUrl }).eq('id', inverso.id)
+    } catch (pdfErr: any) {
+      console.error('[Anular PDF] Error generando PDF del inverso:', pdfErr.message)
     }
 
     return NextResponse.json({

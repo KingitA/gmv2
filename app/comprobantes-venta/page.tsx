@@ -31,6 +31,7 @@ type Comprobante = {
   saldo_pendiente: number
   estado_pago: string
   anulado_en: string | null
+  pdf_url: string | null
   clientes?: {
     nombre_razon_social: string
     cuit: string
@@ -220,16 +221,11 @@ export default function ComprobantesVentaPage() {
     }
   }
 
-  const descargarPDF = async (comprobanteId: string) => {
-    setDescargandoPDF(comprobanteId)
-    try {
-      window.open(`/api/comprobantes-venta/${comprobanteId}/imagen`, "_blank")
-    } catch (error) {
-      console.error("[v0] Error abriendo comprobante:", error)
-      alert("Error al abrir comprobante")
-    } finally {
-      setDescargandoPDF(null)
-    }
+  const abrirComprobante = (comp: Comprobante) => {
+    // Si tiene PDF guardado en bucket, usarlo (versión congelada en el momento de emisión)
+    // Si no, abrir la vista HTML generada dinámicamente
+    const url = comp.pdf_url ?? `/api/comprobantes-venta/${comp.id}/imagen`
+    window.open(url, '_blank')
   }
 
   const comprobantesFiltrados = comprobantes.filter((comp) => {
@@ -358,14 +354,10 @@ export default function ComprobantesVentaPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => descargarPDF(comp.id)}
-                          disabled={descargandoPDF === comp.id}
+                          onClick={() => abrirComprobante(comp)}
+                          title={comp.pdf_url ? 'Ver PDF (versión original congelada)' : 'Ver comprobante'}
                         >
-                          {descargandoPDF === comp.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <FileText className="h-4 w-4" />
-                          )}
+                          <FileText className="h-4 w-4" />
                         </Button>
                         {!comp.anulado_en && TIPO_INVERSO_LABEL[comp.tipo_comprobante] && (
                           <Button

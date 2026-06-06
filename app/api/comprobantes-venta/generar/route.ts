@@ -13,6 +13,7 @@ import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificac
 import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
+import { generarYSubirPDF, buildPDFData } from "@/lib/pdf/generar"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
@@ -393,6 +394,45 @@ export async function POST(request: Request) {
         cliente_id: pedido.cliente.id,
         comprobante_ids: comprobanteIds,
       })
+    }
+
+    // ─── 9. Generar PDFs y subirlos al bucket ───
+    // Se hace en background — si falla no bloquea el comprobante ya emitido con CAE.
+    const { data: empresaData } = await supabase.from('configuracion_empresa').select('*').single()
+    const { data: marcasTbl } = await supabase.from('marcas').select('id, descripcion').eq('activo', true)
+    const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
+
+    for (const comp of comprobantesGenerados) {
+      if (!comp.id) continue
+      try {
+        const { data: compFull } = await supabase
+          .from('comprobantes_venta')
+          .select('*, clientes(*), pedidos(numero_pedido, condicion_entrega, vendedores(nombre)), comprobantes_venta_detalle(*, articulos(descripcion, sku, descuento_propio, marca_id, rubro_id, categoria_id, subcategoria_id))')
+          .eq('id', comp.id)
+          .single()
+
+        if (!compFull) continue
+
+        const pdfData = buildPDFData({
+          comprobante:    compFull,
+          cliente:        compFull.clientes,
+          empresa:        empresaData,
+          detalle:        compFull.comprobantes_venta_detalle ?? [],
+          pedido:         compFull.pedidos,
+          bonificaciones: bonificacionesCliente ?? [],
+          marcaDesc,
+        })
+
+        const pdfUrl = await generarYSubirPDF(supabase, pdfData)
+
+        await supabase
+          .from('comprobantes_venta')
+          .update({ pdf_url: pdfUrl })
+          .eq('id', comp.id)
+      } catch (pdfErr: any) {
+        console.error('[Generar PDF] Error en comprobante', comp.id, pdfErr.message)
+        // No lanzar — el comprobante ya tiene CAE, el PDF se puede regenerar después
+      }
     }
 
     return NextResponse.json({
