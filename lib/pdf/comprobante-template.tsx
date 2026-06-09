@@ -369,11 +369,15 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
                 <>
                   <View style={s.totRow}><Text style={s.totLbl}>Subtotal gravado 21%</Text><Text style={s.totVal}>${fmtARS(totalNeto)}</Text></View>
                   <View style={[s.totRow, s.totRowDim]}><Text style={s.totLbl}>IVA 21%</Text><Text style={s.totVal}>${fmtARS(totalIva)}</Text></View>
-                  {percIva > 0 && <View style={[s.totRow, s.totRowDim]}><Text style={s.totLbl}>Percepción IVA</Text><Text style={s.totVal}>${fmtARS(percIva)}</Text></View>}
+                  {percIva > 0 && <View style={[s.totRow, s.totRowDim]}><Text style={s.totLbl}>Percepción IVA (RG 5329/2023)</Text><Text style={s.totVal}>${fmtARS(percIva)}</Text></View>}
                   {percIibb > 0 && <View style={[s.totRow, s.totRowDim]}><Text style={s.totLbl}>Percepción IIBB</Text><Text style={s.totVal}>${fmtARS(percIibb)}</Text></View>}
                 </>
               ) : (
-                <View style={s.totRow}><Text style={s.totLbl}>Subtotal</Text><Text style={s.totVal}>${fmtARS(totalFact)}</Text></View>
+                <>
+                  <View style={s.totRow}><Text style={s.totLbl}>Subtotal</Text><Text style={s.totVal}>${fmtARS(totalFact - percIva - percIibb)}</Text></View>
+                  {percIva > 0 && <View style={[s.totRow, s.totRowDim]}><Text style={s.totLbl}>Percepción IVA (RG 5329/2023)</Text><Text style={s.totVal}>${fmtARS(percIva)}</Text></View>}
+                  {percIibb > 0 && <View style={[s.totRow, s.totRowDim]}><Text style={s.totLbl}>Percepción IIBB</Text><Text style={s.totVal}>${fmtARS(percIibb)}</Text></View>}
+                </>
               )}
               <View style={s.totGrand}>
                 <Text style={s.totGLbl}>TOTAL</Text>

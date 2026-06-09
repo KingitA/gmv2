@@ -15,6 +15,7 @@ import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from "@/lib/pdf/generar"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
+import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
         *,
         cliente:clientes!pedidos_cliente_id_fkey(
           id, nombre_razon_social, condicion_iva, metodo_facturacion,
-          cuit, direccion, exento_iva, provincia, vendedor_id
+          cuit, direccion, exento_iva, exento_iibb, provincia, percepcion_iibb, vendedor_id
         ),
         detalle:pedidos_detalle(
           id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item,
@@ -592,7 +593,13 @@ async function generarComprobante(
   }
   totalNeto = round2(totalNeto)
   totalIva  = round2(totalIva)
-  const totalFactura = round2(totalNeto + totalIva)
+
+  // ─── Percepciones (IVA 3% RG 5329/2023 + IIBB según padrón provincial) ───
+  const percResult = calcularPercepciones(totalNeto, pedido.cliente, esFiscal)
+  const percIVA    = percResult.percepcion_iva
+  const percIIBB   = percResult.percepcion_iibb
+  const totalTrib  = round2(percIVA + percIIBB)
+  const totalFactura = round2(totalNeto + totalIva + totalTrib)
 
   // ─── Solicitar CAE a ARCA (solo comprobantes fiscales) ───
   let cae: string | null = null
@@ -601,6 +608,15 @@ async function generarComprobante(
   if (esFiscal && arca) {
     const clienteCuit = (pedido.cliente.cuit ?? '').replace(/-/g, '')
     const fecha = todayArgentina().replace(/-/g, '') // YYYYMMDD
+
+    // Armar array de tributos (percepciones) para ARCA
+    const tributos = []
+    if (percIVA > 0) {
+      tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: totalNeto, alic: percResult.tasa_iva_aplicada, importe: percIVA })
+    }
+    if (percIIBB > 0) {
+      tributos.push({ id: TRIBUTO_ID.PERCEPCION_IIBB, desc: 'Percepcion IIBB', baseImp: totalNeto, alic: percResult.tasa_iibb_aplicada, importe: percIIBB })
+    }
 
     const respCAE = await solicitarCAE({
       ambiente:    arca.ambiente,
@@ -620,10 +636,11 @@ async function generarComprobante(
       impNeto:     totalNeto,
       impOpEx:     0,
       impIva:      totalIva,
-      impTrib:     0,
+      impTrib:     totalTrib,
       iva: totalIva > 0
         ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
         : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
+      tributos: tributos.length > 0 ? tributos : undefined,
     })
 
     cae            = respCAE.cae
@@ -646,6 +663,8 @@ async function generarComprobante(
       pedido_id:         pedido.id,
       total_neto:        totalNeto,
       total_iva:         totalIva,
+      percepcion_iva:    percIVA,
+      percepcion_iibb:   percIIBB,
       total_factura:     totalFactura,
       saldo_pendiente:   totalFactura,
       estado_pago:       'pendiente',

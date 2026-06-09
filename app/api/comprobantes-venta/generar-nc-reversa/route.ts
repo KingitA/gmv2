@@ -6,9 +6,11 @@ import { requireAuth } from '@/lib/auth'
 import { insertarKardex } from '@/lib/kardex/insertar-kardex'
 import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
 import { determinarTipoNCADesdeOriginal, determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
-import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, type AmbienteARCA } from "@/lib/arca/tipos"
+import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
+import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
+import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from "@/lib/pdf/generar"
 
 export async function POST(request: Request) {
   try {
@@ -42,6 +44,8 @@ export async function POST(request: Request) {
           metodo_facturacion,
           cuit,
           exento_iva,
+          exento_iibb,
+          percepcion_iibb,
           vendedor_id,
           provincia
         ),
@@ -172,7 +176,13 @@ export async function POST(request: Request) {
     })
     totalNeto = Math.round(totalNeto * 100) / 100
     totalIva  = Math.round(totalIva  * 100) / 100
-    const totalComprobante = Math.round((totalNeto + totalIva) * 100) / 100
+
+    // ─── Percepciones en NC (se incluyen en negativo, espejo de la factura original) ───
+    const percResult    = calcularPercepciones(totalNeto, devolucion.cliente, esFiscal)
+    const percIVA       = percResult.percepcion_iva
+    const percIIBB      = percResult.percepcion_iibb
+    const totalTrib     = Math.round((percIVA + percIIBB) * 100) / 100
+    const totalComprobante = Math.round((totalNeto + totalIva + totalTrib) * 100) / 100
 
     // ─── Solicitar CAE a ARCA (solo NCA/NCB, no REV) ───
     let cae: string | null = null
@@ -192,6 +202,14 @@ export async function POST(request: Request) {
         nro:    parseInt((compOriginal.numero_comprobante ?? '0').split('-')[1] ?? '0', 10),
       }] : []
 
+      const tributos = []
+      if (percIVA > 0) {
+        tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: totalNeto, alic: percResult.tasa_iva_aplicada, importe: percIVA })
+      }
+      if (percIIBB > 0) {
+        tributos.push({ id: TRIBUTO_ID.PERCEPCION_IIBB, desc: 'Percepcion IIBB', baseImp: totalNeto, alic: percResult.tasa_iibb_aplicada, importe: percIIBB })
+      }
+
       const respCAE = await solicitarCAE({
         ambiente,
         token:    ta.token,
@@ -210,11 +228,12 @@ export async function POST(request: Request) {
         impNeto:    totalNeto,
         impOpEx:    0,
         impIva:     totalIva,
-        impTrib:    0,
+        impTrib:    totalTrib,
         iva: totalIva > 0
           ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
           : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
         cbteAsoc,
+        tributos: tributos.length > 0 ? tributos : undefined,
       })
       cae            = respCAE.cae
       vencimientoCae = respCAE.vencimientoCae
@@ -231,6 +250,8 @@ export async function POST(request: Request) {
         pedido_id:          devolucion.pedido_id || null,
         total_neto:         -Math.abs(totalNeto),
         total_iva:          -Math.abs(totalIva),
+        percepcion_iva:     -Math.abs(percIVA),
+        percepcion_iibb:    -Math.abs(percIIBB),
         total_factura:      -Math.abs(totalComprobante),
         saldo_pendiente:    -Math.abs(totalComprobante),
         estado_pago:        "pendiente",
@@ -239,7 +260,7 @@ export async function POST(request: Request) {
         ...(cae            ? { cae }                             : {}),
         ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
       })
-      .select()
+      .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones, motivo_ajuste')
       .single()
 
     if (comprobanteError) {
@@ -404,6 +425,70 @@ export async function POST(request: Request) {
       }
     } catch (comErr) {
       console.error("Error creando comisiones negativas NC:", comErr)
+    }
+
+    // ─── Generar PDF con QR y subirlo al bucket ───
+    try {
+      const { data: empresaData } = await supabase.from('configuracion_empresa').select('*').single()
+      const { data: marcasTbl }   = await supabase.from('marcas').select('id, descripcion').eq('activo', true)
+      const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
+
+      let qrDataUrl: string | undefined
+      if (cae && devolucion.cliente?.cuit) {
+        try {
+          qrDataUrl = await generarQRBase64({
+            cuit:       empresaData?.cuit ?? '',
+            ptoVta:     puntoVenta,
+            tipoCmp:    tipoFinal,
+            nroCmp:     numeroComprobante,
+            importe:    Math.abs(totalComprobante),
+            fecha:      todayArgentina(),
+            tipoDocRec: 80,
+            nroDocRec:  devolucion.cliente.cuit,
+            cae:        cae,
+          })
+        } catch (qrErr: any) {
+          console.error('[NC QR] Error generando QR:', qrErr.message)
+        }
+      }
+
+      // Detalle para el PDF
+      const detalleNC = (devolucion.detalle ?? []).map((item: any) => ({
+        articulo_id:     item.articulo_id,
+        descripcion:     item.articulo?.descripcion ?? item.descripcion ?? '—',
+        sku:             item.articulo?.sku ?? '',
+        cantidad:        -Math.abs(item.cantidad ?? 0),
+        precio_unitario: item.precio_venta_original ?? 0,
+        precio_total:    -Math.abs(item.subtotal ?? 0),
+        marca:           marcaDesc.get(item.articulo?.marca_id) ?? '',
+        descuento_propio: 0,
+      }))
+
+      const pdfData = buildPDFData({
+        comprobante: comprobante,
+        cliente:     devolucion.cliente,
+        empresa:     empresaData,
+        detalle:     detalleNC,
+        pedido:      null,
+        bonificaciones: [],
+        marcaDesc,
+        qrDataUrl,
+      })
+
+      const { pdfUrl, pdfPath, pdfHash } = await generarYSubirPDF(supabase, pdfData)
+      const snapshot = buildSnapshot(pdfData)
+
+      await supabase.from('comprobantes_venta').update({
+        pdf_url:              pdfUrl,
+        pdf_path:             pdfPath,
+        pdf_hash:             pdfHash,
+        fecha_generacion_pdf: new Date().toISOString(),
+        estado_pdf:           'generado',
+        pdf_snapshot:         snapshot,
+      }).eq('id', comprobante.id)
+    } catch (pdfErr: any) {
+      console.error('[NC PDF] Error generando PDF:', pdfErr.message)
+      await supabase.from('comprobantes_venta').update({ estado_pdf: 'error' }).eq('id', comprobante.id).catch(() => {})
     }
 
     return NextResponse.json({
