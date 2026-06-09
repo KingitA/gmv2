@@ -539,22 +539,23 @@ body{font-family:var(--f);background:#bbb;color:#111;font-size:11px}
 .stripe{position:absolute;left:0;top:0;bottom:0;width:5px}
 .body{margin-left:5px;flex:1;display:flex;flex-direction:column;min-height:0}
 /* ── ENCABEZADO EMPRESA ── */
-.enc-top{display:grid;grid-template-columns:1fr 88px 168px;border-bottom:2px solid var(--borde)}
+.enc-top{display:grid;grid-template-columns:1fr 96px 1fr;border-bottom:2px solid var(--borde)}
 .em{padding:10px 12px 9px;border-right:1.5px solid #ccc}
 .em-nombre{font-family:var(--fc);font-size:22px;font-weight:700;text-transform:uppercase;letter-spacing:.01em;line-height:1}
 .em-rubro{font-family:var(--fc);font-size:9px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:#888;margin:3px 0 6px}
 .em-tabla,.comp-tabla,.cli-tabla{border-collapse:collapse;width:100%}
 .em-tabla td,.comp-tabla td{font-size:10px;padding:1.5px 0;vertical-align:top;line-height:1.4;color:#333}
 .em-tabla td.lbl,.comp-tabla td.lbl{font-weight:700;color:#111;white-space:nowrap;padding-right:6px;width:1%}
-.tipo-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 4px;border-right:1.5px solid #ccc;gap:3px}
-.letra{font-family:var(--fc);font-size:52px;font-weight:700;line-height:1;width:66px;height:66px;border:3px solid currentColor;display:flex;align-items:center;justify-content:center;color:inherit}
+.tipo-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 4px;border-left:1.5px solid #ccc;border-right:1.5px solid #ccc;gap:3px}
+.letra{font-family:var(--fc);font-size:56px;font-weight:700;line-height:1;width:72px;height:72px;border:3px solid currentColor;display:flex;align-items:center;justify-content:center;color:inherit}
 .tipo-nombre{font-family:var(--fc);font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#666;text-align:center;line-height:1.2}
 .tipo-cod{font-size:8px;color:#aaa;font-family:var(--fc)}
-.comp{padding:10px 12px 9px}
-.comp-nro{font-family:var(--fc);font-size:18px;font-weight:700;line-height:1;margin-bottom:5px}
+.comp{padding:10px 14px 9px}
+.comp-nro{font-family:var(--fc);font-size:20px;font-weight:700;line-height:1;margin-bottom:6px;text-align:right}
 .comp-nro span{font-size:11px;color:#888;font-weight:400}
+.comp-tabla td{text-align:right}.comp-tabla td.lbl{text-align:left}
 .cae-box{margin-top:6px;padding:4px 7px;border:1.5px solid #bbb;border-radius:2px;background:#f8f8f8}
-.cae-inner{display:flex;align-items:center;gap:6px}
+.cae-inner{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .cae-box .cl{font-size:7.5px;text-transform:uppercase;letter-spacing:.08em;color:#999;font-weight:700}
 .cae-box .cv{font-family:monospace;font-size:11px;font-weight:700;color:#111;letter-spacing:.04em}
 .cae-box .cv2{font-size:9px;color:#555}
