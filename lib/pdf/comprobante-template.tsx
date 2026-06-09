@@ -29,9 +29,10 @@ const TIPO_CONFIG: Record<string, { letra: string; nombre: string; color: string
 
 // ─── Estilos ─────────────────────────────────────────────
 const s = StyleSheet.create({
-  page:        { fontFamily: 'Helvetica', fontSize: 9, paddingTop: 0, paddingBottom: 0, paddingHorizontal: 0, backgroundColor: '#fff' },
+  page:        { fontFamily: 'Helvetica', fontSize: 9, paddingTop: 0, paddingBottom: 70, paddingHorizontal: 0, backgroundColor: '#fff' },
   stripe:      { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
-  body:        { marginLeft: 4, padding: '10 12 10 10', flex: 1, display: 'flex', flexDirection: 'column' },
+  body:        { marginLeft: 4, padding: '10 12 10 10' },
+  footer:      { position: 'absolute', bottom: 0, left: 4, right: 0 },
 
   // Encabezado empresa + tipo + número
   encTop:      { flexDirection: 'row', borderBottom: '2 solid #111', marginBottom: 0 },
@@ -223,7 +224,7 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
 
   return (
     <Document title={`${cfg.nombre} ${cfg.letra} ${nro}`} author={empresa.razon_social}>
-      <Page size="A4" style={s.page} wrap={false}>
+      <Page size="A4" style={s.page}>
         {/* Franja de color lateral */}
         <View style={[s.stripe, { backgroundColor: cfg.color }]} fixed />
 
@@ -352,9 +353,6 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
             )
           })}
 
-          {/* Spacer — empuja el pie al fondo */}
-          <View style={s.spacer} />
-
           {/* ── Totales + Observaciones ── */}
           <View style={s.totArea}>
             <View style={s.totObs}>
@@ -384,7 +382,10 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
             </View>
           </View>
 
-          {/* Transparencia Fiscal */}
+        </View>
+
+        {/* ── Footer fijo en todas las páginas ── */}
+        <View style={s.footer} fixed>
           {esFactA && (
             <View style={s.transpRow}>
               <Text style={s.transpText}>
@@ -394,8 +395,6 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
               </Text>
             </View>
           )}
-
-          {/* Pie */}
           <View style={s.pie}>
             <Text style={s.pieLegal}>
               Emitido conforme RG ARCA 1415{comp.cae ? ` · CAE: ${comp.cae}` : ''}.{'\n'}

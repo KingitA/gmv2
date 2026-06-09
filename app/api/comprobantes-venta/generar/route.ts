@@ -13,7 +13,7 @@ import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificac
 import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
-import { generarYSubirPDF, buildPDFData, generarQRBase64 } from "@/lib/pdf/generar"
+import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from "@/lib/pdf/generar"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
@@ -453,15 +453,28 @@ export async function POST(request: Request) {
           qrDataUrl,
         })
 
-        const pdfUrl = await generarYSubirPDF(supabase, pdfData)
+        const { pdfUrl, pdfPath, pdfHash } = await generarYSubirPDF(supabase, pdfData)
+        const snapshot = buildSnapshot(pdfData)
 
         await supabase
           .from('comprobantes_venta')
-          .update({ pdf_url: pdfUrl })
+          .update({
+            pdf_url:              pdfUrl,
+            pdf_path:             pdfPath,
+            pdf_hash:             pdfHash,
+            fecha_generacion_pdf: new Date().toISOString(),
+            estado_pdf:           'generado',
+            pdf_snapshot:         snapshot,
+          })
           .eq('id', comp.id)
       } catch (pdfErr: any) {
         console.error('[Generar PDF] Error en comprobante', comp.id, pdfErr.message)
-        // No lanzar — el comprobante ya tiene CAE, el PDF se puede regenerar después
+        // Marcar error — el comprobante ya tiene CAE, el PDF requiere intervención manual
+        await supabase
+          .from('comprobantes_venta')
+          .update({ estado_pdf: 'error' })
+          .eq('id', comp.id)
+          .catch(() => {})
       }
     }
 

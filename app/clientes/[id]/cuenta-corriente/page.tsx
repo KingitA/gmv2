@@ -506,7 +506,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                         <Button
                                                             variant="ghost"
                                                             size="sm"
-                                                            onClick={() => window.open(`/api/comprobantes-venta/${doc.id}/imagen`, '_blank')}
+                                                            onClick={() => window.open(`/api/comprobantes-venta/${doc.id}/pdf`, '_blank')}
                                                         >
                                                             <FileTextIcon />
                                                         </Button>

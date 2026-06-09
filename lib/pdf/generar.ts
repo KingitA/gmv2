@@ -1,7 +1,5 @@
 /**
  * Genera el PDF de un comprobante y lo sube al bucket 'comprobantes_venta' de Supabase.
- * Retorna la URL pública firmada (1 año de validez) que se guarda en comprobantes_venta.pdf_url.
- *
  * El PDF queda congelado: si después cambian los datos del cliente, artículos o precios,
  * el PDF original no se modifica. Es el comprobante en el momento de su emisión.
  */
@@ -11,6 +9,7 @@ import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { ComprobantePDF, type ComprobantePDFData } from './comprobante-template'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import QRCode from 'qrcode'
+import crypto from 'crypto'
 import { TIPO_CBTE_ARCA } from '@/lib/arca/tipos'
 
 /**
@@ -50,53 +49,79 @@ export async function generarQRBase64(params: {
   return QRCode.toDataURL(url, { margin: 1, width: 120 })
 }
 
+/** Calcula el hash SHA-256 del buffer PDF. Retorna hex de 64 chars. */
+export function calcularHashPDF(buffer: Buffer): string {
+  return crypto.createHash('sha256').update(buffer).digest('hex')
+}
+
+/** Captura un snapshot JSONB del comprobante en el momento de generación. */
+export function buildSnapshot(data: ComprobantePDFData): Record<string, unknown> {
+  return {
+    v:            1,
+    generado_en:  new Date().toISOString(),
+    comprobante:  data.comprobante,
+    cliente:      data.cliente,
+    empresa:      { razon_social: data.empresa.razon_social, cuit: data.empresa.cuit },
+    detalle_count: data.detalle.length,
+    total_factura: data.comprobante.total_factura,
+  }
+}
+
 const BUCKET = 'comprobantes_venta'
 
+export interface GenerarPDFResult {
+  pdfUrl:  string
+  pdfPath: string
+  pdfHash: string
+}
+
 /**
- * Genera el PDF en memoria y lo sube a Supabase Storage.
- * Retorna la URL firmada con 1 año de validez.
+ * Genera el PDF en memoria, calcula su hash SHA-256 y lo sube a Supabase Storage.
+ * Retorna path permanente + URL firmada (1 año) + hash para verificación.
  */
 export async function generarYSubirPDF(
   supabase: SupabaseClient,
   data: ComprobantePDFData,
-): Promise<string> {
+): Promise<GenerarPDFResult> {
   // 1. Renderizar el PDF a buffer
   const element = React.createElement(ComprobantePDF, { data }) as unknown as ReactElement<DocumentProps, JSXElementConstructor<DocumentProps>>
   const buffer  = await renderToBuffer(element)
 
-  // 2. Nombre de archivo: tipo-numero-id.pdf (ej: FA-0007-00000001-uuid.pdf)
-  const tipo   = data.comprobante.tipo_comprobante
-  const nro    = data.comprobante.numero_comprobante.replace('-', '_')
-  const id     = data.comprobante.id
-  const nombre = `${tipo}_${nro}_${id}.pdf`
+  // 2. Calcular hash SHA-256
+  const pdfHash = calcularHashPDF(buffer)
 
-  // 3. Subir al bucket
+  // 3. Nombre de archivo: tipo-numero-id.pdf
+  const tipo    = data.comprobante.tipo_comprobante
+  const nro     = data.comprobante.numero_comprobante.replace('-', '_')
+  const id      = data.comprobante.id
+  const pdfPath = `${tipo}_${nro}_${id}.pdf`
+
+  // 4. Subir al bucket (no sobreescribir — el comprobante ya fue emitido)
   const { error: uploadErr } = await supabase.storage
     .from(BUCKET)
-    .upload(nombre, buffer, {
+    .upload(pdfPath, buffer, {
       contentType: 'application/pdf',
-      upsert:      false, // no sobreescribir — el comprobante ya fue emitido
+      upsert:      false,
     })
 
   if (uploadErr) {
     throw new Error(`Error subiendo PDF al bucket: ${uploadErr.message}`)
   }
 
-  // 4. Obtener URL firmada con 1 año de validez (60 * 60 * 24 * 365 = 31536000 seg)
+  // 5. Obtener URL firmada con 1 año de validez (31_536_000 seg)
   const { data: signed, error: signErr } = await supabase.storage
     .from(BUCKET)
-    .createSignedUrl(nombre, 31_536_000)
+    .createSignedUrl(pdfPath, 31_536_000)
 
   if (signErr || !signed?.signedUrl) {
     throw new Error(`Error generando URL firmada del PDF: ${signErr?.message}`)
   }
 
-  return signed.signedUrl
+  return { pdfUrl: signed.signedUrl, pdfPath, pdfHash }
 }
 
 /**
  * Construye el objeto ComprobantePDFData a partir de los datos del comprobante en DB.
- * Llamar después de cargar el comprobante con su detalle, cliente y empresa.
  */
 export function buildPDFData(params: {
   comprobante:    any

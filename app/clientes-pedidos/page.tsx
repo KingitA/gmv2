@@ -440,7 +440,7 @@ export default function ClientesPedidosPage() {
   }
 
   const verComprobante = (comprobanteId: string) => {
-    window.open(`/api/comprobantes-venta/${comprobanteId}/imagen`, "_blank")
+    window.open(`/api/comprobantes-venta/${comprobanteId}/pdf`, "_blank")
   }
 
   const imprimirPedido = async (pedido: Pedido) => {

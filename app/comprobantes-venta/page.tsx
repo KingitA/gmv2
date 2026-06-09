@@ -224,7 +224,7 @@ export default function ComprobantesVentaPage() {
   const abrirComprobante = (comp: Comprobante) => {
     // Si tiene PDF guardado en bucket, usarlo (versión congelada en el momento de emisión)
     // Si no, abrir la vista HTML generada dinámicamente
-    const url = comp.pdf_url ?? `/api/comprobantes-venta/${comp.id}/imagen`
+    const url = `/api/comprobantes-venta/${comp.id}/pdf`
     window.open(url, '_blank')
   }
 
