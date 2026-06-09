@@ -8,7 +8,7 @@
  */
 
 import type { AmbienteARCA, SolicitudCAE, RespuestaCAE, IvaARCA, TributoARCA, CbteAsocARCA } from './tipos'
-import { arcaAgent } from './ssl-agent'
+import { fetchArca } from './ssl-agent'
 
 const URL_WSFEV1: Record<AmbienteARCA, string> = {
   testing:    'https://wswhomo.afip.gov.ar/wsfev1/service.asmx',
@@ -92,15 +92,13 @@ async function llamarWS(ambiente: AmbienteARCA, accion: string, body: string): P
   </soapenv:Body>
 </soapenv:Envelope>`
 
-  const res = await fetch(url, {
+  const res = await fetchArca(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'text/xml; charset=utf-8',
       'SOAPAction':   `"${NS}${accion}"`,
     },
     body: envelope,
-    // @ts-expect-error undici dispatcher — necesario para ARCA (DHE 1024-bit DH key)
-    dispatcher: arcaAgent,
   })
 
   const text = await res.text()
