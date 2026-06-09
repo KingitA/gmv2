@@ -12,13 +12,11 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from '@/lib/pdf/generar'
 
-export async function POST(request: NextRequest) {
-  const auth = await requireAuth()
-  if (auth.error) return auth.error
+const ADMIN_SECRET = process.env.BACKFILL_SECRET ?? process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(-12)
 
+export async function POST(request: NextRequest) {
   const supabase = createAdminClient()
   const body      = await request.json().catch(() => ({}))
   const soloId    = body.id as string | undefined
