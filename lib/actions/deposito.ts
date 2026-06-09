@@ -136,7 +136,6 @@ export async function getArticulosListado(
       .eq("activo", true)
     if (filtros.proveedorId) qb = qb.eq("proveedor_id", filtros.proveedorId)
     if (filtros.categoria)   qb = qb.ilike("categoria", filtros.categoria)
-    if (filtros.soloConOrden) qb = qb.not("orden_deposito", "is", null)
     const { data, error, count } = await qb
       .order("orden_deposito", { ascending: true, nullsFirst: false })
       .order("descripcion",    { ascending: true })

@@ -134,10 +134,10 @@ export default function ModificacionArticulosPage() {
   }
 
   const abrirOrden = async () => {
-    if (panelFiltro === "lista" && listaFiltro.soloConOrden) { setPanelFiltro(null); return }
+    if (panelFiltro === "lista" && listaLabel === "Orden de Depósito") { setPanelFiltro(null); return }
     setPanelFiltro("lista")
-    if (!listaFiltro.soloConOrden || listaOrden.length === 0) {
-      await cargarLista({ soloConOrden: true }, "Orden de Depósito")
+    if (listaLabel !== "Orden de Depósito" || listaOrden.length === 0) {
+      await cargarLista({}, "Orden de Depósito")
     }
   }
 
@@ -385,9 +385,9 @@ export default function ModificacionArticulosPage() {
               <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroCategoria(null); limpiarLista() }}>×</span>
             )}
           </button>
-          <button style={C.filterChip(listaFiltro.soloConOrden === true && hayLista)} onClick={abrirOrden}>
+          <button style={C.filterChip(listaLabel === "Orden de Depósito" && hayLista)} onClick={abrirOrden}>
             📦 Orden Depósito
-            {listaFiltro.soloConOrden && hayLista && (
+            {listaLabel === "Orden de Depósito" && hayLista && (
               <span style={C.chipX} onClick={e => { e.stopPropagation(); limpiarLista() }}>×</span>
             )}
           </button>
