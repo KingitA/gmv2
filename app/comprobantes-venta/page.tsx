@@ -84,8 +84,6 @@ export default function ComprobantesVentaPage() {
   const [cargando, setCargando] = useState(true)
   const [generandoComprobante, setGenerandoComprobante] = useState<string | null>(null)
   const [descargandoPDF, setDescargandoPDF] = useState<string | null>(null)
-  const [backfillingPDF, setBackfillingPDF] = useState(false)
-  const [backfillResult, setBackfillResult] = useState<string | null>(null)
   const [modalPedidosAbierto, setModalPedidosAbierto] = useState(false)
   const [anulando, setAnulando] = useState<string | null>(null)
   const [confirmAnular, setConfirmAnular] = useState<Comprobante | null>(null)
@@ -230,29 +228,6 @@ export default function ComprobantesVentaPage() {
     window.open(url, '_blank')
   }
 
-  const generarPDFsFaltantes = async () => {
-    setBackfillingPDF(true)
-    setBackfillResult(null)
-    try {
-      const res  = await fetch('/api/comprobantes-venta/backfill-pdf', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ limit: 50 }),
-      })
-      const data = await res.json()
-      if (data.procesados === 0) {
-        setBackfillResult('✓ Todos los comprobantes ya tienen PDF')
-      } else {
-        setBackfillResult(`✓ ${data.exitosos} PDF${data.exitosos !== 1 ? 's' : ''} generado${data.exitosos !== 1 ? 's' : ''}${data.errores > 0 ? ` · ${data.errores} error${data.errores !== 1 ? 'es' : ''}` : ''}`)
-      }
-      cargarComprobantes()
-    } catch {
-      setBackfillResult('Error generando PDFs')
-    } finally {
-      setBackfillingPDF(false)
-    }
-  }
-
   const comprobantesFiltrados = comprobantes.filter((comp) => {
     const coincideBusqueda =
       comp.numero_comprobante?.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -273,19 +248,10 @@ export default function ComprobantesVentaPage() {
           <h1 className="text-3xl font-bold">Comprobantes de Venta</h1>
           <p className="text-muted-foreground">Administra facturas, presupuestos, remitos y notas de crédito</p>
         </div>
-        <div className="flex items-center gap-3">
-          {backfillResult && (
-            <span className="text-sm text-muted-foreground">{backfillResult}</span>
-          )}
-          <Button variant="outline" onClick={generarPDFsFaltantes} disabled={backfillingPDF}>
-            {backfillingPDF ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-            {backfillingPDF ? 'Generando PDFs…' : 'Generar PDFs faltantes'}
-          </Button>
-          <Button onClick={cargarPedidosSinFacturar}>
-            <Plus className="h-4 w-4 mr-2" />
-            Generar Comprobantes
-          </Button>
-        </div>
+        <Button onClick={cargarPedidosSinFacturar}>
+          <Plus className="h-4 w-4 mr-2" />
+          Generar Comprobantes
+        </Button>
       </div>
 
       <div className="flex gap-4">
