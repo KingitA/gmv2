@@ -66,15 +66,26 @@ export async function GET(request: NextRequest) {
       ganancias_por_provincia[prov] = (ganancias_por_provincia[prov] || 0) + (f.percepcion_ganancias_monto || 0)
     }
 
-    // También sumar percepciones desde comprobantes_venta directamente
-    // (para los que se generaron antes de que existiera el kardex)
+    // Percepciones desde comprobantes_venta (para comprobantes anteriores al kardex o con percepcion_iva > 0)
     const { data: compVenta } = await supabase
       .from("comprobantes_venta")
-      .select("percepcion_iva, percepcion_iibb, total_iva, total_neto, tipo_comprobante")
+      .select("percepcion_iva, percepcion_iibb, total_iva, total_neto, tipo_comprobante, clientes(provincia)")
       .gte("fecha", desde)
       .lte("fecha", hasta)
       .neq("tipo_comprobante", "PRES")
-      .not("percepcion_iva", "is", null)
+      .gt("percepcion_iva", 0)
+
+    // Sumar percepciones de comprobantes que no están en kardex
+    const kardexCompIds = new Set<string>()
+    for (const cv of compVenta || []) {
+      const percIva  = Number(cv.percepcion_iva  ?? 0)
+      const percIibb = Number(cv.percepcion_iibb ?? 0)
+      if (percIva > 0)  percepciones_iva_total += percIva
+      if (percIibb > 0) {
+        const prov = (cv as any).clientes?.provincia || "Sin provincia"
+        iibb_por_provincia[prov] = (iibb_por_provincia[prov] || 0) + percIibb
+      }
+    }
 
     // ── 2. IVA Compras (Crédito Fiscal) — desde comprobantes_compra_detalle ──
     const { data: comprasDetalle } = await supabase

@@ -188,6 +188,7 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
   const cfg = TIPO_CONFIG[comp.tipo_comprobante] ?? { letra: 'X', nombre: comp.tipo_comprobante, color: '#333' }
 
   const esFactA    = ['FA', 'NCA', 'NDA'].includes(comp.tipo_comprobante)
+  const esMonotrib = (cliente.condicion_iva ?? '').toLowerCase().includes('monotributo')
   const esPresRev  = ['PRES', 'REV'].includes(comp.tipo_comprobante)
   const esNC_ND    = ['NCA', 'NCB', 'NDA', 'NDB'].includes(comp.tipo_comprobante)
 
@@ -360,7 +361,9 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
               <Text style={s.totObsTit}>OBSERVACIONES</Text>
               <Text style={s.totObsText}>{comp.observaciones || '—'}</Text>
               <Text style={s.totObsLegal}>
-                Crédito fiscal computable solo para Resp. Inscriptos en IVA (RG ARCA 1415). Emitido conforme RG 4291.
+                {esMonotrib
+                  ? 'El crédito fiscal discriminado en el presente comprobante sólo podrá ser computado a efectos del Régimen de Sostenimiento e Inclusión Fiscal para pequeños contribuyentes de la Ley Nro. 27618'
+                  : 'Crédito fiscal computable solo para Resp. Inscriptos en IVA (RG ARCA 1415). Emitido conforme RG 4291.'}
               </Text>
             </View>
             <View style={s.totNums}>

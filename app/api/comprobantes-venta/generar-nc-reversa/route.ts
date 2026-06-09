@@ -188,7 +188,7 @@ export async function POST(request: Request) {
       const compOriginal = devolucion.detalle[0]?.comprobante_original
       const cbteAsoc = compOriginal ? [{
         tipo:   TIPO_CBTE_ARCA[compOriginal.tipo_comprobante] ?? 0,
-        ptoVta: parseInt(puntoVenta, 10),
+        ptoVta: parseInt((compOriginal.numero_comprobante ?? '0').split('-')[0], 10),
         nro:    parseInt((compOriginal.numero_comprobante ?? '0').split('-')[1] ?? '0', 10),
       }] : []
 
