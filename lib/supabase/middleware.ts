@@ -44,7 +44,8 @@ export async function updateSession(request: NextRequest) {
   const publicRoutes = ["/auth/login", "/auth/sign-up", "/auth/error", "/auth/sign-up-success", "/auth/pendiente", "/auth/cambiar-password"]
   const isPublicRoute = publicRoutes.some(r => pathname === r || pathname.startsWith(r + "/"))
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user ?? null
 
   if (!user) {
     if (isPublicRoute) return applyResponse(NextResponse.next({ request: { headers: requestHeaders } }), cookiesToSet)
