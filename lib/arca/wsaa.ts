@@ -10,6 +10,7 @@
 
 import forge from 'node-forge'
 import type { AmbienteARCA } from './tipos'
+import { arcaAgent } from './ssl-agent'
 
 const DESTINO_WSAA = 'cn=wsaa,o=afip,c=ar,serialNumber=CUIT 33693450239'
 
@@ -130,6 +131,8 @@ export async function obtenerTicketAcceso(
       'SOAPAction':   'loginCms',
     },
     body: soapEnv,
+    // @ts-expect-error undici dispatcher — necesario para ARCA (DHE 1024-bit DH key)
+    dispatcher: arcaAgent,
   })
 
   const body = await res.text()
