@@ -187,6 +187,16 @@ export async function POST(request: Request) {
       grupos.get(key)!.push(item)
     }
 
+    const tipoFactura = determinarTipoFactura(pedido.cliente.condicion_iva)
+    if (!tipoFactura) {
+      return NextResponse.json({
+        error: mensajeErrorCondicionIva(pedido.cliente.nombre_razon_social),
+        error_code: "CLIENTE_SIN_CONDICION_IVA",
+        cliente_id: pedido.cliente.id,
+        cliente_nombre: pedido.cliente.nombre_razon_social,
+      }, { status: 422 })
+    }
+
     // ─── Configuración ARCA ───
     // Se lee una vez y se reutiliza para todos los comprobantes del pedido.
     const { data: empresaConfig } = await supabase
@@ -219,16 +229,6 @@ export async function POST(request: Request) {
     }
 
     const comprobantesGenerados: Array<any & { _segmento?: string; _bonifs?: any[] }> = []
-
-    const tipoFactura = determinarTipoFactura(pedido.cliente.condicion_iva)
-    if (!tipoFactura) {
-      return NextResponse.json({
-        error: mensajeErrorCondicionIva(pedido.cliente.nombre_razon_social),
-        error_code: "CLIENTE_SIN_CONDICION_IVA",
-        cliente_id: pedido.cliente.id,
-        cliente_nombre: pedido.cliente.nombre_razon_social,
-      }, { status: 422 })
-    }
 
     // ─── 5. Generar un comprobante por grupo ───
     for (const [key, grupoItems] of grupos) {
