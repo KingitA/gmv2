@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
+import { generarQRBase64 } from '@/lib/pdf/generar'
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -125,8 +126,26 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       condicion_iva: "Responsable Inscripto",
     }
 
+    // Generar QR ARCA si hay CAE
+    let qrDataUrl: string = ""
+    if (comprobante.cae && cliente?.cuit) {
+      try {
+        qrDataUrl = await generarQRBase64({
+          cuit:       empresa.cuit ?? "",
+          ptoVta:     comprobante.punto_venta ?? "0007",
+          tipoCmp:    comprobante.tipo_comprobante,
+          nroCmp:     comprobante.numero_comprobante,
+          importe:    Math.abs(Number(comprobante.total_factura ?? 0)),
+          fecha:      comprobante.fecha,
+          tipoDocRec: 80,
+          nroDocRec:  cliente.cuit,
+          cae:        comprobante.cae,
+        })
+      } catch { /* QR opcional */ }
+    }
+
     // Generar HTML para visualizar/imprimir
-    const html = generarHTMLComprobante(comprobanteCompleto, empresa)
+    const html = generarHTMLComprobante(comprobanteCompleto, empresa, qrDataUrl)
 
     return new NextResponse(html, {
       headers: {
@@ -152,7 +171,7 @@ function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: s
 // El espacio libre (spacer flex) aparece SOLO en la última hoja.
 const FILAS_POR_HOJA = 30
 
-function generarHTMLComprobante(comprobante: any, empresa: any): string {
+function generarHTMLComprobante(comprobante: any, empresa: any, qrDataUrl = ""): string {
   const fmtARS = (n: number) =>
     Math.abs(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -192,8 +211,8 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
 
   // ─── CAE (vacío si no existe — sin inventar) ───
   const cae: string = comprobante.cae || ""
-  const caeVto: string = comprobante.cae_vencimiento
-    ? new Date(comprobante.cae_vencimiento).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+  const caeVto: string = comprobante.vencimiento_cae
+    ? new Date(comprobante.vencimiento_cae).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
     : ""
 
   // ─── Cliente ───
@@ -355,9 +374,14 @@ function generarHTMLComprobante(comprobante: any, empresa: any): string {
     if (esHoja1) {
       const caeBox = esFact || comprobante.tipo_comprobante.startsWith("NC") || comprobante.tipo_comprobante.startsWith("ND")
         ? `<div class="cae-box">
-            <div class="cl">CAE — ARCA</div>
-            <div class="cv">${cae || "—"}</div>
-            <div class="cv2">Vto. CAE: ${caeVto || "—"}</div>
+            <div class="cae-inner">
+              <div>
+                <div class="cl">CAE — ARCA</div>
+                <div class="cv">${cae || "—"}</div>
+                <div class="cv2">Vto. CAE: ${caeVto || "—"}</div>
+              </div>
+              ${qrDataUrl ? `<img class="qr-img" src="${qrDataUrl}" alt="QR ARCA" />` : ""}
+            </div>
           </div>`
         : ""
 
@@ -530,9 +554,11 @@ body{font-family:var(--f);background:#bbb;color:#111;font-size:11px}
 .comp-nro{font-family:var(--fc);font-size:18px;font-weight:700;line-height:1;margin-bottom:5px}
 .comp-nro span{font-size:11px;color:#888;font-weight:400}
 .cae-box{margin-top:6px;padding:4px 7px;border:1.5px solid #bbb;border-radius:2px;background:#f8f8f8}
+.cae-inner{display:flex;align-items:center;gap:6px}
 .cae-box .cl{font-size:7.5px;text-transform:uppercase;letter-spacing:.08em;color:#999;font-weight:700}
 .cae-box .cv{font-family:monospace;font-size:11px;font-weight:700;color:#111;letter-spacing:.04em}
 .cae-box .cv2{font-size:9px;color:#555}
+.qr-img{width:52px;height:52px;flex-shrink:0}
 /* ── CLIENTE ── */
 .enc-cli{display:grid;grid-template-columns:3fr 2fr;border-bottom:2px solid var(--borde)}
 .cli-col{padding:9px 12px}
