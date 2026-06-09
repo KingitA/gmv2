@@ -92,7 +92,7 @@ function firmarTRA(tra: string, certPem: string, keyPem: string): string {
 }
 
 function extraerTag(xml: string, tag: string): string {
-  const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`))
+  const m = xml.match(new RegExp(`<(?:[^:>]+:)?${tag}[^>]*>([\\s\\S]*?)<\\/(?:[^:>]+:)?${tag}>`))
   return m ? m[1].trim() : ''
 }
 
@@ -135,7 +135,9 @@ export async function obtenerTicketAcceso(
   const body = await res.text()
 
   if (!res.ok) {
-    throw new Error(`WSAA ${ambiente} error ${res.status}: ${body.substring(0, 300)}`)
+    const faultcode  = extraerTag(body, 'faultcode')  || ''
+    const faultstring = extraerTag(body, 'faultstring') || body.substring(0, 500)
+    throw new Error(`WSAA ${ambiente} error ${res.status}: [${faultcode}] ${faultstring}`)
   }
 
   // La respuesta contiene el XML del ticket dentro del tag loginCmsReturn
