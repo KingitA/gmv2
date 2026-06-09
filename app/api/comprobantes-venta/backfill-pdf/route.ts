@@ -10,7 +10,7 @@
  * Puede tardar varios segundos — no usar desde UI síncrona.
  */
 
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from '@/lib/pdf/generar'
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
 
-  const supabase  = await createClient()
+  const supabase = createAdminClient()
   const body      = await request.json().catch(() => ({}))
   const soloId    = body.id as string | undefined
   const limite    = Math.min(Number(body.limit ?? 10), 50)
