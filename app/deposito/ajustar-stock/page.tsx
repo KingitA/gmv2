@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import {
   actualizarDatosArticulo, ajustarStock, getArticuloExtra,
   buscarArticulosDeposito, getProveedoresDeposito, getCategoriasDeposito,
-  getArticulosOrdenDeposito,
+  getArticulosListado,
 } from "@/lib/actions/deposito"
 
 interface Articulo {
@@ -22,12 +22,13 @@ interface Articulo {
   marca?: string | null
 }
 
-type TipoAjuste = "entrada" | "salida" | "correccion"
-type Seccion    = "datos" | "stock"
-type FiltroPanel = "prov" | "cat" | "orden" | null
+type ListaFiltro = { proveedorId?: string; categoria?: string; soloConOrden?: boolean }
+type TipoAjuste  = "entrada" | "salida" | "correccion"
+type Seccion     = "datos" | "stock"
+type FiltroPanel = "prov" | "cat" | "lista" | null
 
 export default function ModificacionArticulosPage() {
-  // ── Búsqueda ──────────────────────────────────────────
+  // ── Búsqueda libre ────────────────────────────────────
   const [busqueda, setBusqueda] = useState("")
   const [resultados, setResultados] = useState<Articulo[]>([])
   const [buscando, setBuscando] = useState(false)
@@ -43,11 +44,13 @@ export default function ModificacionArticulosPage() {
   const [panelFiltro, setPanelFiltro] = useState<FiltroPanel>(null)
   const [busqFiltro, setBusqFiltro] = useState("")
 
-  // ── Recorrido depósito ────────────────────────────────
+  // ── Lista navegable (prov / cat / orden deposito) ─────
   const [listaOrden, setListaOrden] = useState<Articulo[]>([])
   const [listaTotal, setListaTotal] = useState(0)
   const [listaPagina, setListaPagina] = useState(0)
   const [listaCargando, setListaCargando] = useState(false)
+  const [listaLabel, setListaLabel] = useState("")
+  const [listaFiltro, setListaFiltro] = useState<ListaFiltro>({})
   const [indiceActual, setIndiceActual] = useState<number | null>(null)
 
   // ── Datos artículo ────────────────────────────────────
@@ -75,16 +78,14 @@ export default function ModificacionArticulosPage() {
     getCategoriasDeposito().then(setCategorias)
   }, [])
 
-  // Búsqueda reactiva
+  // Búsqueda libre reactiva
   useEffect(() => {
     const hayFiltro = !!(filtroProveedor || filtroCategoria)
     if (!busqueda && !hayFiltro) { setResultados([]); return }
     if (busqueda.length > 0 && busqueda.length < 2 && !hayFiltro) return
-
     clearTimeout(debounce.current)
     debounce.current = setTimeout(async () => {
-      setBuscando(true)
-      setErrorBusqueda(null)
+      setBuscando(true); setErrorBusqueda(null)
       try {
         const res = await buscarArticulosDeposito(busqueda, {
           proveedorId: filtroProveedor?.id,
@@ -93,13 +94,61 @@ export default function ModificacionArticulosPage() {
         if (res.error) setErrorBusqueda(res.error)
         setResultados(res.data as Articulo[])
       } catch (e: any) {
-        setResultados([])
-        setErrorBusqueda(e?.message || "Error al buscar")
+        setResultados([]); setErrorBusqueda(e?.message || "Error al buscar")
       } finally { setBuscando(false) }
     }, 250)
     return () => clearTimeout(debounce.current)
   }, [busqueda, filtroProveedor, filtroCategoria])
 
+  // ── Helpers lista ─────────────────────────────────────
+  const cargarLista = async (filtro: ListaFiltro, label: string, reset = true) => {
+    const page = reset ? 0 : listaPagina + 1
+    setListaCargando(true)
+    if (reset) { setListaOrden([]); setListaTotal(0); setListaPagina(0); setIndiceActual(null) }
+    const res = await getArticulosListado(filtro, page)
+    if (reset) {
+      setListaOrden(res.data)
+    } else {
+      setListaOrden(prev => [...prev, ...res.data])
+      setListaPagina(page)
+    }
+    setListaTotal(res.total)
+    setListaFiltro(filtro)
+    setListaLabel(label)
+    setListaCargando(false)
+  }
+
+  const abrirProv = () => { setPanelFiltro(panelFiltro === "prov" ? null : "prov"); setBusqFiltro("") }
+  const abrirCat  = () => { setPanelFiltro(panelFiltro === "cat"  ? null : "cat");  setBusqFiltro("") }
+
+  const seleccionarProveedor = async (p: {id:string;nombre:string}) => {
+    setFiltroProveedor(p)
+    setPanelFiltro("lista")
+    await cargarLista({ proveedorId: p.id }, `Proveedor: ${p.nombre}`)
+  }
+
+  const seleccionarCategoria = async (cat: string) => {
+    setFiltroCategoria(cat)
+    setPanelFiltro("lista")
+    await cargarLista({ categoria: cat }, `Categoría: ${cat}`)
+  }
+
+  const abrirOrden = async () => {
+    if (panelFiltro === "lista" && listaFiltro.soloConOrden) { setPanelFiltro(null); return }
+    setPanelFiltro("lista")
+    if (!listaFiltro.soloConOrden || listaOrden.length === 0) {
+      await cargarLista({ soloConOrden: true }, "Orden de Depósito")
+    }
+  }
+
+  const cargarMas = () => cargarLista(listaFiltro, listaLabel, false)
+
+  const limpiarLista = () => {
+    setListaOrden([]); setListaTotal(0); setListaPagina(0)
+    setListaFiltro({}); setListaLabel(""); setIndiceActual(null)
+  }
+
+  // ── Artículo ──────────────────────────────────────────
   const seleccionar = async (art: Articulo) => {
     setArticulo(art)
     setEan13(Array.isArray(art.ean13) ? art.ean13 : (art.ean13 ? [art.ean13] : []))
@@ -120,51 +169,25 @@ export default function ModificacionArticulosPage() {
     } catch { /* columnas opcionales */ }
   }
 
-  const abrirOrden = async () => {
-    if (panelFiltro === "orden") { setPanelFiltro(null); return }
-    setPanelFiltro("orden")
-    if (listaOrden.length === 0) {
-      setListaCargando(true)
-      const res = await getArticulosOrdenDeposito(0)
-      setListaOrden(res.data)
-      setListaTotal(res.total)
-      setListaPagina(0)
-      setListaCargando(false)
-    }
-  }
-
-  const cargarMas = async () => {
-    setListaCargando(true)
-    const nextPagina = listaPagina + 1
-    const res = await getArticulosOrdenDeposito(nextPagina)
-    setListaOrden(prev => [...prev, ...res.data])
-    setListaPagina(nextPagina)
-    setListaCargando(false)
-  }
-
-  const seleccionarDeOrden = (art: Articulo, index: number) => {
+  const seleccionarDeLista = (art: Articulo, index: number) => {
     setIndiceActual(index)
     seleccionar(art)
   }
 
   const irAnterior = () => {
     if (indiceActual === null || indiceActual <= 0) return
-    const prev = listaOrden[indiceActual - 1]
-    setIndiceActual(indiceActual - 1)
-    seleccionar(prev)
+    seleccionarDeLista(listaOrden[indiceActual - 1], indiceActual - 1)
   }
 
   const irSiguiente = () => {
     if (indiceActual === null || indiceActual >= listaOrden.length - 1) return
-    const next = listaOrden[indiceActual + 1]
-    setIndiceActual(indiceActual + 1)
-    seleccionar(next)
+    seleccionarDeLista(listaOrden[indiceActual + 1], indiceActual + 1)
   }
 
   const limpiarTodo = () => {
     setBusqueda(""); setResultados([]); setArticulo(null)
     setFiltroProveedor(null); setFiltroCategoria(null); setPanelFiltro(null)
-    setListaOrden([]); setListaTotal(0); setListaPagina(0); setIndiceActual(null)
+    limpiarLista()
   }
 
   const guardarDatos = async () => {
@@ -208,9 +231,10 @@ export default function ModificacionArticulosPage() {
     return s - c
   }
 
-  const enRecorrido    = indiceActual !== null
+  const enNavegacion     = indiceActual !== null && listaOrden.length > 0
   const mostrarResultados = busqueda.length >= 2 || !!(filtroProveedor || filtroCategoria)
   const hayFiltroActivo   = !!(filtroProveedor || filtroCategoria)
+  const hayLista          = listaOrden.length > 0
 
   // ── Estilos ───────────────────────────────────────────
   const C = {
@@ -235,12 +259,24 @@ export default function ModificacionArticulosPage() {
     filterTitle: { color: "#f9fafb", fontWeight: 700, fontSize: 17 },
     filterList: { flex: 1, overflowY: "auto" as const, padding: "4px 10px 20px" },
     filterItem: (active: boolean) => ({
-      padding: "14px 16px", borderRadius: 12, margin: "4px 0", cursor: "pointer",
+      padding: "12px 16px", borderRadius: 12, margin: "4px 0", cursor: "pointer",
       background: active ? "#312e81" : "transparent",
       color: active ? "#a5b4fc" : "#e5e7eb",
-      fontWeight: active ? 700 : 400, fontSize: 15,
       display: "flex", alignItems: "center", justifyContent: "space-between",
     }),
+
+    // Item del listado navegable
+    listaItem: (active: boolean) => ({
+      padding: "12px 16px", borderRadius: 12, margin: "4px 0", cursor: "pointer",
+      background: active ? "#312e81" : "transparent",
+      display: "flex", flexDirection: "column" as const, gap: 4,
+    }),
+    listaItemTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 },
+    listaItemName: (active: boolean) => ({ fontWeight: 700, fontSize: 15, lineHeight: 1.3, flex: 1, color: active ? "#a5b4fc" : "#e5e7eb" }),
+    listaItemOrden: { color: "#6366f1", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap" as const },
+    listaItemMeta: { display: "flex", gap: 10, flexWrap: "wrap" as const, fontSize: 12, color: "#6b7280" },
+    listaItemTag: { fontFamily: "monospace" as const, color: "#9ca3af" },
+    listaItemMuted: { opacity: 0.45 },
 
     results: { flex: 1, overflowY: "auto" as const, padding: "12px 16px", display: "flex", flexDirection: "column" as const, gap: 8 },
     artBtn: { background: "#1f2937", border: "1px solid #374151", borderRadius: 16, padding: "14px 18px", textAlign: "left" as const, cursor: "pointer", width: "100%" },
@@ -289,10 +325,33 @@ export default function ModificacionArticulosPage() {
       background: ok ? "#064e3b" : "#7f1d1d", color: ok ? "#34d399" : "#fca5a5",
     }),
     empty: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" as const, gap: 12, color: "#4b5563" },
+    loadMoreBtn: { width: "100%", marginTop: 8, padding: "14px", borderRadius: 12, background: "#1f2937", border: "1px solid #374151", color: "#a5b4fc", fontWeight: 700, fontSize: 14, cursor: "pointer" },
   }
 
   const provsFiltrados = busqFiltro ? proveedores.filter(p => p.nombre.toLowerCase().includes(busqFiltro.toLowerCase())) : proveedores
   const catsFiltradas  = busqFiltro ? categorias.filter(c => c.toLowerCase().includes(busqFiltro.toLowerCase())) : categorias
+
+  // ── Render del item del listado ───────────────────────
+  const renderListaItem = (art: Articulo, i: number) => {
+    const active = indiceActual === i
+    return (
+      <div key={art.id} style={C.listaItem(active)} onClick={() => seleccionarDeLista(art, i)}>
+        <div style={C.listaItemTop}>
+          <span style={C.listaItemName(active)}>{art.descripcion}</span>
+          {art.orden_deposito != null && <span style={C.listaItemOrden}>#{art.orden_deposito}</span>}
+        </div>
+        <div style={C.listaItemMeta}>
+          <span style={C.listaItemTag}>{art.sku}</span>
+          {art.ean13?.length
+            ? <span style={C.listaItemTag}>{art.ean13[0]}</span>
+            : <span style={C.listaItemMuted}>Sin EAN</span>}
+          {art.codigo_bulto
+            ? <span style={C.listaItemTag}>DUN: {art.codigo_bulto}</span>
+            : <span style={C.listaItemMuted}>Sin código de bulto</span>}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{ ...C.page, position: "relative" }}>
@@ -301,14 +360,11 @@ export default function ModificacionArticulosPage() {
       {!articulo && (
         <div style={C.searchBar}>
           <input
-            style={C.searchInput}
-            type="text" inputMode="search"
+            style={C.searchInput} type="text" inputMode="search"
             placeholder="Escanear EAN o buscar SKU / descripción..."
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            autoFocus
+            value={busqueda} onChange={e => setBusqueda(e.target.value)} autoFocus
           />
-          {(busqueda || hayFiltroActivo || listaOrden.length > 0) && (
+          {(busqueda || hayFiltroActivo || hayLista) && (
             <button style={C.clearBtn} onClick={limpiarTodo}>✕</button>
           )}
         </div>
@@ -317,65 +373,77 @@ export default function ModificacionArticulosPage() {
       {/* ── Barra de filtros ── */}
       {!articulo && (
         <div style={C.filterBar}>
-          <button style={C.filterChip(!!filtroProveedor)} onClick={() => { setPanelFiltro(panelFiltro === "prov" ? null : "prov"); setBusqFiltro("") }}>
+          <button style={C.filterChip(!!filtroProveedor)} onClick={abrirProv}>
             🏭 {filtroProveedor ? filtroProveedor.nombre : "Proveedor"}
-            {filtroProveedor && <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroProveedor(null) }}>×</span>}
+            {filtroProveedor && (
+              <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroProveedor(null); limpiarLista() }}>×</span>
+            )}
           </button>
-          <button style={C.filterChip(!!filtroCategoria)} onClick={() => { setPanelFiltro(panelFiltro === "cat" ? null : "cat"); setBusqFiltro("") }}>
+          <button style={C.filterChip(!!filtroCategoria)} onClick={abrirCat}>
             🗂 {filtroCategoria ?? "Categoría"}
-            {filtroCategoria && <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroCategoria(null) }}>×</span>}
+            {filtroCategoria && (
+              <span style={C.chipX} onClick={e => { e.stopPropagation(); setFiltroCategoria(null); limpiarLista() }}>×</span>
+            )}
           </button>
-          <button style={C.filterChip(listaOrden.length > 0)} onClick={abrirOrden}>
+          <button style={C.filterChip(listaFiltro.soloConOrden === true && hayLista)} onClick={abrirOrden}>
             📦 Orden Depósito
-            {listaOrden.length > 0 && <span style={C.chipX} onClick={e => { e.stopPropagation(); setListaOrden([]); setListaTotal(0); setListaPagina(0); setIndiceActual(null) }}>×</span>}
+            {listaFiltro.soloConOrden && hayLista && (
+              <span style={C.chipX} onClick={e => { e.stopPropagation(); limpiarLista() }}>×</span>
+            )}
           </button>
           {hayFiltroActivo && (
-            <button style={{ ...C.filterChip(false) as any, border: "none", color: "#ef4444", fontSize: 12, marginLeft: "auto" }} onClick={() => { setFiltroProveedor(null); setFiltroCategoria(null) }}>
+            <button style={{ ...C.filterChip(false) as any, border: "none", color: "#ef4444", fontSize: 12, marginLeft: "auto" }}
+              onClick={() => { setFiltroProveedor(null); setFiltroCategoria(null); limpiarLista() }}>
               Limpiar
             </button>
           )}
         </div>
       )}
 
-      {/* ── Panel de filtro (overlay) ── */}
+      {/* ── Paneles overlay ── */}
       {panelFiltro && (
         <div style={C.filterPanel}>
           <div style={C.filterHeader}>
             <span style={C.filterTitle}>
-              {panelFiltro === "prov" ? "Filtrar por Proveedor" : panelFiltro === "cat" ? "Filtrar por Categoría" : "Orden de Depósito"}
+              {panelFiltro === "prov" ? "Filtrar por Proveedor"
+               : panelFiltro === "cat" ? "Filtrar por Categoría"
+               : listaLabel}
             </span>
             <button style={{ ...C.clearBtn, width: 36, height: 36 }} onClick={() => setPanelFiltro(null)}>✕</button>
           </div>
 
-          {(panelFiltro === "prov" || panelFiltro === "cat") && (
+          {/* Picker proveedor */}
+          {panelFiltro === "prov" && (
             <>
-              <input
-                style={C.filterSearch} type="text" inputMode="search" autoFocus
-                placeholder={panelFiltro === "prov" ? "Buscar proveedor..." : "Buscar categoría..."}
-                value={busqFiltro} onChange={e => setBusqFiltro(e.target.value)}
-              />
+              <input style={C.filterSearch} type="text" inputMode="search" autoFocus
+                placeholder="Buscar proveedor..." value={busqFiltro} onChange={e => setBusqFiltro(e.target.value)} />
               <div style={C.filterList}>
-                <div style={C.filterItem(panelFiltro === "prov" ? !filtroProveedor : !filtroCategoria)} onClick={() => { if (panelFiltro === "prov") setFiltroProveedor(null); else setFiltroCategoria(null); setPanelFiltro(null); setBusqFiltro("") }}>
-                  <span>— Todos —</span>
-                  {(panelFiltro === "prov" ? !filtroProveedor : !filtroCategoria) && <span>✓</span>}
-                </div>
-                {panelFiltro === "prov"
-                  ? provsFiltrados.map(p => (
-                      <div key={p.id} style={C.filterItem(filtroProveedor?.id === p.id)} onClick={() => { setFiltroProveedor(p); setPanelFiltro(null); setBusqFiltro("") }}>
-                        <span>{p.nombre}</span>{filtroProveedor?.id === p.id && <span>✓</span>}
-                      </div>
-                    ))
-                  : catsFiltradas.map(cat => (
-                      <div key={cat} style={C.filterItem(filtroCategoria === cat)} onClick={() => { setFiltroCategoria(cat); setPanelFiltro(null); setBusqFiltro("") }}>
-                        <span>{cat}</span>{filtroCategoria === cat && <span>✓</span>}
-                      </div>
-                    ))
-                }
+                {provsFiltrados.map(p => (
+                  <div key={p.id} style={C.filterItem(filtroProveedor?.id === p.id)} onClick={() => seleccionarProveedor(p)}>
+                    <span>{p.nombre}</span>{filtroProveedor?.id === p.id && <span>✓</span>}
+                  </div>
+                ))}
               </div>
             </>
           )}
 
-          {panelFiltro === "orden" && (
+          {/* Picker categoría */}
+          {panelFiltro === "cat" && (
+            <>
+              <input style={C.filterSearch} type="text" inputMode="search" autoFocus
+                placeholder="Buscar categoría..." value={busqFiltro} onChange={e => setBusqFiltro(e.target.value)} />
+              <div style={C.filterList}>
+                {catsFiltradas.map(cat => (
+                  <div key={cat} style={C.filterItem(filtroCategoria === cat)} onClick={() => seleccionarCategoria(cat)}>
+                    <span>{cat}</span>{filtroCategoria === cat && <span>✓</span>}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Listado navegable */}
+          {panelFiltro === "lista" && (
             <>
               {listaTotal > 0 && (
                 <div style={{ padding: "6px 14px 2px", color: "#6b7280", fontSize: 12 }}>
@@ -386,24 +454,9 @@ export default function ModificacionArticulosPage() {
                 <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Cargando...</div>
               )}
               <div style={C.filterList}>
-                {listaOrden.map((art, i) => (
-                  <div key={art.id}
-                    style={{ ...C.filterItem(indiceActual === i), flexDirection: "column" as const, alignItems: "flex-start", gap: 3 }}
-                    onClick={() => seleccionarDeOrden(art, i)}
-                  >
-                    <div style={{ display: "flex", width: "100%", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <span style={{ fontWeight: 700, fontSize: 15, flex: 1, lineHeight: 1.3 }}>{art.descripcion}</span>
-                      <span style={{ color: "#6366f1", fontWeight: 700, fontSize: 13, marginLeft: 8, whiteSpace: "nowrap" as const }}>#{art.orden_deposito}</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 10, color: "#6b7280", fontSize: 12 }}>
-                      {art.marca && <span>{art.marca}</span>}
-                      {art.ean13?.length ? <span style={{ fontFamily: "monospace" }}>{art.ean13[0]}</span> : <span style={{ opacity: 0.5 }}>Sin EAN</span>}
-                      {art.codigo_bulto ? <span style={{ fontFamily: "monospace" }}>DUN: {art.codigo_bulto}</span> : <span style={{ opacity: 0.5 }}>Sin código de bulto</span>}
-                    </div>
-                  </div>
-                ))}
+                {listaOrden.map((art, i) => renderListaItem(art, i))}
                 {listaOrden.length < listaTotal && !listaCargando && (
-                  <button onClick={cargarMas} style={{ width: "100%", marginTop: 8, padding: "14px", borderRadius: 12, background: "#1f2937", border: "1px solid #374151", color: "#a5b4fc", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                  <button style={C.loadMoreBtn} onClick={cargarMas}>
                     Cargar más ({listaOrden.length} / {listaTotal})
                   </button>
                 )}
@@ -416,7 +469,7 @@ export default function ModificacionArticulosPage() {
         </div>
       )}
 
-      {/* ── Resultados búsqueda ── */}
+      {/* ── Resultados búsqueda libre ── */}
       {mostrarResultados && !panelFiltro && !articulo && (
         <>
           {buscando && <div style={{ padding: "16px", color: "#6b7280", textAlign: "center" }}>Buscando...</div>}
@@ -459,21 +512,16 @@ export default function ModificacionArticulosPage() {
               <div style={C.artSelectedSub}>{articulo.sku}{articulo.ean13?.length ? ` · ${articulo.ean13.join(', ')}` : ""}</div>
             </div>
             <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
-            <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda(""); if (enRecorrido) setPanelFiltro("orden") }}>
-              {enRecorrido ? "Volver" : "Cambiar"}
+            <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda(""); if (enNavegacion) setPanelFiltro("lista") }}>
+              {enNavegacion ? "Volver" : "Cambiar"}
             </button>
           </div>
 
-          {/* Navegación anterior / siguiente */}
-          {enRecorrido && (
+          {enNavegacion && (
             <div style={C.navBar}>
-              <button style={C.navBtn(indiceActual! <= 0)} onClick={irAnterior} disabled={indiceActual! <= 0}>
-                ← Anterior
-              </button>
+              <button style={C.navBtn(indiceActual! <= 0)} onClick={irAnterior} disabled={indiceActual! <= 0}>← Anterior</button>
               <span style={C.navCounter}>{indiceActual! + 1} / {listaOrden.length}{listaOrden.length < listaTotal ? "+" : ""}</span>
-              <button style={C.navBtn(indiceActual! >= listaOrden.length - 1)} onClick={irSiguiente} disabled={indiceActual! >= listaOrden.length - 1}>
-                Siguiente →
-              </button>
+              <button style={C.navBtn(indiceActual! >= listaOrden.length - 1)} onClick={irSiguiente} disabled={indiceActual! >= listaOrden.length - 1}>Siguiente →</button>
             </div>
           )}
 
@@ -518,12 +566,8 @@ export default function ModificacionArticulosPage() {
                   <input
                     style={C.input} type="text" inputMode="numeric"
                     placeholder="Código de barras del bulto/caja..."
-                    value={codigoBulto}
-                    onChange={e => setCodigoBulto(e.target.value)}
-                    onBlur={e => {
-                      const v = e.target.value.trim()
-                      if (/^\d+$/.test(v) && v.length < 13) setCodigoBulto(v.padStart(13, "0"))
-                    }}
+                    value={codigoBulto} onChange={e => setCodigoBulto(e.target.value)}
+                    onBlur={e => { const v = e.target.value.trim(); if (/^\d+$/.test(v) && v.length < 13) setCodigoBulto(v.padStart(13, "0")) }}
                   />
                 </div>
                 <div style={C.card}>
@@ -534,7 +578,9 @@ export default function ModificacionArticulosPage() {
                         {e}<button type="button" onClick={()=>setEan13(p=>p.filter((_,j)=>j!==i))} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:16,lineHeight:1,padding:0}}>×</button>
                       </span>
                     ))}
-                    <input type="text" inputMode="numeric" value={eanInput} onChange={e=>setEanInput(e.target.value)} placeholder={ean13.length===0?"Escribí un EAN y presioná Enter...":"Agregar otro..."} style={{flex:1,minWidth:140,background:"transparent",border:"none",outline:"none",color:"#f9fafb",fontSize:15}}
+                    <input type="text" inputMode="numeric" value={eanInput} onChange={e=>setEanInput(e.target.value)}
+                      placeholder={ean13.length===0?"Escribí un EAN y presioná Enter...":"Agregar otro..."}
+                      style={{flex:1,minWidth:140,background:"transparent",border:"none",outline:"none",color:"#f9fafb",fontSize:15}}
                       onKeyDown={e=>{if((e.key==="Enter"||e.key===",")&&eanInput.trim()){e.preventDefault();const raw=eanInput.trim();const v=/^\d+$/.test(raw)&&raw.length<13?raw.padStart(13,"0"):raw;if(!ean13.includes(v))setEan13(p=>[...p,v]);setEanInput("")}}}
                       onBlur={()=>{if(eanInput.trim()){const raw=eanInput.trim();const v=/^\d+$/.test(raw)&&raw.length<13?raw.padStart(13,"0"):raw;if(!ean13.includes(v))setEan13(p=>[...p,v]);setEanInput("")}}}
                     />
