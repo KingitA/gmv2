@@ -4,12 +4,14 @@ import { NextResponse } from 'next/server'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
 import { requireAuth } from '@/lib/auth'
 import { determinarTipoNDA, mensajeErrorCondicionIva } from '@/lib/comprobantes/tipo-comprobante'
-import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, type AmbienteARCA } from "@/lib/arca/tipos"
+import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
+import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
+import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from "@/lib/pdf/generar"
 
 /**
- * Genera Notas de Débito (NDA/NDB/NDC) para ventas.
+ * Genera Notas de Débito (NDA/NDB) para ventas.
  * No afectan stock. Incrementan lo que el cliente debe (CC-debe).
  * Usos: cheque rechazado, diferencia de precio, recargo por mora.
  */
@@ -28,7 +30,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const {
       cliente_id,
-      tipo_comprobante, // 'NDA'|'NDB'|'NDC'|'auto'
+      tipo_comprobante, // 'NDA'|'NDB'|'auto'
       concepto,         // descripción del cargo
       items,            // [{ descripcion, cantidad?, precio_unitario_neto, iva_pct? }]
       pedido_id,
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
 
     const { data: cliente, error: clError } = await supabase
       .from('clientes')
-      .select('id, nombre_razon_social, nombre, condicion_iva, exento_iva, vendedor_id, provincia')
+      .select('id, nombre_razon_social, nombre, cuit, condicion_iva, exento_iva, exento_iibb, percepcion_iibb, vendedor_id, provincia, direccion, localidad_id')
       .eq('id', cliente_id)
       .single()
 
@@ -65,7 +67,7 @@ export async function POST(request: Request) {
     // ─── Configuración ARCA ───
     const { data: empresaConfig } = await supabase
       .from('configuracion_empresa')
-      .select('cuit, arca_ambiente, arca_punto_venta')
+      .select('*')
       .single()
 
     const puntoVenta = String(empresaConfig?.arca_punto_venta ?? 7).padStart(4, '0')
@@ -84,29 +86,40 @@ export async function POST(request: Request) {
       )
     }
 
-    // Calcular totales
+    // ─── Calcular totales de ítems ───
     let totalNeto = 0
-    let totalIva = 0
+    let totalIva  = 0
 
     const itemsCalculados = items.map((item: any) => {
-      const qty = Number(item.cantidad ?? 1)
-      const precioNeto = Number(item.precio_unitario_neto ?? 0)
-      const ivaPct = Number(item.iva_pct ?? (cliente.exento_iva ? 0 : 21))
+      const qty         = Number(item.cantidad ?? 1)
+      const precioNeto  = Number(item.precio_unitario_neto ?? 0)
+      const ivaPct      = Number(item.iva_pct ?? (cliente.exento_iva ? 0 : 21))
       const subtotalNeto = qty * precioNeto
-      const subtotalIva = subtotalNeto * (ivaPct / 100)
+      const subtotalIva  = subtotalNeto * (ivaPct / 100)
       totalNeto += subtotalNeto
-      totalIva += subtotalIva
-      return { qty, precioNeto, ivaPct, subtotalNeto, subtotalIva, descripcion: item.descripcion ?? concepto, articulo_id: item.articulo_id ?? null }
+      totalIva  += subtotalIva
+      return {
+        qty, precioNeto, ivaPct, subtotalNeto, subtotalIva,
+        descripcion: item.descripcion ?? concepto,
+        articulo_id: item.articulo_id ?? null,
+      }
     })
     totalNeto = Math.round(totalNeto * 100) / 100
     totalIva  = Math.round(totalIva  * 100) / 100
-    const totalComprobante = Math.round((totalNeto + totalIva) * 100) / 100
+
+    // ─── Percepciones (IVA 3% RG 5329/2023 + IIBB según padrón) ───
+    const esFiscal   = true // NDA/NDB siempre son fiscales
+    const percResult = calcularPercepciones(totalNeto, cliente, esFiscal)
+    const percIVA    = percResult.percepcion_iva
+    const percIIBB   = percResult.percepcion_iibb
+    const totalTrib  = Math.round((percIVA + percIIBB) * 100) / 100
+    const totalComprobante = Math.round((totalNeto + totalIva + totalTrib) * 100) / 100
 
     // ─── Obtener TA y sincronizar numeración ───
-    const ambiente = (empresaConfig?.arca_ambiente ?? 'produccion') as AmbienteARCA
-    const ta = await obtenerTAConCache(supabase, ambiente)
+    const ambiente    = (empresaConfig?.arca_ambiente ?? 'produccion') as AmbienteARCA
+    const ta          = await obtenerTAConCache(supabase, ambiente)
     const cuitEmpresa = (empresaConfig?.cuit ?? '').replace(/-/g, '')
-    const cbteTipo = TIPO_CBTE_ARCA[tipoFinal]
+    const cbteTipo    = TIPO_CBTE_ARCA[tipoFinal]
 
     let nuevoNumero = numeracion.ultimo_numero + 1
     if (cbteTipo) {
@@ -126,7 +139,16 @@ export async function POST(request: Request) {
 
     // ─── Solicitar CAE ───
     const clienteCuit = (cliente.cuit ?? '').replace(/-/g, '') || '0'
-    const fecha = todayArgentina().replace(/-/g, '')
+    const fecha       = todayArgentina().replace(/-/g, '')
+
+    const tributos = []
+    if (percIVA > 0) {
+      tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: totalNeto, alic: percResult.tasa_iva_aplicada, importe: percIVA })
+    }
+    if (percIIBB > 0) {
+      tributos.push({ id: TRIBUTO_ID.PERCEPCION_IIBB, desc: 'Percepcion IIBB', baseImp: totalNeto, alic: percResult.tasa_iibb_aplicada, importe: percIIBB })
+    }
+
     const respCAE = await solicitarCAE({
       ambiente,
       token:    ta.token,
@@ -145,10 +167,11 @@ export async function POST(request: Request) {
       impNeto:    totalNeto,
       impOpEx:    0,
       impIva:     totalIva,
-      impTrib:    0,
+      impTrib:    totalTrib,
       iva: totalIva > 0
         ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
         : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
+      tributos: tributos.length > 0 ? tributos : undefined,
     })
 
     const { data: comprobante, error: compError } = await supabase
@@ -162,6 +185,8 @@ export async function POST(request: Request) {
         pedido_id:          pedido_id ?? null,
         total_neto:         totalNeto,
         total_iva:          totalIva,
+        percepcion_iva:     percIVA,
+        percepcion_iibb:    percIIBB,
         total_factura:      totalComprobante,
         saldo_pendiente:    totalComprobante,
         estado_pago:        'pendiente',
@@ -169,7 +194,7 @@ export async function POST(request: Request) {
         cae:                respCAE.cae,
         vencimiento_cae:    respCAE.vencimientoCae,
       })
-      .select()
+      .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones')
       .single()
 
     if (compError) {
@@ -177,12 +202,12 @@ export async function POST(request: Request) {
     }
 
     const detalleInserts = itemsCalculados.map((item: any) => ({
-      comprobante_id: comprobante.id,
-      articulo_id: item.articulo_id,
-      descripcion: item.descripcion,
-      cantidad: item.qty,
+      comprobante_id:  comprobante.id,
+      articulo_id:     item.articulo_id,
+      descripcion:     item.descripcion,
+      cantidad:        item.qty,
       precio_unitario: item.precioNeto,
-      precio_total: item.subtotalNeto + item.subtotalIva,
+      precio_total:    item.subtotalNeto + item.subtotalIva,
     }))
 
     const { error: detError } = await supabase.from('comprobantes_venta_detalle').insert(detalleInserts)
@@ -199,25 +224,89 @@ export async function POST(request: Request) {
     // CC: el cliente debe más
     await supabase.from('cuenta_corriente_ajustes').insert({
       cliente_id,
-      tipo_movimiento: 'debe',
-      tipo_comprobante: tipoFinal,
+      tipo_movimiento:    'debe',
+      tipo_comprobante:   tipoFinal,
       numero_comprobante: numeroComprobante,
-      monto: totalComprobante,
-      fecha: todayArgentina(),
-      concepto: 'Nota de Débito',
-      descripcion: concepto,
+      monto:              totalComprobante,
+      fecha:              todayArgentina(),
+      concepto:           'Nota de Débito',
+      descripcion:        concepto,
     })
+
+    // ─── Generar PDF con QR y subirlo al bucket ───
+    try {
+      const { data: marcasTbl } = await supabase.from('marcas').select('id, descripcion').eq('activo', true)
+      const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
+
+      let qrDataUrl: string | undefined
+      if (respCAE.cae && cliente.cuit) {
+        try {
+          qrDataUrl = await generarQRBase64({
+            cuit:       empresaConfig?.cuit ?? '',
+            ptoVta:     puntoVenta,
+            tipoCmp:    tipoFinal,
+            nroCmp:     numeroComprobante,
+            importe:    totalComprobante,
+            fecha:      todayArgentina(),
+            tipoDocRec: 80,
+            nroDocRec:  cliente.cuit,
+            cae:        respCAE.cae,
+          })
+        } catch (qrErr: any) {
+          console.error('[ND QR] Error generando QR:', qrErr.message)
+        }
+      }
+
+      const detalleND = itemsCalculados.map((item: any) => ({
+        articulo_id:      item.articulo_id,
+        descripcion:      item.descripcion,
+        sku:              '',
+        cantidad:         item.qty,
+        precio_unitario:  item.precioNeto,
+        precio_total:     item.subtotalNeto,
+        marca:            '',
+        descuento_propio: 0,
+      }))
+
+      const pdfData = buildPDFData({
+        comprobante:   comprobante,
+        cliente,
+        empresa:       empresaConfig,
+        detalle:       detalleND,
+        pedido:        null,
+        bonificaciones: [],
+        marcaDesc,
+        qrDataUrl,
+      })
+
+      const { pdfUrl, pdfPath, pdfHash } = await generarYSubirPDF(supabase, pdfData)
+      const snapshot = buildSnapshot(pdfData)
+
+      await supabase.from('comprobantes_venta').update({
+        pdf_url:              pdfUrl,
+        pdf_path:             pdfPath,
+        pdf_hash:             pdfHash,
+        fecha_generacion_pdf: new Date().toISOString(),
+        estado_pdf:           'generado',
+        pdf_snapshot:         snapshot,
+      }).eq('id', comprobante.id)
+    } catch (pdfErr: any) {
+      console.error('[ND PDF] Error generando PDF:', pdfErr.message)
+      await supabase.from('comprobantes_venta').update({ estado_pdf: 'error' }).eq('id', comprobante.id).catch(() => {})
+    }
 
     return NextResponse.json({
       success: true,
       comprobante: {
-        id:           comprobante.id,
-        tipo:         tipoFinal,
-        numero:       numeroComprobante,
-        total:        totalComprobante,
-        total_neto:   totalNeto,
-        total_iva:    totalIva,
-        cae:          respCAE.cae,
+        id:              comprobante.id,
+        tipo:            tipoFinal,
+        numero:          numeroComprobante,
+        total:           totalComprobante,
+        total_neto:      totalNeto,
+        total_iva:       totalIva,
+        percepcion_iva:  percIVA,
+        percepcion_iibb: percIIBB,
+        cae:             respCAE.cae,
         vencimiento_cae: respCAE.vencimientoCae,
       },
     })
