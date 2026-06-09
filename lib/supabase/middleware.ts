@@ -2,6 +2,14 @@ import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 import { canAccess, getHomeForRoles } from "@/lib/role-utils"
 
+// Vercel Hobby middleware timeout = 1.5s. Falla rápido si Supabase no responde.
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit) {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), 1200)
+  return fetch(input, { ...init, signal: controller.signal })
+    .finally(() => clearTimeout(id))
+}
+
 export async function updateSession(request: NextRequest) {
   // Preparar headers custom para propagar roles a server components
   const requestHeaders = new Headers(request.headers)
@@ -21,6 +29,7 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet = cookies
         },
       },
+      global: { fetch: fetchWithTimeout },
     },
   )
 
