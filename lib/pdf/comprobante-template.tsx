@@ -6,7 +6,7 @@
  */
 
 import {
-  Document, Page, Text, View, StyleSheet, Font,
+  Document, Page, Text, View, StyleSheet, Font, Image,
 } from '@react-pdf/renderer'
 
 // ─── Helpers ────────────────────────────────────────────
@@ -53,9 +53,11 @@ const s = StyleSheet.create({
   compLbl:     { fontFamily: 'Helvetica-Bold', width: 50, fontSize: 8 },
   compVal:     { fontSize: 8, color: '#444' },
   caeBox:      { marginTop: 6, padding: '4 6', border: '1 solid #bbb', backgroundColor: '#f8f8f8' },
+  caeRow:      { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   caeLbl:      { fontSize: 6.5, color: '#999', letterSpacing: 0.6, marginBottom: 1 },
   caeNro:      { fontFamily: 'Helvetica-Bold', fontSize: 10, letterSpacing: 0.5 },
   caeVto:      { fontSize: 7.5, color: '#555' },
+  qrImg:       { width: 52, height: 52 },
 
   // Cliente
   encCli:      { flexDirection: 'row', borderBottom: '2 solid #111', paddingVertical: 7 },
@@ -141,6 +143,7 @@ export interface ComprobantePDFData {
     observaciones?: string | null
     motivo_ajuste?: string | null
     anulado_en?: string | null
+    qr_data_url?: string | null
   }
   cliente: {
     nombre_razon_social: string
@@ -158,6 +161,8 @@ export interface ComprobantePDFData {
     telefono?: string | null
     email?: string | null
     condicion_iva?: string | null
+    inicio_actividades?: string | null
+    iibb?: string | null
   }
   pedido?: {
     numero_pedido?: string
@@ -230,7 +235,10 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
               <Text style={s.emRubro}>LIMPIEZA · BAZAR · PERFUMERÍA</Text>
               <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{empresa.cuit}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{empresa.condicion_iva ?? 'Responsable Inscripto'}</Text></View>
-              <View style={s.emRow}><Text style={s.emLbl}>Ing. Brutos:</Text><Text style={s.emVal}>Convenio Multilateral — SIFERE</Text></View>
+              <View style={s.emRow}><Text style={s.emLbl}>Ing. Brutos:</Text><Text style={s.emVal}>{empresa.iibb ?? 'Convenio Multilateral — SIFERE'}</Text></View>
+              {empresa.inicio_actividades && (
+                <View style={s.emRow}><Text style={s.emLbl}>Inicio Act.:</Text><Text style={s.emVal}>{empresa.inicio_actividades}</Text></View>
+              )}
               <View style={s.emRow}><Text style={s.emLbl}>Domicilio:</Text><Text style={s.emVal}>{empresa.direccion ?? '—'}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Teléfono:</Text><Text style={s.emVal}>{empresa.telefono ?? '—'} · Pto. Vta.: {pto}</Text></View>
             </View>
@@ -252,9 +260,16 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
               )}
               {comp.cae && (
                 <View style={s.caeBox}>
-                  <Text style={s.caeLbl}>CAE — ARCA</Text>
-                  <Text style={s.caeNro}>{comp.cae}</Text>
-                  <Text style={s.caeVto}>Vto. CAE: {caeVto}</Text>
+                  <View style={s.caeRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.caeLbl}>CAE — ARCA</Text>
+                      <Text style={s.caeNro}>{comp.cae}</Text>
+                      <Text style={s.caeVto}>Vto. CAE: {caeVto}</Text>
+                    </View>
+                    {comp.qr_data_url && (
+                      <Image style={s.qrImg} src={comp.qr_data_url} />
+                    )}
+                  </View>
                 </View>
               )}
             </View>

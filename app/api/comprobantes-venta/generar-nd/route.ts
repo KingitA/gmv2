@@ -4,6 +4,9 @@ import { NextResponse } from 'next/server'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
 import { requireAuth } from '@/lib/auth'
 import { determinarTipoNDA, mensajeErrorCondicionIva } from '@/lib/comprobantes/tipo-comprobante'
+import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, type AmbienteARCA } from "@/lib/arca/tipos"
+import { obtenerTAConCache } from "@/lib/arca/cache"
+import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 
 /**
  * Genera Notas de Débito (NDA/NDB/NDC) para ventas.
@@ -59,22 +62,27 @@ export async function POST(request: Request) {
       tipoFinal = tipoND
     }
 
+    // ─── Configuración ARCA ───
+    const { data: empresaConfig } = await supabase
+      .from('configuracion_empresa')
+      .select('cuit, arca_ambiente, arca_punto_venta')
+      .single()
+
+    const puntoVenta = String(empresaConfig?.arca_punto_venta ?? 7).padStart(4, '0')
+
     const { data: numeracion, error: numError } = await supabase
       .from('numeracion_comprobantes')
       .select('*')
       .eq('tipo_comprobante', tipoFinal)
-      .eq('punto_venta', '0001')
+      .eq('punto_venta', puntoVenta)
       .single()
 
     if (numError || !numeracion) {
       return NextResponse.json(
-        { error: `No hay numeración configurada para ${tipoFinal}. Agregue una fila en numeracion_comprobantes.` },
+        { error: `No hay numeración configurada para ${tipoFinal} PV ${puntoVenta}.` },
         { status: 500 },
       )
     }
-
-    const nuevoNumero = numeracion.ultimo_numero + 1
-    const numeroComprobante = `${numeracion.punto_venta}-${nuevoNumero.toString().padStart(8, '0')}`
 
     // Calcular totales
     let totalNeto = 0
@@ -90,24 +98,76 @@ export async function POST(request: Request) {
       totalIva += subtotalIva
       return { qty, precioNeto, ivaPct, subtotalNeto, subtotalIva, descripcion: item.descripcion ?? concepto, articulo_id: item.articulo_id ?? null }
     })
+    totalNeto = Math.round(totalNeto * 100) / 100
+    totalIva  = Math.round(totalIva  * 100) / 100
+    const totalComprobante = Math.round((totalNeto + totalIva) * 100) / 100
 
-    const totalComprobante = totalNeto + totalIva
+    // ─── Obtener TA y sincronizar numeración ───
+    const ambiente = (empresaConfig?.arca_ambiente ?? 'produccion') as AmbienteARCA
+    const ta = await obtenerTAConCache(supabase, ambiente)
+    const cuitEmpresa = (empresaConfig?.cuit ?? '').replace(/-/g, '')
+    const cbteTipo = TIPO_CBTE_ARCA[tipoFinal]
+
+    let nuevoNumero = numeracion.ultimo_numero + 1
+    if (cbteTipo) {
+      const ultimoEnArca = await ultimoAutorizado(
+        ambiente, ta.token, ta.sign, cuitEmpresa, parseInt(puntoVenta, 10), cbteTipo,
+      )
+      if (ultimoEnArca !== numeracion.ultimo_numero) {
+        await supabase.from('numeracion_comprobantes')
+          .update({ ultimo_numero: ultimoEnArca })
+          .eq('tipo_comprobante', tipoFinal)
+          .eq('punto_venta', puntoVenta)
+        nuevoNumero = ultimoEnArca + 1
+      }
+    }
+
+    const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, '0')}`
+
+    // ─── Solicitar CAE ───
+    const clienteCuit = (cliente.cuit ?? '').replace(/-/g, '') || '0'
+    const fecha = todayArgentina().replace(/-/g, '')
+    const respCAE = await solicitarCAE({
+      ambiente,
+      token:    ta.token,
+      sign:     ta.sign,
+      cuit:     cuitEmpresa,
+      ptoVta:   parseInt(puntoVenta, 10),
+      cbteTipo,
+      cbteDesde: nuevoNumero,
+      cbteHasta: nuevoNumero,
+      concepto:  CONCEPTO.PRODUCTOS,
+      docTipo:   DOC_TIPO.CUIT,
+      docNro:    clienteCuit,
+      fecha,
+      impTotal:   totalComprobante,
+      impTotConc: 0,
+      impNeto:    totalNeto,
+      impOpEx:    0,
+      impIva:     totalIva,
+      impTrib:    0,
+      iva: totalIva > 0
+        ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
+        : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
+    })
 
     const { data: comprobante, error: compError } = await supabase
       .from('comprobantes_venta')
       .insert({
-        tipo_comprobante: tipoFinal,
+        tipo_comprobante:   tipoFinal,
         numero_comprobante: numeroComprobante,
-        punto_venta: numeracion.punto_venta,
-        fecha: todayArgentina(),
+        punto_venta:        puntoVenta,
+        fecha:              todayArgentina(),
         cliente_id,
-        pedido_id: pedido_id ?? null,
-        total_neto: totalNeto,
-        total_iva: totalIva,
-        total_factura: totalComprobante,
-        saldo_pendiente: totalComprobante,
-        estado_pago: 'pendiente',
-        observaciones: concepto,
+        pedido_id:          pedido_id ?? null,
+        total_neto:         totalNeto,
+        total_iva:          totalIva,
+        total_factura:      totalComprobante,
+        saldo_pendiente:    totalComprobante,
+        estado_pago:        'pendiente',
+        observaciones:      concepto,
+        cae:                respCAE.cae,
+        vencimiento_cae:    respCAE.vencimientoCae,
       })
       .select()
       .single()
@@ -134,7 +194,7 @@ export async function POST(request: Request) {
       .from('numeracion_comprobantes')
       .update({ ultimo_numero: nuevoNumero })
       .eq('tipo_comprobante', tipoFinal)
-      .eq('punto_venta', numeracion.punto_venta)
+      .eq('punto_venta', puntoVenta)
 
     // CC: el cliente debe más
     await supabase.from('cuenta_corriente_ajustes').insert({
@@ -151,12 +211,14 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       comprobante: {
-        id: comprobante.id,
-        tipo: tipoFinal,
-        numero: numeroComprobante,
-        total: totalComprobante,
-        total_neto: totalNeto,
-        total_iva: totalIva,
+        id:           comprobante.id,
+        tipo:         tipoFinal,
+        numero:       numeroComprobante,
+        total:        totalComprobante,
+        total_neto:   totalNeto,
+        total_iva:    totalIva,
+        cae:          respCAE.cae,
+        vencimiento_cae: respCAE.vencimientoCae,
       },
     })
   } catch (err: any) {

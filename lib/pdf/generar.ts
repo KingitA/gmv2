@@ -10,6 +10,45 @@ import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { ComprobantePDF, type ComprobantePDFData } from './comprobante-template'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import QRCode from 'qrcode'
+import { TIPO_CBTE_ARCA } from '@/lib/arca/tipos'
+
+/**
+ * Genera el QR de verificación ARCA según RG 4291.
+ * URL: https://www.afip.gob.ar/fe/qr/?p=<base64(JSON)>
+ */
+export async function generarQRBase64(params: {
+  cuit:       string
+  ptoVta:     string
+  tipoCmp:    string
+  nroCmp:     string
+  importe:    number
+  fecha:      string   // YYYY-MM-DD
+  tipoDocRec: number
+  nroDocRec:  string
+  cae:        string
+}): Promise<string> {
+  const nroComprobante = parseInt(params.nroCmp.split('-')[1] ?? params.nroCmp, 10)
+  const payload = {
+    ver:        1,
+    fecha:      params.fecha,
+    cuit:       parseInt(params.cuit.replace(/-/g, ''), 10),
+    ptoVta:     parseInt(params.ptoVta, 10),
+    tipoCmp:    TIPO_CBTE_ARCA[params.tipoCmp] ?? 0,
+    nroCmp:     nroComprobante,
+    importe:    params.importe,
+    moneda:     'PES',
+    ctz:        1,
+    tipoDocRec: params.tipoDocRec,
+    nroDocRec:  parseInt(params.nroDocRec.replace(/-/g, ''), 10),
+    tipoCodAut: 'E',
+    codAut:     parseInt(params.cae, 10),
+  }
+  const json   = JSON.stringify(payload)
+  const b64    = Buffer.from(json).toString('base64')
+  const url    = `https://www.afip.gob.ar/fe/qr/?p=${b64}`
+  return QRCode.toDataURL(url, { margin: 1, width: 120 })
+}
 
 const BUCKET = 'comprobantes_venta'
 
@@ -67,8 +106,9 @@ export function buildPDFData(params: {
   pedido?:        any
   bonificaciones?: any[]
   marcaDesc?:     Map<string, string>
+  qrDataUrl?:     string
 }): ComprobantePDFData {
-  const { comprobante, cliente, empresa, detalle, pedido, bonificaciones = [], marcaDesc } = params
+  const { comprobante, cliente, empresa, detalle, pedido, bonificaciones = [], marcaDesc, qrDataUrl } = params
 
   return {
     comprobante: {
@@ -85,6 +125,7 @@ export function buildPDFData(params: {
       vencimiento_cae:  comprobante.vencimiento_cae  ?? null,
       observaciones:    comprobante.observaciones    ?? null,
       motivo_ajuste:    comprobante.motivo_ajuste    ?? null,
+      qr_data_url:      qrDataUrl ?? null,
     },
     cliente: {
       nombre_razon_social: cliente?.nombre_razon_social ?? cliente?.nombre ?? '—',
@@ -96,12 +137,14 @@ export function buildPDFData(params: {
       condicion_pago:      cliente?.condicion_pago      ?? null,
     },
     empresa: {
-      razon_social:  empresa?.razon_social   ?? '—',
-      cuit:          empresa?.cuit           ?? '—',
-      direccion:     empresa?.direccion      ?? null,
-      telefono:      empresa?.telefono       ?? null,
-      email:         empresa?.email          ?? null,
-      condicion_iva: empresa?.condicion_iva  ?? 'Responsable Inscripto',
+      razon_social:         empresa?.razon_social         ?? '—',
+      cuit:                 empresa?.cuit                 ?? '—',
+      direccion:            empresa?.direccion            ?? null,
+      telefono:             empresa?.telefono             ?? null,
+      email:                empresa?.email                ?? null,
+      condicion_iva:        empresa?.condicion_iva        ?? 'Responsable Inscripto',
+      inicio_actividades:   empresa?.inicio_actividades   ?? null,
+      iibb:                 empresa?.iibb                 ?? null,
     },
     pedido: pedido ? {
       numero_pedido:     pedido.numero_pedido,

@@ -6,6 +6,9 @@ import { requireAuth } from '@/lib/auth'
 import { insertarKardex } from '@/lib/kardex/insertar-kardex'
 import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
 import { determinarTipoNCADesdeOriginal, determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
+import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, type AmbienteARCA } from "@/lib/arca/tipos"
+import { obtenerTAConCache } from "@/lib/arca/cache"
+import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 
 export async function POST(request: Request) {
   try {
@@ -37,6 +40,7 @@ export async function POST(request: Request) {
           nombre_razon_social,
           condicion_iva,
           metodo_facturacion,
+          cuit,
           exento_iva,
           vendedor_id,
           provincia
@@ -55,7 +59,8 @@ export async function POST(request: Request) {
           ),
           comprobante_original:comprobantes_venta!devoluciones_detalle_comprobante_venta_id_fkey(
             id,
-            tipo_comprobante
+            tipo_comprobante,
+            numero_comprobante
           )
         )
       `)
@@ -104,54 +109,135 @@ export async function POST(request: Request) {
       }
     }
 
+    // ─── Configuración ARCA ───
+    const { data: empresaConfig } = await supabase
+      .from('configuracion_empresa')
+      .select('cuit, arca_ambiente, arca_punto_venta')
+      .single()
+
+    const esFiscal = REQUIERE_CAE.has(tipoFinal)
+    const puntoVenta = esFiscal
+      ? String(empresaConfig?.arca_punto_venta ?? 7).padStart(4, '0')
+      : '0001'
+
     const { data: numeracion, error: numError } = await supabase
       .from("numeracion_comprobantes")
       .select("*")
       .eq("tipo_comprobante", tipoFinal)
-      .eq("punto_venta", "0001")
+      .eq("punto_venta", puntoVenta)
       .single()
 
     if (numError) {
-      return NextResponse.json({ error: "Error obteniendo numeración" }, { status: 500 })
+      return NextResponse.json({ error: `Numeración no encontrada para ${tipoFinal} PV ${puntoVenta}` }, { status: 500 })
     }
 
-    const nuevoNumero = numeracion.ultimo_numero + 1
-    const numeroComprobante = `${numeracion.punto_venta}-${nuevoNumero.toString().padStart(8, "0")}`
+    let nuevoNumero = numeracion.ultimo_numero + 1
+
+    // ─── Obtener TA y sincronizar numeración con ARCA ───
+    let arcaTa: { token: string; sign: string } | null = null
+    if (esFiscal && empresaConfig) {
+      const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
+      arcaTa = await obtenerTAConCache(supabase, ambiente)
+      const cbteTipo = TIPO_CBTE_ARCA[tipoFinal]
+      if (cbteTipo) {
+        const ultimoEnArca = await ultimoAutorizado(
+          ambiente, arcaTa.token, arcaTa.sign,
+          (empresaConfig.cuit ?? '').replace(/-/g, ''),
+          parseInt(puntoVenta, 10), cbteTipo,
+        )
+        if (ultimoEnArca !== numeracion.ultimo_numero) {
+          await supabase.from('numeracion_comprobantes')
+            .update({ ultimo_numero: ultimoEnArca })
+            .eq('tipo_comprobante', tipoFinal)
+            .eq('punto_venta', puntoVenta)
+          nuevoNumero = ultimoEnArca + 1
+        }
+      }
+    }
+
+    const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, "0")}`
 
     let totalNeto = 0
     let totalIva = 0
 
     devolucion.detalle.forEach((item: any) => {
       const subtotal = item.subtotal || 0
-
       if (tipoFinal.startsWith("NC") && !devolucion.cliente.exento_iva) {
         const neto = subtotal / 1.21
-        const iva = subtotal - neto
         totalNeto += neto
-        totalIva += iva
+        totalIva += subtotal - neto
       } else {
         totalNeto += subtotal
       }
     })
+    totalNeto = Math.round(totalNeto * 100) / 100
+    totalIva  = Math.round(totalIva  * 100) / 100
+    const totalComprobante = Math.round((totalNeto + totalIva) * 100) / 100
 
-    const totalComprobante = totalNeto + totalIva
+    // ─── Solicitar CAE a ARCA (solo NCA/NCB, no REV) ───
+    let cae: string | null = null
+    let vencimientoCae: string | null = null
+
+    if (esFiscal && empresaConfig && arcaTa) {
+      const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
+      const ta = arcaTa
+      const clienteCuit = (devolucion.cliente?.cuit ?? '').replace(/-/g, '') || '0'
+      const fecha = todayArgentina().replace(/-/g, '')
+
+      // CbteAsoc: referencia a la factura original (si existe)
+      const compOriginal = devolucion.detalle[0]?.comprobante_original
+      const cbteAsoc = compOriginal ? [{
+        tipo:   TIPO_CBTE_ARCA[compOriginal.tipo_comprobante] ?? 0,
+        ptoVta: parseInt(puntoVenta, 10),
+        nro:    parseInt((compOriginal.numero_comprobante ?? '0').split('-')[1] ?? '0', 10),
+      }] : []
+
+      const respCAE = await solicitarCAE({
+        ambiente,
+        token:    ta.token,
+        sign:     ta.sign,
+        cuit:     (empresaConfig.cuit ?? '').replace(/-/g, ''),
+        ptoVta:   parseInt(puntoVenta, 10),
+        cbteTipo: TIPO_CBTE_ARCA[tipoFinal],
+        cbteDesde: nuevoNumero,
+        cbteHasta: nuevoNumero,
+        concepto:  CONCEPTO.PRODUCTOS,
+        docTipo:   DOC_TIPO.CUIT,
+        docNro:    clienteCuit,
+        fecha,
+        impTotal:   totalComprobante,
+        impTotConc: 0,
+        impNeto:    totalNeto,
+        impOpEx:    0,
+        impIva:     totalIva,
+        impTrib:    0,
+        iva: totalIva > 0
+          ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
+          : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
+        cbteAsoc,
+      })
+      cae            = respCAE.cae
+      vencimientoCae = respCAE.vencimientoCae
+    }
 
     const { data: comprobante, error: comprobanteError } = await supabase
       .from("comprobantes_venta")
       .insert({
-        tipo_comprobante: tipoFinal,
+        tipo_comprobante:   tipoFinal,
         numero_comprobante: numeroComprobante,
-        punto_venta: numeracion.punto_venta,
-        fecha: todayArgentina(),
-        cliente_id: devolucion.cliente_id,
-        pedido_id: devolucion.pedido_id || null,
-        total_neto: -Math.abs(totalNeto), // Negativo para NC/Reversa
-        total_iva: -Math.abs(totalIva),
-        total_factura: -Math.abs(totalComprobante),
-        saldo_pendiente: -Math.abs(totalComprobante),
-        estado_pago: "pendiente",
-        motivo_ajuste: motivo_ajuste,
-        observaciones: `Devolución ${devolucion.numero_devolucion || devolucion.id}`,
+        punto_venta:        puntoVenta,
+        fecha:              todayArgentina(),
+        cliente_id:         devolucion.cliente_id,
+        pedido_id:          devolucion.pedido_id || null,
+        total_neto:         -Math.abs(totalNeto),
+        total_iva:          -Math.abs(totalIva),
+        total_factura:      -Math.abs(totalComprobante),
+        saldo_pendiente:    -Math.abs(totalComprobante),
+        estado_pago:        "pendiente",
+        motivo_ajuste:      motivo_ajuste,
+        observaciones:      `Devolución ${devolucion.numero_devolucion || devolucion.id}`,
+        ...(cae            ? { cae }                             : {}),
+        ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
       })
       .select()
       .single()

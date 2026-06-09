@@ -13,7 +13,7 @@ import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificac
 import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
-import { generarYSubirPDF, buildPDFData } from "@/lib/pdf/generar"
+import { generarYSubirPDF, buildPDFData, generarQRBase64 } from "@/lib/pdf/generar"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
@@ -422,6 +422,26 @@ export async function POST(request: Request) {
 
         if (!compFull) continue
 
+        // Generar QR ARCA (RG 4291) — solo para comprobantes con CAE
+        let qrDataUrl: string | undefined
+        if (compFull.cae && compFull.clientes?.cuit) {
+          try {
+            qrDataUrl = await generarQRBase64({
+              cuit:       empresaData?.cuit ?? '',
+              ptoVta:     compFull.punto_venta ?? '0007',
+              tipoCmp:    compFull.tipo_comprobante,
+              nroCmp:     compFull.numero_comprobante,
+              importe:    Math.abs(Number(compFull.total_factura ?? 0)),
+              fecha:      compFull.fecha,
+              tipoDocRec: 80,
+              nroDocRec:  compFull.clientes.cuit,
+              cae:        compFull.cae,
+            })
+          } catch (qrErr: any) {
+            console.error('[QR] Error generando QR:', qrErr.message)
+          }
+        }
+
         const pdfData = buildPDFData({
           comprobante:    compFull,
           cliente:        compFull.clientes,
@@ -430,6 +450,7 @@ export async function POST(request: Request) {
           pedido:         compFull.pedidos,
           bonificaciones: bonificacionesCliente ?? [],
           marcaDesc,
+          qrDataUrl,
         })
 
         const pdfUrl = await generarYSubirPDF(supabase, pdfData)
