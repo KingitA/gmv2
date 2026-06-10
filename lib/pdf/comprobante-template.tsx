@@ -37,6 +37,7 @@ const s = StyleSheet.create({
   // Encabezado empresa + tipo + número
   encTop:      { flexDirection: 'row', borderBottom: '2 solid #111', marginBottom: 0 },
   emBlock:     { flex: 1, paddingRight: 10, borderRight: '1 solid #ccc' },
+  emLogo:      { width: 160, height: 60, marginBottom: 5 },
   emNombre:    { fontSize: 16, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase', marginBottom: 2 },
   emRubro:     { fontSize: 7, color: '#888', marginBottom: 5, letterSpacing: 1 },
   emRow:       { flexDirection: 'row', marginBottom: 2 },
@@ -158,6 +159,7 @@ export interface ComprobantePDFData {
   empresa: {
     razon_social: string
     cuit: string
+    logo_url?: string | null
     direccion?: string | null
     telefono?: string | null
     email?: string | null
@@ -233,8 +235,10 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
           <View style={s.encTop}>
             {/* Empresa */}
             <View style={s.emBlock}>
-              <Text style={s.emNombre}>{empresa.razon_social}</Text>
-              <Text style={s.emRubro}>LIMPIEZA · BAZAR · PERFUMERÍA</Text>
+              {empresa.logo_url
+                ? <Image style={s.emLogo} src={empresa.logo_url} />
+                : <><Text style={s.emNombre}>{empresa.razon_social}</Text><Text style={s.emRubro}>LIMPIEZA · BAZAR · PERFUMERÍA</Text></>
+              }
               <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{empresa.cuit}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{empresa.condicion_iva ?? 'Responsable Inscripto'}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Ing. Brutos:</Text><Text style={s.emVal}>{empresa.iibb ?? 'Convenio Multilateral — SIFERE'}</Text></View>

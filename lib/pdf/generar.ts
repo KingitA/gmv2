@@ -178,6 +178,7 @@ export function buildPDFData(params: {
     empresa: {
       razon_social:         empresa?.razon_social         ?? '—',
       cuit:                 empresa?.cuit                 ?? '—',
+      logo_url:             empresa?.logo_url             ?? null,
       direccion:            empresa?.direccion            ?? null,
       telefono:             empresa?.telefono             ?? null,
       email:                empresa?.email                ?? null,
