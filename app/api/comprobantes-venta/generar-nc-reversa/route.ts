@@ -162,20 +162,17 @@ export async function POST(request: Request) {
     const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, "0")}`
 
     let totalNeto = 0
-    let totalIva = 0
 
     devolucion.detalle.forEach((item: any) => {
-      const subtotal = item.subtotal || 0
-      if (tipoFinal.startsWith("NC") && !devolucion.cliente.exento_iva) {
-        const neto = subtotal / 1.21
-        totalNeto += neto
-        totalIva += subtotal - neto
-      } else {
-        totalNeto += subtotal
-      }
+      totalNeto += Number(item.subtotal) || 0
     })
     totalNeto = Math.round(totalNeto * 100) / 100
-    totalIva  = Math.round(totalIva  * 100) / 100
+
+    // precio_venta_original es el precio NETO (igual que en la FA original)
+    // el IVA se calcula como 21% del neto, no como complemento del total
+    const totalIva = !devolucion.cliente.exento_iva && tipoFinal.startsWith("NC")
+      ? Math.round(totalNeto * 21 / 100 * 100) / 100
+      : 0
 
     // ─── Percepciones en NC (se incluyen en negativo, espejo de la factura original) ───
     const percResult    = calcularPercepciones(totalNeto, devolucion.cliente, esFiscal)
