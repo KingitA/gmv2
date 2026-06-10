@@ -10,7 +10,7 @@ import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, t
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
-import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from "@/lib/pdf/generar"
+import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 
 export async function POST(request: Request) {
   try {
@@ -434,9 +434,10 @@ export async function POST(request: Request) {
       const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
 
       let qrDataUrl: string | undefined
+      let qrUrl: string | undefined
       if (cae && devolucion.cliente?.cuit) {
         try {
-          qrDataUrl = await generarQRBase64({
+          const qrParams = {
             cuit:       empresaData?.cuit ?? '',
             ptoVta:     puntoVenta,
             tipoCmp:    tipoFinal,
@@ -446,7 +447,9 @@ export async function POST(request: Request) {
             tipoDocRec: 80,
             nroDocRec:  devolucion.cliente.cuit,
             cae:        cae,
-          })
+          }
+          qrUrl     = buildQRUrl(qrParams)
+          qrDataUrl = await generarQRBase64(qrParams)
         } catch (qrErr: any) {
           console.error('[NC QR] Error generando QR:', qrErr.message)
         }
@@ -485,6 +488,7 @@ export async function POST(request: Request) {
         fecha_generacion_pdf: new Date().toISOString(),
         estado_pdf:           'generado',
         pdf_snapshot:         snapshot,
+        qr_url:               qrUrl ?? null,
       }).eq('id', comprobante.id)
     } catch (pdfErr: any) {
       console.error('[NC PDF] Error generando PDF:', pdfErr.message)

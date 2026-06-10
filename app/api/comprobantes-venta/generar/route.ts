@@ -13,7 +13,7 @@ import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificac
 import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
-import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from "@/lib/pdf/generar"
+import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
 import { obtenerTAConCache } from "@/lib/arca/cache"
@@ -425,9 +425,10 @@ export async function POST(request: Request) {
 
         // Generar QR ARCA (RG 4291) — solo para comprobantes con CAE
         let qrDataUrl: string | undefined
+        let qrUrl: string | undefined
         if (compFull.cae && compFull.clientes?.cuit) {
           try {
-            qrDataUrl = await generarQRBase64({
+            const qrParams = {
               cuit:       empresaData?.cuit ?? '',
               ptoVta:     compFull.punto_venta ?? '0007',
               tipoCmp:    compFull.tipo_comprobante,
@@ -437,7 +438,9 @@ export async function POST(request: Request) {
               tipoDocRec: 80,
               nroDocRec:  compFull.clientes.cuit,
               cae:        compFull.cae,
-            })
+            }
+            qrUrl     = buildQRUrl(qrParams)
+            qrDataUrl = await generarQRBase64(qrParams)
           } catch (qrErr: any) {
             console.error('[QR] Error generando QR:', qrErr.message)
           }
@@ -466,6 +469,7 @@ export async function POST(request: Request) {
             fecha_generacion_pdf: new Date().toISOString(),
             estado_pdf:           'generado',
             pdf_snapshot:         snapshot,
+            qr_url:               qrUrl ?? null,
           })
           .eq('id', comp.id)
       } catch (pdfErr: any) {

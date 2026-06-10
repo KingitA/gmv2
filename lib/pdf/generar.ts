@@ -22,11 +22,27 @@ export async function generarQRBase64(params: {
   tipoCmp:    string
   nroCmp:     string
   importe:    number
-  fecha:      string   // YYYY-MM-DD
+  fecha:      string
   tipoDocRec: number
   nroDocRec:  string
   cae:        string
 }): Promise<string> {
+  const url = buildQRUrl(params)
+  return QRCode.toDataURL(url, { margin: 2, width: 300, errorCorrectionLevel: 'M' })
+}
+
+/** Retorna solo la URL del QR sin generar la imagen (para guardar en DB). */
+export function buildQRUrl(params: {
+  cuit:       string
+  ptoVta:     string
+  tipoCmp:    string
+  nroCmp:     string
+  importe:    number
+  fecha:      string
+  tipoDocRec: number
+  nroDocRec:  string
+  cae:        string
+}): string {
   const nroComprobante = parseInt(params.nroCmp.split('-')[1] ?? params.nroCmp, 10)
   const payload = {
     ver:        1,
@@ -43,10 +59,8 @@ export async function generarQRBase64(params: {
     tipoCodAut: 'E',
     codAut:     parseInt(params.cae, 10),
   }
-  const json   = JSON.stringify(payload)
-  const b64    = Buffer.from(json).toString('base64')
-  const url    = `https://www.afip.gob.ar/fe/qr/?p=${b64}`
-  return QRCode.toDataURL(url, { margin: 1, width: 120 })
+  const b64 = Buffer.from(JSON.stringify(payload)).toString('base64')
+  return `https://www.afip.gob.ar/fe/qr/?p=${b64}`
 }
 
 /** Calcula el hash SHA-256 del buffer PDF. Retorna hex de 64 chars. */

@@ -58,7 +58,7 @@ const s = StyleSheet.create({
   caeLbl:      { fontSize: 6.5, color: '#999', letterSpacing: 0.6, marginBottom: 1 },
   caeNro:      { fontFamily: 'Helvetica-Bold', fontSize: 10, letterSpacing: 0.5 },
   caeVto:      { fontSize: 7.5, color: '#555' },
-  qrImg:       { width: 52, height: 52 },
+  qrImg:       { width: 80, height: 80 },
 
   // Cliente
   encCli:      { flexDirection: 'row', borderBottom: '2 solid #111', paddingVertical: 7 },

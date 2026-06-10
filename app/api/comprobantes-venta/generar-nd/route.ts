@@ -8,7 +8,7 @@ import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteAR
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
-import { generarYSubirPDF, buildPDFData, generarQRBase64, buildSnapshot } from "@/lib/pdf/generar"
+import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 
 /**
  * Genera Notas de Débito (NDA/NDB) para ventas.
@@ -239,9 +239,10 @@ export async function POST(request: Request) {
       const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
 
       let qrDataUrl: string | undefined
+      let qrUrl: string | undefined
       if (respCAE.cae && cliente.cuit) {
         try {
-          qrDataUrl = await generarQRBase64({
+          const qrParams = {
             cuit:       empresaConfig?.cuit ?? '',
             ptoVta:     puntoVenta,
             tipoCmp:    tipoFinal,
@@ -251,7 +252,9 @@ export async function POST(request: Request) {
             tipoDocRec: 80,
             nroDocRec:  cliente.cuit,
             cae:        respCAE.cae,
-          })
+          }
+          qrUrl     = buildQRUrl(qrParams)
+          qrDataUrl = await generarQRBase64(qrParams)
         } catch (qrErr: any) {
           console.error('[ND QR] Error generando QR:', qrErr.message)
         }
@@ -289,6 +292,7 @@ export async function POST(request: Request) {
         fecha_generacion_pdf: new Date().toISOString(),
         estado_pdf:           'generado',
         pdf_snapshot:         snapshot,
+        qr_url:               qrUrl ?? null,
       }).eq('id', comprobante.id)
     } catch (pdfErr: any) {
       console.error('[ND PDF] Error generando PDF:', pdfErr.message)
