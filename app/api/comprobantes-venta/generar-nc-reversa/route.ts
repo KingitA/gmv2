@@ -182,7 +182,12 @@ export async function POST(request: Request) {
     const percIVA       = percResult.percepcion_iva
     const percIIBB      = percResult.percepcion_iibb
     const totalTrib     = Math.round((percIVA + percIIBB) * 100) / 100
-    const totalComprobante = Math.round((totalNeto + totalIva + totalTrib) * 100) / 100
+    // Integer-cent arithmetic guarantees ImpTotal == ImpNeto + ImpIva + ImpTrib in ARCA's decimal validation
+    const totalComprobante = (
+      Math.round(totalNeto * 100) +
+      Math.round(totalIva  * 100) +
+      Math.round(totalTrib * 100)
+    ) / 100
 
     // ─── Solicitar CAE a ARCA (solo NCA/NCB, no REV) ───
     let cae: string | null = null

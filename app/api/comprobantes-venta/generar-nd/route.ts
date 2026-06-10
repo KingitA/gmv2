@@ -113,7 +113,11 @@ export async function POST(request: Request) {
     const percIVA    = percResult.percepcion_iva
     const percIIBB   = percResult.percepcion_iibb
     const totalTrib  = Math.round((percIVA + percIIBB) * 100) / 100
-    const totalComprobante = Math.round((totalNeto + totalIva + totalTrib) * 100) / 100
+    const totalComprobante = (
+      Math.round(totalNeto * 100) +
+      Math.round(totalIva  * 100) +
+      Math.round(totalTrib * 100)
+    ) / 100
 
     // ─── Obtener TA y sincronizar numeración ───
     const ambiente    = (empresaConfig?.arca_ambiente ?? 'produccion') as AmbienteARCA

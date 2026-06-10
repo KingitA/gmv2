@@ -603,7 +603,11 @@ async function generarComprobante(
   const percIVA    = percResult.percepcion_iva
   const percIIBB   = percResult.percepcion_iibb
   const totalTrib  = round2(percIVA + percIIBB)
-  const totalFactura = round2(totalNeto + totalIva + totalTrib)
+  const totalFactura = (
+    Math.round(totalNeto * 100) +
+    Math.round(totalIva  * 100) +
+    Math.round(totalTrib * 100)
+  ) / 100
 
   // ─── Solicitar CAE a ARCA (solo comprobantes fiscales) ───
   let cae: string | null = null
