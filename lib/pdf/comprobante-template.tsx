@@ -54,10 +54,10 @@ const s = StyleSheet.create({
   compLbl:     { fontFamily: 'Helvetica-Bold', width: 50, fontSize: 8 },
   compVal:     { fontSize: 8, color: '#444' },
   caeBox:      { marginTop: 6, padding: '4 6', border: '1 solid #bbb', backgroundColor: '#f8f8f8' },
-  caeRow:      { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   caeLbl:      { fontSize: 6.5, color: '#999', letterSpacing: 0.6, marginBottom: 1 },
   caeNro:      { fontFamily: 'Helvetica-Bold', fontSize: 10, letterSpacing: 0.5 },
   caeVto:      { fontSize: 7.5, color: '#555' },
+  qrBox:       { alignItems: 'flex-end', marginTop: 8 },
   qrImg:       { width: 80, height: 80 },
 
   // Cliente
@@ -262,16 +262,9 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
               )}
               {comp.cae && (
                 <View style={s.caeBox}>
-                  <View style={s.caeRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.caeLbl}>CAE — ARCA</Text>
-                      <Text style={s.caeNro}>{comp.cae}</Text>
-                      <Text style={s.caeVto}>Vto. CAE: {caeVto}</Text>
-                    </View>
-                    {comp.qr_data_url && (
-                      <Image style={s.qrImg} src={comp.qr_data_url} />
-                    )}
-                  </View>
+                  <Text style={s.caeLbl}>CAE — ARCA</Text>
+                  <Text style={s.caeNro}>{comp.cae}</Text>
+                  <Text style={s.caeVto}>Vto. CAE: {caeVto}</Text>
                 </View>
               )}
             </View>
@@ -383,6 +376,11 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
                 <Text style={s.totGLbl}>TOTAL</Text>
                 <Text style={s.totGVal}>${fmtARS(totalFact)}</Text>
               </View>
+              {comp.qr_data_url && (
+                <View style={s.qrBox}>
+                  <Image style={s.qrImg} src={comp.qr_data_url} />
+                </View>
+              )}
             </View>
           </View>
 
