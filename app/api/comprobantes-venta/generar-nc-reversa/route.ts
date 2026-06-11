@@ -217,7 +217,15 @@ export async function POST(request: Request) {
     if (esFiscal && empresaConfig && arcaTa) {
       const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
       const ta = arcaTa
-      const clienteCuit = (devolucion.cliente?.cuit ?? '').replace(/-/g, '') || '0'
+      if (!devolucion.cliente?.cuit || devolucion.cliente.cuit.trim() === '') {
+        return NextResponse.json({
+          error: `El cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" no tiene CUIT configurado. Sin CUIT no se puede emitir un comprobante fiscal.`,
+          error_code: 'CLIENTE_SIN_CUIT',
+          cliente_id: devolucion.cliente_id,
+          cliente_nombre: devolucion.cliente?.nombre_razon_social,
+        }, { status: 422 })
+      }
+      const clienteCuit = devolucion.cliente.cuit.replace(/-/g, '')
       const fecha = todayArgentina().replace(/-/g, '')
 
       // RG 5616/2024: condición IVA del receptor obligatoria

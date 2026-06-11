@@ -87,6 +87,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Cliente no encontrado' }, { status: 404 })
     }
 
+    if (!cliente.cuit || cliente.cuit.trim() === '') {
+      return NextResponse.json({
+        error: `El cliente "${cliente.nombre_razon_social ?? cliente.nombre ?? ''}" no tiene CUIT configurado. Sin CUIT no se puede emitir un comprobante fiscal.`,
+        error_code: 'CLIENTE_SIN_CUIT',
+        cliente_id,
+        cliente_nombre: cliente.nombre_razon_social ?? cliente.nombre,
+      }, { status: 422 })
+    }
+
     let tipoFinal = tipo_comprobante
     if (!tipoFinal || tipoFinal === 'auto') {
       const tipoND = determinarTipoNDA(cliente.condicion_iva)
@@ -188,7 +197,7 @@ export async function POST(request: Request) {
     const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, '0')}`
 
     // ─── Solicitar CAE ───
-    const clienteCuit = (cliente.cuit ?? '').replace(/-/g, '') || '0'
+    const clienteCuit = cliente.cuit.replace(/-/g, '')
     const fecha       = todayArgentina().replace(/-/g, '')
 
     // RG 5616/2024: condición IVA del receptor obligatoria
@@ -269,7 +278,8 @@ export async function POST(request: Request) {
       descripcion:     item.descripcion,
       cantidad:        item.qty,
       precio_unitario: item.precioNeto,
-      precio_total:    item.subtotalNeto + item.subtotalIva,
+      // precio_total es NETO en todo el sistema: SUM(detalle.precio_total) == total_neto
+      precio_total:    item.subtotalNeto,
     }))
 
     const { error: detError } = await supabase.from('comprobantes_venta_detalle').insert(detalleInserts)
