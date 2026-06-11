@@ -42,11 +42,15 @@ export const IVA_ID = {
   IVA_27:    6,
 }
 
-// Tributos — id para percepciones en el campo <Tributo><Id>
+// Tributos — id para el campo <Tributo><Id> según tabla FEParamGetTiposTributos:
+//   1 = Impuestos nacionales · 2 = Impuestos provinciales · 3 = Impuestos municipales
+//   4 = Impuestos internos · 6 = Percepción de IVA · 99 = Otro
+// Percepción IVA RG 5329 → id 6 (afip.gob.ar/fe/documentos/otros_Tributos.xlsx)
+// Percepción IIBB → id 2 (impuestos provinciales)
 export const TRIBUTO_ID = {
-  PERCEPCION_IVA:      '01',
-  PERCEPCION_IIBB:     '06',
-  PERCEPCION_MUNICIPAL:'07',
+  PERCEPCION_IVA:      '6',
+  PERCEPCION_IIBB:     '2',
+  PERCEPCION_MUNICIPAL:'3',
   PERCEPCION_INGRESOS: '99',
 }
 
