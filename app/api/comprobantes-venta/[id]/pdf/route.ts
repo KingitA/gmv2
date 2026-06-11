@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 
@@ -8,10 +8,13 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // requireAuth controla el acceso; el cliente admin es necesario porque
+  // el bucket es privado y firmar URLs requiere service role (el cliente
+  // de sesión no tiene permiso de sign sobre storage).
   const auth = await requireAuth()
   if (auth.error) return auth.error
 
-  const supabase = await createClient()
+  const supabase = createAdminClient()
   const { id }   = await params
 
   const { data: comp, error } = await supabase
@@ -41,9 +44,16 @@ export async function GET(
     .createSignedUrl(comp.pdf_path, 3_600) // 1 hora — suficiente para visualización
 
   if (signErr || !signed?.signedUrl) {
+    console.error('[PDF] Error firmando URL:', { pdf_path: comp.pdf_path, error: signErr?.message })
+    const noExiste = (signErr?.message ?? '').toLowerCase().includes('not found')
     return NextResponse.json(
-      { error: 'No se pudo acceder al archivo PDF. Contacte al administrador.' },
-      { status: 500 },
+      noExiste
+        ? {
+            error: 'PDF no encontrado en el almacenamiento',
+            mensaje: `El comprobante ${comp.numero_comprobante} tiene registrado un PDF pero el archivo no existe en el bucket.`,
+          }
+        : { error: 'No se pudo acceder al archivo PDF. Contacte al administrador.' },
+      { status: noExiste ? 404 : 500 },
     )
   }
 
