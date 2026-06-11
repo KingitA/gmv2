@@ -4,10 +4,14 @@
  * Flujo:
  * - Los PRESUPUESTOS (PRES) generan UNA REVERSA (REV) con una línea por comprobante.
  *   Monto = 10% del total_factura del presupuesto. Sin IVA discriminado.
+ *   PV 0001, sin CAE, sin QR (documento interno — nunca toca ARCA).
  *
- * - Las FACTURAS (FA→NCA, FB→NCB, FC→NCC) generan UNA NOTA DE CRÉDITO por tipo IVA,
- *   con una línea por factura. Monto neto = 10% del total_neto de cada factura.
- *   IVA = 21% sobre ese neto. Total NC = neto + IVA.
+ * - Las FACTURAS (FA→NCA, FB→NCB) generan UNA NOTA DE CRÉDITO FISCAL por tipo IVA:
+ *   PV fiscal (configuracion_empresa.arca_punto_venta), CAE de ARCA,
+ *   CbtesAsoc = las facturas bonificadas (RG 4540), CondicionIVAReceptorId (RG 5616),
+ *   PDF con QR (RG 4892). Neto = 10% del total_neto de cada factura, IVA = 21% del neto.
+ *   SIN percepciones (es un descuento financiero → impTrib = 0).
+ *   Orden estricto: CAE → insert (si ARCA rechaza, no se crea nada en DB).
  *
  * Si se provee un pago_id, las NC/REV generadas se imputarán automáticamente a ese pago.
  */
@@ -16,10 +20,14 @@ import { SupabaseClient } from "@supabase/supabase-js"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { todayArgentina } from "@/lib/utils"
 import { actualizarDescuentoFinancieroKardex } from "@/lib/kardex/insertar-kardex"
+import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
+import { obtenerTAConCache } from "@/lib/arca/cache"
+import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
+import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 
 const DESCUENTO_CONTADO_PCT = 10
 const IVA_PCT = 0.21
-const PUNTO_VENTA = "0001"
+const PUNTO_VENTA_INTERNO = "0001"
 
 function r2(n: number): number {
   return Math.round(n * 100) / 100
@@ -41,6 +49,7 @@ interface ComprobanteGenerado {
   total_neto: number
   total_iva: number
   total_factura: number
+  cae?: string | null
 }
 
 export interface ResultadoBonificacion {
@@ -58,15 +67,16 @@ export interface ParamsBonificacion {
 async function getNextNumero(
   supabase: SupabaseClient,
   tipo: string,
+  puntoVenta: string,
 ): Promise<{ numero: string; puntoVenta: string; nextNum: number }> {
   const { data: num } = await supabase
     .from("numeracion_comprobantes")
     .select("*")
     .eq("tipo_comprobante", tipo)
-    .eq("punto_venta", PUNTO_VENTA)
+    .eq("punto_venta", puntoVenta)
     .single()
 
-  if (!num) throw new Error(`Numeración no encontrada para tipo ${tipo}`)
+  if (!num) throw new Error(`Numeración no encontrada para ${tipo} punto de venta ${puntoVenta}`)
   const nextNum = num.ultimo_numero + 1
   const numero = `${num.punto_venta}-${nextNum.toString().padStart(8, "0")}`
   return { numero, puntoVenta: num.punto_venta, nextNum }
@@ -75,13 +85,14 @@ async function getNextNumero(
 async function avanzarNumeracion(
   supabase: SupabaseClient,
   tipo: string,
+  puntoVenta: string,
   nextNum: number,
 ): Promise<void> {
   await supabase
     .from("numeracion_comprobantes")
     .update({ ultimo_numero: nextNum })
     .eq("tipo_comprobante", tipo)
-    .eq("punto_venta", PUNTO_VENTA)
+    .eq("punto_venta", puntoVenta)
 }
 
 async function crearComprobante(
@@ -95,6 +106,8 @@ async function crearComprobante(
     total_iva: number
     total_factura: number
     observaciones?: string
+    cae?: string | null
+    vencimiento_cae?: string | null
   },
 ): Promise<{ id: string }> {
   const { data, error } = await supabase
@@ -111,6 +124,8 @@ async function crearComprobante(
       saldo_pendiente: -Math.abs(params.total_factura),
       estado_pago: "pendiente",
       observaciones: params.observaciones || "Bonificación pago contado 10%",
+      ...(params.cae ? { cae: params.cae } : {}),
+      ...(params.vencimiento_cae ? { vencimiento_cae: params.vencimiento_cae } : {}),
     })
     .select("id")
     .single()
@@ -163,6 +178,97 @@ async function crearImputacion(
     .eq("id", comprobante_id)
 }
 
+/** Genera el PDF con QR de la NC fiscal y lo sube al bucket (no bloqueante). */
+async function generarPDFNC(
+  supabase: SupabaseClient,
+  params: {
+    comprobante_id: string
+    tipo: string
+    numero: string
+    puntoVenta: string
+    cliente: any
+    total_neto: number
+    total_iva: number
+    total_factura: number
+    cae: string
+    vencimiento_cae: string | null
+    lineas: Array<{ descripcion: string; precio_neto: number }>
+    observaciones: string
+  },
+): Promise<void> {
+  try {
+    const { data: empresaData } = await supabase.from("configuracion_empresa").select("*").single()
+
+    let qrDataUrl: string | undefined
+    let qrUrl: string | undefined
+    if (params.cliente?.cuit) {
+      try {
+        const qrParams = {
+          cuit:       empresaData?.cuit ?? "",
+          ptoVta:     params.puntoVenta,
+          tipoCmp:    params.tipo,
+          nroCmp:     params.numero,
+          importe:    Math.abs(params.total_factura),
+          fecha:      todayArgentina(),
+          tipoDocRec: 80,
+          nroDocRec:  params.cliente.cuit,
+          cae:        params.cae,
+        }
+        qrUrl     = buildQRUrl(qrParams)
+        qrDataUrl = await generarQRBase64(qrParams)
+      } catch (qrErr: any) {
+        console.error("[Bonif NC QR] Error generando QR:", qrErr.message)
+      }
+    }
+
+    const pdfData = buildPDFData({
+      comprobante: {
+        id:                 params.comprobante_id,
+        tipo_comprobante:   params.tipo,
+        numero_comprobante: params.numero,
+        fecha:              todayArgentina(),
+        total_neto:         -Math.abs(params.total_neto),
+        total_iva:          -Math.abs(params.total_iva),
+        percepcion_iva:     0,
+        percepcion_iibb:    0,
+        total_factura:      -Math.abs(params.total_factura),
+        cae:                params.cae,
+        vencimiento_cae:    params.vencimiento_cae,
+        observaciones:      params.observaciones,
+      },
+      cliente: params.cliente,
+      empresa: empresaData,
+      detalle: params.lineas.map(l => ({
+        articulo_id:      null,
+        descripcion:      l.descripcion,
+        sku:              "",
+        cantidad:         1,
+        precio_unitario:  -Math.abs(l.precio_neto),
+        precio_total:     -Math.abs(l.precio_neto),
+        marca:            "",
+        descuento_propio: 0,
+      })),
+      qrDataUrl,
+    })
+
+    const { pdfUrl, pdfPath, pdfHash } = await generarYSubirPDF(supabase, pdfData)
+    const snapshot = buildSnapshot(pdfData)
+
+    await supabase.from("comprobantes_venta").update({
+      pdf_url:              pdfUrl,
+      pdf_path:             pdfPath,
+      pdf_hash:             pdfHash,
+      fecha_generacion_pdf: new Date().toISOString(),
+      estado_pdf:           "generado",
+      pdf_snapshot:         snapshot,
+      qr_url:               qrUrl ?? null,
+    }).eq("id", params.comprobante_id)
+  } catch (pdfErr: any) {
+    console.error("[Bonif NC PDF] Error generando PDF:", pdfErr.message)
+    await supabase.from("comprobantes_venta").update({ estado_pdf: "error" }).eq("id", params.comprobante_id)
+  }
+}
+
 export async function generarBonificacionContado(
   supabase: SupabaseClient,
   params: ParamsBonificacion,
@@ -194,9 +300,9 @@ export async function generarBonificacionContado(
   const comprobantesGenerados: ComprobanteGenerado[] = []
   let totalBonificacion = 0
 
-  // ─── PRESUPUESTOS → REV ───────────────────────────────────────────────────
+  // ─── PRESUPUESTOS → REV (documento interno: PV 0001, sin CAE, sin QR) ──────
   if (presupuestos.length > 0) {
-    const { numero, puntoVenta, nextNum } = await getNextNumero(supabase, "REV")
+    const { numero, puntoVenta, nextNum } = await getNextNumero(supabase, "REV", PUNTO_VENTA_INTERNO)
 
     const lineas = presupuestos.map(c => ({
       descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
@@ -217,7 +323,7 @@ export async function generarBonificacionContado(
     })
 
     await crearDetalle(supabase, id, bonificacionId, lineas)
-    await avanzarNumeracion(supabase, "REV", nextNum)
+    await avanzarNumeracion(supabase, "REV", PUNTO_VENTA_INTERNO, nextNum)
 
     if (pago_id) await crearImputacion(supabase, pago_id, id, totalNeto)
 
@@ -225,39 +331,145 @@ export async function generarBonificacionContado(
     totalBonificacion += totalNeto
   }
 
-  // ─── Función genérica para NC (FA→NCA, FB→NCB, FC→NCC) ──────────────────
+  // ─── FACTURAS → NC FISCAL (FA→NCA, FB→NCB) con CAE, asociados y QR ─────────
   async function procesarFacturas(facturas: ComprobanteInput[], tipoNC: string) {
     if (facturas.length === 0) return
 
-    const { numero, puntoVenta, nextNum } = await getNextNumero(supabase, tipoNC)
+    const cbteTipo = TIPO_CBTE_ARCA[tipoNC]
+    if (!cbteTipo) throw new Error(`Tipo ${tipoNC} no tiene código ARCA definido`)
 
+    // Cliente: CUIT y condición IVA obligatorios (RG 5616)
+    const { data: cliente } = await supabase
+      .from("clientes")
+      .select("id, nombre_razon_social, nombre, cuit, condicion_iva, direccion, localidad_id, provincia")
+      .eq("id", cliente_id)
+      .single()
+
+    if (!cliente?.cuit) {
+      throw new Error("El cliente no tiene CUIT configurado. No se puede emitir la NC fiscal por pago contado.")
+    }
+    const condIvaReceptor = condicionIvaReceptorId(cliente.condicion_iva)
+    if (condIvaReceptor === null) {
+      throw new Error(
+        `El cliente "${cliente.nombre_razon_social ?? cliente.nombre ?? ""}" tiene condición de IVA ` +
+        `"${cliente.condicion_iva ?? "sin cargar"}" que no mapea a ningún código de receptor de ARCA (RG 5616).`
+      )
+    }
+
+    // Config ARCA: PV fiscal sin defaults
+    const { data: empresaConfig } = await supabase
+      .from("configuracion_empresa")
+      .select("cuit, arca_ambiente, arca_punto_venta")
+      .single()
+
+    if (!empresaConfig?.arca_punto_venta) {
+      throw new Error("configuracion_empresa.arca_punto_venta no está configurado. No se puede emitir la NC fiscal.")
+    }
+    const puntoVentaFiscal = String(empresaConfig.arca_punto_venta).padStart(4, "0")
+    const ambiente = (empresaConfig.arca_ambiente ?? "produccion") as AmbienteARCA
+    const cuitEmpresa = (empresaConfig.cuit ?? "").replace(/-/g, "")
+
+    // Numeración fiscal + sync con ARCA
+    const ta = await obtenerTAConCache(supabase, ambiente)
+    const { data: num } = await supabase
+      .from("numeracion_comprobantes")
+      .select("*")
+      .eq("tipo_comprobante", tipoNC)
+      .eq("punto_venta", puntoVentaFiscal)
+      .single()
+
+    if (!num) throw new Error(`Numeración no encontrada para ${tipoNC} punto de venta ${puntoVentaFiscal}`)
+
+    let nuevoNumero = num.ultimo_numero + 1
+    const ultimoEnArca = await ultimoAutorizado(
+      ambiente, ta.token, ta.sign, cuitEmpresa, parseInt(puntoVentaFiscal, 10), cbteTipo,
+    )
+    if (ultimoEnArca !== num.ultimo_numero) {
+      await supabase.from("numeracion_comprobantes")
+        .update({ ultimo_numero: ultimoEnArca })
+        .eq("tipo_comprobante", tipoNC)
+        .eq("punto_venta", puntoVentaFiscal)
+      nuevoNumero = ultimoEnArca + 1
+    }
+    const numero = `${puntoVentaFiscal}-${nuevoNumero.toString().padStart(8, "0")}`
+
+    // Totales: 10% del neto de cada factura + IVA 21%. Sin percepciones (descuento financiero).
     const lineas = facturas.map(c => ({
       descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
-      // Para facturas: la bonificación se calcula sobre total_neto (sin IVA)
       precio_neto: r2(Math.abs(c.total_neto) * DESCUENTO_CONTADO_PCT / 100),
     }))
-
     const totalNeto = r2(lineas.reduce((s, l) => s + l.precio_neto, 0))
     const totalIva = r2(totalNeto * IVA_PCT)
-    const totalFactura = r2(totalNeto + totalIva)
+    const totalFactura = (Math.round(totalNeto * 100) + Math.round(totalIva * 100)) / 100
+
+    // CbtesAsoc (RG 4540): las facturas que se bonifican
+    const cbteAsoc = facturas.map(c => ({
+      tipo:   TIPO_CBTE_ARCA[c.tipo_comprobante],
+      ptoVta: parseInt(c.numero_comprobante.split("-")[0], 10),
+      nro:    parseInt(c.numero_comprobante.split("-")[1], 10),
+    }))
+
+    // CAE — si ARCA rechaza, acá se corta y NO se crea nada en DB
+    const respCAE = await solicitarCAE({
+      ambiente,
+      token:     ta.token,
+      sign:      ta.sign,
+      cuit:      cuitEmpresa,
+      ptoVta:    parseInt(puntoVentaFiscal, 10),
+      cbteTipo,
+      cbteDesde: nuevoNumero,
+      cbteHasta: nuevoNumero,
+      concepto:  CONCEPTO.PRODUCTOS,
+      docTipo:   DOC_TIPO.CUIT,
+      docNro:    cliente.cuit.replace(/-/g, ""),
+      fecha:     todayArgentina().replace(/-/g, ""),
+      impTotal:   totalFactura,
+      impTotConc: 0,
+      impNeto:    totalNeto,
+      impOpEx:    0,
+      impIva:     totalIva,
+      impTrib:    0,
+      iva: [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }],
+      cbteAsoc,
+      condicionIVAReceptorId: condIvaReceptor,
+    })
+
+    const observaciones = `Bonificación contado 10% — facturas ${facturas.map(c => c.numero_comprobante).join(", ")}`
 
     const { id } = await crearComprobante(supabase, {
       tipo: tipoNC,
       numero,
-      puntoVenta,
+      puntoVenta: puntoVentaFiscal,
       cliente_id,
       total_neto: totalNeto,
       total_iva: totalIva,
       total_factura: totalFactura,
-      observaciones: `Bonificación contado 10% — facturas ${facturas.map(c => c.numero_comprobante).join(", ")}`,
+      observaciones,
+      cae: respCAE.cae,
+      vencimiento_cae: respCAE.vencimientoCae,
     })
 
     await crearDetalle(supabase, id, bonificacionId, lineas)
-    await avanzarNumeracion(supabase, tipoNC, nextNum)
+    await avanzarNumeracion(supabase, tipoNC, puntoVentaFiscal, nuevoNumero)
 
     if (pago_id) await crearImputacion(supabase, pago_id, id, totalFactura)
 
-    comprobantesGenerados.push({ id, tipo: tipoNC, numero, total_neto: totalNeto, total_iva: totalIva, total_factura: totalFactura })
+    await generarPDFNC(supabase, {
+      comprobante_id: id,
+      tipo: tipoNC,
+      numero,
+      puntoVenta: puntoVentaFiscal,
+      cliente,
+      total_neto: totalNeto,
+      total_iva: totalIva,
+      total_factura: totalFactura,
+      cae: respCAE.cae,
+      vencimiento_cae: respCAE.vencimientoCae,
+      lineas,
+      observaciones,
+    })
+
+    comprobantesGenerados.push({ id, tipo: tipoNC, numero, total_neto: totalNeto, total_iva: totalIva, total_factura: totalFactura, cae: respCAE.cae })
     totalBonificacion += totalFactura
   }
 
