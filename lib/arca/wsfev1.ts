@@ -174,6 +174,7 @@ export async function solicitarCAE(req: SolicitudCAE): Promise<RespuestaCAE> {
           <ar:ImpTrib>${n2(req.impTrib)}</ar:ImpTrib>
           <ar:MonId>PES</ar:MonId>
           <ar:MonCotiz>1.000</ar:MonCotiz>
+          <ar:CondicionIVAReceptorId>${req.condicionIVAReceptorId}</ar:CondicionIVAReceptorId>
           ${ivaXml}
           ${tributosXml}
           ${asocXml}

@@ -191,6 +191,7 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
   const cfg = TIPO_CONFIG[comp.tipo_comprobante] ?? { letra: 'X', nombre: comp.tipo_comprobante, color: '#333' }
 
   const esFactA    = ['FA', 'NCA', 'NDA'].includes(comp.tipo_comprobante)
+  const esFactB    = ['FB', 'NCB', 'NDB'].includes(comp.tipo_comprobante)
   const esMonotrib = (cliente.condicion_iva ?? '').toLowerCase().includes('monotributo')
   const esPresRev  = ['PRES', 'REV'].includes(comp.tipo_comprobante)
   const esNC_ND    = ['NCA', 'NCB', 'NDA', 'NDB'].includes(comp.tipo_comprobante)
@@ -358,7 +359,7 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
               <Text style={s.totObsLegal}>
                 {esMonotrib
                   ? 'El crédito fiscal discriminado en el presente comprobante sólo podrá ser computado a efectos del Régimen de Sostenimiento e Inclusión Fiscal para pequeños contribuyentes de la Ley Nro. 27618'
-                  : 'Crédito fiscal computable solo para Resp. Inscriptos en IVA (RG ARCA 1415). Emitido conforme RG 4291.'}
+                  : 'Crédito fiscal computable solo para Resp. Inscriptos en IVA (RG ARCA 1415). QR conforme RG 4892/2020.'}
               </Text>
             </View>
             <View style={s.totNums}>
@@ -391,13 +392,15 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
         </View>
 
         {/* ── Footer fijo en todas las páginas ── */}
+        {/* Transparencia Fiscal (Ley 27.743 / RG 5614): solo comprobantes B — en los A
+            el IVA ya va discriminado en el cuerpo, la franja sería redundante. */}
         <View style={s.footer} fixed>
-          {esFactA && (
+          {esFactB && (
             <View style={s.transpRow}>
               <Text style={s.transpText}>
-                Transparencia Fiscal — Ley 27.743: IVA discriminado ${fmtARS(totalIva)}
-                {percIva > 0 ? ` · Percep. IVA $${fmtARS(percIva)}` : ''}
-                {percIibb > 0 ? ` · Percep. IIBB $${fmtARS(percIibb)}` : ''}
+                Régimen de Transparencia Fiscal al Consumidor (Ley 27.743) ·
+                IVA Contenido: ${fmtARS(totalIva)} ·
+                Otros Impuestos Nacionales Indirectos: $0,00
               </Text>
             </View>
           )}

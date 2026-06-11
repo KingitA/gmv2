@@ -13,7 +13,7 @@ import crypto from 'crypto'
 import { TIPO_CBTE_ARCA } from '@/lib/arca/tipos'
 
 /**
- * Genera el QR de verificación ARCA según RG 4291.
+ * Genera el QR de verificación ARCA según RG 4892/2020 (modificatoria de la RG 4291).
  * URL: https://www.afip.gob.ar/fe/qr/?p=<base64(JSON)>
  */
 export async function generarQRBase64(params: {

@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
 import { requireAuth } from '@/lib/auth'
 import { determinarTipoNDA, mensajeErrorCondicionIva } from '@/lib/comprobantes/tipo-comprobante'
-import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
+import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
@@ -70,7 +70,13 @@ export async function POST(request: Request) {
       .select('*')
       .single()
 
-    const puntoVenta = String(empresaConfig?.arca_punto_venta ?? 7).padStart(4, '0')
+    if (!empresaConfig?.arca_punto_venta) {
+      return NextResponse.json(
+        { error: 'configuracion_empresa.arca_punto_venta no está configurado. No se puede emitir la ND fiscal.' },
+        { status: 500 },
+      )
+    }
+    const puntoVenta = String(empresaConfig.arca_punto_venta).padStart(4, '0')
 
     const { data: numeracion, error: numError } = await supabase
       .from('numeracion_comprobantes')
@@ -145,6 +151,15 @@ export async function POST(request: Request) {
     const clienteCuit = (cliente.cuit ?? '').replace(/-/g, '') || '0'
     const fecha       = todayArgentina().replace(/-/g, '')
 
+    // RG 5616/2024: condición IVA del receptor obligatoria
+    const condIvaReceptor = condicionIvaReceptorId(cliente.condicion_iva)
+    if (condIvaReceptor === null) {
+      return NextResponse.json({
+        error: `El cliente "${cliente.nombre_razon_social ?? cliente.nombre ?? ''}" tiene condición de IVA "${cliente.condicion_iva ?? 'sin cargar'}" que no mapea a ningún código de receptor de ARCA (RG 5616). Corregí la condición de IVA del cliente antes de emitir.`,
+        error_code: 'CONDICION_IVA_NO_MAPEA',
+      }, { status: 422 })
+    }
+
     const tributos = []
     if (percIVA > 0) {
       tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: totalNeto, alic: percResult.tasa_iva_aplicada, importe: percIVA })
@@ -176,6 +191,7 @@ export async function POST(request: Request) {
         ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
         : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
       tributos: tributos.length > 0 ? tributos : undefined,
+      condicionIVAReceptorId: condIvaReceptor,
     })
 
     const { data: comprobante, error: compError } = await supabase

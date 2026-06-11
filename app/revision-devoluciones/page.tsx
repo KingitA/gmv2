@@ -17,6 +17,9 @@ export default function RevisionDevolucionesPage() {
   const [procesando, setProcesando] = useState<string | null>(null)
   const [motivoRechazo, setMotivoRechazo] = useState("")
   const [motivosRechazo, setMotivosRechazo] = useState<Record<string, string>>({})
+  // Comprobantes asociados ingresados a mano (RG 4540) cuando la devolución
+  // no tiene comprobante original vinculado. Formato: "FA 0007-00000123, FB 0007-00000045"
+  const [asociadosManual, setAsociadosManual] = useState<Record<string, string>>({})
   const { toast } = useToast()
 
   useEffect(() => {
@@ -106,6 +109,18 @@ export default function RevisionDevolucionesPage() {
     }
   }
 
+  // Parsea "FA 0007-00000123, FB 0007-00000045" → [{tipo, numero}]
+  function parsearAsociados(texto: string): { tipo: string; numero: string }[] {
+    return (texto ?? "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => {
+        const [tipo, numero] = s.split(/\s+/)
+        return { tipo: (tipo ?? "").toUpperCase(), numero: numero ?? "" }
+      })
+  }
+
   async function confirmarDevolucionConComprobante(devolucionId: string, tipoComprobante: "NC" | "Reversa") {
     setProcesando(devolucionId)
     try {
@@ -121,6 +136,7 @@ export default function RevisionDevolucionesPage() {
           devolucion_id: devolucionId,
           tipo_comprobante: tipoComprobante === "Reversa" ? "REV" : "auto",
           motivo_ajuste: `Devolución ${devolucion?.numero_devolucion || devolucionId.slice(0, 8)}`,
+          asociados_manual: parsearAsociados(asociadosManual[devolucionId] ?? ""),
         }),
       })
 
@@ -218,6 +234,25 @@ export default function RevisionDevolucionesPage() {
                     <Label className="text-sm text-muted-foreground">Observaciones</Label>
                     <p className="text-sm mt-1">{dev.observaciones}</p>
                   </div>
+                )}
+
+                {!dev.items?.some((i: any) => i.comprobante_venta_id) && (
+                  <Alert>
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Comprobante asociado requerido (RG 4540)</AlertTitle>
+                    <AlertDescription>
+                      <p className="mb-2 text-sm">
+                        Esta devolución no tiene factura original vinculada. Para emitir la NC fiscal,
+                        ingresá el/los comprobantes que ajusta — formato: tipo y número separados por coma.
+                      </p>
+                      <Textarea
+                        placeholder="Ej: FA 0007-00000123, FB 0007-00000045"
+                        value={asociadosManual[dev.id] || ""}
+                        onChange={(e) => setAsociadosManual(prev => ({ ...prev, [dev.id]: e.target.value }))}
+                        rows={1}
+                      />
+                    </AlertDescription>
+                  </Alert>
                 )}
 
                 <div className="flex gap-4 pt-4 border-t">

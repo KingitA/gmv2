@@ -9,7 +9,7 @@ import {
   CC_MOVIMIENTO,
   leyendaAnulacion,
 } from '@/lib/comprobantes/anular'
-import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from '@/lib/arca/tipos'
+import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from '@/lib/arca/tipos'
 import { TASA_PERCEPCION_IVA } from '@/lib/comprobantes/calcular-percepciones'
 import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
@@ -73,8 +73,14 @@ export async function POST(
       .select('cuit, arca_ambiente, arca_punto_venta')
       .single()
 
+    if (esFiscal && !empresaConfig?.arca_punto_venta) {
+      return NextResponse.json(
+        { error: 'configuracion_empresa.arca_punto_venta no está configurado. No se puede emitir el comprobante inverso fiscal.' },
+        { status: 500 },
+      )
+    }
     const puntoVenta = esFiscal && empresaConfig
-      ? String(empresaConfig.arca_punto_venta ?? 7).padStart(4, '0')
+      ? String(empresaConfig.arca_punto_venta).padStart(4, '0')
       : original.punto_venta  // PRES/REV usan el mismo PV que el original
 
     // ─── 4. Obtener numeración y sincronizar con ARCA ───
@@ -123,6 +129,15 @@ export async function POST(
       const clienteCuit = original.cliente.cuit.replace(/-/g, '')
       const fecha = todayArgentina().replace(/-/g, '')
 
+      // RG 5616/2024: condición IVA del receptor obligatoria
+      const condIvaReceptor = condicionIvaReceptorId(original.cliente.condicion_iva)
+      if (condIvaReceptor === null) {
+        return NextResponse.json({
+          error: `El cliente "${original.cliente.nombre_razon_social ?? ''}" tiene condición de IVA "${original.cliente.condicion_iva ?? 'sin cargar'}" que no mapea a ningún código de receptor de ARCA (RG 5616). Corregí la condición de IVA del cliente antes de anular.`,
+          error_code: 'CONDICION_IVA_NO_MAPEA',
+        }, { status: 422 })
+      }
+
       // Los montos del inverso siempre positivos para ARCA (el tipo ya indica si es NC/ND)
       // Espejo exacto de la factura original: neto, IVA y percepciones (tributos)
       const impNeto   = r2(Math.abs(original.total_neto))
@@ -168,12 +183,14 @@ export async function POST(
           ? [{ id: IVA_ID.IVA_21, baseImp: impNeto, importe: impIva }]
           : [{ id: IVA_ID.EXENTO,  baseImp: impNeto, importe: 0 }],
         tributos: tributos.length > 0 ? tributos : undefined,
-        // Referencia al comprobante original
+        // Referencia al comprobante original (RG 4540) — el PV sale del número
+        // del comprobante original, sin defaults
         cbteAsoc: [{
           tipo:   TIPO_CBTE_ARCA[original.tipo_comprobante],
-          ptoVta: parseInt(original.punto_venta ?? '1', 10),
-          nro:    parseInt(original.numero_comprobante.split('-')[1] ?? '1', 10),
+          ptoVta: parseInt(original.numero_comprobante.split('-')[0], 10),
+          nro:    parseInt(original.numero_comprobante.split('-')[1], 10),
         }],
+        condicionIVAReceptorId: condIvaReceptor,
       })
 
       cae            = respCAE.cae

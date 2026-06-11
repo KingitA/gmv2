@@ -6,7 +6,7 @@ import { requireAuth } from '@/lib/auth'
 import { insertarKardex } from '@/lib/kardex/insertar-kardex'
 import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
 import { determinarTipoNCADesdeOriginal, determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
-import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
+import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       devolucion_id,
       tipo_comprobante, // 'NC' o 'REV'
       motivo_ajuste,
+      asociados_manual, // [{ tipo: 'FA'|'FB'|..., numero: 'PPPP-NNNNNNNN' }] — para devoluciones sin comprobante original detectable (RG 4540)
     } = body
 
     const { data: devolucion, error: devError } = await supabase
@@ -134,8 +135,14 @@ export async function POST(request: Request) {
       .single()
 
     const esFiscal = REQUIERE_CAE.has(tipoFinal)
+    if (esFiscal && !empresaConfig?.arca_punto_venta) {
+      return NextResponse.json(
+        { error: 'configuracion_empresa.arca_punto_venta no está configurado. No se puede emitir la NC fiscal.' },
+        { status: 500 },
+      )
+    }
     const puntoVenta = esFiscal
-      ? String(empresaConfig?.arca_punto_venta ?? 7).padStart(4, '0')
+      ? String(empresaConfig!.arca_punto_venta).padStart(4, '0')
       : '0001'
 
     const { data: numeracion, error: numError } = await supabase
@@ -210,13 +217,58 @@ export async function POST(request: Request) {
       const clienteCuit = (devolucion.cliente?.cuit ?? '').replace(/-/g, '') || '0'
       const fecha = todayArgentina().replace(/-/g, '')
 
-      // CbteAsoc: referencia a la factura original (si existe)
-      const compOriginal = devolucion.detalle[0]?.comprobante_original
-      const cbteAsoc = compOriginal ? [{
-        tipo:   TIPO_CBTE_ARCA[compOriginal.tipo_comprobante] ?? 0,
-        ptoVta: parseInt((compOriginal.numero_comprobante ?? '0').split('-')[0], 10),
-        nro:    parseInt((compOriginal.numero_comprobante ?? '0').split('-')[1] ?? '0', 10),
-      }] : []
+      // RG 5616/2024: condición IVA del receptor obligatoria
+      const condIvaReceptor = condicionIvaReceptorId(devolucion.cliente?.condicion_iva)
+      if (condIvaReceptor === null) {
+        return NextResponse.json({
+          error: `El cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" tiene condición de IVA "${devolucion.cliente?.condicion_iva ?? 'sin cargar'}" que no mapea a ningún código de receptor de ARCA (RG 5616). Corregí la condición de IVA del cliente antes de emitir.`,
+          error_code: 'CONDICION_IVA_NO_MAPEA',
+        }, { status: 422 })
+      }
+
+      // CbteAsoc (RG 4540): TODOS los comprobantes originales distintos referenciados
+      // por los ítems de la devolución, más los ingresados manualmente.
+      const asocVistos = new Set<string>()
+      const cbteAsoc: { tipo: number; ptoVta: number; nro: number }[] = []
+
+      for (const item of devolucion.detalle) {
+        const orig = item.comprobante_original
+        if (!orig?.numero_comprobante || !TIPO_CBTE_ARCA[orig.tipo_comprobante]) continue
+        const clave = `${orig.tipo_comprobante}|${orig.numero_comprobante}`
+        if (asocVistos.has(clave)) continue
+        asocVistos.add(clave)
+        cbteAsoc.push({
+          tipo:   TIPO_CBTE_ARCA[orig.tipo_comprobante],
+          ptoVta: parseInt(orig.numero_comprobante.split('-')[0], 10),
+          nro:    parseInt(orig.numero_comprobante.split('-')[1] ?? '0', 10),
+        })
+      }
+
+      // Asociados ingresados manualmente (caso migración: el original no está en el sistema)
+      for (const asoc of (asociados_manual ?? [])) {
+        const tipoArca = TIPO_CBTE_ARCA[asoc?.tipo]
+        const partes   = String(asoc?.numero ?? '').trim().split('-')
+        const ptoVta   = parseInt(partes[0], 10)
+        const nro      = parseInt(partes[1] ?? '', 10)
+        if (!tipoArca || isNaN(ptoVta) || isNaN(nro)) {
+          return NextResponse.json({
+            error: `Comprobante asociado inválido: "${asoc?.tipo ?? ''} ${asoc?.numero ?? ''}". Formato esperado: tipo FA/FB/NDA/NDB y número PPPP-NNNNNNNN (ej: FA 0007-00000123).`,
+            error_code: 'ASOCIADO_INVALIDO',
+          }, { status: 422 })
+        }
+        const clave = `${asoc.tipo}|${asoc.numero}`
+        if (asocVistos.has(clave)) continue
+        asocVistos.add(clave)
+        cbteAsoc.push({ tipo: tipoArca, ptoVta, nro })
+      }
+
+      // RG 4540: una NC/ND fiscal no puede emitirse sin comprobante asociado
+      if (cbteAsoc.length === 0) {
+        return NextResponse.json({
+          error: 'No se detectó ningún comprobante original asociado a esta devolución (RG 4540). Ingresá manualmente el/los comprobantes que esta NC ajusta antes de emitir.',
+          error_code: 'NC_SIN_ASOCIADO',
+        }, { status: 422 })
+      }
 
       const tributos = []
       if (percIVA > 0) {
@@ -250,6 +302,7 @@ export async function POST(request: Request) {
           : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
         cbteAsoc,
         tributos: tributos.length > 0 ? tributos : undefined,
+        condicionIVAReceptorId: condIvaReceptor,
       })
       cae            = respCAE.cae
       vencimientoCae = respCAE.vencimientoCae

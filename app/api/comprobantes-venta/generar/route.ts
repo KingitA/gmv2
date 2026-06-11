@@ -14,7 +14,7 @@ import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKarde
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
-import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from "@/lib/arca/tipos"
+import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
@@ -218,11 +218,18 @@ export async function POST(request: Request) {
     const algunGrupoNecesitaCAE = tiposReales.some(t => t !== null && REQUIERE_CAE.has(t))
 
     if (certDisponible && empresaConfig && algunGrupoNecesitaCAE) {
-      const ambiente = (empresaConfig.arca_ambiente ?? 'testing') as AmbienteARCA
+      // Única fuente del PV fiscal: configuracion_empresa. Sin default — si falta, error explícito.
+      if (!empresaConfig.arca_punto_venta) {
+        return NextResponse.json(
+          { error: 'configuracion_empresa.arca_punto_venta no está configurado. No se puede emitir comprobantes fiscales.' },
+          { status: 500 },
+        )
+      }
+      const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
       const ta = await obtenerTAConCache(supabase, ambiente)
       arcaParams = {
         ambiente,
-        puntoVenta: String(empresaConfig.arca_punto_venta ?? 3).padStart(4, '0'),
+        puntoVenta: String(empresaConfig.arca_punto_venta).padStart(4, '0'),
         token:       ta.token,
         sign:        ta.sign,
         cuitEmpresa: (empresaConfig.cuit ?? '').replace(/-/g, ''),
@@ -423,14 +430,14 @@ export async function POST(request: Request) {
 
         if (!compFull) continue
 
-        // Generar QR ARCA (RG 4291) — solo para comprobantes con CAE
+        // Generar QR ARCA (RG 4892/2020) — solo para comprobantes con CAE
         let qrDataUrl: string | undefined
         let qrUrl: string | undefined
-        if (compFull.cae && compFull.clientes?.cuit) {
+        if (compFull.cae && compFull.clientes?.cuit && compFull.punto_venta) {
           try {
             const qrParams = {
               cuit:       empresaData?.cuit ?? '',
-              ptoVta:     compFull.punto_venta ?? '0007',
+              ptoVta:     compFull.punto_venta,
               tipoCmp:    compFull.tipo_comprobante,
               nroCmp:     compFull.numero_comprobante,
               importe:    Math.abs(Number(compFull.total_factura ?? 0)),
@@ -617,6 +624,16 @@ async function generarComprobante(
     const clienteCuit = (pedido.cliente.cuit ?? '').replace(/-/g, '')
     const fecha = todayArgentina().replace(/-/g, '') // YYYYMMDD
 
+    // RG 5616/2024: condición IVA del receptor es obligatoria — sin mapeo no se emite
+    const condIvaReceptor = condicionIvaReceptorId(pedido.cliente.condicion_iva)
+    if (condIvaReceptor === null) {
+      throw new Error(
+        `El cliente "${pedido.cliente.nombre_razon_social ?? pedido.cliente.nombre ?? ''}" tiene condición de IVA ` +
+        `"${pedido.cliente.condicion_iva ?? 'sin cargar'}" que no mapea a ningún código de receptor de ARCA (RG 5616). ` +
+        `Corregí la condición de IVA del cliente antes de emitir.`
+      )
+    }
+
     // Armar array de tributos (percepciones) para ARCA
     const tributos = []
     if (percIVA > 0) {
@@ -649,6 +666,7 @@ async function generarComprobante(
         ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
         : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
       tributos: tributos.length > 0 ? tributos : undefined,
+      condicionIVAReceptorId: condIvaReceptor,
     })
 
     cae            = respCAE.cae

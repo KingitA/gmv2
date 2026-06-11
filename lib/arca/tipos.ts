@@ -57,6 +57,31 @@ export const TRIBUTO_ID = {
 export const MONEDA_PESOS = 'PES'
 export const COTIZACION_PESOS = 1
 
+// Condición frente al IVA del receptor — obligatorio desde RG 5616/2024
+// en FECAESolicitar (<CondicionIVAReceptorId>). Tabla oficial ARCA:
+//   1 = IVA Responsable Inscripto · 4 = IVA Sujeto Exento
+//   5 = Consumidor Final · 6 = Responsable Monotributo
+export const CONDICION_IVA_RECEPTOR_ID = {
+  RESPONSABLE_INSCRIPTO: 1,
+  SUJETO_EXENTO:         4,
+  CONSUMIDOR_FINAL:      5,
+  MONOTRIBUTO:           6,
+}
+
+/**
+ * Mapea clientes.condicion_iva al código de receptor de ARCA.
+ * Mismo matching que determinarTipoFactura. Retorna null si no mapea —
+ * el llamador DEBE bloquear la emisión (nunca asumir un default).
+ */
+export function condicionIvaReceptorId(condicionIva: string | null | undefined): number | null {
+  const c = (condicionIva ?? '').toLowerCase().trim()
+  if (c.includes('responsable inscri')) return CONDICION_IVA_RECEPTOR_ID.RESPONSABLE_INSCRIPTO
+  if (c.includes('monotributo'))        return CONDICION_IVA_RECEPTOR_ID.MONOTRIBUTO
+  if (c.includes('exento'))             return CONDICION_IVA_RECEPTOR_ID.SUJETO_EXENTO
+  if (c.includes('consumidor final'))   return CONDICION_IVA_RECEPTOR_ID.CONSUMIDOR_FINAL
+  return null
+}
+
 export type AmbienteARCA = 'testing' | 'produccion'
 
 export interface TributoARCA {
@@ -101,6 +126,7 @@ export interface SolicitudCAE {
   iva: IvaARCA[]
   tributos?: TributoARCA[]
   cbteAsoc?: CbteAsocARCA[]
+  condicionIVAReceptorId: number  // RG 5616/2024 — obligatorio
 }
 
 export interface RespuestaCAE {

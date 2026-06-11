@@ -74,11 +74,11 @@ export async function POST(request: NextRequest) {
 
       // Generar QR si tiene CAE y CUIT
       let qrDataUrl: string | undefined
-      if (comp.cae && cliente?.cuit) {
+      if (comp.cae && cliente?.cuit && comp.punto_venta) {
         try {
           qrDataUrl = await generarQRBase64({
             cuit:       empresaData?.cuit ?? '',
-            ptoVta:     comp.punto_venta ?? '0007',
+            ptoVta:     comp.punto_venta,
             tipoCmp:    comp.tipo_comprobante,
             nroCmp:     comp.numero_comprobante,
             importe:    Math.abs(Number(comp.total_factura ?? 0)),
