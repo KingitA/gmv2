@@ -10,6 +10,7 @@ import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, c
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
+import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 
 export async function POST(request: Request) {
@@ -196,7 +197,8 @@ export async function POST(request: Request) {
       : 0
 
     // ─── Percepciones en NC (se incluyen en negativo, espejo de la factura original) ───
-    const percResult    = calcularPercepciones(totalNeto, devolucion.cliente, esFiscal)
+    const tasaIIBBResuelta = esFiscal ? await resolverAlicuotaIIBB(supabase, devolucion.cliente) : 0
+    const percResult    = calcularPercepciones(totalNeto, { ...devolucion.cliente, percepcion_iibb: tasaIIBBResuelta }, esFiscal)
     const percIVA       = percResult.percepcion_iva
     const percIIBB      = percResult.percepcion_iibb
     const totalTrib     = Math.round((percIVA + percIIBB) * 100) / 100

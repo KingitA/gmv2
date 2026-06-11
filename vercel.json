@@ -3,6 +3,10 @@
         {
             "path": "/api/cron/purge-deleted-orders",
             "schedule": "0 3 * * *"
+        },
+        {
+            "path": "/api/cron/padron-iibb-check",
+            "schedule": "0 9 1 * *"
         }
     ]
 }

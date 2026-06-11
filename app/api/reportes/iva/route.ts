@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
       .select("subtotal_neto, subtotal_iva, subtotal_total, iva_porcentaje, iva_incluido, tipo_comprobante, provincia_destino, percepcion_iva_monto, percepcion_iibb_monto, percepcion_ganancias_monto")
       .eq("tipo_movimiento", "venta")
       .eq("iva_incluido", false)          // solo facturas A/B/C con IVA discriminado
-      .neq("tipo_comprobante", "PRES")    // excluir presupuestos
+      .in("tipo_comprobante", ["FA", "FB", "NCA", "NCB", "NDA", "NDB"])  // solo fiscales — PRES/REV/REM nunca van a reportes fiscales
       .gte("fecha", desdeTs)
       .lte("fecha", hastaTs)
 
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
       .select("percepcion_iva, percepcion_iibb, total_iva, total_neto, tipo_comprobante, clientes(provincia)")
       .gte("fecha", desde)
       .lte("fecha", hasta)
-      .neq("tipo_comprobante", "PRES")
+      .in("tipo_comprobante", ["FA", "FB", "NCA", "NCB", "NDA", "NDB"])
       .gt("percepcion_iva", 0)
 
     // Sumar percepciones de comprobantes que no están en kardex
@@ -134,6 +134,7 @@ export async function GET(request: NextRequest) {
       .select("tipo_comprobante, total_neto, total_iva, total_factura, percepcion_iva, percepcion_iibb")
       .gte("fecha", desde)
       .lte("fecha", hasta)
+      .in("tipo_comprobante", ["FA", "FB", "NCA", "NCB", "NDA", "NDB"])
 
     const resumen_por_tipo: Record<string, { cantidad: number; neto: number; iva: number; total: number }> = {}
     for (const cv of compVentaResumen || []) {

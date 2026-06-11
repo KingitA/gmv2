@@ -8,6 +8,7 @@ import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaRec
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
+import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 
 /**
@@ -115,7 +116,8 @@ export async function POST(request: Request) {
 
     // ─── Percepciones (IVA 3% RG 5329/2023 + IIBB según padrón) ───
     const esFiscal   = true // NDA/NDB siempre son fiscales
-    const percResult = calcularPercepciones(totalNeto, cliente, esFiscal)
+    const tasaIIBBResuelta = await resolverAlicuotaIIBB(supabase, cliente)
+    const percResult = calcularPercepciones(totalNeto, { ...cliente, percepcion_iibb: tasaIIBBResuelta }, esFiscal)
     const percIVA    = percResult.percepcion_iva
     const percIIBB   = percResult.percepcion_iibb
     const totalTrib  = Math.round((percIVA + percIIBB) * 100) / 100
