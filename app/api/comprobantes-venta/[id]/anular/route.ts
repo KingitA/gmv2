@@ -246,14 +246,16 @@ export async function POST(
 
     // ─── 8. Copiar detalle (mismo ítem, mismo precio, misma cantidad) ───
     // El signo del total del comprobante ya indica si es NC/ND.
-    // El detalle conserva cantidades y precios originales (positivos).
+    // Se PRESERVA el signo original de cada línea: las bonificaciones negativas
+    // de la factura siguen negativas en el espejo — si se les aplicara Math.abs
+    // quedarían como cargos positivos y el detalle no cuadraría con el total.
     const detalleInserts = original.detalle.map((d: any) => ({
       comprobante_id:  inverso.id,
       articulo_id:     d.articulo_id,
       descripcion:     d.descripcion,
       cantidad:        Math.abs(d.cantidad),
-      precio_unitario: Math.abs(d.precio_unitario),
-      precio_total:    r2(Math.abs(d.precio_total)),
+      precio_unitario: d.precio_unitario,
+      precio_total:    r2(d.precio_total),
     }))
 
     if (detalleInserts.length > 0) {
