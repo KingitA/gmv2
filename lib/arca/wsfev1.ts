@@ -80,6 +80,15 @@ function buildCbtesAsoc(cbtes: CbteAsocARCA[]): string {
         </ar:CbtesAsoc>`
 }
 
+// RG 4540: período asociado (alternativa a CbtesAsoc para ND/NC por mora/intereses)
+function buildPeriodoAsoc(periodo?: { desde: string; hasta: string }): string {
+  if (!periodo) return ''
+  return `<ar:PeriodoAsoc>
+            <ar:FchDesde>${periodo.desde}</ar:FchDesde>
+            <ar:FchHasta>${periodo.hasta}</ar:FchHasta>
+          </ar:PeriodoAsoc>`
+}
+
 async function llamarWS(ambiente: AmbienteARCA, accion: string, body: string): Promise<string> {
   const url = URL_WSFEV1[ambiente]
   const envelope = `<?xml version="1.0" encoding="utf-8"?>
@@ -149,6 +158,7 @@ export async function solicitarCAE(req: SolicitudCAE): Promise<RespuestaCAE> {
   const ivaXml      = buildIva(req.iva)
   const tributosXml = buildTributos(req.tributos ?? [])
   const asocXml     = buildCbtesAsoc(req.cbteAsoc ?? [])
+  const periodoXml  = buildPeriodoAsoc(req.periodoAsoc)
 
   const body = `<ar:FECAESolicitar>
     ${buildAuth(req.token, req.sign, req.cuit)}
@@ -178,6 +188,7 @@ export async function solicitarCAE(req: SolicitudCAE): Promise<RespuestaCAE> {
           ${ivaXml}
           ${tributosXml}
           ${asocXml}
+          ${periodoXml}
         </ar:FECAEDetRequest>
       </ar:FeDetReq>
     </ar:FeCAEReq>

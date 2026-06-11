@@ -126,6 +126,8 @@ export interface SolicitudCAE {
   iva: IvaARCA[]
   tributos?: TributoARCA[]
   cbteAsoc?: CbteAsocARCA[]
+  /** RG 4540: período asociado (YYYYMMDD) para ND/NC que no referencian un comprobante puntual */
+  periodoAsoc?: { desde: string; hasta: string }
   condicionIVAReceptorId: number  // RG 5616/2024 — obligatorio
 }
 

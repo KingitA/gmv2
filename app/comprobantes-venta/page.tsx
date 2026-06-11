@@ -94,6 +94,83 @@ export default function ComprobantesVentaPage() {
     pedidoId: string
   } | null>(null)
 
+  // ── Nueva Nota de Débito ──
+  const [modalNDAbierto, setModalNDAbierto] = useState(false)
+  const [emitiendoND, setEmitiendoND] = useState(false)
+  const [ndModo, setNdModo] = useState<"factura" | "periodo">("factura")
+  const [ndFacturaId, setNdFacturaId] = useState("")
+  const [ndClienteId, setNdClienteId] = useState("")
+  const [ndConcepto, setNdConcepto] = useState("")
+  const [ndMonto, setNdMonto] = useState("")
+  const [ndDesde, setNdDesde] = useState("")
+  const [ndHasta, setNdHasta] = useState("")
+  const [ndClientes, setNdClientes] = useState<{ id: string; nombre: string }[]>([])
+
+  const facturasParaND = comprobantes.filter(
+    c => ["FA", "FB"].includes(c.tipo_comprobante) && !c.anulado_en
+  )
+
+  const abrirModalND = async () => {
+    setModalNDAbierto(true)
+    if (ndClientes.length === 0) {
+      const { data } = await supabase
+        .from("clientes")
+        .select("id, nombre_razon_social")
+        .not("cuit", "is", null)
+        .order("nombre_razon_social")
+      setNdClientes((data ?? []).map((c: any) => ({ id: c.id, nombre: c.nombre_razon_social })))
+    }
+  }
+
+  const emitirND = async () => {
+    const monto = parseFloat(ndMonto.replace(",", "."))
+    if (!ndConcepto.trim() || isNaN(monto) || monto <= 0) {
+      alert("Completá el concepto y un monto neto válido")
+      return
+    }
+
+    let cliente_id = ndClienteId
+    let asociados: { tipo: string; numero: string }[] | undefined
+    let periodo: { desde: string; hasta: string } | undefined
+
+    if (ndModo === "factura") {
+      const fac = facturasParaND.find(f => f.id === ndFacturaId)
+      if (!fac) { alert("Seleccioná la factura que esta ND ajusta"); return }
+      cliente_id = fac.cliente_id
+      asociados = [{ tipo: fac.tipo_comprobante, numero: fac.numero_comprobante }]
+    } else {
+      if (!ndClienteId) { alert("Seleccioná el cliente"); return }
+      if (!ndDesde || !ndHasta) { alert("Completá el período asociado (desde/hasta)"); return }
+      periodo = { desde: ndDesde, hasta: ndHasta }
+    }
+
+    setEmitiendoND(true)
+    try {
+      const res = await fetch("/api/comprobantes-venta/generar-nd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cliente_id,
+          tipo_comprobante: "auto",
+          concepto: ndConcepto.trim(),
+          items: [{ descripcion: ndConcepto.trim(), cantidad: 1, precio_unitario_neto: monto }],
+          asociados,
+          periodo,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      alert(`${data.comprobante.tipo} ${data.comprobante.numero} emitida por $${Number(data.comprobante.total).toFixed(2)} — CAE ${data.comprobante.cae}`)
+      setModalNDAbierto(false)
+      setNdConcepto(""); setNdMonto(""); setNdFacturaId(""); setNdDesde(""); setNdHasta("")
+      cargarComprobantes()
+    } catch (e: any) {
+      alert(e.message || "Error emitiendo la Nota de Débito")
+    } finally {
+      setEmitiendoND(false)
+    }
+  }
+
   const router = useRouter()
   const supabase = createClient()
 
@@ -248,11 +325,94 @@ export default function ComprobantesVentaPage() {
           <h1 className="text-3xl font-bold">Comprobantes de Venta</h1>
           <p className="text-muted-foreground">Administra facturas, presupuestos, remitos y notas de crédito</p>
         </div>
-        <Button onClick={cargarPedidosSinFacturar}>
-          <Plus className="h-4 w-4 mr-2" />
-          Generar Comprobantes
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={abrirModalND}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nueva Nota de Débito
+          </Button>
+          <Button onClick={cargarPedidosSinFacturar}>
+            <Plus className="h-4 w-4 mr-2" />
+            Generar Comprobantes
+          </Button>
+        </div>
       </div>
+
+      {/* ── Modal Nueva Nota de Débito ── */}
+      <Dialog open={modalNDAbierto} onOpenChange={setModalNDAbierto}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nueva Nota de Débito</DialogTitle>
+            <DialogDescription>
+              Cargo al cliente (cheque rechazado, diferencia de precio, mora). La RG 4540 exige
+              indicar la factura que ajusta o un período asociado.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button size="sm" variant={ndModo === "factura" ? "default" : "outline"} onClick={() => setNdModo("factura")}>
+                Factura asociada
+              </Button>
+              <Button size="sm" variant={ndModo === "periodo" ? "default" : "outline"} onClick={() => setNdModo("periodo")}>
+                Período asociado
+              </Button>
+            </div>
+
+            {ndModo === "factura" ? (
+              <div>
+                <label className="text-sm font-medium mb-1 block">Factura que ajusta</label>
+                <Select value={ndFacturaId} onValueChange={setNdFacturaId}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar factura..." /></SelectTrigger>
+                  <SelectContent>
+                    {facturasParaND.map(f => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.tipo_comprobante} {f.numero_comprobante} — {f.clientes?.nombre_razon_social} — ${Number(f.total_factura).toFixed(2)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Cliente</label>
+                  <Select value={ndClienteId} onValueChange={setNdClienteId}>
+                    <SelectTrigger><SelectValue placeholder="Seleccionar cliente..." /></SelectTrigger>
+                    <SelectContent>
+                      {ndClientes.map(c => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">Período desde</label>
+                    <Input type="date" value={ndDesde} onChange={e => setNdDesde(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">Período hasta</label>
+                    <Input type="date" value={ndHasta} onChange={e => setNdHasta(e.target.value)} />
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div>
+              <label className="text-sm font-medium mb-1 block">Concepto del cargo</label>
+              <Input placeholder="Ej: Cheque rechazado N° 1234 / Interés por mora" value={ndConcepto} onChange={e => setNdConcepto(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-1 block">Monto NETO (sin IVA — se agrega 21%)</label>
+              <Input type="number" min="0" step="0.01" placeholder="0.00" value={ndMonto} onChange={e => setNdMonto(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModalNDAbierto(false)} disabled={emitiendoND}>Cancelar</Button>
+            <Button onClick={emitirND} disabled={emitiendoND}>
+              {emitiendoND ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
+              Emitir ND
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex gap-4">
         <div className="relative flex-1">

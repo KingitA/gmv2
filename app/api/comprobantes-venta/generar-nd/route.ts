@@ -35,10 +35,46 @@ export async function POST(request: Request) {
       concepto,         // descripción del cargo
       items,            // [{ descripcion, cantidad?, precio_unitario_neto, iva_pct? }]
       pedido_id,
+      asociados,        // [{ tipo: 'FA'|'FB'|..., numero: 'PPPP-NNNNNNNN' }] — comprobantes que ajusta (RG 4540)
+      periodo,          // { desde: 'YYYY-MM-DD', hasta: 'YYYY-MM-DD' } — alternativa para mora/intereses
     } = body
 
     if (!cliente_id || !concepto || !items?.length) {
       return NextResponse.json({ error: 'cliente_id, concepto e items son requeridos' }, { status: 400 })
+    }
+
+    // ─── RG 4540: ND fiscal requiere comprobantes asociados O período asociado ───
+    const cbteAsoc: { tipo: number; ptoVta: number; nro: number }[] = []
+    for (const asoc of (asociados ?? [])) {
+      const tipoArca = TIPO_CBTE_ARCA[asoc?.tipo]
+      const partes   = String(asoc?.numero ?? '').trim().split('-')
+      const ptoVta   = parseInt(partes[0], 10)
+      const nro      = parseInt(partes[1] ?? '', 10)
+      if (!tipoArca || isNaN(ptoVta) || isNaN(nro)) {
+        return NextResponse.json({
+          error: `Comprobante asociado inválido: "${asoc?.tipo ?? ''} ${asoc?.numero ?? ''}". Formato esperado: tipo FA/FB y número PPPP-NNNNNNNN (ej: FA 0007-00000123).`,
+          error_code: 'ASOCIADO_INVALIDO',
+        }, { status: 422 })
+      }
+      cbteAsoc.push({ tipo: tipoArca, ptoVta, nro })
+    }
+
+    let periodoAsoc: { desde: string; hasta: string } | undefined
+    if (!cbteAsoc.length && periodo?.desde && periodo?.hasta) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(periodo.desde) || !/^\d{4}-\d{2}-\d{2}$/.test(periodo.hasta)) {
+        return NextResponse.json({
+          error: 'Período asociado inválido: desde y hasta deben ser YYYY-MM-DD.',
+          error_code: 'PERIODO_INVALIDO',
+        }, { status: 422 })
+      }
+      periodoAsoc = { desde: periodo.desde.replace(/-/g, ''), hasta: periodo.hasta.replace(/-/g, '') }
+    }
+
+    if (!cbteAsoc.length && !periodoAsoc) {
+      return NextResponse.json({
+        error: 'Una Nota de Débito fiscal requiere el/los comprobantes asociados que ajusta, o un período asociado (RG 4540). Ingresalos antes de emitir.',
+        error_code: 'ND_SIN_ASOCIADO',
+      }, { status: 422 })
     }
 
     const { data: cliente, error: clError } = await supabase
@@ -100,7 +136,9 @@ export async function POST(request: Request) {
     const itemsCalculados = items.map((item: any) => {
       const qty         = Number(item.cantidad ?? 1)
       const precioNeto  = Number(item.precio_unitario_neto ?? 0)
-      const ivaPct      = Number(item.iva_pct ?? (cliente.exento_iva ? 0 : 21))
+      // exento_iva es solo exclusión de PERCEPCIONES — el IVA de la operación es 21% siempre
+      // (un receptor exento paga IVA sobre bienes gravados, solo que no computa el crédito)
+      const ivaPct      = Number(item.iva_pct ?? 21)
       const subtotalNeto = qty * precioNeto
       const subtotalIva  = subtotalNeto * (ivaPct / 100)
       totalNeto += subtotalNeto
@@ -193,6 +231,8 @@ export async function POST(request: Request) {
         ? [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }]
         : [{ id: IVA_ID.EXENTO,  baseImp: totalNeto, importe: 0 }],
       tributos: tributos.length > 0 ? tributos : undefined,
+      cbteAsoc: cbteAsoc.length > 0 ? cbteAsoc : undefined,
+      periodoAsoc,
       condicionIVAReceptorId: condIvaReceptor,
     })
 

@@ -321,14 +321,18 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
             <Text style={[s.thText, s.cOf,   { textAlign: 'center' }]}>% Of.</Text>
             <Text style={[s.thText, s.cB1,   { textAlign: 'center' }]}>Bon 1</Text>
             <Text style={[s.thText, s.cB2,   { textAlign: 'center' }]}>Bon 2</Text>
-            <Text style={[s.thText, s.cNet,  { textAlign: 'right' }]}>P. Neto</Text>
+            <Text style={[s.thText, s.cNet,  { textAlign: 'right' }]}>{esFactB ? 'P. Unit.' : 'P. Neto'}</Text>
             <Text style={[s.thText, s.cSub,  { textAlign: 'right' }]}>Subtotal</Text>
           </View>
 
           {/* Filas */}
           {detalle.map((item, i) => {
             const esBonifMerc = item.precio_unitario < 0
-            const precioOferta = Math.abs(item.precio_unitario)
+            // Comprobantes B: precios finales con IVA incluido, sin discriminar (RG 1415).
+            // El detalle guarda precios netos → se muestran ×1.21. Las líneas de
+            // bonificación negativas ya vienen con IVA incluido (no se multiplican).
+            const factorIvaB = esFactB && !esBonifMerc ? 1.21 : 1
+            const precioOferta = r2(Math.abs(item.precio_unitario) * factorIvaB)
             const ofPct = item.descuento_propio ?? 0
             const lista = ofPct > 0 && !esBonifMerc ? r2(precioOferta / (1 - ofPct / 100)) : precioOferta
             const neto  = esBonifMerc ? 0 : precioOferta * factDesc

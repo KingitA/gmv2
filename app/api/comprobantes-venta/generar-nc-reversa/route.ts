@@ -191,8 +191,9 @@ export async function POST(request: Request) {
     totalNeto = Math.round(totalNeto * 100) / 100
 
     // precio_venta_original es el precio NETO (igual que en la FA original)
-    // el IVA se calcula como 21% del neto, no como complemento del total
-    const totalIva = !devolucion.cliente.exento_iva && tipoFinal.startsWith("NC")
+    // el IVA se calcula como 21% del neto, no como complemento del total.
+    // exento_iva NO anula el IVA de la operación (es solo exclusión de percepciones).
+    const totalIva = tipoFinal.startsWith("NC")
       ? Math.round(totalNeto * 21 / 100 * 100) / 100
       : 0
 
@@ -376,7 +377,7 @@ export async function POST(request: Request) {
       const precioNeto = subtotal
       let ivaMonto: number
       let ivaPct: number
-      if (esNC && !devolucion.cliente.exento_iva) {
+      if (esNC) {
         ivaMonto = Math.round(subtotal * 21) / 100
         ivaPct = 21
       } else {
