@@ -10,7 +10,6 @@ import { CheckCircle, XCircle, Loader2, Package } from 'lucide-react'
 import { useToast } from "@/hooks/use-toast"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { AlertTriangle } from 'lucide-react'
-import { nowArgentina, todayArgentina } from "@/lib/utils"
 
 export default function RevisionDevolucionesPage() {
   const [devoluciones, setDevoluciones] = useState<any[]>([])
@@ -26,9 +25,11 @@ export default function RevisionDevolucionesPage() {
 
   async function cargarDevoluciones() {
     try {
-      const response = await fetch("/api/devoluciones?estado=pendiente")
+      // Estado 'confirmado' = depósito ya chequeó físicamente la mercadería.
+      // Acá se confirma administrativamente y se genera la NC/Reversa.
+      const response = await fetch("/api/devoluciones?estado=confirmado")
       const data = await response.json()
-      setDevoluciones(data || [])
+      setDevoluciones(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error("[v0] Error cargando devoluciones:", error)
       toast({
@@ -76,8 +77,6 @@ export default function RevisionDevolucionesPage() {
 
     setProcesando(devolucionId)
     try {
-      const devolucion = devoluciones.find(d => d.id === devolucionId)
-
       const response = await fetch(`/api/devoluciones/${devolucionId}/confirmar`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -92,23 +91,8 @@ export default function RevisionDevolucionesPage() {
 
       if (!response.ok) throw new Error(data.error)
 
-      if (devolucion) {
-        await fetch("/api/cuenta-corriente/ajuste", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cliente_id: devolucion.cliente_id,
-            tipo_comprobante: "Ajuste",
-            numero_comprobante: `AJUSTE-DEV-${devolucionId.slice(0, 8)}`,
-            concepto: "Error de devolución",
-            descripcion: `Se descontó incorrectamente $${devolucion.monto_total.toFixed(2)} por devolución rechazada. Motivo: ${motivo}`,
-            monto: devolucion.monto_total,
-            tipo_movimiento: "debe", // Suma a lo que debe el cliente
-          }),
-        })
-      }
-
-      toast({ title: "Éxito", description: "Devolución rechazada y ajuste creado en cuenta corriente" })
+      // No se toca cuenta corriente: la NC todavía no se generó, no hay nada que revertir.
+      toast({ title: "Éxito", description: "Devolución rechazada" })
       setMotivosRechazo(prev => {
         const nuevo = { ...prev }
         delete nuevo[devolucionId]
@@ -127,13 +111,16 @@ export default function RevisionDevolucionesPage() {
     try {
       const devolucion = devoluciones.find(d => d.id === devolucionId)
 
-      const response = await fetch(`/api/devoluciones/${devolucionId}/confirmar`, {
-        method: "PATCH",
+      // El route genera el comprobante completo: CAE en ARCA (si es NC fiscal),
+      // PDF con QR, kardex, cuenta corriente y comisiones negativas.
+      // 'auto' deriva NCA/NCB del comprobante original o de la condición IVA del cliente.
+      const response = await fetch("/api/comprobantes-venta/generar-nc-reversa", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          usuario_confirmador: "admin", // TODO: obtener usuario actual
-          accion: "confirmar",
-          tipo_comprobante: tipoComprobante,
+          devolucion_id: devolucionId,
+          tipo_comprobante: tipoComprobante === "Reversa" ? "REV" : "auto",
+          motivo_ajuste: `Devolución ${devolucion?.numero_devolucion || devolucionId.slice(0, 8)}`,
         }),
       })
 
@@ -141,48 +128,10 @@ export default function RevisionDevolucionesPage() {
 
       if (!response.ok) throw new Error(data.error)
 
-      if (devolucion) {
-        // Generar número de comprobante
-        const numeroComprobante = `${tipoComprobante}-${new Date().getFullYear()}-${devolucionId.slice(0, 8)}`
-
-        // Crear comprobante de venta
-        await fetch("/api/comprobantes-venta", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cliente_id: devolucion.cliente_id,
-            tipo_comprobante: tipoComprobante,
-            numero_comprobante: numeroComprobante,
-            fecha_emision: todayArgentina(),
-            total: devolucion.monto_total,
-            estado_pago: "pagado", // La NC/Reversa se descuenta directamente
-            observaciones: `Generado por devolución ${devolucionId}`,
-            items: devolucion.items.map((item: any) => ({
-              articulo_id: item.articulo_id,
-              cantidad: item.cantidad,
-              precio_unitario: item.precio_venta_original,
-              subtotal: item.cantidad * item.precio_venta_original,
-            })),
-          }),
-        })
-
-        // Ajustar cuenta corriente (resta lo que debe el cliente)
-        await fetch("/api/cuenta-corriente/ajuste", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cliente_id: devolucion.cliente_id,
-            tipo_comprobante: tipoComprobante,
-            numero_comprobante: numeroComprobante,
-            concepto: "Devolución de mercadería",
-            descripcion: `${tipoComprobante} por devolución confirmada`,
-            monto: devolucion.monto_total,
-            tipo_movimiento: "haber", // Resta lo que debe el cliente
-          }),
-        })
-      }
-
-      toast({ title: "Éxito", description: `Devolución confirmada. ${tipoComprobante} generada y stock actualizado` })
+      toast({
+        title: "Éxito",
+        description: `${data.comprobante?.tipo || tipoComprobante} ${data.comprobante?.numero || ""} generada por $${Math.abs(data.comprobante?.total ?? 0).toFixed(2)}`,
+      })
       cargarDevoluciones()
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" })
@@ -226,7 +175,7 @@ export default function RevisionDevolucionesPage() {
                     </CardDescription>
                   </div>
                   <div className="flex gap-2">
-                    <Badge variant="secondary">Pendiente</Badge>
+                    <Badge variant="secondary">Controlada en depósito</Badge>
                     {dev.retira_viajante && <Badge variant="outline">Retiró mercadería</Badge>}
                   </div>
                 </div>

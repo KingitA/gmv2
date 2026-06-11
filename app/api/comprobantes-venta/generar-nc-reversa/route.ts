@@ -75,6 +75,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Devolución no encontrada" }, { status: 404 })
     }
 
+    if (devolucion.estado === "facturado") {
+      return NextResponse.json({
+        error: "Esta devolución ya tiene un comprobante generado. No se puede facturar dos veces.",
+        error_code: "DEVOLUCION_YA_FACTURADA",
+      }, { status: 422 })
+    }
+
+    if (devolucion.estado === "rechazado") {
+      return NextResponse.json({
+        error: "Esta devolución fue rechazada. No se puede generar comprobante.",
+        error_code: "DEVOLUCION_RECHAZADA",
+      }, { status: 422 })
+    }
+
     let tipoFinal = tipo_comprobante
 
     if (tipo_comprobante === "auto") {
@@ -301,17 +315,16 @@ export async function POST(request: Request) {
     const metodoFact = esNC ? "Factura" : "Presupuesto"
     for (const item of devolucion.detalle) {
       if (item.es_vendible === false) continue
+      // subtotal es NETO (precio_venta_original × cantidad, sin IVA)
       const subtotal = Math.abs(item.subtotal || 0)
       const cantidadAbs = Math.abs(item.cantidad || 1)
-      let precioNeto: number
+      const precioNeto = subtotal
       let ivaMonto: number
       let ivaPct: number
       if (esNC && !devolucion.cliente.exento_iva) {
-        precioNeto = subtotal / 1.21
-        ivaMonto = subtotal - precioNeto
+        ivaMonto = Math.round(subtotal * 21) / 100
         ivaPct = 21
       } else {
-        precioNeto = subtotal
         ivaMonto = 0
         ivaPct = 0
       }
@@ -331,7 +344,7 @@ export async function POST(request: Request) {
           iva_incluido: !esNC,
           subtotal_neto: precioNeto,
           subtotal_iva: ivaMonto,
-          subtotal_total: subtotal,
+          subtotal_total: Math.round((precioNeto + ivaMonto) * 100) / 100,
           cliente_id: devolucion.cliente_id,
           vendedor_id: devolucion.cliente?.vendedor_id ?? null,
           provincia_destino: devolucion.cliente?.provincia ?? null,
@@ -371,6 +384,12 @@ export async function POST(request: Request) {
       concepto: "Devolución",
       descripcion: motivo_ajuste,
     })
+
+    // Marcar la devolución como facturada para que no pueda generar otra NC
+    await supabase
+      .from("devoluciones")
+      .update({ estado: "facturado" })
+      .eq("id", devolucion_id)
 
     // Comisiones negativas tipo='cobrada' para la NC/Reversa
     try {

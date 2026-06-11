@@ -142,6 +142,7 @@ type Comprobante = {
   tipo_comprobante: string
   numero_comprobante: string
   total_factura: number
+  anulado_en: string | null
 }
 
 const ESTADOS_PEDIDO = [
@@ -280,7 +281,7 @@ export default function ClientesPedidosPage() {
       const pedidoIds = pedidos.map((p) => p.id)
       const { data, error } = await supabase
         .from("comprobantes_venta")
-        .select("id, tipo_comprobante, numero_comprobante, total_factura, pedido_id")
+        .select("id, tipo_comprobante, numero_comprobante, total_factura, pedido_id, anulado_en")
         .in("pedido_id", pedidoIds)
 
       if (error) throw error
@@ -799,8 +800,10 @@ export default function ClientesPedidosPage() {
     }
   })
 
+  // Solo los comprobantes vigentes (no anulados) blindan el pedido.
+  // Un pedido con todos sus comprobantes anulados puede modificarse y re-facturarse.
   const tieneComprobantes = (pedidoId: string) => {
-    return comprobantesGenerados[pedidoId]?.length > 0
+    return comprobantesGenerados[pedidoId]?.some((c) => !c.anulado_en) ?? false
   }
 
   const listaName = (id: string | null | undefined) =>
@@ -1266,9 +1269,11 @@ export default function ClientesPedidosPage() {
                   <div className="flex flex-wrap gap-2">
                     {comprobantesGenerados[pedidoSeleccionado.id].map((comp) => (
                       <Button key={comp.id} size="sm" onClick={() => verComprobante(comp.id)}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 shadow-sm">
+                        className={comp.anulado_en
+                          ? "bg-slate-400 hover:bg-slate-500 text-white text-xs h-8 shadow-sm line-through"
+                          : "bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 shadow-sm"}>
                         <FileText className="h-3.5 w-3.5 mr-1.5" />
-                        {getTipoComprobanteLabel(comp.tipo_comprobante)} {comp.numero_comprobante}
+                        {getTipoComprobanteLabel(comp.tipo_comprobante)} {comp.numero_comprobante}{comp.anulado_en ? " (Anulado)" : ""}
                         <ExternalLink className="h-3 w-3 ml-1.5 opacity-70" />
                       </Button>
                     ))}

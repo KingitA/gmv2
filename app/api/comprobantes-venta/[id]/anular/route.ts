@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { generarYSubirPDF, buildPDFData } from '@/lib/pdf/generar'
+import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from '@/lib/pdf/generar'
 import { NextResponse } from 'next/server'
 import { todayArgentina, nowArgentina } from '@/lib/utils'
 import { requireAuth } from '@/lib/auth'
@@ -9,7 +9,8 @@ import {
   CC_MOVIMIENTO,
   leyendaAnulacion,
 } from '@/lib/comprobantes/anular'
-import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, type AmbienteARCA } from '@/lib/arca/tipos'
+import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, type AmbienteARCA } from '@/lib/arca/tipos'
+import { TASA_PERCEPCION_IVA } from '@/lib/comprobantes/calcular-percepciones'
 import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
 
@@ -32,7 +33,7 @@ export async function POST(
       .select(`
         *,
         cliente:clientes!comprobantes_venta_cliente_id_fkey(
-          id, nombre_razon_social, cuit, condicion_iva, exento_iva, vendedor_id, provincia
+          id, nombre_razon_social, nombre, cuit, condicion_iva, exento_iva, exento_iibb, percepcion_iibb, vendedor_id, provincia, direccion, localidad_id
         ),
         detalle:comprobantes_venta_detalle(*)
       `)
@@ -73,7 +74,7 @@ export async function POST(
       .single()
 
     const puntoVenta = esFiscal && empresaConfig
-      ? String(empresaConfig.arca_punto_venta ?? 3).padStart(4, '0')
+      ? String(empresaConfig.arca_punto_venta ?? 7).padStart(4, '0')
       : original.punto_venta  // PRES/REV usan el mismo PV que el original
 
     // ─── 4. Obtener numeración y sincronizar con ARCA ───
@@ -99,7 +100,7 @@ export async function POST(
     const certDisponible = !!(process.env.ARCA_CERTIFICADO && process.env.ARCA_CLAVE_PRIVADA)
 
     if (esFiscal && certDisponible && empresaConfig) {
-      const ambiente = (empresaConfig.arca_ambiente ?? 'testing') as AmbienteARCA
+      const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
       const ta = await obtenerTAConCache(supabase, ambiente)
       const cuitEmpresa = (empresaConfig.cuit ?? '').replace(/-/g, '')
       const cbteTipo = TIPO_CBTE_ARCA[tipoInverso]
@@ -123,9 +124,26 @@ export async function POST(
       const fecha = todayArgentina().replace(/-/g, '')
 
       // Los montos del inverso siempre positivos para ARCA (el tipo ya indica si es NC/ND)
-      const impNeto  = r2(Math.abs(original.total_neto))
-      const impIva   = r2(Math.abs(original.total_iva ?? 0))
-      const impTotal = r2(Math.abs(original.total_factura))
+      // Espejo exacto de la factura original: neto, IVA y percepciones (tributos)
+      const impNeto   = r2(Math.abs(original.total_neto))
+      const impIva    = r2(Math.abs(original.total_iva ?? 0))
+      const percIvaA  = r2(Math.abs(original.percepcion_iva  ?? 0))
+      const percIibbA = r2(Math.abs(original.percepcion_iibb ?? 0))
+      const impTrib   = r2(percIvaA + percIibbA)
+      // ImpTotal debe ser exactamente ImpNeto + ImpIVA + ImpTrib (validación ARCA)
+      const impTotal  = (
+        Math.round(impNeto * 100) +
+        Math.round(impIva  * 100) +
+        Math.round(impTrib * 100)
+      ) / 100
+
+      const tributos = []
+      if (percIvaA > 0) {
+        tributos.push({ id: TRIBUTO_ID.PERCEPCION_IVA, desc: 'Percepcion IVA RG 5329', baseImp: impNeto, alic: TASA_PERCEPCION_IVA, importe: percIvaA })
+      }
+      if (percIibbA > 0) {
+        tributos.push({ id: TRIBUTO_ID.PERCEPCION_IIBB, desc: 'Percepcion IIBB', baseImp: impNeto, alic: Number(original.cliente.percepcion_iibb ?? 0), importe: percIibbA })
+      }
 
       const respCAE = await solicitarCAE({
         ambiente,
@@ -145,10 +163,11 @@ export async function POST(
         impNeto,
         impOpEx:    0,
         impIva,
-        impTrib:    0,
+        impTrib,
         iva: impIva > 0
           ? [{ id: IVA_ID.IVA_21, baseImp: impNeto, importe: impIva }]
           : [{ id: IVA_ID.EXENTO,  baseImp: impNeto, importe: 0 }],
+        tributos: tributos.length > 0 ? tributos : undefined,
         // Referencia al comprobante original
         cbteAsoc: [{
           tipo:   TIPO_CBTE_ARCA[original.tipo_comprobante],
@@ -310,11 +329,33 @@ export async function POST(
       console.error('[Anular] Error revirtiendo comisiones:', e)
     }
 
-    // ─── PDF del comprobante inverso ───
+    // ─── PDF del comprobante inverso (con QR de ARCA) ───
     try {
       const { data: empresaData } = await supabase.from('configuracion_empresa').select('*').single()
       const { data: marcasTbl }   = await supabase.from('marcas').select('id, descripcion').eq('activo', true)
       const marcaDesc = new Map((marcasTbl ?? []).map((m: any) => [m.id, m.descripcion ?? '']))
+
+      let qrDataUrl: string | undefined
+      let qrUrl: string | undefined
+      if (cae && original.cliente?.cuit) {
+        try {
+          const qrParams = {
+            cuit:       empresaData?.cuit ?? '',
+            ptoVta:     puntoVenta,
+            tipoCmp:    tipoInverso,
+            nroCmp:     numeroComprobante,
+            importe:    Math.abs(totalFactura),
+            fecha:      todayArgentina(),
+            tipoDocRec: 80,
+            nroDocRec:  original.cliente.cuit,
+            cae,
+          }
+          qrUrl     = buildQRUrl(qrParams)
+          qrDataUrl = await generarQRBase64(qrParams)
+        } catch (qrErr: any) {
+          console.error('[Anular QR] Error generando QR:', qrErr.message)
+        }
+      }
 
       const pdfData = buildPDFData({
         comprobante: {
@@ -339,12 +380,24 @@ export async function POST(
           articulos: { descripcion: d.descripcion, sku: '' },
         })),
         marcaDesc,
+        qrDataUrl,
       })
 
-      const pdfUrl = await generarYSubirPDF(supabase, pdfData)
-      await supabase.from('comprobantes_venta').update({ pdf_url: pdfUrl }).eq('id', inverso.id)
+      const { pdfUrl, pdfPath, pdfHash } = await generarYSubirPDF(supabase, pdfData)
+      const snapshot = buildSnapshot(pdfData)
+
+      await supabase.from('comprobantes_venta').update({
+        pdf_url:              pdfUrl,
+        pdf_path:             pdfPath,
+        pdf_hash:             pdfHash,
+        fecha_generacion_pdf: new Date().toISOString(),
+        estado_pdf:           'generado',
+        pdf_snapshot:         snapshot,
+        qr_url:               qrUrl ?? null,
+      }).eq('id', inverso.id)
     } catch (pdfErr: any) {
       console.error('[Anular PDF] Error generando PDF del inverso:', pdfErr.message)
+      await supabase.from('comprobantes_venta').update({ estado_pdf: 'error' }).eq('id', inverso.id).catch(() => {})
     }
 
     return NextResponse.json({
