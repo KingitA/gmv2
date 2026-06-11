@@ -96,6 +96,7 @@ export interface GenerarPDFResult {
 export async function generarYSubirPDF(
   supabase: SupabaseClient,
   data: ComprobantePDFData,
+  opts?: { upsert?: boolean },
 ): Promise<GenerarPDFResult> {
   // 1. Renderizar el PDF a buffer
   const element = React.createElement(ComprobantePDF, { data }) as unknown as ReactElement<DocumentProps, JSXElementConstructor<DocumentProps>>
@@ -110,12 +111,14 @@ export async function generarYSubirPDF(
   const id      = data.comprobante.id
   const pdfPath = `${tipo}_${nro}_${id}.pdf`
 
-  // 4. Subir al bucket (no sobreescribir — el comprobante ya fue emitido)
+  // 4. Subir al bucket (no sobreescribir — el comprobante ya fue emitido).
+  // upsert solo se habilita desde el endpoint de regeneración, para
+  // reemplazar archivos huérfanos de generaciones fallidas.
   const { error: uploadErr } = await supabase.storage
     .from(BUCKET)
     .upload(pdfPath, buffer, {
       contentType: 'application/pdf',
-      upsert:      false,
+      upsert:      opts?.upsert ?? false,
     })
 
   if (uploadErr) {
