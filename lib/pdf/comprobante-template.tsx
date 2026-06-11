@@ -211,7 +211,6 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
   const d2 = bonificaciones.find(b => b.tipo === 'viajante' && (!b.segmento || b.segmento === segmento))
   const d1pct = d1?.porcentaje ?? 0
   const d2pct = d2?.porcentaje ?? 0
-  const factDesc = 1 - d1pct / 100 - d2pct / 100
 
   const totalNeto  = Math.abs(comp.total_neto)
   const totalIva   = Math.abs(comp.total_iva ?? 0)
@@ -329,14 +328,16 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
           {detalle.map((item, i) => {
             const esBonifMerc = item.precio_unitario < 0
             // Comprobantes B: precios finales con IVA incluido, sin discriminar (RG 1415).
-            // El detalle guarda precios netos → se muestran ×1.21. Las líneas de
-            // bonificación negativas ya vienen con IVA incluido (no se multiplican).
-            const factorIvaB = esFactB && !esBonifMerc ? 1.21 : 1
+            // El detalle guarda TODAS las líneas en neto (incluidas las negativas de
+            // bonificación) → en B se muestran ×1.21 sin excepción.
+            const factorIvaB = esFactB ? 1.21 : 1
             const precioOferta = r2(Math.abs(item.precio_unitario) * factorIvaB)
             const ofPct = item.descuento_propio ?? 0
             const lista = ofPct > 0 && !esBonifMerc ? r2(precioOferta / (1 - ofPct / 100)) : precioOferta
-            const neto  = esBonifMerc ? 0 : precioOferta * factDesc
-            const sub   = esBonifMerc ? Math.abs(item.precio_total) : r2(neto * Math.abs(item.cantidad))
+            // Precio pleno por línea: el descuento NO se aplica acá — queda visible
+            // únicamente como línea negativa, igual que en la DB y lo declarado a ARCA.
+            const neto  = esBonifMerc ? 0 : precioOferta
+            const sub   = esBonifMerc ? r2(Math.abs(item.precio_total) * factorIvaB) : r2(neto * Math.abs(item.cantidad))
             const isAlt = i % 2 === 1
 
             return (
@@ -349,8 +350,8 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
                 <Text style={[s.tdText, s.cOf,  { color: ofPct > 0 ? '#b45309' : '#ccc', fontSize: 8 }]}>{ofPct > 0 && !esBonifMerc ? `${ofPct}%` : '—'}</Text>
                 <Text style={[s.tdText, s.cB1,  { color: esBonifMerc ? '#b45309' : d1pct > 0 ? '#555' : '#ccc', fontSize: 8 }]}>{esBonifMerc ? '100%' : d1pct > 0 ? `${d1pct}%` : '—'}</Text>
                 <Text style={[s.tdText, s.cB2,  { color: d2pct > 0 && !esBonifMerc ? '#555' : '#ccc', fontSize: 8 }]}>{d2pct > 0 && !esBonifMerc ? `${d2pct}%` : '—'}</Text>
-                <Text style={[s.tdText, s.cNet, { fontFamily: 'Helvetica-Bold', fontSize: 8.5 }]}>{esBonifMerc ? `−$${fmtARS(sub)}` : `$${fmtARS(neto)}`}</Text>
-                <Text style={[s.tdBold, s.cSub, { fontSize: 9 }]}>{esBonifMerc ? `−$${fmtARS(sub)}` : `$${fmtARS(sub)}`}</Text>
+                <Text style={[s.tdText, s.cNet, { fontFamily: 'Helvetica-Bold', fontSize: 8.5 }]}>{esBonifMerc ? `-$${fmtARS(sub)}` : `$${fmtARS(neto)}`}</Text>
+                <Text style={[s.tdBold, s.cSub, { fontSize: 9 }]}>{esBonifMerc ? `-$${fmtARS(sub)}` : `$${fmtARS(sub)}`}</Text>
               </View>
             )
           })}

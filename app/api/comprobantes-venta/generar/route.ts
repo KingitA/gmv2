@@ -592,12 +592,27 @@ async function generarComprobante(
   // ─── Descuentos (bonif mercadería/general/viajante) ANTES del CAE ───
   // El monto de descuento viene con IVA incluido (es % del subtotal final):
   // se descompone en neto + IVA para que ARCA/QR/PDF/DB cierren exacto.
+  // Para el detalle fiscal, cada línea negativa se guarda en NETO (misma base que
+  // el resto de las líneas) y la última absorbe la diferencia de redondeo para que
+  // SUM(detalle.precio_total) == total_neto exacto en centavos.
   const descuentoTotal = round2(lineasDescuento.reduce((s, l) => s + l.monto, 0))
+  const lineasDescuentoDetalle: { descripcion: string; monto: number }[] = []
   if (descuentoTotal > 0) {
     const descNeto = esPresupuesto ? descuentoTotal : round2(descuentoTotal / 1.21)
     const descIva  = esPresupuesto ? 0 : round2(descuentoTotal - descNeto)
     totalNeto = round2(totalNeto - descNeto)
     totalIva  = round2(totalIva  - descIva)
+
+    let acumulado = 0
+    for (let i = 0; i < lineasDescuento.length; i++) {
+      const l = lineasDescuento[i]
+      const esUltima = i === lineasDescuento.length - 1
+      const montoLinea = esPresupuesto
+        ? l.monto
+        : esUltima ? round2(descNeto - acumulado) : round2(l.monto / 1.21)
+      acumulado = round2(acumulado + montoLinea)
+      lineasDescuentoDetalle.push({ descripcion: l.descripcion, monto: montoLinea })
+    }
   }
 
   // ─── Percepciones (IVA 3% RG 5329/2023 + IIBB según padrón provincial) ───
@@ -711,7 +726,7 @@ async function generarComprobante(
       precio_unitario: item.precioUnitario,
       precio_total:    item.subtotalNeto,
     })),
-    ...(bonifArticuloId ? lineasDescuento.map(l => ({
+    ...(bonifArticuloId ? lineasDescuentoDetalle.map(l => ({
       comprobante_id:  comprobante.id,
       articulo_id:     bonifArticuloId,
       descripcion:     l.descripcion,
