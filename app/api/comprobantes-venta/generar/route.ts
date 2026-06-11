@@ -240,13 +240,39 @@ export async function POST(request: Request) {
     const comprobantesGenerados: Array<any & { _segmento?: string; _bonifs?: any[] }> = []
 
     // ─── 5. Generar un comprobante por grupo ───
+    // Las bonificaciones (mercadería 100% + general + viajante) se calculan ANTES
+    // de solicitar el CAE, para que ARCA, el QR, el PDF y la DB tengan el mismo total.
+    const bonifArticuloId = await getBonificacionArticuloId(supabase)
+
     for (const [key, grupoItems] of grupos) {
       const vaEnComp = key.split("__")[0] as "factura" | "presupuesto"
       const tipo = vaEnComp === "factura" ? tipoFactura : "PRES"
-      const resultado = await generarComprobante(supabase, pedido, grupoItems, tipo, auth.user.id, arcaParams)
       const segmentoGrupo = grupoItems[0].segmento
       const bonifAplicables = (bonificacionesCliente || []).filter(
         (b: any) => !b.segmento || b.segmento === segmentoGrupo
+      )
+
+      // Líneas de descuento del grupo (misma aritmética que el viejo paso 7):
+      // - Bonif mercadería: 100% del subtotal de los ítems es_bonificado
+      // - Bonif general/viajante: % sobre la base de mercadería SIN los bonificados
+      const lineasDescuento: { descripcion: string; monto: number }[] = []
+      const totalGrupo = round2(grupoItems.reduce((s, i) => s + i.subtotalFinal, 0))
+      const totalBonificados = round2(grupoItems
+        .filter(i => i.esBonificado)
+        .reduce((s, i) => s + i.subtotalFinal, 0))
+      if (totalBonificados > 0) {
+        lineasDescuento.push({ descripcion: "Bonificación Mercadería 100%", monto: totalBonificados })
+      }
+      const baseNormal = round2(totalGrupo - totalBonificados)
+      for (const bonif of bonifAplicables) {
+        const monto = round2(baseNormal * bonif.porcentaje / 100)
+        const label = bonif.tipo === "general" ? "Bonificación General" : "Desc. Viajante"
+        lineasDescuento.push({ descripcion: `${label} ${bonif.porcentaje}%`, monto })
+      }
+
+      const resultado = await generarComprobante(
+        supabase, pedido, grupoItems, tipo, auth.user.id, arcaParams,
+        lineasDescuento, bonifArticuloId,
       )
       comprobantesGenerados.push({ ...resultado, _segmento: segmentoGrupo, _bonifs: bonifAplicables, _items: grupoItems })
     }
@@ -335,57 +361,12 @@ export async function POST(request: Request) {
     // ─── 6. Actualizar total del pedido ───
     const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
 
-    // ─── 7. Aplicar bonificaciones por comprobante (filtradas por segmento) + bonif mercadería ───
-    const bonifArticuloId = await getBonificacionArticuloId(supabase)
+    // ─── 7. Comisión del viajante: reducir proporcionalmente si hay bonif viajante ───
+    // (los descuentos ya se aplicaron ANTES del CAE, dentro de generarComprobante)
     for (const comp of comprobantesGenerados) {
       if (!comp.id) continue
-      const esPresupuesto = comp.tipo_comprobante === "PRES"
-      const grupoItems: typeof itemsCalculados = comp._items || []
       const bonifAplicables: any[] = comp._bonifs || []
 
-      let descuentoTotal = 0
-      const lineas: { descripcion: string; monto: number }[] = []
-
-      // Bonif mercadería: ítems bonificados al precio real → se descuenta el 100% de su subtotal
-      const totalBonificados = grupoItems
-        .filter(i => i.esBonificado)
-        .reduce((sum, i) => sum + i.subtotalFinal, 0)
-      if (totalBonificados > 0) {
-        lineas.push({ descripcion: "Bonificación Mercadería 100%", monto: totalBonificados })
-        descuentoTotal = round2(descuentoTotal + totalBonificados)
-      }
-
-      // Bonif general + viajante: se aplican sobre la base SIN los ítems bonificados (sólo ítems normales)
-      const baseNormal = round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - totalBonificados)
-      for (const bonif of bonifAplicables) {
-        const monto = round2(baseNormal * bonif.porcentaje / 100)
-        const label = bonif.tipo === "general" ? "Bonificación General" : "Desc. Viajante"
-        lineas.push({ descripcion: `${label} ${bonif.porcentaje}%`, monto })
-        descuentoTotal = round2(descuentoTotal + monto)
-      }
-
-      if (descuentoTotal > 0) {
-        const detalleInserts = lineas.map(l => ({
-          comprobante_id: comp.id,
-          articulo_id: bonifArticuloId,
-          descripcion: l.descripcion,
-          cantidad: 1,
-          precio_unitario: -l.monto,
-          precio_total: -l.monto,
-        }))
-        await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
-
-        const descNeto = esPresupuesto ? descuentoTotal : round2(descuentoTotal / (1 + IVA_RATE))
-        const descIva = esPresupuesto ? 0 : round2(descuentoTotal - descNeto)
-        await supabase.from("comprobantes_venta").update({
-          total_neto: round2(comp.total_neto - descNeto),
-          total_iva: round2((comp.total_iva ?? 0) - descIva),
-          total_factura: round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - descuentoTotal),
-          saldo_pendiente: round2((comp.total ?? comp.total_neto + (comp.total_iva ?? 0)) - descuentoTotal),
-        }).eq("id", comp.id)
-      }
-
-      // Reduce viajante commission proportionally
       const bonifViajante = bonifAplicables.filter((b: any) => b.tipo === "viajante")
       if (bonifViajante.length > 0) {
         const { data: comision } = await supabase
@@ -546,6 +527,8 @@ async function generarComprobante(
   tipoComprobante: string,
   creadoPor?: string,
   arca?: ArcaParams | null,
+  lineasDescuento: { descripcion: string; monto: number }[] = [],
+  bonifArticuloId?: string,
 ) {
   // Determinar punto de venta: fiscal (ARCA) o interno (PRES/REM/REV)
   const esFiscal   = REQUIERE_CAE.has(tipoComprobante)
@@ -606,7 +589,19 @@ async function generarComprobante(
   totalNeto = round2(totalNeto)
   totalIva  = round2(totalIva)
 
+  // ─── Descuentos (bonif mercadería/general/viajante) ANTES del CAE ───
+  // El monto de descuento viene con IVA incluido (es % del subtotal final):
+  // se descompone en neto + IVA para que ARCA/QR/PDF/DB cierren exacto.
+  const descuentoTotal = round2(lineasDescuento.reduce((s, l) => s + l.monto, 0))
+  if (descuentoTotal > 0) {
+    const descNeto = esPresupuesto ? descuentoTotal : round2(descuentoTotal / 1.21)
+    const descIva  = esPresupuesto ? 0 : round2(descuentoTotal - descNeto)
+    totalNeto = round2(totalNeto - descNeto)
+    totalIva  = round2(totalIva  - descIva)
+  }
+
   // ─── Percepciones (IVA 3% RG 5329/2023 + IIBB según padrón provincial) ───
+  // Se calculan sobre el neto YA descontado (incluido el mínimo de $3.000)
   // La alícuota IIBB se resuelve: override manual → padrón vigente → alícuota general
   const tasaIIBBResuelta = esFiscal ? await resolverAlicuotaIIBB(supabase, pedido.cliente) : 0
   const percResult = calcularPercepciones(totalNeto, { ...pedido.cliente, percepcion_iibb: tasaIIBBResuelta }, esFiscal)
@@ -706,15 +701,25 @@ async function generarComprobante(
 
   if (compError) throw new Error('Error creando comprobante: ' + compError.message)
 
-  // ─── Detalle ───
-  const detalleInserts = items.map(item => ({
-    comprobante_id:  comprobante.id,
-    articulo_id:     item.articulo_id,
-    descripcion:     item.descripcion,
-    cantidad:        item.cantidad,
-    precio_unitario: item.precioUnitario,
-    precio_total:    item.subtotalNeto,
-  }))
+  // ─── Detalle (ítems + líneas de descuento negativas, en un solo insert) ───
+  const detalleInserts = [
+    ...items.map(item => ({
+      comprobante_id:  comprobante.id,
+      articulo_id:     item.articulo_id,
+      descripcion:     item.descripcion,
+      cantidad:        item.cantidad,
+      precio_unitario: item.precioUnitario,
+      precio_total:    item.subtotalNeto,
+    })),
+    ...(bonifArticuloId ? lineasDescuento.map(l => ({
+      comprobante_id:  comprobante.id,
+      articulo_id:     bonifArticuloId,
+      descripcion:     l.descripcion,
+      cantidad:        1,
+      precio_unitario: -l.monto,
+      precio_total:    -l.monto,
+    })) : []),
+  ]
 
   const { error: detError } = await supabase.from('comprobantes_venta_detalle').insert(detalleInserts)
   if (detError) throw new Error('Error creando detalle: ' + detError.message)
