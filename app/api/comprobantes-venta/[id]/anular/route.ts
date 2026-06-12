@@ -252,15 +252,17 @@ export async function POST(
     }
 
     // ─── 8. Detalle espejo (armado antes del insert, para el registro de CAE) ───
-    // Se PRESERVA el signo original de cada línea: las bonificaciones negativas
-    // de la factura siguen negativas en el espejo — si se les aplicara Math.abs
-    // quedarían como cargos positivos y el detalle no cuadraría con el total.
+    // cantidad y precio_total se INVIERTEN (×−1) para que SUM(detalle.precio_total)
+    // == total_neto del inverso — la misma invariante que cumplen generar,
+    // generar-nd y generar-nc-reversa. precio_unitario CONSERVA su signo original:
+    // el template lo usa para distinguir líneas de bonificación (pu < 0) de ítems
+    // normales, en el espejo igual que en la factura.
     const detallePayload = original.detalle.map((d: any) => ({
       articulo_id:     d.articulo_id,
       descripcion:     d.descripcion,
-      cantidad:        Math.abs(d.cantidad),
+      cantidad:        -d.cantidad,
       precio_unitario: d.precio_unitario,
-      precio_total:    r2(d.precio_total),
+      precio_total:    r2(-d.precio_total),
     }))
 
     const logId = cae ? await registrarCAEObtenido(supabase, {
