@@ -12,6 +12,7 @@ import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
 import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
+import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 
 export async function POST(request: Request) {
   try {
@@ -319,31 +320,52 @@ export async function POST(request: Request) {
       vencimientoCae = respCAE.vencimientoCae
     }
 
+    const comprobanteInsert = {
+      tipo_comprobante:   tipoFinal,
+      numero_comprobante: numeroComprobante,
+      punto_venta:        puntoVenta,
+      fecha:              todayArgentina(),
+      cliente_id:         devolucion.cliente_id,
+      pedido_id:          devolucion.pedido_id || null,
+      total_neto:         -Math.abs(totalNeto),
+      total_iva:          -Math.abs(totalIva),
+      percepcion_iva:     -Math.abs(percIVA),
+      percepcion_iibb:    -Math.abs(percIIBB),
+      total_factura:      -Math.abs(totalComprobante),
+      saldo_pendiente:    -Math.abs(totalComprobante),
+      estado_pago:        "pendiente",
+      motivo_ajuste:      motivo_ajuste,
+      observaciones:      `Devolución ${devolucion.numero_devolucion || devolucion.id}`,
+      ...(cae            ? { cae }                             : {}),
+      ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
+    }
+
+    const detallePayload = devolucion.detalle.map((item: any) => ({
+      articulo_id: item.articulo_id,
+      descripcion: item.articulo.descripcion,
+      cantidad: -Math.abs(item.cantidad), // Negativo
+      precio_unitario: item.precio_venta_original || 0,
+      precio_total: -Math.abs(item.subtotal || 0),
+    }))
+
+    const logId = cae ? await registrarCAEObtenido(supabase, {
+      tipo: tipoFinal, puntoVenta, numero: numeroComprobante,
+      cae, vencimientoCae, importe: Math.abs(totalComprobante),
+      clienteCuit: devolucion.cliente?.cuit ?? null,
+      payload: { comprobante: comprobanteInsert, detalle: detallePayload },
+    }) : null
+
     const { data: comprobante, error: comprobanteError } = await supabase
       .from("comprobantes_venta")
-      .insert({
-        tipo_comprobante:   tipoFinal,
-        numero_comprobante: numeroComprobante,
-        punto_venta:        puntoVenta,
-        fecha:              todayArgentina(),
-        cliente_id:         devolucion.cliente_id,
-        pedido_id:          devolucion.pedido_id || null,
-        total_neto:         -Math.abs(totalNeto),
-        total_iva:          -Math.abs(totalIva),
-        percepcion_iva:     -Math.abs(percIVA),
-        percepcion_iibb:    -Math.abs(percIIBB),
-        total_factura:      -Math.abs(totalComprobante),
-        saldo_pendiente:    -Math.abs(totalComprobante),
-        estado_pago:        "pendiente",
-        motivo_ajuste:      motivo_ajuste,
-        observaciones:      `Devolución ${devolucion.numero_devolucion || devolucion.id}`,
-        ...(cae            ? { cae }                             : {}),
-        ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
-      })
+      .insert(comprobanteInsert)
       .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones, motivo_ajuste')
       .single()
 
     if (comprobanteError) {
+      if (cae) {
+        await marcarHuerfano(supabase, logId, comprobanteError.message)
+        return NextResponse.json({ error: mensajeHuerfano(tipoFinal, numeroComprobante, cae) }, { status: 500 })
+      }
       return NextResponse.json(
         {
           error: "Error creando comprobante: " + comprobanteError.message,
@@ -352,14 +374,9 @@ export async function POST(request: Request) {
       )
     }
 
-    const detalleInserts = devolucion.detalle.map((item: any) => ({
-      comprobante_id: comprobante.id,
-      articulo_id: item.articulo_id,
-      descripcion: item.articulo.descripcion,
-      cantidad: -Math.abs(item.cantidad), // Negativo
-      precio_unitario: item.precio_venta_original || 0,
-      precio_total: -Math.abs(item.subtotal || 0),
-    }))
+    await marcarComprobanteCreado(supabase, logId, comprobante.id)
+
+    const detalleInserts = detallePayload.map((d: any) => ({ ...d, comprobante_id: comprobante.id }))
 
     const { error: detalleError } = await supabase.from("comprobantes_venta_detalle").insert(detalleInserts)
 

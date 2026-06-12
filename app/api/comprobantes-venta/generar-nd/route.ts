@@ -10,6 +10,7 @@ import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
 import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
+import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 
 /**
  * Genera Notas de Débito (NDA/NDB) para ventas.
@@ -245,35 +246,26 @@ export async function POST(request: Request) {
       condicionIVAReceptorId: condIvaReceptor,
     })
 
-    const { data: comprobante, error: compError } = await supabase
-      .from('comprobantes_venta')
-      .insert({
-        tipo_comprobante:   tipoFinal,
-        numero_comprobante: numeroComprobante,
-        punto_venta:        puntoVenta,
-        fecha:              todayArgentina(),
-        cliente_id,
-        pedido_id:          pedido_id ?? null,
-        total_neto:         totalNeto,
-        total_iva:          totalIva,
-        percepcion_iva:     percIVA,
-        percepcion_iibb:    percIIBB,
-        total_factura:      totalComprobante,
-        saldo_pendiente:    totalComprobante,
-        estado_pago:        'pendiente',
-        observaciones:      concepto,
-        cae:                respCAE.cae,
-        vencimiento_cae:    respCAE.vencimientoCae,
-      })
-      .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones')
-      .single()
-
-    if (compError) {
-      return NextResponse.json({ error: 'Error creando comprobante: ' + compError.message }, { status: 500 })
+    const comprobanteInsert = {
+      tipo_comprobante:   tipoFinal,
+      numero_comprobante: numeroComprobante,
+      punto_venta:        puntoVenta,
+      fecha:              todayArgentina(),
+      cliente_id,
+      pedido_id:          pedido_id ?? null,
+      total_neto:         totalNeto,
+      total_iva:          totalIva,
+      percepcion_iva:     percIVA,
+      percepcion_iibb:    percIIBB,
+      total_factura:      totalComprobante,
+      saldo_pendiente:    totalComprobante,
+      estado_pago:        'pendiente',
+      observaciones:      concepto,
+      cae:                respCAE.cae,
+      vencimiento_cae:    respCAE.vencimientoCae,
     }
 
-    const detalleInserts = itemsCalculados.map((item: any) => ({
-      comprobante_id:  comprobante.id,
+    const detallePayload = itemsCalculados.map((item: any) => ({
       articulo_id:     item.articulo_id,
       descripcion:     item.descripcion,
       cantidad:        item.qty,
@@ -281,6 +273,28 @@ export async function POST(request: Request) {
       // precio_total es NETO en todo el sistema: SUM(detalle.precio_total) == total_neto
       precio_total:    item.subtotalNeto,
     }))
+
+    const logId = await registrarCAEObtenido(supabase, {
+      tipo: tipoFinal, puntoVenta, numero: numeroComprobante,
+      cae: respCAE.cae, vencimientoCae: respCAE.vencimientoCae,
+      importe: totalComprobante, clienteCuit: cliente.cuit,
+      payload: { comprobante: comprobanteInsert, detalle: detallePayload },
+    })
+
+    const { data: comprobante, error: compError } = await supabase
+      .from('comprobantes_venta')
+      .insert(comprobanteInsert)
+      .select('id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_iva, percepcion_iva, percepcion_iibb, total_factura, cae, vencimiento_cae, observaciones')
+      .single()
+
+    if (compError) {
+      await marcarHuerfano(supabase, logId, compError.message)
+      return NextResponse.json({ error: mensajeHuerfano(tipoFinal, numeroComprobante, respCAE.cae) }, { status: 500 })
+    }
+
+    await marcarComprobanteCreado(supabase, logId, comprobante.id)
+
+    const detalleInserts = detallePayload.map((d: any) => ({ ...d, comprobante_id: comprobante.id }))
 
     const { error: detError } = await supabase.from('comprobantes_venta_detalle').insert(detalleInserts)
     if (detError) {

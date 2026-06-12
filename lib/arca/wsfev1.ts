@@ -151,6 +151,43 @@ export async function ultimoAutorizado(
 }
 
 /**
+ * FECompConsultar — consulta un comprobante ya autorizado en ARCA.
+ * Retorna fecha (YYYYMMDD), importe total y CAE, o null si no existe.
+ * Usado por la conciliación para identificar comprobantes huérfanos.
+ */
+export async function consultarComprobante(
+  ambiente: AmbienteARCA,
+  token: string,
+  sign: string,
+  cuit: string,
+  ptoVta: number,
+  cbteTipo: number,
+  cbteNro: number,
+): Promise<{ fecha: string; impTotal: number; cae: string } | null> {
+  const body = `<ar:FECompConsultar>
+    ${buildAuth(token, sign, cuit)}
+    <ar:FeCompConsReq>
+      <ar:CbteTipo>${cbteTipo}</ar:CbteTipo>
+      <ar:CbteNro>${cbteNro}</ar:CbteNro>
+      <ar:PtoVta>${ptoVta}</ar:PtoVta>
+    </ar:FeCompConsReq>
+  </ar:FECompConsultar>`
+
+  const xml = await llamarWS(ambiente, 'FECompConsultar', body)
+
+  // Err 602 = comprobante inexistente — no es un error del sistema
+  const errTags = extraerTodos(xml, 'Err')
+  if (errTags.length) return null
+
+  const fecha    = extraerTag(xml, 'CbteFch')
+  const impTotal = parseFloat(extraerTag(xml, 'ImpTotal') || '0')
+  const cae      = extraerTag(xml, 'CodAutorizacion')
+  if (!fecha) return null
+
+  return { fecha, impTotal, cae }
+}
+
+/**
  * FECAESolicitar — solicita CAE para un comprobante.
  * Lanza error si ARCA rechaza el comprobante.
  */

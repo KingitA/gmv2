@@ -23,6 +23,7 @@ import { actualizarDescuentoFinancieroKardex } from "@/lib/kardex/insertar-karde
 import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
+import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 
 const DESCUENTO_CONTADO_PCT = 10
@@ -436,18 +437,58 @@ export async function generarBonificacionContado(
 
     const observaciones = `Bonificación contado 10% — facturas ${facturas.map(c => c.numero_comprobante).join(", ")}`
 
-    const { id } = await crearComprobante(supabase, {
-      tipo: tipoNC,
-      numero,
-      puntoVenta: puntoVentaFiscal,
-      cliente_id,
-      total_neto: totalNeto,
-      total_iva: totalIva,
-      total_factura: totalFactura,
-      observaciones,
-      cae: respCAE.cae,
-      vencimiento_cae: respCAE.vencimientoCae,
+    // Registro durable del CAE antes del insert local
+    const logId = await registrarCAEObtenido(supabase, {
+      tipo: tipoNC, puntoVenta: puntoVentaFiscal, numero,
+      cae: respCAE.cae, vencimientoCae: respCAE.vencimientoCae,
+      importe: totalFactura, clienteCuit: cliente.cuit,
+      payload: {
+        comprobante: {
+          tipo_comprobante: tipoNC,
+          numero_comprobante: numero,
+          punto_venta: puntoVentaFiscal,
+          fecha: todayArgentina(),
+          cliente_id,
+          total_neto: -Math.abs(totalNeto),
+          total_iva: -Math.abs(totalIva),
+          total_factura: -Math.abs(totalFactura),
+          saldo_pendiente: -Math.abs(totalFactura),
+          estado_pago: "pendiente",
+          observaciones,
+          cae: respCAE.cae,
+          vencimiento_cae: respCAE.vencimientoCae,
+        },
+        detalle: lineas.map(l => ({
+          articulo_id: bonificacionId,
+          descripcion: l.descripcion,
+          cantidad: 1,
+          precio_unitario: -Math.abs(l.precio_neto),
+          precio_total: -Math.abs(l.precio_neto),
+        })),
+      },
     })
+
+    let id: string
+    try {
+      const res = await crearComprobante(supabase, {
+        tipo: tipoNC,
+        numero,
+        puntoVenta: puntoVentaFiscal,
+        cliente_id,
+        total_neto: totalNeto,
+        total_iva: totalIva,
+        total_factura: totalFactura,
+        observaciones,
+        cae: respCAE.cae,
+        vencimiento_cae: respCAE.vencimientoCae,
+      })
+      id = res.id
+    } catch (insErr: any) {
+      await marcarHuerfano(supabase, logId, insErr.message)
+      throw new Error(mensajeHuerfano(tipoNC, numero, respCAE.cae))
+    }
+
+    await marcarComprobanteCreado(supabase, logId, id)
 
     await crearDetalle(supabase, id, bonificacionId, lineas)
     await avanzarNumeracion(supabase, tipoNC, puntoVentaFiscal, nuevoNumero)

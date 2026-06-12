@@ -11,6 +11,7 @@ import {
 } from '@/lib/comprobantes/anular'
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from '@/lib/arca/tipos'
 import { TASA_PERCEPCION_IVA } from '@/lib/comprobantes/calcular-percepciones'
+import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from '@/lib/arca/registro-cae'
 import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
 
@@ -104,6 +105,20 @@ export async function POST(
     let vencimientoCae: string | null = null
 
     const certDisponible = !!(process.env.ARCA_CERTIFICADO && process.env.ARCA_CLAVE_PRIVADA)
+
+    // Bloqueo duro: un inverso fiscal sin CAE no existe. Si falta el certificado
+    // o la config, se aborta — jamás crear la NC/ND espejo sin autorización.
+    if (esFiscal && (!certDisponible || !empresaConfig)) {
+      return NextResponse.json(
+        {
+          error: !certDisponible
+            ? 'Certificado ARCA no configurado (ARCA_CERTIFICADO / ARCA_CLAVE_PRIVADA). No se puede anular con comprobante fiscal — avisá al administrador.'
+            : 'configuracion_empresa no encontrada. No se puede emitir el comprobante inverso fiscal.',
+          error_code: 'ARCA_NO_CONFIGURADO',
+        },
+        { status: 500 },
+      )
+    }
 
     if (esFiscal && certDisponible && empresaConfig) {
       const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
@@ -214,49 +229,64 @@ export async function POST(
     const leyenda = leyendaAnulacion(original.numero_comprobante, original.fecha)
 
     // ─── 7. Crear comprobante inverso ───
-    const { data: inverso, error: invErr } = await supabase
-      .from('comprobantes_venta')
-      .insert({
-        tipo_comprobante:             tipoInverso,
-        numero_comprobante:           numeroComprobante,
-        punto_venta:                  puntoVenta,
-        fecha:                        todayArgentina(),
-        cliente_id:                   original.cliente_id,
-        pedido_id:                    original.pedido_id ?? null,
-        total_neto:                   totalNeto,
-        total_iva:                    totalIva,
-        percepcion_iva:               percIva,
-        percepcion_iibb:              percIibb,
-        total_factura:                totalFactura,
-        saldo_pendiente:              totalFactura,
-        estado_pago:                  'pendiente',
-        motivo_ajuste:                'Anulación',
-        observaciones:                leyenda,
-        comprobantes_relacionados_ids: [original.id],
-        creado_por:                   auth.user.id,
-        ...(cae            ? { cae }                             : {}),
-        ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
-      })
-      .select('id')
-      .single()
-
-    if (invErr || !inverso) {
-      throw new Error('Error creando comprobante inverso: ' + invErr?.message)
+    const inversoInsert = {
+      tipo_comprobante:             tipoInverso,
+      numero_comprobante:           numeroComprobante,
+      punto_venta:                  puntoVenta,
+      fecha:                        todayArgentina(),
+      cliente_id:                   original.cliente_id,
+      pedido_id:                    original.pedido_id ?? null,
+      total_neto:                   totalNeto,
+      total_iva:                    totalIva,
+      percepcion_iva:               percIva,
+      percepcion_iibb:              percIibb,
+      total_factura:                totalFactura,
+      saldo_pendiente:              totalFactura,
+      estado_pago:                  'pendiente',
+      motivo_ajuste:                'Anulación',
+      observaciones:                leyenda,
+      comprobantes_relacionados_ids: [original.id],
+      creado_por:                   auth.user.id,
+      ...(cae            ? { cae }                             : {}),
+      ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
     }
 
-    // ─── 8. Copiar detalle (mismo ítem, mismo precio, misma cantidad) ───
-    // El signo del total del comprobante ya indica si es NC/ND.
+    // ─── 8. Detalle espejo (armado antes del insert, para el registro de CAE) ───
     // Se PRESERVA el signo original de cada línea: las bonificaciones negativas
     // de la factura siguen negativas en el espejo — si se les aplicara Math.abs
     // quedarían como cargos positivos y el detalle no cuadraría con el total.
-    const detalleInserts = original.detalle.map((d: any) => ({
-      comprobante_id:  inverso.id,
+    const detallePayload = original.detalle.map((d: any) => ({
       articulo_id:     d.articulo_id,
       descripcion:     d.descripcion,
       cantidad:        Math.abs(d.cantidad),
       precio_unitario: d.precio_unitario,
       precio_total:    r2(d.precio_total),
     }))
+
+    const logId = cae ? await registrarCAEObtenido(supabase, {
+      tipo: tipoInverso, puntoVenta, numero: numeroComprobante,
+      cae, vencimientoCae, importe: Math.abs(totalFactura),
+      clienteCuit: original.cliente.cuit ?? null,
+      payload: { comprobante: inversoInsert, detalle: detallePayload },
+    }) : null
+
+    const { data: inverso, error: invErr } = await supabase
+      .from('comprobantes_venta')
+      .insert(inversoInsert)
+      .select('id')
+      .single()
+
+    if (invErr || !inverso) {
+      if (cae) {
+        await marcarHuerfano(supabase, logId, invErr?.message ?? 'insert sin resultado')
+        throw new Error(mensajeHuerfano(tipoInverso, numeroComprobante, cae))
+      }
+      throw new Error('Error creando comprobante inverso: ' + invErr?.message)
+    }
+
+    await marcarComprobanteCreado(supabase, logId, inverso.id)
+
+    const detalleInserts = detallePayload.map((d: any) => ({ ...d, comprobante_id: inverso.id }))
 
     if (detalleInserts.length > 0) {
       const { error: detErr } = await supabase

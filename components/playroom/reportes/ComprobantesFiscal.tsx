@@ -203,6 +203,28 @@ function toARCARow(r: FiscalRow): FiscalARCARow {
   }
 }
 
+interface ConciliacionInconsistencia {
+  tipo: string
+  numero: string
+  fecha: string | null
+  importe: number | null
+  motivo: 'en_arca_no_en_sistema' | 'en_sistema_no_en_arca' | 'sin_cae'
+  recuperable_log_id: string | null
+}
+
+interface ConciliacionResult {
+  ok: boolean
+  punto_venta: string
+  resumen: Record<string, { ultimo_arca: number; en_sistema: number }>
+  inconsistencias: ConciliacionInconsistencia[]
+}
+
+const MOTIVO_LABEL: Record<string, string> = {
+  en_arca_no_en_sistema: 'existe en ARCA pero no en el sistema',
+  en_sistema_no_en_arca: 'existe en el sistema pero ARCA no lo autorizó',
+  sin_cae:               'comprobante fiscal sin CAE registrado',
+}
+
 export default function ComprobantesFiscal() {
   const [filters, setFilters] = useState<PlayroomFiltersState>(defaultFilters)
   const [apiData, setApiData] = useState<ApiResponse | null>(null)
@@ -212,6 +234,10 @@ export default function ComprobantesFiscal() {
   const [searchText, setSearchText] = useState('')
   const [soloARCA, setSoloARCA] = useState(false)
   const [provinciaExport, setProvinciaExport] = useState('')
+  const [conc, setConc] = useState<ConciliacionResult | null>(null)
+  const [concLoading, setConcLoading] = useState(false)
+  const [concError, setConcError] = useState<string | null>(null)
+  const [reintentando, setReintentando] = useState<string | null>(null)
 
   const load = async (f = filters) => {
     setLoading(true)
@@ -229,7 +255,38 @@ export default function ComprobantesFiscal() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  const conciliar = async () => {
+    setConcLoading(true)
+    setConcError(null)
+    try {
+      const res = await fetch('/api/reportes/conciliacion-arca')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setConc(data)
+    } catch (e: any) {
+      setConcError(e.message)
+    } finally {
+      setConcLoading(false)
+    }
+  }
+
+  const reintentarRegistro = async (logId: string, numero: string) => {
+    setReintentando(logId)
+    try {
+      const res = await fetch(`/api/arca/huerfanos/${logId}/reintentar`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      alert(`Comprobante ${numero} registrado correctamente en el sistema (sin tocar ARCA).`)
+      conciliar()
+      load(filters)
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setReintentando(null)
+    }
+  }
+
+  useEffect(() => { load(); conciliar() }, [])
 
   const rows = apiData?.rows ?? []
   const summary = apiData?.summary ?? []
@@ -352,6 +409,60 @@ export default function ComprobantesFiscal() {
         </div>
       )}
 
+      {/* Conciliación contra ARCA */}
+      <div className="rounded-xl p-5" style={{
+        background: concError ? 'rgba(239,68,68,0.06)' : conc && !conc.ok ? 'rgba(245,158,11,0.06)' : 'rgba(16,185,129,0.05)',
+        border: `1px solid ${concError ? 'rgba(239,68,68,0.25)' : conc && !conc.ok ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.2)'}`,
+      }}>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            Conciliación contra ARCA — numeración fiscal PV {conc?.punto_venta ?? '0007'}
+          </p>
+          <button
+            onClick={conciliar}
+            disabled={concLoading}
+            style={{ ...btnBase, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            {concLoading ? 'Conciliando…' : 'Volver a conciliar'}
+          </button>
+        </div>
+
+        {concLoading && <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Consultando ARCA…</p>}
+        {concError && <p className="text-xs text-red-400">Error al conciliar: {concError}</p>}
+
+        {conc && !concLoading && conc.ok && (
+          <p className="text-sm" style={{ color: '#34d399' }}>
+            ✓ Conciliación OK — todos los comprobantes autorizados por ARCA están registrados en el sistema
+            ({Object.entries(conc.resumen).map(([t, r]) => `${t}: ${r.ultimo_arca}`).join(' · ')})
+          </p>
+        )}
+
+        {conc && !concLoading && !conc.ok && (
+          <div className="space-y-2">
+            {conc.inconsistencias.map((inc, i) => (
+              <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2"
+                style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                <p className="text-xs" style={{ color: '#fbbf24' }}>
+                  ⚠️ Inconsistencia en {inc.tipo} número {inc.numero}
+                  {inc.fecha ? ` con fecha ${inc.fecha}` : ''}
+                  {inc.importe != null ? ` por ${ars(Math.abs(inc.importe))}` : ''}
+                  {' — '}{MOTIVO_LABEL[inc.motivo]}. Verificar.
+                </p>
+                {inc.recuperable_log_id && (
+                  <button
+                    onClick={() => reintentarRegistro(inc.recuperable_log_id!, inc.numero)}
+                    disabled={reintentando === inc.recuperable_log_id}
+                    style={{ ...btnBase, background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }}
+                  >
+                    {reintentando === inc.recuperable_log_id ? 'Registrando…' : 'Reintentar registro (sin tocar ARCA)'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Exportación ARCA */}
       <div className="rounded-xl p-5" style={{ background: '#0f172a', border: '1px solid rgba(124,58,237,0.2)' }}>
         <p className="text-[10px] font-semibold uppercase tracking-widest mb-3" style={{ color: 'rgba(124,58,237,0.6)' }}>
@@ -387,6 +498,28 @@ export default function ComprobantesFiscal() {
               {arcaRows.length} comprobantes listos para exportar
             </span>
           )}
+        </div>
+
+        {/* Formato oficial Libro IVA Digital (RG 4597) — segunda opción hasta
+            que el contador defina cuál adopta */}
+        <div className="flex flex-wrap items-center gap-4 mt-4 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            Formato oficial ARCA (Libro IVA Digital · RG 4597):
+          </span>
+          <button
+            onClick={() => window.open(`/api/reportes/libro-iva-digital?mes=${filters.dateFrom.slice(5, 7)}&anio=${filters.dateFrom.slice(0, 4)}&archivo=cbte`, '_blank')}
+            disabled={loading}
+            style={{ ...btnBase, background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.25)' }}
+          >
+            Libro IVA Digital · CBTE
+          </button>
+          <button
+            onClick={() => window.open(`/api/reportes/libro-iva-digital?mes=${filters.dateFrom.slice(5, 7)}&anio=${filters.dateFrom.slice(0, 4)}&archivo=alicuotas`, '_blank')}
+            disabled={loading}
+            style={{ ...btnBase, background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.25)' }}
+          >
+            Libro IVA Digital · Alícuotas
+          </button>
         </div>
       </div>
 

@@ -17,6 +17,7 @@ import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnaps
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
 import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
+import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 
@@ -217,6 +218,20 @@ export async function POST(request: Request) {
       return vaEnComp === "factura" ? tipoFactura : "PRES"
     })
     const algunGrupoNecesitaCAE = tiposReales.some(t => t !== null && REQUIERE_CAE.has(t))
+
+    // Bloqueo duro: si hay que pedir CAE y falta el certificado o la config,
+    // se aborta TODO. Jamás degradar a comprobante sin CAE / PV interno.
+    if (algunGrupoNecesitaCAE && (!certDisponible || !empresaConfig)) {
+      return NextResponse.json(
+        {
+          error: !certDisponible
+            ? 'Certificado ARCA no configurado (ARCA_CERTIFICADO / ARCA_CLAVE_PRIVADA). No se puede emitir comprobantes fiscales — avisá al administrador.'
+            : 'configuracion_empresa no encontrada. No se puede emitir comprobantes fiscales.',
+          error_code: 'ARCA_NO_CONFIGURADO',
+        },
+        { status: 500 },
+      )
+    }
 
     if (certDisponible && empresaConfig && algunGrupoNecesitaCAE) {
       // Única fuente del PV fiscal: configuracion_empresa. Sin default — si falta, error explícito.
@@ -691,35 +706,30 @@ async function generarComprobante(
   }
 
   // ─── Crear comprobante en DB (con CAE si corresponde) ───
-  const { data: comprobante, error: compError } = await supabase
-    .from('comprobantes_venta')
-    .insert({
-      tipo_comprobante:  tipoComprobante,
-      numero_comprobante: numeroComprobante,
-      punto_venta:       puntoVenta,
-      fecha:             todayArgentina(),
-      cliente_id:        pedido.cliente_id,
-      pedido_id:         pedido.id,
-      total_neto:        totalNeto,
-      total_iva:         totalIva,
-      percepcion_iva:    percIVA,
-      percepcion_iibb:   percIIBB,
-      total_factura:     totalFactura,
-      saldo_pendiente:   totalFactura,
-      estado_pago:       'pendiente',
-      ...(cae            ? { cae }                                  : {}),
-      ...(vencimientoCae ? { vencimiento_cae: vencimientoCae }      : {}),
-      ...(creadoPor      ? { creado_por: creadoPor }                : {}),
-    })
-    .select('id, percepcion_iva, percepcion_iibb')
-    .single()
+  const comprobanteInsert = {
+    tipo_comprobante:  tipoComprobante,
+    numero_comprobante: numeroComprobante,
+    punto_venta:       puntoVenta,
+    fecha:             todayArgentina(),
+    cliente_id:        pedido.cliente_id,
+    pedido_id:         pedido.id,
+    total_neto:        totalNeto,
+    total_iva:         totalIva,
+    percepcion_iva:    percIVA,
+    percepcion_iibb:   percIIBB,
+    total_factura:     totalFactura,
+    saldo_pendiente:   totalFactura,
+    estado_pago:       'pendiente',
+    ...(cae            ? { cae }                                  : {}),
+    ...(vencimientoCae ? { vencimiento_cae: vencimientoCae }      : {}),
+    ...(creadoPor      ? { creado_por: creadoPor }                : {}),
+  }
 
-  if (compError) throw new Error('Error creando comprobante: ' + compError.message)
-
-  // ─── Detalle (ítems + líneas de descuento negativas, en un solo insert) ───
-  const detalleInserts = [
+  // Detalle (ítems + líneas de descuento negativas) — armado ANTES del insert
+  // para registrarlo junto al CAE: si el insert falla queda todo lo necesario
+  // para recrear el comprobante sin tocar ARCA.
+  const detallePayload = [
     ...items.map(item => ({
-      comprobante_id:  comprobante.id,
       articulo_id:     item.articulo_id,
       descripcion:     item.descripcion,
       cantidad:        item.cantidad,
@@ -727,7 +737,6 @@ async function generarComprobante(
       precio_total:    item.subtotalNeto,
     })),
     ...(bonifArticuloId ? lineasDescuentoDetalle.map(l => ({
-      comprobante_id:  comprobante.id,
       articulo_id:     bonifArticuloId,
       descripcion:     l.descripcion,
       cantidad:        1,
@@ -735,6 +744,32 @@ async function generarComprobante(
       precio_total:    -l.monto,
     })) : []),
   ]
+
+  // Registro durable del CAE antes del insert (solo fiscales con CAE)
+  const logId = cae ? await registrarCAEObtenido(supabase, {
+    tipo: tipoComprobante, puntoVenta, numero: numeroComprobante,
+    cae, vencimientoCae, importe: totalFactura,
+    clienteCuit: pedido.cliente.cuit ?? null,
+    payload: { comprobante: comprobanteInsert, detalle: detallePayload },
+  }) : null
+
+  const { data: comprobante, error: compError } = await supabase
+    .from('comprobantes_venta')
+    .insert(comprobanteInsert)
+    .select('id, percepcion_iva, percepcion_iibb')
+    .single()
+
+  if (compError) {
+    if (cae) {
+      await marcarHuerfano(supabase, logId, compError.message)
+      throw new Error(mensajeHuerfano(tipoComprobante, numeroComprobante, cae))
+    }
+    throw new Error('Error creando comprobante: ' + compError.message)
+  }
+
+  await marcarComprobanteCreado(supabase, logId, comprobante.id)
+
+  const detalleInserts = detallePayload.map(d => ({ ...d, comprobante_id: comprobante.id }))
 
   const { error: detError } = await supabase.from('comprobantes_venta_detalle').insert(detalleInserts)
   if (detError) throw new Error('Error creando detalle: ' + detError.message)
