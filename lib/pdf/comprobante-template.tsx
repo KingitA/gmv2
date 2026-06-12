@@ -198,12 +198,14 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
 
   const nro   = comp.numero_comprobante
   const pto   = nro.includes('-') ? nro.split('-')[0] : '0001'
-  const fecha = comp.fecha
-    ? new Date(comp.fecha).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })
-    : '—'
-  const caeVto = comp.vencimiento_cae
-    ? new Date(comp.vencimiento_cae).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })
-    : ''
+  // Las fechas vienen como 'YYYY-MM-DD' (hora Argentina). Formatear por string:
+  // new Date('YYYY-MM-DD') las interpreta como UTC y retrocede un día al mostrarlas.
+  const fmtFechaISO = (s?: string | null) => {
+    const m = String(s ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
+  }
+  const fecha  = fmtFechaISO(comp.fecha)
+  const caeVto = comp.vencimiento_cae ? fmtFechaISO(comp.vencimiento_cae) : ''
 
   // D1/D2
   const segmento = 'limpieza_bazar'
@@ -243,7 +245,7 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
               <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{empresa.condicion_iva ?? 'Responsable Inscripto'}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Ing. Brutos:</Text><Text style={s.emVal}>{empresa.iibb ?? 'Convenio Multilateral — SIFERE'}</Text></View>
               {empresa.inicio_actividades && (
-                <View style={s.emRow}><Text style={s.emLbl}>Inicio Act.:</Text><Text style={s.emVal}>{empresa.inicio_actividades}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>Inicio Act.:</Text><Text style={s.emVal}>{fmtFechaISO(empresa.inicio_actividades)}</Text></View>
               )}
               <View style={s.emRow}><Text style={s.emLbl}>Domicilio:</Text><Text style={s.emVal}>{empresa.direccion ?? '—'}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Teléfono:</Text><Text style={s.emVal}>{empresa.telefono ?? '—'} · Pto. Vta.: {pto}</Text></View>
