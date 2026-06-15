@@ -338,10 +338,10 @@ export default function ArticulosPage() {
   }
 
   // Ficha (unificado crear + editar)
-  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",rubro_id:null as string|null,precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
+  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",rubro_id:null as string|null,precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,precio_lista_especial:null as number|null,oferta_lista_especial:null as number|null,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
   const normIvaC=(v:any)=>v==="adquisicion_stock"?"adquisicion_stock":v==="mixto"?"mixto":v==="0"?"adquisicion_stock":"factura"
   const normIvaV=(v:any)=>v==="presupuesto"?"presupuesto":v==="0"?"presupuesto":"factura"
-  const ofa=(a:any)=>{ setFa(a); setRubroQ(""); setCatQ(""); setSubcatQ(""); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",rubro_id:a.rubro_id||null,precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null,segmento_precio:a.segmento_precio??null}) }
+  const ofa=(a:any)=>{ setFa(a); setRubroQ(""); setCatQ(""); setSubcatQ(""); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",rubro_id:a.rubro_id||null,precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,precio_lista_especial:a.precio_lista_especial??null,oferta_lista_especial:a.oferta_lista_especial??null,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null,segmento_precio:a.segmento_precio??null}) }
   const openNew=()=>{ setFa({id:"__new__"}); setFf({...BLANK_FF}) }
   const sfa=async()=>{
     if(!fa) return; setFs(true)
@@ -1188,6 +1188,10 @@ export default function ArticulosPage() {
               <div><Label className="text-xs">P. Base</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="Calculado" value={ff.precio_base??""} onChange={e=>setFf(p=>({...p,precio_base:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
               <div><Label className="text-xs">P. Base Contado</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="Calculado" value={ff.precio_base_contado??""} onChange={e=>setFf(p=>({...p,precio_base_contado:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs text-teal-700">P. Lista Especial (neto)</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="Sin precio especial" value={ff.precio_lista_especial??""} onChange={e=>setFf(p=>({...p,precio_lista_especial:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
+              <div><Label className="text-xs text-teal-700">Oferta Especial %</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="0" value={ff.oferta_lista_especial??""} onChange={e=>setFf(p=>({...p,oferta_lista_especial:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
+            </div>
 
             {/* Descuentos (solo en modo edición) */}
             {fa?.id!=="__new__"&&(
@@ -1251,7 +1255,7 @@ export default function ArticulosPage() {
               <p className="text-xs text-slate-500">Importá artículos desde Excel. El sistema detecta automáticamente las columnas y te muestra una preview de los cambios antes de confirmar.</p>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-500 space-y-1">
                 <p className="font-semibold text-slate-700">Campos soportados:</p>
-                <p>sku, ean13, descripcion, unidades_por_bulto, proveedor_codigo, marca_codigo, categoria, subcategoria, precio_compra, porcentaje_ganancia, bonif_recargo, iva_compras, iva_ventas, precio_base, precio_base_contado</p>
+                <p>sku, ean13, descripcion, unidades_por_bulto, proveedor_codigo, marca_codigo, categoria, subcategoria, precio_compra, porcentaje_ganancia, bonif_recargo, iva_compras, iva_ventas, precio_base, precio_base_contado, precio_lista_especial, oferta_lista_especial</p>
                 <p className="font-semibold text-slate-700 mt-1">Descuentos tipados:</p>
                 <p>descuento_comercial, descuento_financiero, descuento_promocional — Formato: "10+5"</p>
               </div>
@@ -1282,6 +1286,8 @@ export default function ArticulosPage() {
                 {[
                   {f:"precio_base",       label:"P. Base",         type:"number", def:0},
                   {f:"precio_base_contado",label:"P. Base Contado",type:"number", def:0},
+                  {f:"precio_lista_especial",label:"P. Lista Especial",type:"number",def:0},
+                  {f:"oferta_lista_especial",label:"Oferta Especial %",type:"number",def:0},
                   {f:"precio_compra",     label:"P. Compra (lista)",type:"number",def:0},
                   {f:"porcentaje_ganancia",label:"Margen %",       type:"number", def:0},
                   {f:"bonif_recargo",     label:"Bonif/Recargo %", type:"number", def:0},

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Save, Loader2, ExternalLink, TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { ArrowLeft, Save, Loader2, ExternalLink, TrendingUp, TrendingDown, Minus, Trash2, Plus } from "lucide-react"
 import Link from "next/link"
 
 function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
@@ -76,6 +76,13 @@ export default function ClienteDetailPage() {
   const [listaPorSegmento, setListaPorSegmento] = useState(false)
   const [ccBalance, setCcBalance] = useState<number | null>(null)
   const [pedidosCliente, setPedidosCliente] = useState<any[]>([])
+  // Condiciones por proveedor (Feature 1)
+  const [proveedores, setProveedores] = useState<any[]>([])
+  const [condProv, setCondProv] = useState<any[]>([])
+  const [savingCond, setSavingCond] = useState(false)
+  const [newCond, setNewCond] = useState<{ proveedor_id: string; lista_precio_id: string; metodo_facturacion: string; dto_general_pct: number; dto_viajante_pct: number; dto_mercaderia_pct: number }>({
+    proveedor_id: "", lista_precio_id: "", metodo_facturacion: "", dto_general_pct: 0, dto_viajante_pct: 0, dto_mercaderia_pct: 0,
+  })
   const [formData, setFormData] = useState({
     codigo_cliente: "",
     nombre_razon_social: "",
@@ -112,14 +119,16 @@ export default function ClienteDetailPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [clienteRes, vendRes, locRes, listasRes, ccRes, pedRes] = await Promise.all([
+    const [clienteRes, vendRes, locRes, listasRes, ccRes, pedRes, provRes] = await Promise.all([
       supabase.from("clientes").select("*, localidades(nombre, zonas(nombre))").eq("id", id).single(),
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
       supabase.from("localidades").select("*, zonas(nombre)").order("provincia, nombre"),
       supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
       supabase.from("comprobantes_venta").select("saldo_pendiente").eq("cliente_id", id).neq("estado_pago", "pagado"),
       supabase.from("pedidos").select("id, numero_pedido, fecha, estado, total").eq("cliente_id", id).order("fecha", { ascending: false }).limit(10),
+      supabase.from("proveedores").select("id, nombre").eq("activo", true).order("nombre"),
     ])
+    setProveedores(provRes.data || [])
 
     if (clienteRes.data) {
       const c = clienteRes.data as any
@@ -164,7 +173,41 @@ export default function ClienteDetailPage() {
       setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
     }
     loadBonificaciones()
+    loadCondProv()
     setLoading(false)
+  }
+
+  async function loadCondProv() {
+    const { data } = await supabase
+      .from("cliente_proveedor_condicion")
+      .select("id, proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, proveedores:proveedor_id(nombre), listas_precio:lista_precio_id(nombre)")
+      .eq("cliente_id", id)
+      .order("created_at")
+    setCondProv(data || [])
+  }
+
+  async function saveCondProv() {
+    if (!newCond.proveedor_id) { alert("Elegí un proveedor"); return }
+    setSavingCond(true)
+    const { error } = await supabase.from("cliente_proveedor_condicion").upsert({
+      cliente_id:         id,
+      proveedor_id:       newCond.proveedor_id,
+      lista_precio_id:    newCond.lista_precio_id || null,
+      metodo_facturacion: newCond.metodo_facturacion || null,
+      dto_general_pct:    newCond.dto_general_pct || null,
+      dto_viajante_pct:   newCond.dto_viajante_pct || null,
+      dto_mercaderia_pct: newCond.dto_mercaderia_pct || null,
+    }, { onConflict: "cliente_id,proveedor_id" })
+    if (error) { alert(`Error al guardar condición: ${error.message}`); setSavingCond(false); return }
+    setNewCond({ proveedor_id: "", lista_precio_id: "", metodo_facturacion: "", dto_general_pct: 0, dto_viajante_pct: 0, dto_mercaderia_pct: 0 })
+    await loadCondProv()
+    setSavingCond(false)
+  }
+
+  async function deleteCondProv(condId: string) {
+    const { error } = await supabase.from("cliente_proveedor_condicion").delete().eq("id", condId)
+    if (error) { alert(`Error al eliminar: ${error.message}`); return }
+    await loadCondProv()
   }
 
   const BONIF_SEGMENTS = [
@@ -554,6 +597,99 @@ export default function ClienteDetailPage() {
                   </CardContent>
                 </Card>
               )}
+
+              {/* Condiciones por proveedor (Feature 1) */}
+              <Card className="border-teal-200 bg-teal-50/30">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold text-teal-700 uppercase tracking-wide">Condiciones por Proveedor</CardTitle>
+                  <p className="text-[11px] text-slate-500 normal-case font-normal mt-1">
+                    La mercadería de estos proveedores se factura aparte, con su propia lista / método / descuentos.
+                    Elegí la lista <b>Especial</b> para usar el precio especial del artículo.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {/* Lista de condiciones existentes */}
+                  {condProv.length > 0 && (
+                    <div className="space-y-2">
+                      {condProv.map((c: any) => (
+                        <div key={c.id} className="flex items-center justify-between gap-2 border border-teal-200 rounded-lg p-2.5 bg-white text-xs">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-slate-700 truncate">{c.proveedores?.nombre || "—"}</p>
+                            <p className="text-slate-500">
+                              {c.listas_precio?.nombre || "Lista del cliente"} · {c.metodo_facturacion || "Método del cliente"}
+                              {(c.dto_general_pct || c.dto_viajante_pct || c.dto_mercaderia_pct) ? " · " : ""}
+                              {c.dto_general_pct ? `Gral ${c.dto_general_pct}% ` : ""}
+                              {c.dto_viajante_pct ? `Viaj ${c.dto_viajante_pct}% ` : ""}
+                              {c.dto_mercaderia_pct ? `Merc ${c.dto_mercaderia_pct}%` : ""}
+                            </p>
+                          </div>
+                          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => deleteCondProv(c.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Alta de nueva condición */}
+                  <div className="border border-teal-200 rounded-lg p-3 bg-white space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="col-span-2">
+                        <Label className="text-[10px] text-slate-500 uppercase tracking-wide">Proveedor</Label>
+                        <Select value={newCond.proveedor_id || ""} onValueChange={(v) => setNewCond({ ...newCond, proveedor_id: v })}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Elegir proveedor" /></SelectTrigger>
+                          <SelectContent>
+                            {proveedores.map((p) => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-slate-500 uppercase tracking-wide">Lista</Label>
+                        <Select value={newCond.lista_precio_id || "__none__"} onValueChange={(v) => setNewCond({ ...newCond, lista_precio_id: v === "__none__" ? "" : v })}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Lista del cliente" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Lista del cliente</SelectItem>
+                            {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] text-slate-500 uppercase tracking-wide">Método</Label>
+                        <Select value={newCond.metodo_facturacion || "__none__"} onValueChange={(v) => setNewCond({ ...newCond, metodo_facturacion: v === "__none__" ? "" : v })}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Método del cliente" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Método del cliente</SelectItem>
+                            <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
+                            <SelectItem value="Final">Final (Mixto)</SelectItem>
+                            <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        { key: "dto_general_pct",    label: "Gral %",  cls: "text-blue-700" },
+                        { key: "dto_mercaderia_pct", label: "Merc %",  cls: "text-green-700" },
+                        { key: "dto_viajante_pct",   label: "Viaj %",  cls: "text-orange-700" },
+                      ] as const).map(({ key, label, cls }) => (
+                        <div key={key}>
+                          <Label className={`text-[10px] uppercase tracking-wide ${cls}`}>{label}</Label>
+                          <Input
+                            type="number" step="0.01" min="0" max="100"
+                            className="h-8 text-xs text-center"
+                            value={(newCond as any)[key]}
+                            onChange={(e) => setNewCond({ ...newCond, [key]: parseFloat(e.target.value) || 0 })}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <Button type="button" size="sm" className="w-full h-8 bg-teal-600 hover:bg-teal-700 text-white" onClick={saveCondProv} disabled={savingCond}>
+                      {savingCond ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
+                      Agregar / actualizar condición
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Columna lateral */}

@@ -29,6 +29,10 @@ export interface DatosArticulo {
   segmento_precio?: "limpieza_bazar" | "perfumeria" | null
   iva_compras: "factura" | "adquisicion_stock" | "mixto"
   iva_ventas: "factura" | "presupuesto"
+  /** Lista Especial (Feature 2): precio neto fijo del artículo (sin impuestos). */
+  precio_lista_especial?: number | null
+  /** Lista Especial: % de oferta sobre el neto especial. */
+  oferta_lista_especial?: number | null
 }
 
 export interface DatosLista {
@@ -213,6 +217,29 @@ function resolveSublistaKey(
 export function calcularPrecioFinal(
   art: DatosArticulo, lista: DatosLista, metodoFacturacion: MetodoFacturacion, descuentoCliente: number = 0,
 ): ResultadoPrecio {
+  // ─── Lista Especial (Feature 2) ───────────────────────────────────────────
+  // Precio neto fijo cargado en el artículo (precio_lista_especial) menos la oferta.
+  // Saltea toda la cascada y los descuentos: SIEMPRE factura (neto + IVA 21%).
+  if ((lista.lista_codigo || "").toLowerCase() === "especial") {
+    const baseEsp  = art.precio_lista_especial || 0
+    const netoEsp  = round2(baseEsp * (1 - (art.oferta_lista_especial || 0) / 100))
+    return {
+      costoNeto: 0,
+      precioBase: baseEsp,
+      recargoListaPct: 0,
+      precioLista: netoEsp,
+      descuentoClientePct: 0,
+      precioConDescuento: netoEsp,
+      descuentoNegroEnFacturaPct: 0,
+      precioAntesIva: netoEsp,
+      ivaIncluido: false,
+      ivaPct: 21,
+      montoIvaDiscriminado: round2(netoEsp * 0.21),
+      precioUnitarioFinal: netoEsp,
+      vaEnComprobante: "factura",
+    }
+  }
+
   const { costoNeto, precioBase } = calcularPrecioBase(art)
 
   // Determinar comprobante según método del cliente
@@ -366,6 +393,8 @@ export function articuloToDatosArticulo(art: any, descuentosDB?: DescuentoTipado
     segmento_precio: (art.segmento_precio as DatosArticulo["segmento_precio"]) ?? null,
     iva_compras: normalizeIvaCompras(art.iva_compras),
     iva_ventas: normalizeIvaVentas(art.iva_ventas),
+    precio_lista_especial: art.precio_lista_especial ?? null,
+    oferta_lista_especial: art.oferta_lista_especial ?? null,
   }
 }
 

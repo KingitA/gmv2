@@ -32,6 +32,8 @@ export interface ArticuloPrecioInput {
   rubros?: { slug: string } | null
   descuentos: DescuentoTipado[]
   proveedor?: { tipo_descuento?: string } | null
+  precio_lista_especial?: number | null
+  oferta_lista_especial?: number | null
 }
 
 export interface PrecioCalculado {

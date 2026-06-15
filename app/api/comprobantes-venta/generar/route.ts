@@ -21,6 +21,17 @@ import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeH
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 
+type CondicionProveedor = {
+  proveedor_id: string
+  lista_precio_id: string | null
+  metodo_facturacion: string | null
+  dto_general_pct: number | null
+  dto_viajante_pct: number | null
+  dto_mercaderia_pct: number | null
+}
+const CONDICION_PROVEEDOR_COLS =
+  "proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct"
+
 export async function POST(request: Request) {
   try {
     const auth = await requireAuth()
@@ -43,7 +54,7 @@ export async function POST(request: Request) {
           cuit, direccion, exento_iva, exento_iibb, provincia, percepcion_iibb, vendedor_id
         ),
         detalle:pedidos_detalle(
-          id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item,
+          id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item, metodo_facturacion_item,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
             id, descripcion, sku, iva_ventas, categoria, iva_compras, marca_id, proveedor_id, segmento_precio
           )
@@ -71,6 +82,26 @@ export async function POST(request: Request) {
     const metodoFacturacion: MetodoFacturacion =
       metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "Factura" :
       metodoRaw === "Presupuesto" ? "Presupuesto" : "Final"
+
+    // ─── Condiciones por proveedor (Feature 1): override del pedido > ficha del cliente ───
+    // El proveedor sólo identifica QUÉ mercadería recibe estas condiciones. Su mercadería
+    // se factura SIEMPRE en comprobante aparte y con la lista/método/descuentos del proveedor.
+    const condProvMap = new Map<string, CondicionProveedor>()
+    {
+      const { data: cliCond } = await supabase
+        .from("cliente_proveedor_condicion")
+        .select(CONDICION_PROVEEDOR_COLS)
+        .eq("cliente_id", pedido.cliente.id)
+      for (const r of cliCond || []) condProvMap.set(r.proveedor_id, r as CondicionProveedor)
+      const { data: pedCond } = await supabase
+        .from("pedido_proveedor_condicion")
+        .select(CONDICION_PROVEEDOR_COLS)
+        .eq("pedido_id", pedido_id)
+      for (const r of pedCond || []) condProvMap.set(r.proveedor_id, r as CondicionProveedor)
+    }
+    const metodoDesdeRaw = (raw: string | null | undefined): MetodoFacturacion =>
+      raw === "Factura (21% IVA)" || raw === "Factura" ? "Factura" :
+      raw === "Presupuesto" ? "Presupuesto" : "Final"
 
     // ─── 3. Build items using stored prices ───
     // precio_final = lo que el cliente paga (IVA incluido en presupuesto, neto en factura)
@@ -108,10 +139,15 @@ export async function POST(request: Request) {
       if (!art) continue
       if (det.estado_item === "FALTANTE" || (det.cantidad ?? 0) <= 0) continue
 
-      const esPresupuesto = art.iva_ventas === "presupuesto" || metodoFacturacion === "Presupuesto"
+      // La mercadería con condición de proveedor usa el método del proveedor; el resto, el del pedido.
+      const condItem = (art as any).proveedor_id ? condProvMap.get((art as any).proveedor_id) : null
+      const metodoItem: MetodoFacturacion = condItem?.metodo_facturacion
+        ? metodoDesdeRaw(condItem.metodo_facturacion)
+        : metodoFacturacion
+      const esPresupuesto = art.iva_ventas === "presupuesto" || metodoItem === "Presupuesto"
       const vaEnComprobante: "factura" | "presupuesto" =
-        metodoFacturacion === "Presupuesto" ? "presupuesto" :
-        metodoFacturacion === "Factura"     ? "factura"     :
+        metodoItem === "Presupuesto" ? "presupuesto" :
+        metodoItem === "Factura"     ? "factura"     :
         esPresupuesto ? "presupuesto" : "factura"
 
       // precio_final = precio final al cliente (IVA siempre incluido)
@@ -184,8 +220,13 @@ export async function POST(request: Request) {
     // ─── Agrupar items por (vaEnComprobante, perfil de descuento) ───
     const grupos = new Map<string, typeof itemsCalculados>()
     for (const item of itemsCalculados) {
-      const bonifProfile = getBonifProfile(item.segmento, bonificacionesCliente || [])
-      const key = `${item.vaEnComprobante}__${bonifProfile}`
+      const cond = item.proveedorId ? condProvMap.get(item.proveedorId) : null
+      // Mercadería con condición de proveedor → comprobante aparte por proveedor.
+      const provKey = cond ? item.proveedorId : ""
+      const bonifProfile = cond
+        ? `prov:${cond.dto_general_pct || 0}:${cond.dto_viajante_pct || 0}`
+        : getBonifProfile(item.segmento, bonificacionesCliente || [])
+      const key = `${item.vaEnComprobante}__${bonifProfile}__${provKey}`
       if (!grupos.has(key)) grupos.set(key, [])
       grupos.get(key)!.push(item)
     }
@@ -263,9 +304,17 @@ export async function POST(request: Request) {
       const vaEnComp = key.split("__")[0] as "factura" | "presupuesto"
       const tipo = vaEnComp === "factura" ? tipoFactura : "PRES"
       const segmentoGrupo = grupoItems[0].segmento
-      const bonifAplicables = (bonificacionesCliente || []).filter(
-        (b: any) => !b.segmento || b.segmento === segmentoGrupo
-      )
+      const condGrupo = grupoItems[0].proveedorId ? condProvMap.get(grupoItems[0].proveedorId) : null
+      // Grupo de proveedor: descuentos de la condición del proveedor.
+      // Grupo por rubro: bonificaciones del cliente filtradas por segmento.
+      const bonifAplicables: Array<{ tipo: string; porcentaje: number; segmento?: string | null }> = condGrupo
+        ? [
+            ...(condGrupo.dto_general_pct  ? [{ tipo: "general",  porcentaje: Number(condGrupo.dto_general_pct) }]  : []),
+            ...(condGrupo.dto_viajante_pct ? [{ tipo: "viajante", porcentaje: Number(condGrupo.dto_viajante_pct) }] : []),
+          ]
+        : (bonificacionesCliente || []).filter(
+            (b: any) => !b.segmento || b.segmento === segmentoGrupo
+          )
 
       // Líneas de descuento del grupo (misma aritmética que el viejo paso 7):
       // - Bonif mercadería: 100% del subtotal de los ítems es_bonificado

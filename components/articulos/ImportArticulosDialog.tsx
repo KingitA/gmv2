@@ -49,6 +49,8 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "descuento_propio",      label: "Oferta (lee '(15%)' del texto)",                        aliases: ["descuentopropio", "pctoferta", "dtopio", "oferta"] },
   { id: "precio_base_contado",   label: "Base contado",                     aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
   { id: "precio_base",           label: "Base cuenta corriente",            aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
+  { id: "precio_lista_especial", label: "Precio lista especial (neto)",     aliases: ["especial", "listaespecial", "precioespecial", "preciolistaespecial", "pespecial"] },
+  { id: "oferta_lista_especial", label: "Oferta lista especial %",          aliases: ["ofertaespecial", "ofertalistaespecial", "dtoespecial", "descespecial"] },
   // ── Resto ──
   { id: "ean13",                 label: "EAN / Código de barras",           aliases: ["ean", "ean13", "barcode", "barra", "codbar"] },
   { id: "unidades_por_bulto",    label: "Unidades por bulto",               aliases: ["bulto", "unidadesbulto", "unidadesxbulto", "xbulto", "porb", "cant"] },
@@ -210,7 +212,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
       colIndexMap[mapping.dbField] = headerColIndices[i]
     })
 
-    const NUMERIC_GT0 = ["unidades_por_bulto","precio_compra","porcentaje_ganancia","precio_base","precio_base_contado"]
+    const NUMERIC_GT0 = ["unidades_por_bulto","precio_compra","porcentaje_ganancia","precio_base","precio_base_contado","precio_lista_especial"]
 
     return excelRows
       .filter(row => {
@@ -237,15 +239,15 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             if (desc) obj["descripcion"] = desc
             if (m) obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
 
-          } else if (field === "descuento_propio") {
+          } else if (field === "descuento_propio" || field === "oferta_lista_especial") {
             // Busca (15%) en CUALQUIER posición del texto (no solo al final)
             // Esto cubre "GRIS (15%)", "(15%)", "15%", "15", etc.
             const mAnywhere = str.match(/\(\s*(\d+(?:[.,]\d+)?)\s*%\s*\)/)
             if (mAnywhere) {
-              obj["descuento_propio"] = parseFloat(mAnywhere[1].replace(",", "."))
+              obj[field] = parseFloat(mAnywhere[1].replace(",", "."))
             } else {
               const n = parseFloat(str.replace(",", "."))
-              if (!isNaN(n) && n >= 0 && n <= 100) obj["descuento_propio"] = n
+              if (!isNaN(n) && n >= 0 && n <= 100) obj[field] = n
             }
 
           } else {

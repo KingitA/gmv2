@@ -87,6 +87,55 @@ function resolverListaSegmento(
   }
 }
 
+// ─── Condiciones por proveedor (Feature 1) ───────────────────────────────────
+// El proveedor sólo identifica QUÉ mercadería (articulos.proveedor_id) recibe estas
+// condiciones para este cliente. lista/método se aplican al precio; los 3 descuentos
+// se aplican como líneas en el comprobante (general/viajante) o como bonificada (mercadería).
+export type CondicionProveedor = {
+  proveedor_id: string
+  lista_precio_id: string | null
+  metodo_facturacion: string | null
+  dto_general_pct: number | null
+  dto_viajante_pct: number | null
+  dto_mercaderia_pct: number | null
+}
+
+const CONDICION_PROVEEDOR_COLS =
+  "proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct"
+
+// Mapa proveedor_id → condición. Si se pasa pedidoId, el override del pedido pisa al del cliente.
+async function fetchCondicionesProveedor(
+  supabase: any,
+  clienteId: string,
+  pedidoId?: string | null,
+): Promise<Map<string, CondicionProveedor>> {
+  const map = new Map<string, CondicionProveedor>()
+  const { data: cli } = await supabase
+    .from("cliente_proveedor_condicion")
+    .select(CONDICION_PROVEEDOR_COLS)
+    .eq("cliente_id", clienteId)
+  for (const r of cli || []) map.set(r.proveedor_id, r as CondicionProveedor)
+  if (pedidoId) {
+    const { data: ped } = await supabase
+      .from("pedido_proveedor_condicion")
+      .select(CONDICION_PROVEEDOR_COLS)
+      .eq("pedido_id", pedidoId)
+    for (const r of ped || []) map.set(r.proveedor_id, r as CondicionProveedor)
+  }
+  return map
+}
+
+// Combina las condiciones del cliente con overrides de formulario (al crear el pedido,
+// cuando todavía no existe pedido_proveedor_condicion).
+function mergeCondicionesProveedor(
+  base: Map<string, CondicionProveedor>,
+  overrides?: CondicionProveedor[] | null,
+): Map<string, CondicionProveedor> {
+  const map = new Map(base)
+  for (const o of overrides || []) if (o?.proveedor_id) map.set(o.proveedor_id, o)
+  return map
+}
+
 // ─── Helper: fetch todas las reglas de fórmulas (una sola vez por request) ────
 async function fetchFormulasReglas(
   supabase: any,
@@ -149,7 +198,7 @@ async function fetchListaYMetodo(
 
 async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
   const [{ data: articulo }, { data: descuentosDB }] = await Promise.all([
-    supabase.from("articulos").select("id,precio_compra,precio_base,precio_base_contado,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
+    supabase.from("articulos").select("id,proveedor_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
     supabase.from("articulos_descuentos").select("tipo,porcentaje,orden").eq("articulo_id", productoId).order("orden"),
   ])
   if (!articulo) throw new Error("Artículo no encontrado")
@@ -253,6 +302,8 @@ export async function previewPrecioArticulo(
     lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
     lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
+    // Condiciones por proveedor (este pedido) — pisan al rubro para esa mercadería
+    condiciones_proveedor?: CondicionProveedor[]
   } = {},
 ): Promise<{ precio: number; descripcion: string; sku: string; unidades_por_bulto: number }> {
   const supabase = await createClient()
@@ -276,11 +327,29 @@ export async function previewPrecioArticulo(
   const formulasReglas = await fetchFormulasReglas(supabase)
   const listasCache: Record<string, DatosLista> = {}
 
+  // Condición por proveedor (del cliente + override del formulario)
+  const condicionesProveedor = mergeCondicionesProveedor(
+    await fetchCondicionesProveedor(supabase, clienteId),
+    overrides.condiciones_proveedor,
+  )
+  const provCond = (articulo.proveedor_id && condicionesProveedor.get(articulo.proveedor_id)) || null
+
   const segmento = detectarSegmento(articulo)
-  const { listaId, metodoRaw } = resolverListaSegmento(segmento, overrides, clienteInfo)
+  let listaId: string | null
+  let metodoRaw: string
+  let descuentoCliente: number
+  if (provCond) {
+    listaId = provCond.lista_precio_id
+    metodoRaw = provCond.metodo_facturacion || "Final"
+    descuentoCliente = 0
+  } else {
+    const resuelto = resolverListaSegmento(segmento, overrides, clienteInfo)
+    listaId = resuelto.listaId
+    metodoRaw = resuelto.metodoRaw
+    descuentoCliente = clienteInfo.descuento_especial || 0
+  }
   const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
   const metodo = toMetodoFacturacion(metodoRaw)
-  const descuentoCliente = clienteInfo.descuento_especial || 0
 
   const precio = calcularPrecioPedido(articulo, listaDatos, metodo, descuentoCliente)
 
@@ -290,6 +359,67 @@ export async function previewPrecioArticulo(
     sku: artMeta?.sku || "",
     unidades_por_bulto: artMeta?.unidades_por_bulto || 1,
   }
+}
+
+// ─── CRUD condiciones por proveedor (Feature 1) ──────────────────────────────
+
+// Condiciones por proveedor guardadas en la ficha del cliente (con nombre del proveedor)
+export async function getCondicionesProveedorCliente(clienteId: string) {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from("cliente_proveedor_condicion")
+    .select(`id, proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct,
+             proveedores:proveedor_id(nombre), listas_precio:lista_precio_id(nombre, codigo)`)
+    .eq("cliente_id", clienteId)
+    .order("created_at")
+  if (error) throw error
+  return data || []
+}
+
+// Upsert (una condición por cliente+proveedor)
+export async function saveCondicionProveedorCliente(input: {
+  cliente_id: string
+  proveedor_id: string
+  lista_precio_id?: string | null
+  metodo_facturacion?: string | null
+  dto_general_pct?: number | null
+  dto_viajante_pct?: number | null
+  dto_mercaderia_pct?: number | null
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error("No autenticado")
+  if (!input.proveedor_id) throw new Error("Falta el proveedor")
+
+  const { error } = await supabase
+    .from("cliente_proveedor_condicion")
+    .upsert({
+      cliente_id:         input.cliente_id,
+      proveedor_id:       input.proveedor_id,
+      lista_precio_id:    input.lista_precio_id ?? null,
+      metodo_facturacion: input.metodo_facturacion ?? null,
+      dto_general_pct:    input.dto_general_pct ?? null,
+      dto_viajante_pct:   input.dto_viajante_pct ?? null,
+      dto_mercaderia_pct: input.dto_mercaderia_pct ?? null,
+    }, { onConflict: "cliente_id,proveedor_id" })
+  if (error) throw error
+  revalidatePath(`/clientes/${input.cliente_id}`)
+  return { success: true }
+}
+
+export async function deleteCondicionProveedorCliente(id: string, clienteId: string) {
+  const supabase = await createClient()
+  const { error } = await supabase.from("cliente_proveedor_condicion").delete().eq("id", id)
+  if (error) throw error
+  revalidatePath(`/clientes/${clienteId}`)
+  return { success: true }
+}
+
+// Condiciones por proveedor efectivas para un pedido (override del pedido > ficha del cliente)
+export async function getCondicionesProveedorPedido(pedidoId: string, clienteId: string) {
+  const supabase = await createClient()
+  const map = await fetchCondicionesProveedor(supabase, clienteId, pedidoId)
+  return Array.from(map.values())
 }
 
 export async function createPedido(data: {
@@ -305,13 +435,15 @@ export async function createPedido(data: {
   // Condiciones generales (todo el pedido)
   metodo_facturacion_pedido?: string
   lista_precio_pedido_id?: string
-  // Condiciones por segmento de proveedor
+  // Condiciones por segmento de rubro (limpieza / perf0 / perf_plus)
   lista_limpieza_pedido_id?: string
   metodo_limpieza_pedido?: string
   lista_perf0_pedido_id?: string
   metodo_perf0_pedido?: string
   lista_perf_plus_pedido_id?: string
   metodo_perf_plus_pedido?: string
+  // Condiciones por proveedor (Feature 1) — override por pedido de la mercadería de un proveedor
+  condiciones_proveedor?: CondicionProveedor[]
 }) {
   const supabase = await createClient()
 
@@ -338,6 +470,12 @@ export async function createPedido(data: {
   // Cargar todas las reglas de fórmulas una sola vez para el pedido
   const formulasReglas = await fetchFormulasReglas(supabase)
 
+  // Condiciones por proveedor: del cliente + overrides del formulario (este pedido)
+  const condicionesProveedor = mergeCondicionesProveedor(
+    await fetchCondicionesProveedor(supabase, data.cliente_id),
+    data.condiciones_proveedor,
+  )
+
   // Overrides de segmento del pedido (vienen del formulario)
   const segmentoOverrides = {
     lista_precio_pedido_id:    data.lista_precio_pedido_id,
@@ -358,15 +496,32 @@ export async function createPedido(data: {
     descuentoPropioPct: number; precioLista: number
     descuentoClientePct: number; precioConDescuento: number
     segmento: Segmento
+    provCond: CondicionProveedor | null
   }
   const itemsCalc: ItemCalc[] = []
   for (const item of data.items) {
     const articulo = await fetchArticuloConDescuentos(supabase, item.producto_id)
     const segmento = detectarSegmento(articulo)
-    const { listaId, metodoRaw } = resolverListaSegmento(segmento, segmentoOverrides, clienteInfo)
+    // ¿La mercadería de este proveedor tiene condición propia para el cliente/pedido?
+    const provCond = (articulo.proveedor_id && condicionesProveedor.get(articulo.proveedor_id)) || null
+    let listaId: string | null
+    let metodoRaw: string
+    let dctoPricing: number
+    if (provCond) {
+      // La mercadería del proveedor se cotiza con su lista/método; los descuentos
+      // (general/viajante/mercadería) se aplican luego como líneas del comprobante.
+      listaId = provCond.lista_precio_id
+      metodoRaw = provCond.metodo_facturacion || "Final"
+      dctoPricing = 0
+    } else {
+      const resuelto = resolverListaSegmento(segmento, segmentoOverrides, clienteInfo)
+      listaId = resuelto.listaId
+      metodoRaw = resuelto.metodoRaw
+      dctoPricing = descuentoCliente
+    }
     const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
     const metodo = toMetodoFacturacion(metodoRaw)
-    const precio = calcularPrecioPedido(articulo, listaDatos, metodo, descuentoCliente)
+    const precio = calcularPrecioPedido(articulo, listaDatos, metodo, dctoPricing)
     itemsCalc.push({
       producto_id: item.producto_id,
       cantidad: item.cantidad,
@@ -380,6 +535,7 @@ export async function createPedido(data: {
       descuentoClientePct: precio.descuentoClientePct,
       precioConDescuento: precio.precioConDescuento,
       segmento,
+      provCond,
     })
   }
 
@@ -414,6 +570,25 @@ export async function createPedido(data: {
     .single()
 
   if (pedidoError) throw pedidoError
+
+  // Persistir las condiciones por proveedor de este pedido (override del formulario)
+  if (data.condiciones_proveedor?.length) {
+    const rows = data.condiciones_proveedor
+      .filter(c => c?.proveedor_id)
+      .map(c => ({
+        pedido_id:          pedido.id,
+        proveedor_id:       c.proveedor_id,
+        lista_precio_id:    c.lista_precio_id ?? null,
+        metodo_facturacion: c.metodo_facturacion ?? null,
+        dto_general_pct:    c.dto_general_pct ?? null,
+        dto_viajante_pct:   c.dto_viajante_pct ?? null,
+        dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+      }))
+    if (rows.length) {
+      const { error: condError } = await supabase.from("pedido_proveedor_condicion").insert(rows)
+      if (condError) console.error("[createPedido] Error guardando condiciones por proveedor:", condError.message)
+    }
+  }
 
   // Obtener stock actual de todos los artículos en una sola query
   const productIds = itemsCalc.map(i => i.producto_id)
@@ -507,7 +682,10 @@ export async function createPedido(data: {
         ...(() => {
           if (!vendedorComisiones || !art?.segmento_precio) return {}
           const pct = getComisionPorcentaje(vendedorComisiones, art.segmento_precio, art.iva_ventas)
-          const dtoViajante = getDescuentoViajante(bonificacionesViajante, item.segmento)
+          // Mercadería con condición de proveedor: usa su dto_viajante; el resto, el del rubro.
+          const dtoViajante = item.provCond
+            ? (item.provCond.dto_viajante_pct || 0)
+            : getDescuentoViajante(bonificacionesViajante, item.segmento)
           if (pct <= 0 && dtoViajante <= 0) return {}
           const comisionEfectivaPct = round2(pct - dtoViajante)
           const precioNeto = getPrecioNeto(item.precioNeto, item.metodoUsado, art.iva_ventas)
