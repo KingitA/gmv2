@@ -221,15 +221,18 @@ export function calcularPrecioFinal(
   // Precio neto fijo cargado en el artículo (precio_lista_especial) menos la oferta.
   // Saltea toda la cascada y los descuentos: SIEMPRE factura (neto + IVA 21%).
   if ((lista.lista_codigo || "").toLowerCase() === "especial") {
-    const baseEsp  = art.precio_lista_especial || 0
-    const netoEsp  = round2(baseEsp * (1 - (art.oferta_lista_especial || 0) / 100))
+    // El precio importado YA tiene la oferta incluida: ES el neto que paga el cliente.
+    // La oferta sólo back-calcula el "precio de lista" bruto para mostrarlo (100 con 15% → bruto 117.65).
+    const oferta   = art.oferta_lista_especial || 0
+    const netoEsp  = round2(art.precio_lista_especial || 0)
+    const brutoEsp = oferta > 0 && oferta < 100 ? round2(netoEsp / (1 - oferta / 100)) : netoEsp
     return {
       costoNeto: 0,
-      precioBase: baseEsp,
+      precioBase: brutoEsp,
       recargoListaPct: 0,
-      precioLista: netoEsp,
-      descuentoClientePct: 0,
-      precioConDescuento: netoEsp,
+      precioLista: brutoEsp,            // P.Lista bruto (informativo)
+      descuentoClientePct: oferta,      // % de oferta (informativo)
+      precioConDescuento: netoEsp,      // neto tras la oferta = precio importado
       descuentoNegroEnFacturaPct: 0,
       precioAntesIva: netoEsp,
       ivaIncluido: false,
