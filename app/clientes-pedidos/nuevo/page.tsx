@@ -52,19 +52,6 @@ const BLANK_COND: Conditions = {
   observaciones: "",
 }
 
-type ProvCond = {
-  proveedor_id: string
-  lista_precio_id: string
-  metodo_facturacion: string
-  dto_general_pct: number
-  dto_viajante_pct: number
-  dto_mercaderia_pct: number
-}
-const BLANK_PROVCOND: ProvCond = {
-  proveedor_id: "", lista_precio_id: "", metodo_facturacion: "",
-  dto_general_pct: 0, dto_viajante_pct: 0, dto_mercaderia_pct: 0,
-}
-
 const METODOS = [
   { value: "Factura",      label: "Factura (21% IVA)" },
   { value: "Final",        label: "Final (Mixto)"      },
@@ -98,10 +85,10 @@ export default function NuevoPedidoPage() {
   const [condOpen, setCondOpen]         = useState(false)
   const [listas, setListas]             = useState<any[]>([])
   const [vendedores, setVendedores]     = useState<any[]>([])
-  // Condiciones por proveedor (Feature 1) — para este pedido
-  const [proveedores, setProveedores]   = useState<any[]>([])
-  const [condProv, setCondProv]         = useState<ProvCond[]>([])
-  const [newProvCond, setNewProvCond]   = useState<ProvCond>({ ...BLANK_PROVCOND })
+  // Listas especiales por proveedor — para este pedido
+  const [specialProveedores, setSpecialProveedores] = useState<any[]>([])
+  const [condProvIds, setCondProvIds]   = useState<string[]>([])
+  const [specialSearch, setSpecialSearch] = useState("")
 
   // ── Article search / add ─────────────────────────────────────────────────────
   const [artQ, setArtQ]                 = useState("")
@@ -121,13 +108,15 @@ export default function NuevoPedidoPage() {
   // ── Load listas + vendedores ─────────────────────────────────────────────────
   useEffect(() => {
     Promise.all([
-      sb.from("listas_precio").select("id,nombre").eq("activo", true).order("nombre"),
+      sb.from("listas_precio").select("id,nombre,codigo").eq("activo", true).order("nombre"),
       sb.from("vendedores").select("id,nombre").eq("activo", true).order("nombre"),
-      sb.from("proveedores").select("id,nombre").eq("activo", true).order("nombre"),
+      sb.from("articulos").select("proveedor_id, proveedores:proveedor_id(nombre)").not("precio_lista_especial", "is", null),
     ]).then(([{ data: l }, { data: v }, { data: p }]: any) => {
       if (l) setListas(l)
       if (v) setVendedores(v)
-      if (p) setProveedores(p)
+      const map = new Map<string, string>()
+      for (const a of (p || [])) if (a.proveedor_id && a.proveedores?.nombre) map.set(a.proveedor_id, a.proveedores.nombre)
+      setSpecialProveedores(Array.from(map, ([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre)))
     })
   }, [])
 
@@ -159,25 +148,18 @@ export default function NuevoPedidoPage() {
       observaciones: "",
     })
     setCart([])
-    // Precargar condiciones por proveedor del cliente (Feature 1)
+    // Precargar listas especiales asignadas al cliente
     sb.from("cliente_proveedor_condicion")
-      .select("proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct")
+      .select("proveedor_id")
       .eq("cliente_id", c.id)
-      .then(({ data }: any) => setCondProv((data || []).map((r: any) => ({
-        proveedor_id: r.proveedor_id,
-        lista_precio_id: r.lista_precio_id || "",
-        metodo_facturacion: r.metodo_facturacion || "",
-        dto_general_pct: r.dto_general_pct || 0,
-        dto_viajante_pct: r.dto_viajante_pct || 0,
-        dto_mercaderia_pct: r.dto_mercaderia_pct || 0,
-      }))))
+      .then(({ data }: any) => setCondProvIds((data || []).map((r: any) => r.proveedor_id)))
   }
 
   const clearCliente = () => {
     setCliente(null)
     setClienteQ("")
     setCond({ ...BLANK_COND })
-    setCondProv([])
+    setCondProvIds([])
     setCart([])
     setSelectedArt(null)
   }
@@ -266,23 +248,17 @@ export default function NuevoPedidoPage() {
       metodo_perf0_pedido:          cond.metodo_perf0_pedido          || undefined,
       lista_perf_plus_pedido_id:    cond.lista_perf_plus_pedido_id    || undefined,
       metodo_perf_plus_pedido:      cond.metodo_perf_plus_pedido      || undefined,
-      // Condiciones por proveedor (este pedido)
-      condiciones_proveedor:        condProv.length ? condProv : undefined,
+      // Listas especiales por proveedor (este pedido): siempre factura, lista Especial
+      condiciones_proveedor:        condProvIds.length && especialLista
+        ? condProvIds.map(pid => ({ proveedor_id: pid, lista_precio_id: especialLista.id, metodo_facturacion: "Factura", dto_general_pct: null, dto_viajante_pct: null, dto_mercaderia_pct: null }))
+        : undefined,
     }
   }
 
-  const addProvCond = () => {
-    if (!newProvCond.proveedor_id) { alert("Elegí un proveedor"); return }
-    setCondProv(prev => {
-      const idx = prev.findIndex(c => c.proveedor_id === newProvCond.proveedor_id)
-      if (idx >= 0) { const u = [...prev]; u[idx] = { ...newProvCond }; return u }
-      return [...prev, { ...newProvCond }]
-    })
-    setNewProvCond({ ...BLANK_PROVCOND })
-  }
-  const removeProvCond = (proveedorId: string) =>
-    setCondProv(prev => prev.filter(c => c.proveedor_id !== proveedorId))
-  const provNombre = (pid: string) => proveedores.find(p => p.id === pid)?.nombre || "—"
+  const especialLista = listas.find((l: any) => l.codigo === "especial")
+  const addSpecial = (pid: string) => { setCondProvIds(prev => prev.includes(pid) ? prev : [...prev, pid]); setSpecialSearch("") }
+  const removeSpecial = (pid: string) => setCondProvIds(prev => prev.filter(x => x !== pid))
+  const provNombre = (pid: string) => specialProveedores.find(p => p.id === pid)?.nombre || "—"
 
   const crearPedido = async () => {
     if (!cliente || cart.length === 0) return
@@ -444,7 +420,7 @@ export default function NuevoPedidoPage() {
                       <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Del cliente" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__">Del cliente</SelectItem>
-                        {listas.map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
+                        {listas.filter((l: any) => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -492,7 +468,7 @@ export default function NuevoPedidoPage() {
                           <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="General" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none__">General</SelectItem>
-                            {listas.map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
+                            {listas.filter((l: any) => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -500,71 +476,43 @@ export default function NuevoPedidoPage() {
                   </div>
                 </div>
 
-                {/* Condiciones por proveedor (este pedido) */}
+                {/* Listas especiales por proveedor (este pedido) */}
                 <div>
-                  <p className="text-xs font-bold text-teal-600 uppercase tracking-wide mb-1">Condiciones por proveedor</p>
-                  <p className="text-[11px] text-slate-500 mb-3">La mercadería de estos proveedores se factura aparte. Elegí la lista <b>Especial</b> para el precio especial del artículo.</p>
-                  {condProv.length > 0 && (
-                    <div className="space-y-1.5 mb-3">
-                      {condProv.map(c => (
-                        <div key={c.proveedor_id} className="flex items-center justify-between gap-2 border border-teal-200 rounded-lg p-2 bg-teal-50/40 text-xs">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-bold text-slate-700 truncate">{provNombre(c.proveedor_id)}</p>
-                            <p className="text-slate-500">
-                              {listas.find(l => l.id === c.lista_precio_id)?.nombre || "Lista del cliente"} · {c.metodo_facturacion || "Método del cliente"}
-                              {c.dto_general_pct ? ` · Gral ${c.dto_general_pct}%` : ""}
-                              {c.dto_viajante_pct ? ` · Viaj ${c.dto_viajante_pct}%` : ""}
-                              {c.dto_mercaderia_pct ? ` · Merc ${c.dto_mercaderia_pct}%` : ""}
-                            </p>
-                          </div>
-                          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => removeProvCond(c.proveedor_id)}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
+                  <p className="text-xs font-bold text-teal-600 uppercase tracking-wide mb-1">Listas especiales</p>
+                  <p className="text-[11px] text-slate-500 mb-3">La mercadería de estos proveedores se factura aparte (siempre en factura) con su precio especial. El resto sigue la lista/segmento de arriba.</p>
+                  {condProvIds.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {condProvIds.map(pid => (
+                        <span key={pid} className="inline-flex items-center gap-1.5 border border-teal-300 bg-teal-50/60 rounded-full pl-3 pr-1.5 py-1 text-xs font-semibold text-teal-700">
+                          Especial {provNombre(pid)}
+                          <button type="button" className="text-red-400 hover:text-red-600" onClick={() => removeSpecial(pid)}>
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </span>
                       ))}
                     </div>
                   )}
-                  <div className="border rounded-lg p-3 bg-slate-50 space-y-2">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                      <Select value={newProvCond.proveedor_id || ""} onValueChange={v => setNewProvCond(p => ({ ...p, proveedor_id: v }))}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Proveedor" /></SelectTrigger>
-                        <SelectContent>
-                          {proveedores.map(p => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <Select value={newProvCond.lista_precio_id || "__none__"} onValueChange={v => setNewProvCond(p => ({ ...p, lista_precio_id: v === "__none__" ? "" : v }))}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Lista del cliente" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Lista del cliente</SelectItem>
-                          {listas.map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <Select value={newProvCond.metodo_facturacion || "__none__"} onValueChange={v => setNewProvCond(p => ({ ...p, metodo_facturacion: v === "__none__" ? "" : v }))}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Método del cliente" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Método del cliente</SelectItem>
-                          {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                  {specialProveedores.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">No hay artículos con precio especial cargado.</p>
+                  ) : (
+                    <div className="border rounded-lg p-3 bg-slate-50 space-y-2">
+                      <Input className="h-8 text-xs" placeholder="Buscar lista especial (Colgate, Kenvue, Haleon...)"
+                        value={specialSearch} onChange={e => setSpecialSearch(e.target.value)} />
+                      <div className="max-h-40 overflow-auto space-y-1">
+                        {specialProveedores
+                          .filter(p => !condProvIds.includes(p.id))
+                          .filter(p => p.nombre.toLowerCase().includes(specialSearch.toLowerCase()))
+                          .map(p => (
+                            <button key={p.id} type="button"
+                              className="w-full text-left px-3 py-2 rounded-lg hover:bg-teal-50 text-xs font-medium text-slate-700 flex items-center justify-between"
+                              onClick={() => addSpecial(p.id)}>
+                              <span>Especial {p.nombre}</span>
+                              <Plus className="h-3.5 w-3.5 text-teal-600" />
+                            </button>
+                          ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {([
-                        { key: "dto_general_pct",    label: "Gral %" },
-                        { key: "dto_mercaderia_pct", label: "Merc %" },
-                        { key: "dto_viajante_pct",   label: "Viaj %" },
-                      ] as const).map(({ key, label }) => (
-                        <div key={key}>
-                          <Label className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</Label>
-                          <Input type="number" step="0.01" min="0" max="100" className="h-8 text-xs text-center"
-                            value={(newProvCond as any)[key]}
-                            onChange={e => setNewProvCond(p => ({ ...p, [key]: parseFloat(e.target.value) || 0 }))} />
-                        </div>
-                      ))}
-                    </div>
-                    <Button type="button" size="sm" className="w-full h-8 bg-teal-600 hover:bg-teal-700 text-white" onClick={addProvCond}>
-                      <Plus className="h-3.5 w-3.5 mr-1.5" /> Agregar condición de proveedor
-                    </Button>
-                  </div>
+                  )}
                 </div>
 
                 {/* Observaciones */}

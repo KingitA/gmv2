@@ -94,7 +94,7 @@ export default function PedidoEditPage() {
         id, cantidad, cantidad_preparada, estado_item, precio_base, precio_final, subtotal, es_bonificado,
         articulos (id, sku, descripcion, proveedores:proveedor_id (nombre))
       `).eq("pedido_id", id).order("created_at" as any),
-      supabase.from("listas_precio").select("id, nombre").eq("activo", true).order("nombre"),
+      supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
     ])
     const p = pedRes.data as any
@@ -442,7 +442,7 @@ export default function PedidoEditPage() {
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__heredar__">{defaultLista} (del cliente)</SelectItem>
-                      {listasPrecio.map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                      {listasPrecio.filter((lp: any) => lp.codigo !== "especial").map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -487,7 +487,7 @@ export default function PedidoEditPage() {
                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__heredar__">{defLista} (general)</SelectItem>
-                          {listasPrecio.map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                          {listasPrecio.filter((lp: any) => lp.codigo !== "especial").map(lp => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
