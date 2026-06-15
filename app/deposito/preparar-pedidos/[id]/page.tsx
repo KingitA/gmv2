@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 
 interface DetallePedido {
   id: string; articulo_id: string; cantidad: number
-  cantidad_preparada: number; estado_item: string
+  cantidad_preparada: number; estado_item: string; es_bonificado?: boolean
   articulos: { id: string; sku: string; descripcion: string; ean13?: string; unidades_por_bulto?: number; proveedores?: { nombre: string } }
 }
 interface ArticuloFound { id: string; sku: string; descripcion: string; ean13?: string; stock_actual: number }
@@ -73,11 +73,19 @@ function SwipeItem({ item, onConfirmFaltante, saving, bgReveal, colorReveal, lab
         style={{ position: "relative", background: bg, border: `1.5px solid ${border}`, borderRadius: 16, padding: "15px 16px", display: "flex", alignItems: "center", gap: 14, transform: `translateX(-${translateX}px)`, transition: dx === 0 ? "transform 0.25s cubic-bezier(.25,.46,.45,.94)" : "none", userSelect: "none" }}>
         <div style={{ width: 10, height: 10, borderRadius: "50%", background: dot, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: C.text, fontWeight: 700, fontSize: 17, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.articulos?.descripcion}</div>
+          <div style={{ color: C.text, fontWeight: 700, fontSize: 17, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display:"flex", alignItems:"center", gap:8 }}>
+            {item.articulos?.descripcion}
+            {item.es_bonificado && (
+              <span style={{ background:"#fef3c7", color:"#b45309", border:"1px solid #fcd34d", fontSize:10, fontWeight:800, padding:"1px 6px", borderRadius:6, flexShrink:0 }}>BONIF</span>
+            )}
+          </div>
           <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:4, flexWrap:"wrap" }}>
             <span style={{ color:C.light, fontSize:12, fontFamily:"monospace" }}>{item.articulos?.sku}</span>
             {item.articulos?.proveedores?.nombre && (
               <span style={{ color:C.orange, fontSize:12, fontWeight:600 }}>{item.articulos.proveedores.nombre}</span>
+            )}
+            {item.es_bonificado && (
+              <span style={{ color:"#b45309", fontSize:12, fontWeight:600 }}>Bonificado — agregar como ítem normal</span>
             )}
           </div>
         </div>

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo } from "@/lib/actions/pedidos"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -51,7 +51,9 @@ export default function PedidoEditPage() {
   const [bonifMercaderia, setBonifMercaderia] = useState<any[]>([])
   const [queryBonif, setQueryBonif] = useState("")
   const [foundBonif, setFoundBonif] = useState<any[]>([])
-  const [qtyBonif, setQtyBonif] = useState(1)
+  const [qtyBonif, setQtyBonif] = useState(0)
+  const [bonifPct, setBonifPct] = useState(0)
+  const [recalcBonif, setRecalcBonif] = useState(false)
   const [headerOpen, setHeaderOpen] = useState(true)
   const [filterQuery, setFilterQuery] = useState("")
   const [showAddPanel, setShowAddPanel] = useState(false)
@@ -79,7 +81,7 @@ export default function PedidoEditPage() {
     setLoading(true)
     const [pedRes, itemsRes, listasRes, vendRes] = await Promise.all([
       supabase.from("pedidos").select(`
-        id, numero_pedido, fecha, estado, total, subtotal,
+        id, numero_pedido, fecha, estado, total, subtotal, cliente_id, bonif_mercaderia_pct,
         metodo_facturacion_pedido, condicion_entrega, observaciones,
         lista_precio_pedido_id, lista_limpieza_pedido_id, metodo_limpieza_pedido,
         lista_perf0_pedido_id, metodo_perf0_pedido,
@@ -109,6 +111,9 @@ export default function PedidoEditPage() {
         .eq("tipo", "mercaderia")
         .eq("activo", true)
       setBonifMercaderia(bonif || [])
+      // % efectivo: override del pedido (si lo tiene) o el mayor de la ficha del cliente
+      const pctFicha = (bonif || []).reduce((m: number, b: any) => Math.max(m, b.porcentaje || 0), 0)
+      setBonifPct(p.bonif_mercaderia_pct != null ? p.bonif_mercaderia_pct : pctFicha)
     }
     if (p) {
       setHeaderForm({
@@ -182,6 +187,7 @@ export default function PedidoEditPage() {
         lista_perf_plus_pedido_id: headerForm.lista_perf_plus_pedido_id || null,
         metodo_perf_plus_pedido: headerForm.metodo_perf_plus_pedido || null,
         observaciones: headerForm.observaciones || null,
+        bonif_mercaderia_pct: bonifPct || null,
       }
       const { error: hErr } = await supabase.from("pedidos").update(headerUpdate).eq("id", id)
       if (hErr) throw hErr
@@ -224,16 +230,67 @@ export default function PedidoEditPage() {
     setFoundBonif((await searchProductos(q)) || [])
   }
 
+  // ── Mercadería bonificada por monto (Feature 3) ──────────────────────────
+  // Monto a bonificar = total NO bonificado × % mercadería. Unidades por artículo =
+  // round(monto / precio) — el entero cuyo valor total queda más cerca del monto.
+  function calcBonifTotals() {
+    const totalNoBonif = items.filter(i => !i.es_bonificado).reduce((s, i) => {
+      const d = getDisplayItem(i); return s + ((d.precio_final || 0) * (d.cantidad || 0))
+    }, 0)
+    const asignado = items.filter(i => i.es_bonificado).reduce((s, i) => s + ((i.precio_final || 0) * (i.cantidad || 0)), 0)
+    const monto = Math.round(totalNoBonif * (bonifPct || 0) / 100 * 100) / 100
+    return {
+      totalNoBonif: Math.round(totalNoBonif * 100) / 100,
+      monto,
+      asignado: Math.round(asignado * 100) / 100,
+      restante: Math.round((monto - asignado) * 100) / 100,
+    }
+  }
+
   async function agregarItemBonif(producto: any) {
+    if (!pedido?.cliente_id) { alert("El pedido no tiene cliente"); return }
     setSavingBonif(true)
     try {
-      await agregarItemBonificado(id, producto.id, qtyBonif)
-      setQueryBonif(""); setFoundBonif([]); setQtyBonif(1)
+      // Si el usuario tipeó cantidad manual (>0) se respeta; si no, se calcula por monto.
+      let units = qtyBonif && qtyBonif > 0 ? qtyBonif : 0
+      if (!units) {
+        const { monto, asignado } = calcBonifTotals()
+        const restante = Math.max(0, monto - asignado)
+        const preview = await previewPrecioArticulo(pedido.cliente_id, producto.id, {})
+        const precio = preview.precio || 0
+        units = precio > 0 ? Math.round(restante / precio) : 0
+      }
+      if (units <= 0) { alert("No queda monto de bonificación para asignar. Subí el % o agregá artículos al pedido."); setSavingBonif(false); return }
+      await agregarItemBonificado(id, producto.id, units)
+      setQueryBonif(""); setFoundBonif([]); setQtyBonif(0)
       await loadAll()
     } catch (err: any) {
       alert(err.message || "Error al agregar artículo bonificado")
     } finally {
       setSavingBonif(false)
+    }
+  }
+
+  // Recalcula cantidades de los artículos ya bonificados según el % y el total actual.
+  async function recalcularBonificados() {
+    setRecalcBonif(true)
+    try {
+      await supabase.from("pedidos").update({ bonif_mercaderia_pct: bonifPct }).eq("id", id)
+      const bonif = items.filter(i => i.es_bonificado)
+      if (bonif.length > 0) {
+        const { monto } = calcBonifTotals()
+        const share = monto / bonif.length
+        for (const bi of bonif) {
+          const precio = bi.precio_final || 0
+          const units = precio > 0 ? Math.round(share / precio) : 0
+          if (units > 0 && units !== bi.cantidad) await actualizarCantidadItem(bi.id, id, units)
+        }
+      }
+      await loadAll()
+    } catch (err: any) {
+      alert(err.message || "Error al recalcular bonificación")
+    } finally {
+      setRecalcBonif(false)
     }
   }
 
@@ -441,24 +498,41 @@ export default function PedidoEditPage() {
           )}
         </div>
 
-        {/* Banner + artículos bonificados */}
-        {bonifMercaderia.length > 0 && (
+        {/* Banner + artículos bonificados (mercadería por monto) */}
+        {(() => {
+          const bt = calcBonifTotals()
+          return (
           <>
             <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
               <Package className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-semibold text-amber-800">Este cliente tiene mercadería bonificada</p>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-amber-800">Mercadería bonificada</p>
                 <p className="text-xs text-amber-600 mt-0.5">
-                  Los artículos bonificados se agregan al precio de lista pero con descuento 100% — el cliente ve el precio real y la bonificación en el comprobante.
+                  El monto a bonificar = total del pedido × % mercadería. Las unidades de cada artículo se calculan
+                  para acercarse a ese monto (precio de lista, 100% bonificado).
+                  {bonifMercaderia.length > 0 && <> El cliente tiene <b>{bt.totalNoBonif > 0 ? `${bonifPct}%` : `${bonifPct}%`}</b> preasignado.</>}
                 </p>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-amber-200 p-5 shadow-sm">
-              <h2 className="font-semibold text-amber-700 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide">
-                <Plus className="h-4 w-4 text-amber-600" />
-                Artículos bonificados (mercadería)
-              </h2>
+            <div className="bg-white rounded-2xl border border-amber-200 p-5 shadow-sm space-y-4">
+              <div className="flex items-end gap-4 flex-wrap">
+                <div>
+                  <Label className="text-xs text-amber-700">% Mercadería bonificada</Label>
+                  <Input type="number" step="0.01" min={0} max={100} className="h-9 w-28 text-center font-semibold"
+                    value={bonifPct || ""} onChange={(e) => setBonifPct(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="text-xs text-slate-600 space-y-0.5">
+                  <p>Base (sin bonificados): <b>${bt.totalNoBonif.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</b></p>
+                  <p>Monto a bonificar: <b className="text-amber-700">${bt.monto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</b></p>
+                  <p>Asignado: ${bt.asignado.toLocaleString("es-AR", { minimumFractionDigits: 2 })} · Saldo sin usar: <b className={bt.restante > 0.01 ? "text-orange-600" : "text-green-600"}>${bt.restante.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</b></p>
+                </div>
+                <Button type="button" size="sm" variant="outline" className="h-9 border-amber-300 text-amber-700 hover:bg-amber-50 ml-auto" onClick={recalcularBonificados} disabled={recalcBonif}>
+                  {recalcBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+                  Recalcular cantidades
+                </Button>
+              </div>
+
               <div className="flex gap-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -483,16 +557,18 @@ export default function PedidoEditPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Input
-                    type="number" min={1} className="h-10 w-24 text-center font-semibold"
-                    value={qtyBonif} onChange={(e) => setQtyBonif(parseInt(e.target.value) || 1)}
+                    type="number" min={0} className="h-10 w-24 text-center font-semibold" placeholder="auto"
+                    value={qtyBonif || ""} onChange={(e) => setQtyBonif(parseInt(e.target.value) || 0)}
                   />
                   <span className="text-sm text-slate-400">uds.</span>
                 </div>
                 {savingBonif && <Loader2 className="h-5 w-5 animate-spin text-amber-600 self-center" />}
               </div>
+              <p className="text-[11px] text-slate-400">Dejá las unidades en "auto" para que se calculen por monto, o tipeá una cantidad fija.</p>
             </div>
           </>
-        )}
+          )
+        })()}
 
         {/* Lista de artículos */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">

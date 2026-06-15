@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
         clientes(id, nombre, razon_social),
         pedidos_detalle(
           id, cantidad, articulo_id,
-          cantidad_preparada, estado_item,
+          cantidad_preparada, estado_item, es_bonificado,
           articulos(id, sku, descripcion, ean13, unidades_por_bulto, proveedores(nombre))
         )
       `)
