@@ -31,7 +31,7 @@ function getClient(): Anthropic {
     return anthropicClient
 }
 
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = 'claude-sonnet-4-6'
 const MAX_TOTAL_CHARS = 50000  // Max chars to send to Claude
 
 // ─── Retry Helper ──────────────────────────────────────

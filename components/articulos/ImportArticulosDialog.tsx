@@ -156,12 +156,21 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
         return
       }
 
+      // La fila de encabezados no siempre es la primera: listas de proveedores suelen
+      // traer un título o filas en blanco arriba. Buscar la primera fila (entre las
+      // primeras 15) con al menos 2 celdas no vacías y tomarla como encabezado.
+      let headerRowIdx = 0
+      for (let r = 0; r < Math.min(data.length, 15); r++) {
+        const nonEmpty = (data[r] as any[]).filter(c => String(c ?? "").trim() !== "").length
+        if (nonEmpty >= 2) { headerRowIdx = r; break }
+      }
+
       // Preservar la posición original de cada columna no-vacía
-      const hdrObjects = (data[0] as any[])
+      const hdrObjects = (data[headerRowIdx] as any[])
         .map((h, i) => ({ name: String(h ?? "").trim(), colIdx: i }))
         .filter(h => h.name !== "")
       if (hdrObjects.length === 0) {
-        setError("No se encontraron columnas en la primera fila.")
+        setError("No se encontraron columnas con nombre en el archivo. Revisá que la fila de encabezados tenga títulos (ej. SKU, Descripción, Precio).")
         return
       }
 
@@ -173,7 +182,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
 
       setHeaders(hdrs)
       setHeaderColIndices(hdrObjects.map(h => h.colIdx))
-      setExcelRows(data.slice(1))   // sin encabezado
+      setExcelRows(data.slice(headerRowIdx + 1))   // filas de datos, después del encabezado
       setMappings(initialMappings)
       setStep("mapping")
     } catch (err: any) {

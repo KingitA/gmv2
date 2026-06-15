@@ -31,7 +31,7 @@ function getClient(): Anthropic {
     return anthropicClient
 }
 
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = 'claude-sonnet-4-6'
 
 /**
  * Clasifica un mensaje (email, chat, WhatsApp) determinando su tipo,
