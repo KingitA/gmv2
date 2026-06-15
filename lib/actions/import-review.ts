@@ -3,8 +3,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
-import { getNextOrderNumber } from "@/lib/utils/next-order-number"
-import { nowArgentina } from "@/lib/utils"
+import { createPedido, type CondicionProveedor } from "@/lib/actions/pedidos"
 
 export async function getPendingImports() {
     const supabase = await createClient()
@@ -80,70 +79,36 @@ export async function getPendingImports() {
     return data
 }
 
-export async function approveImport(importId: string, clienteId: string, items: any[]) {
+export async function approveImport(
+    importId: string,
+    clienteId: string,
+    items: any[],
+    condicionesProveedor?: CondicionProveedor[],
+) {
     const supabase = await createClient()
 
-    // 1. Generate Order Number (numeric-only)
-    const numeroPedido = await getNextOrderNumber(supabase)
+    // Delegar en createPedido: usa el mismo motor de precios que la carga manual
+    // (listas por segmento, descuentos del cliente, y listas especiales por proveedor
+    // — leídas automáticamente de cliente_proveedor_condicion + el override de este import).
+    const itemsPedido = (items || [])
+        .filter((i: any) => i.matchedProduct?.id && (i.quantity ?? 0) > 0)
+        .map((i: any) => ({
+            producto_id: i.matchedProduct.id,
+            cantidad: i.quantity,
+            precio_unitario: 0,   // ignorado: el precio se calcula desde lista/segmento/especial
+            descuento: 0,
+        }))
 
-    // 2. Get client info
-    const { data: cliente } = await supabase.from("clientes").select("*").eq("id", clienteId).single()
-    if (!cliente) throw new Error("Cliente no encontrado")
+    if (itemsPedido.length === 0) throw new Error("El pedido no tiene artículos vinculados")
 
-    // 3. Totals
-    let subtotal = 0
-    const processedItems = []
-
-    for (const item of items) {
-        if (!item.matchedProduct) continue
-        const itemSubtotal = item.quantity * (item.matchedProduct.precio_compra || 0)
-        subtotal += itemSubtotal
-        processedItems.push({
-            producto_id: item.matchedProduct.id,
-            cantidad: item.quantity,
-            precio_base: item.matchedProduct.precio_compra || 0,
-            precio_final: item.matchedProduct.precio_compra || 0,
-            subtotal: itemSubtotal,
-            precio_costo: item.matchedProduct.ultimo_costo || item.matchedProduct.precio_compra || 0
-        })
-    }
-
-    const iva = cliente.condicion_iva === "responsable_inscripto" ? 0 : subtotal * 0.21
-    const percepciones = cliente.aplica_percepciones ? subtotal * 0.03 : 0
-    const total = subtotal + iva + percepciones
-
-    // 4. Create Order
-    const { data: pedido, error: pedidoError } = await supabase.from("pedidos").insert({
-        numero_pedido: numeroPedido,
+    const pedido = await createPedido({
         cliente_id: clienteId,
-        vendedor_id: cliente.vendedor_id,
-        fecha: nowArgentina(),
-        estado: "pendiente",
-        subtotal,
-        descuento_general: 0,
-        total_flete: 0,
-        total_impuestos: iva + percepciones,
-        total,
-        observaciones: `Aprobado desde importación manual`
-    }).select().single()
+        items: itemsPedido,
+        observaciones: "Aprobado desde importación",
+        condiciones_proveedor: condicionesProveedor,
+    })
 
-    if (pedidoError) throw pedidoError
-
-    // 5. Create Details
-    const details = processedItems.map(item => ({
-        pedido_id: pedido.id,
-        articulo_id: item.producto_id,
-        cantidad: item.cantidad,
-        precio_base: item.precio_base,
-        precio_final: item.precio_final,
-        subtotal: item.subtotal,
-        precio_costo: item.precio_costo
-    }))
-
-    const { error: detailsError } = await supabase.from("pedidos_detalle").insert(details)
-    if (detailsError) throw detailsError
-
-    // 6. Update Import status
+    // Marcar la importación como completada
     await supabase.from("imports").update({ status: "completed" }).eq("id", importId)
 
     revalidatePath("/clientes-pedidos")
