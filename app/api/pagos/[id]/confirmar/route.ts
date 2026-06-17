@@ -1,8 +1,10 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
 import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
+import { confirmarCobranza } from "@/lib/actions/cobranzas"
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireAuth()
@@ -201,8 +203,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }
       }
 
+      // Completar la confirmación de forma idempotente: genera el recibo y el
+      // kardex contable (las imputaciones y el libro mayor ya quedaron aplicados
+      // arriba; las guardas de confirmarCobranza evitan duplicarlos).
+      const admin = createAdminClient()
+      const result = await confirmarCobranza(supabase, admin, {
+        pagoId: id,
+        usuarioId: usuario_confirmador || auth.user.id,
+      })
+
       return NextResponse.json({
         success: true,
+        numero_recibo: result.numero_recibo,
         mensaje: "Pago confirmado e imputado exitosamente",
       })
     } else if (accion === "rechazar") {

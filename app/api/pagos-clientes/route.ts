@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
+import { confirmarCobranza } from "@/lib/actions/cobranzas"
 
 // ─── GET: listar pagos con filtros ───────────────────────────
 export async function GET(request: NextRequest) {
@@ -133,6 +134,8 @@ export async function POST(request: NextRequest) {
       imputaciones,    // array de { comprobante_id, monto_imputado }
       retenciones,     // array de { tipo, fecha, numero_comprobante, monto, comprobantes_afectados }
       color,           // BLANCO | NEGRO
+      confirmar,       // bool — true (default): confirma en el acto (oficina con plata a la vista).
+                       // false: queda PENDIENTE de verificación (no toca saldo ni caja).
     } = body
 
     if (!cliente_id || !metodos?.length) {
@@ -168,7 +171,7 @@ export async function POST(request: NextRequest) {
         monto: montoTotal,
         fecha_pago: fecha_pago || todayArgentina(),
         observaciones: observaciones || null,
-        estado: "confirmado",
+        estado: "pendiente",
         creado_por: auth.user.id,
       })
       .select()
@@ -298,145 +301,39 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Imputaciones en estado 'pendiente': se aplican al saldo recién al
+      // confirmar la cobranza (gate de verificación), vía confirmarCobranza.
       const imputData = (imputaciones as any[]).map((imp) => ({
         pago_id: pago.id,
         comprobante_id: imp.comprobante_id,
         tipo_comprobante: "venta",
         monto_imputado: imp.monto_imputado,
-        estado: "confirmado",
+        estado: "pendiente",
       }))
       const { error: impErr } = await supabase.from("imputaciones").insert(imputData)
       if (impErr) throw impErr
-
-      // Actualizar saldo_pendiente de cada comprobante
-      for (const imp of imputaciones as any[]) {
-        if (!imp.comprobante_id) continue
-        const { data: comp } = await supabase
-          .from("comprobantes_venta")
-          .select("saldo_pendiente")
-          .eq("id", imp.comprobante_id)
-          .single()
-        if (!comp) continue
-        const nuevoSaldo = Math.max(0, Number(comp.saldo_pendiente) - Number(imp.monto_imputado))
-        await supabase
-          .from("comprobantes_venta")
-          .update({
-            saldo_pendiente: nuevoSaldo,
-            estado_pago: nuevoSaldo <= 0 ? "pagado" : "parcial",
-          })
-          .eq("id", imp.comprobante_id)
-      }
     }
 
-    // ── 4b. Libro mayor: el pago confirmado acredita al cliente (haber) ──
-    // haber = monto del pago (= pago.monto), consistente con el backfill.
-    // NOTA: el crédito por retenciones aún no se postea (pago.monto no las
-    // incluye hoy); se resolverá en la cobranza unificada (Fase 2).
-    const { error: ccPagoErr } = await supabase.rpc("cc_postear", {
-      p_cliente_id:      cliente_id,
-      p_tipo_movimiento: "pago",
-      p_debe:            0,
-      p_haber:           montoTotal,
-      p_referencia_tipo: "pago_cliente",
-      p_referencia_id:   pago.id,
-      p_numero_comprobante: null,
-      p_observaciones:   observaciones || "Pago",
-      p_usuario_id:      auth.user.id,
-    })
-    if (ccPagoErr) console.error("[cc_postear] pago", pago.id, ccPagoErr.message)
-
-    // ── 5. Generar número de recibo ──
-    const { data: numRow, error: numErr } = await admin
-      .from("numeracion_comprobantes")
-      .select("ultimo_numero")
-      .eq("tipo_comprobante", "RECIBO")
-      .eq("punto_venta", "0001")
-      .single()
-
-    let numeroRecibo = "REC-0001-00000001"
-    if (!numErr && numRow) {
-      const siguiente = Number(numRow.ultimo_numero) + 1
-      const formatted = String(siguiente).padStart(8, "0")
-      numeroRecibo = `REC-0001-${formatted}`
-      await admin
-        .from("numeracion_comprobantes")
-        .update({ ultimo_numero: siguiente })
-        .eq("tipo_comprobante", "RECIBO")
-        .eq("punto_venta", "0001")
-    }
-
-    // ── 6. Crear recibo ──
-    const { data: recibo, error: reciboError } = await supabase
-      .from("recibos")
-      .insert({
-        numero_recibo: numeroRecibo,
-        pago_id: pago.id,
-        cliente_id,
-        fecha: fecha_pago || todayArgentina(),
-        monto_total: montoTotal,
-        generado_por: auth.user.id,
+    // ── 4b. Gate de verificación ──
+    // Por defecto (confirmar !== false) se confirma en el acto: confirmarCobranza
+    // aplica las imputaciones, postea el haber al libro mayor, genera el recibo y
+    // el kardex. Con confirmar:false el pago queda PENDIENTE de verificación y NO
+    // impacta saldo real ni caja hasta confirmarlo (revisión de pagos / rendición).
+    let numeroReciboFinal: string | null = null
+    const estadoFinal = confirmar === false ? "pendiente" : "confirmado"
+    if (confirmar !== false) {
+      const result = await confirmarCobranza(supabase, admin, {
+        pagoId: pago.id,
+        usuarioId: auth.user.id,
       })
-      .select()
-      .single()
-
-    if (reciboError) console.error("[pagos-clientes] Error creando recibo:", reciboError)
-
-    // ── 7. Kardex contable: una línea por método ──
-    const kardexItems = (metodos as any[]).map((m: any) => ({
-      tipo_movimiento: "COBRO_CLIENTE",
-      concepto: `Cobro ${numeroRecibo} — ${m.tipo.toUpperCase()}`,
-      monto: m.tipo === "deposito"
-        ? (m.items || []).reduce((s: number, it: any) => s + Number(it.monto), 0)
-        : Number(m.monto),
-      color: color || null,
-      origen_tipo: "CLIENTE",
-      origen_id: cliente_id,
-      destino_tipo: m.tipo === "cheque" || m.tipo === "deposito" ? "EN_CARTERA"
-        : m.tipo === "efectivo" ? "CAJA"
-        : "BANCO",
-      destino_id: m.tipo === "efectivo" ? (m.caja_id || null)
-        : m.tipo === "transferencia" || m.tipo === "deposito" ? (m.cuenta_bancaria_id || null)
-        : null,
-      metodo: m.tipo === "cheque" ? "CHEQUE_TERCERO"
-        : m.tipo === "transferencia" ? "TRANSFERENCIA"
-        : m.tipo === "deposito" ? "DEPOSITO"
-        : "EFECTIVO",
-      referencia_tipo: "pago_cliente",
-      referencia_id: pago.id,
-      pago_id: pago.id,
-      recibo_id: recibo?.id || null,
-      cliente_id,
-      cobrador_id: auth.user.id,
-    }))
-
-    if (montoRetenciones > 0) {
-      kardexItems.push({
-        tipo_movimiento: "COBRO_CLIENTE",
-        concepto: `Retenciones ${numeroRecibo}`,
-        monto: montoRetenciones,
-        color: color || null,
-        origen_tipo: "CLIENTE",
-        origen_id: cliente_id,
-        destino_tipo: null,
-        destino_id: null,
-        metodo: "RETENCION",
-        referencia_tipo: "pago_cliente",
-        referencia_id: pago.id,
-        pago_id: pago.id,
-        recibo_id: recibo?.id || null,
-        cliente_id,
-        cobrador_id: auth.user.id,
-      } as any)
+      numeroReciboFinal = result.numero_recibo
     }
-
-    const { error: kardexErr } = await supabase.from("kardex_contable").insert(kardexItems)
-    if (kardexErr) console.error("[pagos-clientes] Error en kardex_contable:", kardexErr)
 
     return NextResponse.json({
       success: true,
       pago,
-      recibo: recibo || null,
-      numero_recibo: numeroRecibo,
+      estado: estadoFinal,
+      numero_recibo: numeroReciboFinal,
     })
   } catch (error: any) {
     console.error("[pagos-clientes] POST error:", error)
