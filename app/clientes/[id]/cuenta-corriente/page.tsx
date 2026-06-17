@@ -387,6 +387,16 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">A favor</Badge>;
     };
 
+    const getPagoBadge = (estado: string) => {
+        if (estado === "pendiente" || estado === "pendiente_rendicion")
+            return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Pendiente de verificación</Badge>;
+        if (estado === "rechazado")
+            return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">Rechazado</Badge>;
+        if (estado === "anulado")
+            return <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-200">Anulado</Badge>;
+        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Confirmado</Badge>;
+    };
+
     if (isLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
@@ -507,7 +517,9 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                     {doc.es_credito ? '-' : ''}${Math.abs(doc.saldo).toLocaleString('es-AR')}
                                                 </TableCell>
                                                 <TableCell>
-                                                    {getEstadoBadge(doc.saldo, doc.es_devolucion)}
+                                                    {doc.tipo === "PAGO"
+                                                        ? getPagoBadge((doc as any).estado)
+                                                        : getEstadoBadge(doc.saldo, doc.es_devolucion)}
                                                 </TableCell>
                                                 <TableCell>
                                                     {!doc.es_devolucion && doc.tipo !== "PAGO" && (

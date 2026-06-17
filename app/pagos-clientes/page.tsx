@@ -164,7 +164,7 @@ function PagosClientesContent() {
     }
   }
 
-  const handleGuardar = async () => {
+  const handleGuardar = async (confirmar: boolean = true) => {
     if (!cliente) { toast.error("Seleccioná un cliente"); return }
     if (metodos.length === 0) { toast.error("Agregá al menos un método de pago"); return }
 
@@ -203,6 +203,7 @@ function PagosClientesContent() {
             monto: r.monto,
             origen: r.origen,
           })),
+          confirmar,
         }),
       })
 
@@ -211,6 +212,16 @@ function PagosClientesContent() {
 
       const pagoId: string = data.pago.id
       const numeroRecibo: string = data.numero_recibo
+
+      // Si quedó PENDIENTE de verificación: no hay recibo ni bonificación todavía
+      if (!confirmar) {
+        setLastPagoId(pagoId)
+        toast.success("Pago registrado como PENDIENTE de verificación. Impactará el saldo al confirmarse.")
+        setHistorialCargado(false)
+        // Reset del formulario
+        setMetodos([]); setSeleccionados({}); setRetenciones([]); setPagoACuenta(false)
+        return
+      }
 
       // Bonificación pago contado 10%
       if (aplicarContado && Object.keys(seleccionados).length > 0) {
@@ -425,11 +436,22 @@ function PagosClientesContent() {
               <Button
                 className="w-full"
                 size="lg"
-                onClick={handleGuardar}
+                onClick={() => handleGuardar(true)}
                 disabled={guardando || !cliente || metodos.length === 0}
               >
                 {guardando ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
                 {guardando ? "Guardando..." : "Cerrar Pago y Generar Recibo"}
+              </Button>
+
+              <Button
+                className="w-full"
+                size="lg"
+                variant="outline"
+                onClick={() => handleGuardar(false)}
+                disabled={guardando || !cliente || metodos.length === 0}
+                title="Registra el cobro como pendiente de verificación. No impacta el saldo ni la caja hasta confirmarlo en Revisión de Pagos."
+              >
+                Registrar sin confirmar (pendiente)
               </Button>
 
               {(Object.keys(seleccionados).length === 0 && !pagoACuenta && cliente) && (
