@@ -35,17 +35,25 @@ export async function GET(request: NextRequest) {
 
     if (clientesError) throw clientesError
 
+    // Saldos desde el libro mayor (fuente única) en una sola query
+    const clienteIds = (clientes || []).map((c: any) => c.id)
+    const { data: saldosRows } = await supabase
+      .from("v_saldo_clientes")
+      .select("cliente_id, saldo_actual")
+      .in("cliente_id", clienteIds)
+    const saldoMap = new Map((saldosRows || []).map((r: any) => [r.cliente_id, Number(r.saldo_actual)]))
+
     // Para cada cliente, calcular estado de cuenta
     const clientesConEstado = await Promise.all(
       clientes.map(async (cliente) => {
-        // Obtener comprobantes pendientes
+        // Comprobantes pendientes (solo para detectar vencidos por fecha)
         const { data: comprobantes } = await supabase
           .from("comprobantes_venta")
           .select("saldo_pendiente, fecha_vencimiento")
           .eq("cliente_id", cliente.id)
           .gt("saldo_pendiente", 0)
 
-        const saldoTotal = comprobantes?.reduce((sum, c) => sum + (c.saldo_pendiente || 0), 0) || 0
+        const saldoTotal = saldoMap.get(cliente.id) ?? 0
 
         // Verificar si hay pagos vencidos
         const hoy = todayArgentina()

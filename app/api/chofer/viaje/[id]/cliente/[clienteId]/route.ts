@@ -80,7 +80,13 @@ export async function GET(
       .eq("viaje_id", viajeId)
       .eq("cliente_id", clienteId)
 
-    const saldo_anterior = (comprobantes || []).reduce((s, c) => s + Number(c.saldo_pendiente), 0)
+    // Saldo real desde el libro mayor (fuente única)
+    const { data: saldoRow } = await supabase
+      .from("v_saldo_clientes")
+      .select("saldo_actual")
+      .eq("cliente_id", clienteId)
+      .maybeSingle()
+    const saldo_anterior = Number(saldoRow?.saldo_actual ?? 0)
     const total_devuelto = (devoluciones || []).reduce((s, d) => s + Number(d.monto_total), 0)
     const total_cobrado = (pagos_registrados || []).reduce((s, p) => s + Number(p.monto), 0)
 

@@ -330,11 +330,12 @@ export default function ClientesPage() {
     const sb = createClient()
     const [bonifRes, ccRes, pedidosRes] = await Promise.all([
       sb.from("bonificaciones").select("*").eq("cliente_id", cliente.id).eq("activo", true),
-      sb.from("comprobantes_venta").select("saldo_pendiente").eq("cliente_id", cliente.id).neq("estado_pago", "pagado"),
+      sb.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", cliente.id).maybeSingle(),
       sb.from("pedidos").select("id, numero_pedido, fecha, estado, total").eq("cliente_id", cliente.id).neq("estado", "eliminado").order("fecha", { ascending: false }).limit(5),
     ])
     setSheetBonifs(bonifRes.data || [])
-    const saldo = (ccRes.data || []).reduce((sum: number, c: any) => sum + (c.saldo_pendiente || 0), 0)
+    // Saldo desde el libro mayor (fuente única): Σdebe − Σhaber
+    const saldo = Number((ccRes.data as any)?.saldo_actual ?? 0)
     setSheetCC(saldo)
     setSheetPedidos(pedidosRes.data || [])
   }
