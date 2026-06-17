@@ -823,6 +823,23 @@ async function generarComprobante(
   const { error: detError } = await supabase.from('comprobantes_venta_detalle').insert(detalleInserts)
   if (detError) throw new Error('Error creando detalle: ' + detError.message)
 
+  // ─── Libro mayor (cuenta corriente del cliente) ───
+  // El comprobante incrementa la deuda del cliente: debe = total_factura.
+  // Fuente única del saldo (v_saldo_clientes). Si falla, no se aborta el
+  // comprobante (ya tiene CAE): la reconciliación detecta el faltante.
+  const { error: ccError } = await supabase.rpc('cc_postear', {
+    p_cliente_id:         pedido.cliente_id,
+    p_tipo_movimiento:    tipoComprobante === 'PRES' ? 'presupuesto' : 'factura',
+    p_debe:               totalFactura,
+    p_haber:              0,
+    p_referencia_tipo:    'comprobante_venta',
+    p_referencia_id:      comprobante.id,
+    p_numero_comprobante: numeroComprobante,
+    p_observaciones:      `${tipoComprobante} ${numeroComprobante}`,
+    p_usuario_id:         creadoPor ?? null,
+  })
+  if (ccError) console.error('[cc_postear] comprobante', comprobante.id, ccError.message)
+
   // ─── Stock ───
   for (const item of items) {
     await supabase.rpc('increment_stock_actual', {

@@ -307,17 +307,20 @@ export async function POST(request: Request) {
       .eq('tipo_comprobante', tipoFinal)
       .eq('punto_venta', puntoVenta)
 
-    // CC: el cliente debe más
-    await supabase.from('cuenta_corriente_ajustes').insert({
-      cliente_id,
-      tipo_movimiento:    'debe',
-      tipo_comprobante:   tipoFinal,
-      numero_comprobante: numeroComprobante,
-      monto:              totalComprobante,
-      fecha:              todayArgentina(),
-      concepto:           'Nota de Débito',
-      descripcion:        concepto,
+    // Libro mayor: la Nota de Débito incrementa la deuda del cliente (debe).
+    // Fuente única del saldo (v_saldo_clientes); reemplaza cuenta_corriente_ajustes.
+    const { error: ccError } = await supabase.rpc('cc_postear', {
+      p_cliente_id:         cliente_id,
+      p_tipo_movimiento:    'nota_debito',
+      p_debe:               totalComprobante,
+      p_haber:              0,
+      p_referencia_tipo:    'comprobante_venta',
+      p_referencia_id:      comprobante.id,
+      p_numero_comprobante: numeroComprobante,
+      p_observaciones:      `${tipoFinal} ${numeroComprobante} — ${concepto}`,
+      p_usuario_id:         auth?.user?.id ?? null,
     })
+    if (ccError) console.error('[cc_postear] ND', comprobante.id, ccError.message)
 
     // ─── Generar PDF con QR y subirlo al bucket ───
     try {

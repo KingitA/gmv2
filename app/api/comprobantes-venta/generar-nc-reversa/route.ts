@@ -455,16 +455,20 @@ export async function POST(request: Request) {
       .eq("tipo_comprobante", tipoFinal)
       .eq("punto_venta", numeracion.punto_venta)
 
-    await supabase.from("cuenta_corriente_ajustes").insert({
-      cliente_id: devolucion.cliente_id,
-      tipo_movimiento: "haber",
-      tipo_comprobante: tipoFinal,
-      numero_comprobante: numeroComprobante,
-      monto: Math.abs(totalComprobante),
-      fecha: todayArgentina(),
-      concepto: "Devolución",
-      descripcion: motivo_ajuste,
+    // Libro mayor: la NC/Reversa acredita al cliente (haber). Fuente única del
+    // saldo (v_saldo_clientes); reemplaza el insert legacy a cuenta_corriente_ajustes.
+    const { error: ccError } = await supabase.rpc('cc_postear', {
+      p_cliente_id:         devolucion.cliente_id,
+      p_tipo_movimiento:    'nota_credito',
+      p_debe:               0,
+      p_haber:              Math.abs(totalComprobante),
+      p_referencia_tipo:    'comprobante_venta',
+      p_referencia_id:      comprobante.id,
+      p_numero_comprobante: numeroComprobante,
+      p_observaciones:      `${tipoFinal} ${numeroComprobante} — Devolución${motivo_ajuste ? ': ' + motivo_ajuste : ''}`,
+      p_usuario_id:         auth.user.id,
     })
+    if (ccError) console.error('[cc_postear] NC/REV', comprobante.id, ccError.message)
 
     // Marcar la devolución como facturada para que no pueda generar otra NC
     await supabase

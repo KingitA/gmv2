@@ -96,6 +96,22 @@ export async function POST(
       console.error("[cheques/rechazar] Error creando ND:", ndErr)
     }
 
+    // ── 2b. Libro mayor: la ND por cheque rechazado incrementa la deuda (debe) ──
+    if (nd) {
+      const { error: ccErr } = await supabase.rpc("cc_postear", {
+        p_cliente_id:      cheque.cliente_origen_id,
+        p_tipo_movimiento: "nota_debito",
+        p_debe:            Number(cheque.monto),
+        p_haber:           0,
+        p_referencia_tipo: "comprobante_venta",
+        p_referencia_id:   nd.id,
+        p_numero_comprobante: numeroND,
+        p_observaciones:   `Débito por cheque rechazado Nro. ${cheque.numero || chequeId.slice(0, 8)}`,
+        p_usuario_id:      auth.user.id,
+      })
+      if (ccErr) console.error("[cc_postear] ND cheque rechazado", nd.id, ccErr.message)
+    }
+
     // ── 3. Registrar en kardex_contable ──
     await supabase.from("kardex_contable").insert({
       tipo_movimiento: "DEBITO_CHEQUE_RECHAZADO",

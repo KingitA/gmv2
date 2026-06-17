@@ -336,19 +336,24 @@ export async function POST(
       }
     }
 
-    // ─── 12. CC: si el inverso genera movimiento en cuenta corriente ───
+    // ─── 12. CC: el comprobante inverso postea al libro mayor ───
+    // Por SIGNO de total_factura (misma fórmula que el backfill) → consistente
+    // entre runtime y reconciliación. Reemplaza cuenta_corriente_ajustes.
     const ccMovimiento = CC_MOVIMIENTO[tipoInverso]
     if (ccMovimiento) {
-      await supabase.from('cuenta_corriente_ajustes').insert({
-        cliente_id:         original.cliente_id,
-        tipo_movimiento:    ccMovimiento,
-        tipo_comprobante:   tipoInverso,
-        numero_comprobante: numeroComprobante,
-        monto:              Math.abs(totalFactura),
-        fecha:              todayArgentina(),
-        concepto:           'Anulación',
-        descripcion:        leyenda,
+      const tf = Number(totalFactura)
+      const { error: ccError } = await supabase.rpc('cc_postear', {
+        p_cliente_id:         original.cliente_id,
+        p_tipo_movimiento:    tipoInverso.startsWith('NC') || tipoInverso === 'REV' ? 'nota_credito' : 'nota_debito',
+        p_debe:               Math.max(tf, 0),
+        p_haber:              Math.max(-tf, 0),
+        p_referencia_tipo:    'comprobante_venta',
+        p_referencia_id:      inverso.id,
+        p_numero_comprobante: numeroComprobante,
+        p_observaciones:      `Anulación ${tipoInverso} ${numeroComprobante} → ${original.numero_comprobante}`,
+        p_usuario_id:         auth.user.id,
       })
+      if (ccError) console.error('[cc_postear] anulación', inverso.id, ccError.message)
     }
 
     // ─── 13. Comisiones negativas si el original tenía comisión ───

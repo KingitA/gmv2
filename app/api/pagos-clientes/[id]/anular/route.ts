@@ -162,6 +162,23 @@ export async function POST(
       }
     } catch (e: any) { throw e }
 
+    // ── 7b. Libro mayor: revertir el haber del pago (solo si estaba confirmado) ──
+    // Un pago 'pendiente' nunca posteó al mayor, así que no se revierte.
+    if (pago.estado === "confirmado") {
+      const { error: ccErr } = await supabase.rpc("cc_postear", {
+        p_cliente_id:      pago.cliente_id,
+        p_tipo_movimiento: "ajuste",
+        p_debe:            Math.abs(Number(pago.monto)),
+        p_haber:           0,
+        p_referencia_tipo: "pago_anulacion",
+        p_referencia_id:   pagoId,
+        p_numero_comprobante: null,
+        p_observaciones:   `Anulación de pago${motivo ? ` — ${motivo}` : ""}`,
+        p_usuario_id:      auth.user.id,
+      })
+      if (ccErr) errores.push(`cc_postear anulación: ${ccErr.message}`)
+    }
+
     // ── 8. Registro en kardex_contable ──
     try {
       await supabase.from("kardex_contable").insert({

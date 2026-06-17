@@ -134,6 +134,22 @@ async function crearComprobante(
   if (error || !data) {
     throw new Error(`Error creando comprobante ${params.tipo}: ${error?.message}`)
   }
+
+  // Libro mayor: la NC/REV de bonificación acredita al cliente (haber).
+  // Junto al pago (haber) cancela la factura (debe): FA − pago − NC = 0.
+  const { error: ccError } = await supabase.rpc("cc_postear", {
+    p_cliente_id:         params.cliente_id,
+    p_tipo_movimiento:    "nota_credito",
+    p_debe:               0,
+    p_haber:              Math.abs(params.total_factura),
+    p_referencia_tipo:    "comprobante_venta",
+    p_referencia_id:      data.id,
+    p_numero_comprobante: params.numero,
+    p_observaciones:      params.observaciones || "Bonificación pago contado",
+    p_usuario_id:         null,
+  })
+  if (ccError) console.error("[cc_postear] bonificación", data.id, ccError.message)
+
   return data
 }
 

@@ -138,6 +138,20 @@ export async function POST(
           cobrador_id: viaje.chofer_id,
         })
 
+        // Libro mayor: el pago confirmado acredita al cliente (haber)
+        const { error: ccErr } = await supabase.rpc("cc_postear", {
+          p_cliente_id:      pago.cliente_id,
+          p_tipo_movimiento: "pago",
+          p_debe:            0,
+          p_haber:           Math.abs(Number(pago.monto)),
+          p_referencia_tipo: "pago_cliente",
+          p_referencia_id:   pago.id,
+          p_numero_comprobante: numeroRecibo,
+          p_observaciones:   `Cobro rendición viaje — ${numeroRecibo}`,
+          p_usuario_id:      auth.user.id,
+        })
+        if (ccErr) resultados.errores.push(`cc_postear pago ${pago.id}: ${ccErr.message}`)
+
         resultados.pagos_confirmados++
         resultados.recibos_generados.push(numeroRecibo)
       } catch (err: any) {
@@ -177,18 +191,11 @@ export async function POST(
           }
         }
 
-        // Registrar ajuste en cuenta corriente del cliente (haber = crédito)
-        await supabase.from("cuenta_corriente_clientes").insert({
-          cliente_id: dev.cliente_id,
-          tipo_movimiento: "haber",
-          haber: dev.monto_total,
-          debe: 0,
-          saldo: 0, // el saldo real se calcula en queries
-          referencia_tipo: "devolucion",
-          referencia_id: dev.id,
-          observaciones: `Devolución confirmada — rendición viaje`,
-          usuario_id: auth.user.id,
-        })
+        // NOTA: la confirmación de la devolución NO acredita el libro mayor.
+        // El crédito al cliente se postea cuando se genera la NC/Reversa
+        // (app/api/comprobantes-venta/generar-nc-reversa), que es el documento
+        // fiscal de la devolución. Acá solo se confirma y se restaura stock,
+        // para no doble-contar el haber.
 
         resultados.devoluciones_confirmadas++
       } catch (err: any) {

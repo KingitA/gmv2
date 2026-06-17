@@ -328,6 +328,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── 4b. Libro mayor: el pago confirmado acredita al cliente (haber) ──
+    // haber = monto del pago (= pago.monto), consistente con el backfill.
+    // NOTA: el crédito por retenciones aún no se postea (pago.monto no las
+    // incluye hoy); se resolverá en la cobranza unificada (Fase 2).
+    const { error: ccPagoErr } = await supabase.rpc("cc_postear", {
+      p_cliente_id:      cliente_id,
+      p_tipo_movimiento: "pago",
+      p_debe:            0,
+      p_haber:           montoTotal,
+      p_referencia_tipo: "pago_cliente",
+      p_referencia_id:   pago.id,
+      p_numero_comprobante: null,
+      p_observaciones:   observaciones || "Pago",
+      p_usuario_id:      auth.user.id,
+    })
+    if (ccPagoErr) console.error("[cc_postear] pago", pago.id, ccPagoErr.message)
+
     // ── 5. Generar número de recibo ──
     const { data: numRow, error: numErr } = await admin
       .from("numeracion_comprobantes")

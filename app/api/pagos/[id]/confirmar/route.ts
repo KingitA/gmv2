@@ -39,6 +39,23 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
       if (updateError) throw updateError
 
+      // Libro mayor: el pago confirmado acredita al cliente (haber).
+      // Guarda: solo si no estaba ya confirmado (evita doble posteo).
+      if (pago.estado !== "confirmado") {
+        const { error: ccErr } = await supabase.rpc("cc_postear", {
+          p_cliente_id:      pago.cliente_id,
+          p_tipo_movimiento: "pago",
+          p_debe:            0,
+          p_haber:           Math.abs(Number(pago.monto)),
+          p_referencia_tipo: "pago_cliente",
+          p_referencia_id:   id,
+          p_numero_comprobante: null,
+          p_observaciones:   pago.observaciones || "Pago confirmado",
+          p_usuario_id:      auth.user.id,
+        })
+        if (ccErr) console.error("[cc_postear] confirmar pago", id, ccErr.message)
+      }
+
       let imputacionesFinales = imputaciones
 
       if (!imputacionesFinales || imputacionesFinales.length === 0) {

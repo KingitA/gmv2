@@ -166,6 +166,20 @@ export async function POST(request: NextRequest) {
     // Marcar el pago como confirmado directamente
     await supabase.from("pagos_clientes").update({ estado: "confirmado" }).eq("id", pago.id)
 
+    // Libro mayor: el pago confirmado acredita al cliente (haber)
+    const { error: ccErr } = await supabase.rpc("cc_postear", {
+      p_cliente_id:      cliente_id,
+      p_tipo_movimiento: "pago",
+      p_debe:            0,
+      p_haber:           montoTotal,
+      p_referencia_tipo: "pago_cliente",
+      p_referencia_id:   pago.id,
+      p_numero_comprobante: null,
+      p_observaciones:   observaciones || "Pago",
+      p_usuario_id:      auth.user.id,
+    })
+    if (ccErr) console.error("[cc_postear] pago (api/pagos)", pago.id, ccErr.message)
+
     return NextResponse.json({
       success: true,
       pago,
