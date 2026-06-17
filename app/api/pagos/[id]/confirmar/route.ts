@@ -209,7 +209,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       const admin = createAdminClient()
       const result = await confirmarCobranza(supabase, admin, {
         pagoId: id,
-        usuarioId: usuario_confirmador || auth.user.id,
+        usuarioId: auth.user.id, // usuario logueado real (uuid), no el placeholder del body
       })
 
       return NextResponse.json({

@@ -44,7 +44,7 @@ export default function RevisionPagosPage() {
       .select("*")
       .eq("cliente_id", clienteId)
       .in("estado_pago", ["pendiente", "parcial"])
-      .order("fecha_emision", { ascending: true })
+      .order("fecha", { ascending: true })
 
     setComprobantes(data || [])
   }
