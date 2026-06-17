@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 
 // GET /api/chofer/viaje/[id]/cliente/[clienteId]
 // Datos del cliente para la entrega: pedido, comprobantes pendientes, devoluciones del viaje
@@ -80,13 +81,9 @@ export async function GET(
       .eq("viaje_id", viajeId)
       .eq("cliente_id", clienteId)
 
-    // Saldo real desde el libro mayor (fuente única)
-    const { data: saldoRow } = await supabase
-      .from("v_saldo_clientes")
-      .select("saldo_actual")
-      .eq("cliente_id", clienteId)
-      .maybeSingle()
-    const saldo_anterior = Number(saldoRow?.saldo_actual ?? 0)
+    // Doble saldo: real (libro mayor, confirmado) y proyectado (real − pendientes)
+    const saldos = await getSaldosCliente(supabase, clienteId)
+    const saldo_anterior = saldos.saldo_real
     const total_devuelto = (devoluciones || []).reduce((s, d) => s + Number(d.monto_total), 0)
     const total_cobrado = (pagos_registrados || []).reduce((s, p) => s + Number(p.monto), 0)
 
@@ -109,6 +106,9 @@ export async function GET(
       pagos_registrados: pagos_registrados || [],
       resumen: {
         saldo_anterior,
+        saldo_real: saldos.saldo_real,
+        saldo_proyectado: saldos.saldo_proyectado,
+        pendiente_verificacion: saldos.pendiente_verificacion,
         total_pedido: Number(pedido?.total) || 0,
         total_devuelto,
         total_cobrado,

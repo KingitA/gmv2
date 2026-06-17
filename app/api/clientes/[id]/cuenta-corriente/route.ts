@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from '@/lib/auth';
+import { getSaldosCliente } from '@/lib/cuenta-corriente/saldo';
 
 export const dynamic = "force-dynamic";
 
@@ -160,13 +161,9 @@ export async function GET(
             console.error("[v0] Error fetching devoluciones:", devolucionesError);
         }
 
-        // 5. Saldo total = fuente única: libro mayor (v_saldo_clientes = Σdebe − Σhaber)
-        const { data: saldoRow } = await supabase
-            .from("v_saldo_clientes")
-            .select("saldo_actual")
-            .eq("cliente_id", cliente_id)
-            .maybeSingle();
-        const saldo_total = Number(saldoRow?.saldo_actual ?? 0);
+        // 5. Saldo total = fuente única: libro mayor. Doble saldo: real vs proyectado.
+        const saldos = await getSaldosCliente(supabase, cliente_id);
+        const saldo_total = saldos.saldo_real;
 
         // Extracto (libro mayor) para la UI
         const { data: movimientos } = await supabase
@@ -180,6 +177,8 @@ export async function GET(
             cliente: {
                 ...cliente,
                 saldo_total,
+                saldo_proyectado: saldos.saldo_proyectado,
+                pendiente_verificacion: saldos.pendiente_verificacion,
                 condicion_iva: cliente.condicion_iva || null,
             },
             comprobantes: allComprobantes.map((comp: any) => ({

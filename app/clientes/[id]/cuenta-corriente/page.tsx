@@ -100,6 +100,8 @@ interface CuentaCorrienteData {
         direccion: string;
         telefono: string;
         saldo_total: number;
+        saldo_proyectado?: number;
+        pendiente_verificacion?: number;
         condicion_iva?: string | null;
     };
     comprobantes: Comprobante[];
@@ -421,10 +423,16 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         </div>
                     </div>
                     <div className="text-right">
-                        <p className="text-sm text-gray-500">Saldo Total</p>
+                        <p className="text-sm text-gray-500">Saldo Real</p>
                         <p className={`text-3xl font-bold ${data.cliente.saldo_total > 0 ? 'text-red-600' : 'text-green-600'}`}>
                             ${data.cliente.saldo_total.toLocaleString('es-AR')}
                         </p>
+                        {(data.cliente.pendiente_verificacion ?? 0) > 0 && (
+                            <p className="text-xs text-amber-600 mt-1">
+                                Pendiente de verificación: ${(data.cliente.pendiente_verificacion ?? 0).toLocaleString('es-AR')}
+                                {' · '}Proyectado: ${(data.cliente.saldo_proyectado ?? 0).toLocaleString('es-AR')}
+                            </p>
+                        )}
                     </div>
                 </div>
             </header>
