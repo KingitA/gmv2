@@ -28,7 +28,8 @@ export default function RevisionPagosPage() {
     try {
       const response = await fetch("/api/pagos?estado=pendiente")
       const data = await response.json()
-      setPagos(data || [])
+      if (!response.ok) throw new Error(data?.error || "Error cargando pagos")
+      setPagos(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error("[v0] Error cargando pagos:", error)
       toast({ title: "Error", description: "No se pudieron cargar los pagos pendientes", variant: "destructive" })

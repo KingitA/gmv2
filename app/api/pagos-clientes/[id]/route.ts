@@ -18,7 +18,7 @@ export async function GET(
       .select(`
         *,
         clientes(id, nombre, razon_social, cuit, direccion),
-        vendedor:usuarios!pagos_clientes_vendedor_id_fkey(nombre),
+        vendedor:vendedores!pagos_clientes_vendedor_id_fkey(nombre),
         pagos_detalle(*),
         retenciones(*),
         recibos(id, numero_recibo, pdf_url, fecha, monto_total)

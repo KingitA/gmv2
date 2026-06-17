@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
         `
         *,
         clientes(nombre, razon_social),
-        vendedor:usuarios!pagos_clientes_vendedor_id_fkey(nombre)
+        vendedor:vendedores!pagos_clientes_vendedor_id_fkey(nombre)
       `
       )
       .eq("estado", estado)
