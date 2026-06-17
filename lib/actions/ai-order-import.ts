@@ -332,7 +332,10 @@ async function extraerJSONConContinuacion(
     let acumulado = ""
 
     for (let intento = 0; intento <= MAX_CONTINUACIONES; intento++) {
-        const msg = await anthropic.messages.create({
+        // Streaming obligatorio: con max_tokens alto el SDK rechaza la llamada
+        // no-streaming (riesgo de superar 10 min). finalMessage() junta el
+        // mensaje completo y nos da stop_reason igual que create().
+        const stream = anthropic.messages.stream({
             model: "claude-haiku-4-5-20251001",
             max_tokens: 64000, // tope real de Haiku 4.5; entra un pedido de ~500 ítems de una
             temperature: 0.1,
@@ -341,6 +344,7 @@ async function extraerJSONConContinuacion(
                 ? [...messages, { role: "assistant", content: acumulado }]
                 : messages,
         })
+        const msg = await stream.finalMessage()
 
         const trozo = (msg.content[0] as { type: string; text: string })?.text ?? ""
         acumulado += trozo
