@@ -122,7 +122,7 @@ export default function ClienteDetailPage() {
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
       supabase.from("localidades").select("*, zonas(nombre)").order("provincia, nombre"),
       supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
-      supabase.from("comprobantes_venta").select("saldo_pendiente").eq("cliente_id", id).neq("estado_pago", "pagado"),
+      supabase.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", id).maybeSingle(),
       supabase.from("pedidos").select("id, numero_pedido, fecha, estado, total").eq("cliente_id", id).order("fecha", { ascending: false }).limit(10),
       supabase.from("articulos").select("proveedor_id, proveedores:proveedor_id(nombre)").not("precio_lista_especial", "is", null),
     ])
@@ -170,7 +170,8 @@ export default function ClienteDetailPage() {
     setVendedores(vendRes.data || [])
     setLocalidades(locRes.data || [])
     setListasPrecio(listasRes.data || [])
-    const balance = (ccRes.data || []).reduce((sum: number, r: any) => sum + (r.saldo_pendiente || 0), 0)
+    // Saldo desde el libro mayor (fuente única): Σdebe − Σhaber
+    const balance = Number((ccRes.data as any)?.saldo_actual ?? 0)
     setCcBalance(Math.round(balance * 100) / 100)
     setPedidosCliente(pedRes.data || [])
     if (clienteRes.data) {

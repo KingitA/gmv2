@@ -151,40 +151,29 @@ export async function GET(
             .eq("cliente_id", cliente_id)
             .order("created_at", { ascending: false });
 
-        // 4.5 Fetch 'Pedidos' from cuenta_corriente table (Pendientes de Facturación)
-        const { data: pedidosCtaCte, error: pedidosError } = await supabase
-            .from("cuenta_corriente")
-            .select("*")
-            .eq("cliente_id", cliente_id)
-            .eq("tipo_comprobante", "PEDIDO");
-
-        // Merge Pedidos into Comprobantes list
-        const pedidosFormatted = (pedidosCtaCte || []).map((p: any) => ({
-            id: p.id,
-            tipo_comprobante: "Pedido",
-            numero_comprobante: p.numero_comprobante, // e.g. PED-0001
-            fecha: p.fecha,
-            pedido_id: p.pedido_ref_id, // Reference to real pedido
-            numero_pedido: p.numero_comprobante,
-            total_factura: p.debe, // In CtaCte 'debe' is the amount
-            saldo_pendiente: p.saldo,
-            estado_pago: "pendiente"
-        }));
-
-        // Combine
-        const allComprobantes = [...(comprobantesConPedido || []), ...pedidosFormatted];
-        // Re-sort by date
+        // Comprobantes reales del cliente (la tabla 'cuenta_corriente' singular no
+        // existe; el feature de "pedidos pendientes de facturación" estaba muerto).
+        const allComprobantes = [...(comprobantesConPedido || [])];
         allComprobantes.sort((a: any, b: any) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
 
         if (devolucionesError) {
             console.error("[v0] Error fetching devoluciones:", devolucionesError);
         }
 
-        // 5. Calculate total outstanding balance
-        const saldo_total = allComprobantes.reduce(
-            (sum: number, comp: any) => sum + Number(comp.saldo_pendiente || 0),
-            0
-        );
+        // 5. Saldo total = fuente única: libro mayor (v_saldo_clientes = Σdebe − Σhaber)
+        const { data: saldoRow } = await supabase
+            .from("v_saldo_clientes")
+            .select("saldo_actual")
+            .eq("cliente_id", cliente_id)
+            .maybeSingle();
+        const saldo_total = Number(saldoRow?.saldo_actual ?? 0);
+
+        // Extracto (libro mayor) para la UI
+        const { data: movimientos } = await supabase
+            .from("cuenta_corriente_clientes")
+            .select("fecha, tipo_movimiento, debe, haber, numero_comprobante, observaciones, referencia_tipo, referencia_id")
+            .eq("cliente_id", cliente_id)
+            .order("fecha", { ascending: false });
 
         // 6. Format response
         const response = {
@@ -208,6 +197,7 @@ export async function GET(
             })),
             pagos: pagosConImputaciones,
             devoluciones: devoluciones || [],
+            movimientos: movimientos || [],
         };
 
         return NextResponse.json(response);

@@ -24,18 +24,6 @@ export async function GET(request: NextRequest) {
 
     if (comprobantesError) throw comprobantesError
 
-    // Obtener pagos confirmados (de la tabla pagos_detalle + imputaciones)
-    const { data: pagosProveedores, error: pagosError } = await supabase
-      .from("pagos_detalle")
-      .select(`
-        *,
-        pagos_proveedores (
-          fecha_pago,
-          proveedor_id
-        )
-      `)
-      .order("created_at", { ascending: false })
-
     // Obtener pagos de clientes (nuevos, desde CRM)
     const { data: pagosClientes, error: pagosClientesError } = await supabase
       .from("pagos_clientes")
@@ -45,8 +33,20 @@ export async function GET(request: NextRequest) {
 
     if (pagosClientesError) throw pagosClientesError
 
-    // Calcular saldo total
-    const saldoTotal = comprobantes?.reduce((sum, c) => sum + (c.saldo_pendiente || 0), 0) || 0
+    // Saldo total = fuente única: libro mayor (vista v_saldo_clientes = Σdebe − Σhaber)
+    const { data: saldoRow } = await supabase
+      .from("v_saldo_clientes")
+      .select("saldo_actual")
+      .eq("cliente_id", cliente_id)
+      .maybeSingle()
+    const saldoTotal = Number(saldoRow?.saldo_actual ?? 0)
+
+    // Extracto (libro mayor) para la UI
+    const { data: movimientos } = await supabase
+      .from("cuenta_corriente_clientes")
+      .select("fecha, tipo_movimiento, debe, haber, numero_comprobante, observaciones, referencia_tipo, referencia_id")
+      .eq("cliente_id", cliente_id)
+      .order("fecha", { ascending: false })
 
     // Separar comprobantes por estado
     const hoy = todayArgentina()
@@ -83,6 +83,7 @@ export async function GET(request: NextRequest) {
         comprobantes_pagados: comprobantesPagados,
         pagos_clientes: pagosClientes,
         pedidos: pedidos,
+        movimientos: movimientos || [],
       },
     })
   } catch (error: any) {
