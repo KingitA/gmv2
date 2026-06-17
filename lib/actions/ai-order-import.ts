@@ -290,14 +290,11 @@ ${text}`
 
     let responseText: string
     try {
-        const msg = await anthropic.messages.create({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 8192,
-            temperature: 0.1,
-            system: "You are a data extraction assistant. Always respond with valid JSON only. No markdown, no explanation, no code fences.",
-            messages: [{ role: "user", content: prompt }],
-        })
-        responseText = (msg.content[0] as { type: string; text: string }).text
+        responseText = await extraerJSONConContinuacion(
+            prompt,
+            "You are a data extraction assistant. Always respond with valid JSON only. No markdown, no explanation, no code fences.",
+            "pedido",
+        )
     } catch (e: any) {
         throw new Error(`Claude falló al procesar el texto del email: ${e.message || 'error desconocido'}`)
     }
@@ -310,6 +307,57 @@ ${text}`
     }
 
     return await processMatches(parsedData)
+}
+
+/**
+ * Llama a Claude y, si la respuesta se corta por límite de tokens
+ * (stop_reason === "max_tokens"), continúa la extracción desde donde quedó
+ * usando prefill (soportado en Haiku 4.5) hasta que termine completa.
+ * Concatena los pedazos en un único JSON.
+ *
+ * Garantía dura: o devuelve la respuesta COMPLETA, o lanza un error explícito.
+ * Nunca devuelve un pedido cortado en silencio.
+ */
+const MAX_CONTINUACIONES = 10
+
+async function extraerJSONConContinuacion(
+    prompt: string,
+    system: string,
+    contexto: string,
+): Promise<string> {
+    // Prefill: el partial vuelve como turno del assistant y el modelo lo continúa.
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [
+        { role: "user", content: prompt },
+    ]
+    let acumulado = ""
+
+    for (let intento = 0; intento <= MAX_CONTINUACIONES; intento++) {
+        const msg = await anthropic.messages.create({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 64000, // tope real de Haiku 4.5; entra un pedido de ~500 ítems de una
+            temperature: 0.1,
+            system,
+            messages: acumulado
+                ? [...messages, { role: "assistant", content: acumulado }]
+                : messages,
+        })
+
+        const trozo = (msg.content[0] as { type: string; text: string })?.text ?? ""
+        acumulado += trozo
+
+        if (msg.stop_reason !== "max_tokens") {
+            // Terminó completa (end_turn u otro motivo no-truncante)
+            return acumulado
+        }
+
+        console.warn(`[extraerJSON ${contexto}] Respuesta cortada por límite de tokens, continuando (intento ${intento + 1}). Largo acumulado: ${acumulado.length}`)
+    }
+
+    // Agotamos las continuaciones y SIGUE cortada: fallar fuerte, nunca devolver parcial.
+    throw new Error(
+        `El ${contexto} es demasiado largo: la IA no terminó de extraerlo tras ${MAX_CONTINUACIONES} continuaciones. ` +
+        `Dividí el ${contexto} en dos y volvé a importarlo. (No se importó nada para evitar cargar datos incompletos.)`
+    )
 }
 
 /**
