@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef, memo } from "react"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { createClient as createClientBrowser } from "@/lib/supabase/client"
+import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
 import { formatCurrency } from "@/lib/utils"
 
 // ─── Tipos ────────────────────────────────────────────────────
@@ -112,6 +113,7 @@ export default function ClienteEntregaPage() {
   const [comprobanteArchivos, setComprobanteArchivos] = useState<{ url: string; nombre: string }[]>([])
   // Clientes adicionales para cobrar en la misma cobranza (cobro conjunto en la calle)
   const [cobrosExtra, setCobrosExtra] = useState<Array<{ cliente: any; saldo: number; monto: number }>>([])
+  const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())  // anticipos con 10% contado
 
   const esReadOnly = READONLY_ESTADOS.includes(data?.viaje_estado || "")
 
@@ -133,14 +135,7 @@ export default function ClienteEntregaPage() {
     else if (accion === "devolucion") { setShowDevolucionSheet(true); accionAplicada.current = true }
   }, [data, searchParams])
 
-  useEffect(() => {
-    if (!data) return
-    const init: Record<string, number> = {}
-    for (const c of data.comprobantes_pendientes) {
-      init[c.id] = Number(c.saldo_pendiente)
-    }
-    setComprobantesSeleccionados(init)
-  }, [data])
+  // La selección de comprobantes/pedidos la maneja ComprobantesSelector (incluye anticipos).
 
   // Búsqueda de artículos
   useEffect(() => {
@@ -308,8 +303,10 @@ export default function ClienteEntregaPage() {
     }
     setGuardandoCobro(true)
     try {
+      // Imputaciones = solo comprobantes reales. Las claves "pedido:<id>" son anticipos
+      // a pedidos sin facturar → quedan como pago a cuenta.
       const imputaciones = Object.entries(comprobantesSeleccionados)
-        .filter(([, monto]) => monto > 0)
+        .filter(([k, monto]) => monto > 0 && !k.startsWith("pedido:"))
         .map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado }))
       const devPendientes = incluirDevoluciones
         ? (data?.devoluciones || []).filter((d) => d.estado === "pendiente").map((d: any) => d.id)
@@ -324,13 +321,14 @@ export default function ClienteEntregaPage() {
           imputaciones,
           devolucion_ids: devPendientes,
           comprobante_urls: comprobanteArchivos,
+          pedidos_contado: [...contadoPedidos],
           cobros_extra: cobrosExtra
             .filter((c) => c.monto > 0)
             .map((c) => ({ cliente_id: c.cliente.id, metodos: [{ tipo: "efectivo", monto: c.monto }], imputaciones: [] })),
         }),
       })
       const d = await res.json()
-      if (d.success) { setShowCobroSheet(false); setCobrosExtra([]); setComprobanteArchivos([]); cargarDatos() }
+      if (d.success) { setShowCobroSheet(false); setCobrosExtra([]); setComprobanteArchivos([]); setContadoPedidos(new Set()); setComprobantesSeleccionados({}); cargarDatos() }
       else alert(d.error || "Error al registrar cobro")
     } finally { setGuardandoCobro(false) }
   }
@@ -609,6 +607,8 @@ export default function ClienteEntregaPage() {
           onFotos={procesarFotosOCR}
           cobrosExtra={cobrosExtra}
           setCobrosExtra={setCobrosExtra}
+          clienteId={clienteId}
+          onContadoPedidosChange={setContadoPedidos}
           onClose={() => setShowCobroSheet(false)}
         />
       )}
@@ -636,6 +636,8 @@ function CobroSheet({
   onFotos,
   cobrosExtra,
   setCobrosExtra,
+  clienteId,
+  onContadoPedidosChange,
   onClose,
 }: {
   comprobantes_pendientes: any[]
@@ -655,6 +657,8 @@ function CobroSheet({
   onFotos: (files: FileList | File[]) => void
   cobrosExtra: Array<{ cliente: any; saldo: number; monto: number }>
   setCobrosExtra: React.Dispatch<React.SetStateAction<Array<{ cliente: any; saldo: number; monto: number }>>>
+  clienteId: string
+  onContadoPedidosChange: (s: Set<string>) => void
   onClose: () => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -693,29 +697,16 @@ function CobroSheet({
         </div>
 
         <div className="p-5 space-y-5">
-          {/* Comprobantes */}
-          {comprobantes_pendientes.length > 0 && (
-            <div>
-              <h3 className="font-bold text-gray-700 mb-3">Comprobantes a cobrar</h3>
-              <div className="space-y-2">
-                {comprobantes_pendientes.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
-                    <div>
-                      <p className="font-medium text-sm">{c.tipo_comprobante} {c.numero_comprobante}</p>
-                      <p className="text-xs text-gray-400">{new Date(c.fecha).toLocaleDateString("es-AR")}</p>
-                    </div>
-                    <input
-                      type="number"
-                      value={comprobantesSeleccionados[c.id] || 0}
-                      max={c.saldo_pendiente}
-                      onChange={(e) => setComprobantesSeleccionados((p) => ({ ...p, [c.id]: Math.min(Number(e.target.value), c.saldo_pendiente) }))}
-                      className="w-28 border-2 border-gray-200 rounded-lg px-2 py-1 text-right font-bold"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Pedidos y comprobantes a cobrar (incluye anticipos a pedidos sin facturar) */}
+          <div>
+            <h3 className="font-bold text-gray-700 mb-3">Pedidos / comprobantes a cobrar</h3>
+            <ComprobantesSelector
+              clienteId={clienteId}
+              seleccionados={comprobantesSeleccionados}
+              onChange={setComprobantesSeleccionados}
+              onContadoPedidosChange={onContadoPedidosChange}
+            />
+          </div>
 
           {/* Agregar cliente para cobrar (cobro conjunto en la calle) */}
           <div>

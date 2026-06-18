@@ -27,6 +27,7 @@ export async function POST(
       observaciones,
       comprobante_urls, // [{url, nombre}] fotos de comprobantes
       cobros_extra,     // [{ cliente_id, monto, metodos, imputaciones }] otros clientes en la misma cobranza
+      pedidos_contado,  // string[] pedidos sin facturar anticipados con 10% contado
     } = body
 
     if (!cliente_id || !monto_total || !metodos?.length) {
@@ -67,6 +68,14 @@ export async function POST(
       .single()
 
     if (pagoError) throw pagoError
+
+    // Marcar pedidos anticipados con 10% contado (NC automática al facturar)
+    if (Array.isArray(pedidos_contado) && pedidos_contado.length) {
+      await supabase
+        .from("pedidos")
+        .update({ pago_contado_10: true, anticipo_pago_id: pago.id })
+        .in("id", pedidos_contado)
+    }
 
     // Fotos de comprobantes (cheque/transferencia) cargadas por el chofer
     if (Array.isArray(comprobante_urls) && comprobante_urls.length) {
