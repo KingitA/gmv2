@@ -7,6 +7,7 @@ import {
   getArticulosListado,
 } from "@/lib/actions/deposito"
 import { localMatch } from "@/lib/search/local-match"
+import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 
 interface Articulo {
   id: string
@@ -479,9 +480,9 @@ export default function ModificacionArticulosPage() {
             <div style={C.results}>
               {resultados.map(art => (
                 <button key={art.id} style={C.artBtn} onClick={() => seleccionar(art)}>
-                  <div style={C.artName}>{art.descripcion}</div>
+                  <div style={C.artName}>{art.descripcion}{articuloMarcaSuffix(art)}</div>
                   <div style={C.artSub}>
-                    <span style={{ fontFamily: "monospace" }}>{art.sku}</span>
+                    <span style={{ fontFamily: "monospace" }}>{articuloInfoLine(art)}</span>
                     <span>Stock: <span style={C.artStock}>{art.stock_actual ?? 0}</span></span>
                     {art.orden_deposito != null && <span style={{ color: "#6366f1" }}>#{art.orden_deposito}</span>}
                   </div>
@@ -509,8 +510,8 @@ export default function ModificacionArticulosPage() {
         <>
           <div style={C.artSelected}>
             <div style={C.artSelectedInfo}>
-              <div style={C.artSelectedName}>{articulo.descripcion}</div>
-              <div style={C.artSelectedSub}>{articulo.sku}{articulo.ean13?.length ? ` · ${articulo.ean13.join(', ')}` : ""}</div>
+              <div style={C.artSelectedName}>{articulo.descripcion}{articuloMarcaSuffix(articulo)}</div>
+              <div style={C.artSelectedSub}>{articuloInfoLine(articulo)}</div>
             </div>
             <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
             <button style={C.changeBtn} onClick={() => { setArticulo(null); setBusqueda(""); if (enNavegacion) setPanelFiltro("lista") }}>

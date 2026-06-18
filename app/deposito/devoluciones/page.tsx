@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
+import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 
 interface DetalleDevolucion {
   id: string; cantidad: number; motivo?: string; es_vendible: boolean
@@ -174,8 +175,8 @@ export default function DevolucionesPage() {
       {Toast}
       <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:18, padding:16, marginBottom:18 }}>
         <div style={{ fontSize:12, color:C.light, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:4 }}>Artículo buscado</div>
-        <div style={{ fontSize:17, fontWeight:800, color:C.text }}>{articuloBuscado.descripcion}</div>
-        <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:4 }}>{articuloBuscado.sku}</div>
+        <div style={{ fontSize:17, fontWeight:800, color:C.text }}>{articuloBuscado.descripcion}{articuloMarcaSuffix(articuloBuscado)}</div>
+        <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:4 }}>{articuloInfoLine(articuloBuscado)}</div>
       </div>
       {devConArticulo.length===0 ? (
         <div style={{ textAlign:"center", padding:"40px 20px" }}>
@@ -234,8 +235,8 @@ export default function DevolucionesPage() {
         {resultados.map(art=>(
           <button key={art.id} onClick={()=>seleccionarArticulo(art)}
             style={{ textAlign:"left", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:16, padding:18, cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
-            <div style={{ color:C.text, fontWeight:700, fontSize:16 }}>{art.descripcion}</div>
-            <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:5 }}>{art.sku}{art.ean13&&` · ${art.ean13}`}</div>
+            <div style={{ color:C.text, fontWeight:700, fontSize:16 }}>{art.descripcion}{articuloMarcaSuffix(art)}</div>
+            <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:5 }}>{articuloInfoLine(art)}</div>
           </button>
         ))}
         {!busqueda&&(

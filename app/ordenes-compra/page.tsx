@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Search, Send, FileText, CheckCircle2, AlertCircle, Clock, Trash2, Pencil } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { localMatch } from "@/lib/search/local-match"
+import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import type { Proveedor, OrdenCompra } from "@/lib/types"
 import { ImportOrderDialog } from "@/components/ordenes/ImportOrderDialog"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
@@ -1231,8 +1232,8 @@ export default function OrdenesCompraPage() {
                     {articulosExternos.map((art: any) => (
                       <TableRow key={art.id} className="cursor-pointer hover:bg-accent" onClick={() => agregarArticuloExterno(art)}>
                         <TableCell>
-                          <div className="font-medium text-sm">{art.descripcion}</div>
-                          <div className="text-xs text-muted-foreground">SKU: {art.sku} | ${art.precio_compra?.toFixed(2) || '0.00'}</div>
+                          <ArticuloResultRow articulo={art} size="sm" />
+                          <div className="text-xs text-muted-foreground mt-0.5">${art.precio_compra?.toFixed(2) || '0.00'}</div>
                         </TableCell>
                         <TableCell className="text-right">
                           <Button variant="ghost" size="sm">Agregar</Button>

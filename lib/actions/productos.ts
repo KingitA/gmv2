@@ -3,7 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 
-const SELECT = "id, sku, ean13, descripcion, rubro, categoria, precio_compra, precio_base, unidades_por_bulto, activo"
+const SELECT = "id, sku, ean13, descripcion, rubro, categoria, precio_compra, precio_base, unidades_por_bulto, activo, marca:marca_id(descripcion)"
 
 export async function searchProductos(searchTerm: string) {
   const supabase = createAdminClient()

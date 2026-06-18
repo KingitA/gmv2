@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo } from "@/lib/actions/pedidos"
+import { localMatch } from "@/lib/search/local-match"
+import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -548,8 +550,7 @@ export default function PedidoEditPage() {
                         <div key={p.id}
                           className="px-4 py-3 hover:bg-amber-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
                           onClick={() => agregarItemBonif(p)}>
-                          <div className="font-medium text-slate-800">{p.descripcion}</div>
-                          <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
+                          <ArticuloResultRow articulo={p} size="sm" />
                         </div>
                       ))}
                     </div>
@@ -613,8 +614,7 @@ export default function PedidoEditPage() {
                         <div key={p.id}
                           className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
                           onClick={() => { setSelectedProduct(p); setFound([]); setQuery(""); setQty(1) }}>
-                          <div className="font-medium text-slate-800">{p.descripcion}</div>
-                          <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
+                          <ArticuloResultRow articulo={p} size="sm" />
                         </div>
                       ))}
                     </div>
@@ -624,8 +624,7 @@ export default function PedidoEditPage() {
                 /* Paso 2: confirmar cantidad */
                 <div className="flex items-center gap-3">
                   <div className="flex-1 min-w-0 bg-white border border-indigo-200 rounded-lg px-3 py-2">
-                    <p className="font-medium text-sm text-slate-800 truncate">{selectedProduct.descripcion}</p>
-                    <p className="text-xs text-slate-400 font-mono">{selectedProduct.sku}</p>
+                    <ArticuloResultRow articulo={selectedProduct} size="sm" />
                   </div>
                   <button
                     className="text-xs text-slate-400 hover:text-slate-600 shrink-0 underline"

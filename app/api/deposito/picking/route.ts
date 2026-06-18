@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
     if (!q || q.length < 2) return NextResponse.json([])
 
     const adminSupabase = createAdminClient()
-    const SELECT = "id, sku, descripcion, ean13, codigo_bulto, stock_actual, unidades_por_bulto, unidad_de_medida"
+    const SELECT = "id, sku, descripcion, ean13, codigo_bulto, stock_actual, unidades_por_bulto, unidad_de_medida, marca:marca_id(descripcion)"
 
     // EAN13 / codigo_bulto exacto primero (scanner — máxima prioridad)
     if (/^\d{8,14}$/.test(q)) {

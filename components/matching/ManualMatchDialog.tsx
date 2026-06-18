@@ -1,5 +1,6 @@
 
 import { useState, useEffect } from 'react';
+import { ArticuloResultRow } from '@/components/search/ArticuloResultRow';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -86,6 +87,8 @@ export function ManualMatchDialog({ open, onOpenChange, onSelect, itemName, prov
                         descripcion: art.descripcion,
                         sku: art.sku,
                         ean13: art.ean13,
+                        marca: art.marca,
+                        unidades_por_bulto: art.unidades_por_bulto,
                         codigo_interno: art.sku, // Map for UI compatibility
                         codigo_barras: art.ean13, // Map for UI compatibility
                         source: 'global_search'
@@ -131,13 +134,9 @@ export function ManualMatchDialog({ open, onOpenChange, onSelect, itemName, prov
 
                     <div className="border rounded-md divide-y max-h-[300px] overflow-y-auto">
                         {results.map(r => (
-                            <div key={r.id} className="p-3 flex justify-between items-center hover:bg-slate-50">
-                                <div>
-                                    <div className="font-medium">{r.descripcion}</div>
-                                    <div className="text-xs text-muted-foreground flex gap-2">
-                                        <span>SKU: {r.sku || r.codigo_interno}</span>
-                                        {(r.ean13?.length || r.codigo_barras) && <span>EAN: {Array.isArray(r.ean13) ? r.ean13.join(', ') : (r.ean13 || r.codigo_barras)}</span>}
-                                    </div>
+                            <div key={r.id} className="p-3 flex justify-between items-center gap-2 hover:bg-slate-50">
+                                <div className="min-w-0 flex-1">
+                                    <ArticuloResultRow articulo={r} size="sm" />
                                 </div>
                                 <Button size="sm" onClick={() => onSelect(r.id, 'manual_search', 1.0)}>
                                     Vincular

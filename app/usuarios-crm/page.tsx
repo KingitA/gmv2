@@ -19,6 +19,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Search, UserCheck, UserX, Eye, Clock, CheckCircle2, XCircle, AlertCircle, Pencil, Link2 } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
+import { localMatch } from "@/lib/search/local-match"
 import { createBrowserClient } from "@supabase/ssr"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 

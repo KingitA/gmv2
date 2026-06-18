@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { searchClientes } from "@/lib/actions/clientes"
 import { searchProductos } from "@/lib/actions/productos"
 import { localMatch } from "@/lib/search/local-match"
+import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { createClient } from "@/lib/supabase/client"
 
@@ -586,8 +587,7 @@ export default function ImportReviewPage() {
                                               className="px-3 py-2 hover:bg-muted cursor-pointer border-b last:border-0"
                                               onMouseDown={() => handleAssignProduct(idx, p)}
                                             >
-                                              <div className="font-medium text-sm">{p.descripcion || p.nombre}</div>
-                                              <div className="text-xs text-muted-foreground">SKU: {p.sku}</div>
+                                              <ArticuloResultRow articulo={p} size="sm" />
                                             </div>
                                           ))}
                                         </div>

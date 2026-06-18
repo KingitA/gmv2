@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
+import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 
 interface DetallePedido {
   id: string; articulo_id: string; cantidad: number
@@ -236,8 +237,8 @@ export default function PickingPage() {
       {Toast}
       <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:20, padding:20 }}>
         <div style={{ fontSize:12, color:C.light, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Artículo encontrado</div>
-        <div style={{ fontSize:20, fontWeight:800, color:C.text, lineHeight:1.3 }}>{articuloSel.descripcion}</div>
-        <div style={{ fontSize:14, color:C.sub, fontFamily:"monospace", marginTop:8 }}>{articuloSel.sku}</div>
+        <div style={{ fontSize:20, fontWeight:800, color:C.text, lineHeight:1.3 }}>{articuloSel.descripcion}{articuloMarcaSuffix(articuloSel)}</div>
+        <div style={{ fontSize:14, color:C.sub, fontFamily:"monospace", marginTop:8 }}>{articuloInfoLine(articuloSel)}</div>
       </div>
       <div style={{ background:C.orangeL, border:`1.5px solid ${C.orangeB}`, borderRadius:16, padding:"16px 20px", textAlign:"center" }}>
         <div style={{ color:C.orange, fontSize:13, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em" }}>Cantidad pedida</div>
@@ -288,8 +289,8 @@ export default function PickingPage() {
           return (
             <button key={art.id} onClick={() => seleccionarDeBusqueda(art)}
               style={{ textAlign:"left", width:"100%", background: enPedido?(listo?C.greenL:C.orangeL):C.white, border:`1.5px solid ${enPedido?(listo?C.greenB:C.orangeB):C.border}`, borderRadius:16, padding:18, cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
-              <div style={{ color:C.text, fontWeight:700, fontSize:16 }}>{art.descripcion}</div>
-              <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:5 }}>{art.sku}{art.ean13&&` · ${art.ean13}`}</div>
+              <div style={{ color:C.text, fontWeight:700, fontSize:16 }}>{art.descripcion}{articuloMarcaSuffix(art)}</div>
+              <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:5 }}>{articuloInfoLine(art)}</div>
               {enPedido && <div style={{ fontSize:13, color:listo?C.green:C.orange, marginTop:5, fontWeight:600 }}>
                 Pedido: {enPedido.cantidad} u · {enPedido.estado_item||"PENDIENTE"}
               </div>}

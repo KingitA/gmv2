@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, type ReactNode } from "react"
 import { Input } from "@/components/ui/input"
 import { Search, X, Loader2 } from "lucide-react"
+import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 
 export type SearchEntity = "articulos" | "clientes" | "proveedores"
 
@@ -34,16 +35,7 @@ const DEFAULT_PLACEHOLDER: Record<SearchEntity, string> = {
 
 function defaultRenderItem(entity: SearchEntity, item: any): ReactNode {
     if (entity === "articulos") {
-        return (
-            <>
-                <p className="font-medium text-sm">{item.descripcion}</p>
-                <p className="text-xs text-muted-foreground">
-                    {item.sku ? `SKU: ${item.sku}` : ""}
-                    {item.marca?.descripcion ? ` · ${item.marca.descripcion}` : ""}
-                    {item.proveedor?.nombre ? ` · ${item.proveedor.nombre}` : ""}
-                </p>
-            </>
-        )
+        return <ArticuloResultRow articulo={item} size="sm" />
     }
     if (entity === "proveedores") {
         return (

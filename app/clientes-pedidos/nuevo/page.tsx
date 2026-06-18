@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client"
 import { previewPrecioArticulo, createPedido } from "@/lib/actions/pedidos"
 import { searchProductos } from "@/lib/actions/productos"
 import { localMatch } from "@/lib/search/local-match"
+import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -554,8 +555,7 @@ export default function NuevoPedidoPage() {
                         <div key={p.id}
                           className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
                           onMouseDown={() => seleccionarArticulo(p)}>
-                          <div className="font-medium text-slate-800">{p.descripcion}</div>
-                          <div className="text-xs text-slate-400 mt-0.5 font-mono">{p.sku}</div>
+                          <ArticuloResultRow articulo={p} size="sm" />
                         </div>
                       ))}
                     </div>
@@ -566,8 +566,7 @@ export default function NuevoPedidoPage() {
                   {/* Info artículo + precio */}
                   <div className="flex-1 min-w-0 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2.5 flex items-center gap-4">
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sm text-slate-800 leading-tight truncate">{selectedArt.descripcion}</p>
-                      <p className="text-xs text-slate-400 font-mono mt-0.5">{selectedArt.sku}</p>
+                      <ArticuloResultRow articulo={selectedArt} size="sm" />
                     </div>
                     <div className="shrink-0 text-right">
                       {loadingPrice ? (

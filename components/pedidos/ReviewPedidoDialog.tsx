@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -163,11 +164,8 @@ export function ReviewPedidoDialog({
                                   className="px-3 py-2.5 hover:bg-muted cursor-pointer text-sm border-b last:border-b-0"
                                   onMouseDown={() => linkProduct(idx, p)}
                                 >
-                                  <div className="font-medium">{p.descripcion}</div>
-                                  <div className="text-[10px] text-muted-foreground flex gap-3">
-                                    <span>SKU: {p.sku}</span>
-                                    <span>${p.precio_venta || p.precio_base}</span>
-                                  </div>
+                                  <ArticuloResultRow articulo={p} size="sm" />
+                                  <div className="text-[10px] text-muted-foreground mt-0.5">${p.precio_venta || p.precio_base}</div>
                                 </div>
                               ))}
                             </div>
@@ -184,11 +182,8 @@ export function ReviewPedidoDialog({
                         >
                           {item.matchedProduct ? (
                             <div className="space-y-0.5">
-                              <div className="font-semibold text-sm text-primary">{item.matchedProduct.descripcion || item.matchedProduct.nombre}</div>
-                              <div className="text-xs text-muted-foreground flex gap-3">
-                                <span>SKU: {item.matchedProduct.sku}</span>
-                                <span>Original: {item.originalText}</span>
-                              </div>
+                              <ArticuloResultRow articulo={item.matchedProduct} size="sm" />
+                              <div className="text-xs text-muted-foreground">Original: {item.originalText}</div>
                             </div>
                           ) : (
                             <div className="flex items-center gap-2">

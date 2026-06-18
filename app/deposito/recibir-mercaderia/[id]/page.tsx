@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
+import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 
 interface RecepcionItem {
   id: string; articulo_id: string; cantidad_oc: number; cantidad_fisica: number
@@ -246,8 +247,8 @@ export default function RecibirMercaderiaDetallePage() {
       {Toast}
       <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:20, padding:20 }}>
         <div style={{ fontSize:12, color:C.light, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Artículo</div>
-        <div style={{ fontSize:20, fontWeight:800, color:C.text, lineHeight:1.3 }}>{articuloSel.descripcion}</div>
-        <div style={{ fontSize:14, color:C.sub, fontFamily:"monospace", marginTop:8 }}>{articuloSel.sku}</div>
+        <div style={{ fontSize:20, fontWeight:800, color:C.text, lineHeight:1.3 }}>{articuloSel.descripcion}{articuloMarcaSuffix(articuloSel)}</div>
+        <div style={{ fontSize:14, color:C.sub, fontFamily:"monospace", marginTop:8 }}>{articuloInfoLine(articuloSel)}</div>
       </div>
       {itemActivo && (
         <div style={{ background:C.greenL, border:`1.5px solid ${C.greenB}`, borderRadius:16, padding:"16px 20px", textAlign:"center" }}>
@@ -366,8 +367,8 @@ export default function RecibirMercaderiaDetallePage() {
           return (
             <button key={art.id} onClick={()=>seleccionarDeBusqueda(art)}
               style={{ textAlign:"left", width:"100%", background:enOrden?.estado_linea==="ok"?C.greenL:enOrden?C.orangeL:C.white, border:`1.5px solid ${enOrden?.estado_linea==="ok"?C.greenB:enOrden?C.orangeB:C.border}`, borderRadius:16, padding:18, cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
-              <div style={{ color:C.text, fontWeight:700, fontSize:16 }}>{art.descripcion}</div>
-              <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:5 }}>{art.sku}{art.ean13&&` · ${art.ean13}`}</div>
+              <div style={{ color:C.text, fontWeight:700, fontSize:16 }}>{art.descripcion}{articuloMarcaSuffix(art)}</div>
+              <div style={{ fontSize:13, color:C.sub, fontFamily:"monospace", marginTop:5 }}>{articuloInfoLine(art)}</div>
               {enOrden&&<div style={{ fontSize:13, color:enOrden.estado_linea==="ok"?C.green:C.orange, marginTop:5, fontWeight:600 }}>
                 OC: {enOrden.cantidad_oc} u · {enOrden.estado_linea.toUpperCase()}
               </div>}

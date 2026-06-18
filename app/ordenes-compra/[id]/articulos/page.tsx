@@ -423,6 +423,7 @@ export default function CargarArticulosPage() {
                     <TableHead className="min-w-[250px]">SKU</TableHead>
                     <TableHead>EAN13</TableHead>
                     <TableHead>Descripción</TableHead>
+                    <TableHead>Marca</TableHead>
                     <TableHead>Unid/Bulto</TableHead>
                     <TableHead>Precio</TableHead>
                     <TableHead>Acción</TableHead>
@@ -433,7 +434,8 @@ export default function CargarArticulosPage() {
                     <TableRow key={art.id} className="cursor-pointer hover:bg-muted/50">
                       <TableCell className="font-medium">{art.sku}</TableCell>
                       <TableCell>{art.ean13 || "-"}</TableCell>
-                      <TableCell>{art.descripcion}</TableCell>
+                      <TableCell className="font-semibold">{art.descripcion}</TableCell>
+                      <TableCell className="font-semibold text-indigo-600">{art.marca?.descripcion || "—"}</TableCell>
                       <TableCell>{art.unidades_por_bulto}</TableCell>
                       <TableCell>${(art.precio_compra || 0).toFixed(2)}</TableCell>
                       <TableCell>

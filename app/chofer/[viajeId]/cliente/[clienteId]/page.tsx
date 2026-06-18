@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef, memo } from "react"
+import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 
@@ -507,8 +508,7 @@ export default function ClienteEntregaPage() {
                   <div className="mt-2 border border-gray-200 rounded-xl overflow-hidden">
                     {resultadosArticulo.map((art) => (
                       <button key={art.id} onClick={() => agregarItemDevolucion(art)} className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b last:border-b-0">
-                        <p className="font-medium">{art.descripcion}</p>
-                        <p className="text-xs text-gray-400">{art.sku}</p>
+                        <ArticuloResultRow articulo={art} size="sm" />
                       </button>
                     ))}
                   </div>

@@ -4,8 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { padEan13, padEanArray } from "@/lib/utils/ean"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 
-const SELECT_SEARCH = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
-const SELECT_FULL   = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
+const SELECT_SEARCH = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id, marca:marca_id(descripcion)"
+const SELECT_FULL   = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id, marca:marca_id(descripcion)"
 
 export async function buscarArticulosDeposito(
   query: string,
