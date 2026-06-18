@@ -137,6 +137,7 @@ export async function POST(request: NextRequest) {
       confirmar,       // bool — true (default): confirma en el acto (oficina con plata a la vista).
                        // false: queda PENDIENTE de verificación (no toca saldo ni caja).
       pedidos_contado, // string[] — pedidos sin facturar anticipados con 10% contado (se marcan)
+      comprobante_urls, // [{url, nombre}] — fotos de comprobantes (cheque/transferencia)
     } = body
 
     if (!cliente_id || !metodos?.length) {
@@ -179,6 +180,17 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (pagoError) throw pagoError
+
+    // ── 1a. Guardar fotos de comprobantes (cheque/transferencia) ──
+    if (Array.isArray(comprobante_urls) && comprobante_urls.length) {
+      const fotos = comprobante_urls
+        .filter((c: any) => c?.url)
+        .map((c: any) => ({ pago_id: pago.id, url: c.url, nombre: c.nombre || null }))
+      if (fotos.length) {
+        const { error: fErr } = await supabase.from("pago_comprobantes").insert(fotos)
+        if (fErr) console.error("[pagos-clientes] guardar fotos:", fErr.message)
+      }
+    }
 
     // ── 1b. Marcar pedidos anticipados con 10% contado ──
     // Al facturarse, el flujo de comprobantes generará la NC del 10% y la imputará a este pago.

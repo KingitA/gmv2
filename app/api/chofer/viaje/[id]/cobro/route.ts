@@ -25,6 +25,7 @@ export async function POST(
       imputaciones,     // [{ comprobante_id, monto_imputado }]
       devolucion_ids,   // [uuid] devolucion pendiente a acreditar en rendición
       observaciones,
+      comprobante_urls, // [{url, nombre}] fotos de comprobantes
     } = body
 
     if (!cliente_id || !monto_total || !metodos?.length) {
@@ -65,6 +66,17 @@ export async function POST(
       .single()
 
     if (pagoError) throw pagoError
+
+    // Fotos de comprobantes (cheque/transferencia) cargadas por el chofer
+    if (Array.isArray(comprobante_urls) && comprobante_urls.length) {
+      const fotos = comprobante_urls
+        .filter((c: any) => c?.url)
+        .map((c: any) => ({ pago_id: pago.id, url: c.url, nombre: c.nombre || null }))
+      if (fotos.length) {
+        const { error: fErr } = await supabase.from("pago_comprobantes").insert(fotos)
+        if (fErr) console.error("[chofer/cobro] guardar fotos:", fErr.message)
+      }
+    }
 
     // Crear detalles de pago por método
     const chequesInsert: Array<{ chequeData: any; index: number }> = []

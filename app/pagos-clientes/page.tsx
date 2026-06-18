@@ -70,6 +70,7 @@ function PagosClientesContent() {
   const [clientesExtra, setClientesExtra] = useState<Array<{ cliente: Cliente; seleccionados: Record<string, number> }>>([])
   const [mostrarBuscarExtra, setMostrarBuscarExtra] = useState(false)
   const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())  // anticipos con 10% contado (cliente principal)
+  const [comprobanteArchivos, setComprobanteArchivos] = useState<{ url: string; nombre: string }[]>([])  // fotos de comprobantes (OCR)
   const esMulti = clientesExtra.length > 0
 
   // ── Historial ──
@@ -126,6 +127,7 @@ function PagosClientesContent() {
     setDtosHechos(new Set())
     setClientesExtra([])
     setContadoPedidos(new Set())
+    setComprobanteArchivos([])
   }
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,9 +141,14 @@ function PagosClientesContent() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
+      // Guardar las fotos subidas (para adjuntarlas al pago)
+      if (Array.isArray(data.archivos) && data.archivos.length) {
+        setComprobanteArchivos((prev) => [...prev, ...data.archivos])
+      }
+
       const resultados: any[] = data.resultados || []
       if (resultados.length === 0) {
-        toast.warning("No se detectaron comprobantes en las imágenes")
+        toast.warning("No se detectaron comprobantes en las imágenes (la foto igual quedó adjunta)")
         return
       }
 
@@ -307,6 +314,7 @@ function PagosClientesContent() {
           imputaciones,
           observaciones: obsAnticipo,
           pedidos_contado: [...contadoPedidos],
+          comprobante_urls: comprobanteArchivos,
           retenciones: retenciones.map((r) => ({
             tipo: r.tipo,
             fecha: r.fecha,
@@ -388,6 +396,23 @@ function PagosClientesContent() {
       toast.error("Error cargando historial")
     } finally {
       setCargandoHistorial(false)
+    }
+  }
+
+  const [fotosPago, setFotosPago] = useState<{ url: string; nombre: string | null }[] | null>(null)
+  const [cargandoFotos, setCargandoFotos] = useState(false)
+  const verComprobantes = async (pagoId: string) => {
+    setCargandoFotos(true)
+    setFotosPago([])
+    try {
+      const { data } = await supabase
+        .from("pago_comprobantes")
+        .select("url, nombre")
+        .eq("pago_id", pagoId)
+        .order("created_at", { ascending: true })
+      setFotosPago(data || [])
+    } finally {
+      setCargandoFotos(false)
     }
   }
 
@@ -753,6 +778,14 @@ function PagosClientesContent() {
                                 >
                                   <ExternalLink className="h-3.5 w-3.5 mr-1" /> Recibo
                                 </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7"
+                                  onClick={() => verComprobantes(p.id)}
+                                >
+                                  📎 Comprobantes
+                                </Button>
                                 {(p.estado === "pendiente" || p.estado === "pendiente_rendicion") && (
                                   <Button
                                     variant="ghost"
@@ -855,6 +888,32 @@ function PagosClientesContent() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* ── Modal: ver comprobantes (fotos) ── */}
+      {fotosPago !== null && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setFotosPago(null)}>
+          <div className="bg-white rounded-2xl p-5 max-w-2xl w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Comprobantes adjuntos</h3>
+              <button onClick={() => setFotosPago(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+            </div>
+            {cargandoFotos ? (
+              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : fotosPago.length === 0 ? (
+              <p className="text-center text-muted-foreground py-10">Este pago no tiene comprobantes adjuntos.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {fotosPago.map((f, i) => (
+                  <a key={i} href={f.url} target="_blank" rel="noopener noreferrer" className="block border rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                    <img src={f.url} alt={f.nombre || `Comprobante ${i + 1}`} className="w-full h-48 object-contain bg-gray-50" />
+                    <p className="text-xs text-muted-foreground p-2 truncate">{f.nombre || `Comprobante ${i + 1}`}</p>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Confirmación anulación ── */}
       <AlertDialog open={!!confirmAnularId} onOpenChange={(open) => { if (!open) setConfirmAnularId(null) }}>

@@ -1,7 +1,10 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai"
+
+const BUCKET_COMPROBANTES = "comprobantes-pago"
 
 // Schema de salida: fuerza a Gemini a devolver JSON válido (cero errores de parseo).
 const OCR_SCHEMA: any = {
@@ -202,11 +205,32 @@ export async function POST(request: NextRequest) {
 
     const bancosActivos = bancos || []
 
-    // Procesar cada archivo con Gemini (resiliente: un archivo ilegible no tumba el resto)
+    // Procesar cada archivo con Gemini (resiliente) + guardar la foto en el bucket
+    const admin = createAdminClient()
     const todosResultados: OCRResultMetodo[] = []
+    const archivos: { url: string; nombre: string }[] = []
     const errores: string[] = []
 
     for (const file of files) {
+      // Subir la foto al bucket (aunque el OCR falle, la foto queda guardada)
+      try {
+        const ext = (file.name?.split(".").pop() || "jpg").toLowerCase()
+        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        const { error: upErr } = await admin.storage
+          .from(BUCKET_COMPROBANTES)
+          .upload(path, bytes, { contentType: file.type || "image/jpeg", upsert: false })
+        if (!upErr) {
+          const { data: pub } = admin.storage.from(BUCKET_COMPROBANTES).getPublicUrl(path)
+          if (pub?.publicUrl) archivos.push({ url: pub.publicUrl, nombre: file.name || path })
+        } else {
+          console.error("[pagos-clientes/ocr] upload:", upErr.message)
+        }
+      } catch (e: any) {
+        console.error("[pagos-clientes/ocr] upload exc:", e?.message)
+      }
+
+      // OCR
       try {
         const { resultados } = await processPaymentOCR(file)
         if (!resultados.length) errores.push(`${file.name || "archivo"}: no se detectaron datos`)
@@ -244,6 +268,7 @@ export async function POST(request: NextRequest) {
       success: true,
       resultados: resultadosEnriquecidos,
       total_encontrados: resultadosEnriquecidos.length,
+      archivos, // URLs de las fotos guardadas en el bucket
       errores: errores.length ? errores : undefined,
     })
   } catch (error: any) {

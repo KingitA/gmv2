@@ -108,6 +108,7 @@ export default function ClienteEntregaPage() {
   const [guardandoCobro, setGuardandoCobro] = useState(false)
   const [procesandoOCR, setProcesandoOCR] = useState(false)
   const [ocrMsg, setOcrMsg] = useState<string | null>(null)
+  const [comprobanteArchivos, setComprobanteArchivos] = useState<{ url: string; nombre: string }[]>([])
 
   const esReadOnly = READONLY_ESTADOS.includes(data?.viaje_estado || "")
 
@@ -164,8 +165,11 @@ export default function ClienteEntregaPage() {
         body: formData,
       })
       const d = await res.json()
+      if (Array.isArray(d.archivos) && d.archivos.length) {
+        setComprobanteArchivos((prev) => [...prev, ...d.archivos])
+      }
       if (!d.success || !d.resultados?.length) {
-        setOcrMsg("No se encontraron datos en la imagen. Ingresá los datos manualmente.")
+        setOcrMsg("No se encontraron datos en la imagen (la foto igual quedó adjunta). Ingresá los datos manualmente.")
         return
       }
 
@@ -316,6 +320,7 @@ export default function ClienteEntregaPage() {
           metodos: metodosPago.filter((m) => m.monto > 0),
           imputaciones,
           devolucion_ids: devPendientes,
+          comprobante_urls: comprobanteArchivos,
         }),
       })
       const d = await res.json()
