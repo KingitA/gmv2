@@ -149,32 +149,21 @@ export default function ViajeDetallePage() {
 
       setPedidos(pedidosConDatos)
 
+      // Cobranzas del viaje desde pagos_clientes + pagos_detalle (viajes_pagos retirado)
       const { data: pagosData } = await supabase
-        .from("viajes_pagos")
-        .select("forma_pago, monto")
+        .from("pagos_clientes")
+        .select("monto, estado, pagos_detalle(tipo_pago, monto)")
         .eq("viaje_id", viajeId)
+        .in("estado", ["pendiente_rendicion", "confirmado"])
 
       if (pagosData) {
-        const efectivo = pagosData
-          .filter(p => p.forma_pago === "efectivo")
-          .reduce((sum, p) => sum + p.monto, 0)
+        const detalles = pagosData.flatMap((p: any) => p.pagos_detalle || [])
+        const efectivo = detalles.filter((d: any) => d.tipo_pago === "efectivo").reduce((sum: number, d: any) => sum + Number(d.monto || 0), 0)
+        const cheques = detalles.filter((d: any) => d.tipo_pago === "cheque").length
+        const transferencias = detalles.filter((d: any) => d.tipo_pago === "transferencia").length
+        const total = pagosData.reduce((sum: number, p: any) => sum + Number(p.monto || 0), 0)
 
-        const cheques = pagosData
-          .filter(p => p.forma_pago === "cheque")
-          .length
-
-        const transferencias = pagosData
-          .filter(p => p.forma_pago === "transferencia")
-          .length
-
-        const total = pagosData.reduce((sum, p) => sum + p.monto, 0)
-
-        setCobranzas({
-          efectivo,
-          cheques,
-          transferencias,
-          total
-        })
+        setCobranzas({ efectivo, cheques, transferencias, total })
       }
 
     } catch (error) {

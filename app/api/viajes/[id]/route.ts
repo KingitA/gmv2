@@ -119,23 +119,21 @@ export async function GET(
       })
     )
 
-    // Obtener resumen de pagos del viaje
+    // Resumen de pagos del viaje (desde pagos_clientes + pagos_detalle; viajes_pagos retirado)
     const { data: pagos } = await supabase
-      .from("viajes_pagos")
-      .select("forma_pago, monto")
+      .from("pagos_clientes")
+      .select("monto, estado, pagos_detalle(tipo_pago, monto)")
       .eq("viaje_id", id)
+      .in("estado", ["pendiente_rendicion", "confirmado"])
 
+    const detallesViaje = (pagos || []).flatMap((p: any) => p.pagos_detalle || [])
     const resumen_pagos = {
-      total_efectivo:
-        pagos
-          ?.filter((p) => p.forma_pago === "efectivo")
-          .reduce((sum, p) => sum + (Number(p.monto) || 0), 0) || 0,
-      cantidad_cheques:
-        pagos?.filter((p) => p.forma_pago === "cheque").length || 0,
-      cantidad_transferencias:
-        pagos?.filter((p) => p.forma_pago === "transferencia").length || 0,
-      total_cobrado:
-        pagos?.reduce((sum, p) => sum + (Number(p.monto) || 0), 0) || 0,
+      total_efectivo: detallesViaje
+        .filter((d: any) => d.tipo_pago === "efectivo")
+        .reduce((sum: number, d: any) => sum + (Number(d.monto) || 0), 0),
+      cantidad_cheques: detallesViaje.filter((d: any) => d.tipo_pago === "cheque").length,
+      cantidad_transferencias: detallesViaje.filter((d: any) => d.tipo_pago === "transferencia").length,
+      total_cobrado: (pagos || []).reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0),
     }
 
     return NextResponse.json(

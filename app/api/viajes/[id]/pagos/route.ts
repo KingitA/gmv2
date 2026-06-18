@@ -1,8 +1,11 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
 
+// POST /api/viajes/[id]/pagos
+// Registra una cobranza del viaje en pagos_clientes con estado 'pendiente_rendicion'
+// (viajes_pagos retirado: una sola tabla de pagos). Se confirma en la rendición.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -14,85 +17,83 @@ export async function POST(
     const { id: viaje_id } = await params
     const body = await request.json()
 
-    const {
-      pedido_id,
-      cliente_id,
-      monto,
-      forma_pago,
-      observaciones,
-      datos_cheque,
-      datos_transferencia,
-    } = body
+    const { pedido_id, cliente_id, monto, forma_pago, observaciones, datos_cheque, datos_transferencia } = body
 
-    // Validaciones básicas
-    if (!pedido_id || !cliente_id || !monto || !forma_pago) {
-      return NextResponse.json(
-        { error: "Faltan campos requeridos" },
-        { status: 400 }
-      )
+    if (!cliente_id || !monto || !forma_pago) {
+      return NextResponse.json({ error: "Faltan campos requeridos" }, { status: 400 })
     }
 
-    // Verificar que el viaje esté en estado "en_viaje"
     const { data: viaje } = await supabase
       .from("viajes")
-      .select("estado")
+      .select("estado, chofer_id")
       .eq("id", viaje_id)
       .single()
 
-    if (!viaje || viaje.estado !== "en_viaje") {
-      return NextResponse.json(
-        { error: "El viaje no está en estado 'en_viaje'" },
-        { status: 400 }
-      )
+    if (!viaje || ["completado", "cancelado"].includes(viaje.estado)) {
+      return NextResponse.json({ error: "El viaje no está activo" }, { status: 400 })
     }
 
-    // Registrar el pago en viajes_pagos
+    // Cabecera del pago (pendiente de rendición)
     const { data: pago, error: pagoError } = await supabase
-      .from("viajes_pagos")
+      .from("pagos_clientes")
       .insert({
-        viaje_id,
-        pedido_id,
         cliente_id,
+        vendedor_id: viaje.chofer_id || null,
+        viaje_id,
+        pedido_id: pedido_id || null,
         monto,
-        forma_pago,
-        observaciones,
-        fecha: nowArgentina(),
+        fecha_pago: todayArgentina(),
+        estado: "pendiente_rendicion",
+        observaciones: observaciones || null,
+        creado_por: auth.user.id,
       })
       .select()
       .single()
 
     if (pagoError) {
-      console.error("[v0] Error al registrar pago:", pagoError)
+      console.error("[viajes/pagos] Error registrando pago:", pagoError)
       return NextResponse.json({ error: pagoError.message }, { status: 500 })
     }
 
-    // Si es cheque o transferencia, guardar datos adicionales
+    // Cheque (si corresponde)
+    let cheque_id: string | null = null
     if (forma_pago === "cheque" && datos_cheque) {
-      await supabase.from("viajes_pagos").update({
-        numero_cheque: datos_cheque.numero,
-        banco_cheque: datos_cheque.banco,
-        fecha_emision_cheque: datos_cheque.fecha_emision,
-        fecha_pago_cheque: datos_cheque.fecha_pago,
-      }).eq("id", pago.id)
+      const { data: chq } = await supabase
+        .from("cheques")
+        .insert({
+          tipo: "TERCERO",
+          estado: "EN_CARTERA",
+          banco: datos_cheque.banco || "",
+          numero: datos_cheque.numero || "",
+          fecha_emision: datos_cheque.fecha_emision || null,
+          fecha_vencimiento: datos_cheque.fecha_pago || todayArgentina(),
+          monto,
+          color: datos_cheque.color || "NEGRO",
+          cliente_origen_id: cliente_id,
+        })
+        .select("id")
+        .single()
+      cheque_id = chq?.id || null
     }
 
-    if (forma_pago === "transferencia" && datos_transferencia) {
-      await supabase.from("viajes_pagos").update({
-        banco_origen: datos_transferencia.banco_origen,
-        banco_destino: datos_transferencia.banco_destino,
-        referencia_transferencia: datos_transferencia.referencia,
-      }).eq("id", pago.id)
-    }
+    // Detalle del método de pago
+    await supabase.from("pagos_detalle").insert({
+      pago_id: pago.id,
+      tipo_pago: forma_pago,
+      monto,
+      numero_cheque: datos_cheque?.numero || null,
+      banco: datos_cheque?.banco || null,
+      fecha_cheque: datos_cheque?.fecha_pago || null,
+      cheque_id,
+      numero_comprobante_pago: datos_transferencia?.referencia || null,
+    })
 
     return NextResponse.json(
-      { message: "Pago registrado correctamente", pago },
+      { message: "Cobranza registrada (pendiente de rendición)", pago },
       { status: 201 }
     )
   } catch (error: any) {
-    console.error("[v0] Error en POST /api/viajes/[id]/pagos:", error)
-    return NextResponse.json(
-      { error: "Error al registrar pago" },
-      { status: 500 }
-    )
+    console.error("[viajes/pagos] Error:", error)
+    return NextResponse.json({ error: "Error al registrar pago" }, { status: 500 })
   }
 }

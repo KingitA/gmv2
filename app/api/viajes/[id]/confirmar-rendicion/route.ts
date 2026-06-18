@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
+import { confirmarCobranza } from "@/lib/actions/cobranzas"
 
 // POST /api/viajes/[id]/confirmar-rendicion
 // Admin confirma la rendición del viaje:
@@ -85,75 +86,11 @@ export async function POST(
             .eq("id", imp.id)
         }
 
-        // Generar número de recibo
-        const { data: numRow } = await admin
-          .from("numeracion_comprobantes")
-          .select("ultimo_numero")
-          .eq("tipo_comprobante", "RECIBO")
-          .eq("punto_venta", "0001")
-          .single()
-
-        let numeroRecibo = `REC-0001-${String(Date.now()).slice(-8)}`
-        if (numRow) {
-          const siguiente = Number(numRow.ultimo_numero) + 1
-          numeroRecibo = `REC-0001-${String(siguiente).padStart(8, "0")}`
-          await admin
-            .from("numeracion_comprobantes")
-            .update({ ultimo_numero: siguiente })
-            .eq("tipo_comprobante", "RECIBO")
-            .eq("punto_venta", "0001")
-        }
-
-        // Crear recibo
-        await supabase.from("recibos").insert({
-          numero_recibo: numeroRecibo,
-          pago_id: pago.id,
-          cliente_id: pago.cliente_id,
-          fecha: pago.fecha_pago || todayArgentina(),
-          monto_total: pago.monto,
-          generado_por: auth.user.id,
-        })
-
-        // Confirmar pago
-        await supabase
-          .from("pagos_clientes")
-          .update({
-            estado: "confirmado",
-            confirmado_por: auth.user.id,
-            fecha_confirmacion: nowArgentina(),
-          })
-          .eq("id", pago.id)
-
-        // Registrar en kardex_contable
-        await supabase.from("kardex_contable").insert({
-          tipo_movimiento: "COBRO_CLIENTE",
-          concepto: `Rendición viaje — ${numeroRecibo}`,
-          monto: pago.monto,
-          origen_tipo: "CLIENTE",
-          origen_id: pago.cliente_id,
-          referencia_tipo: "pago_cliente",
-          referencia_id: pago.id,
-          pago_id: pago.id,
-          cliente_id: pago.cliente_id,
-          cobrador_id: viaje.chofer_id,
-        })
-
-        // Libro mayor: el pago confirmado acredita al cliente (haber)
-        const { error: ccErr } = await supabase.rpc("cc_postear", {
-          p_cliente_id:      pago.cliente_id,
-          p_tipo_movimiento: "pago",
-          p_debe:            0,
-          p_haber:           Math.abs(Number(pago.monto)),
-          p_referencia_tipo: "pago_cliente",
-          p_referencia_id:   pago.id,
-          p_numero_comprobante: numeroRecibo,
-          p_observaciones:   `Cobro rendición viaje — ${numeroRecibo}`,
-          p_usuario_id:      auth.user.id,
-        })
-        if (ccErr) resultados.errores.push(`cc_postear pago ${pago.id}: ${ccErr.message}`)
-
+        // Confirmación única (recibo + kardex + libro mayor); las imputaciones
+        // ya quedaron aplicadas arriba y confirmarCobranza es idempotente.
+        const r = await confirmarCobranza(supabase, admin, { pagoId: pago.id, usuarioId: auth.user.id })
         resultados.pagos_confirmados++
-        resultados.recibos_generados.push(numeroRecibo)
+        if (r.numero_recibo) resultados.recibos_generados.push(r.numero_recibo)
       } catch (err: any) {
         resultados.errores.push(`Pago ${pago.id}: ${err.message}`)
       }
