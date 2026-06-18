@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { Input } from "@/components/ui/input"
 import { Search, X } from "lucide-react"
 
@@ -24,7 +23,6 @@ export function ClienteSearchCombobox({ onSelect, value }: Props) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  const supabase = createClient()
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -35,20 +33,23 @@ export function ClienteSearchCombobox({ onSelect, value }: Props) {
   }, [])
 
   useEffect(() => {
-    if (query.length < 2) { setResults([]); return }
+    if (query.trim().length < 2) { setResults([]); return }
+    const ctrl = new AbortController()
     const timer = setTimeout(async () => {
       setLoading(true)
-      const { data } = await supabase
-        .from("clientes")
-        .select("id, nombre, razon_social, cuit, codigo_cliente")
-        .or(`nombre.ilike.%${query}%,razon_social.ilike.%${query}%,cuit.ilike.%${query}%,codigo_cliente.ilike.%${query}%`)
-        .eq("activo", true)
-        .limit(10)
-      setResults(data || [])
-      setLoading(false)
-      setOpen(true)
-    }, 300)
-    return () => clearTimeout(timer)
+      try {
+        // Motor unificado: búsqueda híbrida (léxica trigram + vector de fallback)
+        const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(query.trim())}`, { signal: ctrl.signal })
+        const data = await res.json()
+        setResults(Array.isArray(data) ? data : [])
+        setOpen(true)
+      } catch (e: any) {
+        if (e?.name !== "AbortError") setResults([])
+      } finally {
+        setLoading(false)
+      }
+    }, 250)
+    return () => { clearTimeout(timer); ctrl.abort() }
   }, [query])
 
   if (value) {
