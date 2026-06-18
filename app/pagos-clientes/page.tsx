@@ -69,6 +69,7 @@ function PagosClientesContent() {
   // ── Multi-cliente (caso "Tandil"): clientes adicionales en la misma cobranza ──
   const [clientesExtra, setClientesExtra] = useState<Array<{ cliente: Cliente; seleccionados: Record<string, number> }>>([])
   const [mostrarBuscarExtra, setMostrarBuscarExtra] = useState(false)
+  const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())  // anticipos con 10% contado (cliente principal)
   const esMulti = clientesExtra.length > 0
 
   // ── Historial ──
@@ -118,6 +119,8 @@ function PagosClientesContent() {
     setAplicarContado(false)
     setComprobantesData([])
     setDtosHechos(new Set())
+    setClientesExtra([])
+    setContadoPedidos(new Set())
   }
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -298,6 +301,7 @@ function PagosClientesContent() {
           })),
           imputaciones,
           observaciones: obsAnticipo,
+          pedidos_contado: [...contadoPedidos],
           retenciones: retenciones.map((r) => ({
             tipo: r.tipo,
             fecha: r.fecha,
@@ -490,6 +494,7 @@ function PagosClientesContent() {
                     onChange={setSeleccionados}
                     onComprobantesLoaded={setComprobantesData}
                     onDtosHechosLoaded={setDtosHechos}
+                    onContadoPedidosChange={setContadoPedidos}
                   />
                 </section>
               )}

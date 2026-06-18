@@ -33,6 +33,9 @@ interface Props {
   onChange: (next: Record<string, number>) => void
   onComprobantesLoaded?: (comps: Comprobante[]) => void
   onDtosHechosLoaded?: (dtosHechos: Set<string>) => void
+  // Pedidos (sin facturar) anticipados con 10% contado: se cobra el 90% y al
+  // facturar se genera la NC del 10%. Emite el set de pedido_id marcados.
+  onContadoPedidosChange?: (pedidoIds: Set<string>) => void
 }
 
 // Prefijo de clave para anticipos a pedidos sin facturar (quedan como pago a cuenta).
@@ -40,11 +43,12 @@ export const PEDIDO_PREFIX = "pedido:"
 
 const fmtARS = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })
 
-export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded }: Props) {
+export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange }: Props) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [pedidosFacturados, setPedidosFacturados] = useState<Set<string>>(new Set())
   const [conDtoHecho, setConDtoHecho] = useState<Set<string>>(new Set())
+  const [contado, setContado] = useState<Set<string>>(new Set())  // pedido_id anticipados con 10%
   const [loading, setLoading] = useState(false)
   const [expandido, setExpandido] = useState<Record<string, boolean>>({})
   const supabase = createClient()
@@ -123,8 +127,23 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
     onChange(next)
   }
 
+  const montoAnticipo = (ped: Pedido) => (contado.has(ped.id) ? Math.round(Number(ped.total) * 0.9 * 100) / 100 : Number(ped.total))
+
   const toggleAnticipo = (ped: Pedido) =>
-    setSel(PEDIDO_PREFIX + ped.id, seleccionados[PEDIDO_PREFIX + ped.id] !== undefined ? null : Number(ped.total))
+    setSel(PEDIDO_PREFIX + ped.id, seleccionados[PEDIDO_PREFIX + ped.id] !== undefined ? null : montoAnticipo(ped))
+
+  const toggleContado = (ped: Pedido) => {
+    const next = new Set(contado)
+    if (next.has(ped.id)) next.delete(ped.id)
+    else next.add(ped.id)
+    setContado(next)
+    onContadoPedidosChange?.(next)
+    // Si el anticipo ya está seleccionado, recalcular su monto (90% / 100%)
+    if (seleccionados[PEDIDO_PREFIX + ped.id] !== undefined) {
+      const monto = next.has(ped.id) ? Math.round(Number(ped.total) * 0.9 * 100) / 100 : Number(ped.total)
+      setSel(PEDIDO_PREFIX + ped.id, monto)
+    }
+  }
 
   const toggleExpand = (id: string) => setExpandido((p) => ({ ...p, [id]: !p[id] }))
 
@@ -170,7 +189,13 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
                   <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">Sin facturar (anticipo)</Badge>
                 )}
               </button>
-              <span className="font-mono text-sm">${fmtARS(facturado ? comps.reduce((s, c) => s + Number(c.saldo_pendiente), 0) : Number(ped.total))}</span>
+              {!facturado && (
+                <label className="flex items-center gap-1 text-[11px] text-amber-700 cursor-pointer mr-1" title="El cliente paga el 90% como anticipo; al facturar se genera la NC del 10%.">
+                  <Checkbox checked={contado.has(ped.id)} onCheckedChange={() => toggleContado(ped)} />
+                  10% contado
+                </label>
+              )}
+              <span className="font-mono text-sm">${fmtARS(facturado ? comps.reduce((s, c) => s + Number(c.saldo_pendiente), 0) : montoAnticipo(ped))}</span>
             </div>
 
             {facturado && abierto && (

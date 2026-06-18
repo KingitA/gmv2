@@ -450,13 +450,22 @@ export async function POST(request: Request) {
     }
 
     // ─── 8. Generar bonificación pago contado si corresponde ───
+    // Aplica si se pidió en la facturación (pago_contado) O si el pedido fue
+    // anticipado con 10% contado (pago_contado_10): en ese caso la NC se imputa
+    // al pago anticipo (anticipo_pago_id) para netear el saldo a favor.
     let bonificacion = null
-    if (pago_contado && comprobantesGenerados.length > 0) {
+    const contadoPorAnticipo = !!(pedido as any).pago_contado_10
+    if ((pago_contado || contadoPorAnticipo) && comprobantesGenerados.length > 0) {
       const comprobanteIds = comprobantesGenerados.map((c: any) => c.id).filter(Boolean)
       bonificacion = await generarBonificacionContado(supabase, {
         cliente_id: pedido.cliente.id,
         comprobante_ids: comprobanteIds,
+        pago_id: contadoPorAnticipo ? (pedido as any).anticipo_pago_id : undefined,
       })
+      // Limpiar el flag para no regenerar la NC si se reintenta la facturación
+      if (contadoPorAnticipo) {
+        await supabase.from("pedidos").update({ pago_contado_10: false }).eq("id", pedido_id)
+      }
     }
 
     // ─── 9. Generar PDFs y subirlos al bucket ───
