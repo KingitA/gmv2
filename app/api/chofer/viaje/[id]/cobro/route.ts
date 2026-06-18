@@ -55,7 +55,7 @@ export async function POST(
       .from("pagos_clientes")
       .insert({
         cliente_id,
-        vendedor_id: auth.user.id,
+        vendedor_id: null, // chofer = usuario (profiles), no vendedor; se traza por creado_por/viaje
         viaje_id: viajeId,
         monto: monto_total,
         fecha_pago: todayArgentina(),
@@ -155,7 +155,7 @@ export async function POST(
           .from("pagos_clientes")
           .insert({
             cliente_id: ex.cliente_id,
-            vendedor_id: auth.user.id,
+            vendedor_id: null,
             viaje_id: viajeId,
             monto: montoEx,
             fecha_pago: todayArgentina(),

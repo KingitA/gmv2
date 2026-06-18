@@ -38,7 +38,7 @@ export async function POST(
       .from("pagos_clientes")
       .insert({
         cliente_id,
-        vendedor_id: viaje.chofer_id || null,
+        vendedor_id: null, // chofer = usuario (profiles), no vendedor
         viaje_id,
         pedido_id: pedido_id || null,
         monto,

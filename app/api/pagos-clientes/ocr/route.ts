@@ -86,21 +86,14 @@ interface OCRResultMetodo {
   }>
 }
 
-async function processPaymentOCR(file: File): Promise<{ resultados: OCRResultMetodo[]; raw_text?: string }> {
+async function processPaymentOCR(base64: string, mimeType: string): Promise<{ resultados: OCRResultMetodo[]; raw_text?: string }> {
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurado")
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   const model = genAI.getGenerativeModel({
     model: "gemini-2.0-flash",
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: OCR_SCHEMA,
-      temperature: 0, // determinista: mismos datos → misma extracción
-    },
+    generationConfig: { responseMimeType: "application/json", temperature: 0 },
   })
-
-  const bytes = await file.arrayBuffer()
-  const base64 = Buffer.from(bytes).toString("base64")
 
   const prompt = `Sos un experto en documentos bancarios y de pagos argentinos.
 
@@ -148,7 +141,7 @@ Devolvé SOLO este JSON:
 }`
 
   const result = await model.generateContent([
-    { inlineData: { mimeType: file.type, data: base64 } },
+    { inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } },
     prompt,
   ])
 
@@ -212,14 +205,17 @@ export async function POST(request: NextRequest) {
     const errores: string[] = []
 
     for (const file of files) {
+      // Leer el archivo UNA sola vez (el File se consume en la primera lectura)
+      const buffer = Buffer.from(await file.arrayBuffer())
+      const base64 = buffer.toString("base64")
+
       // Subir la foto al bucket (aunque el OCR falle, la foto queda guardada)
       try {
         const ext = (file.name?.split(".").pop() || "jpg").toLowerCase()
         const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-        const bytes = new Uint8Array(await file.arrayBuffer())
         const { error: upErr } = await admin.storage
           .from(BUCKET_COMPROBANTES)
-          .upload(path, bytes, { contentType: file.type || "image/jpeg", upsert: false })
+          .upload(path, buffer, { contentType: file.type || "image/jpeg", upsert: false })
         if (!upErr) {
           const { data: pub } = admin.storage.from(BUCKET_COMPROBANTES).getPublicUrl(path)
           if (pub?.publicUrl) archivos.push({ url: pub.publicUrl, nombre: file.name || path })
@@ -230,9 +226,9 @@ export async function POST(request: NextRequest) {
         console.error("[pagos-clientes/ocr] upload exc:", e?.message)
       }
 
-      // OCR
+      // OCR (usa el base64 ya leído, no vuelve a leer el File)
       try {
-        const { resultados } = await processPaymentOCR(file)
+        const { resultados } = await processPaymentOCR(base64, file.type)
         if (!resultados.length) errores.push(`${file.name || "archivo"}: no se detectaron datos`)
         todosResultados.push(...resultados)
       } catch (e: any) {
