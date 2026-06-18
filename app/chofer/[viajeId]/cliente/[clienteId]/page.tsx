@@ -167,7 +167,8 @@ export default function ClienteEntregaPage() {
         setComprobanteArchivos((prev) => [...prev, ...d.archivos])
       }
       if (!d.success || !d.resultados?.length) {
-        setOcrMsg("No se encontraron datos en la imagen (la foto igual quedó adjunta). Ingresá los datos manualmente.")
+        const detalle = Array.isArray(d.errores) && d.errores.length ? ` (${d.errores[0]})` : ""
+        setOcrMsg(`No se encontraron datos en la imagen${detalle}. La foto quedó adjunta; ingresá los datos manualmente.`)
         return
       }
 
@@ -289,16 +290,17 @@ export default function ClienteEntregaPage() {
   }
 
   const guardarCobro = async () => {
-    const totalImputado = Object.values(comprobantesSeleccionados).reduce((s, v) => s + v, 0)
+    // Total NETO a cobrar = comprobantes/anticipos seleccionados − devoluciones incluidas.
+    const totalNeto = totalCobro()
     const totalMetodos = metodosPago.reduce((s, m) => s + Number(m.monto), 0)
     if (totalMetodos <= 0) {
       alert("Ingresá al menos un método de pago con monto.")
       return
     }
-    // Se permite cobrar a cuenta (sin comprobantes) o de más: el excedente sobre
-    // lo imputado queda como saldo a favor del cliente.
-    if (totalMetodos + 1 < totalImputado) {
-      alert(`El pago (${formatCurrency(totalMetodos)}) no cubre lo imputado a comprobantes (${formatCurrency(totalImputado)}).`)
+    // Se permite cobrar a cuenta (sin comprobantes) o de más: el excedente queda
+    // como saldo a favor. Solo se bloquea si el pago no cubre el neto a cobrar.
+    if (totalMetodos + 1 < totalNeto) {
+      alert(`El pago (${formatCurrency(totalMetodos)}) no cubre el total a cobrar neto de devoluciones (${formatCurrency(totalNeto)}).`)
       return
     }
     setGuardandoCobro(true)

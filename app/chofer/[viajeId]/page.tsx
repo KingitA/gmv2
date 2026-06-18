@@ -101,6 +101,77 @@ export default function ViajeDashboardPage() {
 
   const { viaje, pedidos, resumen } = data
 
+  // Pedidos gestionados (cobrados / con devolución) van abajo en gris; el resto arriba.
+  const gestionado = (p: PedidoChofer) => p.estado_entrega === "cobrado" || p.estado_entrega === "devolucion_registrada"
+  const aEntregar = pedidos.filter((p) => !gestionado(p))
+  const entregados = pedidos.filter((p) => gestionado(p))
+
+  const renderPedidoCard = (pedido: PedidoChofer, gris: boolean) => (
+    <div
+      key={pedido.id}
+      onClick={() => router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}`)}
+      className={`w-full rounded-2xl shadow-sm border p-4 text-left active:scale-[0.98] transition-transform cursor-pointer ${gris ? "bg-gray-100 border-gray-200 opacity-75" : "bg-white border-gray-200"}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <EstadoBadge estado={pedido.estado_entrega} />
+            <p className="font-bold text-gray-900 truncate">{pedido.cliente_nombre}</p>
+          </div>
+          <p className="text-gray-500 text-sm mt-1 truncate">📍 {pedido.direccion}</p>
+          {pedido.localidad && <p className="text-gray-400 text-xs">{pedido.localidad}</p>}
+        </div>
+        <span className="text-gray-400 text-xl flex-shrink-0">›</span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div className="bg-gray-50 rounded-lg py-2">
+          <p className="text-xs text-gray-400">Bultos</p>
+          <p className="font-bold text-gray-800">{pedido.bultos}</p>
+        </div>
+        <div className="bg-gray-50 rounded-lg py-2">
+          <p className="text-xs text-gray-400">Pedido</p>
+          <p className="font-bold text-gray-800 text-sm">{formatCurrency(pedido.total_pedido)}</p>
+        </div>
+        <div className={`rounded-lg py-2 ${pedido.saldo_anterior > 0 ? "bg-red-50" : "bg-gray-50"}`}>
+          <p className="text-xs text-gray-400">Saldo prev.</p>
+          <p className={`font-bold text-sm ${pedido.saldo_anterior > 0 ? "text-red-600" : "text-gray-400"}`}>
+            {pedido.saldo_anterior > 0 ? formatCurrency(pedido.saldo_anterior) : "—"}
+          </p>
+        </div>
+      </div>
+
+      {gris ? (
+        <div className="mt-2 bg-green-50 rounded-lg px-3 py-2 flex justify-between items-center">
+          <span className="text-green-700 text-sm font-medium">Cobrado:</span>
+          <span className="text-green-800 font-bold">{formatCurrency(pedido.cobrado)}</span>
+        </div>
+      ) : (
+        <div className="mt-2 bg-blue-50 rounded-lg px-3 py-2 flex justify-between items-center">
+          <span className="text-blue-700 text-sm font-medium">Total a cobrar:</span>
+          <span className="text-blue-800 font-bold">{formatCurrency(pedido.total_a_cobrar)}</span>
+        </div>
+      )}
+
+      {!esReadOnly && (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}?accion=devolucion`) }}
+            className="py-2.5 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm border border-amber-200 active:scale-95 transition-transform"
+          >
+            ↩ Devolución
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}?accion=cobrar`) }}
+            className="py-2.5 rounded-xl bg-blue-600 text-white font-bold text-sm active:scale-95 transition-transform"
+          >
+            💵 {gris ? "Editar cobro" : "Cobrar"}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -178,66 +249,17 @@ export default function ViajeDashboardPage() {
 
       {/* Lista de clientes */}
       <div className="px-4 space-y-3 pb-32">
-        {pedidos.map((pedido) => (
-          <div
-            key={pedido.id}
-            onClick={() => router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}`)}
-            className="w-full bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-left active:scale-[0.98] transition-transform cursor-pointer"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <EstadoBadge estado={pedido.estado_entrega} />
-                  <p className="font-bold text-gray-900 truncate">{pedido.cliente_nombre}</p>
-                </div>
-                <p className="text-gray-500 text-sm mt-1 truncate">📍 {pedido.direccion}</p>
-                {pedido.localidad && (
-                  <p className="text-gray-400 text-xs">{pedido.localidad}</p>
-                )}
-              </div>
-              <span className="text-gray-400 text-xl flex-shrink-0">›</span>
-            </div>
+        {aEntregar.length > 0 && (
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide px-1">A entregar ({aEntregar.length})</p>
+        )}
+        {aEntregar.map((pedido) => renderPedidoCard(pedido, false))}
 
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <div className="bg-gray-50 rounded-lg py-2">
-                <p className="text-xs text-gray-400">Bultos</p>
-                <p className="font-bold text-gray-800">{pedido.bultos}</p>
-              </div>
-              <div className="bg-gray-50 rounded-lg py-2">
-                <p className="text-xs text-gray-400">Pedido</p>
-                <p className="font-bold text-gray-800 text-sm">{formatCurrency(pedido.total_pedido)}</p>
-              </div>
-              <div className={`rounded-lg py-2 ${pedido.saldo_anterior > 0 ? "bg-red-50" : "bg-gray-50"}`}>
-                <p className="text-xs text-gray-400">Saldo prev.</p>
-                <p className={`font-bold text-sm ${pedido.saldo_anterior > 0 ? "text-red-600" : "text-gray-400"}`}>
-                  {pedido.saldo_anterior > 0 ? formatCurrency(pedido.saldo_anterior) : "—"}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-2 bg-blue-50 rounded-lg px-3 py-2 flex justify-between items-center">
-              <span className="text-blue-700 text-sm font-medium">Total a cobrar:</span>
-              <span className="text-blue-800 font-bold">{formatCurrency(pedido.total_a_cobrar)}</span>
-            </div>
-
-            {!esReadOnly && (
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  onClick={(e) => { e.stopPropagation(); router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}?accion=devolucion`) }}
-                  className="py-2.5 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm border border-amber-200 active:scale-95 transition-transform"
-                >
-                  ↩ Devolución
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}?accion=cobrar`) }}
-                  className="py-2.5 rounded-xl bg-blue-600 text-white font-bold text-sm active:scale-95 transition-transform"
-                >
-                  💵 Cobrar
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
+        {entregados.length > 0 && (
+          <>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide px-1 pt-4">Entregados ({entregados.length})</p>
+            {entregados.map((pedido) => renderPedidoCard(pedido, true))}
+          </>
+        )}
 
         {pedidos.length === 0 && (
           <div className="text-center py-12 text-gray-400">
