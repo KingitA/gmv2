@@ -66,6 +66,10 @@ function PagosClientesContent() {
   const [aplicarContado, setAplicarContado] = useState(false)
   const [activeTab, setActiveTab] = useState("nuevo")
 
+  // ── Multi-cliente (caso "Tandil"): clientes adicionales en la misma cobranza ──
+  const [clientesExtra, setClientesExtra] = useState<Array<{ cliente: Cliente; seleccionados: Record<string, number> }>>([])
+  const esMulti = clientesExtra.length > 0
+
   // ── Historial ──
   const [historial, setHistorial] = useState<PagoHistorial[]>([])
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
@@ -97,6 +101,9 @@ function PagosClientesContent() {
   }, [searchParams])
 
   const totalComprobantes = Object.values(seleccionados).reduce((s, v) => s + v, 0)
+  // Total combinado (incluye clientes adicionales en cobranza conjunta)
+  const totalExtra = clientesExtra.reduce((s, c) => s + Object.values(c.seleccionados).reduce((a, v) => a + v, 0), 0)
+  const totalSeleccionadoUI = totalComprobantes + totalExtra
   // Solo efectivo → se confirma en el acto (mostrador). Cheque/transferencia/depósito → pendiente de verificación.
   const soloEfectivo = metodos.length > 0 && metodos.every((m) => m.tipo === "efectivo")
 
@@ -166,7 +173,88 @@ function PagosClientesContent() {
     }
   }
 
+  // Cobranza multi-cliente: arma una cobranza (/api/cobranzas) repartiendo los
+  // métodos por la porción de cada cliente (cheque único = compartido).
+  const handleGuardarMulti = async (confirmar: boolean) => {
+    if (!cliente) { toast.error("Seleccioná el cliente principal"); return }
+    if (metodos.length === 0) { toast.error("Agregá al menos un método de pago"); return }
+
+    const clientes = [
+      { cliente_id: cliente.id, seleccionados },
+      ...clientesExtra.map((c) => ({ cliente_id: c.cliente.id, seleccionados: c.seleccionados })),
+    ]
+      .map((c) => ({
+        cliente_id: c.cliente_id,
+        imputaciones: Object.entries(c.seleccionados).map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado })),
+        portion: Object.values(c.seleccionados).reduce((a, v) => a + v, 0),
+      }))
+      .filter((c) => c.portion > 0)
+
+    if (clientes.length === 0) { toast.error("Seleccioná comprobantes a afectar"); return }
+    if (metodos.filter((m) => m.tipo === "cheque").length > 1) {
+      toast.error("En cobranza multi-cliente usá un solo cheque (compartido)"); return
+    }
+
+    const montoMetodo = (m: any) => m.tipo === "deposito"
+      ? (m.items || []).reduce((a: number, it: any) => a + Number(it.monto), 0) : Number(m.monto)
+    const totalSel = clientes.reduce((s, c) => s + c.portion, 0)
+    const totalMet = metodos.reduce((s, m) => s + montoMetodo(m), 0)
+    if (Math.abs(totalSel - totalMet) > 0.5) {
+      toast.error(`El total de métodos ($${totalMet.toLocaleString("es-AR")}) debe igualar lo seleccionado ($${totalSel.toLocaleString("es-AR")})`); return
+    }
+
+    const chequeMetodo = metodos.find((m) => m.tipo === "cheque") as any
+    const cheque_compartido = chequeMetodo ? {
+      banco: chequeMetodo.banco_emisor, numero: chequeMetodo.numero_cheque,
+      fecha_cheque: chequeMetodo.fecha_cheque, monto: Number(chequeMetodo.monto),
+      color: chequeMetodo.color_cheque || "BLANCO",
+    } : null
+
+    // Distribución greedy de cada método entre los clientes según su porción
+    const restante: Record<string, number> = {}
+    const metodosPorCliente: Record<string, any[]> = {}
+    clientes.forEach((c) => { restante[c.cliente_id] = c.portion; metodosPorCliente[c.cliente_id] = [] })
+    for (const m of metodos as any[]) {
+      let amount = montoMetodo(m)
+      for (const c of clientes) {
+        if (amount <= 0.0001) break
+        const take = Math.min(amount, restante[c.cliente_id])
+        if (take <= 0) continue
+        const met: any = { tipo: m.tipo, monto: take }
+        if (m.tipo === "cheque") met.usa_cheque_compartido = true
+        if (m.tipo === "transferencia") { met.numero_comprobante = m.numero_comprobante; met.cuenta_bancaria_id = m.cuenta_bancaria_id; met.fecha_transferencia = m.fecha_transferencia }
+        if (m.tipo === "efectivo") met.caja_id = m.caja_id
+        metodosPorCliente[c.cliente_id].push(met)
+        restante[c.cliente_id] -= take
+        amount -= take
+      }
+    }
+
+    const asignaciones = clientes.map((c) => ({ cliente_id: c.cliente_id, imputaciones: c.imputaciones, metodos: metodosPorCliente[c.cliente_id] }))
+
+    setGuardando(true)
+    try {
+      const res = await fetch("/api/cobranzas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ origen: "ERP", confirmar, cheque_compartido, asignaciones }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(confirmar
+        ? `Cobranza confirmada: ${data.clientes?.length || 0} cliente(s), recibos generados.`
+        : "Cobranza registrada como PENDIENTE de verificación.")
+      setCliente(null); setClientesExtra([]); setSeleccionados({}); setMetodos([]); setRetenciones([]); setPagoACuenta(false)
+      setHistorialCargado(false)
+    } catch (err: any) {
+      toast.error("Error: " + err.message)
+    } finally {
+      setGuardando(false)
+    }
+  }
+
   const handleGuardar = async (confirmar: boolean = true) => {
+    if (esMulti) return handleGuardarMulti(confirmar)
     if (!cliente) { toast.error("Seleccioná un cliente"); return }
     if (metodos.length === 0) { toast.error("Agregá al menos un método de pago"); return }
 
@@ -375,6 +463,53 @@ function PagosClientesContent() {
                 </section>
               )}
 
+              {/* 2b. Clientes adicionales (cobranza conjunta — caso "Tandil") */}
+              {cliente && !pagoACuenta && (
+                <>
+                  {clientesExtra.map((ce, idx) => (
+                    <section key={ce.cliente.id} className="border rounded-xl p-4 bg-white">
+                      <div className="flex items-center justify-between mb-3">
+                        <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">
+                          Cliente adicional — {ce.cliente.razon_social || ce.cliente.nombre}
+                        </h2>
+                        <button
+                          onClick={() => setClientesExtra((prev) => prev.filter((_, i) => i !== idx))}
+                          className="text-xs text-red-600 hover:underline"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                      <ComprobantesSelector
+                        clienteId={ce.cliente.id}
+                        seleccionados={ce.seleccionados}
+                        onChange={(sel) => setClientesExtra((prev) => prev.map((c, i) => (i === idx ? { ...c, seleccionados: sel } : c)))}
+                      />
+                    </section>
+                  ))}
+
+                  <section className="border border-dashed rounded-xl p-4 bg-white">
+                    <h2 className="font-semibold mb-3 text-sm uppercase tracking-wide text-muted-foreground">
+                      + Agregar otro cliente (un solo cobro para varios)
+                    </h2>
+                    <ClienteSearchCombobox
+                      onSelect={(c) => {
+                        if (!c) return
+                        if (c.id === cliente.id || clientesExtra.some((e) => e.cliente.id === c.id)) {
+                          toast.error("Ese cliente ya está en la cobranza"); return
+                        }
+                        setClientesExtra((prev) => [...prev, { cliente: c, seleccionados: {} }])
+                      }}
+                    />
+                    {esMulti && (
+                      <p className="text-xs text-amber-700 mt-2">
+                        Cobranza conjunta: los métodos de pago se reparten entre los clientes según lo seleccionado.
+                        Si pagan con cheque, usá un solo cheque (se registra compartido).
+                      </p>
+                    )}
+                  </section>
+                </>
+              )}
+
               {/* 3. Métodos de pago */}
               <section className="border rounded-xl p-4 bg-white">
                 <div className="flex items-center justify-between mb-3">
@@ -415,14 +550,14 @@ function PagosClientesContent() {
             {/* Columna derecha: resumen */}
             <div className="space-y-4">
               <ResumenPago
-                totalComprobantes={totalComprobantes}
+                totalComprobantes={totalSeleccionadoUI}
                 metodos={metodos}
                 retenciones={retenciones}
                 bonificacion={calcBonificacion()}
               />
 
-              {/* 10% bonificación pago contado */}
-              {Object.keys(seleccionados).length > 0 && (
+              {/* 10% bonificación pago contado (solo cliente único) */}
+              {!esMulti && Object.keys(seleccionados).length > 0 && (
                 <div
                   className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${aplicarContado ? "bg-amber-50 border-amber-300" : "bg-muted/30 border-border"}`}
                   onClick={() => setAplicarContado((v) => !v)}
