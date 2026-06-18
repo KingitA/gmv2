@@ -155,7 +155,7 @@ language sql stable as $$
     and not exists (
       select 1 from toks t
       where not (a.search_text like '%' || t.tok || '%'
-                 or word_similarity(t.tok, a.search_text) > 0.4)
+                 or word_similarity(t.tok, a.search_text) > 0.5)
     )
   order by score desc
   limit match_count;
@@ -182,7 +182,7 @@ language sql stable as $$
     and not exists (
       select 1 from toks t
       where not (c.search_text like '%' || t.tok || '%'
-                 or word_similarity(t.tok, c.search_text) > 0.4)
+                 or word_similarity(t.tok, c.search_text) > 0.5)
     )
   order by score desc
   limit match_count;
@@ -209,7 +209,7 @@ language sql stable as $$
     and not exists (
       select 1 from toks t
       where not (p.search_text like '%' || t.tok || '%'
-                 or word_similarity(t.tok, p.search_text) > 0.4)
+                 or word_similarity(t.tok, p.search_text) > 0.5)
     )
   order by score desc
   limit match_count;
