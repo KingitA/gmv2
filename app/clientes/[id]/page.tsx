@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { formatDateAR } from "@/lib/utils"
+import { localMatch } from "@/lib/search/local-match"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -642,7 +643,7 @@ export default function ClienteDetailPage() {
                       <div className="max-h-40 overflow-auto space-y-1">
                         {specialProveedores
                           .filter(p => !condProv.some((c: any) => c.proveedor_id === p.id))
-                          .filter(p => p.nombre.toLowerCase().includes(specialSearch.toLowerCase()))
+                          .filter(p => localMatch(specialSearch, p.nombre))
                           .map(p => (
                             <button key={p.id} type="button" disabled={savingCond}
                               className="w-full text-left px-3 py-2 rounded-lg hover:bg-teal-50 text-xs font-medium text-slate-700 flex items-center justify-between"

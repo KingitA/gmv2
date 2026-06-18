@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { localMatch } from "@/lib/search/local-match"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -182,10 +183,7 @@ export default function ViajesPage() {
   }
 
   const viajesFiltrados = viajes.filter(
-    (viaje) =>
-      viaje.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
-      viaje.zonas?.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
-      viaje.chofer?.nombre?.toLowerCase().includes(busqueda.toLowerCase()),
+    (viaje) => !busqueda.trim() || localMatch(busqueda, viaje.nombre, viaje.zonas?.nombre, viaje.chofer?.nombre),
   )
 
   const getEstadoBadge = (estado: string) => {

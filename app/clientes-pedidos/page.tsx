@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { formatDateAR } from "@/lib/utils"
+import { localMatch } from "@/lib/search/local-match"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -750,10 +751,12 @@ export default function ClientesPedidosPage() {
   }
 
   const pedidosFiltrados = pedidos.filter((pedido) => {
-    const coincideBusqueda =
-      pedido.numero_pedido?.toLowerCase().includes(busqueda.toLowerCase()) ||
-      pedido.clientes?.nombre_razon_social?.toLowerCase().includes(busqueda.toLowerCase()) ||
-      pedido.clientes?.cuit?.includes(busqueda)
+    const coincideBusqueda = !busqueda.trim() || localMatch(
+      busqueda,
+      pedido.numero_pedido,
+      pedido.clientes?.nombre_razon_social,
+      pedido.clientes?.cuit,
+    )
 
     const coincideEstado = filtroEstado === "todos" || pedido.estado === filtroEstado
 

@@ -666,10 +666,7 @@ export default function PedidoEditPage() {
 
           {(() => {
             const filteredItems = filterQuery.trim()
-              ? items.filter(i =>
-                  i.articulos?.descripcion?.toLowerCase().includes(filterQuery.toLowerCase()) ||
-                  i.articulos?.sku?.toLowerCase().includes(filterQuery.toLowerCase())
-                )
+              ? items.filter(i => localMatch(filterQuery, i.articulos?.descripcion, i.articulos?.sku))
               : items
             return filteredItems.length === 0 ? (
             <div className="py-16 text-center">

@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Card, CardContent } from "@/components/ui/card"
 import { Search, FileText, Loader2, CheckCircle2, Plus, AlertTriangle, ExternalLink, Ban } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
+import { localMatch } from "@/lib/search/local-match"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 const TIPO_INVERSO_LABEL: Record<string, string> = {
@@ -307,11 +308,13 @@ export default function ComprobantesVentaPage() {
   }
 
   const comprobantesFiltrados = comprobantes.filter((comp) => {
-    const coincideBusqueda =
-      comp.numero_comprobante?.toLowerCase().includes(busqueda.toLowerCase()) ||
-      comp.clientes?.nombre_razon_social?.toLowerCase().includes(busqueda.toLowerCase()) ||
-      comp.clientes?.cuit?.includes(busqueda) ||
-      comp.pedidos?.numero_pedido?.includes(busqueda)
+    const coincideBusqueda = !busqueda.trim() || localMatch(
+      busqueda,
+      comp.numero_comprobante,
+      comp.clientes?.nombre_razon_social,
+      comp.clientes?.cuit,
+      comp.pedidos?.numero_pedido,
+    )
 
     const coincideTipo = filtroTipo === "todos" || comp.tipo_comprobante === filtroTipo
     const coincideEstado = filtroEstado === "todos" || comp.estado_pago === filtroEstado

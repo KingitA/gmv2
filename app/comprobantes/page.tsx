@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Camera, Search, Trash2 } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
+import { localMatch } from "@/lib/search/local-match"
 import type { OrdenCompra, Proveedor } from "@/lib/types"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 
@@ -200,9 +201,7 @@ export default function ComprobantesPage() {
   }
 
   const filteredComprobantes = comprobantes.filter(
-    (comp) =>
-      comp.numero_comprobante.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      comp.proveedor?.nombre.toLowerCase().includes(searchTerm.toLowerCase()),
+    (comp) => !searchTerm.trim() || localMatch(searchTerm, comp.numero_comprobante, comp.proveedor?.nombre),
   )
 
   return (

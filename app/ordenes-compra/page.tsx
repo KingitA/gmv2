@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Search, Send, FileText, CheckCircle2, AlertCircle, Clock, Trash2, Pencil } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
+import { localMatch } from "@/lib/search/local-match"
 import type { Proveedor, OrdenCompra } from "@/lib/types"
 import { ImportOrderDialog } from "@/components/ordenes/ImportOrderDialog"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
@@ -731,17 +732,12 @@ export default function OrdenesCompraPage() {
   }
 
   const filteredOrdenes = ordenes.filter(
-    (orden) =>
-      orden.numero_orden?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      orden.proveedor?.nombre.toLowerCase().includes(searchTerm.toLowerCase()),
+    (orden) => !searchTerm.trim() || localMatch(searchTerm, orden.numero_orden, orden.proveedor?.nombre),
   )
 
   const articulosFiltrados = searchArticulo
     ? articulosTabla.filter(
-      (item) =>
-        item.articulo.descripcion.toLowerCase().includes(searchArticulo.toLowerCase()) ||
-        item.articulo.sku.includes(searchArticulo) ||
-        (item.articulo.ean13 && item.articulo.ean13.includes(searchArticulo)),
+      (item) => localMatch(searchArticulo, item.articulo.descripcion, item.articulo.sku, item.articulo.ean13),
     )
     : articulosTabla
 

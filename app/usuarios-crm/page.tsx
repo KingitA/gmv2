@@ -147,12 +147,7 @@ export default function UsuariosCRMPage() {
     let filtered = usuarios
 
     if (searchTerm) {
-      filtered = filtered.filter(
-        (u) =>
-          u.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          u.cuit?.includes(searchTerm),
-      )
+      filtered = filtered.filter((u) => localMatch(searchTerm, u.nombre, u.email, u.cuit))
     }
 
     if (filterEstado !== "todos") {

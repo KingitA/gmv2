@@ -10,6 +10,7 @@ import { getPendingImports, approveImport, rejectImport } from "@/lib/actions/im
 import { Input } from "@/components/ui/input"
 import { searchClientes } from "@/lib/actions/clientes"
 import { searchProductos } from "@/lib/actions/productos"
+import { localMatch } from "@/lib/search/local-match"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { createClient } from "@/lib/supabase/client"
 
@@ -507,7 +508,7 @@ export default function ImportReviewPage() {
                       <div className="max-h-32 overflow-auto space-y-1">
                         {specialProveedores
                           .filter(p => !condProvIds.includes(p.id))
-                          .filter(p => p.nombre.toLowerCase().includes(specialSearch.toLowerCase()))
+                          .filter(p => localMatch(specialSearch, p.nombre))
                           .map(p => (
                             <button key={p.id} type="button"
                               className="w-full text-left px-2.5 py-1.5 rounded hover:bg-teal-50 text-xs font-medium flex items-center justify-between"
