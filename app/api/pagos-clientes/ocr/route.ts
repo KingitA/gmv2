@@ -1,7 +1,55 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai"
+
+// Schema de salida: fuerza a Gemini a devolver JSON válido (cero errores de parseo).
+const OCR_SCHEMA: any = {
+  type: SchemaType.OBJECT,
+  properties: {
+    resultados: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          tipo: { type: SchemaType.STRING, description: "cheque | transferencia | deposito" },
+          monto: { type: SchemaType.NUMBER },
+          numero_cheque: { type: SchemaType.STRING },
+          banco_emisor: { type: SchemaType.STRING },
+          fecha_emision: { type: SchemaType.STRING },
+          fecha_cheque: { type: SchemaType.STRING },
+          cuit_emisor: { type: SchemaType.STRING },
+          localidad: { type: SchemaType.STRING },
+          color_cheque: { type: SchemaType.STRING },
+          cbu_destino: { type: SchemaType.STRING },
+          cvu_destino: { type: SchemaType.STRING },
+          fecha_transferencia: { type: SchemaType.STRING },
+          numero_comprobante: { type: SchemaType.STRING },
+          fecha_deposito: { type: SchemaType.STRING },
+          items: {
+            type: SchemaType.ARRAY,
+            items: {
+              type: SchemaType.OBJECT,
+              properties: {
+                tipo_item: { type: SchemaType.STRING, description: "efectivo | cheque" },
+                monto: { type: SchemaType.NUMBER },
+                banco_emisor: { type: SchemaType.STRING },
+                numero_cheque: { type: SchemaType.STRING },
+                fecha_pago_cheque: { type: SchemaType.STRING },
+                numero_comprobante_deposito: { type: SchemaType.STRING },
+                fecha_deposito_efectivo: { type: SchemaType.STRING },
+                nro_comprobante_deposito_ef: { type: SchemaType.STRING },
+              },
+              required: ["tipo_item", "monto"],
+            },
+          },
+        },
+        required: ["tipo"],
+      },
+    },
+  },
+  required: ["resultados"],
+}
 
 interface OCRResultMetodo {
   tipo: "cheque" | "transferencia" | "deposito"
@@ -39,7 +87,14 @@ async function processPaymentOCR(file: File): Promise<{ resultados: OCRResultMet
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurado")
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" })
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: OCR_SCHEMA,
+      temperature: 0, // determinista: mismos datos → misma extracción
+    },
+  })
 
   const bytes = await file.arrayBuffer()
   const base64 = Buffer.from(bytes).toString("base64")
@@ -95,10 +150,15 @@ Devolvé SOLO este JSON:
   ])
 
   const text = result.response.text()
-  const jsonMatch = text.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error("No se pudo extraer JSON de la respuesta OCR")
-
-  const parsed = JSON.parse(jsonMatch[0])
+  let parsed: any
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    // Fallback defensivo por si el modelo envolviera el JSON en texto
+    const m = text.match(/\{[\s\S]*\}/)
+    if (!m) throw new Error("No se pudo interpretar la respuesta del OCR")
+    parsed = JSON.parse(m[0])
+  }
   const resultados: OCRResultMetodo[] = parsed.resultados || []
 
   // Fallback regex: busca CUIT con guiones O sin guiones (11 dígitos que empiezan con 20/23/24/27/30/33/34)
@@ -142,12 +202,19 @@ export async function POST(request: NextRequest) {
 
     const bancosActivos = bancos || []
 
-    // Procesar cada archivo con Gemini
+    // Procesar cada archivo con Gemini (resiliente: un archivo ilegible no tumba el resto)
     const todosResultados: OCRResultMetodo[] = []
+    const errores: string[] = []
 
     for (const file of files) {
-      const { resultados } = await processPaymentOCR(file)
-      todosResultados.push(...resultados)
+      try {
+        const { resultados } = await processPaymentOCR(file)
+        if (!resultados.length) errores.push(`${file.name || "archivo"}: no se detectaron datos`)
+        todosResultados.push(...resultados)
+      } catch (e: any) {
+        console.error("[pagos-clientes/ocr] archivo", file.name, e?.message)
+        errores.push(`${file.name || "archivo"}: ${e?.message || "no se pudo leer"}`)
+      }
     }
 
     // Match CBU/CVU con bancos propios
@@ -177,6 +244,7 @@ export async function POST(request: NextRequest) {
       success: true,
       resultados: resultadosEnriquecidos,
       total_encontrados: resultadosEnriquecidos.length,
+      errores: errores.length ? errores : undefined,
     })
   } catch (error: any) {
     console.error("[pagos-clientes/ocr] POST error:", error)
