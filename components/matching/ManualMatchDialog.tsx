@@ -75,26 +75,25 @@ export function ManualMatchDialog({ open, onOpenChange, onSelect, itemName, prov
             }
         }
 
-        // 2. Search in Articles (Global) - Description & Codes
-        const { data: artData, error: artError } = await supabase
-            .from('articulos')
-            .select('id, descripcion, sku, ean13')
-            .or(`descripcion.ilike.%${cleanQuery}%,sku.ilike.%${cleanQuery}%,ean13.ilike.%${cleanQuery}%`) // Removed spaces
-            .limit(10);
-
-        if (artError) {
-            console.error("Error searching articles:", JSON.stringify(artError, null, 2));
-        } else if (artData) {
-            artData.forEach((art: any) => {
+        // 2. Search in Articles (Global) - motor unificado (léxico trigram + vector)
+        try {
+            const res = await fetch(`/api/articulos/buscar?q=${encodeURIComponent(cleanQuery)}`);
+            const artData = res.ok ? await res.json() : [];
+            (Array.isArray(artData) ? artData : []).forEach((art: any) => {
                 if (!pendingResults.has(art.id)) {
                     pendingResults.set(art.id, {
-                        ...art,
+                        id: art.id,
+                        descripcion: art.descripcion,
+                        sku: art.sku,
+                        ean13: art.ean13,
                         codigo_interno: art.sku, // Map for UI compatibility
                         codigo_barras: art.ean13, // Map for UI compatibility
                         source: 'global_search'
                     });
                 }
             });
+        } catch (artError) {
+            console.error("Error searching articles:", artError);
         }
 
         setResults(Array.from(pendingResults.values()));

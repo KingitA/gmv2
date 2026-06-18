@@ -115,24 +115,10 @@ export default function CargarArticulosPage() {
       setResultadosBusqueda([])
       return
     }
-
-    const { data } = await supabase
-      .from("articulos")
-      .select("*")
-      .or(`sku.ilike.%${busqueda}%,ean13.ilike.%${busqueda}%,descripcion.ilike.%${busqueda}%`)
-      .eq("activo", true)
-      .order("descripcion", { ascending: true })
-
-    if (data) {
-      const q = busqueda.toLowerCase()
-      const sorted = data.sort((a: any, b: any) => {
-        const aStarts = a.descripcion?.toLowerCase().startsWith(q) ? 0 : 1
-        const bStarts = b.descripcion?.toLowerCase().startsWith(q) ? 0 : 1
-        if (aStarts !== bStarts) return aStarts - bStarts
-        return (a.descripcion || "").localeCompare(b.descripcion || "")
-      })
-      setResultadosBusqueda(sorted)
-    }
+    // Motor unificado (léxico trigram + vector de fallback), ya ordenado por relevancia
+    const res = await fetch(`/api/articulos/buscar?q=${encodeURIComponent(busqueda.trim())}`)
+    const data = res.ok ? await res.json() : []
+    setResultadosBusqueda(Array.isArray(data) ? data : [])
   }
 
   const seleccionarArticulo = (articulo: any) => {

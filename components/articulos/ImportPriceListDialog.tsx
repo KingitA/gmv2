@@ -124,15 +124,10 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
     const searchArticles = async (term: string) => {
         if (!term || term.length < 2) return
         setIsSearching(true)
-        const supabase = createClient()
-        const { data } = await supabase
-            .from("articulos")
-            .select("id, descripcion, sku")
-            .ilike("descripcion", `%${term}%`)
-            .eq("activo", true)
-            .limit(10)
-
-        setSearchResults(data || [])
+        // Motor unificado (léxico trigram + vector de fallback)
+        const res = await fetch(`/api/articulos/buscar?q=${encodeURIComponent(term)}`)
+        const data = res.ok ? await res.json() : []
+        setSearchResults(Array.isArray(data) ? data : [])
         setIsSearching(false)
     }
 

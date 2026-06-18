@@ -6,6 +6,7 @@ import {
   buscarArticulosDeposito, getProveedoresDeposito, getCategoriasDeposito,
   getArticulosListado,
 } from "@/lib/actions/deposito"
+import { localMatch } from "@/lib/search/local-match"
 
 interface Articulo {
   id: string
@@ -328,8 +329,8 @@ export default function ModificacionArticulosPage() {
     loadMoreBtn: { width: "100%", marginTop: 8, padding: "14px", borderRadius: 12, background: "#1f2937", border: "1px solid #374151", color: "#a5b4fc", fontWeight: 700, fontSize: 14, cursor: "pointer" },
   }
 
-  const provsFiltrados = busqFiltro ? proveedores.filter(p => p.nombre.toLowerCase().includes(busqFiltro.toLowerCase())) : proveedores
-  const catsFiltradas  = busqFiltro ? categorias.filter(c => c.toLowerCase().includes(busqFiltro.toLowerCase())) : categorias
+  const provsFiltrados = busqFiltro ? proveedores.filter(p => localMatch(busqFiltro, p.nombre)) : proveedores
+  const catsFiltradas  = busqFiltro ? categorias.filter(c => localMatch(busqFiltro, c)) : categorias
 
   // ── Render del item del listado ───────────────────────
   const renderListaItem = (art: Articulo, i: number) => {

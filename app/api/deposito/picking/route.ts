@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { searchProductsByVector } from "@/lib/actions/embeddings"
+import { hybridSearchIds } from "@/lib/search/hybrid"
 import { padEan13 } from "@/lib/utils/ean"
 
 // POST: Iniciar o retomar sesión de picking para un pedido
@@ -112,33 +112,20 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const [textRes, vectorResults] = await Promise.all([
-      adminSupabase
-        .from("articulos")
-        .select(SELECT)
-        .or(`sku.ilike.%${q}%,descripcion.ilike.%${q}%`)
-        .eq("activo", true)
-        .order("descripcion", { ascending: true }),
-      searchProductsByVector(q, 0.35, 50).catch(() => []),
-    ])
+    // Motor unificado (léxico trigram + vector de fallback)
+    const ids = await hybridSearchIds("articulos", q, 50)
+    if (ids.length === 0) return NextResponse.json([])
 
-    if (textRes.error) console.error("[picking] text search error:", textRes.error.message)
+    const { data, error } = await adminSupabase
+      .from("articulos")
+      .select(SELECT)
+      .in("id", ids)
+      .eq("activo", true)
 
-    const qLower = q.toLowerCase()
-    const sorted = (textRes.data || []).sort((a: any, b: any) => {
-      const aStarts = a.descripcion?.toLowerCase().startsWith(qLower) ? 0 : 1
-      const bStarts = b.descripcion?.toLowerCase().startsWith(qLower) ? 0 : 1
-      if (aStarts !== bStarts) return aStarts - bStarts
-      return (a.descripcion || "").localeCompare(b.descripcion || "")
-    })
+    if (error) console.error("[picking] search error:", error.message)
 
-    const textIds = new Set(sorted.map((r: any) => r.id))
-    const merged = [
-      ...sorted,
-      ...vectorResults.filter((r: any) => !textIds.has(r.id)),
-    ]
-
-    return NextResponse.json(merged)
+    const map = new Map((data || []).map((r: any) => [r.id, r]))
+    return NextResponse.json(ids.map((id) => map.get(id)).filter(Boolean))
 
   } catch (error: any) {
     console.error("[picking] unexpected error:", error)

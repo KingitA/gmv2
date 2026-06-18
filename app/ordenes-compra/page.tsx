@@ -430,13 +430,10 @@ export default function OrdenesCompraPage() {
     if (!term || term.length < 2) { setArticulosExternos([]); return }
     setLoadingArticulosExternos(true)
     try {
-      const { data } = await supabase
-        .from('articulos')
-        .select('id, sku, descripcion, precio_compra, unidades_por_bulto, descuento1, descuento2, descuento3, descuento4')
-        .eq('activo', true)
-        .or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%`)
-        .limit(20)
-      setArticulosExternos(data || [])
+      // Motor unificado (léxico trigram + vector de fallback)
+      const res = await fetch(`/api/articulos/buscar?q=${encodeURIComponent(term)}`)
+      const data = res.ok ? await res.json() : []
+      setArticulosExternos(Array.isArray(data) ? data.slice(0, 20) : [])
     } finally {
       setLoadingArticulosExternos(false)
     }
