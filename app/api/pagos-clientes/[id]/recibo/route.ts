@@ -135,6 +135,44 @@ export async function GET(
       }
     }
 
+    // Cheques referenciados: datos reales + monto total + co-clientes (cobranza compartida)
+    const chequeIds = detalles.filter((d) => d.cheque_id).map((d) => d.cheque_id)
+    const chequeMap = new Map<string, any>()
+    if (chequeIds.length) {
+      const { data: chs } = await supabase
+        .from("cheques")
+        .select("id, banco, numero, fecha_vencimiento, monto")
+        .in("id", chequeIds)
+      for (const ch of chs || []) chequeMap.set(ch.id, { ...ch, coClientes: [] as any[] })
+
+      // Otros pagos que comparten el mismo cheque (un cheque físico repartido en varios clientes)
+      const { data: otros } = await supabase
+        .from("pagos_detalle")
+        .select("pago_id, monto, cheque_id")
+        .in("cheque_id", chequeIds)
+        .neq("pago_id", id)
+      const otrosPagoIds = [...new Set((otros || []).map((o: any) => o.pago_id))]
+      if (otrosPagoIds.length) {
+        const { data: ps } = await supabase.from("pagos_clientes").select("id, cliente_id").in("id", otrosPagoIds)
+        const cliIds = [...new Set((ps || []).map((p: any) => p.cliente_id))]
+        const { data: clis } = await supabase
+          .from("clientes")
+          .select("id, nombre, razon_social, nombre_razon_social, direccion")
+          .in("id", cliIds)
+        const cliMap = new Map((clis || []).map((c: any) => [c.id, c]))
+        const pIdToCli = new Map((ps || []).map((p: any) => [p.id, cliMap.get(p.cliente_id)]))
+        for (const o of otros || []) {
+          const ch = chequeMap.get((o as any).cheque_id)
+          const cli: any = pIdToCli.get((o as any).pago_id)
+          if (ch && cli) ch.coClientes.push({
+            nombre: cli.razon_social || cli.nombre_razon_social || cli.nombre,
+            direccion: cli.direccion,
+            monto: Number((o as any).monto),
+          })
+        }
+      }
+    }
+
     const cliente = pago.clientes as any
     const recibo = (pago.recibos as any[])?.[0] || pago.recibos
     const numeroRecibo = recibo?.numero_recibo || pago.id.slice(0, 8).toUpperCase()
@@ -240,9 +278,30 @@ ${(imputaciones || []).length > 0 ? `
     </thead>
     <tbody>
       ${detalles.map((det: any) => {
-        const label = labelMetodo(det, cajaMap, bancoMap)
+        let label = labelMetodo(det, cajaMap, bancoMap)
         const items = depositoItemsMap.get(det.id) || []
         let extraRows = ""
+
+        // Cheque (con datos reales y, si es compartido, monto total + co-clientes)
+        if (det.tipo_pago === "cheque" && det.cheque_id && chequeMap.has(det.cheque_id)) {
+          const ch = chequeMap.get(det.cheque_id)
+          const compartido = ch.coClientes.length > 0
+          label = `Cheque ${ch.numero || det.numero_cheque || ""}${ch.banco ? ` (${ch.banco})` : ""}`
+            + `${ch.fecha_vencimiento ? ` — vto. ${fmtFecha(ch.fecha_vencimiento)}` : ""}`
+            + ` — Total cheque: $${fmtARS(ch.monto)}`
+          if (compartido) {
+            const co = ch.coClientes
+              .map((c: any) => `${c.nombre}${c.direccion ? ` (${c.direccion})` : ""} — $${fmtARS(c.monto)}`)
+              .join("; ")
+            extraRows = `<tr style="background:#fffbe6;">
+              <td colspan="2" style="font-size:10px; color:#664d03; padding:6px 7px;">
+                Cheque compartido por $${fmtARS(ch.monto)}. Imputado a esta cuenta: <strong>$${fmtARS(det.monto)}</strong>.
+                Se adjunta el pago junto con: ${co}.
+              </td>
+            </tr>`
+          }
+        }
+
         if (det.tipo_pago === "deposito" && items.length > 0) {
           extraRows = items.map((it: any) => {
             const itLabel = it.tipo_item === "cheque"
