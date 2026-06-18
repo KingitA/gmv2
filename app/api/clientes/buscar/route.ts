@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { searchClientesByVector } from "@/lib/actions/embeddings"
+import { hybridSearchIds } from "@/lib/search/hybrid"
+
+const SELECT = "id, nombre, razon_social, nombre_razon_social, cuit, codigo_cliente, direccion, localidad, provincia, tipo_canal, activo, metodo_facturacion, lista_precio_id, condicion_pago, condicion_entrega, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, vendedor_id"
 
 export async function GET(request: NextRequest) {
     try {
@@ -15,29 +17,21 @@ export async function GET(request: NextRequest) {
 
         const supabase = createAdminClient()
 
-        const [{ data: textResults }, vectorResults] = await Promise.all([
-            supabase
-                .from("clientes")
-                .select("id, nombre, razon_social, nombre_razon_social, cuit, codigo_cliente, direccion, localidad, provincia, tipo_canal, activo, metodo_facturacion, lista_precio_id, condicion_pago, condicion_entrega, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, vendedor_id")
-                .eq("activo", true)
-                .or(
-                    `nombre.ilike.%${q}%,` +
-                    `razon_social.ilike.%${q}%,` +
-                    `direccion.ilike.%${q}%,` +
-                    `localidad.ilike.%${q}%,` +
-                    `cuit.ilike.%${q}%`
-                )
-                .limit(20),
-            searchClientesByVector(q, 0.35, 20),
-        ])
+        const ids = await hybridSearchIds("clientes", q, 20)
+        if (ids.length === 0) return NextResponse.json([])
 
-        const textIds = new Set((textResults || []).map((r: any) => r.id))
-        const merged = [
-            ...(textResults || []),
-            ...vectorResults.filter((r: any) => !textIds.has(r.id)),
-        ].slice(0, 20)
+        const { data, error } = await supabase
+            .from("clientes")
+            .select(SELECT)
+            .in("id", ids)
 
-        return NextResponse.json(merged)
+        if (error) {
+            console.error("[clientes/buscar] Supabase error:", error)
+            throw error
+        }
+
+        const map = new Map((data || []).map((r: any) => [r.id, r]))
+        return NextResponse.json(ids.map((id) => map.get(id)).filter(Boolean))
     } catch (error: any) {
         console.error("[clientes/buscar] Error:", error)
         return NextResponse.json({ error: error.message || "Error buscando clientes" }, { status: 500 })

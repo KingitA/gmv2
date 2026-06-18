@@ -179,10 +179,10 @@ export default function ViajeDashboardPage() {
       {/* Lista de clientes */}
       <div className="px-4 space-y-3 pb-32">
         {pedidos.map((pedido) => (
-          <button
+          <div
             key={pedido.id}
             onClick={() => router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}`)}
-            className="w-full bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-left active:scale-95 transition-transform"
+            className="w-full bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-left active:scale-[0.98] transition-transform cursor-pointer"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
@@ -219,7 +219,24 @@ export default function ViajeDashboardPage() {
               <span className="text-blue-700 text-sm font-medium">Total a cobrar:</span>
               <span className="text-blue-800 font-bold">{formatCurrency(pedido.total_a_cobrar)}</span>
             </div>
-          </button>
+
+            {!esReadOnly && (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}?accion=devolucion`) }}
+                  className="py-2.5 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm border border-amber-200 active:scale-95 transition-transform"
+                >
+                  ↩ Devolución
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}?accion=cobrar`) }}
+                  className="py-2.5 rounded-xl bg-blue-600 text-white font-bold text-sm active:scale-95 transition-transform"
+                >
+                  💵 Cobrar
+                </button>
+              </div>
+            )}
+          </div>
         ))}
 
         {pedidos.length === 0 && (

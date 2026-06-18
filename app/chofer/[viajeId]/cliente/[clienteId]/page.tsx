@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef, memo } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 
 // ─── Tipos ────────────────────────────────────────────────────
@@ -80,11 +80,13 @@ const READONLY_ESTADOS = ["completado", "en_rendicion"]
 export default function ClienteEntregaPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const viajeId = params.viajeId as string
   const clienteId = params.clienteId as string
 
   const [data, setData] = useState<ClienteData | null>(null)
   const [loading, setLoading] = useState(true)
+  const accionAplicada = useRef(false)
 
   const [showDevolucionSheet, setShowDevolucionSheet] = useState(false)
   const [showCobroSheet, setShowCobroSheet] = useState(false)
@@ -117,6 +119,14 @@ export default function ClienteEntregaPage() {
   }, [viajeId, clienteId])
 
   useEffect(() => { cargarDatos() }, [cargarDatos])
+
+  // Abrir cobro/devolución automáticamente si se entró con ?accion= desde la lista del viaje
+  useEffect(() => {
+    if (!data || accionAplicada.current) return
+    const accion = searchParams.get("accion")
+    if (accion === "cobrar") { setShowCobroSheet(true); accionAplicada.current = true }
+    else if (accion === "devolucion") { setShowDevolucionSheet(true); accionAplicada.current = true }
+  }, [data, searchParams])
 
   useEffect(() => {
     if (!data) return
@@ -276,10 +286,16 @@ export default function ClienteEntregaPage() {
   }
 
   const guardarCobro = async () => {
-    const total = totalCobro()
+    const totalImputado = Object.values(comprobantesSeleccionados).reduce((s, v) => s + v, 0)
     const totalMetodos = metodosPago.reduce((s, m) => s + Number(m.monto), 0)
-    if (Math.abs(total - totalMetodos) > 1) {
-      alert(`El total de métodos (${formatCurrency(totalMetodos)}) no coincide con lo a cobrar (${formatCurrency(total)})`)
+    if (totalMetodos <= 0) {
+      alert("Ingresá al menos un método de pago con monto.")
+      return
+    }
+    // Se permite cobrar a cuenta (sin comprobantes) o de más: el excedente sobre
+    // lo imputado queda como saldo a favor del cliente.
+    if (totalMetodos + 1 < totalImputado) {
+      alert(`El pago (${formatCurrency(totalMetodos)}) no cubre lo imputado a comprobantes (${formatCurrency(totalImputado)}).`)
       return
     }
     setGuardandoCobro(true)

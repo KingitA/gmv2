@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { searchProveedoresByVector } from "@/lib/actions/embeddings"
+import { hybridSearchIds } from "@/lib/search/hybrid"
+
+const SELECT = "id, nombre, cuit, email, telefono, direccion, activo"
 
 export async function GET(request: NextRequest) {
     try {
@@ -15,22 +17,21 @@ export async function GET(request: NextRequest) {
 
         const supabase = createAdminClient()
 
-        const [{ data: textResults }, vectorResults] = await Promise.all([
-            supabase
-                .from("proveedores")
-                .select("id, nombre, cuit, email, telefono, direccion, activo")
-                .or(`nombre.ilike.%${q}%,cuit.ilike.%${q}%`)
-                .limit(20),
-            searchProveedoresByVector(q, 0.35, 20),
-        ])
+        const ids = await hybridSearchIds("proveedores", q, 20)
+        if (ids.length === 0) return NextResponse.json([])
 
-        const textIds = new Set((textResults || []).map((r: any) => r.id))
-        const merged = [
-            ...(textResults || []),
-            ...vectorResults.filter((r: any) => !textIds.has(r.id)),
-        ].slice(0, 20)
+        const { data, error } = await supabase
+            .from("proveedores")
+            .select(SELECT)
+            .in("id", ids)
 
-        return NextResponse.json(merged)
+        if (error) {
+            console.error("[proveedores/buscar] Supabase error:", error)
+            throw error
+        }
+
+        const map = new Map((data || []).map((r: any) => [r.id, r]))
+        return NextResponse.json(ids.map((id) => map.get(id)).filter(Boolean))
     } catch (error: any) {
         console.error("[proveedores/buscar] Error:", error)
         return NextResponse.json({ error: error.message || "Error buscando proveedores" }, { status: 500 })
