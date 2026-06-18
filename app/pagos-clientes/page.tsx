@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle, Ban, Plus, X } from "lucide-react"
+import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle, Ban, Plus, X, CheckCircle } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -369,6 +369,26 @@ function PagosClientesContent() {
     }
   }
 
+  const [confirmandoPago, setConfirmandoPago] = useState<string | null>(null)
+  const confirmarPagoHistorial = async (pagoId: string) => {
+    setConfirmandoPago(pagoId)
+    try {
+      const res = await fetch(`/api/pagos/${pagoId}/confirmar`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usuario_confirmador: "historial", accion: "confirmar" }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success("Pago confirmado" + (data.numero_recibo ? ` — Recibo ${data.numero_recibo}` : ""))
+      loadHistorial()
+    } catch (e: any) {
+      toast.error("Error: " + e.message)
+    } finally {
+      setConfirmandoPago(null)
+    }
+  }
+
   const handleAnular = async () => {
     if (!confirmAnularId) return
     setAnulando(confirmAnularId)
@@ -708,6 +728,20 @@ function PagosClientesContent() {
                                 >
                                   <ExternalLink className="h-3.5 w-3.5 mr-1" /> Recibo
                                 </Button>
+                                {(p.estado === "pendiente" || p.estado === "pendiente_rendicion") && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-green-700 hover:text-green-800 hover:bg-green-50"
+                                    disabled={confirmandoPago === p.id}
+                                    onClick={() => confirmarPagoHistorial(p.id)}
+                                  >
+                                    {confirmandoPago === p.id
+                                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
+                                    Confirmar
+                                  </Button>
+                                )}
                                 {!esAnulado && (
                                   <Button
                                     variant="ghost"
