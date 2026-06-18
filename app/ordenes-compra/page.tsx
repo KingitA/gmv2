@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Search, Send, FileText, CheckCircle2, AlertCircle, Clock, Trash2, Pencil } from "lucide-react"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import type { Proveedor, OrdenCompra } from "@/lib/types"
 import { ImportOrderDialog } from "@/components/ordenes/ImportOrderDialog"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
@@ -785,18 +786,12 @@ export default function OrdenesCompraPage() {
                 <div className="space-y-4">
                   <div>
                     <Label>Proveedor</Label>
-                    <Select value={selectedProveedor} onValueChange={handleProveedorChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleccionar proveedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {proveedores.map((prov) => (
-                          <SelectItem key={prov.id} value={prov.id}>
-                            {prov.nombre}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <EntitySearchSelect
+                      entity="proveedores"
+                      placeholder="Seleccionar proveedor..."
+                      value={selectedProveedor ? ((proveedores.find((pr: any) => pr.id === selectedProveedor) as any) ?? null) : null}
+                      onSelect={(p: any) => handleProveedorChange(p ? p.id : "")}
+                    />
                   </div>
 
                   {selectedProveedor && (

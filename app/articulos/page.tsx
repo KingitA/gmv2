@@ -13,6 +13,7 @@ import {
   FileDown, FileUp, SlidersHorizontal, X, Pencil, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react"
 import { ImportArticulosDialog } from "@/components/articulos/ImportArticulosDialog"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import * as XLSX from "xlsx"
 import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, determinarGrupoPrecio, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
 import { calcularPreciosConFormulas, SUBLISTA_CODIGOS, SUBLISTA_META, type SublistaCodigo } from "@/lib/pricing/formula-evaluator"
@@ -531,10 +532,14 @@ export default function ArticulosPage() {
         {/* Proveedor */}
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-bold text-slate-400 uppercase">Proveedor</span>
-          <Select value={pf} onValueChange={v=>{setPf(v);setPg(0)}}>
-            <SelectTrigger className="h-7 text-xs w-[140px]"><SelectValue/></SelectTrigger>
-            <SelectContent><SelectItem value="todos">Todos</SelectItem>{provs.map(p=><SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}</SelectContent>
-          </Select>
+          <EntitySearchSelect
+            entity="proveedores"
+            compact
+            className="w-[180px]"
+            placeholder="Todos..."
+            value={pf !== "todos" ? ((provs.find((p: any) => p.id === pf) as any) ?? null) : null}
+            onSelect={(p: any) => { setPf(p ? p.id : "todos"); setPg(0) }}
+          />
         </div>
         {/* Search */}
         <div className="relative min-w-[200px] flex-1 max-w-sm">

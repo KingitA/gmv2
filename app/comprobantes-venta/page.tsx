@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Card, CardContent } from "@/components/ui/card"
 import { Search, FileText, Loader2, CheckCircle2, Plus, AlertTriangle, ExternalLink, Ban } from "lucide-react"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 const TIPO_INVERSO_LABEL: Record<string, string> = {
@@ -375,12 +376,12 @@ export default function ComprobantesVentaPage() {
               <>
                 <div>
                   <label className="text-sm font-medium mb-1 block">Cliente</label>
-                  <Select value={ndClienteId} onValueChange={setNdClienteId}>
-                    <SelectTrigger><SelectValue placeholder="Seleccionar cliente..." /></SelectTrigger>
-                    <SelectContent>
-                      {ndClientes.map(c => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <EntitySearchSelect
+                    entity="clientes"
+                    placeholder="Seleccionar cliente..."
+                    value={ndClienteId ? ((ndClientes.find((c: any) => c.id === ndClienteId) as any) ?? null) : null}
+                    onSelect={(c: any) => setNdClienteId(c ? c.id : "")}
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>

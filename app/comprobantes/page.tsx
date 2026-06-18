@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Camera, Search, Trash2 } from "lucide-react"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import type { OrdenCompra, Proveedor } from "@/lib/types"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 
@@ -239,19 +240,12 @@ export default function ComprobantesPage() {
 
               <div>
                 <Label>Proveedor *</Label>
-                <Select value={selectedProveedor} onValueChange={setSelectedProveedor}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar proveedor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Seleccionar proveedor</SelectItem>
-                    {proveedores.map((prov) => (
-                      <SelectItem key={prov.id} value={prov.id}>
-                        {prov.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <EntitySearchSelect
+                  entity="proveedores"
+                  placeholder="Seleccionar proveedor..."
+                  value={selectedProveedor && selectedProveedor !== "none" ? ((proveedores.find((pr: any) => pr.id === selectedProveedor) as any) ?? null) : null}
+                  onSelect={(p: any) => setSelectedProveedor(p ? p.id : "none")}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">

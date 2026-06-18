@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Plus, Upload, Loader2, Eye, CheckCircle } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 
 export default function ListasProveedoresPage() {
     const supabase = createClient()
@@ -109,13 +110,13 @@ export default function ListasProveedoresPage() {
                         <SelectItem value="vencida">Vencida</SelectItem>
                     </SelectContent>
                 </Select>
-                <Select value={filtroProveedor} onValueChange={setFiltroProveedor}>
-                    <SelectTrigger className="w-48"><SelectValue placeholder="Todos los proveedores" /></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="">Todos</SelectItem>
-                        {proveedores.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
-                    </SelectContent>
-                </Select>
+                <EntitySearchSelect
+                    entity="proveedores"
+                    className="w-56"
+                    placeholder="Todos los proveedores..."
+                    value={filtroProveedor ? ((proveedores.find((p: any) => p.id === filtroProveedor) as any) ?? null) : null}
+                    onSelect={(p: any) => setFiltroProveedor(p ? p.id : "")}
+                />
             </div>
 
             <Card>

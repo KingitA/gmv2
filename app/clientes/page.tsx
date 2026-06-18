@@ -71,6 +71,9 @@ export default function ClientesPage() {
   const [isImporting, setIsImporting] = useState(false)
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
+  // Motor de búsqueda unificado: el endpoint decide qué matchea (ids), filtramos
+  // el array ya cargado por esos ids (no cambia la forma de la tabla).
+  const [searchIds, setSearchIds] = useState<Set<string> | null>(null)
   const [bonificaciones, setBonificaciones] = useState<any[]>([])
   const [proveedores, setProveedores] = useState<any[]>([])
   const [newBonif, setNewBonif] = useState({ tipo: "general", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
@@ -111,6 +114,23 @@ export default function ClientesPage() {
     loadListasPrecio()
     loadProveedores()
   }, [])
+
+  // Búsqueda vía motor unificado (trigram + vector). Devuelve ids; filtramos local.
+  useEffect(() => {
+    const q = searchTerm.trim()
+    if (q.length < 2) { setSearchIds(null); return }
+    const ctrl = new AbortController()
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
+        const data = await res.json()
+        setSearchIds(new Set((Array.isArray(data) ? data : []).map((c: any) => c.id)))
+      } catch (e: any) {
+        if (e?.name !== "AbortError") setSearchIds(new Set())
+      }
+    }, 250)
+    return () => { clearTimeout(timer); ctrl.abort() }
+  }, [searchTerm])
 
   async function loadClientes() {
     const supabase = createClient()
@@ -386,18 +406,9 @@ export default function ClientesPage() {
     })
   }
 
-  const filteredClientes = clientes.filter(
-    (cliente) => {
-      const searchLower = searchTerm.toLowerCase()
-      return (
-        cliente.nombre_razon_social.toLowerCase().includes(searchLower) ||
-        cliente.localidades?.nombre?.toLowerCase().includes(searchLower) ||
-        cliente.cuit?.includes(searchLower) ||
-        cliente.codigo_cliente?.toLowerCase().includes(searchLower) ||
-        cliente.direccion?.toLowerCase().includes(searchLower)
-      )
-    }
-  )
+  const filteredClientes = searchIds === null
+    ? clientes
+    : clientes.filter((cliente) => searchIds.has(cliente.id))
 
   const selectedLocalidad = localidades.find((l) => l.id === formData.localidad_id)
   const zonaAsignada = selectedLocalidad?.zonas?.nombre

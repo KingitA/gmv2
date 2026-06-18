@@ -15,6 +15,7 @@ import {
     ArrowLeft, Plus, Trash2, DollarSign, CreditCard,
     Building2, Banknote, FileText
 } from "lucide-react"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 
@@ -291,16 +292,12 @@ function NuevaOrdenPagoContent() {
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <Label>Proveedor *</Label>
-                                <Select value={proveedorId} onValueChange={setProveedorId}>
-                                    <SelectTrigger><SelectValue placeholder="Seleccionar proveedor" /></SelectTrigger>
-                                    <SelectContent>
-                                        {proveedores.map(p => (
-                                            <SelectItem key={p.id} value={p.id}>
-                                                {p.sigla ? `${p.sigla} - ${p.nombre}` : p.nombre}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <EntitySearchSelect
+                                    entity="proveedores"
+                                    placeholder="Seleccionar proveedor..."
+                                    value={proveedorId ? ((proveedores.find((p: any) => p.id === proveedorId) as any) ?? null) : null}
+                                    onSelect={(p: any) => setProveedorId(p ? p.id : "")}
+                                />
                             </div>
                             <div>
                                 <Label>Fecha</Label>

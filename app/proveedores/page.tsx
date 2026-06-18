@@ -55,26 +55,27 @@ export default function ProveedoresPage() {
     default_unidad_factura: "UNIDAD" as "UNIDAD" | "BULTO" | "CAJA" | "PACK" | "DOCENA",
   })
   const [searchTerm, setSearchTerm] = useState("")
-  const [vectorResults, setVectorResults] = useState<Proveedor[] | null>(null)
+  // Motor unificado: el endpoint decide qué matchea (ids); filtramos el array cargado.
+  const [searchIds, setSearchIds] = useState<Set<string> | null>(null)
 
   useEffect(() => {
     loadProveedores()
   }, [])
 
   useEffect(() => {
-    if (searchTerm.trim().length < 2) {
-      setVectorResults(null)
-      return
-    }
+    const q = searchTerm.trim()
+    if (q.length < 2) { setSearchIds(null); return }
+    const ctrl = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/proveedores/buscar?q=${encodeURIComponent(searchTerm.trim())}`)
-        setVectorResults(res.ok ? await res.json() : null)
-      } catch {
-        setVectorResults(null)
+        const res = await fetch(`/api/proveedores/buscar?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
+        const data = res.ok ? await res.json() : []
+        setSearchIds(new Set((Array.isArray(data) ? data : []).map((p: any) => p.id)))
+      } catch (e: any) {
+        if (e?.name !== "AbortError") setSearchIds(new Set())
       }
-    }, 300)
-    return () => clearTimeout(timer)
+    }, 250)
+    return () => { clearTimeout(timer); ctrl.abort() }
   }, [searchTerm])
 
   async function loadProveedores() {
@@ -319,14 +320,9 @@ export default function ProveedoresPage() {
     }
   }
 
-  const filteredProveedores = vectorResults !== null
-    ? vectorResults as Proveedor[]
-    : proveedores.filter(
-        (proveedor) =>
-          proveedor.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          proveedor.cuit?.includes(searchTerm) ||
-          proveedor.mail_oficina?.toLowerCase().includes(searchTerm.toLowerCase()),
-      )
+  const filteredProveedores = searchIds === null
+    ? proveedores
+    : proveedores.filter((proveedor) => searchIds.has(proveedor.id))
 
   return (
     <div className="min-h-screen bg-background">

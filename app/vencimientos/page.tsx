@@ -15,6 +15,7 @@ import {
     ArrowLeft, Plus, Calendar, AlertTriangle, CheckCircle2,
     Clock, XCircle, Filter, DollarSign
 } from "lucide-react"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 
@@ -281,17 +282,12 @@ export default function VencimientosPage() {
                                         <form onSubmit={handleSubmit} className="space-y-4">
                                             <div>
                                                 <Label>Proveedor (opcional)</Label>
-                                                <Select value={formData.proveedor_id || "none"} onValueChange={(v) => setFormData({ ...formData, proveedor_id: v === "none" ? "" : v })}>
-                                                    <SelectTrigger><SelectValue placeholder="Sin proveedor" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="none">Sin proveedor</SelectItem>
-                                                        {proveedores.map(p => (
-                                                            <SelectItem key={p.id} value={p.id}>
-                                                                {p.sigla ? `${p.sigla} - ${p.nombre}` : p.nombre}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                                <EntitySearchSelect
+                                                    entity="proveedores"
+                                                    placeholder="Sin proveedor..."
+                                                    value={formData.proveedor_id ? ((proveedores.find((p: any) => p.id === formData.proveedor_id) as any) ?? null) : null}
+                                                    onSelect={(p: any) => setFormData({ ...formData, proveedor_id: p ? p.id : "" })}
+                                                />
                                             </div>
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div>

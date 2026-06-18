@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { localMatch } from "@/lib/search/local-match"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -48,10 +49,7 @@ export default function RecepcionPage() {
   useEffect(() => {
     if (busquedaDescripcion.length > 2) {
       const filtrados = articulos.filter(
-        (art) =>
-          art.descripcion.toLowerCase().includes(busquedaDescripcion.toLowerCase()) ||
-          art.sku.includes(busquedaDescripcion) ||
-          (art.ean13 && art.ean13.some((e: string) => e.includes(busquedaDescripcion))),
+        (art) => localMatch(busquedaDescripcion, art.descripcion, art.sku, art.ean13),
       )
       setArticulosFiltrados(filtrados)
     } else {

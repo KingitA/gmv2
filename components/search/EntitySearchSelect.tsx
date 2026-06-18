@@ -22,6 +22,8 @@ interface Props<T extends { id: string }> {
     disabled?: boolean
     /** Permite limpiar la selección (default true). */
     allowClear?: boolean
+    /** Modo compacto para barras de filtro (input bajito + chip chico). */
+    compact?: boolean
 }
 
 const DEFAULT_PLACEHOLDER: Record<SearchEntity, string> = {
@@ -79,8 +81,9 @@ export function EntitySearchSelect<T extends { id: string }>(props: Props<T>) {
         placeholder = DEFAULT_PLACEHOLDER[entity],
         renderItem, renderValue,
         minChars = 2, autoFocus, className = "", inputClassName = "",
-        disabled, allowClear = true,
+        disabled, allowClear = true, compact = false,
     } = props
+    const inputCls = compact ? `h-7 text-xs ${inputClassName}` : inputClassName
 
     const [query, setQuery] = useState("")
     const [results, setResults] = useState<T[]>([])
@@ -122,15 +125,15 @@ export function EntitySearchSelect<T extends { id: string }>(props: Props<T>) {
 
     if (value) {
         return (
-            <div className={`flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 ${className}`}>
+            <div className={`flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg ${compact ? "px-2 py-1" : "px-3 py-2"} ${className}`}>
                 <div className="flex-1 min-w-0">
                     {renderValue ? renderValue(value) : (
-                        <p className="font-semibold text-sm truncate">{defaultLabel(entity, value)}</p>
+                        <p className={`font-semibold truncate ${compact ? "text-xs" : "text-sm"}`}>{defaultLabel(entity, value)}</p>
                     )}
                 </div>
                 {allowClear && !disabled && (
                     <button type="button" onClick={() => onSelect(null)} className="text-muted-foreground hover:text-foreground shrink-0">
-                        <X className="h-4 w-4" />
+                        <X className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
                     </button>
                 )}
             </div>
@@ -155,7 +158,7 @@ export function EntitySearchSelect<T extends { id: string }>(props: Props<T>) {
                         else if (e.key === "Enter") { e.preventDefault(); const it = results[highlight]; if (it) choose(it) }
                         else if (e.key === "Escape") { setOpen(false) }
                     }}
-                    className={`pl-9 ${inputClassName}`}
+                    className={`pl-9 ${inputCls}`}
                 />
                 {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
             </div>

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Search, UserCheck, UserX, Eye, Clock, CheckCircle2, XCircle, AlertCircle, Pencil, Link2 } from "lucide-react"
+import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { createBrowserClient } from "@supabase/ssr"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 
@@ -688,22 +689,12 @@ export default function UsuariosCRMPage() {
                         <Link2 className="w-4 h-4" />
                         Vincular con Cliente del ERP
                       </Label>
-                      <Select
-                        value={editForm.cliente_id || "sin_vincular"}
-                        onValueChange={(v) => setEditForm({ ...editForm, cliente_id: v === "sin_vincular" ? null : v })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Seleccionar cliente..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="sin_vincular">Sin vincular</SelectItem>
-                          {clientes.map((cliente) => (
-                            <SelectItem key={cliente.id} value={cliente.id}>
-                              {cliente.nombre || cliente.razon_social} - {cliente.cuit}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <EntitySearchSelect
+                        entity="clientes"
+                        placeholder="Sin vincular — buscar cliente..."
+                        value={editForm.cliente_id ? ((clientes.find((c: any) => c.id === editForm.cliente_id) as any) ?? null) : null}
+                        onSelect={(c: any) => setEditForm({ ...editForm, cliente_id: c ? c.id : null })}
+                      />
                       <p className="text-xs text-muted-foreground">
                         Vincula este usuario con un cliente existente en el ERP para que pueda ver su cuenta corriente e
                         historial de compras.
