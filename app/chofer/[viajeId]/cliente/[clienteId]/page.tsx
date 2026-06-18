@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, memo } from "react"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { useRouter, useParams, useSearchParams } from "next/navigation"
+import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { formatCurrency } from "@/lib/utils"
 
 // ─── Tipos ────────────────────────────────────────────────────
@@ -109,6 +110,8 @@ export default function ClienteEntregaPage() {
   const [procesandoOCR, setProcesandoOCR] = useState(false)
   const [ocrMsg, setOcrMsg] = useState<string | null>(null)
   const [comprobanteArchivos, setComprobanteArchivos] = useState<{ url: string; nombre: string }[]>([])
+  // Clientes adicionales para cobrar en la misma cobranza (cobro conjunto en la calle)
+  const [cobrosExtra, setCobrosExtra] = useState<Array<{ cliente: any; saldo: number; monto: number }>>([])
 
   const esReadOnly = READONLY_ESTADOS.includes(data?.viaje_estado || "")
 
@@ -321,10 +324,13 @@ export default function ClienteEntregaPage() {
           imputaciones,
           devolucion_ids: devPendientes,
           comprobante_urls: comprobanteArchivos,
+          cobros_extra: cobrosExtra
+            .filter((c) => c.monto > 0)
+            .map((c) => ({ cliente_id: c.cliente.id, metodos: [{ tipo: "efectivo", monto: c.monto }], imputaciones: [] })),
         }),
       })
       const d = await res.json()
-      if (d.success) { setShowCobroSheet(false); cargarDatos() }
+      if (d.success) { setShowCobroSheet(false); setCobrosExtra([]); setComprobanteArchivos([]); cargarDatos() }
       else alert(d.error || "Error al registrar cobro")
     } finally { setGuardandoCobro(false) }
   }
@@ -601,6 +607,8 @@ export default function ClienteEntregaPage() {
           ocrMsg={ocrMsg}
           setOcrMsg={setOcrMsg}
           onFotos={procesarFotosOCR}
+          cobrosExtra={cobrosExtra}
+          setCobrosExtra={setCobrosExtra}
           onClose={() => setShowCobroSheet(false)}
         />
       )}
@@ -626,6 +634,8 @@ function CobroSheet({
   ocrMsg,
   setOcrMsg,
   onFotos,
+  cobrosExtra,
+  setCobrosExtra,
   onClose,
 }: {
   comprobantes_pendientes: any[]
@@ -643,12 +653,36 @@ function CobroSheet({
   ocrMsg: string | null
   setOcrMsg: React.Dispatch<React.SetStateAction<string | null>>
   onFotos: (files: FileList | File[]) => void
+  cobrosExtra: Array<{ cliente: any; saldo: number; monto: number }>
+  setCobrosExtra: React.Dispatch<React.SetStateAction<Array<{ cliente: any; saldo: number; monto: number }>>>
   onClose: () => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const totalMet = metodosPago.reduce((s, m) => s + Number(m.monto), 0)
   const total = totalCobro()
   const diff = totalMet - total
+
+  // Búsqueda de clientes adicionales para cobrar
+  const supabaseCli = createClientBrowser()
+  const [busqCli, setBusqCli] = useState("")
+  const [resCli, setResCli] = useState<any[]>([])
+  useEffect(() => {
+    if (busqCli.length < 2) { setResCli([]); return }
+    const t = setTimeout(async () => {
+      const r = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(busqCli)}&limit=8`)
+      const d = await r.json()
+      setResCli(Array.isArray(d) ? d : d.clientes || [])
+    }, 300)
+    return () => clearTimeout(t)
+  }, [busqCli])
+
+  const agregarClienteExtra = async (cli: any) => {
+    setBusqCli(""); setResCli([])
+    if (cobrosExtra.some((c) => c.cliente.id === cli.id)) return
+    const { data: saldoRow } = await supabaseCli.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", cli.id).maybeSingle()
+    const saldo = Number((saldoRow as any)?.saldo_actual ?? 0)
+    setCobrosExtra((prev) => [...prev, { cliente: cli, saldo, monto: saldo > 0 ? saldo : 0 }])
+  }
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-end">
@@ -682,6 +716,48 @@ function CobroSheet({
               </div>
             </div>
           )}
+
+          {/* Agregar cliente para cobrar (cobro conjunto en la calle) */}
+          <div>
+            <h3 className="font-bold text-gray-700 mb-2">Agregar cliente para cobrar</h3>
+            <input
+              type="text"
+              value={busqCli}
+              onChange={(e) => setBusqCli(e.target.value)}
+              placeholder="Buscar cliente por nombre o CUIT..."
+              className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm"
+            />
+            {resCli.length > 0 && (
+              <div className="mt-1 border rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                {resCli.map((cli) => (
+                  <button key={cli.id} onClick={() => agregarClienteExtra(cli)} className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b last:border-0">
+                    <p className="text-sm font-medium">{cli.razon_social || cli.nombre_razon_social || cli.nombre}</p>
+                    <p className="text-xs text-gray-400">{cli.direccion || ""} {cli.localidad ? `· ${cli.localidad}` : ""}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+            {cobrosExtra.map((ce, idx) => (
+              <div key={ce.cliente.id} className="mt-2 bg-gray-50 rounded-xl p-3">
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{ce.cliente.razon_social || ce.cliente.nombre_razon_social || ce.cliente.nombre}</p>
+                    <p className="text-xs text-gray-400">Saldo: {formatCurrency(ce.saldo)}</p>
+                  </div>
+                  <button onClick={() => setCobrosExtra((p) => p.filter((_, i) => i !== idx))} className="text-red-500 text-lg px-2">×</button>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs text-gray-500">Cobrar (efectivo):</span>
+                  <input
+                    type="number"
+                    value={ce.monto || 0}
+                    onChange={(e) => setCobrosExtra((p) => p.map((c, i) => (i === idx ? { ...c, monto: Number(e.target.value) || 0 } : c)))}
+                    className="flex-1 border-2 border-gray-200 rounded-lg px-2 py-1 text-right font-bold"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
 
           {/* Toggle devoluciones */}
           {devoluciones.filter((d: any) => d.estado === "pendiente").length > 0 && (

@@ -26,6 +26,7 @@ export async function POST(
       devolucion_ids,   // [uuid] devolucion pendiente a acreditar en rendición
       observaciones,
       comprobante_urls, // [{url, nombre}] fotos de comprobantes
+      cobros_extra,     // [{ cliente_id, monto, metodos, imputaciones }] otros clientes en la misma cobranza
     } = body
 
     if (!cliente_id || !monto_total || !metodos?.length) {
@@ -143,6 +144,57 @@ export async function POST(
         estado: "pendiente",
       }))
       await supabase.from("imputaciones").insert(imputData)
+    }
+
+    // ── Clientes adicionales en la misma cobranza (cobro conjunto en la calle) ──
+    if (Array.isArray(cobros_extra) && cobros_extra.length) {
+      for (const ex of cobros_extra) {
+        if (!ex?.cliente_id || !ex?.metodos?.length) continue
+        const montoEx = ex.metodos.reduce((s: number, m: any) => s + Number(m.monto), 0)
+        const { data: pagoEx } = await supabase
+          .from("pagos_clientes")
+          .insert({
+            cliente_id: ex.cliente_id,
+            vendedor_id: auth.user.id,
+            viaje_id: viajeId,
+            monto: montoEx,
+            fecha_pago: todayArgentina(),
+            estado: "pendiente_rendicion",
+            creado_por: auth.user.id,
+            observaciones: observaciones || null,
+          })
+          .select("id")
+          .single()
+        if (!pagoEx) continue
+
+        for (const m of ex.metodos) {
+          let chequeIdEx: string | null = null
+          if (m.tipo === "cheque") {
+            const { data: chq } = await supabase.from("cheques").insert({
+              tipo: "TERCERO", estado: "EN_CARTERA",
+              banco: m.banco_emisor || "", numero: m.numero_cheque || "",
+              fecha_emision: m.fecha_emision || null, fecha_vencimiento: m.fecha_cheque || todayArgentina(),
+              monto: m.monto, color: m.color_cheque || "NEGRO", cliente_origen_id: ex.cliente_id,
+            }).select("id").single()
+            chequeIdEx = chq?.id || null
+          }
+          await supabase.from("pagos_detalle").insert({
+            pago_id: pagoEx.id, tipo_pago: m.tipo, monto: m.monto,
+            caja_id: m.caja_id || null, cuenta_bancaria_id: m.cuenta_bancaria_id || null,
+            fecha_transferencia: m.fecha_transferencia || null, numero_comprobante_pago: m.numero_comprobante || null,
+            banco: m.banco_emisor || null, numero_cheque: m.numero_cheque || null, fecha_cheque: m.fecha_cheque || null,
+            cuit_emisor: m.cuit_emisor || null, color_cheque: m.color_cheque || null, cheque_id: chequeIdEx,
+          })
+        }
+        if (ex.imputaciones?.length) {
+          await supabase.from("imputaciones").insert(
+            ex.imputaciones.map((imp: any) => ({
+              pago_id: pagoEx.id, comprobante_id: imp.comprobante_id,
+              tipo_comprobante: "venta", monto_imputado: imp.monto_imputado, estado: "pendiente",
+            }))
+          )
+        }
+      }
     }
 
     // Registrar en billetera del chofer
