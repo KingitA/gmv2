@@ -186,7 +186,9 @@ function PagosClientesContent() {
     ]
       .map((c) => ({
         cliente_id: c.cliente_id,
-        imputaciones: Object.entries(c.seleccionados).map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado })),
+        imputaciones: Object.entries(c.seleccionados)
+          .filter(([k]) => !k.startsWith("pedido:"))
+          .map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado })),
         portion: Object.values(c.seleccionados).reduce((a, v) => a + v, 0),
       }))
       .filter((c) => c.portion > 0)
@@ -259,7 +261,15 @@ function PagosClientesContent() {
     if (!cliente) { toast.error("Seleccioná un cliente"); return }
     if (metodos.length === 0) { toast.error("Agregá al menos un método de pago"); return }
 
-    const imputaciones = pagoACuenta ? [] : Object.entries(seleccionados).map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado }))
+    // Imputaciones = solo comprobantes reales. Las claves "pedido:<id>" son anticipos
+    // a pedidos sin facturar → quedan como pago a cuenta (saldo a favor) y se anotan.
+    const imputaciones = pagoACuenta ? [] : Object.entries(seleccionados)
+      .filter(([k]) => !k.startsWith("pedido:"))
+      .map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado }))
+    const anticipos = pagoACuenta ? [] : Object.keys(seleccionados).filter((k) => k.startsWith("pedido:"))
+    const obsAnticipo = anticipos.length
+      ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace("pedido:", "")).join(", ")}`
+      : null
 
     setGuardando(true)
     try {
@@ -287,6 +297,7 @@ function PagosClientesContent() {
             items: m.items,
           })),
           imputaciones,
+          observaciones: obsAnticipo,
           retenciones: retenciones.map((r) => ({
             tipo: r.tipo,
             fecha: r.fecha,
@@ -317,8 +328,8 @@ function PagosClientesContent() {
       // Bonificación pago contado 10%
       if (aplicarContado && Object.keys(seleccionados).length > 0) {
         try {
-          // Excluir comprobantes que ya tienen el 10% aplicado
-          const comprobanteIds = Object.keys(seleccionados).filter(id => !dtosHechos.has(id))
+          // Solo comprobantes reales (no anticipos a pedido) y sin dto previo
+          const comprobanteIds = Object.keys(seleccionados).filter(id => !id.startsWith("pedido:") && !dtosHechos.has(id))
           if (comprobanteIds.length === 0) { /* todos ya tienen dto, no hacer nada */ }
           else await fetch("/api/pagos/generar-bonificacion", {
             method: "POST",
