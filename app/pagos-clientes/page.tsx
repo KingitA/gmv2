@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle, Ban } from "lucide-react"
+import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle, Ban, Plus, X } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -68,6 +68,7 @@ function PagosClientesContent() {
 
   // ── Multi-cliente (caso "Tandil"): clientes adicionales en la misma cobranza ──
   const [clientesExtra, setClientesExtra] = useState<Array<{ cliente: Cliente; seleccionados: Record<string, number> }>>([])
+  const [mostrarBuscarExtra, setMostrarBuscarExtra] = useState(false)
   const esMulti = clientesExtra.length > 0
 
   // ── Historial ──
@@ -425,6 +426,39 @@ function PagosClientesContent() {
               <section className="border rounded-xl p-4 bg-white">
                 <h2 className="font-semibold mb-3 text-sm uppercase tracking-wide text-muted-foreground">1. Cliente</h2>
                 <ClienteSearchCombobox value={cliente} onSelect={setCliente} />
+
+                {/* Clientes adicionales (cobro conjunto — caso "Tandil") */}
+                {cliente && !pagoACuenta && (
+                  <div className="mt-3 space-y-2">
+                    {clientesExtra.map((ce, idx) => (
+                      <div key={ce.cliente.id} className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                        <div>
+                          <p className="font-semibold text-sm">{ce.cliente.razon_social || ce.cliente.nombre}</p>
+                          <p className="text-xs text-muted-foreground">CUIT: {ce.cliente.cuit || "—"}</p>
+                        </div>
+                        <button onClick={() => setClientesExtra((prev) => prev.filter((_, i) => i !== idx))} className="text-muted-foreground hover:text-foreground">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {mostrarBuscarExtra ? (
+                      <ClienteSearchCombobox
+                        onSelect={(c) => {
+                          if (!c) return
+                          if (c.id === cliente.id || clientesExtra.some((e) => e.cliente.id === c.id)) {
+                            toast.error("Ese cliente ya está en la cobranza"); return
+                          }
+                          setClientesExtra((prev) => [...prev, { cliente: c, seleccionados: {} }])
+                          setMostrarBuscarExtra(false)
+                        }}
+                      />
+                    ) : (
+                      <button onClick={() => setMostrarBuscarExtra(true)} className="text-sm text-blue-600 hover:underline flex items-center gap-1">
+                        <Plus className="h-4 w-4" /> Agregar cliente (cobro conjunto)
+                      </button>
+                    )}
+                  </div>
+                )}
               </section>
 
               {/* 2. Comprobantes */}
@@ -486,27 +520,12 @@ function PagosClientesContent() {
                       />
                     </section>
                   ))}
-
-                  <section className="border border-dashed rounded-xl p-4 bg-white">
-                    <h2 className="font-semibold mb-3 text-sm uppercase tracking-wide text-muted-foreground">
-                      + Agregar otro cliente (un solo cobro para varios)
-                    </h2>
-                    <ClienteSearchCombobox
-                      onSelect={(c) => {
-                        if (!c) return
-                        if (c.id === cliente.id || clientesExtra.some((e) => e.cliente.id === c.id)) {
-                          toast.error("Ese cliente ya está en la cobranza"); return
-                        }
-                        setClientesExtra((prev) => [...prev, { cliente: c, seleccionados: {} }])
-                      }}
-                    />
-                    {esMulti && (
-                      <p className="text-xs text-amber-700 mt-2">
-                        Cobranza conjunta: los métodos de pago se reparten entre los clientes según lo seleccionado.
-                        Si pagan con cheque, usá un solo cheque (se registra compartido).
-                      </p>
-                    )}
-                  </section>
+                  {esMulti && (
+                    <p className="text-xs text-amber-700 px-1">
+                      Cobranza conjunta: los métodos de pago se reparten entre los clientes según lo seleccionado.
+                      Si pagan con cheque, usá un solo cheque (se registra compartido).
+                    </p>
+                  )}
                 </>
               )}
 
