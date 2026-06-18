@@ -77,6 +77,11 @@ function PagosClientesContent() {
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [historialCargado, setHistorialCargado] = useState(false)
 
+  // ── Rendición de viajes ──
+  const [viajesRendicion, setViajesRendicion] = useState<any[]>([])
+  const [cargandoViajes, setCargandoViajes] = useState(false)
+  const [viajesCargados, setViajesCargados] = useState(false)
+
   // ── Post-guardado ──
   const [reciboGenerado, setReciboGenerado] = useState<{ pagoId: string; numero: string } | null>(null)
   const [showSuccess, setShowSuccess] = useState(false)
@@ -355,6 +360,23 @@ function PagosClientesContent() {
     }
   }
 
+  const loadViajesRendicion = async () => {
+    setCargandoViajes(true)
+    try {
+      const { data: viajes } = await supabase
+        .from("viajes")
+        .select("id, nombre, fecha, estado, chofer")
+        .in("estado", ["en_rendicion", "en_curso", "en_viaje"])
+        .order("fecha", { ascending: false })
+      setViajesRendicion(viajes || [])
+      setViajesCargados(true)
+    } catch {
+      toast.error("Error cargando viajes")
+    } finally {
+      setCargandoViajes(false)
+    }
+  }
+
   const loadHistorial = async () => {
     setCargandoHistorial(true)
     try {
@@ -448,6 +470,9 @@ function PagosClientesContent() {
           <TabsTrigger value="nuevo">Nuevo Pago</TabsTrigger>
           <TabsTrigger value="historial" onClick={() => !historialCargado && loadHistorial()}>
             Historial
+          </TabsTrigger>
+          <TabsTrigger value="rendicion" onClick={() => !viajesCargados && loadViajesRendicion()}>
+            Rendición de viajes
           </TabsTrigger>
         </TabsList>
 
@@ -761,6 +786,67 @@ function PagosClientesContent() {
                           </tr>
                         )
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ════ TAB RENDICIÓN DE VIAJES ════ */}
+        <TabsContent value="rendicion">
+          {cargandoViajes ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <p className="text-sm text-muted-foreground">
+                  Viajes con cobranzas a rendir. Al confirmar la rendición se cierran los cobros en
+                  efectivo y cheque; las transferencias se confirman desde Historial al acreditarse.
+                </p>
+                <Button variant="ghost" size="sm" onClick={loadViajesRendicion}>
+                  <RotateCcw className="h-4 w-4 mr-1" /> Actualizar
+                </Button>
+              </div>
+
+              {viajesRendicion.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">No hay viajes pendientes de rendición</div>
+              ) : (
+                <div className="border rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="p-3 text-left">Viaje</th>
+                        <th className="p-3 text-left">Fecha</th>
+                        <th className="p-3 text-left">Chofer</th>
+                        <th className="p-3 text-center">Estado</th>
+                        <th className="p-3 text-center">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {viajesRendicion.map((v) => (
+                        <tr key={v.id} className="border-t hover:bg-muted/20">
+                          <td className="p-3 font-medium">{v.nombre}</td>
+                          <td className="p-3">{fmtFecha(v.fecha)}</td>
+                          <td className="p-3">{v.chofer || "—"}</td>
+                          <td className="p-3 text-center">
+                            <Badge className="bg-blue-100 text-blue-700 border-0">{v.estado}</Badge>
+                          </td>
+                          <td className="p-3 text-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7"
+                              onClick={() => window.open(`/viajes/${v.id}/rendicion`, "_blank")}
+                            >
+                              <ExternalLink className="h-3.5 w-3.5 mr-1" /> Abrir rendición
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

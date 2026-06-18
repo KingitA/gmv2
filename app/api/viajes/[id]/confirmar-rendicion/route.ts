@@ -40,6 +40,7 @@ export async function POST(
 
     const resultados = {
       pagos_confirmados: 0,
+      transferencias_pendientes: 0,
       devoluciones_confirmadas: 0,
       recibos_generados: [] as string[],
       errores: [] as string[],
@@ -54,6 +55,19 @@ export async function POST(
 
     for (const pago of pagos || []) {
       try {
+        // Regla de rendición: se cierran los pagos con efectivo/cheque. Los pagos
+        // de SOLO transferencia quedan pendientes y se confirman desde Historial
+        // (cuando se vea la acreditación en el banco).
+        const { data: dets } = await supabase
+          .from("pagos_detalle")
+          .select("tipo_pago")
+          .eq("pago_id", pago.id)
+        const soloTransferencia = (dets || []).length > 0 && (dets || []).every((d: any) => d.tipo_pago === "transferencia")
+        if (soloTransferencia) {
+          resultados.transferencias_pendientes++
+          continue
+        }
+
         // Obtener imputaciones pendientes de este pago
         const { data: imputaciones } = await supabase
           .from("imputaciones")
