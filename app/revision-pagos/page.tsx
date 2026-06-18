@@ -18,6 +18,7 @@ export default function RevisionPagosPage() {
   const [motivoRechazo, setMotivoRechazo] = useState("")
   const [comprobantes, setComprobantes] = useState<any[]>([])
   const [imputaciones, setImputaciones] = useState<Record<string, number>>({})
+  const [confirmandoLote, setConfirmandoLote] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -118,6 +119,29 @@ export default function RevisionPagosPage() {
     }
   }
 
+  async function confirmarTodos() {
+    if (!pagos.length) return
+    setConfirmandoLote(true)
+    try {
+      const res = await fetch("/api/pagos/confirmar-lote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pago_ids: pagos.map((p) => p.id) }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast({
+        title: "Rendición confirmada",
+        description: `${data.confirmados?.length || 0} pago(s) confirmados${data.errores?.length ? `, ${data.errores.length} con error` : ""}`,
+      })
+      cargarPagos()
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" })
+    } finally {
+      setConfirmandoLote(false)
+    }
+  }
+
   const getTotalImputado = () => {
     return Object.values(imputaciones).reduce((sum, monto) => sum + (monto || 0), 0)
   }
@@ -132,9 +156,17 @@ export default function RevisionPagosPage() {
 
   return (
     <div className="container mx-auto px-6 py-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">REVISIÓN DE PAGOS</h1>
-        <p className="text-muted-foreground">Confirmar o rechazar pagos registrados por vendedores y choferes</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">REVISIÓN DE PAGOS</h1>
+          <p className="text-muted-foreground">Confirmar o rechazar pagos registrados por vendedores y choferes</p>
+        </div>
+        {pagos.length > 0 && (
+          <Button onClick={confirmarTodos} disabled={confirmandoLote}>
+            {confirmandoLote ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+            Confirmar todos ({pagos.length}) — rendición
+          </Button>
+        )}
       </div>
 
       {pagos.length === 0 ? (
