@@ -32,6 +32,7 @@ import {
   X,
   AlertCircle,
   RefreshCw,
+  DollarSign,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -1171,6 +1172,11 @@ export default function ClientesPedidosPage() {
                   className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                   <Printer className="h-3.5 w-3.5 mr-1.5" />Imprimir
                 </Button>
+                <Link href={`/pagos-clientes?cliente_id=${pedidoSeleccionado.cliente_id}`} className="contents">
+                  <Button size="sm" className="bg-emerald-500 text-white hover:bg-emerald-600 font-semibold shadow-sm">
+                    <DollarSign className="h-3.5 w-3.5 mr-1.5" />Registrar pago
+                  </Button>
+                </Link>
                 <Link href={`/clientes-pedidos/${pedidoSeleccionado.id}`} className="contents">
                   <Button size="sm" className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                     <FileText className="h-3.5 w-3.5 mr-1.5" />Editar pedido

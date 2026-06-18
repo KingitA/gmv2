@@ -97,6 +97,8 @@ function PagosClientesContent() {
   }, [searchParams])
 
   const totalComprobantes = Object.values(seleccionados).reduce((s, v) => s + v, 0)
+  // Solo efectivo → se confirma en el acto (mostrador). Cheque/transferencia/depósito → pendiente de verificación.
+  const soloEfectivo = metodos.length > 0 && metodos.every((m) => m.tipo === "efectivo")
 
   const resetForm = () => {
     setCliente(null)
@@ -436,23 +438,24 @@ function PagosClientesContent() {
               <Button
                 className="w-full"
                 size="lg"
-                onClick={() => handleGuardar(true)}
+                onClick={() => handleGuardar(soloEfectivo)}
                 disabled={guardando || !cliente || metodos.length === 0}
               >
                 {guardando ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-                {guardando ? "Guardando..." : "Cerrar Pago y Generar Recibo"}
+                {guardando
+                  ? "Guardando..."
+                  : soloEfectivo
+                    ? "Cobrar (efectivo) y generar recibo"
+                    : "Registrar pago (queda pendiente de verificación)"}
               </Button>
 
-              <Button
-                className="w-full"
-                size="lg"
-                variant="outline"
-                onClick={() => handleGuardar(false)}
-                disabled={guardando || !cliente || metodos.length === 0}
-                title="Registra el cobro como pendiente de verificación. No impacta el saldo ni la caja hasta confirmarlo en Revisión de Pagos."
-              >
-                Registrar sin confirmar (pendiente)
-              </Button>
+              {metodos.length > 0 && (
+                <p className="text-xs text-muted-foreground text-center">
+                  {soloEfectivo
+                    ? "Pago en efectivo: se confirma en el acto e impacta el saldo."
+                    : "Incluye cheque o transferencia: queda pendiente de verificación (se confirma en Historial cuando se acredite/reciba)."}
+                </p>
+              )}
 
               {(Object.keys(seleccionados).length === 0 && !pagoACuenta && cliente) && (
                 <p className="text-xs text-muted-foreground text-center">
