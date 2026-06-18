@@ -87,13 +87,16 @@ create trigger trg_articulos_alias_refresh
   after insert or update or delete on public.articulos_alias
   for each row execute function public.articulos_alias_refresh_parent();
 
--- 4b) CLIENTES (campos propios).
+-- 4b) CLIENTES (campos propios). Incluye variante compactada (sin espacios) para
+--     siglas pegadas (K&M -> km).
 create or replace function public.clientes_search_text_trg()
 returns trigger language plpgsql as $$
+declare base text;
 begin
-  new.search_text := public.norm_search(concat_ws(' ',
+  base := public.norm_search(concat_ws(' ',
     new.nombre, new.razon_social, new.nombre_razon_social,
     new.cuit, new.codigo_cliente, new.localidad, new.provincia, new.direccion));
+  new.search_text := base || ' ' || replace(base, ' ', '');
   return new;
 end $$;
 
@@ -102,13 +105,15 @@ create trigger trg_clientes_search_text
   before insert or update on public.clientes
   for each row execute function public.clientes_search_text_trg();
 
--- 4c) PROVEEDORES (campos propios).
+-- 4c) PROVEEDORES (campos propios). Incluye variante compactada (siglas pegadas).
 create or replace function public.proveedores_search_text_trg()
 returns trigger language plpgsql as $$
+declare base text;
 begin
-  new.search_text := public.norm_search(concat_ws(' ',
+  base := public.norm_search(concat_ws(' ',
     new.nombre, new.sigla, new.cuit, new.numero_cuit,
     new.codigo_proveedor, new.localidad, new.direccion, new.mail_oficina));
+  new.search_text := base || ' ' || replace(base, ' ', '');
   return new;
 end $$;
 
