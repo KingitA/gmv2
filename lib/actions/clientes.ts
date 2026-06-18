@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
-import { searchClientesByVector } from "@/lib/actions/embeddings"
+import { hybridSearchIds } from "@/lib/search/hybrid"
 
 export async function getViajanteClientes() {
   const supabase = await createClient()
@@ -71,38 +71,20 @@ export async function searchClientes(searchTerm: string) {
 
   const isRestricted = (roles.includes("viajante") || roles.includes("vendedor")) && !roles.includes("admin")
 
-  let textQuery = supabase.from("clientes").select("*").eq("activo", true)
-  if (isRestricted) textQuery = textQuery.eq("vendedor_id", user.id)
+  // Motor unificado: el RPC decide qué matchea (ids); hidratamos aplicando la
+  // restricción por vendedor para usuarios no-admin.
+  const ids = await hybridSearchIds("clientes", searchTerm, 30)
+  if (ids.length === 0) return []
 
-  textQuery = textQuery.or(
-    `nombre_razon_social.ilike.%${searchTerm}%,` +
-    `nombre.ilike.%${searchTerm}%,` +
-    `razon_social.ilike.%${searchTerm}%,` +
-    `direccion.ilike.%${searchTerm}%,` +
-    `localidad.ilike.%${searchTerm}%,` +
-    `codigo_cliente.ilike.%${searchTerm}%,` +
-    `cuit.ilike.%${searchTerm}%`
-  )
+  let query = supabase.from("clientes").select("*").eq("activo", true).in("id", ids)
+  if (isRestricted) query = query.eq("vendedor_id", user.id)
 
-  const [{ data: textResults, error }, vectorResultsRaw] = await Promise.all([
-    textQuery.order("nombre_razon_social").limit(30),
-    searchClientesByVector(searchTerm, 0.35, 30),
-  ])
-
+  const { data, error } = await query
   if (error) throw error
 
-  // For restricted users, post-filter vector results by vendedor_id
-  const vectorResults = isRestricted
-    ? vectorResultsRaw.filter((r: any) => r.vendedor_id === user.id)
-    : vectorResultsRaw
-
-  const textIds = new Set((textResults || []).map((r: any) => r.id))
-  const merged = [
-    ...(textResults || []),
-    ...vectorResults.filter((r: any) => !textIds.has(r.id)),
-  ].slice(0, 30)
-
-  return merged
+  // Conservar el orden de relevancia del motor
+  const map = new Map((data || []).map((r: any) => [r.id, r]))
+  return ids.map((id) => map.get(id)).filter(Boolean)
 }
 
 export async function createCliente(formData: {

@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { padEan13, padEanArray } from "@/lib/utils/ean"
+import { hybridSearchIds } from "@/lib/search/hybrid"
 
 const SELECT_SEARCH = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
 const SELECT_FULL   = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id"
@@ -43,12 +44,13 @@ export async function buscarArticulosDeposito(
       }
     }
 
-    const { data, error } = await base()
-      .or(`descripcion.ilike.%${q}%,sku.ilike.%${q}%`)
-      .order("descripcion")
-      .limit(30)
+    // Motor unificado: ids por relevancia; hidratamos respetando filtros (proveedor/categoria)
+    const ids = await hybridSearchIds("articulos", q, 30)
+    if (ids.length === 0) return { data: [] }
+    const { data, error } = await base().in("id", ids)
     if (error) { console.error("[deposito] buscar texto:", error.message); return { data: [], error: error.message } }
-    return { data: data || [] }
+    const map = new Map((data || []).map((r: any) => [r.id, r]))
+    return { data: ids.map((id) => map.get(id)).filter(Boolean) }
   } catch (e: any) {
     console.error("[deposito] buscar exception:", e?.message)
     return { data: [], error: e?.message || "Error inesperado" }

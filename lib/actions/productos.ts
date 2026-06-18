@@ -1,13 +1,13 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { searchProductsByVector } from "@/lib/actions/embeddings"
+import { hybridSearchIds } from "@/lib/search/hybrid"
+
+const SELECT = "id, sku, ean13, descripcion, rubro, categoria, precio_compra, precio_base, unidades_por_bulto, activo"
 
 export async function searchProductos(searchTerm: string) {
   const supabase = createAdminClient()
   const term = searchTerm?.trim() || ""
-
-  const SELECT = "id, sku, ean13, descripcion, rubro, categoria, precio_compra, precio_base, unidades_por_bulto, activo"
 
   if (!term) {
     const { data, error } = await supabase
@@ -20,22 +20,18 @@ export async function searchProductos(searchTerm: string) {
     return data || []
   }
 
-  const [{ data: textResults }, vectorResults] = await Promise.all([
-    supabase
-      .from("articulos")
-      .select(SELECT)
-      .eq("activo", true)
-      .or(`descripcion.ilike.%${term}%,sku.ilike.%${term}%`)
-      .order("descripcion")
-      .limit(50),
-    searchProductsByVector(term, 0.35, 50),
-  ])
+  // Motor unificado: léxico trigram (token-AND, typos) + vector como fallback.
+  const ids = await hybridSearchIds("articulos", term, 50)
+  if (ids.length === 0) return []
 
-  const textIds = new Set((textResults || []).map((r: any) => r.id))
-  const merged = [
-    ...(textResults || []),
-    ...vectorResults.filter((r: any) => !textIds.has(r.id)),
-  ].slice(0, 50)
+  const { data, error } = await supabase
+    .from("articulos")
+    .select(SELECT)
+    .in("id", ids)
+    .eq("activo", true)
+  if (error) { console.error("[searchProductos] Error:", error); return [] }
 
-  return merged
+  // Conservar el orden de relevancia del motor
+  const map = new Map((data || []).map((r: any) => [r.id, r]))
+  return ids.map((id) => map.get(id)).filter(Boolean)
 }
