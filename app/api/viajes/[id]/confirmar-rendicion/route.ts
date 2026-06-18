@@ -192,7 +192,7 @@ export async function GET(
     ] = await Promise.all([
       supabase
         .from("viajes")
-        .select("id, nombre, fecha, estado, chofer_id, usuarios!viajes_chofer_id_fkey(nombre, email)")
+        .select("id, nombre, fecha, estado, chofer, chofer_id, usuarios:profiles!viajes_chofer_id_fkey(nombre, email)")
         .eq("id", viajeId)
         .single(),
       supabase
