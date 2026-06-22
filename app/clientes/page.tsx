@@ -15,6 +15,7 @@ import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { formatDateAR } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ImportClientesDialog } from "@/components/clientes/ImportClientesDialog"
 
 interface Cliente {
   id: string
@@ -67,8 +68,6 @@ export default function ClientesPage() {
   const [sheetPedidos, setSheetPedidos] = useState<any[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
-  const [importFile, setImportFile] = useState<File | null>(null)
-  const [isImporting, setIsImporting] = useState(false)
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   // Motor de búsqueda unificado: el endpoint decide qué matchea (ids), filtramos
@@ -260,39 +259,6 @@ export default function ClientesPage() {
     setIsDialogOpen(false)
     resetForm()
     loadClientes()
-  }
-
-  async function handleImport() {
-    if (!importFile) {
-      alert("Por favor seleccione un archivo para importar.")
-      return
-    }
-
-    setIsImporting(true)
-    try {
-      const formData = new FormData()
-      formData.append("file", importFile)
-
-      const response = await fetch("/api/clientes/import", {
-        method: "POST",
-        body: formData,
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || "Error en la importación.")
-      }
-
-      alert(`Importación exitosa. Se importaron ${data.count} clientes.`)
-      setIsImportDialogOpen(false)
-      setImportFile(null)
-      loadClientes()
-    } catch (error: any) {
-      alert(`Error: ${error.message}`)
-    } finally {
-      setIsImporting(false)
-    }
   }
 
   async function handleDelete(id: string) {
@@ -500,47 +466,15 @@ export default function ClientesPage() {
                     className="pl-10 w-64"
                   />
                 </div>
-                <Dialog
+                <Button variant="outline" className="gap-2" onClick={() => setIsImportDialogOpen(true)}>
+                  <FileText className="h-4 w-4" />
+                  Importar Clientes
+                </Button>
+                <ImportClientesDialog
                   open={isImportDialogOpen}
-                  onOpenChange={(open) => {
-                    setIsImportDialogOpen(open)
-                    if (!open) setImportFile(null)
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="gap-2">
-                      <FileText className="h-4 w-4" />
-                      Importar Clientes
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Importar Clientes</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-6 py-4">
-                      <div className="space-y-2">
-                        <h4 className="font-medium text-sm">1. Descargue la plantilla</h4>
-                        <p className="text-sm text-muted-foreground">Utilice la plantilla oficial para asegurar que los datos estén en el formato correcto.</p>
-                        <Button variant="secondary" onClick={() => window.open('/api/clientes/template', '_blank')}>Descargar Plantilla</Button>
-                      </div>
-                      <div className="space-y-2">
-                        <h4 className="font-medium text-sm">2. Suba el archivo con los datos</h4>
-                        <p className="text-sm text-muted-foreground">El sistema procesará la lista y agregará los clientes. Las columnas requeridas no pueden estar vacías.</p>
-                        <Input
-                          type="file"
-                          accept=".xlsx, .xls, .csv"
-                          onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setIsImportDialogOpen(false)}>Cancelar</Button>
-                      <Button onClick={handleImport} disabled={!importFile || isImporting}>
-                        {isImporting ? "Importando..." : "Importar"}
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                  onOpenChange={setIsImportDialogOpen}
+                  onImportComplete={loadClientes}
+                />
 
                 <Dialog
                   open={isDialogOpen}
