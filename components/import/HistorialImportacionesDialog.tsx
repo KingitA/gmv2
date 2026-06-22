@@ -116,14 +116,15 @@ export function HistorialImportacionesDialog({ open, onOpenChange, modulo, clave
                 </thead>
                 <tbody>
                   {lista.map((it, i) => (
-                    <tr key={it.id} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
+                    <tr key={it.id} onClick={() => abrirDetalle(it)}
+                      className={`cursor-pointer hover:bg-blue-50 ${i % 2 === 0 ? "bg-background" : "bg-muted/20"}`}>
                       <td className="px-2 py-1 whitespace-nowrap">{fmtFecha(it.created_at)}</td>
                       <td className="px-2 py-1">{it.archivo_nombre || "—"}</td>
                       <td className="px-2 py-1 text-right">{it.total_filas}</td>
                       <td className="px-2 py-1 text-right text-green-700 font-medium">{it.actualizados}</td>
                       <td className="px-2 py-1 text-right text-red-700 font-medium">{it.errores}</td>
                       <td className="px-2 py-1 text-right">
-                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => abrirDetalle(it)}>Ver</Button>
+                        <span className="text-blue-600 font-medium text-[11px]">Ver →</span>
                       </td>
                     </tr>
                   ))}
