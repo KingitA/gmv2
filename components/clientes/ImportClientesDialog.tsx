@@ -32,7 +32,7 @@ const SKIP_ID = "__skip__"
 const DB_FIELD_DEFS: DbFieldDef[] = [
   // Conectores y los más usados primero
   { id: "codigo_cliente",       label: "Código de cliente (conector)",  aliases: ["codigocliente", "codcliente", "codigo", "cod", "cliente"] },
-  { id: "percepcion_iibb",      label: "Percepción IIBB (%)",           aliases: ["percepcioniibb", "percepcion", "percepción", "alicuotaiibb", "aliciibb"] },
+  { id: "percepcion_iibb",      label: "% Percepción IIBB (alícuota a cobrar)", aliases: ["percepcioniibb", "percepcion", "percepción", "alicuotaiibb", "aliciibb"] },
   { id: "cuit",                 label: "CUIT (conector)",               aliases: ["cuit", "cuil"] },
   { id: "nombre_razon_social",  label: "Nombre / Razón social",         aliases: ["nombrerazonsocial", "razonsocial", "razon", "nombre"] },
   { id: "mail",                 label: "Mail",                          aliases: ["mail", "email", "correo", "e-mail"] },
@@ -45,7 +45,7 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "metodo_facturacion",   label: "Método de facturación",         aliases: ["metodofacturacion", "facturacion", "facturación"] },
   { id: "condicion_pago",       label: "Condición de pago",             aliases: ["condicionpago", "formapago", "pago"] },
   { id: "tipo_canal",           label: "Tipo de canal",                 aliases: ["tipocanal", "canal"] },
-  { id: "nro_iibb",             label: "Nro. de IIBB / inscripción",    aliases: ["nroiibb", "numeroiibb", "iibbnro", "inscripcioniibb", "ingresosbrutos"] },
+  { id: "nro_iibb",             label: "N° de inscripción IIBB (NO es la percepción)", aliases: ["nroiibb", "numeroiibb", "iibbnro", "inscripcioniibb"] },
   { id: "exento_iibb",          label: "Exento IIBB (SI/NO)",           aliases: ["exentoiibb"] },
   { id: "exento_iva",           label: "Exento IVA (SI/NO)",            aliases: ["exentoiva"] },
   { id: "dias_credito",         label: "Días de crédito",               aliases: ["diascredito", "diasdecredito"] },
@@ -56,12 +56,43 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: SKIP_ID,                label: "— No importar —",               aliases: [] },
 ]
 
+/**
+ * Sugiere el campo destino para una columna del Excel.
+ * Reglas ordenadas por especificidad (la primera que matchea gana). Es clave que
+ * "percepción/alícuota" se evalúe ANTES que "nro/inscripción", y que una columna
+ * "IIBB" a secas caiga en percepción (que es la alícuota que se cobra y lo que
+ * normalmente se actualiza en masa), no en el número de inscripción.
+ */
 function suggestField(colName: string): string {
-  const norm = colName.toLowerCase().replace(/[^a-z0-9]/g, "")
-  for (const def of DB_FIELD_DEFS) {
-    if (def.id === SKIP_ID) continue
-    if (def.aliases.some(a => norm.includes(a.replace(/[^a-z0-9]/g, "")))) return def.id
-  }
+  const n = colName.toLowerCase().replace(/[^a-z0-9]/g, "")
+  const has = (...subs: string[]) => subs.some(s => n.includes(s))
+
+  // Conector
+  if (has("codcli", "codigocli", "codigodecli", "nrocli", "clientecod")) return "codigo_cliente"
+  if (has("cuit", "cuil")) return "cuit"
+  // IIBB: percepción/alícuota primero; luego inscripción; luego "IIBB" a secas → percepción
+  if (has("perc", "alic", "tasaiibb", "tasadeiibb")) return "percepcion_iibb"
+  if (has("nroiibb", "numeroiibb", "inscrip", "iibbnro", "ndeiibb", "niibb")) return "nro_iibb"
+  if (has("iibb", "ingresosbrutos", "ingbrutos", "brutos")) return "percepcion_iibb"
+  // Resto
+  if (has("razonsocial", "razon", "nombre")) return "nombre_razon_social"
+  if (has("mail", "email", "correo")) return "mail"
+  if (has("telefono", "celular") || n === "tel" || n === "cel") return "telefono"
+  if (has("direccion", "domicilio")) return "direccion"
+  if (has("localidad", "ciudad")) return "localidad"
+  if (has("provincia")) return "provincia"
+  if (has("condicioniva", "condiva")) return "condicion_iva"
+  if (has("factur")) return "metodo_facturacion"
+  if (has("condicionpago", "formapago") || n === "pago") return "condicion_pago"
+  if (has("canal")) return "tipo_canal"
+  if (has("exentoiibb")) return "exento_iibb"
+  if (has("exentoiva")) return "exento_iva"
+  if (has("diascred", "diasdecred")) return "dias_credito"
+  if (has("limitecred") || n === "limite") return "limite_credito"
+  if (has("descuentoesp", "descesp")) return "descuento_especial"
+  if (has("zona")) return "zona"
+  if (has("observ", "nota") || n === "obs") return "observaciones"
+  if (has("codigo") || n === "cod" || n === "cliente") return "codigo_cliente"
   return SKIP_ID
 }
 
