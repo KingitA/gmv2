@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
         // Instead of using header: 1, we can get an array of arrays.
         const rawData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][]
 
-        if (rawData.length < 3) {
+        if (rawData.length < 2) {
             return NextResponse.json({ error: "El archivo parece estar vacío o no tiene el formato correcto." }, { status: 400 })
         }
 
@@ -38,7 +38,16 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Falta columna clave: 'codigo_cliente', 'cuit', 'nombre' o 'nombre_razon_social'." }, { status: 400 })
         }
 
-        const rows = rawData.slice(2)
+        // La plantilla que descarga el sistema trae una 2da fila con instrucciones
+        // (ej: "Obligatorio", "Opcional...", "SI o NO") que NO son datos y hay que saltear.
+        // Pero si el usuario sube un Excel propio sin esa fila, NO debemos saltearnos el
+        // primer cliente. Detectamos si la 2da fila es de instrucciones; si no, es un dato.
+        const secondRow = (rawData[1] || []) as any[]
+        const secondRowText = secondRow.map(c => String(c ?? "")).join(" ")
+        const esFilaInstrucciones = /Obligatorio|Opcional|SI o NO|Ej:|\|/i.test(secondRowText)
+        const dataStartIndex = esFilaInstrucciones ? 2 : 1
+
+        const rows = rawData.slice(dataStartIndex)
         const procesadosBase = []
 
         // Pre-cargar vendedores si la columna es por nombre (no UUID)
@@ -260,8 +269,16 @@ export async function POST(req: NextRequest) {
             }
 
             if (existing) {
-                // Asegurar que nombre siempre esté presente al actualizar
-                const updateData = { ...existing, ...cliente }
+                // ACTUALIZACIÓN PARCIAL: partimos del cliente existente y SOLO sobrescribimos
+                // los campos que realmente vienen con valor en el Excel. Así, si el archivo
+                // trae únicamente codigo_cliente + percepcion_iibb, no borramos CUIT, mail,
+                // dirección, ni ninguna otra columna ya cargada.
+                const updateData = { ...existing }
+                for (const [campo, valor] of Object.entries(cliente)) {
+                    if (valor !== null && valor !== undefined) {
+                        updateData[campo] = valor
+                    }
+                }
                 if (!updateData.nombre && updateData.nombre_razon_social) {
                     updateData.nombre = updateData.nombre_razon_social
                 }
