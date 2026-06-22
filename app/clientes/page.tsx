@@ -15,7 +15,9 @@ import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { formatDateAR } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ImportClientesDialog } from "@/components/clientes/ImportClientesDialog"
+import { ImportClientesDialog, clientesFieldLabel } from "@/components/clientes/ImportClientesDialog"
+import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
+import { History } from "lucide-react"
 
 interface Cliente {
   id: string
@@ -68,6 +70,7 @@ export default function ClientesPage() {
   const [sheetPedidos, setSheetPedidos] = useState<any[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
+  const [isHistorialOpen, setIsHistorialOpen] = useState(false)
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   // Motor de búsqueda unificado: el endpoint decide qué matchea (ids), filtramos
@@ -474,6 +477,19 @@ export default function ClientesPage() {
                   open={isImportDialogOpen}
                   onOpenChange={setIsImportDialogOpen}
                   onImportComplete={loadClientes}
+                />
+                <Button variant="outline" className="gap-2" onClick={() => setIsHistorialOpen(true)}>
+                  <History className="h-4 w-4" />
+                  Historial
+                </Button>
+                <HistorialImportacionesDialog
+                  open={isHistorialOpen}
+                  onOpenChange={setIsHistorialOpen}
+                  modulo="clientes"
+                  claveLabel="Código"
+                  nombreLabel="Nombre"
+                  statuses={["actualizado", "sin_cambios", "no_encontrado", "error"]}
+                  fieldLabel={clientesFieldLabel}
                 />
 
                 <Dialog

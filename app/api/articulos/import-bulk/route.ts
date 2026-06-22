@@ -16,6 +16,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { guardarHistorialImportacion } from "@/lib/import/guardar-historial"
 
 export interface ArticleUpdateRow {
   sku: string
@@ -37,6 +38,7 @@ export interface ArticleUpdateRow {
 
 interface DiffRow {
   sku: string
+  descripcion: string | null   // descripción del artículo, para mostrar junto al SKU
   articulo_id: string | null   // null si es nuevo
   campo: string
   valor_actual: string | number | null
@@ -77,7 +79,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { rows, dry_run } = body as { rows: ArticleUpdateRow[]; dry_run: boolean }
+    const { rows, dry_run, archivo } = body as { rows: ArticleUpdateRow[]; dry_run: boolean; archivo?: string }
 
     if (!rows || !Array.isArray(rows)) {
       return NextResponse.json({ error: "rows es requerido y debe ser un array" }, { status: 400 })
@@ -170,6 +172,7 @@ export async function POST(request: NextRequest) {
         ?? (skuStripped !== skuNorm ? articulosMap.get(skuStripped) : undefined)
         ?? null
       const articuloId = existente?.id || null
+      const descripcionArt = existente?.descripcion ?? (row.descripcion ?? null)
 
       // Campos directos
       for (const campo of CAMPOS_DIRECTOS) {
@@ -182,6 +185,7 @@ export async function POST(request: NextRequest) {
         if (cambiado) {
           diffs.push({
             sku: row.sku,
+            descripcion: descripcionArt,
             articulo_id: articuloId,
             campo,
             valor_actual: valorActual ?? null,
@@ -198,6 +202,7 @@ export async function POST(request: NextRequest) {
         if (marcaIdActual !== marcaIdNuevo) {
           diffs.push({
             sku: row.sku,
+            descripcion: descripcionArt,
             articulo_id: articuloId,
             campo: "marca_codigo",
             valor_actual: marcaIdActual,
@@ -226,6 +231,7 @@ export async function POST(request: NextRequest) {
         if (actualStr !== nuevoStr) {
           diffs.push({
             sku: row.sku,
+            descripcion: descripcionArt,
             articulo_id: articuloId,
             campo: `descuento_${tipoDesc}`,
             valor_actual: actualStr,
@@ -370,6 +376,34 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // ── Reporte fila por fila (pantalla de resultados, export e historial) ──
+    const erroresSet = new Map(erroresDetalle.map(e => [e.sku, e.error]))
+    const diffsPorSku = new Map<string, DiffRow[]>()
+    for (const d of diffs) {
+      if (!diffsPorSku.has(d.sku)) diffsPorSku.set(d.sku, [])
+      diffsPorSku.get(d.sku)!.push(d)
+    }
+    const filas = rowsParaActualizar.map(({ row, articulo }) => {
+      const ds = diffsPorSku.get(row.sku) || []
+      const err = erroresSet.get(row.sku)
+      const status = err ? "error" : !articulo ? "nuevo" : (ds.length > 0 ? "actualizado" : "sin_cambios")
+      return {
+        clave: row.sku,
+        nombre: articulo?.descripcion ?? (row.descripcion ?? null),
+        status,
+        cambios: ds.map(d => ({ campo: d.campo, actual: d.valor_actual, nuevo: d.valor_nuevo })),
+        error: err,
+      }
+    })
+
+    await guardarHistorialImportacion({
+      modulo: "articulos",
+      archivo_nombre: archivo ?? null,
+      usuario_id: auth.user?.id ?? null,
+      conector: "sku",
+      filas,
+    })
+
     return NextResponse.json({
       success: true,
       dry_run: false,
@@ -378,6 +412,7 @@ export async function POST(request: NextRequest) {
       articulos_nuevos: nuevosCreados,
       errores,
       errores_detalle: erroresDetalle,
+      filas,
     })
   } catch (error: any) {
     console.error("[import-bulk] Error:", error)

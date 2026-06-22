@@ -8,7 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Plus, Pencil, Trash2, ArrowLeft, Upload, Download, ShoppingCart, FileText, Search } from "lucide-react"
+import { Plus, Pencil, Trash2, ArrowLeft, Upload, Download, ShoppingCart, FileText, Search, History } from "lucide-react"
+import { ImportProveedoresDialog, proveedoresFieldLabel } from "@/components/proveedores/ImportProveedoresDialog"
+import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import type { Proveedor } from "@/lib/types"
@@ -21,6 +23,8 @@ export default function ProveedoresPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingProveedor, setEditingProveedor] = useState<Proveedor | null>(null)
   const [importing, setImporting] = useState(false)
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
+  const [isHistorialOpen, setIsHistorialOpen] = useState(false)
   const [formData, setFormData] = useState({
     nombre: "",
     sigla: "",
@@ -256,69 +260,6 @@ export default function ProveedoresPage() {
     URL.revokeObjectURL(url)
   }
 
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setImporting(true)
-
-    try {
-      const data = await file.arrayBuffer()
-      const workbook = XLSX.read(data)
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
-      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
-
-      const supabase = createClient()
-      const proveedoresData = jsonData.map((row) => ({
-        nombre: row.nombre,
-        sigla: row.sigla || null,
-        codigo_proveedor: row.codigo_proveedor || null,
-        cuit: row.cuit || null,
-        email: row.email || null,
-        telefono: row.telefono || null,
-        direccion: row.direccion || null,
-        codigo_postal: row.codigo_postal || null,
-        localidad: row.localidad || null,
-        provincia: row.provincia || "",
-        codigo_provincia_dj: row.codigo_provincia_dj ? Number.parseInt(row.codigo_provincia_dj) : 1,
-        telefono_oficina: row.telefono_oficina || null,
-        telefono_vendedor: row.telefono_vendedor || null,
-        mail_vendedor: row.mail_vendedor || null,
-        mail_oficina: row.mail_oficina || null,
-        tipo_iva: row.tipo_iva ? Number.parseInt(row.tipo_iva) : 2,
-        condicion_pago_tipo: row.condicion_pago_tipo || "cuenta_corriente",
-        plazo_dias: row.plazo_dias ? Number.parseInt(row.plazo_dias) : 30,
-        plazo_desde: row.plazo_desde || "fecha_factura",
-        tipo_proveedor: row.tipo_proveedor || "mercaderia_general",
-        banco_nombre: row.banco_nombre || null,
-        banco_cuenta: row.banco_cuenta || null,
-        banco_numero_cuenta: row.banco_numero_cuenta || null,
-        banco_tipo_cuenta: row.banco_tipo_cuenta || null,
-        tipo_pago: row.tipo_pago ? row.tipo_pago.split(",").map((t: string) => t.trim()) : null,
-        retencion_iibb: row.retencion_iibb || 0,
-        retencion_ganancias: row.retencion_ganancias || 0,
-        percepcion_iva: row.percepcion_iva || 0,
-        percepcion_iibb: row.percepcion_iibb || 0,
-        tipo_descuento: row.tipo_descuento || "cascada",
-      }))
-
-      const { error } = await supabase.from("proveedores").insert(proveedoresData)
-
-      if (error) {
-        console.error("[v0] Error importing proveedores:", error)
-        alert("Error al importar proveedores. Verifique el formato del archivo.")
-      } else {
-        alert(`Se importaron ${proveedoresData.length} proveedores correctamente`)
-        loadProveedores()
-      }
-    } catch (error) {
-      console.error("[v0] Error processing file:", error)
-      alert("Error al procesar el archivo. Verifique que sea un archivo Excel válido.")
-    } finally {
-      setImporting(false)
-      e.target.value = ""
-    }
-  }
 
   const filteredProveedores = searchIds === null
     ? proveedores
@@ -421,13 +362,28 @@ export default function ProveedoresPage() {
                   <Download className="h-4 w-4" />
                   Plantilla
                 </Button>
-                <Button variant="outline" disabled={importing} asChild>
-                  <label className="cursor-pointer gap-2">
-                    <Upload className="h-4 w-4" />
-                    {importing ? "Importando..." : "Importar"}
-                    <input type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" />
-                  </label>
+                <Button variant="outline" className="gap-2" onClick={() => setIsImportDialogOpen(true)}>
+                  <Upload className="h-4 w-4" />
+                  Importar
                 </Button>
+                <Button variant="outline" className="gap-2" onClick={() => setIsHistorialOpen(true)}>
+                  <History className="h-4 w-4" />
+                  Historial
+                </Button>
+                <ImportProveedoresDialog
+                  open={isImportDialogOpen}
+                  onOpenChange={setIsImportDialogOpen}
+                  onImportComplete={loadProveedores}
+                />
+                <HistorialImportacionesDialog
+                  open={isHistorialOpen}
+                  onOpenChange={setIsHistorialOpen}
+                  modulo="proveedores"
+                  claveLabel="Código"
+                  nombreLabel="Nombre"
+                  statuses={["actualizado", "sin_cambios", "no_encontrado", "error"]}
+                  fieldLabel={proveedoresFieldLabel}
+                />
                 <Dialog
                   open={isDialogOpen}
                   onOpenChange={(open) => {

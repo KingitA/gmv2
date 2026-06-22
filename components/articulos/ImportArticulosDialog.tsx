@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Upload, ArrowRight, CheckCircle2, AlertCircle, Loader2, FileSpreadsheet } from "lucide-react"
+import { ImportReportView } from "@/components/import/ImportReportView"
 
 // ─── Campos mapeables de la DB ────────────────────────────────────────────────
 
@@ -65,6 +66,8 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
 
 const SKIP_ID = "__skip__"
 
+export const articulosFieldLabel = (id: string) => DB_FIELD_DEFS.find(d => d.id === id)?.label ?? id
+
 function suggestField(colName: string): string {
   const norm = colName.toLowerCase().replace(/[^a-z0-9]/g, "")
   for (const def of DB_FIELD_DEFS) {
@@ -83,6 +86,7 @@ interface ColumnMapping {
 
 interface DiffRow {
   sku: string
+  descripcion: string | null
   articulo_id: string | null
   campo: string
   valor_actual: string | number | null
@@ -325,7 +329,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
       const res = await fetch("/api/articulos/import-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, dry_run: false }),
+        body: JSON.stringify({ rows, dry_run: false, archivo: fileName }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Error importando")
@@ -342,7 +346,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
-  const fieldLabel = (id: string) => DB_FIELD_DEFS.find(d => d.id === id)?.label ?? id
+  const fieldLabel = articulosFieldLabel
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v) }}>
@@ -490,6 +494,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
                     <thead className="bg-muted sticky top-0">
                       <tr>
                         <th className="text-left px-2 py-2 font-medium">SKU</th>
+                        <th className="text-left px-2 py-2 font-medium">Descripción</th>
                         <th className="text-left px-2 py-2 font-medium">Campo</th>
                         <th className="text-left px-2 py-2 font-medium">Actual</th>
                         <th className="text-left px-2 py-2 font-medium">Nuevo</th>
@@ -500,6 +505,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
                       {preview.diffs.filter(d => previewFilter === "todos" || d.accion === previewFilter).slice(0, 200).map((d, i) => (
                         <tr key={i} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
                           <td className="px-2 py-1 font-mono font-medium">{d.sku}</td>
+                          <td className="px-2 py-1 text-muted-foreground">{d.descripcion ?? "—"}</td>
                           <td className="px-2 py-1 text-muted-foreground">{fieldLabel(d.campo)}</td>
                           <td className="px-2 py-1 text-muted-foreground line-through">
                             {d.valor_actual !== null ? String(d.valor_actual) : "—"}
@@ -524,22 +530,20 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
 
         {/* ── STEP 4: DONE ── */}
         {step === "done" && doneResult && (
-          <div className="flex flex-col items-center gap-4 py-6">
-            <CheckCircle2 className="w-12 h-12 text-green-600" />
-            <div className="text-center">
-              <p className="text-lg font-semibold">¡Importación completada!</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {doneResult.articulos_actualizados} actualizados · {doneResult.articulos_nuevos} nuevos
-                {doneResult.errores > 0 ? ` · ${doneResult.errores} errores` : ""}
-              </p>
+          <div>
+            <div className="flex items-center gap-2 mb-3 text-green-700">
+              <CheckCircle2 className="w-5 h-5" />
+              <span className="font-semibold">¡Importación completada!</span>
             </div>
-            {doneResult.errores > 0 && doneResult.errores_detalle?.length > 0 && (
-              <div className="w-full border rounded p-2 text-xs text-destructive max-h-32 overflow-y-auto">
-                {doneResult.errores_detalle.map((e: any, i: number) => (
-                  <div key={i}>SKU {e.sku}: {e.error}</div>
-                ))}
-              </div>
-            )}
+            <ImportReportView
+              filas={doneResult.filas ?? []}
+              totalFilas={doneResult.total_filas ?? (doneResult.filas?.length ?? 0)}
+              claveLabel="SKU"
+              nombreLabel="Descripción"
+              statuses={["actualizado", "sin_cambios", "nuevo", "error"]}
+              archivo={fileName}
+              fieldLabel={fieldLabel}
+            />
           </div>
         )}
 

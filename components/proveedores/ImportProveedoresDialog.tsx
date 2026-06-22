@@ -1,23 +1,14 @@
 "use client"
 
 /**
- * ImportClientesDialog
- *
- * Diálogo de actualización masiva de clientes desde Excel.
- * Flujo:
- *   1. Subir archivo
- *   2. Mapear columnas (auto-sugerencia + override manual). Una columna debe ser la
- *      conectora: codigo_cliente o cuit.
- *   3. Click en "Actualizar"
- *   4. Reporte filtrable: actualizados / sin cambios / no encontrados / errores,
- *      mostrando código, nombre y el dato actualizado.
+ * ImportProveedoresDialog — actualización masiva de proveedores desde Excel.
+ * Mismo flujo que clientes: subir → mapear (conector codigo_proveedor o cuit) →
+ * actualizar → reporte filtrable con export. NO crea proveedores nuevos.
  */
 
 import React, { useRef, useState } from "react"
 import * as XLSX from "xlsx"
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -25,93 +16,74 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Upload, ArrowRight, AlertCircle, Loader2, FileSpreadsheet } from "lucide-react"
 import { ImportReportView } from "@/components/import/ImportReportView"
 
-// ─── Campos de cliente mapeables ────────────────────────────────────────────
-interface DbFieldDef { id: string; label: string; aliases: string[] }
-
+interface DbFieldDef { id: string; label: string }
 const SKIP_ID = "__skip__"
 
 const DB_FIELD_DEFS: DbFieldDef[] = [
-  // Conectores y los más usados primero
-  { id: "codigo_cliente",       label: "Código de cliente (conector)",  aliases: ["codigocliente", "codcliente", "codigo", "cod", "cliente"] },
-  { id: "percepcion_iibb",      label: "% Percepción IIBB (alícuota a cobrar)", aliases: ["percepcioniibb", "percepcion", "percepción", "alicuotaiibb", "aliciibb"] },
-  { id: "cuit",                 label: "CUIT (conector)",               aliases: ["cuit", "cuil"] },
-  { id: "nombre_razon_social",  label: "Nombre / Razón social",         aliases: ["nombrerazonsocial", "razonsocial", "razon", "nombre"] },
-  { id: "mail",                 label: "Mail",                          aliases: ["mail", "email", "correo", "e-mail"] },
-  { id: "telefono",             label: "Teléfono",                      aliases: ["telefono", "teléfono", "tel", "celular", "cel"] },
-  // Resto
-  { id: "direccion",            label: "Dirección",                     aliases: ["direccion", "dirección", "domicilio"] },
-  { id: "localidad",            label: "Localidad",                     aliases: ["localidad", "ciudad"] },
-  { id: "provincia",            label: "Provincia",                     aliases: ["provincia"] },
-  { id: "condicion_iva",        label: "Condición IVA",                 aliases: ["condicioniva", "condición iva", "iva", "condiva"] },
-  { id: "metodo_facturacion",   label: "Método de facturación",         aliases: ["metodofacturacion", "facturacion", "facturación"] },
-  { id: "condicion_pago",       label: "Condición de pago",             aliases: ["condicionpago", "formapago", "pago"] },
-  { id: "tipo_canal",           label: "Tipo de canal",                 aliases: ["tipocanal", "canal"] },
-  { id: "nro_iibb",             label: "N° de inscripción IIBB (NO es la percepción)", aliases: ["nroiibb", "numeroiibb", "iibbnro", "inscripcioniibb"] },
-  { id: "exento_iibb",          label: "Exento IIBB (SI/NO)",           aliases: ["exentoiibb"] },
-  { id: "exento_iva",           label: "Exento IVA (SI/NO)",            aliases: ["exentoiva"] },
-  { id: "dias_credito",         label: "Días de crédito",               aliases: ["diascredito", "diasdecredito"] },
-  { id: "limite_credito",       label: "Límite de crédito",             aliases: ["limitecredito", "limite", "límite"] },
-  { id: "descuento_especial",   label: "Descuento especial (%)",        aliases: ["descuentoespecial", "descespecial"] },
-  { id: "zona",                 label: "Zona",                          aliases: ["zona"] },
-  { id: "observaciones",        label: "Observaciones",                 aliases: ["observaciones", "obs", "nota", "notas"] },
-  { id: SKIP_ID,                label: "— No importar —",               aliases: [] },
+  { id: "codigo_proveedor",     label: "Código de proveedor (conector)" },
+  { id: "email",                label: "Mail principal" },
+  { id: "mail_oficina",         label: "Mail oficina" },
+  { id: "mail_vendedor",        label: "Mail vendedor" },
+  { id: "cuit",                 label: "CUIT (conector)" },
+  { id: "nombre",               label: "Nombre / Razón social" },
+  { id: "sigla",                label: "Sigla" },
+  { id: "telefono",             label: "Teléfono" },
+  { id: "telefono_oficina",     label: "Teléfono oficina" },
+  { id: "telefono_vendedor",    label: "Teléfono vendedor" },
+  { id: "direccion",            label: "Dirección" },
+  { id: "localidad",            label: "Localidad" },
+  { id: "provincia",            label: "Provincia" },
+  { id: "codigo_postal",        label: "Código postal" },
+  { id: "condicion_pago",       label: "Condición de pago" },
+  { id: "plazo_dias",           label: "Plazo (días)" },
+  { id: "dias_vencimiento",     label: "Días de vencimiento" },
+  { id: "tipo_proveedor",       label: "Tipo de proveedor" },
+  { id: "percepcion_iva",       label: "% Percepción IVA" },
+  { id: "percepcion_iibb",      label: "% Percepción IIBB" },
+  { id: "retencion_iibb",       label: "% Retención IIBB" },
+  { id: "retencion_ganancias",  label: "% Retención Ganancias" },
+  { id: "margen_ganancia",      label: "% Margen de ganancia" },
+  { id: "banco_nombre",         label: "Banco - nombre" },
+  { id: "banco_numero_cuenta",  label: "Banco - N° de cuenta" },
+  { id: SKIP_ID,                label: "— No importar —" },
 ]
 
-/**
- * Sugiere el campo destino para una columna del Excel.
- * Reglas ordenadas por especificidad (la primera que matchea gana). Es clave que
- * "percepción/alícuota" se evalúe ANTES que "nro/inscripción", y que una columna
- * "IIBB" a secas caiga en percepción (que es la alícuota que se cobra y lo que
- * normalmente se actualiza en masa), no en el número de inscripción.
- */
+export const proveedoresFieldLabel = (id: string) => DB_FIELD_DEFS.find(d => d.id === id)?.label ?? id
+
 function suggestField(colName: string): string {
   const n = colName.toLowerCase().replace(/[^a-z0-9]/g, "")
-  const has = (...subs: string[]) => subs.some(s => n.includes(s))
-
-  // Conector
-  if (has("codcli", "codigocli", "codigodecli", "nrocli", "clientecod")) return "codigo_cliente"
+  const has = (...s: string[]) => s.some(x => n.includes(x))
+  if (has("codprov", "codigoprov", "codigodeprov", "nroprov")) return "codigo_proveedor"
   if (has("cuit", "cuil")) return "cuit"
-  // IIBB: percepción/alícuota primero; luego inscripción; luego "IIBB" a secas → percepción
-  if (has("perc", "alic", "tasaiibb", "tasadeiibb")) return "percepcion_iibb"
-  if (has("nroiibb", "numeroiibb", "inscrip", "iibbnro", "ndeiibb", "niibb")) return "nro_iibb"
-  if (has("iibb", "ingresosbrutos", "ingbrutos", "brutos")) return "percepcion_iibb"
-  // Resto
-  if (has("razonsocial", "razon", "nombre")) return "nombre_razon_social"
-  if (has("mail", "email", "correo")) return "mail"
+  if (has("mailofic", "emailofic", "correoofic")) return "mail_oficina"
+  if (has("mailvend", "emailvend", "correovend")) return "mail_vendedor"
+  if (has("mail", "email", "correo")) return "email"
+  if (has("telofic")) return "telefono_oficina"
+  if (has("telvend")) return "telefono_vendedor"
   if (has("telefono", "celular") || n === "tel" || n === "cel") return "telefono"
+  if (has("razonsocial", "razon", "nombre")) return "nombre"
+  if (has("sigla")) return "sigla"
   if (has("direccion", "domicilio")) return "direccion"
   if (has("localidad", "ciudad")) return "localidad"
   if (has("provincia")) return "provincia"
-  if (has("condicioniva", "condiva")) return "condicion_iva"
-  if (has("factur")) return "metodo_facturacion"
-  if (has("condicionpago", "formapago") || n === "pago") return "condicion_pago"
-  if (has("canal")) return "tipo_canal"
-  if (has("exentoiibb")) return "exento_iibb"
-  if (has("exentoiva")) return "exento_iva"
-  if (has("diascred", "diasdecred")) return "dias_credito"
-  if (has("limitecred") || n === "limite") return "limite_credito"
-  if (has("descuentoesp", "descesp")) return "descuento_especial"
-  if (has("zona")) return "zona"
-  if (has("observ", "nota") || n === "obs") return "observaciones"
-  if (has("codigo") || n === "cod" || n === "cliente") return "codigo_cliente"
+  if (has("codigopostal", "cpostal") || n === "cp") return "codigo_postal"
+  if (has("perciibb", "percepcioniibb")) return "percepcion_iibb"
+  if (has("perciva", "percepcioniva")) return "percepcion_iva"
+  if (has("retiibb", "retencioniibb")) return "retencion_iibb"
+  if (has("retgan", "retenciongan")) return "retencion_ganancias"
+  if (has("margen", "ganancia")) return "margen_ganancia"
+  if (has("plazo")) return "plazo_dias"
+  if (has("vencimiento")) return "dias_vencimiento"
+  if (has("condicionpago", "formapago")) return "condicion_pago"
+  if (has("tipoprov")) return "tipo_proveedor"
+  if (has("banco")) return "banco_nombre"
+  if (has("codigo") || n === "cod") return "codigo_proveedor"
   return SKIP_ID
 }
 
 interface ColumnMapping { excelCol: string; dbField: string }
-
-interface FilaReporte {
-  clave: string | null
-  nombre: string | null
-  status: "actualizado" | "actualizar" | "sin_cambios" | "no_encontrado" | "error"
-  cambios: { campo: string; actual: any; nuevo: any }[]
-  error?: string
-}
-
-interface Resultado {
-  total_filas: number
-  filas: FilaReporte[]
-}
-
+interface FilaReporte { clave: string | null; nombre: string | null; status: string; cambios: { campo: string; actual: any; nuevo: any }[]; error?: string }
+interface Resultado { total_filas: number; filas: FilaReporte[] }
 type Step = "upload" | "mapping" | "done"
 
 interface Props {
@@ -120,10 +92,7 @@ interface Props {
   onImportComplete?: () => void
 }
 
-export const clientesFieldLabel = (id: string) => DB_FIELD_DEFS.find(d => d.id === id)?.label ?? id
-const fieldLabel = clientesFieldLabel
-
-export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: Props) {
+export function ImportProveedoresDialog({ open, onOpenChange, onImportComplete }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [step, setStep] = useState<Step>("upload")
   const [fileName, setFileName] = useState("")
@@ -137,11 +106,9 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
 
   function reset() {
     setStep("upload"); setFileName(""); setExcelRows([]); setHeaders([])
-    setHeaderColIndices([]); setMappings([]); setResult(null)
-    setLoading(false); setError(null)
+    setHeaderColIndices([]); setMappings([]); setResult(null); setLoading(false); setError(null)
   }
 
-  // ── Step 1: Upload ──
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -151,23 +118,14 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
       const wb = XLSX.read(buffer, { type: "array" })
       const ws = wb.Sheets[wb.SheetNames[0]]
       const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" })
-      if (!data || data.length < 2) {
-        setError("El archivo no tiene datos suficientes (se necesita una fila de encabezados y al menos una de datos).")
-        return
-      }
-      // Buscar la primera fila con ≥2 celdas no vacías como encabezado
+      if (!data || data.length < 2) { setError("El archivo no tiene datos suficientes."); return }
       let headerRowIdx = 0
       for (let r = 0; r < Math.min(data.length, 15); r++) {
         const nonEmpty = (data[r] as any[]).filter(c => String(c ?? "").trim() !== "").length
         if (nonEmpty >= 2) { headerRowIdx = r; break }
       }
-      const hdrObjects = (data[headerRowIdx] as any[])
-        .map((h, i) => ({ name: String(h ?? "").trim(), colIdx: i }))
-        .filter(h => h.name !== "")
-      if (hdrObjects.length === 0) {
-        setError("No se encontraron columnas con nombre. Revisá que la primera fila tenga títulos (ej. codigo_cliente, percepcion_iibb).")
-        return
-      }
+      const hdrObjects = (data[headerRowIdx] as any[]).map((h, i) => ({ name: String(h ?? "").trim(), colIdx: i })).filter(h => h.name !== "")
+      if (hdrObjects.length === 0) { setError("No se encontraron columnas con nombre."); return }
       const hdrs = hdrObjects.map(h => h.name)
       setHeaders(hdrs)
       setHeaderColIndices(hdrObjects.map(h => h.colIdx))
@@ -179,26 +137,23 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
     }
   }
 
-  // ── Step 2: Mapping ──
   function updateMapping(excelCol: string, dbField: string) {
     setMappings(prev => prev.map(m => m.excelCol === excelCol ? { ...m, dbField } : m))
   }
 
-  /** Determina la columna conectora (codigo_cliente preferido, si no cuit). */
-  function getConnector(): "codigo_cliente" | "cuit" | null {
-    if (mappings.some(m => m.dbField === "codigo_cliente")) return "codigo_cliente"
+  function getConnector(): "codigo_proveedor" | "cuit" | null {
+    if (mappings.some(m => m.dbField === "codigo_proveedor")) return "codigo_proveedor"
     if (mappings.some(m => m.dbField === "cuit")) return "cuit"
     return null
   }
 
   function getValidationError(): string | null {
     const connector = getConnector()
-    if (!connector) return "Tenés que mapear una columna como conector: 'Código de cliente' o 'CUIT'."
+    if (!connector) return "Tenés que mapear una columna como conector: 'Código de proveedor' o 'CUIT'."
     const activos = mappings.filter(m => m.dbField !== SKIP_ID)
     if (activos.length < 2) return "Mapeá al menos dos columnas: el conector + algún dato a actualizar."
-    // No permitir el mismo destino dos veces
     const usados = activos.map(m => m.dbField)
-    if (new Set(usados).size !== usados.length) return "Hay dos columnas del Excel apuntando al mismo campo. Revisá el mapeo."
+    if (new Set(usados).size !== usados.length) return "Hay dos columnas apuntando al mismo campo. Revisá el mapeo."
     return null
   }
 
@@ -224,7 +179,6 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
       .filter(r => r[connector] !== undefined)
   }
 
-  // ── Step 3: Actualizar ──
   async function handleActualizar() {
     const validation = getValidationError()
     if (validation) { setError(validation); return }
@@ -233,7 +187,7 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
     try {
       const rows = buildRows(connector)
       if (rows.length === 0) { setError("No se encontraron filas con valor en la columna conectora."); setLoading(false); return }
-      const res = await fetch("/api/clientes/import-bulk", {
+      const res = await fetch("/api/proveedores/import-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connector, rows, dry_run: false, archivo: fileName }),
@@ -258,16 +212,15 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileSpreadsheet className="w-5 h-5 text-blue-600" />
-            Actualizar clientes desde Excel
+            Actualizar proveedores desde Excel
           </DialogTitle>
           <DialogDescription>
             {step === "upload" && "Subí tu Excel. El sistema detecta las columnas automáticamente."}
-            {step === "mapping" && "Indicá qué columna del Excel corresponde a cada dato. Una debe ser el conector (código o CUIT)."}
+            {step === "mapping" && "Indicá qué columna corresponde a cada dato. Una debe ser el conector (código o CUIT)."}
             {step === "done" && "Resultado de la actualización."}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Stepper */}
         <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
           {(["upload", "mapping", "done"] as Step[]).map((s, i) => (
             <React.Fragment key={s}>
@@ -284,7 +237,6 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
           </Alert>
         )}
 
-        {/* STEP 1: UPLOAD */}
         {step === "upload" && (
           <div className="flex flex-col items-center justify-center gap-4 py-10 border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
                onClick={() => fileInputRef.current?.click()}>
@@ -297,7 +249,6 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
           </div>
         )}
 
-        {/* STEP 2: MAPPING */}
         {step === "mapping" && (
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -307,8 +258,7 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
               <Badge variant="outline">{excelRows.length} filas</Badge>
             </div>
             <div className="text-xs text-muted-foreground mb-3">
-              El sistema sugirió un mapeo automático. Cambialo si hace falta. El conector se usa para
-              encontrar al cliente; los demás campos se actualizan.
+              El conector se usa para encontrar al proveedor; los demás campos se actualizan.
             </div>
             <div className="border rounded-lg overflow-hidden">
               <table className="w-full text-sm">
@@ -342,7 +292,6 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
           </div>
         )}
 
-        {/* STEP 3: DONE — reporte */}
         {step === "done" && result && (
           <ImportReportView
             filas={result.filas}
@@ -351,7 +300,7 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
             nombreLabel="Nombre"
             statuses={["actualizado", "sin_cambios", "no_encontrado", "error"]}
             archivo={fileName}
-            fieldLabel={fieldLabel}
+            fieldLabel={proveedoresFieldLabel}
           />
         )}
 
@@ -363,7 +312,7 @@ export function ImportClientesDialog({ open, onOpenChange, onImportComplete }: P
             <>
               <Button variant="ghost" onClick={() => setStep("upload")}>← Volver</Button>
               <Button onClick={handleActualizar} disabled={loading} className="bg-green-600 hover:bg-green-700 text-white">
-                {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Actualizando...</> : "Actualizar clientes"}
+                {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Actualizando...</> : "Actualizar proveedores"}
               </Button>
             </>
           )}

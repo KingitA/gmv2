@@ -12,7 +12,9 @@ import {
   Plus, Upload, ShoppingCart, TrendingUp, Package, ChevronDown, Check,
   FileDown, FileUp, SlidersHorizontal, X, Pencil, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react"
-import { ImportArticulosDialog } from "@/components/articulos/ImportArticulosDialog"
+import { ImportArticulosDialog, articulosFieldLabel } from "@/components/articulos/ImportArticulosDialog"
+import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
+import { History } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import * as XLSX from "xlsx"
 import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, determinarGrupoPrecio, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
@@ -186,6 +188,7 @@ export default function ArticulosPage() {
   const [expCols,setExpCols]       = useState<Set<string>>(new Set())
   const [exporting,setExporting]   = useState(false)
   const [showImporter,setShowImporter] = useState(false)
+  const [showHistorial,setShowHistorial] = useState(false)
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -518,6 +521,9 @@ export default function ArticulosPage() {
           </Button>
           <Button size="sm" className="h-8 text-xs gap-1.5 bg-indigo-600 hover:bg-indigo-700" onClick={()=>{setShowImpExp(true);setIeTab("import")}}>
             <FileUp className="h-3.5 w-3.5"/>Importar
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={()=>setShowHistorial(true)}>
+            <History className="h-3.5 w-3.5"/>Historial
           </Button>
           {ed.size>0&&(
             <Button size="sm" className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={gsv} disabled={sav}>
@@ -1438,6 +1444,15 @@ export default function ArticulosPage() {
       </Dialog>
 
       <ImportArticulosDialog open={showImporter} onOpenChange={setShowImporter} onImportComplete={()=>load()}/>
+      <HistorialImportacionesDialog
+        open={showHistorial}
+        onOpenChange={setShowHistorial}
+        modulo="articulos"
+        claveLabel="SKU"
+        nombreLabel="Descripción"
+        statuses={["actualizado", "sin_cambios", "nuevo", "error"]}
+        fieldLabel={articulosFieldLabel}
+      />
     </div>
   )
 }
