@@ -29,10 +29,12 @@ const TIPO_CONFIG: Record<string, { letra: string; nombre: string; color: string
 
 // ─── Estilos ─────────────────────────────────────────────
 const s = StyleSheet.create({
-  page:        { fontFamily: 'Helvetica', fontSize: 9, paddingTop: 0, paddingBottom: 70, paddingHorizontal: 0, backgroundColor: '#fff' },
+  // Página como columna flex: cuerpo arriba, spacer elástico, pie abajo.
+  page:        { fontFamily: 'Helvetica', fontSize: 9, paddingTop: 0, paddingBottom: 0, paddingHorizontal: 0, backgroundColor: '#fff', flexDirection: 'column' },
   stripe:      { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
   body:        { marginLeft: 4, padding: '10 12 10 10' },
-  footer:      { position: 'absolute', bottom: 0, left: 4, right: 0 },
+  // Bloque inferior en flujo normal (NO absoluto): el spacer lo empuja al pie.
+  footer:      { marginLeft: 4 },
 
   // Encabezado empresa + tipo + número
   encTop:      { flexDirection: 'row', borderBottom: '2 solid #111', marginBottom: 0 },
@@ -343,7 +345,7 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
             const isAlt = i % 2 === 1
 
             return (
-              <View key={i} style={[s.tableRow, isAlt ? s.tableRowAlt : {}, esBonifMerc ? { backgroundColor: '#fef3c7' } : {}]}>
+              <View key={i} wrap={false} style={[s.tableRow, isAlt ? s.tableRowAlt : {}, esBonifMerc ? { backgroundColor: '#fef3c7' } : {}]}>
                 <Text style={[s.tdText, s.cCod, { fontSize: 7.5, color: '#888' }]}>{esBonifMerc ? '' : (item.sku ?? '')}</Text>
                 <Text style={[s.tdBold, s.cDesc, { fontSize: 8 }]}>{item.descripcion}</Text>
                 <Text style={[s.tdText, s.cMarca, { fontSize: 7.5, color: '#666' }]}>{item.marca ?? ''}</Text>
@@ -358,7 +360,17 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
             )
           })}
 
-          {/* ── Totales + Observaciones ── */}
+        </View>
+
+        {/* Spacer elástico: empuja el bloque inferior al pie de la hoja.
+            Con 1 o 50 ítems el pie queda SIEMPRE en el mismo lugar; si el
+            cuerpo supera una hoja, el bloque cae al pie de la última. */}
+        <View style={s.spacer} />
+
+        {/* ── Bloque inferior anclado al pie: totales + leyendas + firma ──
+            wrap={false} mantiene todo junto en la última hoja, nunca se parte. */}
+        <View style={s.footer} wrap={false}>
+          {/* Totales + Observaciones */}
           <View style={s.totArea}>
             <View style={s.totObs}>
               <Text style={s.totObsTit}>OBSERVACIONES</Text>
@@ -396,12 +408,8 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
             </View>
           </View>
 
-        </View>
-
-        {/* ── Footer fijo en todas las páginas ── */}
-        {/* Transparencia Fiscal (Ley 27.743 / RG 5614): solo comprobantes B — en los A
-            el IVA ya va discriminado en el cuerpo, la franja sería redundante. */}
-        <View style={s.footer} fixed>
+          {/* Transparencia Fiscal (Ley 27.743 / RG 5614): solo comprobantes B — en los A
+              el IVA ya va discriminado en el cuerpo, la franja sería redundante. */}
           {esFactB && (
             <View style={s.transpRow}>
               <Text style={s.transpText}>
@@ -411,6 +419,7 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
               </Text>
             </View>
           )}
+
           <View style={s.pie}>
             <Text style={s.pieLegal}>
               Emitido conforme RG ARCA 1415{comp.cae ? ` · CAE: ${comp.cae}` : ''}.{'\n'}
