@@ -35,6 +35,10 @@ const s = StyleSheet.create({
   body:        { marginLeft: 4, padding: '10 12 10 10' },
   // Bloque inferior en flujo normal (NO absoluto): el spacer lo empuja al pie.
   footer:      { marginLeft: 4 },
+  // Encabezado que se repite en cada hoja (RG 1415, comprobantes multi-hoja)
+  headerFixed: { marginLeft: 4, padding: '10 12 0 10' },
+  bodyRows:    { marginLeft: 4, padding: '0 12 10 10' },
+  hojaText:    { fontSize: 7.5, color: '#555', fontFamily: 'Helvetica-Bold', marginTop: 5 },
 
   // Encabezado empresa + tipo + número
   encTop:      { flexDirection: 'row', borderBottom: '2 solid #111', marginBottom: 0 },
@@ -130,7 +134,7 @@ const s = StyleSheet.create({
   spacer:      { flex: 1 },
 
   // Marca de agua de vista previa (no es un comprobante emitido)
-  previewBanner:     { backgroundColor: '#fde2e2', borderBottom: '1 solid #e57373', padding: '5 10', alignItems: 'center', marginLeft: 4 },
+  previewBanner:     { backgroundColor: '#fde2e2', borderBottom: '1 solid #e57373', padding: '5 10', alignItems: 'center', marginBottom: 4 },
   previewBannerText: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#b71c1c', letterSpacing: 0.5 },
 })
 
@@ -235,16 +239,17 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
 
   return (
       <Page size="A4" style={s.page}>
-        {/* Marca de agua: deja claro que NO es un comprobante emitido */}
-        {preview && (
-          <View style={s.previewBanner}>
-            <Text style={s.previewBannerText}>VISTA PREVIA — SIN VALIDEZ FISCAL · NO EMITIDO · NO ENVIADO A ARCA</Text>
-          </View>
-        )}
         {/* Franja de color lateral */}
         <View style={[s.stripe, { backgroundColor: cfg.color }]} fixed />
 
-        <View style={s.body}>
+        {/* ── Encabezado: se REPITE en cada hoja (RG 1415, comprobantes multi-hoja) ── */}
+        <View style={s.headerFixed} fixed>
+          {/* Marca de agua: deja claro que NO es un comprobante emitido */}
+          {preview && (
+            <View style={s.previewBanner}>
+              <Text style={s.previewBannerText}>VISTA PREVIA — SIN VALIDEZ FISCAL · NO EMITIDO · NO ENVIADO A ARCA</Text>
+            </View>
+          )}
           {/* ── Encabezado: empresa | tipo | número ── */}
           <View style={s.encTop}>
             {/* Empresa */}
@@ -278,6 +283,10 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
               {pedido?.numero_pedido && (
                 <View style={s.compRow}><Text style={s.compLbl}>N° Pedido:</Text><Text style={s.compVal}>{pedido.numero_pedido}</Text></View>
               )}
+              {/* "Hoja N de M" — RG 1415: solo si el comprobante ocupa más de una hoja */}
+              <Text style={s.hojaText} render={({ subPageNumber, subPageTotalPages }) =>
+                (subPageTotalPages ?? 1) > 1 ? `Hoja ${subPageNumber} de ${subPageTotalPages}` : ''
+              } />
               {comp.cae && (
                 <View style={s.caeBox}>
                   <Text style={s.caeLbl}>CAE — ARCA</Text>
@@ -344,8 +353,10 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
             <Text style={[s.thText, s.cNet,  { textAlign: 'right' }]}>{esFactB ? 'P. Unit.' : 'P. Neto'}</Text>
             <Text style={[s.thText, s.cSub,  { textAlign: 'right' }]}>Subtotal</Text>
           </View>
+        </View>
 
-          {/* Filas */}
+        {/* ── Filas: fluyen; el encabezado de arriba se repite en cada hoja ── */}
+        <View style={s.bodyRows}>
           {detalle.map((item, i) => {
             const esBonifMerc = item.precio_unitario < 0
             // Comprobantes B: precios finales con IVA incluido, sin discriminar (RG 1415).
