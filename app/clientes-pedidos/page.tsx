@@ -1171,6 +1171,10 @@ export default function ClientesPedidosPage() {
                       : <><Receipt className="h-3.5 w-3.5 mr-1.5" />Generar</>}
                   </Button>
                 ) : <div />}
+                <Button size="sm" onClick={() => window.open(`/api/comprobantes-venta/preview?pedido_id=${pedidoSeleccionado.id}`, "_blank")}
+                  className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
+                  <FileText className="h-3.5 w-3.5 mr-1.5" />Vista previa
+                </Button>
                 <Button size="sm" onClick={() => imprimirPedido(pedidoSeleccionado)}
                   className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                   <Printer className="h-3.5 w-3.5 mr-1.5" />Imprimir

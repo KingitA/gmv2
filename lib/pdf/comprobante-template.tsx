@@ -128,6 +128,10 @@ const s = StyleSheet.create({
   firmaLbl:    { fontSize: 6.5, color: '#888', letterSpacing: 0.5 },
 
   spacer:      { flex: 1 },
+
+  // Marca de agua de vista previa (no es un comprobante emitido)
+  previewBanner:     { backgroundColor: '#fde2e2', borderBottom: '1 solid #e57373', padding: '5 10', alignItems: 'center', marginLeft: 4 },
+  previewBannerText: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#b71c1c', letterSpacing: 0.5 },
 })
 
 // ─── Tipos ───────────────────────────────────────────────
@@ -187,8 +191,9 @@ export interface ComprobantePDFData {
   bonificaciones?: Array<{ tipo: string; porcentaje: number; segmento?: string }>
 }
 
-// ─── Componente principal ─────────────────────────────────
-export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
+// ─── Página de un comprobante (sin el wrapper Document) ──────
+// preview=true: marca de agua + placeholder de CAE, para vistas previas.
+function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData; preview?: boolean }) {
   const { comprobante: comp, cliente, empresa, pedido, detalle, bonificaciones = [] } = data
   const cfg = TIPO_CONFIG[comp.tipo_comprobante] ?? { letra: 'X', nombre: comp.tipo_comprobante, color: '#333' }
 
@@ -229,8 +234,13 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
   }
 
   return (
-    <Document title={`${cfg.nombre} ${cfg.letra} ${nro}`} author={empresa.razon_social}>
       <Page size="A4" style={s.page}>
+        {/* Marca de agua: deja claro que NO es un comprobante emitido */}
+        {preview && (
+          <View style={s.previewBanner}>
+            <Text style={s.previewBannerText}>VISTA PREVIA — SIN VALIDEZ FISCAL · NO EMITIDO · NO ENVIADO A ARCA</Text>
+          </View>
+        )}
         {/* Franja de color lateral */}
         <View style={[s.stripe, { backgroundColor: cfg.color }]} fixed />
 
@@ -273,6 +283,13 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
                   <Text style={s.caeLbl}>CAE — ARCA</Text>
                   <Text style={s.caeNro}>{comp.cae}</Text>
                   <Text style={s.caeVto}>Vto. CAE: {caeVto}</Text>
+                </View>
+              )}
+              {preview && !esPresRev && (
+                <View style={s.caeBox}>
+                  <Text style={s.caeLbl}>CAE — ARCA</Text>
+                  <Text style={s.caeNro}>VISTA PREVIA</Text>
+                  <Text style={s.caeVto}>Se asigna al emitir</Text>
                 </View>
               )}
             </View>
@@ -432,6 +449,26 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
           </View>
         </View>
       </Page>
+  )
+}
+
+// ─── Documento real (emisión): un comprobante por PDF ────────
+export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
+  const cfg = TIPO_CONFIG[data.comprobante.tipo_comprobante]
+  return (
+    <Document title={`${cfg?.nombre ?? 'Comprobante'} ${cfg?.letra ?? ''} ${data.comprobante.numero_comprobante}`} author={data.empresa.razon_social}>
+      <ComprobantePagina data={data} />
+    </Document>
+  )
+}
+
+// ─── Vista previa: presupuesto + factura en un mismo PDF ─────
+// Con marca de agua, sin CAE/QR reales, sin emitir y sin contactar ARCA.
+export function ComprobantesPreviewPDF({ presupuesto, factura }: { presupuesto: ComprobantePDFData; factura: ComprobantePDFData }) {
+  return (
+    <Document title="Vista previa de comprobantes" author={factura.empresa.razon_social}>
+      <ComprobantePagina data={presupuesto} preview />
+      <ComprobantePagina data={factura} preview />
     </Document>
   )
 }
