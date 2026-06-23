@@ -473,13 +473,13 @@ export function ComprobantePDF({ data }: { data: ComprobantePDFData }) {
   )
 }
 
-// ─── Vista previa: presupuesto + factura en un mismo PDF ─────
-// Con marca de agua, sin CAE/QR reales, sin emitir y sin contactar ARCA.
-export function ComprobantesPreviewPDF({ presupuesto, factura }: { presupuesto: ComprobantePDFData; factura: ComprobantePDFData }) {
+// ─── Vista previa: los comprobantes que saldrían del pedido en un mismo PDF ─────
+// Copia fiel del split real (factura/presupuesto por ítem + agrupación). Con marca
+// de agua, sin CAE/QR reales, sin emitir y sin contactar ARCA.
+export function ComprobantesPreviewPDF({ comprobantes }: { comprobantes: ComprobantePDFData[] }) {
   return (
-    <Document title="Vista previa de comprobantes" author={factura.empresa.razon_social}>
-      <ComprobantePagina data={presupuesto} preview />
-      <ComprobantePagina data={factura} preview />
+    <Document title="Vista previa de comprobantes" author={comprobantes[0]?.empresa.razon_social ?? ''}>
+      {comprobantes.map((d, i) => <ComprobantePagina key={i} data={d} preview />)}
     </Document>
   )
 }
