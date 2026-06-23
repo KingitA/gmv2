@@ -135,18 +135,20 @@ export async function armarComprobantesPreview(
     }
     const subtotalNeto = r2(precioUnitario * det.cantidad)
     const subtotalIva  = r2(ivaUnitario * det.cantidad)
+    const subtotalFinal = r2(subtotalNeto + subtotalIva)
 
     items.push({
       articulo_id: det.articulo_id,
       descripcion: art.descripcion || '',
       sku: art.sku || '',
       cantidad: det.cantidad,
-      precioUnitario, subtotalNeto, subtotalIva,
+      precioUnitario, subtotalNeto, subtotalIva, subtotalFinal,
       vaEnComprobante,
       segmento: detectarSegmento(art),
       proveedorId: art.proveedor_id ?? null,
       marcaId: art.marca_id ?? null,
       descuentoPropio: Number(art.descuento_propio ?? 0),
+      esBonificado: det.es_bonificado === true,
     })
   }
 
@@ -174,11 +176,56 @@ export async function armarComprobantesPreview(
   const comprobantes: ComprobantePreview[] = []
   for (const grupoItems of grupos.values()) {
     const esFactura = grupoItems[0].vaEnComprobante === 'factura'
+    const esPresupuesto = !esFactura
     const tipo = esFactura ? tipoFactura : 'PRES'
+    const segmentoGrupo = grupoItems[0].segmento
 
-    const totalNeto = r2(grupoItems.reduce((s, i) => s + i.subtotalNeto, 0))
-    const totalIva  = esFactura ? r2(grupoItems.reduce((s, i) => s + i.subtotalIva, 0)) : 0
+    // ── Bonificaciones aplicables (idéntico al route): condición de proveedor o
+    //    bonificaciones del cliente filtradas por segmento ──
+    const condGrupo = grupoItems[0].proveedorId ? condProvMap.get(grupoItems[0].proveedorId) : null
+    const bonifAplicables: Array<{ tipo: string; porcentaje: number }> = condGrupo
+      ? [
+          ...(condGrupo.dto_general_pct  ? [{ tipo: 'general',  porcentaje: Number(condGrupo.dto_general_pct) }]  : []),
+          ...(condGrupo.dto_viajante_pct ? [{ tipo: 'viajante', porcentaje: Number(condGrupo.dto_viajante_pct) }] : []),
+        ]
+      : (bonificacionesCliente || []).filter((b: any) => !b.segmento || b.segmento === segmentoGrupo)
 
+    // ── Líneas de descuento (idéntico al route) ──
+    const lineasDescuento: { descripcion: string; monto: number }[] = []
+    const totalGrupo = r2(grupoItems.reduce((s, i) => s + i.subtotalFinal, 0))
+    const totalBonificados = r2(grupoItems.filter((i) => i.esBonificado).reduce((s, i) => s + i.subtotalFinal, 0))
+    if (totalBonificados > 0) {
+      lineasDescuento.push({ descripcion: 'Bonificación Mercadería 100%', monto: totalBonificados })
+    }
+    const baseNormal = r2(totalGrupo - totalBonificados)
+    for (const bonif of bonifAplicables) {
+      const monto = r2(baseNormal * bonif.porcentaje / 100)
+      const label = bonif.tipo === 'general' ? 'Bonificación General' : 'Desc. Viajante'
+      lineasDescuento.push({ descripcion: `${label} ${bonif.porcentaje}%`, monto })
+    }
+
+    // ── Totales + descuento (idéntico a generarComprobante) ──
+    let totalNeto = r2(grupoItems.reduce((s, i) => s + i.subtotalNeto, 0))
+    let totalIva  = esPresupuesto ? 0 : r2(grupoItems.reduce((s, i) => s + i.subtotalIva, 0))
+
+    const descuentoTotal = r2(lineasDescuento.reduce((s, l) => s + l.monto, 0))
+    const lineasDescuentoDetalle: { descripcion: string; monto: number }[] = []
+    if (descuentoTotal > 0) {
+      const descNeto = esPresupuesto ? descuentoTotal : r2(descuentoTotal / (1 + IVA_RATE))
+      const descIva  = esPresupuesto ? 0 : r2(descuentoTotal - descNeto)
+      totalNeto = r2(totalNeto - descNeto)
+      totalIva  = r2(totalIva  - descIva)
+      let acumulado = 0
+      for (let i = 0; i < lineasDescuento.length; i++) {
+        const l = lineasDescuento[i]
+        const esUltima = i === lineasDescuento.length - 1
+        const montoLinea = esPresupuesto ? l.monto : esUltima ? r2(descNeto - acumulado) : r2(l.monto / (1 + IVA_RATE))
+        acumulado = r2(acumulado + montoLinea)
+        lineasDescuentoDetalle.push({ descripcion: l.descripcion, monto: montoLinea })
+      }
+    }
+
+    // ── Percepciones sobre el neto YA descontado (solo facturas) ──
     let percIva = 0, percIibb = 0
     if (esFactura) {
       const perc = calcularPercepciones(totalNeto, { ...cliente, percepcion_iibb: tasaIIBB }, true)
@@ -190,11 +237,19 @@ export async function armarComprobantesPreview(
     comprobantes.push({
       tipo, total_neto: totalNeto, total_iva: totalIva,
       percepcion_iva: percIva, percepcion_iibb: percIibb, total_factura: totalFactura,
-      detalle: grupoItems.map((i) => ({
-        articulo_id: i.articulo_id, descripcion: i.descripcion, sku: i.sku,
-        cantidad: i.cantidad, precio_unitario: i.precioUnitario, precio_total: i.subtotalNeto,
-        articulos: { descripcion: i.descripcion, sku: i.sku, marca_id: i.marcaId, descuento_propio: i.descuentoPropio },
-      })),
+      detalle: [
+        ...grupoItems.map((i) => ({
+          articulo_id: i.articulo_id, descripcion: i.descripcion, sku: i.sku,
+          cantidad: i.cantidad, precio_unitario: i.precioUnitario, precio_total: i.subtotalNeto,
+          articulos: { descripcion: i.descripcion, sku: i.sku, marca_id: i.marcaId, descuento_propio: i.descuentoPropio },
+        })),
+        // Líneas negativas de bonificación (el template las muestra con "-$" por precio_unitario < 0)
+        ...lineasDescuentoDetalle.map((l) => ({
+          articulo_id: null, descripcion: l.descripcion, sku: '',
+          cantidad: 1, precio_unitario: -l.monto, precio_total: -l.monto,
+          articulos: { descripcion: l.descripcion, sku: '', marca_id: null, descuento_propio: 0 },
+        })),
+      ],
     })
   }
 
