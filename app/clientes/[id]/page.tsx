@@ -103,7 +103,6 @@ export default function ClienteDetailPage() {
     vendedor_id: "",
     condicion_entrega: "entregamos_nosotros",
     lista_precio_id: "",
-    descuento_especial: 0,
     lista_limpieza_id: "",
     metodo_limpieza: "",
     lista_perf0_id: "",
@@ -159,7 +158,6 @@ export default function ClienteDetailPage() {
         vendedor_id: c.vendedor_id || "",
         condicion_entrega: normalizeEnum(c.condicion_entrega, ENTREGA_MAP, "entregamos_nosotros"),
         lista_precio_id: c.lista_precio_id || "",
-        descuento_especial: c.descuento_especial || 0,
         lista_limpieza_id: c.lista_limpieza_id || "",
         metodo_limpieza: normalizeEnum(c.metodo_limpieza, FACTURACION_MAP, ""),
         lista_perf0_id: c.lista_perf0_id || "",
@@ -301,7 +299,6 @@ export default function ClienteDetailPage() {
       vendedor_id: formData.vendedor_id && formData.vendedor_id !== "none" ? formData.vendedor_id : null,
       localidad_id: formData.localidad_id || null,
       lista_precio_id: formData.lista_precio_id && formData.lista_precio_id !== "__none__" ? formData.lista_precio_id : null,
-      descuento_especial: formData.descuento_especial || 0,
       lista_limpieza_id: formData.lista_limpieza_id || null,
       metodo_limpieza: formData.metodo_limpieza || null,
       lista_perf0_id: formData.lista_perf0_id || null,
@@ -521,10 +518,6 @@ export default function ClienteDetailPage() {
                           <SelectItem value="__por_segmento__">— Por Segmento —</SelectItem>
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-slate-500">Descuento Especial (%)</Label>
-                      <Input type="number" step="0.01" min="0" max="100" value={formData.descuento_especial} onChange={(e) => setFormData({ ...formData, descuento_especial: parseFloat(e.target.value) || 0 })} className="h-9" />
                     </div>
                   </div>
                 </CardContent>

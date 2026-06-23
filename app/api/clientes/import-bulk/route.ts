@@ -24,10 +24,10 @@ const ALLOWED_FIELDS = new Set<string>([
   "codigo_cliente", "cuit", "nombre_razon_social", "nombre", "direccion", "localidad",
   "provincia", "telefono", "mail", "condicion_iva", "metodo_facturacion", "condicion_pago",
   "tipo_canal", "nro_iibb", "percepcion_iibb", "exento_iibb", "exento_iva", "dias_credito",
-  "limite_credito", "descuento_especial", "zona", "observaciones",
+  "limite_credito", "zona", "observaciones",
 ])
 
-const NUMERIC_FIELDS = new Set<string>(["percepcion_iibb", "limite_credito", "descuento_especial", "dias_credito"])
+const NUMERIC_FIELDS = new Set<string>(["percepcion_iibb", "limite_credito", "dias_credito"])
 const BOOLEAN_FIELDS = new Set<string>(["exento_iibb", "exento_iva"])
 const CONNECTORS = new Set<string>(["codigo_cliente", "cuit"])
 

@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
-import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
+import { getComisionPorcentaje, calcularComisionMonto } from "@/lib/comisiones/calcular"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -97,10 +97,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         // Si el comprobante quedó saldado → crear comisiones 'cobrada' y movimiento en billetera
         if (nuevoEstado === "pagado") {
           try {
-            // Obtener ítems del comprobante con datos del artículo
+            // Obtener ítems del comprobante con datos del artículo + desglose por línea
             const { data: items } = await supabase
               .from("comprobantes_venta_detalle")
-              .select("articulo_id, cantidad, precio_unitario, articulos(segmento_precio, iva_ventas)")
+              .select("articulo_id, cantidad, precio_unitario, precio_lista, bonif_viajante_pct, es_bonificado, articulos(segmento_precio, iva_ventas)")
               .eq("comprobante_id", imp.comprobante_id)
 
             // Tipo de comprobante y pedido_id
@@ -130,12 +130,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
               const metodo = ["PRES", "REV"].includes(comp?.tipo_comprobante ?? "") ? "presupuesto" : "factura"
 
+              // Comisión COBRADA con la fórmula única (= la vendida): base = neto final,
+              // tasa = comisión% − viajante%. La mercadería bonificada (es_bonificado) resta
+              // (comisión negativa por el valor regalado). El financiero, si aplica, lo debita
+              // la NC financiera (generar-bonificacion).
               const cobradas = (items ?? [])
                 .filter((item: any) => item.articulos?.segmento_precio && vendedor)
                 .map((item: any) => {
                   const { segmento_precio, iva_ventas } = item.articulos
-                  const porcentaje = getComisionPorcentaje(vendedor!, segmento_precio, iva_ventas)
-                  const precioNeto = getPrecioNeto(Number(item.precio_unitario), metodo, iva_ventas)
+                  const comisionPct = getComisionPorcentaje(vendedor!, segmento_precio, iva_ventas)
+                  const viajantePct = Number(item.bonif_viajante_pct ?? 0)
+                  const esBonif = item.es_bonificado === true
+                  // Para la línea bonificada el precio cobrado es $0: la base es su P.Lista
+                  // real (valor regalado) y la comisión se RESTA.
+                  const baseUnit = esBonif ? Number(item.precio_lista ?? 0) : Number(item.precio_unitario)
+                  const { monto, tasaEfectivaPct } = calcularComisionMonto({
+                    precioNetoUnitario: baseUnit,
+                    cantidad: Number(item.cantidad),
+                    metodoFacturacion: metodo,
+                    ivaVentas: iva_ventas,
+                    comisionPct,
+                    viajantePct,
+                  })
                   return {
                     viajante_id: viajanteId,
                     pedido_id: comp?.pedido_id ?? null,
@@ -144,15 +160,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
                     articulo_id: item.articulo_id,
                     segmento: segmento_precio,
                     cantidad: Number(item.cantidad),
-                    precio_neto_unitario: precioNeto,
-                    porcentaje,
-                    monto: (precioNeto * Number(item.cantidad) * porcentaje) / 100,
+                    precio_neto_unitario: baseUnit,
+                    porcentaje: tasaEfectivaPct,
+                    monto: esBonif ? -monto : monto,
                     comprobante_cobrado: true,
                     fecha_comprobante_cobrado: nowArgentina(),
                     pagado: false,
                   }
                 })
-                .filter((c: any) => c.porcentaje > 0)
+                .filter((c: any) => c.monto !== 0)
 
               if (cobradas.length) {
                 await supabase.from("comisiones").insert(cobradas)

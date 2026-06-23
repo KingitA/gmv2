@@ -56,7 +56,10 @@ export interface ResultadoPrecio {
   precioBase: number
   recargoListaPct: number
   precioLista: number
-  descuentoClientePct: number
+  /** Bonificación general del cliente (por segmento) aplicada al neto. % */
+  bonifGeneralPct: number
+  /** Bonificación viajante del cliente (por segmento) aplicada al neto. % */
+  bonifViajantePct: number
   precioConDescuento: number
   descuentoNegroEnFacturaPct: number
   precioAntesIva: number
@@ -215,24 +218,32 @@ function resolveSublistaKey(
 // ─── Paso 3 + 4: Precio Final ─────────────────────────
 
 export function calcularPrecioFinal(
-  art: DatosArticulo, lista: DatosLista, metodoFacturacion: MetodoFacturacion, descuentoCliente: number = 0,
+  art: DatosArticulo, lista: DatosLista, metodoFacturacion: MetodoFacturacion,
+  bonif: { generalPct?: number; viajantePct?: number } = {},
 ): ResultadoPrecio {
+  // Bonificaciones del cliente, escalonadas sobre el neto (la oferta ya viene
+  // incluida en el precio base): primero general, luego viajante.
+  const bonifGeneralPct  = bonif.generalPct  || 0
+  const bonifViajantePct = bonif.viajantePct || 0
+  const factorBonif = (1 - bonifGeneralPct / 100) * (1 - bonifViajantePct / 100)
+
   // ─── Lista Especial (Feature 2) ───────────────────────────────────────────
   // Precio neto fijo cargado en el artículo (precio_lista_especial) menos la oferta.
-  // Saltea toda la cascada y los descuentos: SIEMPRE factura (neto + IVA 21%).
+  // Saltea la cascada de costo; las bonificaciones general/viajante SÍ se aplican.
   if ((lista.lista_codigo || "").toLowerCase() === "especial") {
-    // El precio importado YA tiene la oferta incluida: ES el neto que paga el cliente.
+    // El precio importado YA tiene la oferta incluida: ES el neto pre-bonificación.
     // La oferta sólo back-calcula el "precio de lista" bruto para mostrarlo (100 con 15% → bruto 117.65).
     const oferta   = art.oferta_lista_especial || 0
-    const netoEsp  = round2(art.precio_lista_especial || 0)
-    const brutoEsp = oferta > 0 && oferta < 100 ? round2(netoEsp / (1 - oferta / 100)) : netoEsp
+    const netoEsp0 = round2(art.precio_lista_especial || 0)  // neto post-oferta, pre-bonif
+    const netoEsp  = round2(netoEsp0 * factorBonif)          // neto final tras general/viajante
+    const brutoEsp = oferta > 0 && oferta < 100 ? round2(netoEsp0 / (1 - oferta / 100)) : netoEsp0
     return {
       costoNeto: 0,
       precioBase: brutoEsp,
       recargoListaPct: 0,
       precioLista: brutoEsp,            // P.Lista bruto (informativo)
-      descuentoClientePct: oferta,      // % de oferta (informativo)
-      precioConDescuento: netoEsp,      // neto tras la oferta = precio importado
+      bonifGeneralPct, bonifViajantePct,
+      precioConDescuento: netoEsp,      // neto final tras oferta + bonificaciones
       descuentoNegroEnFacturaPct: 0,
       precioAntesIva: netoEsp,
       ivaIncluido: false,
@@ -287,14 +298,14 @@ export function calcularPrecioFinal(
     if (vaEnComprobante === "factura") {
       const netoFormula = round2(precioListaFormula / 1.21)
       precioLista = netoFormula
-      precioConDescuento = round2(netoFormula * (1 - (descuentoCliente || 0) / 100))
+      precioConDescuento = round2(netoFormula * factorBonif)
       precioAntesIva = precioConDescuento
       ivaPct = 21
       montoIvaDiscriminado = round2(precioAntesIva * 0.21)
       precioUnitarioFinal = precioAntesIva
     } else {
       precioLista = precioListaFormula
-      precioConDescuento = round2(precioListaFormula * (1 - (descuentoCliente || 0) / 100))
+      precioConDescuento = round2(precioListaFormula * factorBonif)
       precioAntesIva = precioConDescuento
       precioUnitarioFinal = precioConDescuento
       ivaIncluido = true
@@ -303,7 +314,7 @@ export function calcularPrecioFinal(
     // Fallback al sistema legacy de recargo porcentual
     recargoListaPct = obtenerRecargoLista(art, lista)
     precioLista = round2(precioBase * (1 + recargoListaPct / 100))
-    precioConDescuento = round2(precioLista * (1 - (descuentoCliente || 0) / 100))
+    precioConDescuento = round2(precioLista * factorBonif)
 
     const esPerf = art.segmento_precio === 'perfumeria' || art.rubro_slug === 'perfumeria'
     const coefIva = esPerf ? 1.00 : obtenerCoeficienteIva(art.iva_compras, vaEnComprobante)
@@ -326,7 +337,7 @@ export function calcularPrecioFinal(
 
   return {
     costoNeto, precioBase, recargoListaPct, precioLista,
-    descuentoClientePct: descuentoCliente || 0,
+    bonifGeneralPct, bonifViajantePct,
     precioConDescuento,
     descuentoNegroEnFacturaPct: coefAjusteAplicado,
     precioAntesIva, ivaIncluido, ivaPct,
@@ -343,10 +354,10 @@ export interface TotalesComprobante {
   subtotalNeto: number; totalIva: number; totalFinal: number
 }
 
-export function calcularTotalesPedido(items: ItemPedidoParaCalculo[], lista: DatosLista, metodoFacturacion: MetodoFacturacion, descuentoCliente = 0): TotalesComprobante[] {
+export function calcularTotalesPedido(items: ItemPedidoParaCalculo[], lista: DatosLista, metodoFacturacion: MetodoFacturacion, bonif: { generalPct?: number; viajantePct?: number } = {}): TotalesComprobante[] {
   const comprobantes: Record<string, TotalesComprobante> = {}
   items.forEach((item, index) => {
-    const r = calcularPrecioFinal(item.articulo, lista, metodoFacturacion, descuentoCliente)
+    const r = calcularPrecioFinal(item.articulo, lista, metodoFacturacion, bonif)
     if (!comprobantes[r.vaEnComprobante]) comprobantes[r.vaEnComprobante] = { tipo: r.vaEnComprobante, items: [], subtotalNeto: 0, totalIva: 0, totalFinal: 0 }
     const sub = round2(r.precioUnitarioFinal * item.cantidad)
     const iva = round2(r.montoIvaDiscriminado * item.cantidad)

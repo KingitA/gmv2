@@ -857,7 +857,7 @@ export default function ArticulosPage() {
                             const lista=listas.find(l=>l.codigo===leg.listaCodigo)
                             if(lista){
                               const ld2:DatosLista={recargo_limpieza_bazar:lista.recargo_limpieza_bazar,recargo_perfumeria_negro:lista.recargo_perfumeria_negro,recargo_perfumeria_blanco:lista.recargo_perfumeria_blanco}
-                              const r=calcularPrecioFinal({...dt,precio_base_stored:base},ld2,leg.fac,0)
+                              const r=calcularPrecioFinal({...dt,precio_base_stored:base},ld2,leg.fac,{})
                               precio=r.ivaIncluido?r.precioUnitarioFinal:r.precioUnitarioFinal+r.montoIvaDiscriminado
                               isLegacy=true
                             }

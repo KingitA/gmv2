@@ -191,6 +191,13 @@ export interface ComprobantePDFData {
     precio_total: number
     marca?: string
     descuento_propio?: number
+    // Desglose por línea (cascada escalonada): la oferta/general/viajante ya están
+    // en el neto; estas columnas son para mostrarlas y reconstruir el P.Lista.
+    precio_lista?: number
+    descuento_propio_pct?: number
+    bonif_general_pct?: number
+    bonif_viajante_pct?: number
+    es_bonificado?: boolean
   }>
   bonificaciones?: Array<{ tipo: string; porcentaje: number; segmento?: string }>
 }
@@ -218,12 +225,15 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
   const fecha  = fmtFechaISO(comp.fecha)
   const caeVto = comp.vencimiento_cae ? fmtFechaISO(comp.vencimiento_cae) : ''
 
-  // D1/D2
+  // D1/D2 para los chips del encabezado: se derivan del desglose por línea
+  // (la cascada ya está en el neto). Fallback al param bonificaciones (legacy).
   const segmento = 'limpieza_bazar'
-  const d1 = bonificaciones.find(b => b.tipo === 'general'  && (!b.segmento || b.segmento === segmento))
-  const d2 = bonificaciones.find(b => b.tipo === 'viajante' && (!b.segmento || b.segmento === segmento))
-  const d1pct = d1?.porcentaje ?? 0
-  const d2pct = d2?.porcentaje ?? 0
+  const d1Linea = detalle.find(d => Number(d.bonif_general_pct ?? 0) > 0)
+  const d2Linea = detalle.find(d => Number(d.bonif_viajante_pct ?? 0) > 0)
+  const d1Legacy = bonificaciones.find(b => b.tipo === 'general'  && (!b.segmento || b.segmento === segmento))
+  const d2Legacy = bonificaciones.find(b => b.tipo === 'viajante' && (!b.segmento || b.segmento === segmento))
+  const d1pct = Number(d1Linea?.bonif_general_pct ?? d1Legacy?.porcentaje ?? 0)
+  const d2pct = Number(d2Linea?.bonif_viajante_pct ?? d2Legacy?.porcentaje ?? 0)
 
   const totalNeto  = Math.abs(comp.total_neto)
   const totalIva   = Math.abs(comp.total_iva ?? 0)
@@ -358,32 +368,37 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
         {/* ── Filas: fluyen; el encabezado de arriba se repite en cada hoja ── */}
         <View style={s.bodyRows}>
           {detalle.map((item, i) => {
-            const esBonifMerc = item.precio_unitario < 0
+            // Mercadería bonificada: producto regalado, línea a $0 (P.Lista real, 100% Of.).
+            const esBonifMerc = item.es_bonificado === true || item.precio_unitario < 0
             // Comprobantes B: precios finales con IVA incluido, sin discriminar (RG 1415).
-            // El detalle guarda TODAS las líneas en neto (incluidas las negativas de
-            // bonificación) → en B se muestran ×1.21 sin excepción.
             const factorIvaB = esFactB ? 1.21 : 1
-            const precioOferta = r2(Math.abs(item.precio_unitario) * factorIvaB)
-            const ofPct = item.descuento_propio ?? 0
-            const lista = ofPct > 0 && !esBonifMerc ? r2(precioOferta / (1 - ofPct / 100)) : precioOferta
-            // Precio pleno por línea: el descuento NO se aplica acá — queda visible
-            // únicamente como línea negativa, igual que en la DB y lo declarado a ARCA.
-            const neto  = esBonifMerc ? 0 : precioOferta
-            const sub   = esBonifMerc ? r2(Math.abs(item.precio_total) * factorIvaB) : r2(neto * Math.abs(item.cantidad))
+            // Desglose por línea: oferta/general/viajante ya están en el neto; las columnas
+            // los muestran y el P.Lista se reconstruye con la cascada.
+            const ofPct  = Number(item.descuento_propio_pct ?? item.descuento_propio ?? 0)
+            const b1pct  = Number(item.bonif_general_pct ?? 0)
+            const b2pct  = Number(item.bonif_viajante_pct ?? 0)
+            const neto   = esBonifMerc ? 0 : r2(Math.abs(item.precio_unitario) * factorIvaB)
+            // P.Lista bruto: el guardado por línea, o reconstruido desde el neto y la cascada.
+            const listaStored = item.precio_lista != null ? r2(item.precio_lista * factorIvaB) : 0
+            const factorCascada = (1 - ofPct / 100) * (1 - b1pct / 100) * (1 - b2pct / 100)
+            const lista = listaStored > 0
+              ? listaStored
+              : (factorCascada > 0 ? r2(neto / factorCascada) : neto)
+            const sub    = esBonifMerc ? 0 : r2(neto * Math.abs(item.cantidad))
             const isAlt = i % 2 === 1
 
             return (
               <View key={i} wrap={false} style={[s.tableRow, isAlt ? s.tableRowAlt : {}, esBonifMerc ? { backgroundColor: '#fef3c7' } : {}]}>
-                <Text style={[s.tdText, s.cCod, { fontSize: 7.5, color: '#888' }]}>{esBonifMerc ? '' : (item.sku ?? '')}</Text>
+                <Text style={[s.tdText, s.cCod, { fontSize: 7.5, color: '#888' }]}>{item.sku ?? ''}</Text>
                 <Text style={[s.tdBold, s.cDesc, { fontSize: 8 }]}>{item.descripcion}</Text>
                 <Text style={[s.tdText, s.cMarca, { fontSize: 7.5, color: '#666' }]}>{item.marca ?? ''}</Text>
-                <Text style={[s.tdBold, s.cCant]}>{esBonifMerc ? '—' : String(Math.abs(item.cantidad))}</Text>
-                <Text style={[s.tdText, s.cLst, { color: '#777', fontSize: 8 }]}>{esBonifMerc ? '—' : `$${fmtARS(lista)}`}</Text>
-                <Text style={[s.tdText, s.cOf,  { color: ofPct > 0 ? '#b45309' : '#ccc', fontSize: 8 }]}>{ofPct > 0 && !esBonifMerc ? `${ofPct}%` : '—'}</Text>
-                <Text style={[s.tdText, s.cB1,  { color: esBonifMerc ? '#b45309' : d1pct > 0 ? '#555' : '#ccc', fontSize: 8 }]}>{esBonifMerc ? '100%' : d1pct > 0 ? `${d1pct}%` : '—'}</Text>
-                <Text style={[s.tdText, s.cB2,  { color: d2pct > 0 && !esBonifMerc ? '#555' : '#ccc', fontSize: 8 }]}>{d2pct > 0 && !esBonifMerc ? `${d2pct}%` : '—'}</Text>
-                <Text style={[s.tdText, s.cNet, { fontFamily: 'Helvetica-Bold', fontSize: 8.5 }]}>{esBonifMerc ? `-$${fmtARS(sub)}` : `$${fmtARS(neto)}`}</Text>
-                <Text style={[s.tdBold, s.cSub, { fontSize: 9 }]}>{esBonifMerc ? `-$${fmtARS(sub)}` : `$${fmtARS(sub)}`}</Text>
+                <Text style={[s.tdBold, s.cCant]}>{String(Math.abs(item.cantidad))}</Text>
+                <Text style={[s.tdText, s.cLst, { color: '#777', fontSize: 8 }]}>{`$${fmtARS(lista)}`}</Text>
+                <Text style={[s.tdText, s.cOf,  { color: esBonifMerc ? '#b45309' : ofPct > 0 ? '#b45309' : '#ccc', fontSize: 8 }]}>{esBonifMerc ? '100%' : ofPct > 0 ? `${ofPct}%` : '—'}</Text>
+                <Text style={[s.tdText, s.cB1,  { color: b1pct > 0 ? '#555' : '#ccc', fontSize: 8 }]}>{b1pct > 0 && !esBonifMerc ? `${b1pct}%` : '—'}</Text>
+                <Text style={[s.tdText, s.cB2,  { color: b2pct > 0 ? '#555' : '#ccc', fontSize: 8 }]}>{b2pct > 0 && !esBonifMerc ? `${b2pct}%` : '—'}</Text>
+                <Text style={[s.tdText, s.cNet, { fontFamily: 'Helvetica-Bold', fontSize: 8.5 }]}>{`$${fmtARS(neto)}`}</Text>
+                <Text style={[s.tdBold, s.cSub, { fontSize: 9 }]}>{`$${fmtARS(sub)}`}</Text>
               </View>
             )
           })}

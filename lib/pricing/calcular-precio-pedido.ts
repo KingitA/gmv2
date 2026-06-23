@@ -42,10 +42,11 @@ export interface PrecioCalculado {
   ivaUnitario: number       // IVA por unidad (0 si incluido)
   ivaIncluido: boolean
   vaEnComprobante: "factura" | "presupuesto"
-  // Breakdown para kardex
-  precioLista: number       // precio post-recargo, ANTES de descuento_cliente (pre-IVA adj)
-  descuentoClientePct: number
-  precioConDescuento: number // precioLista * (1 - descuentoCliente/100), pre-IVA adj
+  // Breakdown para kardex / display
+  precioLista: number       // precio post-recargo, post-oferta, ANTES de bonificaciones (pre-IVA adj)
+  bonifGeneralPct: number   // bonificación general del cliente aplicada al neto
+  bonifViajantePct: number  // bonificación viajante del cliente aplicada al neto
+  precioConDescuento: number // precioLista * (1-general/100)*(1-viajante/100), pre-IVA adj
 }
 
 function round2(n: number) { return Math.round(n * 100) / 100 }
@@ -54,10 +55,10 @@ export function calcularPrecioPedido(
   articulo: ArticuloPrecioInput,
   listaDatos: DatosLista,
   metodoFacturacion: MetodoFacturacion,
-  descuentoCliente: number = 0,
+  bonif: { generalPct?: number; viajantePct?: number } = {},
 ): PrecioCalculado {
   const datosArticulo = articuloToDatosArticulo(articulo as any, articulo.descuentos)
-  const resultado = calcularPrecioFinal(datosArticulo, listaDatos, metodoFacturacion, descuentoCliente)
+  const resultado = calcularPrecioFinal(datosArticulo, listaDatos, metodoFacturacion, bonif)
 
   // precioAlCliente = lo que el cliente realmente paga
   // Para presupuesto: precioUnitarioFinal ya tiene IVA incluido
@@ -73,7 +74,8 @@ export function calcularPrecioPedido(
     ivaIncluido: resultado.ivaIncluido,
     vaEnComprobante: resultado.vaEnComprobante,
     precioLista: resultado.precioLista,
-    descuentoClientePct: resultado.descuentoClientePct,
+    bonifGeneralPct: resultado.bonifGeneralPct,
+    bonifViajantePct: resultado.bonifViajantePct,
     precioConDescuento: resultado.precioConDescuento,
   }
 }

@@ -11,7 +11,6 @@ import {
 } from "@/lib/pricing/calculator"
 import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
 import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
-import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
@@ -55,6 +54,7 @@ export async function POST(request: Request) {
         ),
         detalle:pedidos_detalle(
           id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item, metodo_facturacion_item,
+          precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
             id, descripcion, sku, iva_ventas, categoria, iva_compras, marca_id, proveedor_id, segmento_precio
           )
@@ -125,6 +125,11 @@ export async function POST(request: Request) {
       vaEnComprobante: "factura" | "presupuesto"
       segmento: string
       esBonificado: boolean
+      // Desglose por línea (para el detalle del comprobante + PDF)
+      precioListaDisplay: number    // P.Lista bruto pre-cascada
+      descuentoPropioPct: number
+      bonifGeneralPct: number
+      bonifViajantePct: number
       marcaId: string | null
       proveedorId: string | null
       ivaCompras: string | null
@@ -151,7 +156,8 @@ export async function POST(request: Request) {
         esPresupuesto ? "presupuesto" : "factura"
 
       // precio_final = precio final al cliente (IVA siempre incluido)
-      // precio_base  = precio neto antes de IVA
+      // precio_base  = precio neto antes de IVA (YA con oferta+general+viajante aplicados)
+      const esBonificado = det.es_bonificado === true
       const precioAlCliente = det.precio_final || 0
       const precioNeto = det.precio_base > 0
         ? det.precio_base
@@ -161,7 +167,12 @@ export async function POST(request: Request) {
       let ivaUnitario: number
       let ivaIncluido: boolean
 
-      if (vaEnComprobante === "factura") {
+      if (esBonificado) {
+        // Mercadería bonificada: línea a $0 (P.Lista real, 100% Of.). No suma a la boleta.
+        precioUnitario = 0
+        ivaUnitario    = 0
+        ivaIncluido    = vaEnComprobante !== "factura"
+      } else if (vaEnComprobante === "factura") {
         // Factura: la línea muestra el neto, el IVA se discrimina al pie
         // precio_final = $100 (con IVA) → línea = $82.64, IVA = $17.36
         precioUnitario = precioNeto
@@ -183,6 +194,10 @@ export async function POST(request: Request) {
 
       const segmento = detectarSegmento(art)
       const precioBase = det.precio_base > 0 ? det.precio_base : round2(precioAlCliente / (1 + IVA_RATE))
+      // P.Lista bruto a mostrar: el guardado en pedidos_detalle, o el neto si no hay.
+      const precioListaDisplay = (det.precio_lista && det.precio_lista > 0)
+        ? det.precio_lista
+        : (vaEnComprobante === "factura" ? precioBase : precioAlCliente)
       itemsCalculados.push({
         detalle_id: det.id,
         articulo_id: det.articulo_id,
@@ -201,7 +216,11 @@ export async function POST(request: Request) {
         descNegroAplicado: false,
         vaEnComprobante,
         segmento,
-        esBonificado: det.es_bonificado === true,
+        esBonificado,
+        precioListaDisplay,
+        descuentoPropioPct: Number(det.descuento_propio_pct ?? 0),
+        bonifGeneralPct: Number(det.bonif_general_pct ?? 0),
+        bonifViajantePct: Number(det.bonif_viajante_pct ?? 0),
         marcaId: (art as any).marca_id ?? null,
         proveedorId: (art as any).proveedor_id ?? null,
         ivaCompras: art.iva_compras ?? null,
@@ -293,52 +312,21 @@ export async function POST(request: Request) {
       }
     }
 
-    const comprobantesGenerados: Array<any & { _segmento?: string; _bonifs?: any[] }> = []
+    const comprobantesGenerados: Array<any & { _segmento?: string }> = []
 
     // ─── 5. Generar un comprobante por grupo ───
-    // Las bonificaciones (mercadería 100% + general + viajante) se calculan ANTES
-    // de solicitar el CAE, para que ARCA, el QR, el PDF y la DB tengan el mismo total.
-    const bonifArticuloId = await getBonificacionArticuloId(supabase)
-
+    // Los descuentos general/viajante YA vienen aplicados en el neto por línea
+    // (pedidos_detalle), y la mercadería bonificada se emite como línea a $0.
+    // No hay más líneas negativas de descuento al pie del comprobante.
     for (const [key, grupoItems] of grupos) {
       const vaEnComp = key.split("__")[0] as "factura" | "presupuesto"
       const tipo = vaEnComp === "factura" ? tipoFactura : "PRES"
       const segmentoGrupo = grupoItems[0].segmento
-      const condGrupo = grupoItems[0].proveedorId ? condProvMap.get(grupoItems[0].proveedorId) : null
-      // Grupo de proveedor: descuentos de la condición del proveedor.
-      // Grupo por rubro: bonificaciones del cliente filtradas por segmento.
-      const bonifAplicables: Array<{ tipo: string; porcentaje: number; segmento?: string | null }> = condGrupo
-        ? [
-            ...(condGrupo.dto_general_pct  ? [{ tipo: "general",  porcentaje: Number(condGrupo.dto_general_pct) }]  : []),
-            ...(condGrupo.dto_viajante_pct ? [{ tipo: "viajante", porcentaje: Number(condGrupo.dto_viajante_pct) }] : []),
-          ]
-        : (bonificacionesCliente || []).filter(
-            (b: any) => !b.segmento || b.segmento === segmentoGrupo
-          )
-
-      // Líneas de descuento del grupo (misma aritmética que el viejo paso 7):
-      // - Bonif mercadería: 100% del subtotal de los ítems es_bonificado
-      // - Bonif general/viajante: % sobre la base de mercadería SIN los bonificados
-      const lineasDescuento: { descripcion: string; monto: number }[] = []
-      const totalGrupo = round2(grupoItems.reduce((s, i) => s + i.subtotalFinal, 0))
-      const totalBonificados = round2(grupoItems
-        .filter(i => i.esBonificado)
-        .reduce((s, i) => s + i.subtotalFinal, 0))
-      if (totalBonificados > 0) {
-        lineasDescuento.push({ descripcion: "Bonificación Mercadería 100%", monto: totalBonificados })
-      }
-      const baseNormal = round2(totalGrupo - totalBonificados)
-      for (const bonif of bonifAplicables) {
-        const monto = round2(baseNormal * bonif.porcentaje / 100)
-        const label = bonif.tipo === "general" ? "Bonificación General" : "Desc. Viajante"
-        lineasDescuento.push({ descripcion: `${label} ${bonif.porcentaje}%`, monto })
-      }
 
       const resultado = await generarComprobante(
         supabase, pedido, grupoItems, tipo, auth.user.id, arcaParams,
-        lineasDescuento, bonifArticuloId,
       )
-      comprobantesGenerados.push({ ...resultado, _segmento: segmentoGrupo, _bonifs: bonifAplicables, _items: grupoItems })
+      comprobantesGenerados.push({ ...resultado, _segmento: segmentoGrupo, _items: grupoItems })
     }
 
     // ── Kardex: vincular entradas existentes o crear si no existen ────────────
@@ -422,34 +410,12 @@ export async function POST(request: Request) {
         .is("comprobante_venta_id", null)
     }
 
-    // ─── 6. Actualizar total del pedido ───
+    // ─── 6. Total del pedido (informativo) ───
+    // La comisión del viajante ya se calculó con la fórmula única al crear el pedido
+    // (base = neto final, tasa = comisión% − viajante%, una sola vez). No se reduce de nuevo.
     const totalPedido = itemsCalculados.reduce((sum, i) => sum + i.subtotalFinal, 0)
 
-    // ─── 7. Comisión del viajante: reducir proporcionalmente si hay bonif viajante ───
-    // (los descuentos ya se aplicaron ANTES del CAE, dentro de generarComprobante)
-    for (const comp of comprobantesGenerados) {
-      if (!comp.id) continue
-      const bonifAplicables: any[] = comp._bonifs || []
-
-      const bonifViajante = bonifAplicables.filter((b: any) => b.tipo === "viajante")
-      if (bonifViajante.length > 0) {
-        const { data: comision } = await supabase
-          .from("comisiones")
-          .select("id, monto, porcentaje")
-          .eq("pedido_id", pedido_id)
-          .maybeSingle()
-        if (comision && comision.porcentaje > 0) {
-          let montoReducido = comision.monto
-          for (const bv of bonifViajante) {
-            const reduccionPct = (bv.porcentaje * 100) / comision.porcentaje
-            montoReducido = round2(montoReducido * (1 - reduccionPct / 100))
-          }
-          await supabase.from("comisiones").update({ monto: montoReducido }).eq("id", comision.id)
-        }
-      }
-    }
-
-    // ─── 8. Generar bonificación pago contado si corresponde ───
+    // ─── 7. Generar bonificación pago contado si corresponde ───
     // Aplica si se pidió en la facturación (pago_contado) O si el pedido fue
     // anticipado con 10% contado (pago_contado_10): en ese caso la NC se imputa
     // al pago anticipo (anticipo_pago_id) para netear el saldo a favor.
@@ -596,12 +562,15 @@ async function generarComprobante(
     ivaUnitario: number; ivaIncluido: boolean
     subtotalNeto: number; subtotalIva: number; subtotalFinal: number
     descNegroAplicado: boolean
+    esBonificado?: boolean
+    precioListaDisplay?: number
+    descuentoPropioPct?: number
+    bonifGeneralPct?: number
+    bonifViajantePct?: number
   }>,
   tipoComprobante: string,
   creadoPor?: string,
   arca?: ArcaParams | null,
-  lineasDescuento: { descripcion: string; monto: number }[] = [],
-  bonifArticuloId?: string,
 ) {
   // Determinar punto de venta: fiscal (ARCA) o interno (PRES/REM/REV)
   const esFiscal   = REQUIERE_CAE.has(tipoComprobante)
@@ -661,32 +630,8 @@ async function generarComprobante(
   }
   totalNeto = round2(totalNeto)
   totalIva  = round2(totalIva)
-
-  // ─── Descuentos (bonif mercadería/general/viajante) ANTES del CAE ───
-  // El monto de descuento viene con IVA incluido (es % del subtotal final):
-  // se descompone en neto + IVA para que ARCA/QR/PDF/DB cierren exacto.
-  // Para el detalle fiscal, cada línea negativa se guarda en NETO (misma base que
-  // el resto de las líneas) y la última absorbe la diferencia de redondeo para que
-  // SUM(detalle.precio_total) == total_neto exacto en centavos.
-  const descuentoTotal = round2(lineasDescuento.reduce((s, l) => s + l.monto, 0))
-  const lineasDescuentoDetalle: { descripcion: string; monto: number }[] = []
-  if (descuentoTotal > 0) {
-    const descNeto = esPresupuesto ? descuentoTotal : round2(descuentoTotal / 1.21)
-    const descIva  = esPresupuesto ? 0 : round2(descuentoTotal - descNeto)
-    totalNeto = round2(totalNeto - descNeto)
-    totalIva  = round2(totalIva  - descIva)
-
-    let acumulado = 0
-    for (let i = 0; i < lineasDescuento.length; i++) {
-      const l = lineasDescuento[i]
-      const esUltima = i === lineasDescuento.length - 1
-      const montoLinea = esPresupuesto
-        ? l.monto
-        : esUltima ? round2(descNeto - acumulado) : round2(l.monto / 1.21)
-      acumulado = round2(acumulado + montoLinea)
-      lineasDescuentoDetalle.push({ descripcion: l.descripcion, monto: montoLinea })
-    }
-  }
+  // Los descuentos general/viajante ya vienen en el neto por línea; la mercadería
+  // bonificada es una línea a $0. El neto declarado = Σ(líneas). No hay líneas negativas.
 
   // ─── Percepciones (IVA 3% RG 5329/2023 + IIBB según padrón provincial) ───
   // Se calculan sobre el neto YA descontado (incluido el mínimo de $3.000)
@@ -783,25 +728,22 @@ async function generarComprobante(
     ...(creadoPor      ? { creado_por: creadoPor }                : {}),
   }
 
-  // Detalle (ítems + líneas de descuento negativas) — armado ANTES del insert
-  // para registrarlo junto al CAE: si el insert falla queda todo lo necesario
-  // para recrear el comprobante sin tocar ARCA.
-  const detallePayload = [
-    ...items.map(item => ({
-      articulo_id:     item.articulo_id,
-      descripcion:     item.descripcion,
-      cantidad:        item.cantidad,
-      precio_unitario: item.precioUnitario,
-      precio_total:    item.subtotalNeto,
-    })),
-    ...(bonifArticuloId ? lineasDescuentoDetalle.map(l => ({
-      articulo_id:     bonifArticuloId,
-      descripcion:     l.descripcion,
-      cantidad:        1,
-      precio_unitario: -l.monto,
-      precio_total:    -l.monto,
-    })) : []),
-  ]
+  // Detalle: una línea por ítem. Los descuentos general/viajante ya están en el
+  // neto; la mercadería bonificada es una línea a $0 (P.Lista real, 100% Of.).
+  // Se persiste el desglose por línea (precio_lista + % de cada descuento) para el
+  // PDF y para reconstrucción/auditoría AFIP.
+  const detallePayload = items.map(item => ({
+    articulo_id:          item.articulo_id,
+    descripcion:          item.descripcion,
+    cantidad:             item.cantidad,
+    precio_unitario:      item.precioUnitario,
+    precio_total:         item.subtotalNeto,
+    precio_lista:         item.precioListaDisplay ?? null,
+    descuento_propio_pct: item.descuentoPropioPct ?? 0,
+    bonif_general_pct:    item.bonifGeneralPct ?? 0,
+    bonif_viajante_pct:   item.bonifViajantePct ?? 0,
+    es_bonificado:        item.esBonificado === true,
+  }))
 
   // Registro durable del CAE antes del insert (solo fiscales con CAE)
   const logId = cae ? await registrarCAEObtenido(supabase, {

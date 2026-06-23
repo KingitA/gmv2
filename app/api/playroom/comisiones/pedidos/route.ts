@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
         .select('pedido_id, numero_pedido, cliente_id, fecha, fecha_comprobante_cobrado, articulo_id, subtotal_total, comision_viajante_monto, comprobante_cobrado')
         .eq('tipo_movimiento', 'venta')
         .not('comision_viajante_monto', 'is', null)
-        .gt('comision_viajante_monto', 0)
+        .neq('comision_viajante_monto', 0)
         .eq('pedido_eliminado', false)
         .eq('vendedor_id', viajanteId)
         .gte(dateField, startOfDayArgentina(dateFrom))

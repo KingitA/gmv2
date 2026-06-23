@@ -88,7 +88,6 @@ export interface Cliente {
   zona?: string | null
   dias_credito?: number | null
   limite_credito?: number | null
-  descuento_especial?: number | null
   aplica_percepciones?: boolean | null
   observaciones?: string | null
   activo: boolean

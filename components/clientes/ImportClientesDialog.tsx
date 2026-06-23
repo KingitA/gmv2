@@ -51,7 +51,6 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "exento_iva",           label: "Exento IVA (SI/NO)",            aliases: ["exentoiva"] },
   { id: "dias_credito",         label: "Días de crédito",               aliases: ["diascredito", "diasdecredito"] },
   { id: "limite_credito",       label: "Límite de crédito",             aliases: ["limitecredito", "limite", "límite"] },
-  { id: "descuento_especial",   label: "Descuento especial (%)",        aliases: ["descuentoespecial", "descespecial"] },
   { id: "zona",                 label: "Zona",                          aliases: ["zona"] },
   { id: "observaciones",        label: "Observaciones",                 aliases: ["observaciones", "obs", "nota", "notas"] },
   { id: SKIP_ID,                label: "— No importar —",               aliases: [] },
@@ -90,7 +89,6 @@ function suggestField(colName: string): string {
   if (has("exentoiva")) return "exento_iva"
   if (has("diascred", "diasdecred")) return "dias_credito"
   if (has("limitecred") || n === "limite") return "limite_credito"
-  if (has("descuentoesp", "descesp")) return "descuento_especial"
   if (has("zona")) return "zona"
   if (has("observ", "nota") || n === "obs") return "observaciones"
   if (has("codigo") || n === "cod" || n === "cliente") return "codigo_cliente"

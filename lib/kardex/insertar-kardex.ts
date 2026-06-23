@@ -63,6 +63,8 @@ export interface KardexMovimientoInput {
   descuentos_json?: DescuentoKardex[]
   descuento_cliente_pct?: number
   // Columnas individuales por tipo (para filtros SQL directos en reportes)
+  descuento_oferta_pct?: number | null
+  descuento_oferta_monto?: number | null
   descuento_mercaderia_pct?: number | null
   descuento_mercaderia_monto?: number | null
   descuento_general_pct?: number | null
@@ -199,6 +201,8 @@ export async function insertarKardex(
 
     descuentos_json: input.descuentos_json ?? null,
     descuento_cliente_pct: input.descuento_cliente_pct ?? 0,
+    descuento_oferta_pct: input.descuento_oferta_pct ?? null,
+    descuento_oferta_monto: input.descuento_oferta_monto ?? null,
     descuento_mercaderia_pct: input.descuento_mercaderia_pct ?? null,
     descuento_mercaderia_monto: input.descuento_mercaderia_monto ?? null,
     descuento_general_pct: input.descuento_general_pct ?? null,

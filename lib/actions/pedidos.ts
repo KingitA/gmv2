@@ -8,7 +8,7 @@ import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { calcularPrecioPedido } from "@/lib/pricing/calcular-precio-pedido"
 import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/pricing/calculator"
 import { insertarKardex, type DescuentoKardex } from "@/lib/kardex/insertar-kardex"
-import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
+import { getComisionPorcentaje, getPrecioNeto, calcularComisionMonto } from "@/lib/comisiones/calcular"
 
 // ─── Tipos de segmento de proveedor ──────────────────────────────────────────
 type Segmento = "limpieza" | "perf0" | "perf_plus"
@@ -186,14 +186,13 @@ async function fetchListaYMetodo(
   clienteInfo: any,
   metodo_facturacion_pedido?: string,
   lista_precio_pedido_id?: string,
-): Promise<{ listaDatos: DatosLista; metodo: MetodoFacturacion; descuentoCliente: number }> {
+): Promise<{ listaDatos: DatosLista; metodo: MetodoFacturacion }> {
   const listaId = lista_precio_pedido_id || clienteInfo.lista_precio_id
   const [formulasReglas] = await Promise.all([fetchFormulasReglas(supabase)])
   const listaDatos = await fetchListaDatos(supabase, listaId || null, {}, formulasReglas)
   const metodoRaw = metodo_facturacion_pedido || clienteInfo.metodo_facturacion || "Final"
   const metodo = toMetodoFacturacion(metodoRaw)
-  const descuentoCliente = clienteInfo.descuento_especial || 0
-  return { listaDatos, metodo, descuentoCliente }
+  return { listaDatos, metodo }
 }
 
 async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
@@ -231,64 +230,111 @@ function getDescuentoViajante(
 }
 
 /**
- * Calcula precio_unitario_bruto y descuentos_json para el kardex.
- *
- * precio_bruto  = precio ANTES de dto_oferta (descuento_propio) Y antes de dto_general (cliente).
- * descuentos_json contiene cada descuento con su porcentaje y monto unitario (pre-IVA adj).
+ * Devuelve la bonificación general (%) aplicable al segmento dado.
+ * Misma resolución que viajante: segmento específico > segmento NULL (todos).
+ */
+function getDescuentoGeneral(
+  bonifs: Array<{ segmento: string | null; porcentaje: number }>,
+  segmento: Segmento,
+): number {
+  const key = SEGMENTO_BONIF[segmento]
+  const especifico = bonifs.find(b => b.segmento === key)
+  if (especifico) return especifico.porcentaje
+  const general = bonifs.find(b => b.segmento === null || b.segmento === "")
+  return general?.porcentaje ?? 0
+}
+
+/** Trae las bonificaciones general + viajante activas de un cliente. */
+async function fetchBonifGeneralViajante(supabase: any, clienteId: string): Promise<{
+  general: Array<{ segmento: string | null; porcentaje: number }>
+  viajante: Array<{ segmento: string | null; porcentaje: number }>
+}> {
+  const { data } = await supabase
+    .from("bonificaciones")
+    .select("tipo, segmento, porcentaje")
+    .eq("cliente_id", clienteId)
+    .eq("activo", true)
+    .in("tipo", ["general", "viajante"])
+  return {
+    general:  (data ?? []).filter((b: any) => b.tipo === "general"),
+    viajante: (data ?? []).filter((b: any) => b.tipo === "viajante"),
+  }
+}
+
+/** Resuelve los % de general/viajante para un ítem (condición de proveedor > bonificación por segmento). */
+function resolverBonifItem(
+  provCond: CondicionProveedor | null,
+  general: Array<{ segmento: string | null; porcentaje: number }>,
+  viajante: Array<{ segmento: string | null; porcentaje: number }>,
+  segmento: Segmento,
+): { generalPct: number; viajantePct: number } {
+  if (provCond) {
+    return { generalPct: provCond.dto_general_pct || 0, viajantePct: provCond.dto_viajante_pct || 0 }
+  }
+  return { generalPct: getDescuentoGeneral(general, segmento), viajantePct: getDescuentoViajante(viajante, segmento) }
+}
+
+/**
+ * Arma el desglose de descuentos por línea para el kardex.
+ * Cascada escalonada (neto basis, pre-IVA adj): P.Lista bruto −oferta −general −viajante.
+ *   - oferta (descuento_propio): YA viene incluida en precioLista; back-calculamos su monto.
+ *   - general: sobre precioLista.
+ *   - viajante: sobre el neto post-general (= precioConDescuento).
+ * kardex.precio_lista se mantiene = precioLista (post-oferta, pre-bonif) para no alterar el margen.
  */
 function buildKardexDescuentos(
-  precioLista: number,        // P.Lista mostrado en comprobante (post-recargo, pre-descuento, pre-IVA adj)
-  precioConDescuento: number, // precioLista * (1 - descuentoCliente/100)
-  descuentoClientePct: number,
-  descuentoPropioPct: number,
+  precioLista: number,        // engine: post-recargo, post-oferta, PRE-bonif (pre-IVA adj)
+  precioConDescuento: number, // engine: precioLista * (1-general/100)*(1-viajante/100)
+  ofertaPct: number,          // descuento_propio del artículo
+  generalPct: number,         // bonificación general del cliente (por segmento)
+  viajantePct: number,        // bonificación viajante del cliente (por segmento)
 ): {
   precio_lista: number
-  precio_unitario_bruto: number
   descuentos_json: DescuentoKardex[]
-  descuento_mercaderia_pct: number | null
-  descuento_mercaderia_monto: number | null
+  descuento_oferta_pct: number | null
+  descuento_oferta_monto: number | null
   descuento_general_pct: number | null
   descuento_general_monto: number | null
+  descuento_viajante_pct: number | null
+  descuento_viajante_monto: number | null
 } {
-  // precio bruto: precio antes del dto_oferta (mercadería) y del dto_general (cliente)
-  const precio_unitario_bruto = descuentoPropioPct > 0
-    ? round2(precioLista / (1 - descuentoPropioPct / 100))
-    : precioLista
-
   const descuentos_json: DescuentoKardex[] = []
 
-  let descuento_mercaderia_pct: number | null = null
-  let descuento_mercaderia_monto: number | null = null
-  if (descuentoPropioPct > 0) {
-    descuento_mercaderia_pct = descuentoPropioPct
-    descuento_mercaderia_monto = round2(precio_unitario_bruto - precioLista)
-    descuentos_json.push({
-      tipo: 'oferta',
-      porcentaje: descuentoPropioPct,
-      monto_unitario: descuento_mercaderia_monto,
-    })
+  let descuento_oferta_pct: number | null = null
+  let descuento_oferta_monto: number | null = null
+  if (ofertaPct > 0) {
+    const bruto = round2(precioLista / (1 - ofertaPct / 100))
+    descuento_oferta_pct = ofertaPct
+    descuento_oferta_monto = round2(bruto - precioLista)
+    descuentos_json.push({ tipo: 'oferta', porcentaje: ofertaPct, monto_unitario: descuento_oferta_monto })
   }
 
+  const afterGeneral = round2(precioLista * (1 - generalPct / 100))
   let descuento_general_pct: number | null = null
   let descuento_general_monto: number | null = null
-  if (descuentoClientePct > 0) {
-    descuento_general_pct = descuentoClientePct
-    descuento_general_monto = round2(precioLista - precioConDescuento)
-    descuentos_json.push({
-      tipo: 'general',
-      porcentaje: descuentoClientePct,
-      monto_unitario: descuento_general_monto,
-    })
+  if (generalPct > 0) {
+    descuento_general_pct = generalPct
+    descuento_general_monto = round2(precioLista - afterGeneral)
+    descuentos_json.push({ tipo: 'general', porcentaje: generalPct, monto_unitario: descuento_general_monto })
+  }
+
+  let descuento_viajante_pct: number | null = null
+  let descuento_viajante_monto: number | null = null
+  if (viajantePct > 0) {
+    descuento_viajante_pct = viajantePct
+    descuento_viajante_monto = round2(afterGeneral - precioConDescuento)
+    descuentos_json.push({ tipo: 'viajante', porcentaje: viajantePct, monto_unitario: descuento_viajante_monto })
   }
 
   return {
     precio_lista: precioLista,
-    precio_unitario_bruto,
     descuentos_json,
-    descuento_mercaderia_pct,
-    descuento_mercaderia_monto,
+    descuento_oferta_pct,
+    descuento_oferta_monto,
     descuento_general_pct,
     descuento_general_monto,
+    descuento_viajante_pct,
+    descuento_viajante_monto,
   }
 }
 
@@ -310,7 +356,7 @@ export async function previewPrecioArticulo(
 
   const [clienteRes, articuloRes] = await Promise.all([
     supabase.from("clientes").select(`
-      id, vendedor_id, metodo_facturacion, lista_precio_id, descuento_especial,
+      id, vendedor_id, metodo_facturacion, lista_precio_id,
       lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0,
       lista_perf_plus_id, metodo_perf_plus
     `).eq("id", clienteId).single(),
@@ -337,21 +383,20 @@ export async function previewPrecioArticulo(
   const segmento = detectarSegmento(articulo)
   let listaId: string | null
   let metodoRaw: string
-  let descuentoCliente: number
   if (provCond) {
     listaId = provCond.lista_precio_id
     metodoRaw = provCond.metodo_facturacion || "Final"
-    descuentoCliente = 0
   } else {
     const resuelto = resolverListaSegmento(segmento, overrides, clienteInfo)
     listaId = resuelto.listaId
     metodoRaw = resuelto.metodoRaw
-    descuentoCliente = clienteInfo.descuento_especial || 0
   }
+  const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId)
+  const bonif = resolverBonifItem(provCond, general, viajante, segmento)
   const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
   const metodo = toMetodoFacturacion(metodoRaw)
 
-  const precio = calcularPrecioPedido(articulo, listaDatos, metodo, descuentoCliente)
+  const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
 
   return {
     precio: precio.precioAlCliente,
@@ -455,7 +500,7 @@ export async function createPedido(data: {
   const { data: clienteInfo, error: clienteError } = await supabase
     .from("clientes")
     .select(`
-      id, vendedor_id, metodo_facturacion, lista_precio_id, descuento_especial,
+      id, vendedor_id, metodo_facturacion, lista_precio_id,
       lista_limpieza_id, metodo_limpieza,
       lista_perf0_id, metodo_perf0,
       lista_perf_plus_id, metodo_perf_plus, provincia
@@ -466,9 +511,20 @@ export async function createPedido(data: {
 
   // Cache de listas para evitar múltiples queries a la misma lista
   const listasCache: Record<string, DatosLista> = {}
-  const descuentoCliente = clienteInfo.descuento_especial || 0
   // Cargar todas las reglas de fórmulas una sola vez para el pedido
   const formulasReglas = await fetchFormulasReglas(supabase)
+
+  // Bonificaciones general + viajante del cliente (escalonadas en el neto por línea)
+  const { data: bonifData } = await supabase
+    .from("bonificaciones")
+    .select("tipo, segmento, porcentaje")
+    .eq("cliente_id", data.cliente_id)
+    .eq("activo", true)
+    .in("tipo", ["general", "viajante"])
+  const bonifGeneral: Array<{ segmento: string | null; porcentaje: number }> =
+    (bonifData ?? []).filter((b: any) => b.tipo === "general")
+  const bonificacionesViajante: Array<{ segmento: string | null; porcentaje: number }> =
+    (bonifData ?? []).filter((b: any) => b.tipo === "viajante")
 
   // Condiciones por proveedor: del cliente + overrides del formulario (este pedido)
   const condicionesProveedor = mergeCondicionesProveedor(
@@ -494,7 +550,7 @@ export async function createPedido(data: {
     precioAlCliente: number; precioNeto: number; precio_costo: number
     listaUsadaId: string | null; metodoUsado: string
     descuentoPropioPct: number; precioLista: number
-    descuentoClientePct: number; precioConDescuento: number
+    bonifGeneralPct: number; bonifViajantePct: number; precioConDescuento: number
     segmento: Segmento
     provCond: CondicionProveedor | null
   }
@@ -506,22 +562,25 @@ export async function createPedido(data: {
     const provCond = (articulo.proveedor_id && condicionesProveedor.get(articulo.proveedor_id)) || null
     let listaId: string | null
     let metodoRaw: string
-    let dctoPricing: number
+    let generalPct: number
+    let viajantePct: number
     if (provCond) {
-      // La mercadería del proveedor se cotiza con su lista/método; los descuentos
-      // (general/viajante/mercadería) se aplican luego como líneas del comprobante.
+      // La mercadería del proveedor se cotiza con su lista/método y sus propios
+      // descuentos general/viajante (escalonados en el neto por línea).
       listaId = provCond.lista_precio_id
       metodoRaw = provCond.metodo_facturacion || "Final"
-      dctoPricing = 0
+      generalPct = provCond.dto_general_pct || 0
+      viajantePct = provCond.dto_viajante_pct || 0
     } else {
       const resuelto = resolverListaSegmento(segmento, segmentoOverrides, clienteInfo)
       listaId = resuelto.listaId
       metodoRaw = resuelto.metodoRaw
-      dctoPricing = descuentoCliente
+      generalPct = getDescuentoGeneral(bonifGeneral, segmento)
+      viajantePct = getDescuentoViajante(bonificacionesViajante, segmento)
     }
     const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
     const metodo = toMetodoFacturacion(metodoRaw)
-    const precio = calcularPrecioPedido(articulo, listaDatos, metodo, dctoPricing)
+    const precio = calcularPrecioPedido(articulo, listaDatos, metodo, { generalPct, viajantePct })
     itemsCalc.push({
       producto_id: item.producto_id,
       cantidad: item.cantidad,
@@ -532,7 +591,8 @@ export async function createPedido(data: {
       metodoUsado: metodoRaw,
       descuentoPropioPct: articulo.descuento_propio || 0,
       precioLista: precio.precioLista,
-      descuentoClientePct: precio.descuentoClientePct,
+      bonifGeneralPct: precio.bonifGeneralPct,
+      bonifViajantePct: precio.bonifViajantePct,
       precioConDescuento: precio.precioConDescuento,
       segmento,
       provCond,
@@ -609,16 +669,11 @@ export async function createPedido(data: {
     vendedorComisiones = vd ?? null
   }
 
-  // Obtener descuentos viajante del cliente (afectan la comisión)
-  const { data: bonifViajante } = await supabase
-    .from("bonificaciones")
-    .select("segmento, porcentaje")
-    .eq("cliente_id", data.cliente_id)
-    .eq("tipo", "viajante")
-    .eq("activo", true)
-  const bonificacionesViajante: Array<{ segmento: string | null; porcentaje: number }> = bonifViajante ?? []
-
   for (const item of itemsCalc) {
+    // P.Lista bruto (pre-oferta) para mostrar en el comprobante: precioLista ya es post-oferta.
+    const precioListaBruto = item.descuentoPropioPct > 0
+      ? Math.round(item.precioLista / (1 - item.descuentoPropioPct / 100) * 100) / 100
+      : item.precioLista
     const { error: itemError } = await supabase.from("pedidos_detalle").insert({
       pedido_id: pedido.id,
       articulo_id: item.producto_id,
@@ -629,6 +684,10 @@ export async function createPedido(data: {
       precio_costo: item.precio_costo,
       lista_precio_id: item.listaUsadaId,
       metodo_facturacion_item: item.metodoUsado,
+      precio_lista: precioListaBruto,
+      descuento_propio_pct: item.descuentoPropioPct,
+      bonif_general_pct: item.bonifGeneralPct,
+      bonif_viajante_pct: item.bonifViajantePct,
     })
     if (itemError) throw itemError
 
@@ -643,7 +702,7 @@ export async function createPedido(data: {
     const metodoColor = item.metodoUsado
     const colorDinero = metodoColor === "Factura (21% IVA)" || metodoColor === "Factura" ? "BLANCO" : "NEGRO"
     const kardexDesc = buildKardexDescuentos(
-      item.precioLista, item.precioConDescuento, item.descuentoClientePct, item.descuentoPropioPct,
+      item.precioLista, item.precioConDescuento, item.descuentoPropioPct, item.bonifGeneralPct, item.bonifViajantePct,
     )
 
     await insertarKardex(
@@ -660,11 +719,12 @@ export async function createPedido(data: {
         iva_monto_unitario: ivaMonto,
         iva_incluido: ivaIncluido,
         descuentos_json: kardexDesc.descuentos_json.length > 0 ? kardexDesc.descuentos_json : undefined,
-        descuento_cliente_pct: item.descuentoClientePct,
-        descuento_mercaderia_pct: kardexDesc.descuento_mercaderia_pct,
-        descuento_mercaderia_monto: kardexDesc.descuento_mercaderia_monto,
+        descuento_oferta_pct: kardexDesc.descuento_oferta_pct,
+        descuento_oferta_monto: kardexDesc.descuento_oferta_monto,
         descuento_general_pct: kardexDesc.descuento_general_pct,
         descuento_general_monto: kardexDesc.descuento_general_monto,
+        descuento_viajante_pct: kardexDesc.descuento_viajante_pct,
+        descuento_viajante_monto: kardexDesc.descuento_viajante_monto,
         subtotal_neto: Math.round(item.precioNeto * item.cantidad * 100) / 100,
         subtotal_iva: Math.round(ivaMonto * item.cantidad * 100) / 100,
         subtotal_total: Math.round(item.precioAlCliente * item.cantidad * 100) / 100,
@@ -678,25 +738,25 @@ export async function createPedido(data: {
         stock_antes: stockActual,
         stock_despues: stockActual !== null ? stockActual - item.cantidad : null,
         operador_id: user.id,
-        // Comisión del viajante embebida en kardex (reducida por descuento_viajante)
+        // Comisión del viajante embebida en kardex (fórmula única: base = neto final,
+        // tasa = comisión% − viajante%, restado una sola vez). El descuento_viajante (precio)
+        // ya lo aporta buildKardexDescuentos. Mercadería/financiero reducen al cobrar.
         ...(() => {
           if (!vendedorComisiones || !art?.segmento_precio) return {}
-          const pct = getComisionPorcentaje(vendedorComisiones, art.segmento_precio, art.iva_ventas)
-          // Mercadería con condición de proveedor: usa su dto_viajante; el resto, el del rubro.
-          const dtoViajante = item.provCond
-            ? (item.provCond.dto_viajante_pct || 0)
-            : getDescuentoViajante(bonificacionesViajante, item.segmento)
-          if (pct <= 0 && dtoViajante <= 0) return {}
-          const comisionEfectivaPct = round2(pct - dtoViajante)
-          const precioNeto = getPrecioNeto(item.precioNeto, item.metodoUsado, art.iva_ventas)
-          const comisionMonto = round2(precioNeto * item.cantidad * comisionEfectivaPct / 100)
+          const comisionPct = getComisionPorcentaje(vendedorComisiones, art.segmento_precio, art.iva_ventas)
+          const viajantePct = item.bonifViajantePct
+          if (comisionPct <= 0 && viajantePct <= 0) return {}
+          const { monto, tasaEfectivaPct } = calcularComisionMonto({
+            precioNetoUnitario: item.precioNeto,
+            cantidad: item.cantidad,
+            metodoFacturacion: item.metodoUsado,
+            ivaVentas: art.iva_ventas,
+            comisionPct,
+            viajantePct,
+          })
           return {
-            comision_viajante_pct: comisionEfectivaPct,
-            comision_viajante_monto: comisionMonto,
-            ...(dtoViajante > 0 ? {
-              descuento_viajante_pct: dtoViajante,
-              descuento_viajante_monto: round2(precioNeto * item.cantidad * dtoViajante / 100),
-            } : {}),
+            comision_viajante_pct: tasaEfectivaPct,
+            comision_viajante_monto: monto,
           }
         })(),
       },
@@ -943,12 +1003,18 @@ export async function agregarItemPedido(
   if (!pedido) throw new Error("Pedido no encontrado")
 
   const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
-  const { listaDatos, metodo, descuentoCliente } = await fetchListaYMetodo(
+  const { listaDatos, metodo } = await fetchListaYMetodo(
     supabase, clienteInfo, pedido.metodo_facturacion_pedido, pedido.lista_precio_pedido_id
   )
 
   const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
-  const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, descuentoCliente)
+  const segmentoArt = detectarSegmento(articuloConDescuentos)
+  const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
+  const bonif = resolverBonifItem(null, general, viajante, segmentoArt)
+  const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, bonif)
+
+  const ofertaPct = articuloConDescuentos.descuento_propio || 0
+  const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
 
   const { error } = await supabase.from("pedidos_detalle").insert({
     pedido_id: pedidoId,
@@ -958,15 +1024,18 @@ export async function agregarItemPedido(
     precio_final: precio.precioAlCliente,
     subtotal: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
     precio_costo: articuloConDescuentos.precio_compra || 0,
+    precio_lista: precioListaBruto,
+    descuento_propio_pct: ofertaPct,
+    bonif_general_pct: precio.bonifGeneralPct,
+    bonif_viajante_pct: precio.bonifViajantePct,
   })
 
   if (error) throw error
 
   // ── Insertar en kardex ──────────────────────────────────────────────────
-  const [{ data: artInfo }, { data: clienteVendedor }, { data: bonifData }] = await Promise.all([
+  const [{ data: artInfo }, { data: clienteVendedor }] = await Promise.all([
     supabase.from("articulos").select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual, segmento_precio").eq("id", productoId).single(),
-    supabase.from("clientes").select("vendedor_id, descuento_especial").eq("id", pedido.cliente_id).single(),
-    supabase.from("bonificaciones").select("segmento, porcentaje").eq("cliente_id", pedido.cliente_id).eq("tipo", "viajante").eq("activo", true),
+    supabase.from("clientes").select("vendedor_id").eq("id", pedido.cliente_id).single(),
   ])
   const vendedorId = (clienteVendedor as any)?.vendedor_id ?? (pedido.clientes as any)?.vendedor_id ?? null
   let vendedorComisionesAgregar: { comision_limpieza_bazar: number; comision_perfumeria_0: number; comision_perfumeria_plus: number } | null = null
@@ -974,8 +1043,6 @@ export async function agregarItemPedido(
     const { data: vd } = await supabase.from("vendedores").select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus").eq("id", vendedorId).single()
     vendedorComisionesAgregar = vd ?? null
   }
-  const bonificacionesViajanteAgregar: Array<{ segmento: string | null; porcentaje: number }> = bonifData ?? []
-  const segmentoArt = detectarSegmento({ ...articuloConDescuentos, segmento_precio: artInfo?.segmento_precio })
 
   const ivaIncluido = precio.precioAlCliente === precio.precioNeto
   const ivaMonto = ivaIncluido ? 0 : Math.round((precio.precioAlCliente - precio.precioNeto) * 100) / 100
@@ -985,25 +1052,23 @@ export async function agregarItemPedido(
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
   const kardexDesc = buildKardexDescuentos(
     precio.precioLista, precio.precioConDescuento,
-    precio.descuentoClientePct, articuloConDescuentos.descuento_propio || 0,
+    ofertaPct, precio.bonifGeneralPct, precio.bonifViajantePct,
   )
 
   const comisionBlockAgregar = (() => {
     if (!vendedorComisionesAgregar || !artInfo?.segmento_precio) return {}
-    const pct = getComisionPorcentaje(vendedorComisionesAgregar, artInfo.segmento_precio, artInfo.iva_ventas)
-    const dtoViajante = getDescuentoViajante(bonificacionesViajanteAgregar, segmentoArt)
-    if (pct <= 0 && dtoViajante <= 0) return {}
-    const comisionEfectivaPct = round2(pct - dtoViajante)
-    const precioNeto = getPrecioNeto(precio.precioNeto, metodoRaw, artInfo.iva_ventas)
-    const comisionMonto = round2(precioNeto * cantidad * comisionEfectivaPct / 100)
-    return {
-      comision_viajante_pct: comisionEfectivaPct,
-      comision_viajante_monto: comisionMonto,
-      ...(dtoViajante > 0 ? {
-        descuento_viajante_pct: dtoViajante,
-        descuento_viajante_monto: round2(precioNeto * cantidad * dtoViajante / 100),
-      } : {}),
-    }
+    const comisionPct = getComisionPorcentaje(vendedorComisionesAgregar, artInfo.segmento_precio, artInfo.iva_ventas)
+    const viajantePct = precio.bonifViajantePct
+    if (comisionPct <= 0 && viajantePct <= 0) return {}
+    const { monto, tasaEfectivaPct } = calcularComisionMonto({
+      precioNetoUnitario: precio.precioNeto,
+      cantidad,
+      metodoFacturacion: metodoRaw,
+      ivaVentas: artInfo.iva_ventas,
+      comisionPct,
+      viajantePct,
+    })
+    return { comision_viajante_pct: tasaEfectivaPct, comision_viajante_monto: monto }
   })()
 
   await insertarKardex(
@@ -1020,11 +1085,12 @@ export async function agregarItemPedido(
       iva_monto_unitario: ivaMonto,
       iva_incluido: ivaIncluido,
       descuentos_json: kardexDesc.descuentos_json.length > 0 ? kardexDesc.descuentos_json : undefined,
-      descuento_cliente_pct: precio.descuentoClientePct,
-      descuento_mercaderia_pct: kardexDesc.descuento_mercaderia_pct,
-      descuento_mercaderia_monto: kardexDesc.descuento_mercaderia_monto,
+      descuento_oferta_pct: kardexDesc.descuento_oferta_pct,
+      descuento_oferta_monto: kardexDesc.descuento_oferta_monto,
       descuento_general_pct: kardexDesc.descuento_general_pct,
       descuento_general_monto: kardexDesc.descuento_general_monto,
+      descuento_viajante_pct: kardexDesc.descuento_viajante_pct,
+      descuento_viajante_monto: kardexDesc.descuento_viajante_monto,
       subtotal_neto: Math.round(precio.precioNeto * cantidad * 100) / 100,
       subtotal_iva: Math.round(ivaMonto * cantidad * 100) / 100,
       subtotal_total: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
@@ -1079,12 +1145,20 @@ export async function agregarItemBonificado(
   if (!pedido) throw new Error("Pedido no encontrado")
 
   const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
-  const { listaDatos, metodo, descuentoCliente } = await fetchListaYMetodo(
+  const { listaDatos, metodo } = await fetchListaYMetodo(
     supabase, clienteInfo, pedido.metodo_facturacion_pedido, pedido.lista_precio_pedido_id
   )
 
   const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
-  const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, descuentoCliente)
+  // La mercadería bonificada es gratis (net $0): general/viajante no aplican a su precio.
+  const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, {})
+  const ofertaPctBonif = articuloConDescuentos.descuento_propio || 0
+  const precioListaRef = precio.precioLista  // P.Lista real del producto bonificado
+  const segmentoBonif = detectarSegmento(articuloConDescuentos)
+  // Viajante del segmento: se guarda en la línea para que la comisión "cobrada" use
+  // la misma tasa (comisión% − viajante%) al restar el valor regalado.
+  const { viajante: bonifViajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
+  const viajantePctBonif = getDescuentoViajante(bonifViajante, segmentoBonif)
 
   const { error } = await supabase.from("pedidos_detalle").insert({
     pedido_id: pedidoId,
@@ -1095,19 +1169,42 @@ export async function agregarItemBonificado(
     subtotal: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
     precio_costo: articuloConDescuentos.precio_compra || 0,
     es_bonificado: true,
+    precio_lista: ofertaPctBonif > 0 ? round2(precioListaRef / (1 - ofertaPctBonif / 100)) : precioListaRef,
+    descuento_propio_pct: ofertaPctBonif,
+    bonif_general_pct: 0,
+    bonif_viajante_pct: viajantePctBonif,
   })
   if (error) throw error
 
   const { data: artInfo } = await supabase
     .from("articulos")
-    .select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual")
+    .select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual, segmento_precio")
     .eq("id", productoId)
     .single()
 
   const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
-  // Bonified item: real list price shown but goods are free (100% mercadería discount)
-  const precioListaRef = precio.precioLista
+
+  // Reducción de comisión por mercadería bonificada ("la venta real es $90"):
+  // comisión negativa = − valor regalado × (comisión% − viajante%). El vendedor no
+  // cobra comisión sobre lo que se entregó gratis.
+  const vendedorIdBonif = (pedido.clientes as any)?.vendedor_id ?? null
+  const comisionReduccion = await (async () => {
+    if (!vendedorIdBonif || !artInfo?.segmento_precio) return {}
+    const { data: vd } = await supabase.from("vendedores").select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus").eq("id", vendedorIdBonif).single()
+    if (!vd) return {}
+    const comisionPct = getComisionPorcentaje(vd, artInfo.segmento_precio, artInfo.iva_ventas)
+    if (comisionPct <= 0 && viajantePctBonif <= 0) return {}
+    const { monto, tasaEfectivaPct } = calcularComisionMonto({
+      precioNetoUnitario: precio.precioNeto,
+      cantidad,
+      metodoFacturacion: metodoRaw,
+      ivaVentas: artInfo.iva_ventas,
+      comisionPct,
+      viajantePct: viajantePctBonif,
+    })
+    return { comision_viajante_pct: tasaEfectivaPct, comision_viajante_monto: -monto }
+  })()
 
   await insertarKardex(
     createAdminClient(),
@@ -1132,7 +1229,7 @@ export async function agregarItemBonificado(
       subtotal_iva: 0,
       subtotal_total: 0,
       cliente_id: pedido.cliente_id,
-      vendedor_id: (pedido.clientes as any)?.vendedor_id ?? null,
+      vendedor_id: vendedorIdBonif,
       provincia_destino: (pedido.clientes as any)?.provincia ?? null,
       pedido_id: pedidoId,
       numero_pedido: (pedido as any).numero_pedido ?? null,
@@ -1142,6 +1239,7 @@ export async function agregarItemBonificado(
       stock_antes: artInfo?.stock_actual ?? null,
       stock_despues: artInfo?.stock_actual != null ? artInfo.stock_actual - cantidad : null,
       operador_id: user?.id ?? null,
+      ...comisionReduccion,
     },
     {
       sku: artInfo?.sku,

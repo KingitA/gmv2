@@ -96,7 +96,6 @@ export async function createCliente(formData: {
   email?: string
   dias_credito?: number
   limite_credito?: number
-  descuento_especial?: number
   condicion_iva?: string
   aplica_percepciones?: boolean
   observaciones?: string
@@ -151,7 +150,6 @@ export async function updateCliente(
     email: string
     dias_credito: number
     limite_credito: number
-    descuento_especial: number
     condicion_iva: string
     aplica_percepciones: boolean
     observaciones: string

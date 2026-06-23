@@ -18,7 +18,7 @@
 
 import { SupabaseClient } from "@supabase/supabase-js"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
-import { todayArgentina } from "@/lib/utils"
+import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { actualizarDescuentoFinancieroKardex } from "@/lib/kardex/insertar-kardex"
 import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
@@ -537,8 +537,50 @@ export async function generarBonificacionContado(
   // Marcar descuento financiero en kardex de los comprobantes bonificados
   await actualizarDescuentoFinancieroKardex(supabase, comprobante_ids)
 
+  // Débito de comisión por financiero ya cobrado: si la comisión del comprobante ya
+  // estaba "cobrada", el 10% financiero reduce la venta real → se debita el 10% de la
+  // comisión al vendedor ("debía cobrar 90, cobró 100, nos debe 10").
+  await debitarComisionPorFinanciero(supabase, comprobante_ids)
+
   return {
     total_bonificacion: r2(totalBonificacion),
     comprobantes_generados: comprobantesGenerados,
+  }
+}
+
+/**
+ * Por cada comprobante con comisión ya COBRADA, inserta un ajuste negativo del 10%
+ * (descuento financiero). Idempotente: no debita dos veces el mismo comprobante.
+ */
+async function debitarComisionPorFinanciero(supabase: any, comprobante_ids: string[]) {
+  if (!comprobante_ids?.length) return
+  const MOTIVO = "Débito por NC financiera 10% (descuento contado) sobre comisión ya cobrada"
+  for (const compId of comprobante_ids) {
+    const { data: cobradas } = await supabase
+      .from("comisiones")
+      .select("id, viajante_id, pedido_id, monto, motivo")
+      .eq("comprobante_venta_id", compId)
+      .eq("tipo", "cobrada")
+    if (!cobradas?.length) continue
+    // Evitar doble débito
+    if (cobradas.some((c: any) => (c.motivo ?? "") === MOTIVO)) continue
+    // Solo las comisiones reales (excluye un eventual ajuste previo)
+    const totalComision = cobradas
+      .filter((c: any) => (c.motivo ?? "") !== MOTIVO)
+      .reduce((s: number, c: any) => s + Number(c.monto || 0), 0)
+    const debito = r2(totalComision * 0.10)
+    if (debito === 0) continue
+    await supabase.from("comisiones").insert({
+      viajante_id: cobradas[0].viajante_id,
+      pedido_id: cobradas[0].pedido_id ?? null,
+      comprobante_venta_id: compId,
+      tipo: "cobrada",
+      monto: -debito,
+      porcentaje: 10,
+      comprobante_cobrado: true,
+      fecha_comprobante_cobrado: nowArgentina(),
+      pagado: false,
+      motivo: MOTIVO,
+    })
   }
 }

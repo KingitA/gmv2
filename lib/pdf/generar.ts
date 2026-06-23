@@ -203,6 +203,12 @@ export function buildPDFData(params: {
       precio_total:    Number(d.precio_total    ?? 0),
       marca:           marcaDesc?.get(d.articulos?.marca_id) ?? '',
       descuento_propio: Number(d.articulos?.descuento_propio ?? 0),
+      // Desglose por línea (cascada escalonada) — persistido en comprobantes_venta_detalle
+      precio_lista:        d.precio_lista != null ? Number(d.precio_lista) : undefined,
+      descuento_propio_pct: Number(d.descuento_propio_pct ?? 0),
+      bonif_general_pct:    Number(d.bonif_general_pct ?? 0),
+      bonif_viajante_pct:   Number(d.bonif_viajante_pct ?? 0),
+      es_bonificado:        d.es_bonificado === true,
     })),
     bonificaciones: bonificaciones.map(b => ({
       tipo:       b.tipo,
