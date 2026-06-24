@@ -75,6 +75,8 @@ export default function ClienteDetailPage() {
   const [bonifGrid, setBonifGrid] = useState<Record<string, number>>({})
   const [savingBonif, setSavingBonif] = useState(false)
   const [listaPorSegmento, setListaPorSegmento] = useState(false)
+  const [segMetodo, setSegMetodo] = useState(false)
+  const [segDescuentos, setSegDescuentos] = useState(false)
   const [ccBalance, setCcBalance] = useState<number | null>(null)
   const [pedidosCliente, setPedidosCliente] = useState<any[]>([])
   // Listas especiales por proveedor (Colgate / Kenvue / Haleon, etc.)
@@ -175,7 +177,11 @@ export default function ClienteDetailPage() {
     setPedidosCliente(pedRes.data || [])
     if (clienteRes.data) {
       const c = clienteRes.data as any
+      const esSentinela = normalizeEnum(c.metodo_facturacion, FACTURACION_MAP, "Factura") === "PorSegmento"
+      setSegMetodo(esSentinela || !!(c.metodo_limpieza || c.metodo_perf0 || c.metodo_perf_plus))
       setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
+      // El método general no debe quedar con el centinela: si segmenta, queda vacío.
+      if (esSentinela) setFormData(prev => ({ ...prev, metodo_facturacion: "" }))
     }
     loadBonificaciones()
     loadCondProv()
@@ -232,26 +238,30 @@ export default function ClienteDetailPage() {
   async function loadBonificaciones() {
     const { data } = await supabase.from("bonificaciones").select("tipo, porcentaje, segmento").eq("cliente_id", id).eq("activo", true)
     const grid: Record<string, number> = {}
+    let haySeg = false
     for (const b of (data || [])) {
       const segKey = b.segmento || "todos"
       grid[`${segKey}__${b.tipo}`] = b.porcentaje
+      if (b.segmento) haySeg = true
     }
     setBonifGrid(grid)
+    setSegDescuentos(haySeg)
   }
 
   async function saveBonificaciones() {
     setSavingBonif(true)
 
-    // 1. Guardar campos de segmento en clientes
+    // 1. Guardar campos en clientes según cada toggle (general vs por segmento).
+    //    Nunca se guarda el centinela; la dimensión segmentada deja el general en null.
     const { error: updErr } = await supabase.from("clientes").update({
-      metodo_facturacion: formData.metodo_facturacion || null,
-      lista_precio_id:    listaPorSegmento ? null : (formData.lista_precio_id || null),
-      lista_limpieza_id:  formData.lista_limpieza_id || null,
-      metodo_limpieza:    formData.metodo_limpieza || null,
-      lista_perf0_id:     formData.lista_perf0_id || null,
-      metodo_perf0:       formData.metodo_perf0 || null,
-      lista_perf_plus_id: formData.lista_perf_plus_id || null,
-      metodo_perf_plus:    formData.metodo_perf_plus || null,
+      metodo_facturacion: !segMetodo ? (formData.metodo_facturacion || null) : null,
+      lista_precio_id:    !listaPorSegmento ? (formData.lista_precio_id || null) : null,
+      metodo_limpieza:    segMetodo ? (formData.metodo_limpieza || null) : null,
+      metodo_perf0:       segMetodo ? (formData.metodo_perf0 || null) : null,
+      metodo_perf_plus:   segMetodo ? (formData.metodo_perf_plus || null) : null,
+      lista_limpieza_id:  listaPorSegmento ? (formData.lista_limpieza_id || null) : null,
+      lista_perf0_id:     listaPorSegmento ? (formData.lista_perf0_id || null) : null,
+      lista_perf_plus_id: listaPorSegmento ? (formData.lista_perf_plus_id || null) : null,
     }).eq("id", id)
     if (updErr) { alert(`Error al guardar cliente: ${updErr.message}`); setSavingBonif(false); return }
 
@@ -263,18 +273,19 @@ export default function ClienteDetailPage() {
       .in("tipo", ["general", "mercaderia", "viajante"])
     if (delErr) { alert(`Error al limpiar descuentos: ${delErr.message}`); setSavingBonif(false); return }
 
-    // 3. Insertar solo los que tienen porcentaje > 0
+    // 3. Insertar los descuentos del set activo (general → segmento null; por segmento → seg)
+    const segsToSave = segDescuentos ? ["limpieza_bazar", "perf0", "perf_plus"] : ["todos"]
     const toInsert: any[] = []
-    for (const seg of BONIF_SEGMENTS) {
+    for (const segKey of segsToSave) {
       for (const tipo of BONIF_TIPOS) {
-        const pct = bonifGrid[`${seg.key}__${tipo.key}`] || 0
+        const pct = bonifGrid[`${segKey}__${tipo.key}`] || 0
         if (pct > 0) {
           toInsert.push({
             cliente_id: id,
             tipo: tipo.key,
             porcentaje: pct,
             activo: true,
-            segmento: seg.key === "todos" ? null : seg.key,
+            segmento: segKey === "todos" ? null : segKey,
           })
         }
       }
@@ -472,133 +483,141 @@ export default function ClienteDetailPage() {
                       </Select>
                     </div>
                   </div>
-                  {/* Fila 2: Facturación / Lista / Descuento */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <Label className="text-xs text-slate-500">Facturación *</Label>
-                      <Select
-                        value={formData.metodo_facturacion}
-                        onValueChange={(v) => {
-                          if (v === "PorSegmento") {
-                            setFormData({ ...formData, metodo_facturacion: "PorSegmento" })
-                          } else {
-                            // Al salir de PorSegmento, limpiar métodos de segmento
-                            setFormData({ ...formData, metodo_facturacion: v, metodo_limpieza: "", metodo_perf0: "", metodo_perf_plus: "" })
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
-                          <SelectItem value="Final">Final (Mixto)</SelectItem>
-                          <SelectItem value="Presupuesto">Presupuesto</SelectItem>
-                          <SelectItem value="PorSegmento">— Por Segmento —</SelectItem>
-                        </SelectContent>
-                      </Select>
+                  {/* Fila 2: Lista / Facturación / Descuentos — 3 toggles independientes */}
+                  {(() => {
+                    const SegToggle = ({ on, set }: { on: boolean; set: (b: boolean) => void }) => (
+                      <div className="flex rounded-md border border-slate-300 overflow-hidden shrink-0 text-[11px]">
+                        <button type="button" onClick={() => set(false)} className={`px-2 py-1.5 font-medium ${!on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>General</button>
+                        <button type="button" onClick={() => set(true)}  className={`px-2 py-1.5 font-medium ${on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>Por segmento</button>
+                      </div>
+                    )
+                    return (
+                    <div className="space-y-2.5">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs text-slate-500 w-20 shrink-0">Lista</Label>
+                        {!listaPorSegmento ? (
+                          <Select value={formData.lista_precio_id || "__none__"} onValueChange={(v) => setFormData({ ...formData, lista_precio_id: v === "__none__" ? "" : v })}>
+                            <SelectTrigger className="h-9 flex-1"><SelectValue placeholder="Sin lista" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Sin lista</SelectItem>
+                              {listasPrecio.filter((lp: any) => lp.codigo !== "especial").map((lp: any) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
+                        <SegToggle on={listaPorSegmento} set={setListaPorSegmento} />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs text-slate-500 w-20 shrink-0">Facturación</Label>
+                        {!segMetodo ? (
+                          <Select value={formData.metodo_facturacion || "Final"} onValueChange={(v) => setFormData({ ...formData, metodo_facturacion: v })}>
+                            <SelectTrigger className="h-9 flex-1"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
+                              <SelectItem value="Final">Final (Mixto)</SelectItem>
+                              <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
+                        <SegToggle on={segMetodo} set={(b) => { setSegMetodo(b); if (b) setFormData(prev => ({ ...prev, metodo_facturacion: "" })) }} />
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <Label className="text-xs text-slate-500 w-20 shrink-0 pt-2">Descuentos</Label>
+                        {!segDescuentos ? (
+                          <div className="flex-1 flex flex-wrap gap-2 items-center">
+                            {BONIF_TIPOS.map(tipo => (
+                              <div key={tipo.key} className="flex items-center gap-1">
+                                <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
+                                <Input type="number" step="0.01" min="0" max="100" className="h-6 w-14 text-center text-xs font-bold px-1"
+                                  value={bonifGrid[`todos__${tipo.key}`] || 0}
+                                  onChange={(e) => setBonifGrid({ ...bonifGrid, [`todos__${tipo.key}`]: parseFloat(e.target.value) || 0 })} />
+                                <span className="text-[10px] text-slate-400">%</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1 pt-2">Definidos por segmento ↓</span>}
+                        <SegToggle on={segDescuentos} set={setSegDescuentos} />
+                      </div>
                     </div>
-                    <div>
-                      <Label className="text-xs text-slate-500">Lista de Precio</Label>
-                      <Select
-                        value={listaPorSegmento ? "__por_segmento__" : (formData.lista_precio_id || "__none__")}
-                        onValueChange={(v) => {
-                          if (v === "__por_segmento__") {
-                            setListaPorSegmento(true)
-                            setFormData({ ...formData, lista_precio_id: "" })
-                          } else {
-                            // Al salir de PorSegmento, limpiar listas de segmento
-                            setListaPorSegmento(false)
-                            setFormData({ ...formData, lista_precio_id: v === "__none__" ? "" : v, lista_limpieza_id: "", lista_perf0_id: "", lista_perf_plus_id: "" })
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-9"><SelectValue placeholder="Sin lista" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">Sin lista</SelectItem>
-                          {listasPrecio.filter((lp: any) => lp.codigo !== "especial").map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
-                          <SelectItem value="__por_segmento__">— Por Segmento —</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+                    )
+                  })()}
                 </CardContent>
               </Card>
 
-              {/* Condiciones por segmento — aparece automáticamente cuando alguno es "Por Segmento" */}
-              {(formData.metodo_facturacion === "PorSegmento" || listaPorSegmento) && (
+              {/* Condiciones por segmento — solo las dimensiones marcadas Por segmento */}
+              {(segMetodo || listaPorSegmento || segDescuentos) && (
                 <Card className="border-indigo-200 bg-indigo-50/30">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-semibold text-indigo-700 uppercase tracking-wide">Condiciones por Segmento</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="grid grid-cols-3 gap-3">
-                      {[
-                        { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id",  metodoKey: "metodo_limpieza",  segKey: "limpieza_bazar" },
-                        { label: "Perfumería Perf0", listaKey: "lista_perf0_id",     metodoKey: "metodo_perf0",     segKey: "perf0" },
-                        { label: "Perfumería Plus",  listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus", segKey: "perf_plus" },
-                      ].map(({ label, listaKey, metodoKey, segKey }) => (
-                        <div key={listaKey} className="border border-indigo-200 rounded-lg p-3 bg-white space-y-2">
-                          <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wide">{label}</p>
-
-                          {/* Metodo: solo si "Por Segmento" está activo en facturación */}
-                          {formData.metodo_facturacion === "PorSegmento" && (
-                            <Select
-                              value={(formData as any)[metodoKey] || ""}
-                              onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v })}
-                            >
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar método *" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
-                                <SelectItem value="Final">Final (Mixto)</SelectItem>
-                                <SelectItem value="Presupuesto">Presupuesto</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          )}
-
-                          {/* Lista: solo si "Por Segmento" está activo en lista */}
-                          {listaPorSegmento && (
-                            <Select
-                              value={(formData as any)[listaKey] || ""}
-                              onValueChange={(v) => setFormData({ ...formData, [listaKey]: v })}
-                            >
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar lista *" /></SelectTrigger>
-                              <SelectContent>
-                                {listasPrecio.filter((lp: any) => lp.codigo !== "especial").map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          )}
-
-                          {/* Descuentos siempre visibles en el segmento */}
-                          <div className="border-t border-slate-200 pt-2 space-y-1.5">
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descuentos</p>
-                            {BONIF_TIPOS.map(tipo => {
-                              const key = `${segKey}__${tipo.key}`
-                              const val = bonifGrid[key] || 0
-                              return (
-                                <div key={tipo.key} className="flex items-center justify-between">
-                                  <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
-                                  <div className="flex items-center gap-1">
-                                    <Input
-                                      type="number" step="0.01" min="0" max="100"
-                                      className="h-6 w-16 text-center text-xs font-bold px-1"
-                                      value={val}
-                                      onChange={(e) => setBonifGrid({ ...bonifGrid, [key]: parseFloat(e.target.value) || 0 })}
-                                    />
-                                    <span className="text-[10px] text-slate-400">%</span>
-                                  </div>
-                                </div>
-                              )
-                            })}
+                    {(() => {
+                      const METODO_CORTO: Record<string, string> = { "Factura": "Factura", "Final": "Mixto", "Presupuesto": "Presupuesto" }
+                      const metGen = formData.metodo_facturacion || "Final"
+                      const metHeredar = `General (${METODO_CORTO[metGen] ?? metGen})`
+                      const listaGenNombre = listasPrecio.find((l: any) => l.id === formData.lista_precio_id)?.nombre ?? ""
+                      const listaHeredar = listaGenNombre ? `General (${listaGenNombre})` : "General (sin lista)"
+                      return (
+                      <div className="grid grid-cols-3 gap-3">
+                        {[
+                          { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id",  metodoKey: "metodo_limpieza",  segKey: "limpieza_bazar" },
+                          { label: "Perfumería Perf0", listaKey: "lista_perf0_id",     metodoKey: "metodo_perf0",     segKey: "perf0" },
+                          { label: "Perfumería Plus",  listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus", segKey: "perf_plus" },
+                        ].map(({ label, listaKey, metodoKey, segKey }) => (
+                          <div key={listaKey} className="border border-indigo-200 rounded-lg p-3 bg-white space-y-2">
+                            <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wide">{label}</p>
+                            {segMetodo && (
+                              <Select value={(formData as any)[metodoKey] || "__heredar__"} onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v === "__heredar__" ? "" : v })}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__heredar__">{metHeredar}</SelectItem>
+                                  <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
+                                  <SelectItem value="Final">Final (Mixto)</SelectItem>
+                                  <SelectItem value="Presupuesto">Presupuesto</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {listaPorSegmento && (
+                              <Select value={(formData as any)[listaKey] || "__heredar__"} onValueChange={(v) => setFormData({ ...formData, [listaKey]: v === "__heredar__" ? "" : v })}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__heredar__">{listaHeredar}</SelectItem>
+                                  {listasPrecio.filter((lp: any) => lp.codigo !== "especial").map((lp: any) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {segDescuentos && (
+                              <div className="border-t border-slate-200 pt-2 space-y-1.5">
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descuentos</p>
+                                {BONIF_TIPOS.map(tipo => {
+                                  const key = `${segKey}__${tipo.key}`
+                                  return (
+                                    <div key={tipo.key} className="flex items-center justify-between">
+                                      <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
+                                      <div className="flex items-center gap-1">
+                                        <Input type="number" step="0.01" min="0" max="100" className="h-6 w-16 text-center text-xs font-bold px-1"
+                                          value={bonifGrid[key] || 0}
+                                          onChange={(e) => setBonifGrid({ ...bonifGrid, [key]: parseFloat(e.target.value) || 0 })} />
+                                        <span className="text-[10px] text-slate-400">%</span>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                    <Button type="button" size="sm" className="w-full h-9 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={saveBonificaciones} disabled={savingBonif}>
-                      {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-                      Guardar segmentos y descuentos
-                    </Button>
+                        ))}
+                      </div>
+                      )
+                    })()}
                   </CardContent>
                 </Card>
               )}
+
+              {/* Guardar segmentos + descuentos (siempre visible) */}
+              <Button type="button" size="sm" className="w-full h-9 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={saveBonificaciones} disabled={savingBonif}>
+                {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+                Guardar lista, facturación y descuentos
+              </Button>
 
               {/* Listas especiales por proveedor (Colgate / Kenvue / Haleon) */}
               <Card className="border-teal-200 bg-teal-50/30">
