@@ -183,12 +183,12 @@ export default function BilleteraPage() {
               {/* Categoría */}
               <div>
                 <label className="text-sm font-medium text-gray-600 mb-3 block">Categoría</label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {CATEGORIAS_GASTO.map((cat) => (
                     <button
                       key={cat.key}
                       onClick={() => setCategoria(cat.key)}
-                      className={`flex flex-col items-center py-3 rounded-xl border-2 transition-colors ${
+                      className={`flex flex-col items-center justify-center min-h-[68px] py-3 rounded-xl border-2 transition-colors ${
                         categoria === cat.key ? "bg-red-50 border-red-500 text-red-700" : "border-gray-200 text-gray-500"
                       }`}
                     >
