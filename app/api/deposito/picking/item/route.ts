@@ -13,7 +13,7 @@ async function recalcularBonificados(supabase: any, pedido_id: string) {
   const [{ data: pedido }, { data: dets }] = await Promise.all([
     supabase.from("pedidos").select("bonif_mercaderia_pct").eq("id", pedido_id).single(),
     supabase.from("pedidos_detalle")
-      .select("id, cantidad, cantidad_preparada, precio_final, es_bonificado")
+      .select("id, cantidad, cantidad_preparada, precio_base, lista_precio_id, es_bonificado")
       .eq("pedido_id", pedido_id),
   ])
   const bonificados = (dets || []).filter((d: any) => d.es_bonificado)
@@ -21,14 +21,18 @@ async function recalcularBonificados(supabase: any, pedido_id: string) {
   const pct = Number(pedido?.bonif_mercaderia_pct ?? 0)
   // Sin % no se recalcula: deja las cantidades como las cargó el usuario manualmente.
   if (pct <= 0) return bonificados.map((b: any) => ({ id: b.id, cantidad: Number(b.cantidad || 0) }))
+  // Lista especial: sus artículos NO entran en la base de bonificación.
+  const { data: especial } = await supabase.from("listas_precio").select("id").eq("codigo", "especial").maybeSingle()
+  const especialId = especial?.id ?? null
+  // Base = NETO realmente preparado (precio_base, sin IVA), excluyendo bonificados y especial.
   const netoPreparado = (dets || [])
-    .filter((d: any) => !d.es_bonificado)
-    .reduce((s: number, d: any) => s + Number(d.precio_final || 0) * Number(d.cantidad_preparada || 0), 0)
+    .filter((d: any) => !d.es_bonificado && (!especialId || d.lista_precio_id !== especialId))
+    .reduce((s: number, d: any) => s + Number(d.precio_base || 0) * Number(d.cantidad_preparada || 0), 0)
   const monto = netoPreparado * pct / 100
   const share = bonificados.length > 0 ? monto / bonificados.length : 0
   const out: Array<{ id: string; cantidad: number }> = []
   for (const b of bonificados) {
-    const precio = Number(b.precio_final || 0)
+    const precio = Number(b.precio_base || 0)
     const units = precio > 0 ? Math.round(share / precio) : 0
     if (units !== Number(b.cantidad) || units !== Number(b.cantidad_preparada)) {
       await supabase.from("pedidos_detalle")

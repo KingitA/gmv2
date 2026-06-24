@@ -239,7 +239,9 @@ export function calcularPrecioFinal(
       costoNeto: 0,
       precioBase: brutoEsp,
       recargoListaPct: 0,
-      precioLista: brutoEsp,            // P.Lista bruto (informativo)
+      // precioLista = NETO especial (post-oferta), consistente con el resto: quien muestre
+      // el P.Lista bruto lo back-calcula con la oferta especial (oferta_lista_especial).
+      precioLista: netoEsp,
       bonifGeneralPct: 0, bonifViajantePct: 0,  // especial no lleva bonificaciones
       precioConDescuento: netoEsp,      // neto final = precio especial con su oferta
       descuentoNegroEnFacturaPct: 0,

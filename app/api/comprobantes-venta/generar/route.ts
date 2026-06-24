@@ -238,8 +238,12 @@ export async function POST(request: Request) {
       .in("tipo", ["general", "viajante"])
 
     // ─── Agrupar items por (vaEnComprobante, perfil de descuento) ───
+    // La mercadería bonificada NO se agrupa: se reparte luego entre los comprobantes
+    // normales (no-especial) proporcional al neto de cada uno, como ÚLTIMO ítem.
     const grupos = new Map<string, typeof itemsCalculados>()
+    const itemsBonificados: typeof itemsCalculados = []
     for (const item of itemsCalculados) {
+      if (item.esBonificado) { itemsBonificados.push(item); continue }
       const cond = item.proveedorId ? condProvMap.get(item.proveedorId) : null
       // Mercadería con condición de proveedor → comprobante aparte por proveedor.
       const provKey = cond ? item.proveedorId : ""
@@ -249,6 +253,35 @@ export async function POST(request: Request) {
       const key = `${item.vaEnComprobante}__${bonifProfile}__${provKey}`
       if (!grupos.has(key)) grupos.set(key, [])
       grupos.get(key)!.push(item)
+    }
+
+    // Repartir la mercadería bonificada entre los grupos NORMALES (sin condición de
+    // proveedor / especial), proporcional al neto de cada grupo. Cada artículo bonificado
+    // se divide y se agrega al FINAL de cada comprobante normal.
+    if (itemsBonificados.length > 0) {
+      const grupoEsProv = (items: typeof itemsCalculados) => {
+        const c = items[0]?.proveedorId ? condProvMap.get(items[0].proveedorId) : null
+        return !!c
+      }
+      const netoGrupo = (items: typeof itemsCalculados) => round2(items.reduce((s, i) => s + i.subtotalNeto, 0))
+      const normales = [...grupos.values()].filter(g => !grupoEsProv(g))
+      const netos = normales.map(netoGrupo)
+      const netoTotal = round2(netos.reduce((s, n) => s + n, 0))
+      if (normales.length > 0 && netoTotal > 0) {
+        for (const bonif of itemsBonificados) {
+          const Q = Math.abs(bonif.cantidad)
+          let asignado = 0
+          for (let i = 0; i < normales.length; i++) {
+            const esUltimo = i === normales.length - 1
+            const qtyG = esUltimo ? (Q - asignado) : Math.round(Q * netos[i] / netoTotal)
+            asignado += qtyG
+            if (qtyG > 0) normales[i].push({ ...bonif, cantidad: qtyG })
+          }
+        }
+      } else if (normales.length === 0 && grupos.size > 0) {
+        // Sin grupos normales (todo especial): la bonificación va al primero como último ítem.
+        ;[...grupos.values()][0].push(...itemsBonificados)
+      }
     }
 
     const tipoFactura = determinarTipoFactura(pedido.cliente.condicion_iva)

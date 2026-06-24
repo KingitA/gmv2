@@ -400,7 +400,7 @@ export async function previewPrecioArticulo(
     // Condiciones por proveedor (este pedido) — pisan al rubro para esa mercadería
     condiciones_proveedor?: CondicionProveedor[]
   } = {},
-): Promise<{ precio: number; descripcion: string; sku: string; unidades_por_bulto: number }> {
+): Promise<{ precio: number; precioNeto: number; descripcion: string; sku: string; unidades_por_bulto: number }> {
   const supabase = await createClient()
 
   const [clienteRes, articuloRes] = await Promise.all([
@@ -449,6 +449,7 @@ export async function previewPrecioArticulo(
 
   return {
     precio: precio.precioAlCliente,
+    precioNeto: precio.precioNeto,
     descripcion: artMeta?.descripcion || "",
     sku: artMeta?.sku || "",
     unidades_por_bulto: artMeta?.unidades_por_bulto || 1,
@@ -616,6 +617,7 @@ export async function createPedido(data: {
     bonifGeneralPct: number; bonifViajantePct: number; precioConDescuento: number
     segmento: Segmento
     provCond: CondicionProveedor | null
+    esEspecial: boolean
   }
   const itemsCalc: ItemCalc[] = []
   for (const item of data.items) {
@@ -644,6 +646,9 @@ export async function createPedido(data: {
     const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
     const metodo = toMetodoFacturacion(metodoRaw)
     const precio = calcularPrecioPedido(articulo, listaDatos, metodo, { generalPct, viajantePct })
+    // Lista especial: la oferta es oferta_lista_especial (no la oferta común descuento_propio).
+    const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
+    const ofertaPropia = esEspecial ? (articulo.oferta_lista_especial || 0) : (articulo.descuento_propio || 0)
     itemsCalc.push({
       producto_id: item.producto_id,
       cantidad: item.cantidad,
@@ -652,13 +657,14 @@ export async function createPedido(data: {
       precio_costo: articulo.precio_compra || 0,
       listaUsadaId: listaId,
       metodoUsado: metodoRaw,
-      descuentoPropioPct: articulo.descuento_propio || 0,
+      descuentoPropioPct: ofertaPropia,
       precioLista: precio.precioLista,
       bonifGeneralPct: precio.bonifGeneralPct,
       bonifViajantePct: precio.bonifViajantePct,
       precioConDescuento: precio.precioConDescuento,
       segmento,
       provCond,
+      esEspecial,
     })
   }
 
@@ -877,12 +883,14 @@ export async function createPedido(data: {
   if (merc && merc.pct > 0 && merc.articulo_ids.length > 0) {
     try {
       await supabase.from("pedidos").update({ bonif_mercaderia_pct: merc.pct }).eq("id", pedido.id)
-      const monto = total * merc.pct / 100
+      // Base = NETO (sin IVA ni percepciones), excluyendo los artículos con lista especial.
+      const netoBonifBase = itemsCalc.reduce((s, i) => s + (i.esEspecial ? 0 : i.precioNeto * i.cantidad), 0)
+      const monto = netoBonifBase * merc.pct / 100
       const share = monto / merc.articulo_ids.length
       for (const artId of merc.articulo_ids) {
         const preview = await previewPrecioArticulo(data.cliente_id, artId, {})
-        const precio = preview.precio || 0
-        const units = precio > 0 ? Math.round(share / precio) : 0
+        const precioNetoArt = preview.precioNeto || 0  // neto: consistente con la base neta
+        const units = precioNetoArt > 0 ? Math.round(share / precioNetoArt) : 0
         if (units > 0) await agregarItemBonificado(pedido.id, artId, units)
       }
     } catch (bonifErr) {
@@ -1101,7 +1109,8 @@ export async function agregarItemPedido(
   const bonif = resolverBonifItem(provCond, general, viajante, segmentoArt)
   const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, bonif)
 
-  const ofertaPct = articuloConDescuentos.descuento_propio || 0
+  const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
+  const ofertaPct = esEspecial ? (articuloConDescuentos.oferta_lista_especial || 0) : (articuloConDescuentos.descuento_propio || 0)
   const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
 
   const { error } = await supabase.from("pedidos_detalle").insert({
