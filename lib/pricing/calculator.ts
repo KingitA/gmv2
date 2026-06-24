@@ -228,22 +228,20 @@ export function calcularPrecioFinal(
   const factorBonif = (1 - bonifGeneralPct / 100) * (1 - bonifViajantePct / 100)
 
   // ─── Lista Especial (Feature 2) ───────────────────────────────────────────
-  // Precio neto fijo cargado en el artículo (precio_lista_especial) menos la oferta.
-  // Saltea la cascada de costo; las bonificaciones general/viajante SÍ se aplican.
+  // Precio neto fijo del artículo (precio_lista_especial) con su oferta especial
+  // (oferta_lista_especial). NO aplica general/viajante/mercadería: el precio
+  // especial es final, solo lleva su oferta. Siempre factura (neto + IVA 21%).
   if ((lista.lista_codigo || "").toLowerCase() === "especial") {
-    // El precio importado YA tiene la oferta incluida: ES el neto pre-bonificación.
-    // La oferta sólo back-calcula el "precio de lista" bruto para mostrarlo (100 con 15% → bruto 117.65).
     const oferta   = art.oferta_lista_especial || 0
-    const netoEsp0 = round2(art.precio_lista_especial || 0)  // neto post-oferta, pre-bonif
-    const netoEsp  = round2(netoEsp0 * factorBonif)          // neto final tras general/viajante
-    const brutoEsp = oferta > 0 && oferta < 100 ? round2(netoEsp0 / (1 - oferta / 100)) : netoEsp0
+    const netoEsp  = round2(art.precio_lista_especial || 0)  // neto final (ya con su oferta)
+    const brutoEsp = oferta > 0 && oferta < 100 ? round2(netoEsp / (1 - oferta / 100)) : netoEsp
     return {
       costoNeto: 0,
       precioBase: brutoEsp,
       recargoListaPct: 0,
       precioLista: brutoEsp,            // P.Lista bruto (informativo)
-      bonifGeneralPct, bonifViajantePct,
-      precioConDescuento: netoEsp,      // neto final tras oferta + bonificaciones
+      bonifGeneralPct: 0, bonifViajantePct: 0,  // especial no lleva bonificaciones
+      precioConDescuento: netoEsp,      // neto final = precio especial con su oferta
       descuentoNegroEnFacturaPct: 0,
       precioAntesIva: netoEsp,
       ivaIncluido: false,

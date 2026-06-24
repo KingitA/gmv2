@@ -48,6 +48,13 @@ function toMetodoFacturacion(raw: string | null | undefined): MetodoFacturacion 
 
 // Resuelve qué listaId + metodoRaw usar para un segmento dado
 // Jerarquía: override pedido → default cliente → fallback general
+// Centinelas de UI que NUNCA deben llegar como lista/método concretos: si el
+// usuario eligió "por segmento", el valor general queda vacío y resuelve por segmento.
+const CENTINELAS_SEGMENTO = new Set(["PorSegmento", "porsegmento", "__por_segmento__", "por_segmento"])
+function limpiarCentinela(v?: string | null): string | undefined {
+  return v && !CENTINELAS_SEGMENTO.has(v) ? v : undefined
+}
+
 function resolverListaSegmento(
   segmento: Segmento,
   overrides: {
@@ -63,27 +70,28 @@ function resolverListaSegmento(
     lista_precio_id?: string;   metodo_facturacion?: string
   },
 ): { listaId: string | null; metodoRaw: string } {
+  const lc = limpiarCentinela
   const general = {
-    listaId: overrides.lista_precio_pedido_id || cliente.lista_precio_id || null,
-    metodoRaw: overrides.metodo_facturacion_pedido || cliente.metodo_facturacion || "Final",
+    listaId: lc(overrides.lista_precio_pedido_id) || lc(cliente.lista_precio_id) || null,
+    metodoRaw: lc(overrides.metodo_facturacion_pedido) || lc(cliente.metodo_facturacion) || "Final",
   }
 
   if (segmento === "limpieza") {
     return {
-      listaId: overrides.lista_limpieza_pedido_id || cliente.lista_limpieza_id || general.listaId,
-      metodoRaw: overrides.metodo_limpieza_pedido || cliente.metodo_limpieza || general.metodoRaw,
+      listaId: lc(overrides.lista_limpieza_pedido_id) || lc(cliente.lista_limpieza_id) || general.listaId,
+      metodoRaw: lc(overrides.metodo_limpieza_pedido) || lc(cliente.metodo_limpieza) || general.metodoRaw,
     }
   }
   if (segmento === "perf0") {
     return {
-      listaId: overrides.lista_perf0_pedido_id || cliente.lista_perf0_id || general.listaId,
-      metodoRaw: overrides.metodo_perf0_pedido || cliente.metodo_perf0 || general.metodoRaw,
+      listaId: lc(overrides.lista_perf0_pedido_id) || lc(cliente.lista_perf0_id) || general.listaId,
+      metodoRaw: lc(overrides.metodo_perf0_pedido) || lc(cliente.metodo_perf0) || general.metodoRaw,
     }
   }
   // perf_plus
   return {
-    listaId: overrides.lista_perf_plus_pedido_id || cliente.lista_perf_plus_id || general.listaId,
-    metodoRaw: overrides.metodo_perf_plus_pedido || cliente.metodo_perf_plus || general.metodoRaw,
+    listaId: lc(overrides.lista_perf_plus_pedido_id) || lc(cliente.lista_perf_plus_id) || general.listaId,
+    metodoRaw: lc(overrides.metodo_perf_plus_pedido) || lc(cliente.metodo_perf_plus) || general.metodoRaw,
   }
 }
 
@@ -193,6 +201,47 @@ async function fetchListaYMetodo(
   const metodoRaw = metodo_facturacion_pedido || clienteInfo.metodo_facturacion || "Final"
   const metodo = toMetodoFacturacion(metodoRaw)
   return { listaDatos, metodo }
+}
+
+// Campos de override de segmento que guarda el pedido (para resolver al agregar ítems en edición).
+const SEGMENTO_PEDIDO_COLS =
+  "metodo_facturacion_pedido,lista_precio_pedido_id," +
+  "lista_limpieza_pedido_id,metodo_limpieza_pedido," +
+  "lista_perf0_pedido_id,metodo_perf0_pedido," +
+  "lista_perf_plus_pedido_id,metodo_perf_plus_pedido"
+const SEGMENTO_CLIENTE_COLS =
+  "metodo_facturacion,lista_precio_id,lista_limpieza_id,metodo_limpieza," +
+  "lista_perf0_id,metodo_perf0,lista_perf_plus_id,metodo_perf_plus"
+
+/**
+ * Resuelve lista + método de UN ítem respetando la segmentación (igual que createPedido):
+ * condición por proveedor > override por segmento del pedido > config del cliente > general.
+ * Devuelve listaId/metodoRaw (para guardar en pedidos_detalle) + listaDatos + metodo + provCond.
+ */
+async function resolverListaMetodoItem(
+  supabase: any,
+  articulo: { proveedor_id?: string | null },
+  segmento: Segmento,
+  pedidoOverrides: any,
+  clienteInfo: any,
+  condProvMap: Map<string, CondicionProveedor>,
+  listasCache: Record<string, DatosLista>,
+  formulasReglas: Record<string, Record<string, string>>,
+): Promise<{ listaId: string | null; metodoRaw: string; metodo: MetodoFacturacion; listaDatos: DatosLista; provCond: CondicionProveedor | null }> {
+  const provCond = (articulo.proveedor_id && condProvMap.get(articulo.proveedor_id)) || null
+  let listaId: string | null
+  let metodoRaw: string
+  if (provCond) {
+    listaId = provCond.lista_precio_id
+    metodoRaw = provCond.metodo_facturacion || "Final"
+  } else {
+    const r = resolverListaSegmento(segmento, pedidoOverrides, clienteInfo)
+    listaId = r.listaId
+    metodoRaw = r.metodoRaw
+  }
+  const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
+  const metodo = toMetodoFacturacion(metodoRaw)
+  return { listaId, metodoRaw, metodo, listaDatos, provCond }
 }
 
 async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
@@ -626,8 +675,8 @@ export async function createPedido(data: {
       estado: "pendiente",
       subtotal: total,
       descuento_general: 0,
-      ...(data.metodo_facturacion_pedido    ? { metodo_facturacion_pedido:    data.metodo_facturacion_pedido }    : {}),
-      ...(data.lista_precio_pedido_id       ? { lista_precio_pedido_id:       data.lista_precio_pedido_id }       : {}),
+      ...(limpiarCentinela(data.metodo_facturacion_pedido) ? { metodo_facturacion_pedido: limpiarCentinela(data.metodo_facturacion_pedido) } : {}),
+      ...(limpiarCentinela(data.lista_precio_pedido_id)    ? { lista_precio_pedido_id:    limpiarCentinela(data.lista_precio_pedido_id) }    : {}),
       ...(data.lista_limpieza_pedido_id     ? { lista_limpieza_pedido_id:     data.lista_limpieza_pedido_id }     : {}),
       ...(data.metodo_limpieza_pedido       ? { metodo_limpieza_pedido:       data.metodo_limpieza_pedido }       : {}),
       ...(data.lista_perf0_pedido_id        ? { lista_perf0_pedido_id:        data.lista_perf0_pedido_id }        : {}),
@@ -1029,23 +1078,27 @@ export async function agregarItemPedido(
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Fetch pedido to get lista + metodo + cliente
+  // Fetch pedido con TODOS los overrides de segmento + cliente con su config de segmento
   const { data: pedido } = await supabase
     .from("pedidos")
-    .select("cliente_id,numero_pedido,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,provincia)")
+    .select(`cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
     .eq("id", pedidoId)
     .single()
   if (!pedido) throw new Error("Pedido no encontrado")
 
   const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
-  const { listaDatos, metodo } = await fetchListaYMetodo(
-    supabase, clienteInfo, pedido.metodo_facturacion_pedido, pedido.lista_precio_pedido_id
-  )
+  const formulasReglas = await fetchFormulasReglas(supabase)
+  const listasCache: Record<string, DatosLista> = {}
+  const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
 
   const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
   const segmentoArt = detectarSegmento(articuloConDescuentos)
+  // Resolución por segmento (igual que createPedido): provCond > override pedido > cliente > general
+  const { listaId, metodoRaw: metodoItemRaw, metodo, listaDatos, provCond } =
+    await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoArt, pedido, clienteInfo, condProvMap, listasCache, formulasReglas)
+
   const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
-  const bonif = resolverBonifItem(null, general, viajante, segmentoArt)
+  const bonif = resolverBonifItem(provCond, general, viajante, segmentoArt)
   const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, bonif)
 
   const ofertaPct = articuloConDescuentos.descuento_propio || 0
@@ -1059,6 +1112,8 @@ export async function agregarItemPedido(
     precio_final: precio.precioAlCliente,
     subtotal: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
     precio_costo: articuloConDescuentos.precio_compra || 0,
+    lista_precio_id: listaId,
+    metodo_facturacion_item: metodoItemRaw,
     precio_lista: precioListaBruto,
     descuento_propio_pct: ofertaPct,
     bonif_general_pct: precio.bonifGeneralPct,
@@ -1083,7 +1138,7 @@ export async function agregarItemPedido(
   const ivaMonto = ivaIncluido ? 0 : Math.round((precio.precioAlCliente - precio.precioNeto) * 100) / 100
   const ivaPct = ivaMonto > 0 && precio.precioNeto > 0
     ? Math.round((ivaMonto / precio.precioNeto) * 10000) / 100 : 0
-  const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
+  const metodoRaw = metodoItemRaw
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
   const kardexDesc = buildKardexDescuentos(
     precio.precioLista, precio.precioConDescuento,
@@ -1174,22 +1229,25 @@ export async function agregarItemBonificado(
 
   const { data: pedido } = await supabase
     .from("pedidos")
-    .select("cliente_id,numero_pedido,metodo_facturacion_pedido,lista_precio_pedido_id,clientes:cliente_id(metodo_facturacion,lista_precio_id,provincia)")
+    .select(`cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
     .eq("id", pedidoId)
     .single()
   if (!pedido) throw new Error("Pedido no encontrado")
 
   const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
-  const { listaDatos, metodo } = await fetchListaYMetodo(
-    supabase, clienteInfo, pedido.metodo_facturacion_pedido, pedido.lista_precio_pedido_id
-  )
+  const formulasReglas = await fetchFormulasReglas(supabase)
+  const listasCache: Record<string, DatosLista> = {}
+  const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
 
   const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
+  const segmentoBonif = detectarSegmento(articuloConDescuentos)
+  // Resolución por segmento del producto bonificado (lista/método correctos)
+  const { listaId: listaIdBonif, metodoRaw: metodoItemRaw, metodo, listaDatos } =
+    await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoBonif, pedido, clienteInfo, condProvMap, listasCache, formulasReglas)
   // La mercadería bonificada es gratis (net $0): general/viajante no aplican a su precio.
   const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, {})
   const ofertaPctBonif = articuloConDescuentos.descuento_propio || 0
   const precioListaRef = precio.precioLista  // P.Lista real del producto bonificado
-  const segmentoBonif = detectarSegmento(articuloConDescuentos)
   // Viajante del segmento: se guarda en la línea para que la comisión "cobrada" use
   // la misma tasa (comisión% − viajante%) al restar el valor regalado.
   const { viajante: bonifViajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
@@ -1204,6 +1262,8 @@ export async function agregarItemBonificado(
     subtotal: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
     precio_costo: articuloConDescuentos.precio_compra || 0,
     es_bonificado: true,
+    lista_precio_id: listaIdBonif,
+    metodo_facturacion_item: metodoItemRaw,
     precio_lista: ofertaPctBonif > 0 ? round2(precioListaRef / (1 - ofertaPctBonif / 100)) : precioListaRef,
     descuento_propio_pct: ofertaPctBonif,
     bonif_general_pct: 0,
@@ -1217,7 +1277,7 @@ export async function agregarItemBonificado(
     .eq("id", productoId)
     .single()
 
-  const metodoRaw = pedido.metodo_facturacion_pedido || (pedido.clientes as any)?.metodo_facturacion || "Final"
+  const metodoRaw = metodoItemRaw
   const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
 
   // Reducción de comisión por mercadería bonificada ("la venta real es $90"):
