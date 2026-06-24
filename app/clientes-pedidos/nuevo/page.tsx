@@ -67,10 +67,17 @@ const ENTREGAS = [
 ]
 
 const SEGMENTOS = [
-  { label: "Limpieza / Bazar",  listaKey: "lista_limpieza_pedido_id", metodoKey: "metodo_limpieza_pedido" },
-  { label: "Perfumería Perf0",  listaKey: "lista_perf0_pedido_id",    metodoKey: "metodo_perf0_pedido"    },
-  { label: "Perfumería Plus",   listaKey: "lista_perf_plus_pedido_id", metodoKey: "metodo_perf_plus_pedido" },
+  { label: "Limpieza / Bazar",  listaKey: "lista_limpieza_pedido_id", metodoKey: "metodo_limpieza_pedido", segKey: "limpieza_bazar" },
+  { label: "Perfumería Perf0",  listaKey: "lista_perf0_pedido_id",    metodoKey: "metodo_perf0_pedido",    segKey: "perf0" },
+  { label: "Perfumería Plus",   listaKey: "lista_perf_plus_pedido_id", metodoKey: "metodo_perf_plus_pedido", segKey: "perf_plus" },
 ]
+
+const BONIF_TIPOS = [
+  { key: "general",    label: "General",    cls: "text-blue-700 bg-blue-50 border-blue-200" },
+  { key: "mercaderia", label: "Mercadería", cls: "text-green-700 bg-green-50 border-green-200" },
+  { key: "viajante",   label: "Viajante",   cls: "text-orange-700 bg-orange-50 border-orange-200" },
+]
+const METODO_CORTO: Record<string, string> = { "Factura": "Factura", "Final": "Mixto", "Presupuesto": "Presupuesto" }
 
 export default function NuevoPedidoPage() {
   const router = useRouter()
@@ -91,6 +98,11 @@ export default function NuevoPedidoPage() {
   const [specialProveedores, setSpecialProveedores] = useState<any[]>([])
   const [condProvIds, setCondProvIds]   = useState<string[]>([])
   const [specialSearch, setSpecialSearch] = useState("")
+  // Toggles independientes + descuentos del pedido
+  const [segMetodo, setSegMetodo]       = useState(false)
+  const [segLista, setSegLista]         = useState(false)
+  const [segDescuentos, setSegDescuentos] = useState(false)
+  const [bonifGrid, setBonifGrid]       = useState<Record<string, number>>({})
 
   // ── Article search / add ─────────────────────────────────────────────────────
   const [artQ, setArtQ]                 = useState("")
@@ -135,9 +147,12 @@ export default function NuevoPedidoPage() {
     setCliente(c)
     setClienteQ(c.nombre_razon_social || c.razon_social || "")
     setClienteOpen(false)
+    const esSentinela = ["PorSegmento", "__por_segmento__", "porsegmento"].includes(c.metodo_facturacion || "")
+    setSegMetodo(esSentinela || !!(c.metodo_limpieza || c.metodo_perf0 || c.metodo_perf_plus))
+    setSegLista(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
     setCond({
       ...BLANK_COND,
-      metodo_facturacion_pedido: c.metodo_facturacion || "",
+      metodo_facturacion_pedido: esSentinela ? "" : (c.metodo_facturacion || ""),
       lista_precio_pedido_id:    c.lista_precio_id    || "",
       lista_limpieza_pedido_id:  c.lista_limpieza_id  || "",
       metodo_limpieza_pedido:    c.metodo_limpieza     || "",
@@ -155,6 +170,16 @@ export default function NuevoPedidoPage() {
       .select("proveedor_id")
       .eq("cliente_id", c.id)
       .then(({ data }: any) => setCondProvIds((data || []).map((r: any) => r.proveedor_id)))
+    // Precargar descuentos del cliente (para mostrarlos/editarlos en el pedido)
+    sb.from("bonificaciones")
+      .select("tipo, porcentaje, segmento")
+      .eq("cliente_id", c.id).eq("activo", true).in("tipo", ["general", "mercaderia", "viajante"])
+      .then(({ data }: any) => {
+        const grid: Record<string, number> = {}
+        let haySeg = false
+        for (const b of (data || [])) { const k = b.segmento || "todos"; grid[`${k}__${b.tipo}`] = b.porcentaje; if (b.segmento) haySeg = true }
+        setBonifGrid(grid); setSegDescuentos(haySeg)
+      })
   }
 
   const clearCliente = () => {
@@ -162,6 +187,7 @@ export default function NuevoPedidoPage() {
     setClienteQ("")
     setCond({ ...BLANK_COND })
     setCondProvIds([])
+    setSegMetodo(false); setSegLista(false); setSegDescuentos(false); setBonifGrid({})
     setCart([])
     setSelectedArt(null)
   }
@@ -241,17 +267,33 @@ export default function NuevoPedidoPage() {
   }
 
   function buildOverrides() {
+    // Descuentos: general (segmento null) o por segmento
+    const bonifs: Array<{ tipo: string; segmento: string | null; porcentaje: number }> = []
+    if (segDescuentos) {
+      for (const seg of SEGMENTOS) for (const tipo of BONIF_TIPOS) {
+        const pct = bonifGrid[`${seg.segKey}__${tipo.key}`] || 0
+        if (pct > 0) bonifs.push({ tipo: tipo.key, segmento: seg.segKey, porcentaje: pct })
+      }
+    } else {
+      for (const tipo of BONIF_TIPOS) {
+        const pct = bonifGrid[`todos__${tipo.key}`] || 0
+        if (pct > 0) bonifs.push({ tipo: tipo.key, segmento: null, porcentaje: pct })
+      }
+    }
     return {
-      metodo_facturacion_pedido:    cond.metodo_facturacion_pedido    || undefined,
-      lista_precio_pedido_id:       cond.lista_precio_pedido_id       || undefined,
-      lista_limpieza_pedido_id:     cond.lista_limpieza_pedido_id     || undefined,
-      metodo_limpieza_pedido:       cond.metodo_limpieza_pedido       || undefined,
-      lista_perf0_pedido_id:        cond.lista_perf0_pedido_id        || undefined,
-      metodo_perf0_pedido:          cond.metodo_perf0_pedido          || undefined,
-      lista_perf_plus_pedido_id:    cond.lista_perf_plus_pedido_id    || undefined,
-      metodo_perf_plus_pedido:      cond.metodo_perf_plus_pedido      || undefined,
+      // General: solo si la dimensión NO está segmentada
+      metodo_facturacion_pedido: !segMetodo ? (cond.metodo_facturacion_pedido || undefined) : undefined,
+      lista_precio_pedido_id:    !segLista  ? (cond.lista_precio_pedido_id || undefined) : undefined,
+      // Por segmento: solo de la dimensión segmentada (vacío = heredar, no se manda)
+      metodo_limpieza_pedido:    segMetodo ? (cond.metodo_limpieza_pedido || undefined) : undefined,
+      metodo_perf0_pedido:       segMetodo ? (cond.metodo_perf0_pedido || undefined) : undefined,
+      metodo_perf_plus_pedido:   segMetodo ? (cond.metodo_perf_plus_pedido || undefined) : undefined,
+      lista_limpieza_pedido_id:  segLista ? (cond.lista_limpieza_pedido_id || undefined) : undefined,
+      lista_perf0_pedido_id:     segLista ? (cond.lista_perf0_pedido_id || undefined) : undefined,
+      lista_perf_plus_pedido_id: segLista ? (cond.lista_perf_plus_pedido_id || undefined) : undefined,
+      bonificaciones_pedido:     bonifs.length > 0 ? bonifs : undefined,
       // Listas especiales por proveedor (este pedido): siempre factura, lista Especial
-      condiciones_proveedor:        condProvIds.length && especialLista
+      condiciones_proveedor:     condProvIds.length && especialLista
         ? condProvIds.map(pid => ({ proveedor_id: pid, lista_precio_id: especialLista.id, metodo_facturacion: "Factura", dto_general_pct: null, dto_viajante_pct: null, dto_mercaderia_pct: null }))
         : undefined,
     }
@@ -402,30 +444,8 @@ export default function NuevoPedidoPage() {
 
             {condOpen && (
               <div className="border-t border-slate-100 px-5 py-5 space-y-4">
-                {/* Fila 1: Facturación + Lista general + Entrega + Vendedor */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <Label className="text-xs text-slate-500 mb-1 block">Facturación</Label>
-                    <Select value={cond.metodo_facturacion_pedido || "__none__"}
-                      onValueChange={v => setCond(p => ({ ...p, metodo_facturacion_pedido: v === "__none__" ? "" : v }))}>
-                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Del cliente" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">Del cliente</SelectItem>
-                        {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-xs text-slate-500 mb-1 block">Lista de precio</Label>
-                    <Select value={cond.lista_precio_pedido_id || "__none__"}
-                      onValueChange={v => setCond(p => ({ ...p, lista_precio_pedido_id: v === "__none__" ? "" : v }))}>
-                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Del cliente" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">Del cliente</SelectItem>
-                        {listas.filter((l: any) => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                {/* Entrega + Vendedor */}
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-xs text-slate-500 mb-1 block">Entrega</Label>
                     <Select value={cond.condicion_entrega || "__none__"}
@@ -450,33 +470,112 @@ export default function NuevoPedidoPage() {
                   </div>
                 </div>
 
-                {/* Condiciones por segmento */}
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Condiciones por segmento</p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {SEGMENTOS.map(seg => (
-                      <div key={seg.listaKey} className="border rounded-lg p-3 bg-slate-50 space-y-2">
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{seg.label}</p>
-                        <Select value={(cond as any)[seg.metodoKey] || "__none__"}
-                          onValueChange={v => setCond(p => ({ ...p, [seg.metodoKey]: v === "__none__" ? "" : v }))}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="General" /></SelectTrigger>
+                {/* Lista / Facturación / Descuentos — 3 toggles independientes */}
+                {(() => {
+                  const metGen = cond.metodo_facturacion_pedido || (cliente as any)?.metodo_facturacion || "Final"
+                  const metHeredar = `Del cliente (${METODO_CORTO[metGen] ?? metGen})`
+                  const listaGenNombre = listas.find((l: any) => l.id === (cond.lista_precio_pedido_id || (cliente as any)?.lista_precio_id))?.nombre ?? ""
+                  const listaHeredar = listaGenNombre ? `Del cliente (${listaGenNombre})` : "Del cliente (sin lista)"
+                  const SegToggle = ({ on, set }: { on: boolean; set: (b: boolean) => void }) => (
+                    <div className="flex rounded-md border border-slate-300 overflow-hidden shrink-0 text-[11px]">
+                      <button type="button" onClick={() => set(false)} className={`px-2 py-1.5 font-medium ${!on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>General</button>
+                      <button type="button" onClick={() => set(true)}  className={`px-2 py-1.5 font-medium ${on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>Por segmento</button>
+                    </div>
+                  )
+                  return (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-slate-500 w-20 shrink-0">Lista</Label>
+                      {!segLista ? (
+                        <Select value={cond.lista_precio_pedido_id || "__none__"} onValueChange={v => setCond(p => ({ ...p, lista_precio_pedido_id: v === "__none__" ? "" : v }))}>
+                          <SelectTrigger className="h-9 text-sm flex-1"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">General</SelectItem>
-                            {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        <Select value={(cond as any)[seg.listaKey] || "__none__"}
-                          onValueChange={v => setCond(p => ({ ...p, [seg.listaKey]: v === "__none__" ? "" : v }))}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="General" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">General</SelectItem>
+                            <SelectItem value="__none__">{listaHeredar}</SelectItem>
                             {listas.filter((l: any) => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
                           </SelectContent>
                         </Select>
+                      ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
+                      <SegToggle on={segLista} set={setSegLista} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-slate-500 w-20 shrink-0">Facturación</Label>
+                      {!segMetodo ? (
+                        <Select value={cond.metodo_facturacion_pedido || "__none__"} onValueChange={v => setCond(p => ({ ...p, metodo_facturacion_pedido: v === "__none__" ? "" : v }))}>
+                          <SelectTrigger className="h-9 text-sm flex-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">{metHeredar}</SelectItem>
+                            {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
+                      <SegToggle on={segMetodo} set={setSegMetodo} />
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Label className="text-xs text-slate-500 w-20 shrink-0 pt-2">Descuentos</Label>
+                      {!segDescuentos ? (
+                        <div className="flex-1 flex flex-wrap gap-2 items-center">
+                          {BONIF_TIPOS.map(tipo => (
+                            <div key={tipo.key} className="flex items-center gap-1">
+                              <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
+                              <Input type="number" step="0.01" min="0" max="100" className="h-6 w-14 text-center text-xs font-bold px-1"
+                                value={bonifGrid[`todos__${tipo.key}`] || 0}
+                                onChange={e => setBonifGrid(prev => ({ ...prev, [`todos__${tipo.key}`]: parseFloat(e.target.value) || 0 }))} />
+                              <span className="text-[10px] text-slate-400">%</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1 pt-2">Definidos por segmento ↓</span>}
+                      <SegToggle on={segDescuentos} set={setSegDescuentos} />
+                    </div>
+
+                    {(segMetodo || segLista || segDescuentos) && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                        {SEGMENTOS.map(seg => (
+                          <div key={seg.listaKey} className="border rounded-lg p-3 bg-slate-50 space-y-2">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{seg.label}</p>
+                            {segMetodo && (
+                              <Select value={(cond as any)[seg.metodoKey] || "__heredar__"} onValueChange={v => setCond(p => ({ ...p, [seg.metodoKey]: v === "__heredar__" ? "" : v }))}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__heredar__">{metHeredar}</SelectItem>
+                                  {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {segLista && (
+                              <Select value={(cond as any)[seg.listaKey] || "__heredar__"} onValueChange={v => setCond(p => ({ ...p, [seg.listaKey]: v === "__heredar__" ? "" : v }))}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__heredar__">{listaHeredar}</SelectItem>
+                                  {listas.filter((l: any) => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {segDescuentos && (
+                              <div className="border-t border-slate-200 pt-2 space-y-1">
+                                {BONIF_TIPOS.map(tipo => {
+                                  const k = `${seg.segKey}__${tipo.key}`
+                                  return (
+                                    <div key={tipo.key} className="flex items-center justify-between">
+                                      <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
+                                      <div className="flex items-center gap-1">
+                                        <Input type="number" step="0.01" min="0" max="100" className="h-6 w-14 text-center text-xs font-bold px-1"
+                                          value={bonifGrid[k] || 0}
+                                          onChange={e => setBonifGrid(prev => ({ ...prev, [k]: parseFloat(e.target.value) || 0 }))} />
+                                        <span className="text-[10px] text-slate-400">%</span>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                </div>
+                  )
+                })()}
 
                 {/* Listas especiales por proveedor (este pedido) */}
                 <div>
