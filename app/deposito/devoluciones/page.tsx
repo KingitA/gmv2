@@ -150,13 +150,13 @@ export default function DevolucionesPage() {
                 <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:14 }}>
                   <span style={{ fontSize:24 }}>{esVendible?"✅":"🚫"}</span>
                   <div style={{ flex:1 }}>
-                    <div style={{ color:C.text, fontWeight:700, fontSize:18, lineHeight:1.3 }}>{det.articulos.descripcion}</div>
-                    <div style={{ color:C.light, fontSize:14, fontFamily:"monospace", marginTop:3 }}>{det.articulos.sku}</div>
-                    {det.motivo&&<div style={{ color:C.sub, fontSize:13, marginTop:4, fontStyle:"italic" }}>{det.motivo}</div>}
+                    <div style={{ color:C.text, fontWeight:700, fontSize:20, lineHeight:1.3 }}>{det.articulos.descripcion}</div>
+                    <div style={{ color:C.light, fontSize:15, fontFamily:"monospace", marginTop:3 }}>{det.articulos.sku}</div>
+                    {det.motivo&&<div style={{ color:C.sub, fontSize:14, marginTop:4, fontStyle:"italic" }}>{det.motivo}</div>}
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ color:C.text, fontWeight:800, fontSize:24 }}>{det.cantidad}</div>
-                    <div style={{ color:C.light, fontSize:14 }}>unidades</div>
+                    <div style={{ color:C.text, fontWeight:800, fontSize:26 }}>{det.cantidad}</div>
+                    <div style={{ color:C.light, fontSize:15 }}>unidades</div>
                   </div>
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
