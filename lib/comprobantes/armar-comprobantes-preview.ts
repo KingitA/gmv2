@@ -179,8 +179,12 @@ export async function armarComprobantesPreview(
     .eq('cliente_id', cliente?.id).eq('activo', true).in('tipo', ['general', 'viajante'])
 
   // ── Agrupar por (vaEnComprobante, perfil de descuento, proveedor) — idéntico al route ──
+  // La mercadería bonificada NO se agrupa: se reparte luego entre los comprobantes
+  // normales (no-especial) proporcional al neto, como ÚLTIMO ítem de cada uno.
   const grupos = new Map<string, any[]>()
+  const itemsBonificados: any[] = []
   for (const item of items) {
+    if (item.esBonificado) { itemsBonificados.push(item); continue }
     const cond = item.proveedorId ? condProvMap.get(item.proveedorId) : null
     const provKey = cond ? item.proveedorId : ''
     const bonifProfile = cond
@@ -189,6 +193,27 @@ export async function armarComprobantesPreview(
     const key = `${item.vaEnComprobante}__${bonifProfile}__${provKey}`
     if (!grupos.has(key)) grupos.set(key, [])
     grupos.get(key)!.push(item)
+  }
+
+  if (itemsBonificados.length > 0) {
+    const grupoEsProv = (g: any[]) => !!(g[0]?.proveedorId && condProvMap.get(g[0].proveedorId))
+    const netoGrupo = (g: any[]) => r2(g.reduce((s, i) => s + i.subtotalNeto, 0))
+    const normales = [...grupos.values()].filter(g => !grupoEsProv(g))
+    const netos = normales.map(netoGrupo)
+    const netoTotal = r2(netos.reduce((s, n) => s + n, 0))
+    if (normales.length > 0 && netoTotal > 0) {
+      for (const bonif of itemsBonificados) {
+        const Q = Math.abs(bonif.cantidad)
+        let asignado = 0
+        for (let i = 0; i < normales.length; i++) {
+          const qtyG = i === normales.length - 1 ? (Q - asignado) : Math.round(Q * netos[i] / netoTotal)
+          asignado += qtyG
+          if (qtyG > 0) normales[i].push({ ...bonif, cantidad: qtyG })
+        }
+      }
+    } else if (normales.length === 0 && grupos.size > 0) {
+      ;[...grupos.values()][0].push(...itemsBonificados)
+    }
   }
 
   const tipoFactura = determinarTipoFactura(cliente?.condicion_iva) ?? 'FA'
