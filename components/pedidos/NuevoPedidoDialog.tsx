@@ -22,7 +22,7 @@ type Cliente = {
   lista_precio_id?: string | null
 }
 
-type LP = { id: string; nombre: string }
+type LP = { id: string; nombre: string; codigo?: string }
 
 interface Props {
   open: boolean
@@ -79,6 +79,14 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const [saveMode, setSaveMode]     = useState<"temp" | "permanent" | null>(null)
   const [bonifMercaderia, setBonifMercaderia] = useState<any[]>([])
 
+  // Toggles independientes de segmentación (lista ya está en listaPorSegmento)
+  const [segMetodo, setSegMetodo]         = useState(false)
+  const [segDescuentos, setSegDescuentos] = useState(false)
+  // Lista especial por proveedor (este pedido)
+  const [specialProveedores, setSpecialProveedores] = useState<{ id: string; nombre: string }[]>([])
+  const [condProvIds, setCondProvIds]     = useState<string[]>([])
+  const [specialSearch, setSpecialSearch] = useState("")
+
   // Mercadería bonificada: artículos a regalar elegidos para este pedido
   const [mercArticulos, setMercArticulos] = useState<Array<{ id: string; descripcion: string; sku: string }>>([])
   const [mercQuery, setMercQuery]   = useState("")
@@ -102,14 +110,21 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   }
   const removeMercArticulo = (id: string) => setMercArticulos(prev => prev.filter(a => a.id !== id))
 
-  const metodoPorSegmento = metodo === "PorSegmento"
-  const mostrarSegmentos  = metodoPorSegmento || listaPorSegmento
+  const metodoPorSegmento = segMetodo
+  const mostrarSegmentos  = segMetodo || listaPorSegmento || segDescuentos
+  const especialLista = listas.find(l => l.codigo === "especial")
 
-  // Cargar listas al abrir
+  // Cargar listas + proveedores con lista especial al abrir
   useEffect(() => {
     if (!open) return
-    sb.from("listas_precio").select("id,nombre").eq("activo", true).order("nombre")
+    sb.from("listas_precio").select("id,nombre,codigo").eq("activo", true).order("nombre")
       .then(({ data }) => setListas(data || []))
+    sb.from("articulos").select("proveedor_id, proveedores:proveedor_id(nombre)").not("precio_lista_especial", "is", null)
+      .then(({ data }: any) => {
+        const map = new Map<string, string>()
+        for (const a of (data || [])) if (a.proveedor_id && a.proveedores?.nombre) map.set(a.proveedor_id, a.proveedores.nombre)
+        setSpecialProveedores(Array.from(map, ([id, nombre]) => ({ id, nombre })).sort((x, y) => x.nombre.localeCompare(y.nombre)))
+      })
   }, [open])
 
   // Inicializar condiciones cuando se selecciona cliente
@@ -117,8 +132,10 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     if (!cliente) { setBonifMercaderia([]); return }
 
     const c = cliente as any
-    setMetodo(c.metodo_facturacion || "")
+    const ES_CENTINELA = (v?: string) => !!v && ["PorSegmento", "__por_segmento__", "porsegmento"].includes(v)
+    setMetodo(c.metodo_facturacion && !ES_CENTINELA(c.metodo_facturacion) ? c.metodo_facturacion : "")
     setListaId(c.lista_precio_id || "")
+    setSegMetodo(!!(c.metodo_limpieza || c.metodo_perf0 || c.metodo_perf_plus) || ES_CENTINELA(c.metodo_facturacion))
     setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
     setListaLimpieza(c.lista_limpieza_id || "")
     setMetodoLimpieza(c.metodo_limpieza || "")
@@ -128,6 +145,10 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     setMetodoPerfPlus(c.metodo_perf_plus || "")
     setSaveMode(null)
 
+    // Listas especiales ya asignadas al cliente
+    sb.from("cliente_proveedor_condicion").select("proveedor_id").eq("cliente_id", cliente.id)
+      .then(({ data }: any) => setCondProvIds((data || []).map((r: any) => r.proveedor_id)))
+
     // Cargar bonificaciones del cliente
     sb.from("bonificaciones")
       .select("tipo, porcentaje, segmento")
@@ -136,12 +157,15 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       .in("tipo", ["general", "mercaderia", "viajante"])
       .then(({ data }) => {
         const grid: Record<string, number> = {}
+        let haySeg = false
         for (const b of (data || [])) {
           const segKey = b.segmento || "todos"
           grid[`${segKey}__${b.tipo}`] = b.porcentaje
+          if (b.segmento) haySeg = true
         }
         setBonifGrid(grid)
         setBonifGridOriginal(grid)
+        setSegDescuentos(haySeg)
       })
 
     // Alerta mercadería bonificada
@@ -219,64 +243,89 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     setSaveMode(null)
     setBonifMercaderia([])
     setMercArticulos([]); setMercQuery(""); setMercResults([])
+    setSegMetodo(false); setSegDescuentos(false)
+    setCondProvIds([]); setSpecialSearch("")
   }
 
   const handleSubmit = async () => {
     if (!cliente || files.length === 0) return
     if (conditionsChanged && !saveMode) return
 
+    const SEGS = ["limpieza_bazar", "perf0", "perf_plus"]
     let overrides: PedidoOverrides = {}
     if (conditionsChanged) {
-      if (metodo !== (c?.metodo_facturacion || ""))        overrides.metodo_facturacion_pedido = metodo || undefined
-      if (!listaPorSegmento && listaId !== (c?.lista_precio_id || "")) overrides.lista_precio_pedido_id = listaId || undefined
-      if (listaLimpieza  !== (c?.lista_limpieza_id || ""))  overrides.lista_limpieza_pedido_id  = listaLimpieza  || undefined
-      if (metodoLimpieza !== (c?.metodo_limpieza   || ""))  overrides.metodo_limpieza_pedido    = metodoLimpieza || undefined
-      if (listaPerf0     !== (c?.lista_perf0_id    || ""))  overrides.lista_perf0_pedido_id     = listaPerf0     || undefined
-      if (metodoPerf0    !== (c?.metodo_perf0      || ""))  overrides.metodo_perf0_pedido       = metodoPerf0    || undefined
-      if (listaPerfPlus  !== (c?.lista_perf_plus_id || "")) overrides.lista_perf_plus_pedido_id = listaPerfPlus  || undefined
-      if (metodoPerfPlus !== (c?.metodo_perf_plus  || ""))  overrides.metodo_perf_plus_pedido   = metodoPerfPlus || undefined
+      // General: solo si la dimensión NO está segmentada
+      if (!segMetodo && metodo) overrides.metodo_facturacion_pedido = metodo
+      if (!listaPorSegmento && listaId) overrides.lista_precio_pedido_id = listaId
+      // Por segmento: solo de la dimensión segmentada; vacío = heredar (no se manda)
+      if (segMetodo) {
+        if (metodoLimpieza) overrides.metodo_limpieza_pedido   = metodoLimpieza
+        if (metodoPerf0)    overrides.metodo_perf0_pedido       = metodoPerf0
+        if (metodoPerfPlus) overrides.metodo_perf_plus_pedido   = metodoPerfPlus
+      }
+      if (listaPorSegmento) {
+        if (listaLimpieza)  overrides.lista_limpieza_pedido_id  = listaLimpieza
+        if (listaPerf0)     overrides.lista_perf0_pedido_id     = listaPerf0
+        if (listaPerfPlus)  overrides.lista_perf_plus_pedido_id = listaPerfPlus
+      }
 
-      // Descuentos por segmento del pedido (inline): aplican a ESTE pedido tanto si
-      // se guardan al cliente como si son "solo este pedido".
+      // Descuentos: general (segmento null) o por segmento — aplican a este pedido
       {
-        const bonifs: Array<{ tipo: string; segmento: string; porcentaje: number }> = []
-        const segs = ["limpieza_bazar", "perf0", "perf_plus"]
-        for (const seg of segs) {
-          for (const tipo of BONIF_TIPOS) {
+        const bonifs: Array<{ tipo: string; segmento: string | null; porcentaje: number }> = []
+        if (segDescuentos) {
+          for (const seg of SEGS) for (const tipo of BONIF_TIPOS) {
             const pct = bonifGrid[`${seg}__${tipo.key}`] || 0
             if (pct > 0) bonifs.push({ tipo: tipo.key, segmento: seg, porcentaje: pct })
+          }
+        } else {
+          for (const tipo of BONIF_TIPOS) {
+            const pct = bonifGrid[`todos__${tipo.key}`] || 0
+            if (pct > 0) bonifs.push({ tipo: tipo.key, segmento: null, porcentaje: pct })
           }
         }
         if (bonifs.length > 0) overrides.bonificaciones_pedido = bonifs
       }
 
+      // Guardar al cliente (permanente): cada dimensión escribe solo lo que corresponde
       if (saveMode === "permanent") {
-        const upd: any = {}
-        if (metodo      !== (c?.metodo_facturacion  || ""))  upd.metodo_facturacion = metodo || null
-        if (!listaPorSegmento && listaId !== (c?.lista_precio_id || ""))  upd.lista_precio_id = listaId || null
-        if (listaLimpieza  !== (c?.lista_limpieza_id || "")) upd.lista_limpieza_id  = listaLimpieza  || null
-        if (metodoLimpieza !== (c?.metodo_limpieza   || "")) upd.metodo_limpieza    = metodoLimpieza || null
-        if (listaPerf0     !== (c?.lista_perf0_id    || "")) upd.lista_perf0_id     = listaPerf0     || null
-        if (metodoPerf0    !== (c?.metodo_perf0      || "")) upd.metodo_perf0       = metodoPerf0    || null
-        if (listaPerfPlus  !== (c?.lista_perf_plus_id || "")) upd.lista_perf_plus_id = listaPerfPlus || null
-        if (metodoPerfPlus !== (c?.metodo_perf_plus  || "")) upd.metodo_perf_plus   = metodoPerfPlus || null
-        if (Object.keys(upd).length > 0) await sb.from("clientes").update(upd).eq("id", cliente.id)
+        const upd: any = {
+          metodo_facturacion: !segMetodo ? (metodo || null) : null,
+          lista_precio_id:    !listaPorSegmento ? (listaId || null) : null,
+          metodo_limpieza:    segMetodo ? (metodoLimpieza || null) : null,
+          metodo_perf0:       segMetodo ? (metodoPerf0 || null) : null,
+          metodo_perf_plus:   segMetodo ? (metodoPerfPlus || null) : null,
+          lista_limpieza_id:  listaPorSegmento ? (listaLimpieza || null) : null,
+          lista_perf0_id:     listaPorSegmento ? (listaPerf0 || null) : null,
+          lista_perf_plus_id: listaPorSegmento ? (listaPerfPlus || null) : null,
+        }
+        await sb.from("clientes").update(upd).eq("id", cliente.id)
 
-        // Guardar descuentos si cambiaron
         if (bonifChanged) {
           await sb.from("bonificaciones").delete()
             .eq("cliente_id", cliente.id).in("tipo", ["general", "mercaderia", "viajante"])
           const toInsert: any[] = []
-          const segs = ["limpieza_bazar", "perf0", "perf_plus"]
-          for (const seg of segs) {
-            for (const tipo of BONIF_TIPOS) {
+          if (segDescuentos) {
+            for (const seg of SEGS) for (const tipo of BONIF_TIPOS) {
               const pct = bonifGrid[`${seg}__${tipo.key}`] || 0
               if (pct > 0) toInsert.push({ cliente_id: cliente.id, tipo: tipo.key, porcentaje: pct, activo: true, segmento: seg })
+            }
+          } else {
+            for (const tipo of BONIF_TIPOS) {
+              const pct = bonifGrid[`todos__${tipo.key}`] || 0
+              if (pct > 0) toInsert.push({ cliente_id: cliente.id, tipo: tipo.key, porcentaje: pct, activo: true, segmento: null })
             }
           }
           if (toInsert.length > 0) await sb.from("bonificaciones").insert(toInsert)
         }
       }
+    }
+
+    // Listas especiales por proveedor (este pedido)
+    if (condProvIds.length > 0 && especialLista) {
+      overrides.condiciones_proveedor = condProvIds.map(pid => ({
+        proveedor_id: pid, lista_precio_id: especialLista.id, metodo_facturacion: "Factura",
+        dto_general_pct: null, dto_viajante_pct: null, dto_mercaderia_pct: null,
+      }))
     }
 
     // Mercadería bonificada (artículos elegidos) — se pasa siempre que haya % y artículos,
@@ -285,7 +334,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       overrides.mercaderia_bonificada = { pct: mercPct, articulo_ids: mercArticulos.map(a => a.id) }
     }
 
-    const hayOverrides = conditionsChanged || !!overrides.mercaderia_bonificada
+    const hayOverrides = conditionsChanged || !!overrides.mercaderia_bonificada || !!overrides.condiciones_proveedor
     onAddToQueue(cliente.id, clienteNombre, files, hayOverrides ? overrides : undefined)
     reset()
     onOpenChange(false)
@@ -444,128 +493,153 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                 Condiciones del pedido
               </Label>
 
-              {/* Facturación + Lista */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs text-slate-600 mb-1 block">Facturación</Label>
-                  <Select
-                    value={metodo || "__none__"}
-                    onValueChange={v => {
-                      if (v === "PorSegmento") {
-                        setMetodo("PorSegmento")
-                      } else {
-                        setMetodo(v === "__none__" ? "" : v)
-                        setMetodoLimpieza("")
-                        setMetodoPerf0("")
-                        setMetodoPerfPlus("")
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="h-9 text-sm w-full"><SelectValue placeholder="Sin definir" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Sin definir</SelectItem>
-                      {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                      <SelectItem value="PorSegmento">— Por Segmento —</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs text-slate-600 mb-1 block">Lista de precio</Label>
-                  <Select
-                    value={listaPorSegmento ? "__por_segmento__" : (listaId || "__none__")}
-                    onValueChange={v => {
-                      if (v === "__por_segmento__") {
-                        setListaPorSegmento(true)
-                        setListaId("")
-                      } else {
-                        setListaPorSegmento(false)
-                        setListaId(v === "__none__" ? "" : v)
-                        setListaLimpieza("")
-                        setListaPerf0("")
-                        setListaPerfPlus("")
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="h-9 text-sm w-full"><SelectValue placeholder="Sin definir" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Sin definir</SelectItem>
-                      {listas.map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
-                      <SelectItem value="__por_segmento__">— Por Segmento —</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Condiciones por segmento — aparece automáticamente */}
-              {mostrarSegmentos && (
-                <div className="border border-indigo-200 rounded-lg overflow-hidden bg-indigo-50/30">
-                  <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest px-3 pt-2.5 pb-1">
-                    Condiciones por segmento
-                  </p>
-                  <div className="divide-y divide-slate-200">
-                    {SEGMENTOS.map(seg => (
-                      <div key={seg.key} className="px-3 py-2.5 bg-white">
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">{seg.label}</p>
-                        <div className="grid grid-cols-2 gap-2 mb-2">
-                          {/* Método: solo si metodoPorSegmento */}
-                          {metodoPorSegmento && (
-                            <div>
-                              <Label className="text-[11px] text-slate-500 mb-1 block">Facturación</Label>
-                              <Select
-                                value={getSegValue(seg.metodoState) || ""}
-                                onValueChange={v => setSegValue(seg.metodoState, v)}
-                              >
-                                <SelectTrigger className="h-8 text-xs w-full">
-                                  <SelectValue placeholder="Seleccionar *" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
-                          {/* Lista: solo si listaPorSegmento */}
-                          {listaPorSegmento && (
-                            <div>
-                              <Label className="text-[11px] text-slate-500 mb-1 block">Lista de precio</Label>
-                              <Select
-                                value={getSegValue(seg.listaState) || ""}
-                                onValueChange={v => setSegValue(seg.listaState, v)}
-                              >
-                                <SelectTrigger className="h-8 text-xs w-full">
-                                  <SelectValue placeholder="Seleccionar *" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {listas.map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Descuentos del segmento */}
-                        <div className="border-t border-slate-100 pt-2 space-y-1">
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descuentos</p>
-                          {BONIF_TIPOS.map(tipo => {
-                            const k = `${seg.key}__${tipo.key}`
-                            return (
-                              <div key={tipo.key} className="flex items-center justify-between">
-                                <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
-                                <div className="flex items-center gap-1">
-                                  <Input
-                                    type="number" step="0.01" min="0" max="100"
-                                    className="h-6 w-16 text-center text-xs font-bold px-1"
-                                    value={bonifGrid[k] || 0}
-                                    onChange={e => setBonifGrid(prev => ({ ...prev, [k]: parseFloat(e.target.value) || 0 }))}
-                                  />
-                                  <span className="text-[10px] text-slate-400">%</span>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
+              {/* Toggles independientes: cada dimensión General o Por segmento */}
+              {(() => {
+                const metodoGeneralLabel = METODOS.find(m => m.value === (metodo || (cliente as any)?.metodo_facturacion))?.label ?? "Final (Mixto)"
+                const listaGeneralNombre = listas.find(l => l.id === (listaId || (cliente as any)?.lista_precio_id))?.nombre ?? "Del cliente"
+                const SegToggle = ({ on, set }: { on: boolean; set: (b: boolean) => void }) => (
+                  <div className="flex rounded-md border border-slate-300 overflow-hidden shrink-0 text-[11px]">
+                    <button type="button" onClick={() => set(false)} className={`px-2 py-1.5 font-medium ${!on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>General</button>
+                    <button type="button" onClick={() => set(true)}  className={`px-2 py-1.5 font-medium ${on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>Por segmento</button>
+                  </div>
+                )
+                return (
+                <div className="space-y-2.5">
+                  {/* LISTA */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-slate-600 w-20 shrink-0">Lista</Label>
+                    {!listaPorSegmento ? (
+                      <Select value={listaId || "__none__"} onValueChange={v => setListaId(v === "__none__" ? "" : v)}>
+                        <SelectTrigger className="h-9 text-sm flex-1"><SelectValue placeholder="Del cliente" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Del cliente</SelectItem>
+                          {listas.filter(l => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
+                    <SegToggle on={listaPorSegmento} set={setListaPorSegmento} />
+                  </div>
+                  {/* FACTURACIÓN */}
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-slate-600 w-20 shrink-0">Facturación</Label>
+                    {!segMetodo ? (
+                      <Select value={metodo || "__none__"} onValueChange={v => setMetodo(v === "__none__" ? "" : v)}>
+                        <SelectTrigger className="h-9 text-sm flex-1"><SelectValue placeholder="Del cliente" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Del cliente</SelectItem>
+                          {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
+                    <SegToggle on={segMetodo} set={setSegMetodo} />
+                  </div>
+                  {/* DESCUENTOS */}
+                  <div className="flex items-start gap-2">
+                    <Label className="text-xs text-slate-600 w-20 shrink-0 pt-2">Descuentos</Label>
+                    {!segDescuentos ? (
+                      <div className="flex-1 flex flex-wrap gap-2 items-center">
+                        {BONIF_TIPOS.map(tipo => (
+                          <div key={tipo.key} className="flex items-center gap-1">
+                            <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
+                            <Input type="number" step="0.01" min="0" max="100" className="h-6 w-14 text-center text-xs font-bold px-1"
+                              value={bonifGrid[`todos__${tipo.key}`] || 0}
+                              onChange={e => setBonifGrid(prev => ({ ...prev, [`todos__${tipo.key}`]: parseFloat(e.target.value) || 0 }))} />
+                            <span className="text-[10px] text-slate-400">%</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1 pt-2">Definidos por segmento ↓</span>}
+                    <SegToggle on={segDescuentos} set={setSegDescuentos} />
+                  </div>
+
+                  {/* Grid por segmento — solo las dimensiones marcadas "Por segmento" */}
+                  {mostrarSegmentos && (
+                    <div className="border border-indigo-200 rounded-lg overflow-hidden bg-indigo-50/30">
+                      <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest px-3 pt-2.5 pb-1">Condiciones por segmento</p>
+                      <div className="divide-y divide-slate-200">
+                        {SEGMENTOS.map(seg => (
+                          <div key={seg.key} className="px-3 py-2.5 bg-white">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">{seg.label}</p>
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              {segMetodo && (
+                                <div>
+                                  <Label className="text-[11px] text-slate-500 mb-1 block">Facturación</Label>
+                                  <Select value={getSegValue(seg.metodoState) || "__heredar__"} onValueChange={v => setSegValue(seg.metodoState, v === "__heredar__" ? "" : v)}>
+                                    <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__heredar__">{metodoGeneralLabel} (general)</SelectItem>
+                                      {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )}
+                              {listaPorSegmento && (
+                                <div>
+                                  <Label className="text-[11px] text-slate-500 mb-1 block">Lista de precio</Label>
+                                  <Select value={getSegValue(seg.listaState) || "__heredar__"} onValueChange={v => setSegValue(seg.listaState, v === "__heredar__" ? "" : v)}>
+                                    <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__heredar__">{listaGeneralNombre} (general)</SelectItem>
+                                      {listas.filter(l => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )}
+                            </div>
+                            {segDescuentos && (
+                              <div className="border-t border-slate-100 pt-2 space-y-1">
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descuentos</p>
+                                {BONIF_TIPOS.map(tipo => {
+                                  const k = `${seg.key}__${tipo.key}`
+                                  return (
+                                    <div key={tipo.key} className="flex items-center justify-between">
+                                      <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
+                                      <div className="flex items-center gap-1">
+                                        <Input type="number" step="0.01" min="0" max="100" className="h-6 w-16 text-center text-xs font-bold px-1"
+                                          value={bonifGrid[k] || 0}
+                                          onChange={e => setBonifGrid(prev => ({ ...prev, [k]: parseFloat(e.target.value) || 0 }))} />
+                                        <span className="text-[10px] text-slate-400">%</span>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                )
+              })()}
+
+              {/* Listas especiales por proveedor (este pedido) */}
+              {specialProveedores.length > 0 && (
+                <div className="rounded-lg border border-teal-200 bg-teal-50/40 px-3 py-3 space-y-2">
+                  <p className="text-xs font-bold text-teal-700 uppercase tracking-wide">Listas especiales</p>
+                  <p className="text-[11px] text-slate-500">La mercadería de estos proveedores se factura aparte (en factura) con su precio especial. El resto sigue la lista/segmento de arriba.</p>
+                  {condProvIds.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {condProvIds.map(pid => (
+                        <span key={pid} className="inline-flex items-center gap-1 text-[11px] bg-white border border-teal-300 text-teal-700 rounded-full pl-2.5 pr-1.5 py-0.5 font-semibold">
+                          Especial {specialProveedores.find(p => p.id === pid)?.nombre ?? "—"}
+                          <button type="button" onClick={() => setCondProvIds(prev => prev.filter(x => x !== pid))} className="text-red-400 hover:text-red-600"><X className="h-3 w-3" /></button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <Input className="h-8 text-xs" placeholder="Buscar proveedor con lista especial (Colgate, Kenvue...)" value={specialSearch} onChange={e => setSpecialSearch(e.target.value)} />
+                  <div className="max-h-36 overflow-auto space-y-1">
+                    {specialProveedores
+                      .filter(p => !condProvIds.includes(p.id))
+                      .filter(p => !specialSearch || p.nombre.toLowerCase().includes(specialSearch.toLowerCase()))
+                      .map(p => (
+                        <button key={p.id} type="button" onClick={() => { setCondProvIds(prev => prev.includes(p.id) ? prev : [...prev, p.id]); setSpecialSearch("") }}
+                          className="w-full text-left px-3 py-1.5 rounded hover:bg-teal-50 text-xs font-medium text-slate-700 flex items-center justify-between">
+                          <span>Especial {p.nombre}</span><Plus className="h-3.5 w-3.5 text-teal-600" />
+                        </button>
+                      ))}
                   </div>
                 </div>
               )}
