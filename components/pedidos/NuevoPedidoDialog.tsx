@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Upload, Plus, X, Search, Check, FileText, MapPin } from "lucide-react"
 import type { PedidoOverrides } from "@/hooks/use-order-queue"
+import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 
 type Cliente = {
   id: string
@@ -594,16 +595,15 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                             type="button"
                             key={p.id}
                             onClick={() => addMercArticulo(p)}
-                            className="w-full text-left px-3 py-2 hover:bg-green-50 border-b border-slate-100 last:border-0 text-xs"
+                            className="w-full text-left px-3 py-2 hover:bg-green-50 border-b border-slate-100 last:border-0"
                           >
-                            <span className="font-mono text-slate-400 mr-2">{p.sku ?? ""}</span>
-                            <span className="font-medium text-slate-700">{p.descripcion}</span>
+                            <ArticuloResultRow articulo={p} size="sm" />
                           </button>
                         ))}
                       </div>
                     )}
                   </div>
-                  {mercArticulos.length > 0 && (
+                  {mercArticulos.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
                       {mercArticulos.map(a => (
                         <span key={a.id} className="inline-flex items-center gap-1 text-[11px] bg-white border border-green-300 text-green-800 rounded px-2 py-0.5">
@@ -613,6 +613,13 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                           </button>
                         </span>
                       ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5">
+                      <span className="text-amber-600 text-sm leading-none">⚠</span>
+                      <p className="text-[11px] font-medium text-amber-800">
+                        Sin mercadería bonificada asignada — completá desde edición de pedido.
+                      </p>
                     </div>
                   )}
                 </div>

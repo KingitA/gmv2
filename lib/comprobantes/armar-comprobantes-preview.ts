@@ -84,7 +84,7 @@ export async function armarComprobantesPreview(
         exento_iva, exento_iibb, provincia, percepcion_iibb, telefono, condicion_pago
       ),
       detalle:pedidos_detalle(
-        id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item,
+        id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item, metodo_facturacion_item,
         precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct,
         articulo:articulos!pedidos_detalle_articulo_id_fkey(
           id, descripcion, sku, iva_ventas, categoria, iva_compras, marca_id, proveedor_id, segmento_precio, descuento_propio
@@ -118,8 +118,11 @@ export async function armarComprobantesPreview(
     if (!art) continue
     if (det.estado_item === 'FALTANTE' || (det.cantidad ?? 0) <= 0) continue
 
+    // El método del ítem se decidió al crear el pedido (incluye condición por segmento
+    // y por proveedor) y quedó en metodo_facturacion_item. Se usa ese; si falta, el general.
     const condItem = art.proveedor_id ? condProvMap.get(art.proveedor_id) : null
-    const metodoItem: Metodo = condItem?.metodo_facturacion ? metodoDesdeRaw(condItem.metodo_facturacion) : metodoFacturacion
+    const metodoRawItem = det.metodo_facturacion_item || condItem?.metodo_facturacion || metodoRaw
+    const metodoItem: Metodo = metodoDesdeRaw(metodoRawItem)
     const esPresupuesto = art.iva_ventas === 'presupuesto' || metodoItem === 'Presupuesto'
     const vaEnComprobante: 'factura' | 'presupuesto' =
       metodoItem === 'Presupuesto' ? 'presupuesto' :

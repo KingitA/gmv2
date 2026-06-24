@@ -144,11 +144,12 @@ export async function POST(request: Request) {
       if (!art) continue
       if (det.estado_item === "FALTANTE" || (det.cantidad ?? 0) <= 0) continue
 
-      // La mercadería con condición de proveedor usa el método del proveedor; el resto, el del pedido.
+      // El método del ítem se decidió al CREAR el pedido (resolverListaSegmento: incluye
+      // la condición por segmento y por proveedor) y quedó en metodo_facturacion_item.
+      // Se usa ese; si falta (ítems viejos/agregados aparte), se cae al del pedido.
       const condItem = (art as any).proveedor_id ? condProvMap.get((art as any).proveedor_id) : null
-      const metodoItem: MetodoFacturacion = condItem?.metodo_facturacion
-        ? metodoDesdeRaw(condItem.metodo_facturacion)
-        : metodoFacturacion
+      const metodoRawItem = det.metodo_facturacion_item || condItem?.metodo_facturacion || metodoRaw
+      const metodoItem: MetodoFacturacion = metodoDesdeRaw(metodoRawItem)
       const esPresupuesto = art.iva_ventas === "presupuesto" || metodoItem === "Presupuesto"
       const vaEnComprobante: "factura" | "presupuesto" =
         metodoItem === "Presupuesto" ? "presupuesto" :
