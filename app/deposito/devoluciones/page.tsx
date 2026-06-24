@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
+import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
+import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 
 interface DetalleDevolucion {
   id: string; cantidad: number; motivo?: string; es_vendible: boolean
@@ -75,6 +77,20 @@ export default function DevolucionesPage() {
     setBusqueda(""); setResultados([])
     setVista("resultados")
   }
+
+  // Escaneo con el botón físico de la colectora (keyboard-wedge).
+  const onScanCodigo = useCallback(async (code:string) => {
+    try {
+      const arr = await (await fetch(`/api/deposito/picking?q=${encodeURIComponent(code)}`)).json()
+      const art: ArticuloFound | null = Array.isArray(arr) && arr.length > 0 ? arr[0] : null
+      if (!art) { scanError(); showToast(`No se encontró el código ${code}`, "err"); return }
+      scanOk()
+      seleccionarArticulo(art)
+    } catch { scanError(); showToast("Error de conexión", "err") }
+  }, [devoluciones])
+
+  // Activo en home y resultados (no en confirmar, donde se marca vendible/no vendible).
+  useBarcodeScanner({ onScan: onScanCodigo, enabled: vista === "home" || vista === "resultados" || vista === "scanner" })
 
   const abrirDevolucion = (dev:Devolucion) => {
     setDevSeleccionada(dev)
@@ -261,9 +277,12 @@ export default function DevolucionesPage() {
       <div style={{ padding:"16px 16px 0" }}>
         {/* Botón principal escanear */}
         <button onClick={()=>setVista("scanner")}
-          style={{ width:"100%", background:C.purple, color:"#fff", fontWeight:800, fontSize:18, padding:"22px 0", borderRadius:20, border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:12, boxShadow:"0 4px 20px rgba(147,51,234,0.35)", marginBottom:20 }}>
-          <span style={{ fontSize:26 }}>📦</span> Escanear artículo del camión
+          style={{ width:"100%", background:C.purple, color:"#fff", fontWeight:800, fontSize:18, padding:"22px 0", borderRadius:20, border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:12, boxShadow:"0 4px 20px rgba(147,51,234,0.35)", marginBottom:8 }}>
+          <span style={{ fontSize:26 }}>🔍</span> Buscar artículo del camión
         </button>
+        <p style={{ textAlign:"center", color:C.sub, fontSize:13, marginBottom:20 }}>
+          O apuntá con la colectora y apretá el gatillo para escanear.
+        </p>
 
         <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:18 }}>
           <div style={{ flex:1, height:1, background:C.border }} />

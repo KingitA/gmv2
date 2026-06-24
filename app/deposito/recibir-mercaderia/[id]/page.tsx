@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
+import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
+import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 import { useParams, useRouter } from "next/navigation"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 
@@ -145,6 +147,22 @@ export default function RecibirMercaderiaDetallePage() {
     setCantidadInput(item?String(item.cantidad_oc):"")
     setBusqueda(""); setResultados([]); setScannerOpen(false)
   }
+
+  // Escaneo con el botón físico de la colectora (keyboard-wedge).
+  const onScanCodigo = useCallback(async (code:string) => {
+    try {
+      const arr = await (await fetch(`/api/deposito/picking?q=${encodeURIComponent(code)}`)).json()
+      const art: ArticuloFound | null = Array.isArray(arr) && arr.length > 0 ? arr[0] : null
+      if (!art) { scanError(); showToast(`No se encontró el código ${code}`, "err"); return }
+      const item = items.find(i=>i.articulo_id===art.id)
+      scanOk()
+      setArticuloSel(art); setItemActivo(item||null)
+      setCantidadInput(item?String(item.cantidad_oc):"")
+      setBusqueda(""); setResultados([]); setScannerOpen(false)
+    } catch { scanError(); showToast("Error de conexión", "err") }
+  }, [items])
+
+  useBarcodeScanner({ onScan: onScanCodigo, enabled: !articuloSel && !finalizando })
 
   const guardarCantidad = async (esFaltante=false) => {
     if (!articuloSel||!recepcion) return
@@ -500,8 +518,8 @@ export default function RecibirMercaderiaDetallePage() {
 
       <div style={{ background:C.white, borderTop:`1px solid ${C.border}`, padding:"14px 16px", display:"flex", gap:12 }}>
         <button onClick={()=>setScannerOpen(true)}
-          style={{ flex:2, background:C.green, color:"#fff", fontWeight:800, fontSize:19, padding:"19px 0", borderRadius:18, border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
-          <span style={{ fontSize:22 }}>📱</span> Escanear
+          style={{ flex:2, background:C.white, color:C.text, fontWeight:700, fontSize:18, padding:"19px 0", borderRadius:18, border:`1.5px solid ${C.border}`, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+          <span style={{ fontSize:20 }}>🔍</span> Buscar artículo
         </button>
         {todosResueltos
           ?<button onClick={finalizarRecepcion} disabled={finalizando} style={{ flex:1, background:"#15803d", color:"#fff", fontWeight:800, fontSize:16, padding:"19px 0", borderRadius:18, border:"none", cursor:"pointer", opacity:finalizando?0.6:1 }}>{finalizando?"...":"✅ Finalizar"}</button>

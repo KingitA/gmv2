@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Search, Package, Pencil, X, Minus, Plus } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label"
 import { buscarArticulosDeposito, actualizarDatosArticulo, ajustarStock } from "@/lib/actions/deposito"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { toast } from "sonner"
+import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
+import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 
 type Articulo = {
   id: string
@@ -66,6 +68,24 @@ export default function DepositoPage() {
     setAjusteTipo("correccion")
     setAjusteMotivo("")
   }
+
+  // Escaneo con el botón físico de la colectora (keyboard-wedge): busca el código con
+  // el motor completo y, si hay match, abre directamente el artículo para editar.
+  const onScanCodigo = useCallback(async (code: string) => {
+    setQuery(code)
+    try {
+      const data = await buscarArticulosDeposito(code) as Articulo[]
+      if (data && data.length > 0) {
+        scanOk(); setResults(data); openArticulo(data[0])
+      } else {
+        scanError(); toast.error(`No se encontró el código ${code}`)
+      }
+    } catch {
+      scanError(); toast.error("Error de conexión")
+    }
+  }, [])
+
+  useBarcodeScanner({ onScan: onScanCodigo })
 
   const guardarDatos = async () => {
     if (!selected) return
