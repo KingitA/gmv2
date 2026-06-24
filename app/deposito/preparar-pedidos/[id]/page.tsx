@@ -138,6 +138,12 @@ export default function PickingPage() {
 
   const showToast = (msg: string, tipo: "ok"|"err") => { setToast({msg,tipo}); setTimeout(()=>setToast(null),3000) }
 
+  // Aplica el recálculo en vivo de las cantidades bonificadas devuelto por el endpoint.
+  const mergeBonif = (i: DetallePedido, bonif: any[]): DetallePedido => {
+    const b = bonif?.find((x: any) => x.id === i.id)
+    return b ? { ...i, cantidad: b.cantidad, cantidad_preparada: b.cantidad, estado_item: "COMPLETO" } : i
+  }
+
   const buscarArticulo = useCallback((q: string) => {
     if (!q || q.length < 2) { setResultados([]); return }
     clearTimeout(searchTimeout.current)
@@ -167,7 +173,11 @@ export default function PickingPage() {
       })
       const data = await r.json()
       if (data.error) { showToast(data.error, "err"); return }
-      setItems(prev => prev.map(i => i.id === itemActivo.id ? { ...i, cantidad_preparada: cantidad, estado_item: data.estado_item } : i))
+      setItems(prev => prev.map(i =>
+        i.id === itemActivo.id
+          ? { ...i, cantidad_preparada: cantidad, estado_item: data.estado_item }
+          : mergeBonif(i, data.bonificados_actualizados)
+      ))
       showToast(esFaltante ? "Marcado como faltante" : "✓ Guardado", "ok")
       setArticuloSel(null); setItemActivo(null); setCantidadInput("")
     } catch { showToast("Error al guardar", "err") }
@@ -183,7 +193,11 @@ export default function PickingPage() {
       })
       const data = await r.json()
       if (!data.error) {
-        setItems(prev => prev.map(i => i.id === item.id ? { ...i, cantidad_preparada: 0, estado_item: "FALTANTE" } : i))
+        setItems(prev => prev.map(i =>
+          i.id === item.id
+            ? { ...i, cantidad_preparada: 0, estado_item: "FALTANTE" }
+            : mergeBonif(i, data.bonificados_actualizados)
+        ))
         showToast("Marcado como faltante", "ok")
       }
     } finally { setSaving(false) }
@@ -198,7 +212,11 @@ export default function PickingPage() {
       })
       const data = await r.json()
       if (!data.error) {
-        setItems(prev => prev.map(i => i.id === item.id ? { ...i, cantidad_preparada: 0, estado_item: "PENDIENTE" } : i))
+        setItems(prev => prev.map(i =>
+          i.id === item.id
+            ? { ...i, cantidad_preparada: 0, estado_item: "PENDIENTE" }
+            : mergeBonif(i, data.bonificados_actualizados)
+        ))
         showToast("Devuelto a pendientes", "ok")
       }
     } finally { setSaving(false) }
@@ -207,6 +225,12 @@ export default function PickingPage() {
   const finalizarPicking = async () => {
     const pendientes = items.filter(i => !i.estado_item || i.estado_item === "PENDIENTE").length
     if (pendientes > 0) { showToast(`Faltan ${pendientes} artículos por resolver`, "err"); return }
+    // Resumen de mercadería bonificada antes de finalizar
+    const bonif = items.filter(i => i.es_bonificado && (i.cantidad ?? 0) > 0)
+    if (bonif.length > 0) {
+      const lineas = bonif.map(b => `• ${b.cantidad} u — ${b.articulos?.descripcion ?? ""}`).join("\n")
+      if (!confirm(`MERCADERÍA BONIFICADA a entregar:\n\n${lineas}\n\n¿Finalizar la preparación?`)) return
+    }
     setFinalizando(true)
     try {
       const r = await fetch("/api/deposito/picking/item", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ pedido_id: pedidoId }) })
