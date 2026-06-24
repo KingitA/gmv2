@@ -58,21 +58,21 @@ function SwipeItemOC({ item, onConfirm, saving, bgReveal, colorReveal, labelReve
         <span style={{ color:colorReveal, fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.05em" }}>{labelReveal}</span>
       </button>
       <div onClick={handleCardClick} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
-        style={{ position:"relative", background:bg, border:`1.5px solid ${border}`, borderRadius:16, padding:"15px 16px", display:"flex", alignItems:"center", gap:14, transform:`translateX(-${translateX}px)`, transition:dx===0?"transform 0.25s cubic-bezier(.25,.46,.45,.94)":"none", userSelect:"none" }}>
-        <div style={{ width:10, height:10, borderRadius:"50%", background:dot, flexShrink:0 }} />
+        style={{ position:"relative", background:bg, border:`1.5px solid ${border}`, borderRadius:16, padding:"18px 16px", display:"flex", alignItems:"center", gap:14, transform:`translateX(-${translateX}px)`, transition:dx===0?"transform 0.25s cubic-bezier(.25,.46,.45,.94)":"none", userSelect:"none" }}>
+        <div style={{ width:12, height:12, borderRadius:"50%", background:dot, flexShrink:0 }} />
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ color:C.text, fontWeight:700, fontSize:15, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.articulos?.descripcion || item.articulo_id}</div>
-          <div style={{ color:C.light, fontSize:12, fontFamily:"monospace", marginTop:3 }}>{item.articulos?.sku}</div>
+          <div style={{ color:C.text, fontWeight:700, fontSize:20, lineHeight:1.25, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.articulos?.descripcion || item.articulo_id}</div>
+          <div style={{ color:C.light, fontSize:14, fontFamily:"monospace", marginTop:4 }}>{item.articulos?.sku}</div>
         </div>
         <div style={{ textAlign:"right", flexShrink:0 }}>
           {ok ? <>
-            <div style={{ color:C.green, fontWeight:800, fontSize:20 }}>{item.cantidad_fisica}</div>
-            <div style={{ color:C.light, fontSize:12 }}>de {item.cantidad_oc}</div>
+            <div style={{ color:C.green, fontWeight:800, fontSize:24 }}>{item.cantidad_fisica}</div>
+            <div style={{ color:C.light, fontSize:14 }}>de {item.cantidad_oc}</div>
           </> : faltante ? (
-            <div style={{ color:C.red, fontWeight:700, fontSize:13 }}>FALTANTE</div>
+            <div style={{ color:C.red, fontWeight:700, fontSize:15 }}>FALTANTE</div>
           ) : <>
-            <div style={{ color:C.text, fontWeight:800, fontSize:20 }}>{item.cantidad_oc}</div>
-            <div style={{ color:C.light, fontSize:12 }}>esperadas</div>
+            <div style={{ color:C.text, fontWeight:800, fontSize:24 }}>{item.cantidad_oc}</div>
+            <div style={{ color:C.light, fontSize:14 }}>esperadas</div>
           </>}
         </div>
       </div>
