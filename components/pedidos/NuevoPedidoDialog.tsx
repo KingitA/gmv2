@@ -211,6 +211,20 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       if (listaPerfPlus  !== (c?.lista_perf_plus_id || "")) overrides.lista_perf_plus_pedido_id = listaPerfPlus  || undefined
       if (metodoPerfPlus !== (c?.metodo_perf_plus  || ""))  overrides.metodo_perf_plus_pedido   = metodoPerfPlus || undefined
 
+      // Descuentos por segmento del pedido (inline): aplican a ESTE pedido tanto si
+      // se guardan al cliente como si son "solo este pedido".
+      {
+        const bonifs: Array<{ tipo: string; segmento: string; porcentaje: number }> = []
+        const segs = ["limpieza_bazar", "perf0", "perf_plus"]
+        for (const seg of segs) {
+          for (const tipo of BONIF_TIPOS) {
+            const pct = bonifGrid[`${seg}__${tipo.key}`] || 0
+            if (pct > 0) bonifs.push({ tipo: tipo.key, segmento: seg, porcentaje: pct })
+          }
+        }
+        if (bonifs.length > 0) overrides.bonificaciones_pedido = bonifs
+      }
+
       if (saveMode === "permanent") {
         const upd: any = {}
         if (metodo      !== (c?.metodo_facturacion  || ""))  upd.metodo_facturacion = metodo || null

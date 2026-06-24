@@ -489,6 +489,9 @@ export async function createPedido(data: {
   metodo_perf_plus_pedido?: string
   // Condiciones por proveedor (Feature 1) — override por pedido de la mercadería de un proveedor
   condiciones_proveedor?: CondicionProveedor[]
+  // Descuentos por segmento cargados en el pedido (general/viajante/mercadería).
+  // Si vienen, se usan en lugar de las bonificaciones permanentes del cliente.
+  bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
 }) {
   const supabase = await createClient()
 
@@ -514,17 +517,24 @@ export async function createPedido(data: {
   // Cargar todas las reglas de fórmulas una sola vez para el pedido
   const formulasReglas = await fetchFormulasReglas(supabase)
 
-  // Bonificaciones general + viajante del cliente (escalonadas en el neto por línea)
-  const { data: bonifData } = await supabase
-    .from("bonificaciones")
-    .select("tipo, segmento, porcentaje")
-    .eq("cliente_id", data.cliente_id)
-    .eq("activo", true)
-    .in("tipo", ["general", "viajante"])
+  // Bonificaciones general + viajante (escalonadas en el neto por línea).
+  // Prioridad: las cargadas en el pedido (inline) > las permanentes del cliente.
+  let bonifData: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
+  if (data.bonificaciones_pedido && data.bonificaciones_pedido.length > 0) {
+    bonifData = data.bonificaciones_pedido
+  } else {
+    const { data: bonifTabla } = await supabase
+      .from("bonificaciones")
+      .select("tipo, segmento, porcentaje")
+      .eq("cliente_id", data.cliente_id)
+      .eq("activo", true)
+      .in("tipo", ["general", "viajante"])
+    bonifData = bonifTabla ?? []
+  }
   const bonifGeneral: Array<{ segmento: string | null; porcentaje: number }> =
-    (bonifData ?? []).filter((b: any) => b.tipo === "general")
+    bonifData.filter((b: any) => b.tipo === "general")
   const bonificacionesViajante: Array<{ segmento: string | null; porcentaje: number }> =
-    (bonifData ?? []).filter((b: any) => b.tipo === "viajante")
+    bonifData.filter((b: any) => b.tipo === "viajante")
 
   // Condiciones por proveedor: del cliente + overrides del formulario (este pedido)
   const condicionesProveedor = mergeCondicionesProveedor(
