@@ -364,7 +364,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   return (
     <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v) }}>
-      <DialogContent className="sm:max-w-[560px] max-h-[90vh] flex flex-col overflow-hidden p-0">
+      <DialogContent className="sm:max-w-[800px] w-[95vw] max-h-[90vh] flex flex-col overflow-hidden p-0">
         {/* ── Título fijo ── */}
         <div className="px-6 pt-6 pb-3 shrink-0 border-b">
           <DialogTitle className="text-base font-semibold">Nuevo Pedido</DialogTitle>
@@ -495,8 +495,11 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
 
               {/* Toggles independientes: cada dimensión General o Por segmento */}
               {(() => {
-                const metodoGeneralLabel = METODOS.find(m => m.value === (metodo || (cliente as any)?.metodo_facturacion))?.label ?? "Final (Mixto)"
-                const listaGeneralNombre = listas.find(l => l.id === (listaId || (cliente as any)?.lista_precio_id))?.nombre ?? "Del cliente"
+                const metodoGeneralVal = metodo || (cliente as any)?.metodo_facturacion || "Final"
+                const METODO_CORTO: Record<string, string> = { "Factura": "Factura", "Final": "Mixto", "Presupuesto": "Presupuesto" }
+                const metodoHeredarLabel = `Del cliente (${METODO_CORTO[metodoGeneralVal] ?? metodoGeneralVal})`
+                const listaGeneralNombre = listas.find(l => l.id === (listaId || (cliente as any)?.lista_precio_id))?.nombre ?? ""
+                const listaHeredarLabel = listaGeneralNombre ? `Del cliente (${listaGeneralNombre})` : "Del cliente"
                 const SegToggle = ({ on, set }: { on: boolean; set: (b: boolean) => void }) => (
                   <div className="flex rounded-md border border-slate-300 overflow-hidden shrink-0 text-[11px]">
                     <button type="button" onClick={() => set(false)} className={`px-2 py-1.5 font-medium ${!on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>General</button>
@@ -567,7 +570,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                                   <Select value={getSegValue(seg.metodoState) || "__heredar__"} onValueChange={v => setSegValue(seg.metodoState, v === "__heredar__" ? "" : v)}>
                                     <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="__heredar__">{metodoGeneralLabel} (general)</SelectItem>
+                                      <SelectItem value="__heredar__">{metodoHeredarLabel}</SelectItem>
                                       {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
                                     </SelectContent>
                                   </Select>
@@ -579,7 +582,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                                   <Select value={getSegValue(seg.listaState) || "__heredar__"} onValueChange={v => setSegValue(seg.listaState, v === "__heredar__" ? "" : v)}>
                                     <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="__heredar__">{listaGeneralNombre} (general)</SelectItem>
+                                      <SelectItem value="__heredar__">{listaHeredarLabel}</SelectItem>
                                       {listas.filter(l => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
                                     </SelectContent>
                                   </Select>
