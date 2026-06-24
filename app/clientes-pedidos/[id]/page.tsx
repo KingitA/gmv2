@@ -56,6 +56,7 @@ export default function PedidoEditPage() {
   const [qtyBonif, setQtyBonif] = useState(0)
   const [bonifPct, setBonifPct] = useState(0)
   const [recalcBonif, setRecalcBonif] = useState(false)
+  const [showBonifPanel, setShowBonifPanel] = useState(false)
   const [headerOpen, setHeaderOpen] = useState(true)
   const [filterQuery, setFilterQuery] = useState("")
   const [showAddPanel, setShowAddPanel] = useState(false)
@@ -500,8 +501,22 @@ export default function PedidoEditPage() {
           )}
         </div>
 
-        {/* Banner + artículos bonificados (mercadería por monto) */}
+        {/* Mercadería bonificada — el panel SOLO aparece si el pedido lleva
+            bonificados, o si se abre manualmente para agregar (no confunde en
+            pedidos sin mercadería bonificada). */}
         {(() => {
+          const hasBonif = items.some(i => i.es_bonificado)
+          if (!hasBonif && !showBonifPanel) {
+            return (
+              <button
+                type="button"
+                onClick={() => setShowBonifPanel(true)}
+                className="text-xs font-medium text-amber-700 hover:text-amber-800 hover:underline self-start flex items-center gap-1"
+              >
+                <Package className="h-3.5 w-3.5" /> Agregar mercadería bonificada
+              </button>
+            )
+          }
           const bt = calcBonifTotals()
           return (
           <>

@@ -78,6 +78,29 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   const [saveMode, setSaveMode]     = useState<"temp" | "permanent" | null>(null)
   const [bonifMercaderia, setBonifMercaderia] = useState<any[]>([])
 
+  // Mercadería bonificada: artículos a regalar elegidos para este pedido
+  const [mercArticulos, setMercArticulos] = useState<Array<{ id: string; descripcion: string; sku: string }>>([])
+  const [mercQuery, setMercQuery]   = useState("")
+  const [mercResults, setMercResults] = useState<any[]>([])
+
+  // % de mercadería bonificada cargado en la grilla (cualquier segmento)
+  const mercPct = Math.max(0, ...Object.entries(bonifGrid)
+    .filter(([k]) => k.endsWith("__mercaderia"))
+    .map(([, v]) => Number(v) || 0))
+
+  const buscarMercArticulo = useCallback(async (term: string) => {
+    setMercQuery(term)
+    if (term.trim().length < 2) { setMercResults([]); return }
+    const { searchProductos } = await import("@/lib/actions/productos")
+    setMercResults((await searchProductos(term)) || [])
+  }, [])
+
+  const addMercArticulo = (p: any) => {
+    setMercArticulos(prev => prev.some(a => a.id === p.id) ? prev : [...prev, { id: p.id, descripcion: p.descripcion || "", sku: p.sku || "" }])
+    setMercQuery(""); setMercResults([])
+  }
+  const removeMercArticulo = (id: string) => setMercArticulos(prev => prev.filter(a => a.id !== id))
+
   const metodoPorSegmento = metodo === "PorSegmento"
   const mostrarSegmentos  = metodoPorSegmento || listaPorSegmento
 
@@ -194,6 +217,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     setBonifGridOriginal({})
     setSaveMode(null)
     setBonifMercaderia([])
+    setMercArticulos([]); setMercQuery(""); setMercResults([])
   }
 
   const handleSubmit = async () => {
@@ -254,7 +278,14 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       }
     }
 
-    onAddToQueue(cliente.id, clienteNombre, files, conditionsChanged ? overrides : undefined)
+    // Mercadería bonificada (artículos elegidos) — se pasa siempre que haya % y artículos,
+    // independientemente de si cambiaron las condiciones.
+    if (mercArticulos.length > 0 && mercPct > 0) {
+      overrides.mercaderia_bonificada = { pct: mercPct, articulo_ids: mercArticulos.map(a => a.id) }
+    }
+
+    const hayOverrides = conditionsChanged || !!overrides.mercaderia_bonificada
+    onAddToQueue(cliente.id, clienteNombre, files, hayOverrides ? overrides : undefined)
     reset()
     onOpenChange(false)
   }
@@ -535,6 +566,55 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Mercadería bonificada: elegir artículos a regalar (aparece si hay % de mercadería) */}
+              {mercPct > 0 && (
+                <div className="rounded-lg border border-green-200 bg-green-50/60 px-3 py-3 space-y-2">
+                  <p className="text-sm font-semibold text-green-800">
+                    Mercadería bonificada ({mercPct}%)
+                  </p>
+                  <p className="text-[11px] text-green-700">
+                    Elegí qué artículos regalar. Las cantidades se calculan por monto (% × neto del pedido,
+                    repartido parejo) y se reajustan al preparar en depósito.
+                  </p>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-500" />
+                    <Input
+                      placeholder="Buscar artículo a bonificar..."
+                      className="pl-8 h-9 text-sm"
+                      value={mercQuery}
+                      onChange={e => buscarMercArticulo(e.target.value)}
+                    />
+                    {mercResults.length > 0 && (
+                      <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg mt-1 z-50 max-h-52 overflow-auto">
+                        {mercResults.map((p: any) => (
+                          <button
+                            type="button"
+                            key={p.id}
+                            onClick={() => addMercArticulo(p)}
+                            className="w-full text-left px-3 py-2 hover:bg-green-50 border-b border-slate-100 last:border-0 text-xs"
+                          >
+                            <span className="font-mono text-slate-400 mr-2">{p.sku ?? ""}</span>
+                            <span className="font-medium text-slate-700">{p.descripcion}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {mercArticulos.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {mercArticulos.map(a => (
+                        <span key={a.id} className="inline-flex items-center gap-1 text-[11px] bg-white border border-green-300 text-green-800 rounded px-2 py-0.5">
+                          {a.descripcion}
+                          <button type="button" onClick={() => removeMercArticulo(a.id)} className="text-green-500 hover:text-green-700">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

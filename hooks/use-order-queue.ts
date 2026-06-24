@@ -19,6 +19,8 @@ export type PedidoOverrides = {
   metodo_perf_plus_pedido?: string
   // Descuentos por segmento cargados en el pedido (general/viajante/mercadería)
   bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
+  // Mercadería bonificada elegida al crear el pedido (artículos a regalar + %)
+  mercaderia_bonificada?: { pct: number; articulo_ids: string[] }
 }
 
 export type QueueItem = {

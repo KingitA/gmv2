@@ -492,6 +492,10 @@ export async function createPedido(data: {
   // Descuentos por segmento cargados en el pedido (general/viajante/mercadería).
   // Si vienen, se usan en lugar de las bonificaciones permanentes del cliente.
   bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
+  // Mercadería bonificada elegida al crear el pedido: artículos a regalar + % .
+  // Las unidades se calculan por monto (% × neto) repartido parejo, y luego se
+  // reajustan en vivo al preparar en depósito.
+  mercaderia_bonificada?: { pct: number; articulo_ids: string[] }
 }) {
   const supabase = await createClient()
 
@@ -814,6 +818,27 @@ export async function createPedido(data: {
     console.log("Account balance updated successfully")
   } catch (ctaError) {
     console.error("Non-critical error updating account balance:", ctaError)
+  }
+
+  // ── Mercadería bonificada elegida al crear el pedido ──────────────────────
+  // Monto a bonificar = % × total (sin bonificados), repartido parejo entre los
+  // artículos elegidos. Crea las líneas es_bonificado; las cantidades se
+  // reajustan en vivo al preparar el pedido en depósito.
+  const merc = data.mercaderia_bonificada
+  if (merc && merc.pct > 0 && merc.articulo_ids.length > 0) {
+    try {
+      await supabase.from("pedidos").update({ bonif_mercaderia_pct: merc.pct }).eq("id", pedido.id)
+      const monto = total * merc.pct / 100
+      const share = monto / merc.articulo_ids.length
+      for (const artId of merc.articulo_ids) {
+        const preview = await previewPrecioArticulo(data.cliente_id, artId, {})
+        const precio = preview.precio || 0
+        const units = precio > 0 ? Math.round(share / precio) : 0
+        if (units > 0) await agregarItemBonificado(pedido.id, artId, units)
+      }
+    } catch (bonifErr) {
+      console.error("Error creando mercadería bonificada:", bonifErr)
+    }
   }
 
   revalidatePath("/clientes-pedidos")
