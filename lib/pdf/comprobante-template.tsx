@@ -263,13 +263,16 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
           {/* ── Encabezado: (empresa | cliente en PRES/REV) | tipo | número ── */}
           <View style={s.encTop}>
             {esPresRev ? (
-              /* Presupuesto/Reversa: NO lleva datos de la empresa. En su lugar, el cliente. */
+              /* Presupuesto/Reversa: NO lleva datos de la empresa. Encabezado ÚNICO del cliente
+                 (la sección "DATOS DEL CLIENTE / DE GESTIÓN" de abajo se oculta para no duplicar). */
               <View style={s.emBlock}>
                 <Text style={s.emNombre}>{cliente.nombre_razon_social ?? cliente.nombre ?? '—'}</Text>
-                <View style={s.emRow}><Text style={s.emLbl}>CUIT/DNI:</Text><Text style={s.emVal}>{cliente.cuit ?? '—'}</Text></View>
-                <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{cliente.condicion_iva ?? '—'}</Text></View>
-                <View style={s.emRow}><Text style={s.emLbl}>Domicilio:</Text><Text style={s.emVal}>{[cliente.direccion, cliente.localidad].filter(Boolean).join(', ') || '—'}</Text></View>
-                {cliente.telefono && <View style={s.emRow}><Text style={s.emLbl}>Teléfono:</Text><Text style={s.emVal}>{cliente.telefono}</Text></View>}
+                <View style={s.emRow}><Text style={s.emLbl}>Dirección:</Text><Text style={s.emVal}>{cliente.direccion ?? '—'}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>Localidad:</Text><Text style={s.emVal}>{cliente.localidad ?? '—'}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>Forma pago:</Text><Text style={s.emVal}>{cliente.condicion_pago ?? 'Cuenta Corriente'}</Text></View>
+                {pedido?.condicion_entrega && (
+                  <View style={s.emRow}><Text style={s.emLbl}>Entrega:</Text><Text style={s.emVal}>{condEntregaMap[pedido.condicion_entrega] ?? pedido.condicion_entrega}</Text></View>
+                )}
               </View>
             ) : (
               /* Empresa (solo comprobantes fiscales) */
@@ -332,7 +335,8 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
             </View>
           )}
 
-          {/* ── Cliente ── */}
+          {/* ── Cliente ── (en PRES/REV se omite: ya va en el encabezado único de arriba) */}
+          {!esPresRev && (
           <View style={s.encCli}>
             <View style={s.cliCol}>
               <Text style={s.cliTit}>DATOS DEL CLIENTE</Text>
@@ -351,6 +355,7 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
               )}
             </View>
           </View>
+          )}
 
           {/* ── Condiciones rápidas ── */}
           <View style={s.encCond}>
