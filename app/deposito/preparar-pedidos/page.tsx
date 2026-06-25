@@ -85,7 +85,7 @@ export default function PrepararPedidosPage() {
         event: "UPDATE",
         schema: "public",
         table: "pedidos",
-        filter: "estado=in.(pendiente,en_preparacion)",
+        filter: "estado=in.(pendiente,en_preparacion,impreso)",
       }, (payload: any) => {
         const updated = payload.new
         if (!updated) return

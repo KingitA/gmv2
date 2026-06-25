@@ -19,7 +19,7 @@ export async function GET() {
           articulos(id, sku, descripcion, ean13, proveedores(nombre))
         )
       `)
-      .in("estado", ["pendiente", "en_preparacion"])
+      .in("estado", ["pendiente", "en_preparacion", "impreso"])
       .neq("estado", "eliminado")
       .order("created_at", { ascending: true })
 
