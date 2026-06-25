@@ -154,6 +154,85 @@ export async function getArticulosListado(
   }
 }
 
+const SELECT_LISTADO = "id, sku, descripcion, ean13, codigo_bulto, orden_deposito, stock_actual, unidades_por_bulto, unidad_de_medida, marcas!marca_id(descripcion)"
+const mapListado = (a: any) => a ? ({ ...a, marca: (a.marcas as any)?.descripcion ?? null, marcas: undefined }) : null
+
+// Trae un artículo por id con el mismo shape del listado (para restaurar la sesión tras recarga).
+export async function getArticuloPorId(id: string): Promise<{ data: any | null }> {
+  const sb = createAdminClient()
+  const { data } = await sb.from("articulos").select(SELECT_LISTADO).eq("id", id).eq("activo", true).single()
+  return { data: mapListado(data) }
+}
+
+/**
+ * Devuelve el artículo adyacente (siguiente/anterior) en el orden de depósito,
+ * usando un cursor sobre la clave estable (orden_deposito ASC nulls last, descripcion ASC, id ASC).
+ * No depende de tener la lista en memoria → retomable desde cualquier punto.
+ * Sólo usa filtros numéricos/null (no mete descripcion en strings de PostgREST, que rompen con comas/paréntesis).
+ */
+export async function getArticuloAdyacente(
+  actual: { orden_deposito: number | null; descripcion: string; id: string },
+  dir: "next" | "prev",
+  filtros: { proveedorId?: string; categoria?: string }
+): Promise<{ data: any | null }> {
+  const sb = createAdminClient()
+  const base = () => {
+    let qb = sb.from("articulos").select(SELECT_LISTADO).eq("activo", true)
+    if (filtros.proveedorId) qb = qb.eq("proveedor_id", filtros.proveedorId)
+    if (filtros.categoria) qb = qb.ilike("categoria", filtros.categoria)
+    return qb
+  }
+  const cmpAsc = (x: any, y: any) =>
+    x.descripcion < y.descripcion ? -1 : x.descripcion > y.descripcion ? 1 : (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)
+
+  const o = actual.orden_deposito
+
+  // Bucket = artículos con el mismo orden_deposito (o todos los null), ordenados por (descripcion, id).
+  const cargarBucket = async (): Promise<any[]> => {
+    let qb = base()
+    qb = o == null ? qb.is("orden_deposito", null) : qb.eq("orden_deposito", o)
+    const { data } = await qb.order("descripcion", { ascending: true }).order("id", { ascending: true }).limit(1000)
+    return (data || []).sort(cmpAsc)
+  }
+
+  if (dir === "next") {
+    const bucket = await cargarBucket()
+    const idx = bucket.findIndex((a) => a.id === actual.id)
+    if (idx >= 0 && idx < bucket.length - 1) return { data: mapListado(bucket[idx + 1]) }
+    if (o != null) {
+      // siguiente bucket (orden_deposito mayor)
+      const { data: sig } = await base()
+        .gt("orden_deposito", o)
+        .order("orden_deposito", { ascending: true, nullsFirst: false })
+        .order("descripcion", { ascending: true }).order("id", { ascending: true }).limit(1)
+      if (sig && sig[0]) return { data: mapListado(sig[0]) }
+      // cola de nulls
+      const { data: nulls } = await base()
+        .is("orden_deposito", null)
+        .order("descripcion", { ascending: true }).order("id", { ascending: true }).limit(1)
+      if (nulls && nulls[0]) return { data: mapListado(nulls[0]) }
+    }
+    return { data: null }
+  } else {
+    const bucket = await cargarBucket()
+    const idx = bucket.findIndex((a) => a.id === actual.id)
+    if (idx > 0) return { data: mapListado(bucket[idx - 1]) }
+    if (o == null) {
+      // antes de la cola de nulls está el último con orden
+      const { data } = await base()
+        .not("orden_deposito", "is", null)
+        .order("orden_deposito", { ascending: false }).order("descripcion", { ascending: false }).order("id", { ascending: false }).limit(1)
+      if (data && data[0]) return { data: mapListado(data[0]) }
+    } else {
+      const { data } = await base()
+        .lt("orden_deposito", o)
+        .order("orden_deposito", { ascending: false }).order("descripcion", { ascending: false }).order("id", { ascending: false }).limit(1)
+      if (data && data[0]) return { data: mapListado(data[0]) }
+    }
+    return { data: null }
+  }
+}
+
 export async function ajustarStock(
   articuloId: string,
   cantidad: number,

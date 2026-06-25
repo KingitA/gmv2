@@ -73,7 +73,15 @@ export default function DepositoLayout({ children }: { children: React.ReactNode
       <header style={S.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {!isHome && (
-            <Link href={backHref} style={S.backBtn}>‹</Link>
+            <button
+              onClick={() => {
+                // Volver un paso en el historial (cierra sub-vistas internas como artículo/escáner
+                // sin expulsar a la principal). Si no hay historial propio, cae a la ruta padre.
+                if (typeof window !== "undefined" && window.history.length > 1) router.back()
+                else router.push(backHref)
+              }}
+              style={{ ...S.backBtn, cursor: "pointer" }}
+            >‹</button>
           )}
           <div>
             <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase" as const, letterSpacing: "0.12em" }}>
