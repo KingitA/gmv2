@@ -260,23 +260,34 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
               <Text style={s.previewBannerText}>VISTA PREVIA — SIN VALIDEZ FISCAL · NO EMITIDO · NO ENVIADO A ARCA</Text>
             </View>
           )}
-          {/* ── Encabezado: empresa | tipo | número ── */}
+          {/* ── Encabezado: (empresa | cliente en PRES/REV) | tipo | número ── */}
           <View style={s.encTop}>
-            {/* Empresa */}
-            <View style={s.emBlock}>
-              {empresa.logo_url
-                ? <Image style={s.emLogo} src={empresa.logo_url} />
-                : <><Text style={s.emNombre}>{empresa.razon_social}</Text><Text style={s.emRubro}>LIMPIEZA · BAZAR · PERFUMERÍA</Text></>
-              }
-              <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{empresa.cuit}</Text></View>
-              <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{empresa.condicion_iva ?? 'Responsable Inscripto'}</Text></View>
-              <View style={s.emRow}><Text style={s.emLbl}>Ing. Brutos:</Text><Text style={s.emVal}>{empresa.iibb ?? 'Convenio Multilateral — SIFERE'}</Text></View>
-              {empresa.inicio_actividades && (
-                <View style={s.emRow}><Text style={s.emLbl}>Inicio Act.:</Text><Text style={s.emVal}>{fmtFechaISO(empresa.inicio_actividades)}</Text></View>
-              )}
-              <View style={s.emRow}><Text style={s.emLbl}>Domicilio:</Text><Text style={s.emVal}>{empresa.direccion ?? '—'}</Text></View>
-              <View style={s.emRow}><Text style={s.emLbl}>Teléfono:</Text><Text style={s.emVal}>{empresa.telefono ?? '—'} · Pto. Vta.: {pto}</Text></View>
-            </View>
+            {esPresRev ? (
+              /* Presupuesto/Reversa: NO lleva datos de la empresa. En su lugar, el cliente. */
+              <View style={s.emBlock}>
+                <Text style={s.emNombre}>{cliente.nombre_razon_social ?? cliente.nombre ?? '—'}</Text>
+                <View style={s.emRow}><Text style={s.emLbl}>CUIT/DNI:</Text><Text style={s.emVal}>{cliente.cuit ?? '—'}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{cliente.condicion_iva ?? '—'}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>Domicilio:</Text><Text style={s.emVal}>{[cliente.direccion, cliente.localidad].filter(Boolean).join(', ') || '—'}</Text></View>
+                {cliente.telefono && <View style={s.emRow}><Text style={s.emLbl}>Teléfono:</Text><Text style={s.emVal}>{cliente.telefono}</Text></View>}
+              </View>
+            ) : (
+              /* Empresa (solo comprobantes fiscales) */
+              <View style={s.emBlock}>
+                {empresa.logo_url
+                  ? <Image style={s.emLogo} src={empresa.logo_url} />
+                  : <><Text style={s.emNombre}>{empresa.razon_social}</Text><Text style={s.emRubro}>LIMPIEZA · BAZAR · PERFUMERÍA</Text></>
+                }
+                <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{empresa.cuit}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{empresa.condicion_iva ?? 'Responsable Inscripto'}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>Ing. Brutos:</Text><Text style={s.emVal}>{empresa.iibb ?? 'Convenio Multilateral — SIFERE'}</Text></View>
+                {empresa.inicio_actividades && (
+                  <View style={s.emRow}><Text style={s.emLbl}>Inicio Act.:</Text><Text style={s.emVal}>{fmtFechaISO(empresa.inicio_actividades)}</Text></View>
+                )}
+                <View style={s.emRow}><Text style={s.emLbl}>Domicilio:</Text><Text style={s.emVal}>{empresa.direccion ?? '—'}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>Teléfono:</Text><Text style={s.emVal}>{empresa.telefono ?? '—'} · Pto. Vta.: {pto}</Text></View>
+              </View>
+            )}
 
             {/* Tipo (letra en caja) */}
             <View style={s.tipoBox}>
@@ -418,11 +429,14 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
             <View style={s.totObs}>
               <Text style={s.totObsTit}>OBSERVACIONES</Text>
               <Text style={s.totObsText}>{comp.observaciones || '—'}</Text>
-              <Text style={s.totObsLegal}>
-                {esMonotrib
-                  ? 'El crédito fiscal discriminado en el presente comprobante sólo podrá ser computado a efectos del Régimen de Sostenimiento e Inclusión Fiscal para pequeños contribuyentes de la Ley Nro. 27618'
-                  : 'Crédito fiscal computable solo para Resp. Inscriptos en IVA (RG ARCA 1415). QR conforme RG 4892/2020.'}
-              </Text>
+              {/* Leyenda fiscal: solo comprobantes fiscales (no presupuesto/reversa) */}
+              {!esPresRev && (
+                <Text style={s.totObsLegal}>
+                  {esMonotrib
+                    ? 'El crédito fiscal discriminado en el presente comprobante sólo podrá ser computado a efectos del Régimen de Sostenimiento e Inclusión Fiscal para pequeños contribuyentes de la Ley Nro. 27618'
+                    : 'Crédito fiscal computable solo para Resp. Inscriptos en IVA (RG ARCA 1415). QR conforme RG 4892/2020.'}
+                </Text>
+              )}
             </View>
             <View style={s.totNums}>
               {esFactA ? (
@@ -464,9 +478,11 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
           )}
 
           <View style={s.pie}>
+            {/* Pie legal: solo comprobantes fiscales. Presupuesto/Reversa sin datos de empresa ni ARCA. */}
             <Text style={s.pieLegal}>
-              Emitido conforme RG ARCA 1415{comp.cae ? ` · CAE: ${comp.cae}` : ''}.{'\n'}
-              Original para el cliente. {empresa.email ?? ''} · {empresa.telefono ?? ''}
+              {esPresRev
+                ? 'Presupuesto — documento no válido como factura.'
+                : `Emitido conforme RG ARCA 1415${comp.cae ? ` · CAE: ${comp.cae}` : ''}.\nOriginal para el cliente. ${empresa.email ?? ''} · ${empresa.telefono ?? ''}`}
             </Text>
             <View style={s.firmaBox}>
               <View style={s.firmaLinea} />
