@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
         )
       `)
       .eq("id", pedido_id)
-      .in("estado", ["pendiente", "en_preparacion"])
+      .in("estado", ["pendiente", "en_preparacion", "impreso"])
       .single()
 
     if (pedidoError || !pedido) {
