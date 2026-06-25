@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
-import { createPedido, type CondicionProveedor } from "@/lib/actions/pedidos"
+import { createPedido, type CondicionProveedor, type CondicionMarca } from "@/lib/actions/pedidos"
 
 export async function getPendingImports() {
     const supabase = await createClient()
@@ -84,6 +84,7 @@ export async function approveImport(
     clienteId: string,
     items: any[],
     condicionesProveedor?: CondicionProveedor[],
+    condicionesMarca?: CondicionMarca[],
 ) {
     const supabase = await createClient()
 
@@ -106,6 +107,7 @@ export async function approveImport(
         items: itemsPedido,
         observaciones: "Aprobado desde importación",
         condiciones_proveedor: condicionesProveedor,
+        condiciones_marca: condicionesMarca,
     })
 
     // Marcar la importación como completada

@@ -14,6 +14,7 @@ import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { createClient } from "@/lib/supabase/client"
+import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION, condRowsToProveedor, condRowsToMarca } from "@/components/pedidos/SegmentacionCondiciones"
 
 // ─── Types ──────────────────────────────────────────────
 interface ReviewItem {
@@ -55,32 +56,42 @@ export default function ImportReviewPage() {
   // Email preview
   const [previewEmailId, setPreviewEmailId] = useState<string | null>(null)
 
-  // Listas especiales por proveedor
+  // Segmentación por proveedor / marca
   const sb = createClient()
-  const [specialProveedores, setSpecialProveedores] = useState<any[]>([])
-  const [especialListaId, setEspecialListaId] = useState<string | null>(null)
-  const [condProvIds, setCondProvIds] = useState<string[]>([])
-  const [specialSearch, setSpecialSearch] = useState("")
+  const [listas, setListas] = useState<any[]>([])
+  const [segmentacion, setSegmentacion] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
 
   useEffect(() => { loadImports(); loadEspecialData() }, [])
 
   async function loadEspecialData() {
-    const lpRes = await sb.from("listas_precio").select("id").eq("codigo", "especial").maybeSingle()
-    setEspecialListaId((lpRes.data as any)?.id || null)
-    const { data: arts } = await sb.from("articulos").select("proveedor_id, proveedores:proveedor_id(nombre)").not("precio_lista_especial", "is", null)
-    const map = new Map<string, string>()
-    for (const a of (arts || []) as any[]) if (a.proveedor_id && a.proveedores?.nombre) map.set(a.proveedor_id, a.proveedores.nombre)
-    setSpecialProveedores(Array.from(map, ([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre)))
+    const { data } = await sb.from("listas_precio").select("id,nombre,codigo").eq("activo", true).order("nombre")
+    setListas(data || [])
   }
 
-  // Carga las listas especiales asignadas a un cliente
+  // Carga la segmentación (proveedor + marca) asignada a un cliente
   async function loadCondProvForCliente(cid: string) {
-    if (!cid) { setCondProvIds([]); return }
-    const { data } = await sb.from("cliente_proveedor_condicion").select("proveedor_id").eq("cliente_id", cid)
-    setCondProvIds((data || []).map((r: any) => r.proveedor_id))
+    if (!cid) { setSegmentacion(EMPTY_SEGMENTACION); return }
+    const [prov, marca] = await Promise.all([
+      sb.from("cliente_proveedor_condicion")
+        .select("proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, proveedores:proveedor_id(nombre)")
+        .eq("cliente_id", cid),
+      sb.from("cliente_marca_condicion")
+        .select("marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, marcas:marca_id(descripcion)")
+        .eq("cliente_id", cid),
+    ])
+    setSegmentacion({
+      proveedor: ((prov.data || []) as any[]).map(r => ({
+        ref_id: r.proveedor_id, nombre: r.proveedores?.nombre || "—",
+        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+        dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+      })),
+      marca: ((marca.data || []) as any[]).map(r => ({
+        ref_id: r.marca_id, nombre: r.marcas?.descripcion || "—",
+        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+        dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+      })),
+    })
   }
-
-  const provNombre = (pid: string) => specialProveedores.find(p => p.id === pid)?.nombre || "—"
 
   const loadImports = async () => {
     setLoading(true)
@@ -233,10 +244,9 @@ export default function ImportReviewPage() {
 
     setProcessing(true)
     try {
-      const condiciones = condProvIds.length && especialListaId
-        ? condProvIds.map(pid => ({ proveedor_id: pid, lista_precio_id: especialListaId, metodo_facturacion: "Factura", dto_general_pct: null, dto_viajante_pct: null, dto_mercaderia_pct: null }))
-        : undefined
-      const result = await approveImport(selectedImport.id, clienteId, items, condiciones)
+      const condProv = segmentacion.proveedor.length ? condRowsToProveedor(segmentacion.proveedor) : undefined
+      const condMarca = segmentacion.marca.length ? condRowsToMarca(segmentacion.marca) : undefined
+      const result = await approveImport(selectedImport.id, clienteId, items, condProv, condMarca)
       toast.success("✅ Pedido creado correctamente")
       setSelectedImport(null)
       loadImports()
@@ -482,46 +492,8 @@ export default function ImportReviewPage() {
                   </div>
                 </div>
 
-                {/* ── Listas especiales por proveedor ── */}
-                <div className="space-y-1.5">
-                  <label className="text-sm font-semibold">Listas especiales</label>
-                  <p className="text-xs text-muted-foreground">
-                    La mercadería de estos proveedores se factura aparte, siempre en factura, con su precio especial. El resto sigue la lista del cliente.
-                  </p>
-                  {condProvIds.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {condProvIds.map(pid => (
-                        <span key={pid} className="inline-flex items-center gap-1.5 border border-teal-300 bg-teal-50 rounded-full pl-3 pr-1.5 py-1 text-xs font-semibold text-teal-700">
-                          Especial {provNombre(pid)}
-                          <button type="button" className="text-red-400 hover:text-red-600" onClick={() => setCondProvIds(prev => prev.filter(x => x !== pid))}>
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {specialProveedores.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No hay artículos con precio especial cargado.</p>
-                  ) : (
-                    <div className="border rounded-md p-2 space-y-2 bg-muted/30">
-                      <Input className="h-8 text-xs" placeholder="Buscar lista especial (Colgate, Kenvue, Haleon...)"
-                        value={specialSearch} onChange={(e) => setSpecialSearch(e.target.value)} />
-                      <div className="max-h-32 overflow-auto space-y-1">
-                        {specialProveedores
-                          .filter(p => !condProvIds.includes(p.id))
-                          .filter(p => localMatch(specialSearch, p.nombre))
-                          .map(p => (
-                            <button key={p.id} type="button"
-                              className="w-full text-left px-2.5 py-1.5 rounded hover:bg-teal-50 text-xs font-medium flex items-center justify-between"
-                              onClick={() => { setCondProvIds(prev => prev.includes(p.id) ? prev : [...prev, p.id]); setSpecialSearch("") }}>
-                              <span>Especial {p.nombre}</span>
-                              <Plus className="h-3.5 w-3.5 text-teal-600" />
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                {/* ── Segmentación por proveedor / marca ── */}
+                <SegmentacionCondiciones listas={listas} value={segmentacion} onChange={setSegmentacion} />
 
                 {/* ── Articles table ── */}
                 <div className="space-y-1.5">

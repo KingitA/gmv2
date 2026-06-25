@@ -116,7 +116,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
   useEffect(() => {
     if (!open) return
     sb.from("listas_precio").select("id,nombre,codigo").eq("activo", true).order("nombre")
-      .then(({ data }) => setListas(data || []))
+      .then(({ data }: any) => setListas(data || []))
   }, [open])
 
   // Inicializar condiciones cuando se selecciona cliente
@@ -166,7 +166,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       .eq("cliente_id", cliente.id)
       .eq("activo", true)
       .in("tipo", ["general", "mercaderia", "viajante"])
-      .then(({ data }) => {
+      .then(({ data }: any) => {
         const grid: Record<string, number> = {}
         let haySeg = false
         for (const b of (data || [])) {
@@ -185,7 +185,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
       .eq("cliente_id", cliente.id)
       .eq("tipo", "mercaderia")
       .eq("activo", true)
-      .then(({ data }) => setBonifMercaderia(data || []))
+      .then(({ data }: any) => setBonifMercaderia(data || []))
   }, [cliente])
 
   const c = cliente as any

@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Save, Loader2, ExternalLink, TrendingUp, TrendingDown, Minus, Trash2, Plus } from "lucide-react"
+import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION } from "@/components/pedidos/SegmentacionCondiciones"
 import Link from "next/link"
 
 function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
@@ -79,11 +80,9 @@ export default function ClienteDetailPage() {
   const [segDescuentos, setSegDescuentos] = useState(false)
   const [ccBalance, setCcBalance] = useState<number | null>(null)
   const [pedidosCliente, setPedidosCliente] = useState<any[]>([])
-  // Listas especiales por proveedor (Colgate / Kenvue / Haleon, etc.)
-  const [specialProveedores, setSpecialProveedores] = useState<any[]>([])  // proveedores con precio especial cargado
-  const [condProv, setCondProv] = useState<any[]>([])                       // proveedores asignados a este cliente
-  const [savingCond, setSavingCond] = useState(false)
-  const [specialSearch, setSpecialSearch] = useState("")
+  // Segmentación por proveedor / marca (lista/facturación/descuentos propios → comprobante aparte)
+  const [segmentacion, setSegmentacion] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
+  const [savingSeg, setSavingSeg] = useState(false)
   const [formData, setFormData] = useState({
     codigo_cliente: "",
     nombre_razon_social: "",
@@ -119,23 +118,14 @@ export default function ClienteDetailPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [clienteRes, vendRes, locRes, listasRes, ccRes, pedRes, provRes] = await Promise.all([
+    const [clienteRes, vendRes, locRes, listasRes, ccRes, pedRes] = await Promise.all([
       supabase.from("clientes").select("*, localidades(nombre, zonas(nombre))").eq("id", id).single(),
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
       supabase.from("localidades").select("*, zonas(nombre)").order("provincia, nombre"),
       supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
       supabase.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", id).maybeSingle(),
       supabase.from("pedidos").select("id, numero_pedido, fecha, estado, total").eq("cliente_id", id).order("fecha", { ascending: false }).limit(10),
-      supabase.from("articulos").select("proveedor_id, proveedores:proveedor_id(nombre)").not("precio_lista_especial", "is", null),
     ])
-    // Proveedores con precio especial cargado (deduplicados) → "Especial <Proveedor>"
-    {
-      const map = new Map<string, string>()
-      for (const a of (provRes.data || []) as any[]) {
-        if (a.proveedor_id && a.proveedores?.nombre) map.set(a.proveedor_id, a.proveedores.nombre)
-      }
-      setSpecialProveedores(Array.from(map, ([pid, nombre]) => ({ id: pid, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre)))
-    }
 
     if (clienteRes.data) {
       const c = clienteRes.data as any
@@ -189,38 +179,60 @@ export default function ClienteDetailPage() {
   }
 
   async function loadCondProv() {
-    const { data } = await supabase
-      .from("cliente_proveedor_condicion")
-      .select("id, proveedor_id, proveedores:proveedor_id(nombre)")
-      .eq("cliente_id", id)
-      .order("created_at")
-    setCondProv(data || [])
+    const [prov, marca] = await Promise.all([
+      supabase.from("cliente_proveedor_condicion")
+        .select("proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, proveedores:proveedor_id(nombre)")
+        .eq("cliente_id", id).order("created_at"),
+      supabase.from("cliente_marca_condicion")
+        .select("marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, marcas:marca_id(descripcion)")
+        .eq("cliente_id", id).order("created_at"),
+    ])
+    setSegmentacion({
+      proveedor: ((prov.data || []) as any[]).map(r => ({
+        ref_id: r.proveedor_id, nombre: r.proveedores?.nombre || "—",
+        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+        dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+      })),
+      marca: ((marca.data || []) as any[]).map(r => ({
+        ref_id: r.marca_id, nombre: r.marcas?.descripcion || "—",
+        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+        dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+      })),
+    })
   }
 
-  // Asigna la lista especial de un proveedor al cliente (siempre en factura)
-  async function addSpecialProv(proveedorId: string) {
-    const especial = listasPrecio.find((l: any) => l.codigo === "especial")
-    if (!especial) { alert("Falta la lista 'Especial' en el sistema (migración)."); return }
-    setSavingCond(true)
-    const { error } = await supabase.from("cliente_proveedor_condicion").upsert({
-      cliente_id:         id,
-      proveedor_id:       proveedorId,
-      lista_precio_id:    especial.id,
-      metodo_facturacion: "Factura",
-      dto_general_pct:    null,
-      dto_viajante_pct:   null,
-      dto_mercaderia_pct: null,
-    }, { onConflict: "cliente_id,proveedor_id" })
-    if (error) { alert(`Error al asignar lista especial: ${error.message}`); setSavingCond(false); return }
-    setSpecialSearch("")
-    await loadCondProv()
-    setSavingCond(false)
-  }
-
-  async function deleteCondProv(condId: string) {
-    const { error } = await supabase.from("cliente_proveedor_condicion").delete().eq("id", condId)
-    if (error) { alert(`Error al quitar: ${error.message}`); return }
-    await loadCondProv()
+  // Guarda la segmentación del cliente (reemplaza todo: borra y reinserta, como los descuentos)
+  async function saveSegmentacion() {
+    setSavingSeg(true)
+    try {
+      const { error: delP } = await supabase.from("cliente_proveedor_condicion").delete().eq("cliente_id", id)
+      if (delP) throw delP
+      const { error: delM } = await supabase.from("cliente_marca_condicion").delete().eq("cliente_id", id)
+      if (delM) throw delM
+      if (segmentacion.proveedor.length > 0) {
+        const rows = segmentacion.proveedor.map(r => ({
+          cliente_id: id, proveedor_id: r.ref_id,
+          lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion,
+          dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+        }))
+        const { error } = await supabase.from("cliente_proveedor_condicion").insert(rows)
+        if (error) throw error
+      }
+      if (segmentacion.marca.length > 0) {
+        const rows = segmentacion.marca.map(r => ({
+          cliente_id: id, marca_id: r.ref_id,
+          lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion,
+          dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+        }))
+        const { error } = await supabase.from("cliente_marca_condicion").insert(rows)
+        if (error) throw error
+      }
+      await loadCondProv()
+    } catch (e: any) {
+      alert(`Error al guardar la segmentación: ${e?.message || e}`)
+    } finally {
+      setSavingSeg(false)
+    }
   }
 
   const BONIF_SEGMENTS = [
@@ -619,54 +631,20 @@ export default function ClienteDetailPage() {
                 Guardar lista, facturación y descuentos
               </Button>
 
-              {/* Listas especiales por proveedor (Colgate / Kenvue / Haleon) */}
+              {/* Segmentación por proveedor / marca */}
               <Card className="border-teal-200 bg-teal-50/30">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold text-teal-700 uppercase tracking-wide">Listas Especiales</CardTitle>
+                  <CardTitle className="text-sm font-semibold text-teal-700 uppercase tracking-wide">Segmentación por proveedor / marca</CardTitle>
                   <p className="text-[11px] text-slate-500 normal-case font-normal mt-1">
-                    La mercadería de estos proveedores se factura aparte, siempre en <b>factura</b>, con el precio especial cargado en el artículo.
-                    El resto sigue la lista/segmento asignados.
+                    Aplicá lista, facturación y descuentos propios a la mercadería de un proveedor o marca.
+                    Esa mercadería se factura aparte. La opción <b>Especial</b> aparece sólo si el proveedor/marca tiene precio especial cargado.
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {/* Proveedores ya asignados */}
-                  {condProv.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {condProv.map((c: any) => (
-                        <span key={c.id} className="inline-flex items-center gap-1.5 border border-teal-300 bg-white rounded-full pl-3 pr-1.5 py-1 text-xs font-semibold text-teal-700">
-                          Especial {c.proveedores?.nombre || "—"}
-                          <button type="button" className="text-red-400 hover:text-red-600" onClick={() => deleteCondProv(c.id)}>
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Buscador de listas especiales */}
-                  {specialProveedores.length === 0 ? (
-                    <p className="text-[11px] text-slate-400">No hay artículos con precio especial cargado. Cargá precios especiales en /artículos primero.</p>
-                  ) : (
-                    <div className="border border-teal-200 rounded-lg p-3 bg-white space-y-2">
-                      <Input
-                        className="h-8 text-xs" placeholder="Buscar lista especial (Colgate, Kenvue, Haleon...)"
-                        value={specialSearch} onChange={(e) => setSpecialSearch(e.target.value)}
-                      />
-                      <div className="max-h-40 overflow-auto space-y-1">
-                        {specialProveedores
-                          .filter(p => !condProv.some((c: any) => c.proveedor_id === p.id))
-                          .filter(p => localMatch(specialSearch, p.nombre))
-                          .map(p => (
-                            <button key={p.id} type="button" disabled={savingCond}
-                              className="w-full text-left px-3 py-2 rounded-lg hover:bg-teal-50 text-xs font-medium text-slate-700 flex items-center justify-between"
-                              onClick={() => addSpecialProv(p.id)}>
-                              <span>Especial {p.nombre}</span>
-                              <Plus className="h-3.5 w-3.5 text-teal-600" />
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-                  )}
+                  <SegmentacionCondiciones listas={listasPrecio} value={segmentacion} onChange={setSegmentacion} />
+                  <Button onClick={saveSegmentacion} disabled={savingSeg} className="w-full bg-teal-600 hover:bg-teal-700">
+                    {savingSeg ? "Guardando..." : "Guardar segmentación"}
+                  </Button>
                 </CardContent>
               </Card>
             </div>
