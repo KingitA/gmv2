@@ -7,6 +7,7 @@ import { previewPrecioArticulo, createPedido } from "@/lib/actions/pedidos"
 import { searchProductos } from "@/lib/actions/productos"
 import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
+import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION, condRowsToProveedor, condRowsToMarca } from "@/components/pedidos/SegmentacionCondiciones"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -94,10 +95,8 @@ export default function NuevoPedidoPage() {
   const [condOpen, setCondOpen]         = useState(false)
   const [listas, setListas]             = useState<any[]>([])
   const [vendedores, setVendedores]     = useState<any[]>([])
-  // Listas especiales por proveedor — para este pedido
-  const [specialProveedores, setSpecialProveedores] = useState<any[]>([])
-  const [condProvIds, setCondProvIds]   = useState<string[]>([])
-  const [specialSearch, setSpecialSearch] = useState("")
+  // Segmentación por proveedor / marca — para este pedido
+  const [segmentacion, setSegmentacion] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
   // Toggles independientes + descuentos del pedido
   const [segMetodo, setSegMetodo]       = useState(false)
   const [segLista, setSegLista]         = useState(false)
@@ -124,13 +123,9 @@ export default function NuevoPedidoPage() {
     Promise.all([
       sb.from("listas_precio").select("id,nombre,codigo").eq("activo", true).order("nombre"),
       sb.from("vendedores").select("id,nombre").eq("activo", true).order("nombre"),
-      sb.from("articulos").select("proveedor_id, proveedores:proveedor_id(nombre)").not("precio_lista_especial", "is", null),
-    ]).then(([{ data: l }, { data: v }, { data: p }]: any) => {
+    ]).then(([{ data: l }, { data: v }]: any) => {
       if (l) setListas(l)
       if (v) setVendedores(v)
-      const map = new Map<string, string>()
-      for (const a of (p || [])) if (a.proveedor_id && a.proveedores?.nombre) map.set(a.proveedor_id, a.proveedores.nombre)
-      setSpecialProveedores(Array.from(map, ([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre)))
     })
   }, [])
 
@@ -165,11 +160,28 @@ export default function NuevoPedidoPage() {
       observaciones: "",
     })
     setCart([])
-    // Precargar listas especiales asignadas al cliente
-    sb.from("cliente_proveedor_condicion")
-      .select("proveedor_id")
-      .eq("cliente_id", c.id)
-      .then(({ data }: any) => setCondProvIds((data || []).map((r: any) => r.proveedor_id)))
+    // Precargar segmentación (proveedor + marca) asignada al cliente
+    Promise.all([
+      sb.from("cliente_proveedor_condicion")
+        .select("proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, proveedores:proveedor_id(nombre)")
+        .eq("cliente_id", c.id),
+      sb.from("cliente_marca_condicion")
+        .select("marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, marcas:marca_id(descripcion)")
+        .eq("cliente_id", c.id),
+    ]).then(([prov, marca]: any) => {
+      setSegmentacion({
+        proveedor: (prov.data || []).map((r: any) => ({
+          ref_id: r.proveedor_id, nombre: r.proveedores?.nombre || "—",
+          lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+          dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+        })),
+        marca: (marca.data || []).map((r: any) => ({
+          ref_id: r.marca_id, nombre: r.marcas?.descripcion || "—",
+          lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+          dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+        })),
+      })
+    })
     // Precargar descuentos del cliente (para mostrarlos/editarlos en el pedido)
     sb.from("bonificaciones")
       .select("tipo, porcentaje, segmento")
@@ -186,7 +198,7 @@ export default function NuevoPedidoPage() {
     setCliente(null)
     setClienteQ("")
     setCond({ ...BLANK_COND })
-    setCondProvIds([])
+    setSegmentacion(EMPTY_SEGMENTACION)
     setSegMetodo(false); setSegLista(false); setSegDescuentos(false); setBonifGrid({})
     setCart([])
     setSelectedArt(null)
@@ -292,17 +304,11 @@ export default function NuevoPedidoPage() {
       lista_perf0_pedido_id:     segLista ? (cond.lista_perf0_pedido_id || undefined) : undefined,
       lista_perf_plus_pedido_id: segLista ? (cond.lista_perf_plus_pedido_id || undefined) : undefined,
       bonificaciones_pedido:     bonifs.length > 0 ? bonifs : undefined,
-      // Listas especiales por proveedor (este pedido): siempre factura, lista Especial
-      condiciones_proveedor:     condProvIds.length && especialLista
-        ? condProvIds.map(pid => ({ proveedor_id: pid, lista_precio_id: especialLista.id, metodo_facturacion: "Factura", dto_general_pct: null, dto_viajante_pct: null, dto_mercaderia_pct: null }))
-        : undefined,
+      // Segmentación por proveedor / marca (este pedido)
+      condiciones_proveedor:     segmentacion.proveedor.length ? condRowsToProveedor(segmentacion.proveedor) : undefined,
+      condiciones_marca:         segmentacion.marca.length ? condRowsToMarca(segmentacion.marca) : undefined,
     }
   }
-
-  const especialLista = listas.find((l: any) => l.codigo === "especial")
-  const addSpecial = (pid: string) => { setCondProvIds(prev => prev.includes(pid) ? prev : [...prev, pid]); setSpecialSearch("") }
-  const removeSpecial = (pid: string) => setCondProvIds(prev => prev.filter(x => x !== pid))
-  const provNombre = (pid: string) => specialProveedores.find(p => p.id === pid)?.nombre || "—"
 
   const crearPedido = async () => {
     if (!cliente || cart.length === 0) return
@@ -577,44 +583,8 @@ export default function NuevoPedidoPage() {
                   )
                 })()}
 
-                {/* Listas especiales por proveedor (este pedido) */}
-                <div>
-                  <p className="text-xs font-bold text-teal-600 uppercase tracking-wide mb-1">Listas especiales</p>
-                  <p className="text-[11px] text-slate-500 mb-3">La mercadería de estos proveedores se factura aparte (siempre en factura) con su precio especial. El resto sigue la lista/segmento de arriba.</p>
-                  {condProvIds.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {condProvIds.map(pid => (
-                        <span key={pid} className="inline-flex items-center gap-1.5 border border-teal-300 bg-teal-50/60 rounded-full pl-3 pr-1.5 py-1 text-xs font-semibold text-teal-700">
-                          Especial {provNombre(pid)}
-                          <button type="button" className="text-red-400 hover:text-red-600" onClick={() => removeSpecial(pid)}>
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {specialProveedores.length === 0 ? (
-                    <p className="text-[11px] text-slate-400">No hay artículos con precio especial cargado.</p>
-                  ) : (
-                    <div className="border rounded-lg p-3 bg-slate-50 space-y-2">
-                      <Input className="h-8 text-xs" placeholder="Buscar lista especial (Colgate, Kenvue, Haleon...)"
-                        value={specialSearch} onChange={e => setSpecialSearch(e.target.value)} />
-                      <div className="max-h-40 overflow-auto space-y-1">
-                        {specialProveedores
-                          .filter(p => !condProvIds.includes(p.id))
-                          .filter(p => localMatch(specialSearch, p.nombre))
-                          .map(p => (
-                            <button key={p.id} type="button"
-                              className="w-full text-left px-3 py-2 rounded-lg hover:bg-teal-50 text-xs font-medium text-slate-700 flex items-center justify-between"
-                              onClick={() => addSpecial(p.id)}>
-                              <span>Especial {p.nombre}</span>
-                              <Plus className="h-3.5 w-3.5 text-teal-600" />
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                {/* Segmentación por proveedor / marca (este pedido) */}
+                <SegmentacionCondiciones listas={listas} value={segmentacion} onChange={setSegmentacion} />
 
                 {/* Observaciones */}
                 <div>
