@@ -21,9 +21,18 @@ export type PedidoOverrides = {
   bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
   // Mercadería bonificada elegida al crear el pedido (artículos a regalar + %)
   mercaderia_bonificada?: { pct: number; articulo_ids: string[] }
-  // Listas especiales por proveedor (este pedido)
+  // Segmentación por proveedor (este pedido): lista/método/descuentos propios, comprobante aparte
   condiciones_proveedor?: Array<{
     proveedor_id: string
+    lista_precio_id: string | null
+    metodo_facturacion: string | null
+    dto_general_pct: number | null
+    dto_viajante_pct: number | null
+    dto_mercaderia_pct: number | null
+  }>
+  // Segmentación por marca (este pedido): gana sobre proveedor; comprobante aparte
+  condiciones_marca?: Array<{
+    marca_id: string
     lista_precio_id: string | null
     metodo_facturacion: string | null
     dto_general_pct: number | null

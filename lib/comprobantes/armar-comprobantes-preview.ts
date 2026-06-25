@@ -41,6 +41,8 @@ function getBonifProfile(itemSegmento: string, bonificaciones: any[]): string {
 
 const CONDICION_PROVEEDOR_COLS =
   'proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct'
+const CONDICION_MARCA_COLS =
+  'marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct'
 
 export interface ComprobantePreview {
   tipo: string                      // 'FA' | 'FB' | 'PRES'
@@ -111,6 +113,24 @@ export async function armarComprobantesPreview(
     .from('pedido_proveedor_condicion').select(CONDICION_PROVEEDOR_COLS).eq('pedido_id', pedidoId)
   for (const r of pedCond || []) condProvMap.set((r as any).proveedor_id, r)
 
+  // Condiciones por MARCA (ganan sobre proveedor)
+  const condMarcaMap = new Map<string, any>()
+  const { data: cliCondM } = await supabase
+    .from('cliente_marca_condicion').select(CONDICION_MARCA_COLS).eq('cliente_id', cliente?.id)
+  for (const r of cliCondM || []) condMarcaMap.set((r as any).marca_id, r)
+  const { data: pedCondM } = await supabase
+    .from('pedido_marca_condicion').select(CONDICION_MARCA_COLS).eq('pedido_id', pedidoId)
+  for (const r of pedCondM || []) condMarcaMap.set((r as any).marca_id, r)
+
+  // Resuelve la condición de segmento de un ítem: MARCA gana sobre PROVEEDOR.
+  const segCondDe = (marcaId: string | null, proveedorId: string | null): { cond: any | null; segKey: string } => {
+    const m = marcaId ? condMarcaMap.get(marcaId) : null
+    if (m) return { cond: m, segKey: `marca:${marcaId}` }
+    const p = proveedorId ? condProvMap.get(proveedorId) : null
+    if (p) return { cond: p, segKey: `prov:${proveedorId}` }
+    return { cond: null, segKey: '' }
+  }
+
   // ── Cálculo por ítem (idéntico al route) ──
   const items: any[] = []
   for (const det of (pedido as any).detalle ?? []) {
@@ -120,7 +140,7 @@ export async function armarComprobantesPreview(
 
     // El método del ítem se decidió al crear el pedido (incluye condición por segmento
     // y por proveedor) y quedó en metodo_facturacion_item. Se usa ese; si falta, el general.
-    const condItem = art.proveedor_id ? condProvMap.get(art.proveedor_id) : null
+    const condItem = segCondDe(art.marca_id ?? null, art.proveedor_id ?? null).cond
     const metodoRawItem = det.metodo_facturacion_item || condItem?.metodo_facturacion || metodoRaw
     const metodoItem: Metodo = metodoDesdeRaw(metodoRawItem)
     const esPresupuesto = art.iva_ventas === 'presupuesto' || metodoItem === 'Presupuesto'
@@ -181,22 +201,25 @@ export async function armarComprobantesPreview(
   // ── Agrupar por (vaEnComprobante, perfil de descuento, proveedor) — idéntico al route ──
   // La mercadería bonificada NO se agrupa: se reparte luego entre los comprobantes
   // normales (no-especial) proporcional al neto, como ÚLTIMO ítem de cada uno.
+  const keyDeItem = (item: any) => {
+    const { cond, segKey } = segCondDe(item.marcaId, item.proveedorId)
+    const bonifProfile = cond
+      ? `seg:${cond.dto_general_pct || 0}:${cond.dto_viajante_pct || 0}`
+      : getBonifProfile(item.segmento, bonificacionesCliente || [])
+    return { key: `${item.vaEnComprobante}__${bonifProfile}__${segKey}`, esSegmento: !!cond }
+  }
+
   const grupos = new Map<string, any[]>()
   const itemsBonificados: any[] = []
   for (const item of items) {
-    if (item.esBonificado) { itemsBonificados.push(item); continue }
-    const cond = item.proveedorId ? condProvMap.get(item.proveedorId) : null
-    const provKey = cond ? item.proveedorId : ''
-    const bonifProfile = cond
-      ? `prov:${cond.dto_general_pct || 0}:${cond.dto_viajante_pct || 0}`
-      : getBonifProfile(item.segmento, bonificacionesCliente || [])
-    const key = `${item.vaEnComprobante}__${bonifProfile}__${provKey}`
+    const { key, esSegmento } = keyDeItem(item)
+    if (item.esBonificado && !esSegmento) { itemsBonificados.push(item); continue }
     if (!grupos.has(key)) grupos.set(key, [])
     grupos.get(key)!.push(item)
   }
 
   if (itemsBonificados.length > 0) {
-    const grupoEsProv = (g: any[]) => !!(g[0]?.proveedorId && condProvMap.get(g[0].proveedorId))
+    const grupoEsProv = (g: any[]) => !!(g[0] && segCondDe(g[0].marcaId, g[0].proveedorId).cond)
     const netoGrupo = (g: any[]) => r2(g.reduce((s, i) => s + i.subtotalNeto, 0))
     const normales = [...grupos.values()].filter(g => !grupoEsProv(g))
     const netos = normales.map(netoGrupo)

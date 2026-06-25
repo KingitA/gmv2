@@ -99,17 +99,22 @@ function resolverListaSegmento(
 // El proveedor sólo identifica QUÉ mercadería (articulos.proveedor_id) recibe estas
 // condiciones para este cliente. lista/método se aplican al precio; los 3 descuentos
 // se aplican como líneas en el comprobante (general/viajante) o como bonificada (mercadería).
-export type CondicionProveedor = {
-  proveedor_id: string
+// Condición de segmento (lista/método/descuentos). El segmento se identifica por
+// proveedor o por marca. Marca gana sobre proveedor cuando un artículo cae en ambos.
+export type CondicionSegmento = {
   lista_precio_id: string | null
   metodo_facturacion: string | null
   dto_general_pct: number | null
   dto_viajante_pct: number | null
   dto_mercaderia_pct: number | null
 }
+export type CondicionProveedor = CondicionSegmento & { proveedor_id: string }
+export type CondicionMarca = CondicionSegmento & { marca_id: string }
 
 const CONDICION_PROVEEDOR_COLS =
   "proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct"
+const CONDICION_MARCA_COLS =
+  "marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct"
 
 // Mapa proveedor_id → condición. Si se pasa pedidoId, el override del pedido pisa al del cliente.
 async function fetchCondicionesProveedor(
@@ -133,6 +138,28 @@ async function fetchCondicionesProveedor(
   return map
 }
 
+// Mapa marca_id → condición. Espejo de fetchCondicionesProveedor.
+async function fetchCondicionesMarca(
+  supabase: any,
+  clienteId: string,
+  pedidoId?: string | null,
+): Promise<Map<string, CondicionMarca>> {
+  const map = new Map<string, CondicionMarca>()
+  const { data: cli } = await supabase
+    .from("cliente_marca_condicion")
+    .select(CONDICION_MARCA_COLS)
+    .eq("cliente_id", clienteId)
+  for (const r of cli || []) map.set(r.marca_id, r as CondicionMarca)
+  if (pedidoId) {
+    const { data: ped } = await supabase
+      .from("pedido_marca_condicion")
+      .select(CONDICION_MARCA_COLS)
+      .eq("pedido_id", pedidoId)
+    for (const r of ped || []) map.set(r.marca_id, r as CondicionMarca)
+  }
+  return map
+}
+
 // Combina las condiciones del cliente con overrides de formulario (al crear el pedido,
 // cuando todavía no existe pedido_proveedor_condicion).
 function mergeCondicionesProveedor(
@@ -142,6 +169,28 @@ function mergeCondicionesProveedor(
   const map = new Map(base)
   for (const o of overrides || []) if (o?.proveedor_id) map.set(o.proveedor_id, o)
   return map
+}
+
+function mergeCondicionesMarca(
+  base: Map<string, CondicionMarca>,
+  overrides?: CondicionMarca[] | null,
+): Map<string, CondicionMarca> {
+  const map = new Map(base)
+  for (const o of overrides || []) if (o?.marca_id) map.set(o.marca_id, o)
+  return map
+}
+
+// Resuelve la condición de segmento de un artículo: MARCA gana sobre PROVEEDOR.
+function resolverCondSegmento(
+  articulo: { proveedor_id?: string | null; marca_id?: string | null },
+  condProvMap: Map<string, CondicionProveedor>,
+  condMarcaMap: Map<string, CondicionMarca>,
+): { cond: CondicionSegmento | null; segKey: string | null } {
+  const marcaCond = (articulo.marca_id && condMarcaMap.get(articulo.marca_id)) || null
+  if (marcaCond) return { cond: marcaCond, segKey: `marca:${articulo.marca_id}` }
+  const provCond = (articulo.proveedor_id && condProvMap.get(articulo.proveedor_id)) || null
+  if (provCond) return { cond: provCond, segKey: `prov:${articulo.proveedor_id}` }
+  return { cond: null, segKey: null }
 }
 
 // ─── Helper: fetch todas las reglas de fórmulas (una sola vez por request) ────
@@ -220,20 +269,21 @@ const SEGMENTO_CLIENTE_COLS =
  */
 async function resolverListaMetodoItem(
   supabase: any,
-  articulo: { proveedor_id?: string | null },
+  articulo: { proveedor_id?: string | null; marca_id?: string | null },
   segmento: Segmento,
   pedidoOverrides: any,
   clienteInfo: any,
   condProvMap: Map<string, CondicionProveedor>,
+  condMarcaMap: Map<string, CondicionMarca>,
   listasCache: Record<string, DatosLista>,
   formulasReglas: Record<string, Record<string, string>>,
-): Promise<{ listaId: string | null; metodoRaw: string; metodo: MetodoFacturacion; listaDatos: DatosLista; provCond: CondicionProveedor | null }> {
-  const provCond = (articulo.proveedor_id && condProvMap.get(articulo.proveedor_id)) || null
+): Promise<{ listaId: string | null; metodoRaw: string; metodo: MetodoFacturacion; listaDatos: DatosLista; cond: CondicionSegmento | null }> {
+  const { cond } = resolverCondSegmento(articulo, condProvMap, condMarcaMap)
   let listaId: string | null
   let metodoRaw: string
-  if (provCond) {
-    listaId = provCond.lista_precio_id
-    metodoRaw = provCond.metodo_facturacion || "Final"
+  if (cond) {
+    listaId = cond.lista_precio_id
+    metodoRaw = cond.metodo_facturacion || "Final"
   } else {
     const r = resolverListaSegmento(segmento, pedidoOverrides, clienteInfo)
     listaId = r.listaId
@@ -241,12 +291,12 @@ async function resolverListaMetodoItem(
   }
   const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
   const metodo = toMetodoFacturacion(metodoRaw)
-  return { listaId, metodoRaw, metodo, listaDatos, provCond }
+  return { listaId, metodoRaw, metodo, listaDatos, cond }
 }
 
 async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
   const [{ data: articulo }, { data: descuentosDB }] = await Promise.all([
-    supabase.from("articulos").select("id,proveedor_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
+    supabase.from("articulos").select("id,proveedor_id,marca_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
     supabase.from("articulos_descuentos").select("tipo,porcentaje,orden").eq("articulo_id", productoId).order("orden"),
   ])
   if (!articulo) throw new Error("Artículo no encontrado")
@@ -310,15 +360,15 @@ async function fetchBonifGeneralViajante(supabase: any, clienteId: string): Prom
   }
 }
 
-/** Resuelve los % de general/viajante para un ítem (condición de proveedor > bonificación por segmento). */
+/** Resuelve los % de general/viajante para un ítem (condición de segmento > bonificación por segmento). */
 function resolverBonifItem(
-  provCond: CondicionProveedor | null,
+  cond: CondicionSegmento | null,
   general: Array<{ segmento: string | null; porcentaje: number }>,
   viajante: Array<{ segmento: string | null; porcentaje: number }>,
   segmento: Segmento,
 ): { generalPct: number; viajantePct: number } {
-  if (provCond) {
-    return { generalPct: provCond.dto_general_pct || 0, viajantePct: provCond.dto_viajante_pct || 0 }
+  if (cond) {
+    return { generalPct: cond.dto_general_pct || 0, viajantePct: cond.dto_viajante_pct || 0 }
   }
   return { generalPct: getDescuentoGeneral(general, segmento), viajantePct: getDescuentoViajante(viajante, segmento) }
 }
@@ -399,6 +449,8 @@ export async function previewPrecioArticulo(
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
     // Condiciones por proveedor (este pedido) — pisan al rubro para esa mercadería
     condiciones_proveedor?: CondicionProveedor[]
+    // Condiciones por marca (este pedido) — ganan sobre proveedor
+    condiciones_marca?: CondicionMarca[]
   } = {},
 ): Promise<{ precio: number; precioNeto: number; descripcion: string; sku: string; unidades_por_bulto: number }> {
   const supabase = await createClient()
@@ -422,26 +474,30 @@ export async function previewPrecioArticulo(
   const formulasReglas = await fetchFormulasReglas(supabase)
   const listasCache: Record<string, DatosLista> = {}
 
-  // Condición por proveedor (del cliente + override del formulario)
+  // Condición por proveedor + marca (del cliente + override del formulario). Marca gana.
   const condicionesProveedor = mergeCondicionesProveedor(
     await fetchCondicionesProveedor(supabase, clienteId),
     overrides.condiciones_proveedor,
   )
-  const provCond = (articulo.proveedor_id && condicionesProveedor.get(articulo.proveedor_id)) || null
+  const condicionesMarca = mergeCondicionesMarca(
+    await fetchCondicionesMarca(supabase, clienteId),
+    overrides.condiciones_marca,
+  )
+  const { cond } = resolverCondSegmento(articulo, condicionesProveedor, condicionesMarca)
 
   const segmento = detectarSegmento(articulo)
   let listaId: string | null
   let metodoRaw: string
-  if (provCond) {
-    listaId = provCond.lista_precio_id
-    metodoRaw = provCond.metodo_facturacion || "Final"
+  if (cond) {
+    listaId = cond.lista_precio_id
+    metodoRaw = cond.metodo_facturacion || "Final"
   } else {
     const resuelto = resolverListaSegmento(segmento, overrides, clienteInfo)
     listaId = resuelto.listaId
     metodoRaw = resuelto.metodoRaw
   }
   const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId)
-  const bonif = resolverBonifItem(provCond, general, viajante, segmento)
+  const bonif = resolverBonifItem(cond, general, viajante, segmento)
   const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
   const metodo = toMetodoFacturacion(metodoRaw)
 
@@ -510,6 +566,58 @@ export async function deleteCondicionProveedorCliente(id: string, clienteId: str
   return { success: true }
 }
 
+// ─── CRUD condiciones por marca (espejo de proveedor) ────────────────────────
+
+export async function getCondicionesMarcaCliente(clienteId: string) {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from("cliente_marca_condicion")
+    .select(`id, marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct,
+             marcas:marca_id(descripcion), listas_precio:lista_precio_id(nombre, codigo)`)
+    .eq("cliente_id", clienteId)
+    .order("created_at")
+  if (error) throw error
+  return data || []
+}
+
+export async function saveCondicionMarcaCliente(input: {
+  cliente_id: string
+  marca_id: string
+  lista_precio_id?: string | null
+  metodo_facturacion?: string | null
+  dto_general_pct?: number | null
+  dto_viajante_pct?: number | null
+  dto_mercaderia_pct?: number | null
+}) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error("No autenticado")
+  if (!input.marca_id) throw new Error("Falta la marca")
+
+  const { error } = await supabase
+    .from("cliente_marca_condicion")
+    .upsert({
+      cliente_id:         input.cliente_id,
+      marca_id:           input.marca_id,
+      lista_precio_id:    input.lista_precio_id ?? null,
+      metodo_facturacion: input.metodo_facturacion ?? null,
+      dto_general_pct:    input.dto_general_pct ?? null,
+      dto_viajante_pct:   input.dto_viajante_pct ?? null,
+      dto_mercaderia_pct: input.dto_mercaderia_pct ?? null,
+    }, { onConflict: "cliente_id,marca_id" })
+  if (error) throw error
+  revalidatePath(`/clientes/${input.cliente_id}`)
+  return { success: true }
+}
+
+export async function deleteCondicionMarcaCliente(id: string, clienteId: string) {
+  const supabase = await createClient()
+  const { error } = await supabase.from("cliente_marca_condicion").delete().eq("id", id)
+  if (error) throw error
+  revalidatePath(`/clientes/${clienteId}`)
+  return { success: true }
+}
+
 // Condiciones por proveedor efectivas para un pedido (override del pedido > ficha del cliente)
 export async function getCondicionesProveedorPedido(pedidoId: string, clienteId: string) {
   const supabase = await createClient()
@@ -537,8 +645,10 @@ export async function createPedido(data: {
   metodo_perf0_pedido?: string
   lista_perf_plus_pedido_id?: string
   metodo_perf_plus_pedido?: string
-  // Condiciones por proveedor (Feature 1) — override por pedido de la mercadería de un proveedor
+  // Condiciones por proveedor — override por pedido de la mercadería de un proveedor
   condiciones_proveedor?: CondicionProveedor[]
+  // Condiciones por marca — override por pedido de la mercadería de una marca (gana sobre proveedor)
+  condiciones_marca?: CondicionMarca[]
   // Descuentos por segmento cargados en el pedido (general/viajante/mercadería).
   // Si vienen, se usan en lugar de las bonificaciones permanentes del cliente.
   bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
@@ -595,6 +705,11 @@ export async function createPedido(data: {
     await fetchCondicionesProveedor(supabase, data.cliente_id),
     data.condiciones_proveedor,
   )
+  // Condiciones por marca: del cliente + overrides del formulario (este pedido)
+  const condicionesMarca = mergeCondicionesMarca(
+    await fetchCondicionesMarca(supabase, data.cliente_id),
+    data.condiciones_marca,
+  )
 
   // Overrides de segmento del pedido (vienen del formulario)
   const segmentoOverrides = {
@@ -616,26 +731,27 @@ export async function createPedido(data: {
     descuentoPropioPct: number; precioLista: number
     bonifGeneralPct: number; bonifViajantePct: number; precioConDescuento: number
     segmento: Segmento
-    provCond: CondicionProveedor | null
+    cond: CondicionSegmento | null
+    segKey: string | null
     esEspecial: boolean
   }
   const itemsCalc: ItemCalc[] = []
   for (const item of data.items) {
     const articulo = await fetchArticuloConDescuentos(supabase, item.producto_id)
     const segmento = detectarSegmento(articulo)
-    // ¿La mercadería de este proveedor tiene condición propia para el cliente/pedido?
-    const provCond = (articulo.proveedor_id && condicionesProveedor.get(articulo.proveedor_id)) || null
+    // ¿Este artículo cae en un segmento (marca o proveedor)? Marca gana sobre proveedor.
+    const { cond, segKey } = resolverCondSegmento(articulo, condicionesProveedor, condicionesMarca)
     let listaId: string | null
     let metodoRaw: string
     let generalPct: number
     let viajantePct: number
-    if (provCond) {
-      // La mercadería del proveedor se cotiza con su lista/método y sus propios
+    if (cond) {
+      // La mercadería del segmento se cotiza con su lista/método y sus propios
       // descuentos general/viajante (escalonados en el neto por línea).
-      listaId = provCond.lista_precio_id
-      metodoRaw = provCond.metodo_facturacion || "Final"
-      generalPct = provCond.dto_general_pct || 0
-      viajantePct = provCond.dto_viajante_pct || 0
+      listaId = cond.lista_precio_id
+      metodoRaw = cond.metodo_facturacion || "Final"
+      generalPct = cond.dto_general_pct || 0
+      viajantePct = cond.dto_viajante_pct || 0
     } else {
       const resuelto = resolverListaSegmento(segmento, segmentoOverrides, clienteInfo)
       listaId = resuelto.listaId
@@ -663,7 +779,8 @@ export async function createPedido(data: {
       bonifViajantePct: precio.bonifViajantePct,
       precioConDescuento: precio.precioConDescuento,
       segmento,
-      provCond,
+      cond,
+      segKey,
       esEspecial,
     })
   }
@@ -716,6 +833,25 @@ export async function createPedido(data: {
     if (rows.length) {
       const { error: condError } = await supabase.from("pedido_proveedor_condicion").insert(rows)
       if (condError) console.error("[createPedido] Error guardando condiciones por proveedor:", condError.message)
+    }
+  }
+
+  // Persistir las condiciones por marca de este pedido (override del formulario)
+  if (data.condiciones_marca?.length) {
+    const rows = data.condiciones_marca
+      .filter(c => c?.marca_id)
+      .map(c => ({
+        pedido_id:          pedido.id,
+        marca_id:           c.marca_id,
+        lista_precio_id:    c.lista_precio_id ?? null,
+        metodo_facturacion: c.metodo_facturacion ?? null,
+        dto_general_pct:    c.dto_general_pct ?? null,
+        dto_viajante_pct:   c.dto_viajante_pct ?? null,
+        dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+      }))
+    if (rows.length) {
+      const { error: condError } = await supabase.from("pedido_marca_condicion").insert(rows)
+      if (condError) console.error("[createPedido] Error guardando condiciones por marca:", condError.message)
     }
   }
 
@@ -883,8 +1019,9 @@ export async function createPedido(data: {
   if (merc && merc.pct > 0 && merc.articulo_ids.length > 0) {
     try {
       await supabase.from("pedidos").update({ bonif_mercaderia_pct: merc.pct }).eq("id", pedido.id)
-      // Base = NETO (sin IVA ni percepciones), excluyendo los artículos con lista especial.
-      const netoBonifBase = itemsCalc.reduce((s, i) => s + (i.esEspecial ? 0 : i.precioNeto * i.cantidad), 0)
+      // Base = NETO (sin IVA ni percepciones), excluyendo los artículos segmentados
+      // (proveedor/marca con condición propia): esos usan SOLO su propia mercadería.
+      const netoBonifBase = itemsCalc.reduce((s, i) => s + (i.cond ? 0 : i.precioNeto * i.cantidad), 0)
       const monto = netoBonifBase * merc.pct / 100
       const share = monto / merc.articulo_ids.length
       for (const artId of merc.articulo_ids) {
@@ -896,6 +1033,32 @@ export async function createPedido(data: {
     } catch (bonifErr) {
       console.error("Error creando mercadería bonificada:", bonifErr)
     }
+  }
+
+  // ── Mercadería bonificada POR SEGMENTO (proveedor/marca con dto_mercaderia_pct) ──
+  // Cada segmento regala % × su propio neto, repartido entre SUS artículos, como
+  // líneas es_bonificado. Como esos artículos pertenecen al segmento, la línea cae
+  // en el comprobante aparte del segmento (igual que la mercadería a nivel pedido).
+  try {
+    const segGroups = new Map<string, { cond: CondicionSegmento; items: ItemCalc[] }>()
+    for (const i of itemsCalc) {
+      if (i.cond && i.segKey && (i.cond.dto_mercaderia_pct || 0) > 0) {
+        if (!segGroups.has(i.segKey)) segGroups.set(i.segKey, { cond: i.cond, items: [] })
+        segGroups.get(i.segKey)!.items.push(i)
+      }
+    }
+    for (const { cond, items } of segGroups.values()) {
+      const base = items.reduce((s, i) => s + i.precioNeto * i.cantidad, 0)
+      const monto = base * (cond.dto_mercaderia_pct || 0) / 100
+      if (monto <= 0 || items.length === 0) continue
+      const share = monto / items.length
+      for (const it of items) {
+        const units = it.precioNeto > 0 ? Math.round(share / it.precioNeto) : 0
+        if (units > 0) await agregarItemBonificado(pedido.id, it.producto_id, units)
+      }
+    }
+  } catch (segMercErr) {
+    console.error("Error creando mercadería bonificada por segmento:", segMercErr)
   }
 
   revalidatePath("/clientes-pedidos")
@@ -1098,15 +1261,16 @@ export async function agregarItemPedido(
   const formulasReglas = await fetchFormulasReglas(supabase)
   const listasCache: Record<string, DatosLista> = {}
   const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
+  const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
 
   const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
   const segmentoArt = detectarSegmento(articuloConDescuentos)
-  // Resolución por segmento (igual que createPedido): provCond > override pedido > cliente > general
-  const { listaId, metodoRaw: metodoItemRaw, metodo, listaDatos, provCond } =
-    await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoArt, pedido, clienteInfo, condProvMap, listasCache, formulasReglas)
+  // Resolución por segmento (igual que createPedido): marca > proveedor > override pedido > cliente > general
+  const { listaId, metodoRaw: metodoItemRaw, metodo, listaDatos, cond } =
+    await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas)
 
   const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
-  const bonif = resolverBonifItem(provCond, general, viajante, segmentoArt)
+  const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
   const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, bonif)
 
   const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
@@ -1247,12 +1411,13 @@ export async function agregarItemBonificado(
   const formulasReglas = await fetchFormulasReglas(supabase)
   const listasCache: Record<string, DatosLista> = {}
   const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
+  const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
 
   const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
   const segmentoBonif = detectarSegmento(articuloConDescuentos)
   // Resolución por segmento del producto bonificado (lista/método correctos)
   const { listaId: listaIdBonif, metodoRaw: metodoItemRaw, metodo, listaDatos } =
-    await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoBonif, pedido, clienteInfo, condProvMap, listasCache, formulasReglas)
+    await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoBonif, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas)
   // La mercadería bonificada es gratis (net $0): general/viajante no aplican a su precio.
   const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, {})
   const ofertaPctBonif = articuloConDescuentos.descuento_propio || 0
