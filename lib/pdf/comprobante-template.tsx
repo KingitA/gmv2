@@ -360,7 +360,7 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
           {/* ── Condiciones rápidas ── */}
           <View style={s.encCond}>
             <View style={s.condItem}><Text style={s.condLbl}>MONEDA</Text><Text style={s.condVal}>Pesos ARS</Text></View>
-            <View style={s.condItem}><Text style={s.condLbl}>OPERACIÓN</Text><Text style={s.condVal}>Venta de bienes</Text></View>
+            {!esPresRev && <View style={s.condItem}><Text style={s.condLbl}>OPERACIÓN</Text><Text style={s.condVal}>Venta de bienes</Text></View>}
             {d1pct > 0 && <View style={s.condItem}><Text style={s.condLbl}>BONIF. GENERAL</Text><Text style={s.condVal}>{d1pct}%</Text></View>}
             {d2pct > 0 && <View style={s.condItem}><Text style={s.condLbl}>BONIF. VIAJANTE</Text><Text style={s.condVal}>{d2pct}%</Text></View>}
           </View>
