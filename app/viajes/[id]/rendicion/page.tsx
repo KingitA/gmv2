@@ -15,12 +15,14 @@ interface RendicionData {
   pagos: any[]
   devoluciones: any[]
   gastos: any[]
+  cajas?: { id: string; nombre: string }[]
   resumen: {
     total_cobrado: number
     total_devoluciones: number
     total_gastos: number
     fondos_recibidos: number
     efectivo_neto: number
+    efectivo_pendiente_rendir?: number
     pagos_por_metodo: Record<string, number>
     pagos_pendientes: number
     devoluciones_pendientes: number
@@ -37,24 +39,68 @@ export default function RendicionPage() {
   const [confirmando, setConfirmando] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
 
+  // Conciliación de la rendición
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set())
+  const [efectivoContado, setEfectivoContado] = useState("")
+  const [cajaDestino, setCajaDestino] = useState("")
+  const [forzarDiferencia, setForzarDiferencia] = useState(false)
+
   useEffect(() => {
     fetch(`/api/viajes/${viajeId}/confirmar-rendicion`)
       .then((r) => r.json())
-      .then((d) => { if (!d.error) setData(d) })
+      .then((d) => {
+        if (!d.error) {
+          setData(d)
+          // Checklist: todos los pendientes marcados por defecto
+          setSeleccionados(
+            new Set(
+              (d.pagos || [])
+                .filter((p: any) => p.estado === "pendiente_rendicion")
+                .map((p: any) => p.id)
+            )
+          )
+          setEfectivoContado(String(d.resumen?.efectivo_pendiente_rendir ?? ""))
+          const chica = (d.cajas || []).find((c: any) => c.nombre === "Caja Chica")
+          if (chica) setCajaDestino(chica.id)
+        }
+      })
       .finally(() => setLoading(false))
   }, [viajeId])
 
+  const togglePago = (id: string) => {
+    setSeleccionados((prev) => {
+      const n = new Set(prev)
+      n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
+  }
+
   const handleConfirmar = async () => {
+    if (!cajaDestino) {
+      alert("Seleccioná la caja destino del efectivo")
+      return
+    }
     setConfirmando(true)
     try {
       const res = await fetch(`/api/viajes/${viajeId}/confirmar-rendicion`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          caja_destino_tipo: "CAJA",
+          caja_destino_id: cajaDestino,
+          efectivo_declarado: parseFloat(efectivoContado) || 0,
+          pagos_verificados: [...seleccionados],
+          forzar_diferencia: forzarDiferencia,
+        }),
       })
       const d = await res.json()
       if (d.success) {
         router.push(`/viajes/${viajeId}`)
+      } else if (res.status === 409 && d.requiere_forzar) {
+        setForzarDiferencia(true)
+        alert(
+          `${d.error}\n\nSi la diferencia es real (faltante/sobrante), volvé a confirmar: quedará documentada en el kardex.`
+        )
       } else {
         alert(d.error || "Error al confirmar rendición")
       }
@@ -161,35 +207,57 @@ export default function RendicionPage() {
           <p className="text-center py-8 text-gray-400">Sin cobros registrados</p>
         ) : (
           <div className="divide-y">
-            {pagos.map((p: any) => (
-              <div key={p.id} className="px-5 py-4 flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900">
-                    {p.clientes?.razon_social || p.clientes?.nombre || p.cliente_id}
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    {new Date(p.fecha_pago).toLocaleDateString("es-AR")}
-                  </p>
-                  <div className="flex gap-1 mt-1 flex-wrap">
-                    {(p.pagos_detalle || []).map((d: any, i: number) => (
-                      <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                        {d.tipo_pago}: {formatCurrency(d.monto)}
+            {pagos.map((p: any) => {
+              const esPendiente = p.estado === "pendiente_rendicion"
+              return (
+                <div key={p.id} className="px-5 py-4 flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    {esPendiente && !yaConfirmado && (
+                      <input
+                        type="checkbox"
+                        checked={seleccionados.has(p.id)}
+                        onChange={() => togglePago(p.id)}
+                        className="mt-1.5 h-4 w-4 accent-green-600"
+                        title="Verificado: la plata/valores de este cobro están en la rendición"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900">
+                        {p.clientes?.razon_social || p.clientes?.nombre || p.cliente_id}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {new Date(p.fecha_pago).toLocaleDateString("es-AR")}
+                      </p>
+                      <div className="flex gap-1 mt-1 flex-wrap">
+                        {(p.pagos_detalle || []).map((d: any, i: number) => (
+                          <span key={i} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                            {d.tipo_pago}: {formatCurrency(d.monto)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="font-bold text-gray-900">{formatCurrency(p.monto)}</p>
+                    {p.estado === "confirmado" ? (
+                      p.verificado_por ? (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                          ✓ Verificado{p.verificacion_metodo ? ` (${p.verificacion_metodo})` : ""}
+                        </span>
+                      ) : (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                          Confirmado — sin verificar
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                        Sin rendir
                       </span>
-                    ))}
+                    )}
                   </div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="font-bold text-gray-900">{formatCurrency(p.monto)}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    p.estado === "confirmado"
-                      ? "bg-green-100 text-green-700"
-                      : "bg-amber-100 text-amber-700"
-                  }`}>
-                    {p.estado === "confirmado" ? "Confirmado" : "Pendiente"}
-                  </span>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -266,15 +334,66 @@ export default function RendicionPage() {
         </div>
       )}
 
-      {/* Botón confirmar rendición */}
+      {/* Conciliación y confirmación */}
       {!yaConfirmado && (
-        <div className="flex justify-end pt-4 pb-8">
-          <button
-            onClick={() => setShowConfirm(true)}
-            className="bg-green-600 text-white px-8 py-4 rounded-xl text-lg font-bold hover:bg-green-700 transition-colors"
-          >
-            ✓ Confirmar Rendición
-          </button>
+        <div className="bg-white rounded-xl border-2 border-green-200 p-5 space-y-4 mb-8">
+          <h2 className="font-bold text-gray-700">Conciliación de efectivo</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">
+                Efectivo esperado (según cobros marcados)
+              </label>
+              <p className="text-lg font-bold text-gray-800 py-2">
+                {formatCurrency(resumen.efectivo_pendiente_rendir ?? 0)}
+              </p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">
+                Efectivo contado (real) *
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={efectivoContado}
+                onChange={(e) => { setEfectivoContado(e.target.value); setForzarDiferencia(false) }}
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-lg font-bold focus:border-green-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">
+                Caja destino *
+              </label>
+              <select
+                value={cajaDestino}
+                onChange={(e) => setCajaDestino(e.target.value)}
+                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2.5 focus:border-green-500 outline-none"
+              >
+                <option value="">Seleccionar…</option>
+                {(data.cajas || []).map((c) => (
+                  <option key={c.id} value={c.id}>{c.nombre}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {efectivoContado !== "" &&
+            Math.abs((parseFloat(efectivoContado) || 0) - (resumen.efectivo_pendiente_rendir ?? 0)) > 0.01 && (
+            <p className="text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              ⚠ Diferencia de {formatCurrency((parseFloat(efectivoContado) || 0) - (resumen.efectivo_pendiente_rendir ?? 0))} entre lo contado y lo registrado. Si es real, quedará documentada en el kardex.
+            </p>
+          )}
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-sm text-gray-500">
+              {seleccionados.size} de {resumen.pagos_pendientes} cobros marcados como verificados.
+              Las transferencias quedan para conciliación bancaria.
+            </p>
+            <button
+              onClick={() => setShowConfirm(true)}
+              disabled={seleccionados.size === 0 || !cajaDestino}
+              className="bg-green-600 text-white px-8 py-4 rounded-xl text-lg font-bold hover:bg-green-700 transition-colors disabled:opacity-40"
+            >
+              ✓ Confirmar Rendición
+            </button>
+          </div>
         </div>
       )}
 
@@ -290,16 +409,21 @@ export default function RendicionPage() {
             <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-500">Pagos a confirmar</span>
-                <span className="font-bold">{resumen.pagos_pendientes}</span>
+                <span className="font-bold">{seleccionados.size}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Devoluciones a confirmar</span>
                 <span className="font-bold">{resumen.devoluciones_pendientes}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-bold">
-                <span>Efectivo a recibir</span>
-                <span className="text-green-700">{formatCurrency(resumen.efectivo_neto)}</span>
+                <span>Efectivo contado a caja</span>
+                <span className="text-green-700">{formatCurrency(parseFloat(efectivoContado) || 0)}</span>
               </div>
+              {forzarDiferencia && (
+                <p className="text-xs text-amber-700 font-medium pt-1">
+                  ⚠ Se confirmará CON diferencia de efectivo (queda documentada).
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <button

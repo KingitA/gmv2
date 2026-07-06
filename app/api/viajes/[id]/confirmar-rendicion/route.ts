@@ -1,15 +1,27 @@
-import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { todayArgentina, nowArgentina } from "@/lib/utils"
-import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { nowArgentina } from "@/lib/utils"
 
-// POST /api/viajes/[id]/confirmar-rendicion
-// Admin confirma la rendición del viaje:
-// 1. Confirma todos los pagos pendiente_rendicion (crea imputaciones, actualiza saldos, genera recibos)
-// 2. Confirma todas las devoluciones pendientes del viaje (restaura stock, registra en CC)
-// 3. Cierra el viaje como 'completado'
+/**
+ * POST /api/viajes/[id]/confirmar-rendicion
+ *
+ * Desde Fase C la rendición es transaccional vía RPCs:
+ *   rendicion_crear    → cabecera + checklist de pagos (rendiciones/rendicion_items)
+ *   rendicion_confirmar→ por cada pago verificado: cobranza_confirmar (firma 2,
+ *                        método 'rendicion'), débito de billetera, efectivo
+ *                        declarado a la caja elegida (kardex RENDICION_VIAJE),
+ *                        transferencias quedan sin verificar → conciliación,
+ *                        diferencia declarado/registrado exige forzar=true.
+ *
+ * Body: {
+ *   caja_destino_tipo: "CAJA"|"BANCO", caja_destino_id: uuid,
+ *   efectivo_declarado: number,
+ *   pagos_verificados?: uuid[],   // omitido = todos los pendiente_rendicion
+ *   forzar_diferencia?: boolean,
+ *   observaciones?: string
+ * }
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -19,14 +31,28 @@ export async function POST(
 
   try {
     const supabase = await createClient()
-    const admin = createAdminClient()
     const { id: viajeId } = await params
     const body = await request.json()
+    const {
+      caja_destino_tipo,
+      caja_destino_id,
+      efectivo_declarado,
+      pagos_verificados,
+      forzar_diferencia,
+      observaciones,
+      // compat con la UI anterior
+      caja_destino_efectivo,
+    } = body
 
-    // caja_destino_efectivo: uuid de la caja donde entra el efectivo neto
-    const { caja_destino_efectivo } = body
+    const cajaTipo = caja_destino_tipo || "CAJA"
+    const cajaId = caja_destino_id || caja_destino_efectivo
+    if (!cajaId) {
+      return NextResponse.json(
+        { error: "Falta la caja destino del efectivo (caja_destino_id)" },
+        { status: 400 }
+      )
+    }
 
-    // Verificar que el viaje está en_rendicion
     const { data: viaje } = await supabase
       .from("viajes")
       .select("id, estado, nombre, chofer_id")
@@ -38,133 +64,88 @@ export async function POST(
       return NextResponse.json({ error: "El viaje no está pendiente de rendición" }, { status: 400 })
     }
 
-    const resultados = {
-      pagos_confirmados: 0,
-      transferencias_pendientes: 0,
-      devoluciones_confirmadas: 0,
-      recibos_generados: [] as string[],
-      errores: [] as string[],
+    // Pagos a rendir: los seleccionados o todos los pendiente_rendicion del viaje
+    let pagoIds: string[] = pagos_verificados || []
+    if (!pagoIds.length) {
+      const { data: pagos } = await supabase
+        .from("pagos_clientes")
+        .select("id")
+        .eq("viaje_id", viajeId)
+        .eq("estado", "pendiente_rendicion")
+      pagoIds = (pagos || []).map((p) => p.id)
+    }
+    if (!pagoIds.length) {
+      return NextResponse.json({ error: "El viaje no tiene pagos pendientes de rendición" }, { status: 400 })
     }
 
-    // ─── 1. Confirmar pagos pendiente_rendicion ───────────────
-    const { data: pagos } = await supabase
-      .from("pagos_clientes")
-      .select("id, cliente_id, monto, fecha_pago")
-      .eq("viaje_id", viajeId)
-      .eq("estado", "pendiente_rendicion")
+    // ── 1. Crear la rendición ──
+    const { data: creada, error: crearErr } = await supabase.rpc("rendicion_crear", {
+      p_cobrador_id: viaje.chofer_id,
+      p_cobrador_tipo: "chofer",
+      p_pago_ids: pagoIds,
+      p_efectivo_declarado: Number(efectivo_declarado) || 0,
+      p_viaje_id: viajeId,
+      p_observaciones: observaciones || null,
+      p_usuario_id: auth.user.id,
+    })
+    if (crearErr) return NextResponse.json({ error: crearErr.message }, { status: 400 })
 
-    for (const pago of pagos || []) {
-      try {
-        // Regla de rendición: se cierran los pagos con efectivo/cheque. Los pagos
-        // de SOLO transferencia quedan pendientes y se confirman desde Historial
-        // (cuando se vea la acreditación en el banco).
-        const { data: dets } = await supabase
-          .from("pagos_detalle")
-          .select("tipo_pago")
-          .eq("pago_id", pago.id)
-        const soloTransferencia = (dets || []).length > 0 && (dets || []).every((d: any) => d.tipo_pago === "transferencia")
-        if (soloTransferencia) {
-          resultados.transferencias_pendientes++
-          continue
-        }
-
-        // Obtener imputaciones pendientes de este pago
-        const { data: imputaciones } = await supabase
-          .from("imputaciones")
-          .select("id, comprobante_id, monto_imputado")
-          .eq("pago_id", pago.id)
-          .eq("estado", "pendiente")
-
-        // Aplicar imputaciones: actualizar saldo de comprobantes
-        for (const imp of imputaciones || []) {
-          const { data: comp } = await supabase
-            .from("comprobantes_venta")
-            .select("saldo_pendiente")
-            .eq("id", imp.comprobante_id)
-            .single()
-
-          if (comp) {
-            const nuevoSaldo = Math.max(0, Number(comp.saldo_pendiente) - Number(imp.monto_imputado))
-            await supabase
-              .from("comprobantes_venta")
-              .update({
-                saldo_pendiente: nuevoSaldo,
-                estado_pago: nuevoSaldo <= 0 ? "pagado" : "parcial",
-              })
-              .eq("id", imp.comprobante_id)
-          }
-
-          await supabase
-            .from("imputaciones")
-            .update({ estado: "confirmado" })
-            .eq("id", imp.id)
-        }
-
-        // Confirmación única (recibo + kardex + libro mayor); las imputaciones
-        // ya quedaron aplicadas arriba y confirmarCobranza es idempotente.
-        const r = await confirmarCobranza(supabase, admin, { pagoId: pago.id, usuarioId: auth.user.id })
-        resultados.pagos_confirmados++
-        if (r.numero_recibo) resultados.recibos_generados.push(r.numero_recibo)
-      } catch (err: any) {
-        resultados.errores.push(`Pago ${pago.id}: ${err.message}`)
-      }
+    // ── 2. Confirmar (segunda firma en lote) ──
+    const { data: confirmada, error: confErr } = await supabase.rpc("rendicion_confirmar", {
+      p_rendicion_id: creada.rendicion_id,
+      p_caja_destino_tipo: cajaTipo,
+      p_caja_destino_id: cajaId,
+      p_usuario_id: auth.user.id,
+      p_pagos_verificados: null,
+      p_efectivo_declarado: Number(efectivo_declarado) || 0,
+      p_forzar_diferencia: Boolean(forzar_diferencia),
+    })
+    if (confErr) {
+      // diferencia de efectivo sin forzar → 409 para que la UI pida confirmación
+      const esDiferencia = confErr.message?.includes("diferencia de efectivo")
+      return NextResponse.json(
+        { error: confErr.message, requiere_forzar: esDiferencia, rendicion_id: creada.rendicion_id },
+        { status: esDiferencia ? 409 : 400 }
+      )
     }
 
-    // ─── 2. Confirmar devoluciones pendientes del viaje ───────
+    // ── 3. Confirmar devoluciones pendientes del viaje (stock) ──
+    let devolucionesConfirmadas = 0
     const { data: devoluciones } = await supabase
       .from("devoluciones")
-      .select(`
-        id, cliente_id, monto_total,
-        devoluciones_detalle(id, articulo_id, cantidad, precio_venta_original, es_vendible, motivo)
-      `)
+      .select("id, devoluciones_detalle(articulo_id, cantidad, es_vendible)")
       .eq("viaje_id", viajeId)
       .eq("estado", "pendiente")
 
     for (const dev of devoluciones || []) {
-      try {
-        // Confirmar devolución
-        await supabase
-          .from("devoluciones")
-          .update({
-            estado: "confirmado",
-            confirmado_por: auth.user.id,
-            fecha_confirmacion: nowArgentina(),
+      await supabase
+        .from("devoluciones")
+        .update({ estado: "confirmado", confirmado_por: auth.user.id, fecha_confirmacion: nowArgentina() })
+        .eq("id", dev.id)
+      for (const item of (dev as any).devoluciones_detalle || []) {
+        if (item.es_vendible) {
+          await supabase.rpc("incrementar_stock", {
+            p_articulo_id: item.articulo_id,
+            p_cantidad: item.cantidad,
           })
-          .eq("id", dev.id)
-
-        // Restaurar stock para artículos vendibles
-        for (const item of (dev as any).devoluciones_detalle || []) {
-          if (item.es_vendible) {
-            await supabase.rpc("incrementar_stock", {
-              p_articulo_id: item.articulo_id,
-              p_cantidad: item.cantidad,
-            })
-          }
         }
-
-        // NOTA: la confirmación de la devolución NO acredita el libro mayor.
-        // El crédito al cliente se postea cuando se genera la NC/Reversa
-        // (app/api/comprobantes-venta/generar-nc-reversa), que es el documento
-        // fiscal de la devolución. Acá solo se confirma y se restaura stock,
-        // para no doble-contar el haber.
-
-        resultados.devoluciones_confirmadas++
-      } catch (err: any) {
-        resultados.errores.push(`Devolución ${dev.id}: ${err.message}`)
       }
+      // El crédito al cliente lo postea la NC/Reversa (generar-nc-reversa),
+      // que además se imputa automáticamente contra la FA de origen (A3).
+      devolucionesConfirmadas++
     }
-
-    // ─── 3. Cerrar viaje ──────────────────────────────────────
-    await supabase
-      .from("viajes")
-      .update({ estado: "completado" })
-      .eq("id", viajeId)
 
     return NextResponse.json({
       success: true,
       viaje_id: viajeId,
-      ...resultados,
-      mensaje: `Rendición confirmada. ${resultados.pagos_confirmados} pagos y ${resultados.devoluciones_confirmadas} devoluciones procesadas.`,
+      rendicion_id: creada.rendicion_id,
+      pagos_confirmados: confirmada.confirmados,
+      pagos_omitidos: confirmada.omitidos,
+      transferencias_a_conciliar: confirmada.a_conciliar,
+      efectivo_a_caja: confirmada.efectivo_a_caja,
+      diferencia: confirmada.diferencia,
+      devoluciones_confirmadas: devolucionesConfirmadas,
+      mensaje: `Rendición confirmada: ${confirmada.confirmados} pagos (${confirmada.a_conciliar} transferencias a conciliar), efectivo a caja $${Number(confirmada.efectivo_a_caja).toLocaleString("es-AR")}.`,
     })
   } catch (error: any) {
     console.error("[viajes] Error en confirmar-rendicion:", error)
@@ -189,6 +170,7 @@ export async function GET(
       { data: pagos },
       { data: devoluciones },
       { data: gastos },
+      { data: cajas },
     ] = await Promise.all([
       supabase
         .from("viajes")
@@ -198,7 +180,7 @@ export async function GET(
       supabase
         .from("pagos_clientes")
         .select(`
-          id, cliente_id, monto, estado, fecha_pago,
+          id, cliente_id, monto, estado, fecha_pago, verificado_por, verificado_at, verificacion_metodo,
           clientes(nombre, razon_social),
           pagos_detalle(tipo_pago, monto),
           imputaciones(comprobante_id, monto_imputado, estado,
@@ -222,6 +204,7 @@ export async function GET(
         .select("tipo, medio, monto, concepto, fecha")
         .eq("referencia_tipo", "viaje")
         .eq("referencia_id", viajeId),
+      supabase.from("cajas_financieras").select("id, nombre").order("nombre"),
     ])
 
     if (!viaje) return NextResponse.json({ error: "Viaje no encontrado" }, { status: 404 })
@@ -236,7 +219,6 @@ export async function GET(
       .filter((g) => g.tipo === "credito")
       .reduce((s, g) => s + Number(g.monto), 0)
 
-    // Desglose por método de pago
     const pagosPorMetodo = { efectivo: 0, cheque: 0, transferencia: 0, deposito: 0 }
     for (const p of pagos || []) {
       for (const d of (p as any).pagos_detalle || []) {
@@ -247,6 +229,18 @@ export async function GET(
       }
     }
 
+    // Efectivo esperado de los pagos AÚN pendientes de rendir
+    const efectivoPendiente = (pagos || [])
+      .filter((p) => p.estado === "pendiente_rendicion")
+      .reduce(
+        (s, p) =>
+          s +
+          ((p as any).pagos_detalle || [])
+            .filter((d: any) => d.tipo_pago === "efectivo")
+            .reduce((x: number, d: any) => x + Number(d.monto), 0),
+        0
+      )
+
     const efectivoNeto = pagosPorMetodo.efectivo + fondosRecibidos - totalGastos
 
     return NextResponse.json({
@@ -254,12 +248,14 @@ export async function GET(
       pagos: pagos || [],
       devoluciones: devoluciones || [],
       gastos: gastosList,
+      cajas: cajas || [],
       resumen: {
         total_cobrado: totalCobrado,
         total_devoluciones: totalDevoluciones,
         total_gastos: totalGastos,
         fondos_recibidos: fondosRecibidos,
         efectivo_neto: efectivoNeto,
+        efectivo_pendiente_rendir: efectivoPendiente,
         pagos_por_metodo: pagosPorMetodo,
         pagos_pendientes: (pagos || []).filter((p) => p.estado === "pendiente_rendicion").length,
         devoluciones_pendientes: (devoluciones || []).filter((d) => d.estado === "pendiente").length,
