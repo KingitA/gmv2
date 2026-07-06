@@ -135,6 +135,22 @@ export default function VendedorHomePage() {
             <p className="text-lg font-bold">Nuevo Pedido</p>
             <p className="text-emerald-100 text-sm mt-1">Levantar pedido</p>
           </button>
+          <button
+            onClick={() => router.push("/vendedor/pedidos")}
+            className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-left active:scale-95 transition-transform"
+          >
+            <p className="text-3xl mb-2">📋</p>
+            <p className="text-lg font-bold text-gray-900">Mis Pedidos</p>
+            <p className="text-gray-500 text-sm mt-1">Historial y estados</p>
+          </button>
+          <button
+            onClick={() => router.push("/vendedor/estadisticas")}
+            className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-left active:scale-95 transition-transform"
+          >
+            <p className="text-3xl mb-2">📊</p>
+            <p className="text-lg font-bold text-gray-900">Estadísticas</p>
+            <p className="text-gray-500 text-sm mt-1">Ventas y comisiones</p>
+          </button>
         </section>
 
         {/* Últimos pedidos */}
