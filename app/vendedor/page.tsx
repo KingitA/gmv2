@@ -111,7 +111,12 @@ export default function VendedorHomePage() {
 
         {/* Últimos pedidos */}
         <section>
-          <h2 className="text-lg font-bold text-gray-700 mb-3">Últimos pedidos</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-bold text-gray-700">Últimos pedidos</h2>
+            <button onClick={() => router.push("/vendedor/pedidos")} className="text-emerald-700 font-medium text-sm">
+              Ver todos →
+            </button>
+          </div>
           {data?.ultimos_pedidos?.length ? (
             <div className="space-y-3">
               {data.ultimos_pedidos.map((p) => (
