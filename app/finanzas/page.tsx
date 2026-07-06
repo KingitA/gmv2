@@ -6,11 +6,7 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend,
   PieChart, Pie, Cell,
 } from "recharts"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { ArrowLeft, Pencil, TrendingUp, PieChart as PieIcon } from "lucide-react"
+import { ArrowLeft, TrendingUp, PieChart as PieIcon } from "lucide-react"
 import Link from "next/link"
 
 // ─── Estructura de cajas ─────────────────────────────────────────────────────
@@ -18,7 +14,7 @@ import Link from "next/link"
 type CajaKey =
   | "caja_chica" | "caja_grande"
   | "credicoop" | "nacion" | "provincia" | "mercadopago"
-  | "acciones" | "fondos_comunes" | "cauciones" | "cedears"
+  | "acciones" | "fondos_comunes" | "cauciones" | "cedears" | "obligaciones"
 
 type GroupKey = "bancos" | "bolsa"
 
@@ -42,12 +38,29 @@ const CAJAS: CajaDef[] = [
   { key: "provincia",      label: "Provincia",      group: "bancos", color: "#a5b4fc" },
   { key: "mercadopago",    label: "Mercado Pago",   group: "bancos", color: "#4338ca" },
   { key: "acciones",       label: "Acciones",       group: "bolsa",  color: "#10b981" },
-  { key: "fondos_comunes", label: "Fondos Comunes", group: "bolsa",  color: "#34d399" },
+  { key: "fondos_comunes", label: "FCI",            group: "bolsa",  color: "#34d399" },
   { key: "cauciones",      label: "Cauciones",      group: "bolsa",  color: "#059669" },
   { key: "cedears",        label: "CEDEARs",        group: "bolsa",  color: "#047857" },
+  { key: "obligaciones",   label: "Obl. Negoc.",    group: "bolsa",  color: "#065f46" },
 ]
 
 const ALL_KEYS = CAJAS.map(c => c.key)
+
+// Mapeo caja_key legacy → nombre de cuenta en el sistema de cajas (Fase B).
+// El valor VIGENTE se lee de saldos_financieros (derivado del kardex);
+// finanzas_saldos queda solo como serie histórica para los gráficos.
+const LIVE_NOMBRE: Partial<Record<CajaKey, string>> = {
+  caja_chica: "Caja Chica",
+  caja_grande: "Caja Grande",
+  credicoop: "Credicoop",
+  nacion: "Nación",
+  provincia: "Provincia",
+  mercadopago: "MercadoPago",
+  acciones: "Bolsa - Acciones",
+  fondos_comunes: "Bolsa - FCI",
+  cedears: "Bolsa - CEDEARs",
+  obligaciones: "Bolsa - Obligaciones Negociables",
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -74,20 +87,22 @@ export default function FinanzasPage() {
   // Which cajas are selected for charts (default: all)
   const [selected, setSelected] = useState<Set<CajaKey>>(new Set(ALL_KEYS))
 
-  // Update modal
-  const [editCaja, setEditCaja] = useState<CajaDef | null>(null)
-  const [editMonto, setEditMonto] = useState("")
-  const [editFecha, setEditFecha] = useState(today())
-  const [saving, setSaving] = useState(false)
+  // Saldos vigentes del sistema de cajas (kardex → saldos_financieros)
+  const [liveMap, setLiveMap] = useState<Record<string, number>>({})
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const load = async () => {
     setLoading(true)
-    const { data } = await sb
-      .from("finanzas_saldos")
-      .select("id, caja_key, monto, fecha")
-      .order("fecha", { ascending: true })
+    const [{ data }, liveRes] = await Promise.all([
+      sb.from("finanzas_saldos").select("id, caja_key, monto, fecha").order("fecha", { ascending: true }),
+      fetch("/api/finanzas/cajas").then(r => r.json()).catch(() => ({ cuentas: [] })),
+    ])
     setSaldos((data || []) as any)
+    const live: Record<string, number> = {}
+    for (const c of liveRes.cuentas || []) {
+      live[c.nombre] = Number(c.saldos?.BLANCO ?? 0) + Number(c.saldos?.NEGRO ?? 0)
+    }
+    setLiveMap(live)
     setLoading(false)
   }
 
@@ -104,7 +119,13 @@ export default function FinanzasPage() {
     return m
   }, [saldos])
 
-  const latestOf = (key: CajaKey) => latestMap[key] ?? 0
+  // Saldo vigente: sistema de cajas (kardex) si la cuenta existe; si no,
+  // último snapshot histórico (ej. cauciones, aún sin cuenta mapeada).
+  const latestOf = (key: CajaKey) => {
+    const nombre = LIVE_NOMBRE[key]
+    if (nombre && nombre in liveMap) return liveMap[nombre]
+    return latestMap[key] ?? 0
+  }
   const groupTotal = (g: GroupKey) =>
     CAJAS.filter(c => c.group === g).reduce((s, c) => s + latestOf(c.key), 0)
   const grandTotal = CAJAS.reduce((s, c) => s + latestOf(c.key), 0)
@@ -164,27 +185,6 @@ export default function FinanzasPage() {
     })
   }
 
-  // ── Save saldo ────────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    if (!editCaja) return
-    const monto = parseFloat(editMonto.replace(/\./g, "").replace(",", "."))
-    if (isNaN(monto)) return
-    setSaving(true)
-    await sb.from("finanzas_saldos").insert({ caja_key: editCaja.key, monto, fecha: editFecha })
-    await load()
-    setSaving(false)
-    setEditCaja(null)
-    setEditMonto("")
-    setEditFecha(today())
-  }
-
-  const openEdit = (c: CajaDef) => {
-    setEditCaja(c)
-    const current = latestOf(c.key)
-    setEditMonto(current > 0 ? String(current) : "")
-    setEditFecha(today())
-  }
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   const CajaCard = ({ caja }: { caja: CajaDef }) => {
@@ -200,12 +200,6 @@ export default function FinanzasPage() {
         }`}
         style={isSel ? { borderColor: caja.color, background: `${caja.color}10` } : {}}
       >
-        <button
-          onClick={e => { e.stopPropagation(); openEdit(caja) }}
-          className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-700"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </button>
         <div className="flex items-center gap-2 mb-2">
           <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: caja.color }} />
           <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide truncate">{caja.label}</span>
@@ -232,6 +226,11 @@ export default function FinanzasPage() {
           <h1 className="text-lg font-bold text-slate-800">Finanzas</h1>
           <p className="text-xs text-slate-400">Patrimonio total: <span className="font-semibold text-slate-700">{fmt(grandTotal)}</span></p>
         </div>
+        <Link href="/finanzas/cajas">
+          <button className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 transition-colors">
+            Operar cajas →
+          </button>
+        </Link>
         <div className="text-right">
           <div className="text-xs text-slate-400">Seleccionado</div>
           <div className="text-base font-bold text-indigo-600">{fmt(selectedTotal)}</div>
@@ -384,62 +383,12 @@ export default function FinanzasPage() {
 
             {lineData.length === 0 && pieData.length === 0 && (
               <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400 text-sm shadow-sm">
-                No hay datos todavía. Hacé clic en el ícono ✏️ de una caja para ingresar el primer saldo.
+                Sin serie histórica todavía. Los saldos vigentes se operan desde &quot;Operar cajas&quot;.
               </div>
             )}
           </div>
         )}
       </div>
-
-      {/* ── Update saldo modal ── */}
-      <Dialog open={!!editCaja} onOpenChange={o => { if (!o) setEditCaja(null) }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-sm">
-              <div className="w-3 h-3 rounded-full" style={{ background: editCaja?.color }} />
-              Actualizar saldo — {editCaja?.label}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-1">
-            <div>
-              <Label className="text-xs">Saldo actual</Label>
-              <Input
-                type="number"
-                className="h-10 text-lg font-mono mt-1"
-                placeholder="0"
-                value={editMonto}
-                onChange={e => setEditMonto(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Fecha del registro</Label>
-              <Input
-                type="date"
-                className="h-9 text-sm mt-1"
-                value={editFecha}
-                onChange={e => setEditFecha(e.target.value)}
-              />
-            </div>
-            {editMonto && !isNaN(parseFloat(editMonto)) && (
-              <p className="text-xs text-slate-500 text-center">
-                {fmt(parseFloat(editMonto.replace(/\./g, "").replace(",", ".")))}
-              </p>
-            )}
-            <div className="flex gap-2 pt-1">
-              <Button variant="outline" className="flex-1" onClick={() => setEditCaja(null)}>Cancelar</Button>
-              <Button
-                className="flex-1"
-                style={{ background: editCaja?.color }}
-                onClick={handleSave}
-                disabled={saving || !editMonto}
-              >
-                {saving ? "Guardando..." : "Guardar"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
