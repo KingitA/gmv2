@@ -470,6 +470,36 @@ export async function POST(request: Request) {
     })
     if (ccError) console.error('[cc_postear] NC/REV', comprobante.id, ccError.message)
 
+    // Imputación automática NC↔FA (Fase A3): aplicar el crédito de la NC
+    // contra los comprobantes de origen de la devolución hasta agotarlo.
+    // Si el ítem no tiene comprobante original linkeado, el crédito queda
+    // disponible para imputación manual (cc_imputar_credito).
+    try {
+      const origenIds: string[] = [
+        ...new Set(
+          (devolucion.detalle ?? [])
+            .map((item: any) => item.comprobante_venta_id)
+            .filter(Boolean) as string[],
+        ),
+      ]
+      for (const origenId of origenIds) {
+        const { data: impRes, error: impErr } = await supabase.rpc("cc_imputar_credito", {
+          p_credito_id: comprobante.id,
+          p_debito_id: origenId,
+          p_monto: null,
+          p_usuario_id: auth.user.id,
+        })
+        if (impErr) {
+          // "sin saldo disponible/pendiente" es esperable cuando el crédito se agotó
+          console.warn("[cc_imputar_credito] NC", comprobante.id, "→", origenId, impErr.message)
+          break
+        }
+        if (Number(impRes?.credito_saldo_restante) >= 0) break // crédito agotado
+      }
+    } catch (impError: any) {
+      console.error("[cc_imputar_credito] NC/REV", comprobante.id, impError.message)
+    }
+
     // Marcar la devolución como facturada para que no pueda generar otra NC
     await supabase
       .from("devoluciones")
