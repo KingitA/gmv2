@@ -99,8 +99,14 @@ export default function VendedorBilleteraPage() {
               <p className="font-bold">{formatCurrency(data.total_pendiente_comisiones)}</p>
             </div>
           </div>
-          <p className="text-emerald-200 text-xs mt-3">
-            La rendición se declara acá y la confirma oficina (doble firma).
+          <button
+            onClick={() => router.push("/vendedor/rendiciones")}
+            className="w-full bg-white text-emerald-700 rounded-xl py-3 font-bold mt-4 active:scale-[0.98] transition-transform"
+          >
+            📤 Rendir cobranzas
+          </button>
+          <p className="text-emerald-200 text-xs mt-2">
+            Vos declarás la rendición; oficina la confirma (doble firma).
           </p>
         </section>
 

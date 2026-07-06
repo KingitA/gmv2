@@ -164,22 +164,18 @@ export default function VendedorClienteFichaPage() {
             <p className="font-bold text-sm mt-1">Pedido</p>
           </button>
           <button
-            disabled
-            className="bg-gray-200 text-gray-400 rounded-2xl p-4 text-center"
-            title="Disponible cuando se active el módulo de cobranzas"
+            onClick={() => router.push(`/vendedor/clientes/${cliente.id}/cobrar`)}
+            className="bg-white border-2 border-emerald-600 text-emerald-700 rounded-2xl p-4 text-center active:scale-95 transition-transform"
           >
             <p className="text-2xl">💵</p>
             <p className="font-bold text-sm mt-1">Cobrar</p>
-            <p className="text-[10px]">Próximamente</p>
           </button>
           <button
-            disabled
-            className="bg-gray-200 text-gray-400 rounded-2xl p-4 text-center"
-            title="Disponible cuando se active el módulo de cobranzas"
+            onClick={() => router.push(`/vendedor/clientes/${cliente.id}/devolucion`)}
+            className="bg-white border-2 border-orange-400 text-orange-600 rounded-2xl p-4 text-center active:scale-95 transition-transform"
           >
             <p className="text-2xl">📦</p>
             <p className="font-bold text-sm mt-1">Devolución</p>
-            <p className="text-[10px]">Próximamente</p>
           </button>
         </section>
 
