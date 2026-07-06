@@ -18,7 +18,7 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    const [pendientesRes, sinVerificarRes, saldosRes] = await Promise.all([
+    const [pendientesRes, sinVerificarRes, saldosRes, rendicionesRes, cajasRes] = await Promise.all([
       supabase
         .from("pagos_clientes")
         .select(
@@ -35,6 +35,12 @@ export async function GET() {
         .is("verificado_por", null)
         .order("fecha_pago", { ascending: true }),
       supabase.from("saldos_financieros").select("cuenta_id, color, saldo").eq("cuenta_tipo", "BILLETERA"),
+      supabase
+        .from("rendiciones")
+        .select("id, cobrador_id, cobrador_tipo, fecha, efectivo_declarado, efectivo_registrado, diferencia, observaciones, rendicion_items(pago_id)")
+        .eq("estado", "abierta")
+        .order("fecha", { ascending: true }),
+      supabase.from("cajas_financieras").select("id, nombre").order("nombre"),
     ])
 
     const saldoBilletera = new Map<string, number>()
@@ -75,14 +81,20 @@ export async function GET() {
       })
     }
 
-    // Nombres de cobradores
-    const cobradorIds = [...grupos.keys()].filter((id) => id !== "desconocido")
+    // Nombres de cobradores (grupos + rendiciones declaradas)
+    const rendicionesAbiertas = rendicionesRes.data || []
+    const cobradorIds = [
+      ...new Set([
+        ...[...grupos.keys()].filter((id) => id !== "desconocido"),
+        ...rendicionesAbiertas.map((r) => r.cobrador_id),
+      ]),
+    ]
+    const nombres = new Map<string, string>()
     if (cobradorIds.length) {
       const [profilesRes, vendedoresRes] = await Promise.all([
         supabase.from("profiles").select("id, nombre").in("id", cobradorIds),
         supabase.from("vendedores").select("id, nombre").in("id", cobradorIds),
       ])
-      const nombres = new Map<string, string>()
       for (const v of vendedoresRes.data || []) nombres.set(v.id, v.nombre)
       for (const p of profilesRes.data || []) nombres.set(p.id, p.nombre)
       for (const [id, g] of grupos) g.cobrador_nombre = nombres.get(id) ?? id.slice(0, 8)
@@ -95,6 +107,18 @@ export async function GET() {
     return NextResponse.json({
       cobradores: [...grupos.values()].sort((a, b) => b.total - a.total),
       total_en_calle: [...grupos.values()].reduce((s, g) => s + g.total, 0),
+      cajas: cajasRes.data || [],
+      rendiciones_declaradas: rendicionesAbiertas.map((r: any) => ({
+        id: r.id,
+        cobrador_nombre: nombres.get(r.cobrador_id) ?? r.cobrador_id.slice(0, 8),
+        cobrador_tipo: r.cobrador_tipo,
+        fecha: r.fecha,
+        efectivo_declarado: Number(r.efectivo_declarado),
+        efectivo_registrado: Number(r.efectivo_registrado),
+        diferencia: Number(r.diferencia),
+        cantidad_pagos: (r.rendicion_items || []).length,
+        observaciones: r.observaciones,
+      })),
       sin_verificar: sinVerificar.map((p) => ({
         id: p.id,
         cliente: (p as any).clientes?.nombre ?? p.cliente_id,

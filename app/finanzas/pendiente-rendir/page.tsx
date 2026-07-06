@@ -5,8 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
-import { ArrowLeft, Wallet, RefreshCw, ShieldCheck } from "lucide-react"
+import { ArrowLeft, Wallet, RefreshCw, ShieldCheck, Inbox } from "lucide-react"
 import Link from "next/link"
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
 
 const fmt = (n: number) =>
   n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 })
@@ -16,6 +19,9 @@ export default function PendienteRendirPage() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [verificando, setVerificando] = useState<string | null>(null)
+  const [confirmandoRendicion, setConfirmandoRendicion] = useState<string | null>(null)
+  const [cajaDestino, setCajaDestino] = useState("")
+  const [forzar, setForzar] = useState<Record<string, boolean>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -32,6 +38,45 @@ export default function PendienteRendirPage() {
   }, [toast])
 
   useEffect(() => { load() }, [load])
+
+  const confirmarRendicion = async (rendicionId: string) => {
+    if (!cajaDestino) {
+      toast({ variant: "destructive", title: "Elegí la caja destino del efectivo" })
+      return
+    }
+    setConfirmandoRendicion(rendicionId)
+    try {
+      const res = await fetch(`/api/finanzas/rendiciones/${rendicionId}/confirmar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caja_destino_tipo: "CAJA",
+          caja_destino_id: cajaDestino,
+          forzar_diferencia: Boolean(forzar[rendicionId]),
+        }),
+      })
+      const d = await res.json()
+      if (res.status === 409 && d.requiere_forzar) {
+        setForzar((prev) => ({ ...prev, [rendicionId]: true }))
+        toast({
+          variant: "destructive",
+          title: "Diferencia de efectivo",
+          description: `${d.error}. Si es real, volvé a confirmar: queda documentada.`,
+        })
+        return
+      }
+      if (!res.ok) throw new Error(d.error)
+      toast({
+        title: `Rendición confirmada: ${d.confirmados} pagos`,
+        description: `Efectivo a caja $${Number(d.efectivo_a_caja).toLocaleString("es-AR")}${d.a_conciliar ? ` · ${d.a_conciliar} transferencias a conciliar` : ""}`,
+      })
+      load()
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: e.message })
+    } finally {
+      setConfirmandoRendicion(null)
+    }
+  }
 
   const verificar = async (pagoId: string) => {
     setVerificando(pagoId)
@@ -74,6 +119,56 @@ export default function PendienteRendirPage() {
       </header>
 
       <main className="container mx-auto px-6 py-8 space-y-8">
+        {/* ── Rendiciones declaradas por viajantes (a confirmar) ── */}
+        {(data?.rendiciones_declaradas?.length ?? 0) > 0 && (
+          <section>
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Inbox className="h-5 w-5 text-muted-foreground" />
+              Rendiciones declaradas — esperando confirmación de oficina
+            </h2>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm text-muted-foreground">Caja destino del efectivo:</span>
+              <Select value={cajaDestino} onValueChange={setCajaDestino}>
+                <SelectTrigger className="w-52"><SelectValue placeholder="Seleccionar caja…" /></SelectTrigger>
+                <SelectContent>
+                  {(data?.cajas || []).map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              {data.rendiciones_declaradas.map((r: any) => (
+                <div key={r.id} className="flex items-center justify-between border-2 border-amber-200 bg-amber-50/40 rounded-lg px-4 py-3">
+                  <div>
+                    <p className="font-medium">
+                      {r.cobrador_nombre}
+                      <Badge variant="outline" className="ml-2 capitalize">{r.cobrador_tipo}</Badge>
+                      <span className="text-sm text-muted-foreground ml-2">
+                        {new Date(r.fecha).toLocaleString("es-AR")} · {r.cantidad_pagos} pagos
+                      </span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Efectivo declarado {fmt(r.efectivo_declarado)} · registrado {fmt(r.efectivo_registrado)}
+                      {Math.abs(r.diferencia) > 0.01 && (
+                        <span className="text-amber-700 font-semibold"> · diferencia {fmt(r.diferencia)}</span>
+                      )}
+                      {r.observaciones && ` · ${r.observaciones}`}
+                    </p>
+                  </div>
+                  <Button
+                    disabled={confirmandoRendicion === r.id || !cajaDestino}
+                    variant={forzar[r.id] ? "destructive" : "default"}
+                    onClick={() => confirmarRendicion(r.id)}
+                  >
+                    {confirmandoRendicion === r.id ? "..." : forzar[r.id] ? "Confirmar CON diferencia" : "✓ Confirmar rendición"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* ── Por cobrador ── */}
         <section>
           <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
