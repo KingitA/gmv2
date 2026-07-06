@@ -977,39 +977,10 @@ export async function createPedido(data: {
     )
   }
 
-  // Create account movement and update balance
-  console.log("Updating account movements...")
-  try {
-    // 1. Get current balance
-    const { data: ctaActual } = await supabase
-      .from("cuenta_corriente")
-      .select("saldo")
-      .eq("cliente_id", data.cliente_id)
-      .maybeSingle()
-
-    const nuevoSaldo = (ctaActual?.saldo || 0) + total
-
-    // 2. Insert into movimientos_cuenta (Ledger)
-    await supabase.from("movimientos_cuenta").insert({
-      cliente_id: data.cliente_id,
-      tipo: "debe",
-      concepto: `Pedido #${numeroPedido}`,
-      importe: total,
-      saldo_resultante: nuevoSaldo,
-      fecha: nowArgentina(),
-      referencia: `PEDIDO-${pedido.id}`
-    })
-
-    // 3. Update summary balance
-    if (ctaActual) {
-      await supabase.from("cuenta_corriente").update({ saldo: nuevoSaldo }).eq("cliente_id", data.cliente_id)
-    } else {
-      await supabase.from("cuenta_corriente").insert({ cliente_id: data.cliente_id, saldo: nuevoSaldo })
-    }
-    console.log("Account balance updated successfully")
-  } catch (ctaError) {
-    console.error("Non-critical error updating account balance:", ctaError)
-  }
+  // NOTA (Fase A2): acá había escrituras a las tablas cuenta_corriente y
+  // movimientos_cuenta, que NO EXISTEN en la DB — fallaban silenciosamente en
+  // cada pedido dentro de un try/catch. La cuenta corriente del cliente se
+  // postea al facturar (cc_postear via comprobantes), no al crear el pedido.
 
   // ── Mercadería bonificada elegida al crear el pedido ──────────────────────
   // Monto a bonificar = % × total (sin bonificados), repartido parejo entre los

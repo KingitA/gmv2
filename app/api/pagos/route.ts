@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
-import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
+import { confirmarCobranza } from "@/lib/actions/cobranzas"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -130,59 +132,35 @@ export async function POST(request: NextRequest) {
     if (detallesError) throw detallesError
 
     if (listaImputaciones.length > 0) {
-      const imputacionesData = listaImputaciones.map((imp: any) => ({
-        pago_id: pago.id,
-        comprobante_id: imp.comprobante_id,
-        tipo_comprobante: imp.tipo_documento || "venta",
-        monto_imputado: imp.monto_imputado,
-        estado: "confirmado",
-      }))
+      const imputacionesData = listaImputaciones
+        .filter((imp: any) => imp.comprobante_id)
+        .map((imp: any) => ({
+          pago_id: pago.id,
+          comprobante_id: imp.comprobante_id,
+          tipo_comprobante: imp.tipo_documento || "venta",
+          monto_imputado: imp.monto_imputado,
+          estado: "pendiente",
+        }))
 
-      const { error: impError } = await supabase.from("imputaciones").insert(imputacionesData)
-      if (impError) {
-        console.error("[v0] Error guardando imputaciones:", impError)
-      }
-
-      // Aplicar cada imputación al saldo_pendiente del comprobante
-      for (const imp of listaImputaciones) {
-        if (!imp.comprobante_id) continue
-        const { data: comp } = await supabase
-          .from("comprobantes_venta")
-          .select("saldo_pendiente")
-          .eq("id", imp.comprobante_id)
-          .single()
-        if (!comp) continue
-        const nuevoSaldo = Number(comp.saldo_pendiente) - Number(imp.monto_imputado)
-        await supabase
-          .from("comprobantes_venta")
-          .update({
-            saldo_pendiente: Math.max(0, nuevoSaldo),
-            estado_pago: nuevoSaldo <= 0 ? "pagado" : "parcial",
-          })
-          .eq("id", imp.comprobante_id)
+      if (imputacionesData.length) {
+        const { error: impError } = await supabase.from("imputaciones").insert(imputacionesData)
+        if (impError) throw new Error(`imputaciones: ${impError.message}`)
       }
     }
 
-    // Marcar el pago como confirmado directamente
-    await supabase.from("pagos_clientes").update({ estado: "confirmado" }).eq("id", pago.id)
-
-    // Libro mayor: el pago confirmado acredita al cliente (haber)
-    const { error: ccErr } = await supabase.rpc("cc_postear", {
-      p_cliente_id:      cliente_id,
-      p_tipo_movimiento: "pago",
-      p_debe:            0,
-      p_haber:           montoTotal,
-      p_referencia_tipo: "pago_cliente",
-      p_referencia_id:   pago.id,
-      p_numero_comprobante: null,
-      p_observaciones:   observaciones || "Pago",
-      p_usuario_id:      auth.user.id,
+    // Confirmación atómica (Fase A1): imputaciones → saldos, libro mayor,
+    // recibo numerado, kardex y estado, todo en el RPC cobranza_confirmar.
+    // (Antes este endpoint auto-confirmaba a mano sin recibo ni kardex.)
+    const admin = createAdminClient()
+    const result = await confirmarCobranza(supabase, admin, {
+      pagoId: pago.id,
+      usuarioId: auth.user.id,
     })
-    if (ccErr) console.error("[cc_postear] pago (api/pagos)", pago.id, ccErr.message)
 
     return NextResponse.json({
       success: true,
       pago,
+      numero_recibo: result.numero_recibo,
       mensaje: "Pago registrado y aplicado.",
     })
   } catch (error: any) {
