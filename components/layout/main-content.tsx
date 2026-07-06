@@ -8,7 +8,8 @@ export function MainContent({ children }: { children: React.ReactNode }) {
   const isDepositoRoute = pathname?.startsWith('/deposito')
   const isWarehouseRoute = pathname?.startsWith('/warehouse')
   const isChoferRoute = pathname?.startsWith('/chofer')
-  const noSidebar = isAuthRoute || isDepositoRoute || isWarehouseRoute || isChoferRoute
+  const isVendedorRoute = pathname?.startsWith('/vendedor')
+  const noSidebar = isAuthRoute || isDepositoRoute || isWarehouseRoute || isChoferRoute || isVendedorRoute
 
   return (
     <main className={`min-h-screen transition-all duration-200 ${noSidebar ? '' : 'pl-[230px]'}`}>

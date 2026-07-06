@@ -1,7 +1,7 @@
 // Pure utility — no imports, works in Edge Runtime, browser, and Node.js
 
 export const ERP_ROLES = ['admin', 'administrativo'] as const
-export const ALL_ROLES = ['admin', 'administrativo', 'deposito', 'chofer', 'viajante'] as const
+export const ALL_ROLES = ['admin', 'administrativo', 'deposito', 'chofer', 'vendedor', 'viajante'] as const
 
 /**
  * Devuelve la URL de inicio según los roles del usuario.
@@ -12,6 +12,7 @@ export function getHomeForRoles(roles: string[]): string | null {
   if (roles.includes('deposito') && roles.includes('chofer')) return '/seleccionar-modulo'
   if (roles.includes('deposito')) return '/deposito'
   if (roles.includes('chofer')) return '/chofer'
+  if (roles.includes('vendedor')) return '/vendedor'
   return null
 }
 
@@ -24,6 +25,7 @@ export const ROUTE_RULES: [string, string[]][] = [
   ['/admin',                ['admin']],
   ['/deposito',             ['admin', 'deposito']],
   ['/chofer',               ['admin', 'chofer']],
+  ['/vendedor',             ['admin', 'vendedor']],
   ['/seleccionar-modulo',   ['admin', 'deposito', 'chofer']],
   ['/viajantes',            ['admin']],
   ['/finanzas',             ['admin']],
