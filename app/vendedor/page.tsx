@@ -13,11 +13,22 @@ interface PedidoResumen {
   clientes?: { id: string; nombre: string } | null
 }
 
+interface ZonaProxima {
+  id: string
+  nombre: string
+  fecha: string
+  estado: string
+  zonas?: { nombre: string; descripcion: string | null } | null
+  mis_clientes_en_zona: number
+}
+
 interface MeData {
   usuario: { id: string; nombre: string; email: string }
   vendedores: { id: string; nombre: string }[]
   total_clientes: number
   ultimos_pedidos: PedidoResumen[]
+  billetera?: { saldo: number; comisiones_pendientes: number }
+  proximas_zonas?: ZonaProxima[]
 }
 
 const ESTADO_BADGE: Record<string, string> = {
@@ -89,6 +100,23 @@ export default function VendedorHomePage() {
       </header>
 
       <div className="p-4 space-y-6 max-w-2xl mx-auto">
+        {/* Billetera */}
+        <button
+          onClick={() => router.push("/vendedor/billetera")}
+          className="w-full bg-emerald-700 text-white rounded-2xl shadow-md p-5 text-left active:scale-[0.98] transition-transform"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-emerald-200 text-sm">💰 Plata en la calle</p>
+              <p className="text-3xl font-bold mt-1">{formatCurrency(data?.billetera?.saldo ?? 0)}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-emerald-200 text-sm">Comisiones pend.</p>
+              <p className="text-lg font-bold">{formatCurrency(data?.billetera?.comisiones_pendientes ?? 0)}</p>
+            </div>
+          </div>
+        </button>
+
         {/* Accesos principales */}
         <section className="grid grid-cols-2 gap-4">
           <button
@@ -153,6 +181,50 @@ export default function VendedorHomePage() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center">
               <p className="text-4xl mb-3">📋</p>
               <p className="text-gray-500 text-lg">Todavía no tenés pedidos.</p>
+            </div>
+          )}
+        </section>
+
+        {/* Próximas zonas */}
+        <section>
+          <h2 className="text-lg font-bold text-gray-700 mb-3">Próximas zonas</h2>
+          {data?.proximas_zonas?.length ? (
+            <div className="space-y-3">
+              {data.proximas_zonas.map((z) => (
+                <div key={z.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-900 truncate">
+                        📍 {z.zonas?.nombre || z.nombre}
+                      </p>
+                      <p className="text-gray-500 text-sm">
+                        {new Date(z.fecha).toLocaleDateString("es-AR", {
+                          weekday: "long",
+                          day: "numeric",
+                          month: "long",
+                        })}
+                        {z.zonas?.descripcion ? ` · ${z.zonas.descripcion}` : ""}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      {z.estado === "en_curso" && (
+                        <span className="inline-block bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                          EN CURSO
+                        </span>
+                      )}
+                      {z.mis_clientes_en_zona > 0 && (
+                        <p className="text-emerald-700 text-sm font-bold mt-1">
+                          {z.mis_clientes_en_zona} clientes tuyos
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-center text-gray-500">
+              No hay viajes programados.
             </div>
           )}
         </section>

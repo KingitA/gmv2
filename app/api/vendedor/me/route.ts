@@ -31,11 +31,57 @@ export async function GET() {
       .order("fecha", { ascending: false })
       .limit(5)
 
+    // Resumen de billetera (plata en la calle + comisiones pendientes)
+    const { data: movs } = await supabase
+      .from("billetera_movimientos")
+      .select("monto")
+      .in("viajante_id", session.vendedorIds)
+    const billeteraSaldo = (movs || []).reduce((s, m) => s + Number(m.monto), 0)
+
+    const { data: comisiones } = await supabase
+      .from("comisiones")
+      .select("monto")
+      .in("viajante_id", session.vendedorIds)
+      .eq("tipo", "cobrada")
+      .eq("pagado", false)
+    const comisionesPendientes = (comisiones || []).reduce((s, c) => s + Number(c.monto), 0)
+
+    // Próximas zonas: viajes vigentes (hoy en adelante o en curso) con la
+    // cantidad de clientes del vendedor en cada zona (vía localidades)
+    const hoy = new Date().toISOString().slice(0, 10)
+    const { data: viajes } = await supabase
+      .from("viajes")
+      .select("id, nombre, fecha, estado, zona_id, zonas(id, nombre, descripcion)")
+      .or(`fecha.gte.${hoy},estado.eq.en_curso`)
+      .order("fecha", { ascending: true })
+      .limit(5)
+
+    let proximasZonas: any[] = viajes || []
+    if (proximasZonas.length) {
+      const { data: misClientes } = await supabase
+        .from("clientes")
+        .select("localidad_id, localidades:localidad_id(zona_id)")
+        .in("vendedor_id", session.vendedorIds)
+        .eq("activo", true)
+        .not("localidad_id", "is", null)
+      const clientesPorZona = new Map<string, number>()
+      for (const c of misClientes || []) {
+        const zonaId = (c.localidades as any)?.zona_id
+        if (zonaId) clientesPorZona.set(zonaId, (clientesPorZona.get(zonaId) || 0) + 1)
+      }
+      proximasZonas = proximasZonas.map((v) => ({
+        ...v,
+        mis_clientes_en_zona: v.zona_id ? clientesPorZona.get(v.zona_id) || 0 : 0,
+      }))
+    }
+
     return NextResponse.json({
       usuario: usuario || { id: session.user.id, nombre: session.user.email, email: session.user.email },
       vendedores: session.vendedores,
       total_clientes: totalClientes ?? 0,
       ultimos_pedidos: ultimosPedidos || [],
+      billetera: { saldo: billeteraSaldo, comisiones_pendientes: comisionesPendientes },
+      proximas_zonas: proximasZonas,
     })
   } catch (error: any) {
     console.error("[vendedor] Error en GET /api/vendedor/me:", error)
