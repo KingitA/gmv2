@@ -46,7 +46,9 @@ interface ViajeData {
   }
 }
 
-const READONLY_ESTADOS = ["completado", "en_rendicion"]
+// en_rendicion ya NO es read-only: el chofer puede corregir cobros hasta que
+// oficina confirme la rendición (Fase C).
+const READONLY_ESTADOS = ["completado"]
 
 export default function ViajeDashboardPage() {
   const router = useRouter()

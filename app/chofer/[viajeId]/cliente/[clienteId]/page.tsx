@@ -76,7 +76,9 @@ interface MetodoPago {
 }
 
 const MOTIVOS = ["diferencia_precios", "rotura", "vencido", "no_pedido", "otro"]
-const READONLY_ESTADOS = ["completado", "en_rendicion"]
+// en_rendicion ya NO es read-only: el chofer puede corregir cobros hasta que
+// oficina confirme la rendición (Fase C).
+const READONLY_ESTADOS = ["completado"]
 
 // ─── Componente principal ─────────────────────────────────────
 

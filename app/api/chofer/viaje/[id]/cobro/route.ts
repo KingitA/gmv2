@@ -47,7 +47,9 @@ export async function POST(
     if (!viaje || viaje.chofer_id !== auth.user.id) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
-    if (viaje.estado !== "en_curso") {
+    // Fase C: el chofer puede registrar/corregir cobros también durante
+    // 'en_rendicion' (hasta que oficina confirme la rendición).
+    if (!["en_curso", "en_rendicion"].includes(viaje.estado)) {
       return NextResponse.json({ error: "El viaje no está activo" }, { status: 400 })
     }
 
