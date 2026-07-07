@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronRight, Plus, Trash2, Pencil, Check, X, GripVertical } from "lucide-react"
 
-type Rubro = { id: string; nombre: string; slug: string; orden: number }
+type Rubro = { id: string; nombre: string; slug: string; orden: number; descripcion?: string | null; imagen_url?: string | null }
 type Categoria = { id: string; rubro_id: string; nombre: string; orden: number }
 type Subcategoria = { id: string; categoria_id: string; nombre: string; orden: number }
 
@@ -32,6 +32,24 @@ export default function CategoriasPage() {
   const [editingSubcat, setEditingSubcat] = useState<string | null>(null)
   const [inputVal, setInputVal] = useState("")
   const [saving, setSaving] = useState(false)
+
+  // Edición de rubro (descripción + imagen para el catálogo del vendedor)
+  const [editingRubro, setEditingRubro] = useState<string | null>(null)
+  const [rubroDesc, setRubroDesc] = useState("")
+  const [rubroImg, setRubroImg] = useState("")
+
+  const saveRubro = async (rubroId: string) => {
+    setSaving(true)
+    const { error } = await sb
+      .from("rubros")
+      .update({ descripcion: rubroDesc.trim() || null, imagen_url: rubroImg.trim() || null })
+      .eq("id", rubroId)
+    if (!error) {
+      setEditingRubro(null)
+      await load()
+    } else alert(error.message)
+    setSaving(false)
+  }
 
   // Drag state — refs for source ID (no re-render during drag), state for visual feedback
   const dragCatIdRef    = useRef<string | null>(null)
@@ -225,15 +243,51 @@ export default function CategoriasPage() {
           return (
             <div key={rubro.id} className={`rounded-xl border ${colors.border} overflow-hidden`}>
               {/* Rubro header — orden fijo, no draggable */}
-              <button
-                onClick={() => toggleRubro(rubro.id)}
-                className={`w-full flex items-center gap-2 px-4 py-3 ${colors.header} font-semibold text-sm`}
-              >
-                <span className={`w-2.5 h-2.5 rounded-full ${colors.dot} flex-shrink-0`} />
-                <span className="flex-1 text-left">{rubro.nombre}</span>
+              <div className={`w-full flex items-center gap-2 px-4 py-3 ${colors.header} font-semibold text-sm`}>
+                <button onClick={() => toggleRubro(rubro.id)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+                  <span className={`w-2.5 h-2.5 rounded-full ${colors.dot} flex-shrink-0`} />
+                  <span className="flex-1 truncate">{rubro.nombre}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (editingRubro === rubro.id) setEditingRubro(null)
+                    else {
+                      setEditingRubro(rubro.id)
+                      setRubroDesc(rubro.descripcion || "")
+                      setRubroImg(rubro.imagen_url || "")
+                    }
+                  }}
+                  title="Descripción e imagen (catálogo del vendedor)"
+                  className="p-1 opacity-60 hover:opacity-100"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
                 <span className="text-xs font-normal opacity-60">{cats.length} cat.</span>
-                {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              </button>
+                <button onClick={() => toggleRubro(rubro.id)} className="p-0.5">
+                  {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </button>
+              </div>
+
+              {/* Descripción + imagen del rubro (se muestran en el catálogo del vendedor) */}
+              {editingRubro === rubro.id && (
+                <div className={`px-4 py-3 space-y-2 border-b ${colors.border} bg-white`}>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Descripción (catálogo del vendedor)</label>
+                    <Input value={rubroDesc} onChange={e => setRubroDesc(e.target.value)} placeholder="Ej: Limpieza del hogar, textiles y esponjas" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">URL de imagen</label>
+                    <Input value={rubroImg} onChange={e => setRubroImg(e.target.value)} placeholder="https://..." />
+                  </div>
+                  {rubroImg.trim() && (
+                    <img src={rubroImg} alt="" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
+                  )}
+                  <div className="flex gap-2 justify-end">
+                    <Button variant="outline" size="sm" onClick={() => setEditingRubro(null)} disabled={saving}>Cancelar</Button>
+                    <Button size="sm" onClick={() => saveRubro(rubro.id)} disabled={saving}>{saving ? "Guardando..." : "Guardar"}</Button>
+                  </div>
+                </div>
+              )}
 
               {isOpen && (
                 <div className={`${colors.bg} divide-y divide-slate-100`}>

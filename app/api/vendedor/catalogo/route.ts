@@ -18,6 +18,14 @@ export async function GET() {
       supabase.from("subcategorias").select("id, categoria_id, nombre, orden").order("orden"),
     ])
 
+    // Descripción e imagen del rubro (best-effort: requiere la migración
+    // 20260707_rubros_descripcion_imagen; hasta entonces quedan null)
+    const extrasRubro = new Map<string, { descripcion: string | null; imagen_url: string | null }>()
+    const { data: extras } = await supabase.from("rubros").select("id, descripcion, imagen_url")
+    for (const e of extras || []) {
+      extrasRubro.set(e.id, { descripcion: e.descripcion || null, imagen_url: e.imagen_url || null })
+    }
+
     // Conteo de artículos activos por categoría/subcategoría (paginado: PostgREST corta en 1000)
     const countCat = new Map<string, number>()
     const countSub = new Map<string, number>()
@@ -45,11 +53,8 @@ export async function GET() {
       subsPorCategoria.set(s.categoria_id, list)
     }
 
-    const resultado = (rubros || []).map((r) => ({
-      id: r.id,
-      nombre: r.nombre,
-      slug: r.slug,
-      categorias: (categorias || [])
+    const resultado = (rubros || []).map((r) => {
+      const cats = (categorias || [])
         .filter((c) => c.rubro_id === r.id)
         .map((c) => ({
           id: c.id,
@@ -57,8 +62,17 @@ export async function GET() {
           cantidad: countCat.get(c.id) || 0,
           subcategorias: subsPorCategoria.get(c.id) || [],
         }))
-        .filter((c) => c.cantidad > 0),
-    }))
+        .filter((c) => c.cantidad > 0)
+      return {
+        id: r.id,
+        nombre: r.nombre,
+        slug: r.slug,
+        descripcion: extrasRubro.get(r.id)?.descripcion || null,
+        imagen_url: extrasRubro.get(r.id)?.imagen_url || null,
+        cantidad: cats.reduce((s, c) => s + c.cantidad, 0),
+        categorias: cats,
+      }
+    })
 
     return NextResponse.json({ rubros: resultado })
   } catch (error: any) {

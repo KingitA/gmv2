@@ -88,6 +88,9 @@ interface CatalogoRubro {
   id: string
   nombre: string
   slug: string | null
+  descripcion?: string | null
+  imagen_url?: string | null
+  cantidad?: number
   categorias: CatalogoCategoria[]
 }
 
@@ -843,39 +846,100 @@ function NuevoPedidoInner() {
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 mb-2 px-1">
                 Catálogo por rubro
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Rubros apilados: header con imagen + título + descripción (entra al
+                  rubro) y debajo las categorías principales como accesos directos */}
+              <div className="space-y-3">
                 {catalogo.map((r) => {
                   const t = tinteRubro(r.nombre)
+                  const cats = [...r.categorias].sort((a, b) => b.cantidad - a.cantidad)
+                  const top = cats.slice(0, 6)
+                  const resto = cats.length - top.length
+                  const totalArts = r.cantidad ?? cats.reduce((s, c) => s + c.cantidad, 0)
                   return (
-                    <button
+                    <div
                       key={r.id}
-                      onClick={() => abrirRubro(r)}
-                      className="rounded-2xl border overflow-hidden text-left active:scale-[0.98] transition-transform flex sm:flex-col"
-                      style={{ background: t.bg, borderColor: t.border }}
+                      className="rounded-2xl border overflow-hidden bg-white"
+                      style={{ borderColor: t.border }}
                     >
-                      <div
-                        className="w-28 sm:w-full h-24 sm:h-28 shrink-0 flex items-center justify-center p-3"
-                        style={{ color: t.ink }}
+                      <button
+                        onClick={() => abrirRubro(r)}
+                        className="w-full text-left active:opacity-90"
+                        style={{ background: t.bg }}
                       >
-                        <div className="w-20 h-20">
-                          <ArteRubro nombre={r.nombre} accent={t.accent} />
+                        <div className="flex items-center gap-4 p-4">
+                          <div
+                            className="w-20 h-20 shrink-0 rounded-xl overflow-hidden flex items-center justify-center bg-white/60"
+                            style={{ color: t.ink }}
+                          >
+                            {r.imagen_url ? (
+                              <img src={r.imagen_url} alt="" loading="lazy" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-16 h-16">
+                                <ArteRubro nombre={r.nombre} accent={t.accent} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: t.accent }}>
+                              Rubro
+                            </p>
+                            <p className="font-bold text-gray-900 text-xl leading-tight">{r.nombre}</p>
+                            {r.descripcion && (
+                              <p className="text-gray-600 text-sm mt-0.5 line-clamp-2">{r.descripcion}</p>
+                            )}
+                            <p className="text-xs mt-1 font-medium" style={{ color: t.accent }}>
+                              {r.categorias.length} categorías · {totalArts} artículos
+                            </p>
+                          </div>
+                          <span className="text-3xl font-light shrink-0" style={{ color: t.accent }}>
+                            ›
+                          </span>
                         </div>
+                      </button>
+                      <div className="p-3 grid grid-cols-2 gap-2">
+                        {top.map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() =>
+                              abrirCategoria(
+                                { tipo: "rubro", rubroId: r.id, rubroNombre: r.nombre },
+                                c.id,
+                                c.nombre,
+                                r.nombre
+                              )
+                            }
+                            className="flex items-center gap-2.5 rounded-xl border p-2.5 text-left active:scale-[0.97] transition-transform"
+                            style={{ background: t.bgSoft, borderColor: t.border }}
+                          >
+                            <div
+                              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                              style={{ background: t.bg, color: t.ink }}
+                            >
+                              <IconoCategoria nombre={c.nombre} className="w-5 h-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-bold text-gray-900 text-[13px] leading-snug truncate">{c.nombre}</p>
+                              <p className="text-[11px]" style={{ color: t.accent }}>
+                                {c.cantidad} {c.cantidad === 1 ? "artículo" : "artículos"}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                        {resto > 0 && (
+                          <button
+                            onClick={() => abrirRubro(r)}
+                            className="flex items-center justify-center rounded-xl border border-dashed p-2.5 text-[13px] font-bold active:scale-[0.97]"
+                            style={{ borderColor: t.border, color: t.accent }}
+                          >
+                            +{resto} categorías más ›
+                          </button>
+                        )}
                       </div>
-                      <div className="bg-white/85 flex-1 px-4 py-3 flex flex-col justify-center">
-                        <p
-                          className="text-[10px] font-bold uppercase tracking-[0.16em]"
-                          style={{ color: t.accent }}
-                        >
-                          Rubro
-                        </p>
-                        <p className="font-bold text-gray-900 text-base leading-tight">{r.nombre}</p>
-                        <p className="text-gray-500 text-xs mt-0.5">{r.categorias.length} categorías</p>
-                      </div>
-                    </button>
+                    </div>
                   )
                 })}
                 {catalogo.length === 0 && (
-                  <div className="col-span-full text-center py-6">
+                  <div className="text-center py-6">
                     <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
                   </div>
                 )}
