@@ -4,7 +4,7 @@ import { requireVendedor } from "@/lib/vendedor/session"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 
 const SELECT =
-  "id, sku, ean13, descripcion, unidades_por_bulto, stock_actual, stock_reservado, descuento_propio, iva_ventas, marca:marca_id(descripcion), proveedor:proveedor_id(nombre)"
+  "id, sku, ean13, descripcion, unidades_por_bulto, stock_actual, stock_reservado, descuento_propio, iva_ventas, imagen_url, rubro_id, categoria_id, subcategoria_id, marca:marca_id(descripcion), proveedor:proveedor_id(nombre), rubro_info:rubro_id(nombre), categoria_info:categoria_id(nombre), subcategoria_info:subcategoria_id(nombre)"
 
 function mapArticulo(a: any, extra: Record<string, any> = {}) {
   return {
@@ -18,13 +18,22 @@ function mapArticulo(a: any, extra: Record<string, any> = {}) {
     iva_ventas: a.iva_ventas,
     marca: a.marca?.descripcion || null,
     proveedor: a.proveedor?.nombre || null,
+    imagen_url: a.imagen_url || null,
+    rubro_id: a.rubro_id || null,
+    categoria_id: a.categoria_id || null,
+    subcategoria_id: a.subcategoria_id || null,
+    rubro_nombre: a.rubro_info?.nombre || null,
+    categoria_nombre: a.categoria_info?.nombre || null,
+    subcategoria_nombre: a.subcategoria_info?.nombre || null,
     ...extra,
   }
 }
 
-// GET /api/vendedor/articulos?vista=habituales|ofertas|buscar&cliente=&q=
+// GET /api/vendedor/articulos?vista=habituales|ofertas|novedades|categoria|buscar&cliente=&q=&categoria=&subcategoria=
 // - habituales: artículos más pedidos por el cliente (derivado de pedidos_detalle)
-// - ofertas: artículos activos con descuento_propio > 0
+// - ofertas: artículos activos con descuento_propio > 0 (filtros opcionales categoria/subcategoria)
+// - novedades: últimos artículos cargados al sistema (filtros opcionales categoria/subcategoria)
+// - categoria: catálogo completo de una categoría (requiere categoria, subcategoria opcional)
 // - buscar: motor híbrido (trigram + vector) sobre el catálogo completo
 export async function GET(request: Request) {
   const session = await requireVendedor()
@@ -36,6 +45,8 @@ export async function GET(request: Request) {
     const vista = searchParams.get("vista") || "buscar"
     const clienteId = searchParams.get("cliente")
     const q = searchParams.get("q")?.trim() || ""
+    const categoriaId = searchParams.get("categoria") || ""
+    const subcategoriaId = searchParams.get("subcategoria") || ""
 
     if (vista === "habituales") {
       if (!clienteId) return NextResponse.json({ error: "Se requiere cliente." }, { status: 400 })
@@ -99,13 +110,37 @@ export async function GET(request: Request) {
     }
 
     if (vista === "ofertas") {
-      const { data: articulos } = await supabase
+      let query = supabase
         .from("articulos")
         .select(SELECT)
         .eq("activo", true)
         .gt("descuento_propio", 0)
-        .order("descuento_propio", { ascending: false })
-        .limit(100)
+      if (categoriaId) query = query.eq("categoria_id", categoriaId)
+      if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
+      const { data: articulos } = await query.order("descuento_propio", { ascending: false }).limit(300)
+      return NextResponse.json({ articulos: (articulos || []).map((a: any) => mapArticulo(a)) })
+    }
+
+    if (vista === "novedades") {
+      let query = supabase
+        .from("articulos")
+        .select(SELECT)
+        .eq("activo", true)
+      if (categoriaId) query = query.eq("categoria_id", categoriaId)
+      if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
+      const { data: articulos } = await query.order("created_at", { ascending: false }).limit(80)
+      return NextResponse.json({ articulos: (articulos || []).map((a: any) => mapArticulo(a)) })
+    }
+
+    if (vista === "categoria") {
+      if (!categoriaId) return NextResponse.json({ error: "Se requiere categoría." }, { status: 400 })
+      let query = supabase
+        .from("articulos")
+        .select(SELECT)
+        .eq("activo", true)
+        .eq("categoria_id", categoriaId)
+      if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
+      const { data: articulos } = await query.order("descripcion").limit(500)
       return NextResponse.json({ articulos: (articulos || []).map((a: any) => mapArticulo(a)) })
     }
 

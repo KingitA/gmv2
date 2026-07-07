@@ -1,9 +1,18 @@
 "use client"
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { createPedido, previewPrecioArticulo } from "@/lib/actions/pedidos"
+import {
+  ArteRubro,
+  IconoCategoria,
+  TINTE_HABITUALES,
+  TINTE_NOVEDADES,
+  TINTE_OFERTAS,
+  tinteRubro,
+  type Tinte,
+} from "./catalogo-ui"
 
 interface Articulo {
   id: string
@@ -16,6 +25,13 @@ interface Articulo {
   iva_ventas: string | null
   marca: string | null
   proveedor: string | null
+  imagen_url: string | null
+  rubro_id: string | null
+  categoria_id: string | null
+  subcategoria_id: string | null
+  rubro_nombre: string | null
+  categoria_nombre: string | null
+  subcategoria_nombre: string | null
   veces_pedido?: number
   cantidad_habitual?: number
 }
@@ -35,11 +51,83 @@ interface CartItem {
   precioNeto: number
 }
 
-const VISTAS = [
-  { key: "habituales", label: "⭐ Habituales" },
-  { key: "ofertas", label: "🏷️ Ofertas" },
-  { key: "buscar", label: "🔍 Buscar" },
-] as const
+interface CatalogoSubcategoria {
+  id: string
+  nombre: string
+  cantidad: number
+}
+
+interface CatalogoCategoria {
+  id: string
+  nombre: string
+  cantidad: number
+  subcategorias: CatalogoSubcategoria[]
+}
+
+interface CatalogoRubro {
+  id: string
+  nombre: string
+  slug: string | null
+  categorias: CatalogoCategoria[]
+}
+
+type Filtro = "novedades" | "ofertas" | "habituales"
+
+type Ctx = { tipo: Filtro } | { tipo: "rubro"; rubroId: string; rubroNombre: string }
+
+type Nav =
+  | { s: "home" }
+  | { s: "cats"; ctx: Ctx }
+  | { s: "arts"; ctx: Ctx; catId: string | null; catNombre: string; rubroNombre: string | null }
+
+const FILTROS: Record<Filtro, { label: string; sub: string; tinte: Tinte; icono: React.ReactNode }> = {
+  novedades: {
+    label: "Novedades",
+    sub: "Últimos ingresos",
+    tinte: TINTE_NOVEDADES,
+    icono: (
+      <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden>
+        <path
+          d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3ZM18.5 15.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6Z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
+  ofertas: {
+    label: "Ofertas",
+    sub: "Con descuento",
+    tinte: TINTE_OFERTAS,
+    icono: (
+      <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden>
+        <path
+          d="M11 3.5h6.5c1.7 0 3 1.3 3 3V13L12 21.5c-1 1-2.6 1-3.5 0L3.5 16.5c-1-1-1-2.6 0-3.5L11 3.5Z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+        <circle cx="15.5" cy="8.5" r="1.6" stroke="currentColor" strokeWidth="1.8" />
+      </svg>
+    ),
+  },
+  habituales: {
+    label: "Habituales",
+    sub: "Lo de siempre",
+    tinte: TINTE_HABITUALES,
+    icono: (
+      <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden>
+        <path
+          d="M12 3.5l2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8L12 3.5Z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
+}
 
 function NuevoPedidoInner() {
   const router = useRouter()
@@ -50,10 +138,19 @@ function NuevoPedidoInner() {
   const [clientes, setClientes] = useState<ClienteSel[]>([])
   const [qCliente, setQCliente] = useState("")
 
-  const [vista, setVista] = useState<string>("habituales")
-  const [q, setQ] = useState("")
-  const [articulos, setArticulos] = useState<Articulo[]>([])
+  // ── Navegación del catálogo ─────────────────────────────────────────
+  const [nav, setNav] = useState<Nav>({ s: "home" })
+  const [catalogo, setCatalogo] = useState<CatalogoRubro[]>([])
+  const [listas, setListas] = useState<Partial<Record<Filtro, Articulo[]>>>({})
+  const [cargandoLista, setCargandoLista] = useState(false)
+  const [artsCategoria, setArtsCategoria] = useState<Articulo[]>([])
   const [cargandoArts, setCargandoArts] = useState(false)
+  const [subSel, setSubSel] = useState<string | null>(null)
+
+  // ── Búsqueda ────────────────────────────────────────────────────────
+  const [q, setQ] = useState("")
+  const [resultados, setResultados] = useState<Articulo[]>([])
+  const [buscando, setBuscando] = useState(false)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [sel, setSel] = useState<Articulo | null>(null)
@@ -89,40 +186,90 @@ function NuevoPedidoInner() {
     }
   }, [clienteParam])
 
-  // ── Carga de artículos según vista ──────────────────────────────────
-  const cargarArticulos = useCallback(
-    (v: string, term: string) => {
-      if (!cliente) return
-      if (v === "buscar" && !term) {
-        setArticulos([])
-        return
-      }
-      setCargandoArts(true)
-      const params = new URLSearchParams({ vista: v, cliente: cliente.id })
-      if (term) params.set("q", term)
+  // Taxonomía (rubros → categorías → subcategorías) una sola vez
+  useEffect(() => {
+    if (!cliente) return
+    fetch("/api/vendedor/catalogo")
+      .then((r) => r.json())
+      .then((d) => !d.error && setCatalogo(d.rubros || []))
+      .catch(() => {})
+  }, [cliente])
+
+  // ── Carga de listas por filtro (novedades/ofertas/habituales) ───────
+  const cargarLista = useCallback(
+    (tipo: Filtro) => {
+      if (!cliente || listas[tipo]) return
+      setCargandoLista(true)
+      const params = new URLSearchParams({ vista: tipo, cliente: cliente.id })
       fetch(`/api/vendedor/articulos?${params}`)
         .then((r) => r.json())
-        .then((d) => setArticulos(d.articulos || []))
-        .catch(() => setArticulos([]))
+        .then((d) => setListas((prev) => ({ ...prev, [tipo]: d.articulos || [] })))
+        .catch(() => setListas((prev) => ({ ...prev, [tipo]: [] })))
+        .finally(() => setCargandoLista(false))
+    },
+    [cliente, listas]
+  )
+
+  // ── Artículos de una categoría (navegación por rubro) ───────────────
+  const cargarCategoria = useCallback(
+    (catId: string) => {
+      if (!cliente) return
+      setCargandoArts(true)
+      const params = new URLSearchParams({ vista: "categoria", cliente: cliente.id, categoria: catId })
+      fetch(`/api/vendedor/articulos?${params}`)
+        .then((r) => r.json())
+        .then((d) => setArtsCategoria(d.articulos || []))
+        .catch(() => setArtsCategoria([]))
         .finally(() => setCargandoArts(false))
     },
     [cliente]
   )
 
-  useEffect(() => {
-    if (cliente) cargarArticulos(vista, q)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cliente])
+  const abrirFiltro = (tipo: Filtro) => {
+    setNav({ s: "cats", ctx: { tipo } })
+    cargarLista(tipo)
+  }
 
-  const cambiarVista = (v: string) => {
-    setVista(v)
-    cargarArticulos(v, q)
+  const abrirRubro = (r: CatalogoRubro) => {
+    setNav({ s: "cats", ctx: { tipo: "rubro", rubroId: r.id, rubroNombre: r.nombre } })
+  }
+
+  const abrirCategoria = (ctx: Ctx, catId: string | null, catNombre: string, rubroNombre: string | null) => {
+    setSubSel(null)
+    setNav({ s: "arts", ctx, catId, catNombre, rubroNombre })
+    if (ctx.tipo === "rubro" && catId) cargarCategoria(catId)
+  }
+
+  const volver = () => {
+    setSubSel(null)
+    if (q) {
+      setQ("")
+      setResultados([])
+      return
+    }
+    if (nav.s === "arts") setNav({ s: "cats", ctx: nav.ctx })
+    else if (nav.s === "cats") setNav({ s: "home" })
+    else router.back()
   }
 
   const onBuscar = (value: string) => {
     setQ(value)
     if (debounce.current) clearTimeout(debounce.current)
-    debounce.current = setTimeout(() => cargarArticulos("buscar", value), 400)
+    if (!value.trim()) {
+      setResultados([])
+      setBuscando(false)
+      return
+    }
+    setBuscando(true)
+    debounce.current = setTimeout(() => {
+      if (!cliente) return
+      const params = new URLSearchParams({ vista: "buscar", cliente: cliente.id, q: value })
+      fetch(`/api/vendedor/articulos?${params}`)
+        .then((r) => r.json())
+        .then((d) => setResultados(d.articulos || []))
+        .catch(() => setResultados([]))
+        .finally(() => setBuscando(false))
+    }, 400)
   }
 
   // ── Detalle de artículo + precio en vivo ────────────────────────────
@@ -182,6 +329,69 @@ function NuevoPedidoInner() {
       setConfirmando(false)
     }
   }
+
+  // ── Derivados de navegación ─────────────────────────────────────────
+  const ctxLabel = (ctx: Ctx) => (ctx.tipo === "rubro" ? ctx.rubroNombre : FILTROS[ctx.tipo].label)
+
+  const ctxTinte = (ctx: Ctx): Tinte => (ctx.tipo === "rubro" ? tinteRubro(ctx.rubroNombre) : FILTROS[ctx.tipo].tinte)
+
+  // Tarjetas de categoría según contexto: por rubro sale de la taxonomía;
+  // por filtro se agrupa la lista ya cargada (solo categorías con artículos en el filtro).
+  const categoriasCtx = useMemo(() => {
+    if (nav.s !== "cats") return []
+    if (nav.ctx.tipo === "rubro") {
+      const rubroId = nav.ctx.rubroId
+      const rubro = catalogo.find((r) => r.id === rubroId)
+      return (rubro?.categorias || []).map((c) => ({
+        id: c.id as string | null,
+        nombre: c.nombre,
+        cantidad: c.cantidad,
+        rubroNombre: rubro?.nombre || null,
+      }))
+    }
+    const lista = listas[nav.ctx.tipo] || []
+    const grupos = new Map<string, { id: string | null; nombre: string; cantidad: number; rubroNombre: string | null }>()
+    for (const a of lista) {
+      const key = a.categoria_id || "otros"
+      const g = grupos.get(key)
+      if (g) g.cantidad += 1
+      else
+        grupos.set(key, {
+          id: a.categoria_id,
+          nombre: a.categoria_nombre || "Otros",
+          cantidad: 1,
+          rubroNombre: a.rubro_nombre,
+        })
+    }
+    return [...grupos.values()].sort((a, b) => b.cantidad - a.cantidad)
+  }, [nav, catalogo, listas])
+
+  // Artículos visibles en la pantalla de lista
+  const articulosVisibles = useMemo(() => {
+    if (nav.s !== "arts") return []
+    let base: Articulo[]
+    if (nav.ctx.tipo === "rubro") base = artsCategoria
+    else base = (listas[nav.ctx.tipo] || []).filter((a) => (a.categoria_id || "otros") === (nav.catId || "otros"))
+    if (subSel) base = base.filter((a) => a.subcategoria_id === subSel)
+    return base
+  }, [nav, artsCategoria, listas, subSel])
+
+  // Chips de subcategoría derivados de los artículos presentes
+  const subchips = useMemo(() => {
+    if (nav.s !== "arts") return []
+    const base =
+      nav.ctx.tipo === "rubro"
+        ? artsCategoria
+        : (listas[nav.ctx.tipo] || []).filter((a) => (a.categoria_id || "otros") === (nav.catId || "otros"))
+    const m = new Map<string, { id: string; nombre: string; cantidad: number }>()
+    for (const a of base) {
+      if (!a.subcategoria_id) continue
+      const g = m.get(a.subcategoria_id)
+      if (g) g.cantidad += 1
+      else m.set(a.subcategoria_id, { id: a.subcategoria_id, nombre: a.subcategoria_nombre || "—", cantidad: 1 })
+    }
+    return [...m.values()].sort((a, b) => b.cantidad - a.cantidad)
+  }, [nav, artsCategoria, listas])
 
   // ── Pantalla éxito ──────────────────────────────────────────────────
   if (pedidoOk) {
@@ -255,98 +465,277 @@ function NuevoPedidoInner() {
     )
   }
 
+  // ── Tarjeta de artículo (compartida por todas las listas) ───────────
+  const ArticuloCard = ({ a }: { a: Articulo }) => {
+    const enCarrito = cart.find((i) => i.articulo.id === a.id)
+    return (
+      <button
+        onClick={() => abrirArticulo(a)}
+        className={`w-full bg-white rounded-xl shadow-sm border p-3 text-left active:scale-[0.98] ${
+          enCarrito ? "border-emerald-500 border-2" : "border-gray-200"
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          {a.imagen_url ? (
+            <img
+              src={a.imagen_url}
+              alt=""
+              loading="lazy"
+              className="w-12 h-12 rounded-lg object-cover bg-gray-100 shrink-0"
+            />
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-gray-900 text-sm leading-snug">{a.descripcion}</p>
+            <p className="text-gray-500 text-xs mt-0.5">
+              {[a.marca, a.proveedor].filter(Boolean).join(" · ")}
+            </p>
+            <p className="text-gray-400 text-xs">
+              {a.unidades_por_bulto ? `${a.unidades_por_bulto} u/bulto · ` : ""}
+              Stock: {a.stock_disponible}
+              {a.veces_pedido ? ` · pedido ${a.veces_pedido}×` : ""}
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            {a.descuento_propio > 0 && (
+              <span className="inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold">
+                -{a.descuento_propio}%
+              </span>
+            )}
+            {enCarrito && (
+              <p className="text-emerald-700 font-bold text-sm mt-1">✓ {enCarrito.cantidad}</p>
+            )}
+          </div>
+        </div>
+      </button>
+    )
+  }
+
+  const tituloHeader =
+    q
+      ? "Buscar artículos"
+      : nav.s === "home"
+        ? cliente.nombre
+        : nav.s === "cats"
+          ? ctxLabel(nav.ctx)
+          : nav.catNombre
+
+  const subtituloHeader =
+    q
+      ? cliente.nombre
+      : nav.s === "home"
+        ? cliente.metodo_facturacion
+          ? `Facturación: ${cliente.metodo_facturacion}`
+          : "Nuevo pedido"
+        : nav.s === "cats"
+          ? cliente.nombre
+          : `${ctxLabel(nav.ctx)} · ${cliente.nombre}`
+
   // ── Pantalla principal de armado ────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       <header className="bg-emerald-700 text-white sticky top-0 z-10 shadow-md">
         <div className="px-5 py-3 flex items-center gap-3">
-          <button onClick={() => router.back()} className="text-2xl leading-none px-1">←</button>
+          <button onClick={volver} className="text-2xl leading-none px-1">←</button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-bold truncate">{cliente.nombre}</h1>
-            <p className="text-emerald-200 text-xs">
-              {cliente.metodo_facturacion ? `Facturación: ${cliente.metodo_facturacion}` : "Nuevo pedido"}
-            </p>
+            <h1 className="text-lg font-bold truncate">{tituloHeader}</h1>
+            <p className="text-emerald-200 text-xs truncate">{subtituloHeader}</p>
           </div>
         </div>
-        <div className="px-4 pb-3 space-y-2">
-          <div className="flex gap-2">
-            {VISTAS.map((v) => (
-              <button
-                key={v.key}
-                onClick={() => cambiarVista(v.key)}
-                className={`flex-1 px-3 py-2 rounded-full text-sm font-medium ${
-                  vista === v.key ? "bg-white text-emerald-700" : "bg-emerald-600 text-emerald-100"
-                }`}
+        {nav.s === "home" && (
+          <div className="px-4 pb-3">
+            <div className="relative">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
+                aria-hidden
               >
-                {v.label}
-              </button>
-            ))}
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                <path d="M16.5 16.5 21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <input
+                type="search"
+                value={q}
+                onChange={(e) => onBuscar(e.target.value)}
+                placeholder="Buscar artículo, SKU o EAN..."
+                className="w-full rounded-xl pl-11 pr-4 py-3 text-gray-900 text-lg bg-white outline-none"
+              />
+            </div>
           </div>
-          {vista === "buscar" && (
-            <input
-              type="search"
-              value={q}
-              onChange={(e) => onBuscar(e.target.value)}
-              placeholder="Descripción, SKU o EAN..."
-              autoFocus
-              className="w-full rounded-xl px-4 py-3 text-gray-900 text-lg bg-white outline-none"
-            />
-          )}
-        </div>
+        )}
       </header>
 
-      <div className="p-4 space-y-2 max-w-2xl mx-auto">
-        {cargandoArts ? (
-          <div className="text-center py-10">
-            <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+      <div className="p-4 max-w-2xl mx-auto">
+        {/* ── Resultados de búsqueda ── */}
+        {nav.s === "home" && q ? (
+          buscando ? (
+            <div className="text-center py-10">
+              <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            </div>
+          ) : resultados.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
+              Sin resultados para “{q}”. Probá con otra palabra, SKU o EAN.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {resultados.map((a) => (
+                <ArticuloCard key={a.id} a={a} />
+              ))}
+            </div>
+          )
+        ) : nav.s === "home" ? (
+          /* ── Home del catálogo: banners + rubros ── */
+          <div className="space-y-5">
+            <div className="grid grid-cols-3 gap-2.5">
+              {(Object.keys(FILTROS) as Filtro[]).map((tipo) => {
+                const f = FILTROS[tipo]
+                return (
+                  <button
+                    key={tipo}
+                    onClick={() => abrirFiltro(tipo)}
+                    className="rounded-2xl border p-3 text-left active:scale-[0.97] transition-transform"
+                    style={{ background: f.tinte.bg, borderColor: f.tinte.border, color: f.tinte.ink }}
+                  >
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center mb-2 bg-white/70"
+                      style={{ color: f.tinte.accent }}
+                    >
+                      {f.icono}
+                    </div>
+                    <p className="font-bold text-sm leading-tight">{f.label}</p>
+                    <p className="text-[11px] mt-0.5 opacity-70">{f.sub}</p>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 mb-2 px-1">
+                Catálogo por rubro
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {catalogo.map((r) => {
+                  const t = tinteRubro(r.nombre)
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => abrirRubro(r)}
+                      className="rounded-2xl border overflow-hidden text-left active:scale-[0.98] transition-transform flex sm:flex-col"
+                      style={{ background: t.bg, borderColor: t.border }}
+                    >
+                      <div
+                        className="w-28 sm:w-full h-24 sm:h-28 shrink-0 flex items-center justify-center p-3"
+                        style={{ color: t.ink }}
+                      >
+                        <div className="w-20 h-20">
+                          <ArteRubro nombre={r.nombre} accent={t.accent} />
+                        </div>
+                      </div>
+                      <div className="bg-white/85 flex-1 px-4 py-3 flex flex-col justify-center">
+                        <p
+                          className="text-[10px] font-bold uppercase tracking-[0.16em]"
+                          style={{ color: t.accent }}
+                        >
+                          Rubro
+                        </p>
+                        <p className="font-bold text-gray-900 text-base leading-tight">{r.nombre}</p>
+                        <p className="text-gray-500 text-xs mt-0.5">{r.categorias.length} categorías</p>
+                      </div>
+                    </button>
+                  )
+                })}
+                {catalogo.length === 0 && (
+                  <div className="col-span-full text-center py-6">
+                    <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        ) : articulos.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
-            {vista === "habituales"
-              ? "Este cliente todavía no tiene artículos habituales."
-              : vista === "ofertas"
-                ? "No hay artículos en oferta."
-                : q
-                  ? "Sin resultados."
-                  : "Escribí para buscar en el catálogo."}
-          </div>
+        ) : nav.s === "cats" ? (
+          /* ── Tarjetas de categorías del contexto ── */
+          cargandoLista && nav.ctx.tipo !== "rubro" && !listas[nav.ctx.tipo] ? (
+            <div className="text-center py-10">
+              <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            </div>
+          ) : categoriasCtx.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
+              {nav.ctx.tipo === "habituales"
+                ? "Este cliente todavía no tiene artículos habituales. Buscá desde el inicio para armar su primer pedido."
+                : nav.ctx.tipo === "ofertas"
+                  ? "No hay artículos en oferta en este momento."
+                  : nav.ctx.tipo === "novedades"
+                    ? "No hay ingresos recientes en el catálogo."
+                    : "Este rubro no tiene categorías con artículos."}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {categoriasCtx.map((c) => {
+                const t = nav.ctx.tipo === "rubro" ? ctxTinte(nav.ctx) : tinteRubro(c.rubroNombre)
+                return (
+                  <button
+                    key={c.id || "otros"}
+                    onClick={() => abrirCategoria(nav.ctx, c.id, c.nombre, c.rubroNombre)}
+                    className="rounded-2xl border p-3.5 text-left active:scale-[0.97] transition-transform"
+                    style={{ background: t.bgSoft, borderColor: t.border }}
+                  >
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center mb-2.5"
+                      style={{ background: t.bg, color: t.ink }}
+                    >
+                      <IconoCategoria nombre={c.nombre} className="w-5.5 h-5.5" />
+                    </div>
+                    <p className="font-bold text-gray-900 text-[13px] leading-snug">{c.nombre}</p>
+                    <p className="text-xs mt-1" style={{ color: t.accent }}>
+                      {c.cantidad} {c.cantidad === 1 ? "artículo" : "artículos"}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          )
         ) : (
-          articulos.map((a) => {
-            const enCarrito = cart.find((i) => i.articulo.id === a.id)
-            return (
-              <button
-                key={a.id}
-                onClick={() => abrirArticulo(a)}
-                className={`w-full bg-white rounded-xl shadow-sm border p-3 text-left active:scale-[0.98] ${
-                  enCarrito ? "border-emerald-500 border-2" : "border-gray-200"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-bold text-gray-900 text-sm leading-snug">{a.descripcion}</p>
-                    <p className="text-gray-500 text-xs mt-0.5">
-                      {[a.marca, a.proveedor].filter(Boolean).join(" · ")}
-                    </p>
-                    <p className="text-gray-400 text-xs">
-                      {a.unidades_por_bulto ? `${a.unidades_por_bulto} u/bulto · ` : ""}
-                      Stock: {a.stock_disponible}
-                      {a.veces_pedido ? ` · pedido ${a.veces_pedido}×` : ""}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    {a.descuento_propio > 0 && (
-                      <span className="inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold">
-                        -{a.descuento_propio}%
-                      </span>
-                    )}
-                    {enCarrito && (
-                      <p className="text-emerald-700 font-bold text-sm mt-1">✓ {enCarrito.cantidad}</p>
-                    )}
-                  </div>
-                </div>
-              </button>
-            )
-          })
+          /* ── Lista de artículos de la categoría ── */
+          <div className="space-y-3">
+            {subchips.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                <button
+                  onClick={() => setSubSel(null)}
+                  className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border ${
+                    !subSel ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-300"
+                  }`}
+                >
+                  Todas
+                </button>
+                {subchips.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => setSubSel(subSel === s.id ? null : s.id)}
+                    className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border ${
+                      subSel === s.id ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-300"
+                    }`}
+                  >
+                    {s.nombre} · {s.cantidad}
+                  </button>
+                ))}
+              </div>
+            )}
+            {cargandoArts && nav.ctx.tipo === "rubro" ? (
+              <div className="text-center py-10">
+                <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+              </div>
+            ) : articulosVisibles.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
+                No hay artículos en esta categoría.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {articulosVisibles.map((a) => (
+                  <ArticuloCard key={a.id} a={a} />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -357,22 +746,31 @@ function NuevoPedidoInner() {
             className="bg-white w-full rounded-t-3xl p-5 max-w-2xl mx-auto space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <div>
-              <p className="font-bold text-gray-900 text-lg leading-snug">{sel.descripcion}</p>
-              <p className="text-gray-500 text-sm mt-1">
-                {[sel.marca, sel.proveedor].filter(Boolean).join(" · ")}
-              </p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 mt-2">
-                {sel.sku && <span>SKU {sel.sku}</span>}
-                {sel.ean13 && <span>EAN {sel.ean13}</span>}
-                {sel.unidades_por_bulto ? <span>{sel.unidades_por_bulto} u/bulto</span> : null}
-                <span className={sel.stock_disponible > 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
-                  Stock: {sel.stock_disponible}
-                </span>
-                {sel.descuento_propio > 0 && (
-                  <span className="text-red-600 font-bold">Oferta -{sel.descuento_propio}%</span>
-                )}
+            <div className="flex items-start gap-3">
+              {sel.imagen_url ? (
+                <img
+                  src={sel.imagen_url}
+                  alt=""
+                  className="w-16 h-16 rounded-xl object-cover bg-gray-100 shrink-0"
+                />
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <p className="font-bold text-gray-900 text-lg leading-snug">{sel.descripcion}</p>
+                <p className="text-gray-500 text-sm mt-1">
+                  {[sel.marca, sel.proveedor].filter(Boolean).join(" · ")}
+                </p>
               </div>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500">
+              {sel.sku && <span>SKU {sel.sku}</span>}
+              {sel.ean13 && <span>EAN {sel.ean13}</span>}
+              {sel.unidades_por_bulto ? <span>{sel.unidades_por_bulto} u/bulto</span> : null}
+              <span className={sel.stock_disponible > 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                Stock: {sel.stock_disponible}
+              </span>
+              {sel.descuento_propio > 0 && (
+                <span className="text-red-600 font-bold">Oferta -{sel.descuento_propio}%</span>
+              )}
             </div>
 
             <div className="bg-gray-50 rounded-xl p-4 text-center">
