@@ -27,6 +27,8 @@ interface Articulo {
   ean13: string | null
   descripcion: string
   unidades_por_bulto: number | null
+  tipo_fraccion?: string | null
+  cantidad_fraccion?: number | null
   stock_disponible: number
   descuento_propio: number
   iva_ventas: string | null
@@ -174,7 +176,9 @@ function NuevoPedidoInner() {
 
   const [sel, setSel] = useState<Articulo | null>(null)
   const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number } | null>(null)
-  const [selCantidad, setSelCantidad] = useState(1)
+  // Cantidad en el modo elegido; arranca vacía (sin el "1" fantasma)
+  const [selCantidad, setSelCantidad] = useState<number | "">("")
+  const [selModo, setSelModo] = useState<"unidad" | "fraccion" | "bulto">("unidad")
   const [cargandoPrecio, setCargandoPrecio] = useState(false)
 
   const [cart, setCart] = useState<CartItem[]>([])
@@ -385,7 +389,9 @@ function NuevoPedidoInner() {
   // ── Detalle de artículo + precio en vivo ────────────────────────────
   const abrirArticulo = async (a: Articulo) => {
     setSel(a)
-    setSelCantidad(a.cantidad_habitual || 1)
+    // Sin default de 1: arranca vacío. En habituales precarga la última cantidad.
+    setSelCantidad(a.cantidad_habitual || "")
+    setSelModo("unidad")
     setSelPrecio(null)
     setCargandoPrecio(true)
     try {
@@ -398,12 +404,27 @@ function NuevoPedidoInner() {
     }
   }
 
+  // Factor de conversión a unidades según el modo de carga elegido
+  const factorModo = (a: Articulo, modo: "unidad" | "fraccion" | "bulto") =>
+    modo === "bulto" ? a.unidades_por_bulto || 1 : modo === "fraccion" ? a.cantidad_fraccion || 1 : 1
+
+  // Etiqueta de la fracción: usa tipo_fraccion si es un nombre real (CAJA/PACK/DOCENA…)
+  const labelFraccion = (a: Articulo) => {
+    const t = (a.tipo_fraccion || "").trim().toUpperCase()
+    if (t && !["UN", "UNIDAD", "UNIDADES"].includes(t)) {
+      return t.charAt(0) + t.slice(1).toLowerCase()
+    }
+    return "Fracción"
+  }
+
+  const selUnidades = (typeof selCantidad === "number" ? selCantidad : 0) * (sel ? factorModo(sel, selModo) : 1)
+
   // Agregar ítem: crea el pedido "en_venta" al primer artículo, después
   // sincroniza cada alta contra pedidos_detalle. Los precios los fija el server.
   const agregarAlCarrito = () => {
-    if (!sel || !selPrecio || selCantidad <= 0 || !cliente) return
+    if (!sel || !selPrecio || selUnidades <= 0 || !cliente) return
     const art = sel
-    const cant = selCantidad
+    const cant = selUnidades // siempre se guarda en unidades
     setSel(null)
     setSync("saving")
     enqueue(async () => {
@@ -974,6 +995,11 @@ function NuevoPedidoInner() {
               {sel.sku && <span>SKU {sel.sku}</span>}
               {sel.ean13 && <span>EAN {sel.ean13}</span>}
               {sel.unidades_por_bulto ? <span>{sel.unidades_por_bulto} u/bulto</span> : null}
+              {(sel.cantidad_fraccion || 0) > 1 ? (
+                <span>
+                  {labelFraccion(sel)} ×{sel.cantidad_fraccion}
+                </span>
+              ) : null}
               <span className={sel.stock_disponible > 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
                 Stock: {sel.stock_disponible}
               </span>
@@ -1002,9 +1028,38 @@ function NuevoPedidoInner() {
               )}
             </div>
 
+            {/* Modo de carga: unidades / fracción / bulto */}
+            {(() => {
+              const modos: Array<{ key: "unidad" | "fraccion" | "bulto"; label: string; factor: number }> = [
+                { key: "unidad", label: "Unidades", factor: 1 },
+              ]
+              if ((sel.cantidad_fraccion || 0) > 1)
+                modos.push({ key: "fraccion", label: `${labelFraccion(sel)} ×${sel.cantidad_fraccion}`, factor: sel.cantidad_fraccion! })
+              if ((sel.unidades_por_bulto || 0) > 1)
+                modos.push({ key: "bulto", label: `Bulto ×${sel.unidades_por_bulto}`, factor: sel.unidades_por_bulto! })
+              if (modos.length === 1) return null
+              return (
+                <div className="flex gap-2">
+                  {modos.map((m) => (
+                    <button
+                      key={m.key}
+                      onClick={() => setSelModo(m.key)}
+                      className={`flex-1 py-2.5 rounded-xl text-sm font-bold border ${
+                        selModo === m.key
+                          ? "bg-emerald-600 text-white border-emerald-600"
+                          : "bg-white text-gray-600 border-gray-300"
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )
+            })()}
+
             <div className="flex items-center justify-center gap-3">
               <button
-                onClick={() => setSelCantidad((c) => Math.max(1, c - 1))}
+                onClick={() => setSelCantidad((c) => Math.max(0, (typeof c === "number" ? c : 0) - 1) || "")}
                 className="w-14 h-14 rounded-xl bg-gray-100 text-2xl font-bold text-gray-700"
               >
                 −
@@ -1012,39 +1067,41 @@ function NuevoPedidoInner() {
               <input
                 type="number"
                 inputMode="numeric"
-                min={1}
+                min={0}
                 value={selCantidad}
-                onChange={(e) => setSelCantidad(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-24 h-14 text-center text-2xl font-bold border border-gray-300 rounded-xl"
+                placeholder="0"
+                onChange={(e) => {
+                  const v = parseInt(e.target.value)
+                  setSelCantidad(Number.isFinite(v) && v > 0 ? v : "")
+                }}
+                className="w-24 h-14 text-center text-2xl font-bold border border-gray-300 rounded-xl placeholder:text-gray-300"
               />
               <button
-                onClick={() => setSelCantidad((c) => c + 1)}
+                onClick={() => setSelCantidad((c) => (typeof c === "number" ? c : 0) + 1)}
                 className="w-14 h-14 rounded-xl bg-gray-100 text-2xl font-bold text-gray-700"
               >
                 +
               </button>
-              {sel.unidades_por_bulto ? (
-                <button
-                  onClick={() => setSelCantidad((c) => c + (sel.unidades_por_bulto || 0))}
-                  className="h-14 px-4 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-sm"
-                >
-                  +bulto
-                </button>
-              ) : null}
             </div>
 
-            {selPrecio && (
+            {selModo !== "unidad" && selUnidades > 0 && (
+              <p className="text-center text-gray-500 text-sm -mt-2">
+                = <span className="font-bold text-gray-800">{selUnidades}</span> unidades
+              </p>
+            )}
+
+            {selPrecio && selUnidades > 0 && (
               <p className="text-center text-gray-500">
-                Subtotal: <span className="font-bold text-gray-900">{formatCurrency(selPrecio.precio * selCantidad)}</span>
+                Subtotal: <span className="font-bold text-gray-900">{formatCurrency(selPrecio.precio * selUnidades)}</span>
               </p>
             )}
 
             <button
               onClick={agregarAlCarrito}
-              disabled={!selPrecio}
+              disabled={!selPrecio || selUnidades <= 0}
               className="w-full bg-emerald-600 disabled:bg-gray-300 text-white rounded-xl py-4 text-lg font-bold"
             >
-              Agregar al pedido
+              {selUnidades > 0 ? "Agregar al pedido" : "Ingresá la cantidad"}
             </button>
           </div>
         </div>
