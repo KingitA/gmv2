@@ -123,6 +123,7 @@ const CAMPOS_EDITABLES = [
   "mail",
   "condicion_pago",
   "condicion_entrega",
+  "metodo_facturacion",
 ] as const
 
 // PATCH /api/vendedor/cliente/[id]

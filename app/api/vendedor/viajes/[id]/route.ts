@@ -30,7 +30,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     }
     const zonaIds = (viaje.viaje_zonas || []).map((vz: any) => vz.zona_id)
 
-    // Clientes de las zonas: por localidad y por asignación manual (clientes_zonas)
+    // Clientes de las zonas: por localidad y por asignación manual (clientes_zonas).
+    // SOLO los clientes del vendedor de la sesión.
     const { data: locs } = await supabase.from("localidades").select("id, zona_id").in("zona_id", zonaIds)
     const locIds = (locs || []).map((l: any) => l.id)
 
@@ -40,6 +41,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         .from("clientes")
         .select("id, nombre, localidad, telefono, localidad_id")
         .eq("activo", true)
+        .in("vendedor_id", session.vendedorIds)
         .in("localidad_id", locIds)
       for (const c of porLocalidad || []) clientesMap.set(c.id, c)
     }
@@ -50,6 +52,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         .from("clientes")
         .select("id, nombre, localidad, telefono, localidad_id")
         .eq("activo", true)
+        .in("vendedor_id", session.vendedorIds)
         .in("id", czIds)
       for (const c of manuales || []) clientesMap.set(c.id, c)
     }

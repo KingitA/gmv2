@@ -1736,8 +1736,13 @@ async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string
 
 // Cambia el método de facturación del pedido y re-precia TODO el carrito al
 // instante (incluye pedidos ya "pendientes"). Usado por el módulo vendedor
-// al tocar el selector de método.
-export async function aplicarMetodoPedidoVendedor(pedidoId: string, metodoFacturacion: string) {
+// al tocar el selector de método. `forzarReprecio` re-precia aunque el
+// override no cambie (p. ej. cuando cambió el método guardado del CLIENTE).
+export async function aplicarMetodoPedidoVendedor(
+  pedidoId: string,
+  metodoFacturacion: string,
+  opts: { forzarReprecio?: boolean } = {}
+) {
   const supabase = await createClient()
   await assertPedidoEditable(supabase, pedidoId)
 
@@ -1753,7 +1758,7 @@ export async function aplicarMetodoPedidoVendedor(pedidoId: string, metodoFactur
 
   const metodoNuevo = limpiarCentinela(metodoFacturacion) || null
   const metodoActual = (pedido as any).metodo_facturacion_pedido || null
-  if (metodoNuevo === metodoActual) return { success: true, sinCambios: true }
+  if (metodoNuevo === metodoActual && !opts.forzarReprecio) return { success: true, sinCambios: true }
 
   await supabase
     .from("pedidos")

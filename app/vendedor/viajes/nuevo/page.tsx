@@ -23,7 +23,6 @@ export default function NuevoViajePage() {
   const [fechaInicio, setFechaInicio] = useState(hoy())
   const [fechaFin, setFechaFin] = useState("")
   const [creando, setCreando] = useState(false)
-  const [verTodas, setVerTodas] = useState(false)
 
   useEffect(() => {
     fetch("/api/vendedor/zonas")
@@ -41,7 +40,7 @@ export default function NuevoViajePage() {
       return next
     })
 
-  const clientesTotal = zonas.filter((z) => sel.has(z.id)).reduce((s, z) => s + z.cantidad_clientes, 0)
+  const clientesTotal = zonas.filter((z) => sel.has(z.id)).reduce((s, z) => s + z.mis_clientes, 0)
 
   const crear = async () => {
     if (!sel.size || !fechaInicio || creando) return
@@ -121,70 +120,43 @@ export default function NuevoViajePage() {
             </div>
           ) : (
             (() => {
+              // Solo las zonas donde el vendedor tiene clientes propios
               const mias = zonas
                 .filter((z) => z.mis_clientes > 0)
                 .sort((a, b) => b.mis_clientes - a.mis_clientes)
-              const otras = zonas.filter((z) => z.mis_clientes === 0)
-              const ZonaCard = ({ z }: { z: Zona }) => {
-                const activo = sel.has(z.id)
+              if (!mias.length) {
                 return (
-                  <button
-                    onClick={() => toggle(z.id)}
-                    className={`w-full bg-white rounded-xl border-2 p-3 text-left active:scale-[0.98] ${
-                      activo ? "border-emerald-500" : "border-gray-200"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-bold text-gray-900">
-                          {activo ? "☑" : "☐"} {z.nombre}
-                        </p>
-                        {z.descripcion && <p className="text-gray-500 text-sm truncate">{z.descripcion}</p>}
-                      </div>
-                      <div className="shrink-0 text-right">
-                        {z.mis_clientes > 0 && (
-                          <p className="text-sm font-bold text-emerald-700">{z.mis_clientes} tuyos</p>
-                        )}
-                        <p className="text-xs text-gray-400">{z.cantidad_clientes} clientes</p>
-                      </div>
-                    </div>
-                  </button>
+                  <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
+                    No hay zonas con clientes tuyos. Pedile a oficina que te asigne clientes.
+                  </div>
                 )
               }
               return (
                 <div className="space-y-2">
-                  {mias.length > 0 && (
-                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 px-1">
-                      Tus zonas
-                    </p>
-                  )}
-                  {mias.map((z) => (
-                    <ZonaCard key={z.id} z={z} />
-                  ))}
-                  {mias.length === 0 &&
-                    // sin clientes propios: mostrar todas directamente
-                    otras.map((z) => <ZonaCard key={z.id} z={z} />)}
-                  {mias.length > 0 && otras.length > 0 && (
-                    <>
-                      {verTodas ? (
-                        <>
-                          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 px-1 pt-2">
-                            Otras zonas
-                          </p>
-                          {otras.map((z) => (
-                            <ZonaCard key={z.id} z={z} />
-                          ))}
-                        </>
-                      ) : (
-                        <button
-                          onClick={() => setVerTodas(true)}
-                          className="w-full rounded-xl border border-dashed border-gray-300 p-3 text-sm font-bold text-gray-500 active:scale-[0.98]"
-                        >
-                          Ver las otras {otras.length} zonas ▾
-                        </button>
-                      )}
-                    </>
-                  )}
+                  {mias.map((z) => {
+                    const activo = sel.has(z.id)
+                    return (
+                      <button
+                        key={z.id}
+                        onClick={() => toggle(z.id)}
+                        className={`w-full bg-white rounded-xl border-2 p-3 text-left active:scale-[0.98] ${
+                          activo ? "border-emerald-500" : "border-gray-200"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-bold text-gray-900">
+                              {activo ? "☑" : "☐"} {z.nombre}
+                            </p>
+                            {z.descripcion && <p className="text-gray-500 text-sm truncate">{z.descripcion}</p>}
+                          </div>
+                          <span className="shrink-0 text-sm font-bold text-emerald-700">
+                            {z.mis_clientes} {z.mis_clientes === 1 ? "cliente" : "clientes"}
+                          </span>
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               )
             })()

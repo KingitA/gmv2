@@ -192,6 +192,9 @@ function NuevoPedidoInner() {
 
   const [cart, setCart] = useState<CartItem[]>([])
   const [verCarrito, setVerCarrito] = useState(false)
+  // Panel de acceso rápido al cliente (ficha, CC, método de facturación)
+  const [verCliente, setVerCliente] = useState(false)
+  const [metodoSel, setMetodoSel] = useState("")
   const [obs, setObs] = useState("")
   const [metodoOverride, setMetodoOverride] = useState("")
   const [confirmando, setConfirmando] = useState(false)
@@ -345,8 +348,8 @@ function NuevoPedidoInner() {
     [cliente, metodoOverride]
   )
 
-  // Al cambiar el método del pedido, los precios del catálogo se recalculan
-  useEffect(() => {
+  // Vacía el cache de precios y recalcula todo lo cargado en pantalla
+  const recalcularPreciosCatalogo = useCallback(() => {
     setPrecios({})
     preciosPedidos.current = new Set()
     const cargados: Articulo[] = [
@@ -355,6 +358,12 @@ function NuevoPedidoInner() {
       ...resultados,
     ]
     if (cargados.length) cargarPrecios(cargados)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listas, artsCategoria, resultados, cargarPrecios])
+
+  // Al cambiar el método del pedido, los precios del catálogo se recalculan
+  useEffect(() => {
+    recalcularPreciosCatalogo()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [metodoOverride])
 
@@ -541,6 +550,38 @@ function NuevoPedidoInner() {
         console.error("Error repreciando el pedido:", e)
         setSync("error")
         alert(`No se pudieron recalcular los precios: ${e?.message || e}`)
+      }
+    })
+  }
+
+  // Guardar el método EN LA FICHA del cliente (queda para futuros pedidos),
+  // limpiando el override del pedido y repreciando carrito + catálogo.
+  const guardarMetodoCliente = (metodo: string) => {
+    if (!cliente || !metodo) return
+    setVerCliente(false)
+    setSync("saving")
+    enqueue(async () => {
+      try {
+        const res = await fetch(`/api/vendedor/cliente/${cliente.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ metodo_facturacion: metodo }),
+        })
+        const d = await res.json()
+        if (d.error) throw new Error(d.error)
+        setCliente((prev) => (prev ? { ...prev, metodo_facturacion: metodo } : prev))
+        if (pedidoIdRef.current) {
+          // el pedido pasa a usar el método del cliente (sin override)
+          await aplicarMetodoPedidoVendedor(pedidoIdRef.current, "", { forzarReprecio: true })
+          await refreshPedido(pedidoIdRef.current)
+        }
+        if (metodoOverride) setMetodoOverride("") // el effect recalcula el catálogo
+        else recalcularPreciosCatalogo()
+        setSync("idle")
+      } catch (e: any) {
+        console.error("Error guardando método del cliente:", e)
+        setSync("error")
+        alert(`No se pudo guardar el método del cliente: ${e?.message || e}`)
       }
     })
   }
@@ -868,6 +909,16 @@ function NuevoPedidoInner() {
               {sync === "saving" ? "Guardando…" : sync === "error" ? "⚠ Sin guardar" : "✓ Guardado"}
             </span>
           )}
+          <button
+            onClick={() => {
+              setMetodoSel(metodoOverride || cliente.metodo_facturacion || "")
+              setVerCliente(true)
+            }}
+            className="w-10 h-10 rounded-xl bg-emerald-600 border border-emerald-500 flex items-center justify-center text-lg shrink-0 active:scale-95"
+            title="Cliente: ficha, cuenta corriente y método"
+          >
+            👤
+          </button>
         </div>
         {nav.s === "home" && (
           <div className="px-4 pb-3">
@@ -1127,6 +1178,95 @@ function NuevoPedidoInner() {
           </div>
         )}
       </div>
+
+      {/* Panel del cliente: ficha, cuenta corriente y método de facturación */}
+      {verCliente && (
+        <div className="fixed inset-0 z-30 flex items-end bg-black/40" onClick={() => setVerCliente(false)}>
+          <div
+            className="bg-white w-full rounded-t-3xl p-5 max-w-2xl mx-auto space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <p className="font-bold text-gray-900 text-lg leading-snug">{cliente.nombre}</p>
+              <p className="text-gray-500 text-sm">
+                {cliente.localidad || ""}
+                {typeof cliente.saldo_actual === "number" && cliente.saldo_actual > 0 ? (
+                  <span className="text-red-600 font-bold"> · debe {formatCurrency(cliente.saldo_actual)}</span>
+                ) : null}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => router.push(`/vendedor/clientes/${cliente.id}`)}
+                className="bg-white border-2 border-emerald-600 text-emerald-700 rounded-xl py-3 text-center font-bold active:scale-[0.97]"
+              >
+                👤 Ficha del cliente
+              </button>
+              <button
+                onClick={() => router.push(`/vendedor/clientes/${cliente.id}/cobrar`)}
+                className="bg-emerald-600 text-white rounded-xl py-3 text-center font-bold active:scale-[0.97]"
+              >
+                💵 Cuenta corriente
+              </button>
+            </div>
+
+            <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+              <div>
+                <p className="text-gray-700 font-bold text-sm">Método de facturación</p>
+                <p className="text-gray-400 text-xs">
+                  Actual: {metodoOverride ? `${metodoOverride} (solo este pedido)` : cliente.metodo_facturacion || "—"}
+                </p>
+              </div>
+              <select
+                value={metodoSel}
+                onChange={(e) => setMetodoSel(e.target.value)}
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
+              >
+                <option value="">Elegir método...</option>
+                <option value="Factura">Factura</option>
+                <option value="Final">Final (Mixto)</option>
+                <option value="Presupuesto">Presupuesto</option>
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                    if (!metodoSel) return
+                    setVerCliente(false)
+                    cambiarMetodo(metodoSel)
+                  }}
+                  disabled={!metodoSel}
+                  className="bg-white border border-gray-300 disabled:opacity-40 text-gray-700 rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
+                >
+                  Solo este pedido
+                </button>
+                <button
+                  onClick={() => guardarMetodoCliente(metodoSel)}
+                  disabled={!metodoSel}
+                  className="bg-gray-900 disabled:opacity-40 text-white rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
+                >
+                  Guardar para el cliente
+                </button>
+              </div>
+              <p className="text-gray-400 text-xs">
+                En ambos casos se recalculan al instante los precios del catálogo y de los artículos ya cargados en
+                el pedido — de estos precios sale la factura.
+              </p>
+              {metodoOverride && (
+                <button
+                  onClick={() => {
+                    setVerCliente(false)
+                    cambiarMetodo("")
+                  }}
+                  className="w-full text-emerald-700 text-sm font-bold py-1"
+                >
+                  Volver al método del cliente ({cliente.metodo_facturacion || "—"})
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sheet de artículo */}
       {sel && (
