@@ -15,17 +15,30 @@ interface PedidoItem {
 
 const ESTADOS = [
   { key: "", label: "Todos" },
+  { key: "en_venta", label: "En venta" },
   { key: "pendiente", label: "Pendientes" },
-  { key: "confirmado", label: "Confirmados" },
-  { key: "facturado", label: "Facturados" },
+  { key: "impreso", label: "Impresos" },
+  { key: "en_preparacion", label: "En preparación" },
+  { key: "en_viaje", label: "En viaje" },
 ] as const
 
 const ESTADO_BADGE: Record<string, string> = {
+  en_venta: "bg-amber-100 text-amber-700",
   pendiente: "bg-yellow-100 text-yellow-700",
-  confirmado: "bg-blue-100 text-blue-700",
-  facturado: "bg-green-100 text-green-700",
-  entregado: "bg-green-100 text-green-700",
+  impreso: "bg-green-100 text-green-700",
+  en_preparacion: "bg-blue-100 text-blue-700",
+  en_viaje: "bg-purple-100 text-purple-700",
+  facturado: "bg-emerald-100 text-emerald-700",
+  entregado: "bg-emerald-100 text-emerald-700",
   cancelado: "bg-red-100 text-red-700",
+}
+
+const ESTADO_LABEL: Record<string, string> = {
+  en_venta: "EN VENTA",
+  pendiente: "PENDIENTE",
+  impreso: "IMPRESO",
+  en_preparacion: "EN PREPARACIÓN",
+  en_viaje: "EN VIAJE",
 }
 
 export default function VendedorPedidosPage() {
@@ -92,9 +105,14 @@ export default function VendedorPedidosPage() {
           </div>
         ) : (
           pedidos.map((p) => (
-            <div
+            <button
               key={p.id}
-              className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex items-center justify-between"
+              onClick={() =>
+                p.estado === "en_venta" && p.clientes?.id
+                  ? router.push(`/vendedor/pedido/nuevo?cliente=${p.clientes.id}&pedido=${p.id}`)
+                  : router.push(`/vendedor/pedidos/${p.id}`)
+              }
+              className="w-full bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex items-center justify-between text-left active:scale-[0.98]"
             >
               <div className="min-w-0">
                 <p className="font-bold text-gray-900 truncate">{p.clientes?.nombre || "Sin cliente"}</p>
@@ -105,6 +123,7 @@ export default function VendedorPedidosPage() {
                     month: "short",
                     year: "numeric",
                   })}
+                  {p.estado === "en_venta" ? " · tocá para seguir cargando" : ""}
                 </p>
               </div>
               <div className="text-right shrink-0 ml-3">
@@ -114,10 +133,10 @@ export default function VendedorPedidosPage() {
                     ESTADO_BADGE[p.estado] || "bg-gray-100 text-gray-600"
                   }`}
                 >
-                  {p.estado.toUpperCase()}
+                  {ESTADO_LABEL[p.estado] || p.estado.toUpperCase()}
                 </span>
               </div>
-            </div>
+            </button>
           ))
         )}
       </div>

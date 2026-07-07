@@ -148,6 +148,7 @@ type Comprobante = {
 }
 
 const ESTADOS_PEDIDO = [
+  { value: "en_venta", label: "En Venta", color: "bg-amber-500" },
   { value: "pendiente", label: "Pendiente", color: "bg-yellow-500" },
   { value: "en_preparacion", label: "En Preparación", color: "bg-blue-500" },
   { value: "impreso", label: "Impreso", color: "bg-green-500" },

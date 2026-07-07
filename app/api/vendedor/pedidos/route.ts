@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 
-// GET /api/vendedor/pedidos?q=&estado=
+// GET /api/vendedor/pedidos?q=&estado=&cliente=
 // Pedidos de los clientes de los vendedores del usuario.
 export async function GET(request: Request) {
   const session = await requireVendedor()
@@ -12,6 +12,7 @@ export async function GET(request: Request) {
     const supabase = await createClient()
     const { searchParams } = new URL(request.url)
     const estado = searchParams.get("estado")?.trim() || ""
+    const clienteId = searchParams.get("cliente")?.trim() || ""
     const q = searchParams.get("q")?.trim() || ""
 
     let query = supabase
@@ -24,6 +25,7 @@ export async function GET(request: Request) {
       .limit(100)
 
     if (estado) query = query.eq("estado", estado)
+    if (clienteId) query = query.eq("cliente_id", clienteId)
 
     const { data: pedidos, error } = await query
     if (error) throw error

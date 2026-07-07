@@ -656,6 +656,9 @@ export async function createPedido(data: {
   // Las unidades se calculan por monto (% × neto) repartido parejo, y luego se
   // reajustan en vivo al preparar en depósito.
   mercaderia_bonificada?: { pct: number; articulo_ids: string[] }
+  // "en_venta": el vendedor está armando el pedido en vivo (autoguardado);
+  // pasa a "pendiente" al confirmar (confirmarPedidoVendedor).
+  estado_inicial?: "en_venta" | "pendiente"
 }) {
   const supabase = await createClient()
 
@@ -795,7 +798,7 @@ export async function createPedido(data: {
       cliente_id: data.cliente_id,
       vendedor_id: clienteInfo.vendedor_id,
       fecha: todayArgentina(),
-      estado: "pendiente",
+      estado: data.estado_inicial === "en_venta" ? "en_venta" : "pendiente",
       subtotal: total,
       descuento_general: 0,
       ...(limpiarCentinela(data.metodo_facturacion_pedido) ? { metodo_facturacion_pedido: limpiarCentinela(data.metodo_facturacion_pedido) } : {}),
@@ -1167,8 +1170,8 @@ export async function softDeletePedido(pedidoId: string) {
     throw new Error("Pedido no encontrado")
   }
 
-  if (pedido.estado !== "pendiente") {
-    throw new Error("Solo se pueden eliminar pedidos en estado 'pendiente'")
+  if (pedido.estado !== "pendiente" && pedido.estado !== "en_venta") {
+    throw new Error("Solo se pueden eliminar pedidos en estado 'pendiente' o 'en venta'")
   }
 
   // Soft-delete: change state and record timestamp
@@ -1208,6 +1211,20 @@ async function assertPedidoEditable(supabase: any, pedidoId: string) {
   if (data.estado === "facturado" || data.estado === "entregado")
     throw new Error("El pedido ya fue facturado/entregado y no puede modificarse")
   return data
+}
+
+// Total del pedido = Σ subtotales de líneas no bonificadas (mismo criterio que
+// createPedido/guardarItemsPedido). Se llama tras cada alta/edición/baja de ítem.
+async function recalcularTotalPedido(supabase: any, pedidoId: string) {
+  const { data: allItems } = await supabase
+    .from("pedidos_detalle")
+    .select("subtotal, es_bonificado")
+    .eq("pedido_id", pedidoId)
+  const total = Math.round(
+    (allItems || []).filter((i: any) => !i.es_bonificado).reduce((s: number, i: any) => s + (i.subtotal || 0), 0) * 100
+  ) / 100
+  await supabase.from("pedidos").update({ total, subtotal: total }).eq("id", pedidoId)
+  return total
 }
 
 export async function agregarItemPedido(
@@ -1356,6 +1373,8 @@ export async function agregarItemPedido(
   if (user?.id) {
     await supabase.from("pedidos").update({ actualizado_por: user.id }).eq("id", pedidoId)
   }
+
+  await recalcularTotalPedido(supabase, pedidoId)
 
   revalidatePath("/clientes-pedidos")
   return { success: true }
@@ -1524,6 +1543,8 @@ export async function actualizarCantidadItem(
 
   if (error) throw error
 
+  await recalcularTotalPedido(supabase, pedidoId)
+
   revalidatePath("/clientes-pedidos")
   return { success: true }
 }
@@ -1534,6 +1555,8 @@ export async function eliminarItemPedido(itemId: string, pedidoId: string) {
 
   const { error } = await supabase.from("pedidos_detalle").delete().eq("id", itemId)
   if (error) throw error
+
+  await recalcularTotalPedido(supabase, pedidoId)
 
   revalidatePath("/clientes-pedidos")
   return { success: true }
@@ -1573,4 +1596,97 @@ export async function guardarItemsPedido(
 
   revalidatePath("/clientes-pedidos")
   return { success: true }
+}
+
+// ─── Confirmación del pedido armado en vivo por el vendedor ─────────────────
+// El pedido nace "en_venta" (autoguardado ítem a ítem desde la tablet). Al
+// confirmar: aplica observaciones, re-precia si cambió el método de facturación
+// y pasa a "pendiente". Sobre pedidos ya pendientes/impresos actúa como
+// "guardar cambios" (no toca el estado).
+export async function confirmarPedidoVendedor(
+  pedidoId: string,
+  opts: { observaciones?: string; metodo_facturacion_pedido?: string } = {}
+) {
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error("No autenticado")
+
+  const { data: pedido } = await supabase
+    .from("pedidos")
+    .select(`id,estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
+    .eq("id", pedidoId)
+    .single()
+  if (!pedido) throw new Error("Pedido no encontrado")
+
+  // ¿Cambió el override de método del pedido? ("" limpia el override → método del cliente)
+  const metodoNuevo = limpiarCentinela(opts.metodo_facturacion_pedido) || null
+  const metodoActual = (pedido as any).metodo_facturacion_pedido || null
+  const cambioMetodo = opts.metodo_facturacion_pedido !== undefined && metodoNuevo !== metodoActual
+
+  if (cambioMetodo) {
+    await supabase.from("pedidos").update({ metodo_facturacion_pedido: metodoNuevo }).eq("id", pedidoId)
+    ;(pedido as any).metodo_facturacion_pedido = metodoNuevo
+
+    // Re-preciar todas las líneas no bonificadas con el método nuevo (misma
+    // resolución que agregarItemPedido: marca > proveedor > override pedido > cliente)
+    const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
+    const formulasReglas = await fetchFormulasReglas(supabase)
+    const listasCache: Record<string, DatosLista> = {}
+    const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
+    const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
+    const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
+
+    const { data: items } = await supabase
+      .from("pedidos_detalle")
+      .select("id, articulo_id, cantidad, es_bonificado")
+      .eq("pedido_id", pedidoId)
+
+    for (const it of items || []) {
+      if (it.es_bonificado) continue
+      const articulo = await fetchArticuloConDescuentos(supabase, it.articulo_id)
+      const segmentoArt = detectarSegmento(articulo)
+      const { listaId, metodoRaw, metodo, listaDatos, cond } = await resolverListaMetodoItem(
+        supabase, articulo, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas
+      )
+      const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
+      const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
+      const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
+      const ofertaPct = esEspecial ? (articulo.oferta_lista_especial || 0) : (articulo.descuento_propio || 0)
+      const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
+
+      const { error: itemError } = await supabase
+        .from("pedidos_detalle")
+        .update({
+          precio_base: precio.precioNeto,
+          precio_final: precio.precioAlCliente,
+          subtotal: round2(precio.precioAlCliente * it.cantidad),
+          lista_precio_id: listaId,
+          metodo_facturacion_item: metodoRaw,
+          precio_lista: precioListaBruto,
+          descuento_propio_pct: ofertaPct,
+          bonif_general_pct: precio.bonifGeneralPct,
+          bonif_viajante_pct: precio.bonifViajantePct,
+        })
+        .eq("id", it.id)
+      if (itemError) throw itemError
+    }
+  }
+
+  const patch: Record<string, any> = { actualizado_por: user.id }
+  if (opts.observaciones !== undefined) patch.observaciones = opts.observaciones || null
+  if (pedido.estado === "en_venta") patch.estado = "pendiente"
+  const { error: updError } = await supabase.from("pedidos").update(patch).eq("id", pedidoId)
+  if (updError) throw updError
+
+  const total = await recalcularTotalPedido(supabase, pedidoId)
+
+  revalidatePath("/clientes-pedidos")
+  return {
+    success: true,
+    numero_pedido: (pedido as any).numero_pedido as string | null,
+    estado: (patch.estado || pedido.estado) as string,
+    total,
+  }
 }

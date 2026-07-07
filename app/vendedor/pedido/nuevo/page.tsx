@@ -3,7 +3,14 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
-import { createPedido, previewPrecioArticulo } from "@/lib/actions/pedidos"
+import {
+  actualizarCantidadItem,
+  agregarItemPedido,
+  confirmarPedidoVendedor,
+  createPedido,
+  eliminarItemPedido,
+  previewPrecioArticulo,
+} from "@/lib/actions/pedidos"
 import {
   ArteRubro,
   IconoCategoria,
@@ -44,8 +51,19 @@ interface ClienteSel {
   saldo_actual?: number
 }
 
+// Datos mínimos del artículo dentro del carrito (al retomar un pedido
+// guardado solo tenemos lo que devuelve el detalle, no el Articulo completo).
+interface CartArticulo {
+  id: string
+  descripcion: string
+  sku?: string | null
+  unidades_por_bulto?: number | null
+  imagen_url?: string | null
+}
+
 interface CartItem {
-  articulo: Articulo
+  detalleId: string // id de pedidos_detalle — el carrito vive en DB (autoguardado)
+  articulo: CartArticulo
   cantidad: number
   precio: number // al cliente
   precioNeto: number
@@ -133,6 +151,7 @@ function NuevoPedidoInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const clienteParam = searchParams.get("cliente")
+  const pedidoParam = searchParams.get("pedido")
 
   const [cliente, setCliente] = useState<ClienteSel | null>(null)
   const [clientes, setClientes] = useState<ClienteSel[]>([])
@@ -163,7 +182,98 @@ function NuevoPedidoInner() {
   const [obs, setObs] = useState("")
   const [metodoOverride, setMetodoOverride] = useState("")
   const [confirmando, setConfirmando] = useState(false)
-  const [pedidoOk, setPedidoOk] = useState<{ numero: string } | null>(null)
+  const [pedidoOk, setPedidoOk] = useState<{ numero: string; editado?: boolean } | null>(null)
+
+  // ── Pedido en DB (autoguardado en tiempo real) ──────────────────────
+  // El carrito se persiste ítem a ítem: al primer artículo se crea el pedido
+  // en estado "en_venta" y cada cambio se sincroniza. El ERP lo ve al instante.
+  const [pedidoId, setPedidoId] = useState<string | null>(pedidoParam)
+  const [numeroPedido, setNumeroPedido] = useState<string | null>(null)
+  const [estadoPedido, setEstadoPedido] = useState<string | null>(null)
+  const [sync, setSync] = useState<"idle" | "saving" | "error">("idle")
+  const pedidoIdRef = useRef<string | null>(pedidoParam)
+  const cartRef = useRef<CartItem[]>([])
+  const opQueue = useRef<Promise<void>>(Promise.resolve())
+  const cantTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  useEffect(() => {
+    cartRef.current = cart
+  }, [cart])
+
+  // Serializa las mutaciones al pedido (evita carreras entre taps rápidos)
+  const enqueue = (op: () => Promise<void>) => {
+    opQueue.current = opQueue.current.then(op).catch(() => {})
+    return opQueue.current
+  }
+
+  // Rehidrata el carrito desde el pedido guardado (fuente de verdad: DB)
+  const refreshPedido = useCallback(
+    async (id: string, opts?: { hydrateMeta?: boolean }) => {
+      const r = await fetch(`/api/vendedor/pedidos/${id}`)
+      const d = await r.json()
+      if (d.error) throw new Error(d.error)
+      const p = d.pedido
+      setNumeroPedido(p.numero_pedido || null)
+      setEstadoPedido(p.estado || null)
+      const items = (p.pedidos_detalle || []).filter((i: any) => !i.es_bonificado)
+      setCart(
+        items.map((i: any) => ({
+          detalleId: i.id,
+          articulo: {
+            id: i.articulos?.id || i.articulo_id,
+            descripcion: i.articulos?.descripcion || "Artículo",
+            sku: i.articulos?.sku ?? null,
+            unidades_por_bulto: i.articulos?.unidades_por_bulto ?? null,
+            imagen_url: i.articulos?.imagen_url ?? null,
+          },
+          cantidad: i.cantidad,
+          precio: i.precio_final,
+          precioNeto: i.precio_base,
+        }))
+      )
+      if (opts?.hydrateMeta) {
+        setObs(p.observaciones || "")
+        setMetodoOverride(p.metodo_facturacion_pedido || "")
+        if (p.clientes) {
+          setCliente((prev) =>
+            prev || {
+              id: p.clientes.id,
+              nombre: p.clientes.nombre,
+              localidad: p.clientes.localidad,
+              metodo_facturacion: p.clientes.metodo_facturacion,
+            }
+          )
+        }
+      }
+      return p
+    },
+    []
+  )
+
+  // Retomar pedido desde la URL (?pedido=): al volver a entrar no se pierde nada
+  useEffect(() => {
+    if (!pedidoParam) return
+    pedidoIdRef.current = pedidoParam
+    setPedidoId(pedidoParam)
+    refreshPedido(pedidoParam, { hydrateMeta: true }).catch(() => setSync("error"))
+  }, [pedidoParam, refreshPedido])
+
+  // Si el cliente ya tiene un pedido "en venta" abierto, retomarlo en vez de duplicar
+  useEffect(() => {
+    if (!cliente || pedidoIdRef.current) return
+    let cancel = false
+    fetch(`/api/vendedor/pedidos?estado=en_venta&cliente=${cliente.id}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancel || pedidoIdRef.current) return
+        const p = d.pedidos?.[0]
+        if (p) router.replace(`/vendedor/pedido/nuevo?cliente=${cliente.id}&pedido=${p.id}`)
+      })
+      .catch(() => {})
+    return () => {
+      cancel = true
+    }
+  }, [cliente, router])
 
   // ── Selección de cliente ────────────────────────────────────────────
   useEffect(() => {
@@ -288,43 +398,127 @@ function NuevoPedidoInner() {
     }
   }
 
+  // Agregar ítem: crea el pedido "en_venta" al primer artículo, después
+  // sincroniza cada alta contra pedidos_detalle. Los precios los fija el server.
   const agregarAlCarrito = () => {
-    if (!sel || !selPrecio || selCantidad <= 0) return
-    setCart((prev) => {
-      const idx = prev.findIndex((i) => i.articulo.id === sel.id)
-      if (idx >= 0) {
-        const next = [...prev]
-        next[idx] = { ...next[idx], cantidad: next[idx].cantidad + selCantidad }
-        return next
-      }
-      return [...prev, { articulo: sel, cantidad: selCantidad, precio: selPrecio.precio, precioNeto: selPrecio.precioNeto }]
-    })
+    if (!sel || !selPrecio || selCantidad <= 0 || !cliente) return
+    const art = sel
+    const cant = selCantidad
     setSel(null)
+    setSync("saving")
+    enqueue(async () => {
+      try {
+        if (!pedidoIdRef.current) {
+          const pedido: any = await createPedido({
+            cliente_id: cliente.id,
+            items: [{ producto_id: art.id, cantidad: cant, precio_unitario: 0, descuento: 0 }],
+            estado_inicial: "en_venta",
+            ...(metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}),
+          })
+          pedidoIdRef.current = pedido.id
+          setPedidoId(pedido.id)
+          setNumeroPedido(pedido.numero_pedido || null)
+          setEstadoPedido("en_venta")
+          // URL con ?pedido= para que un refresh/back retome este pedido
+          window.history.replaceState(null, "", `/vendedor/pedido/nuevo?cliente=${cliente.id}&pedido=${pedido.id}`)
+          await refreshPedido(pedido.id)
+        } else {
+          const existente = cartRef.current.find((i) => i.articulo.id === art.id)
+          if (existente) {
+            await actualizarCantidadItem(existente.detalleId, pedidoIdRef.current, existente.cantidad + cant)
+          } else {
+            await agregarItemPedido(pedidoIdRef.current, art.id, cant)
+          }
+          await refreshPedido(pedidoIdRef.current)
+        }
+        setSync("idle")
+      } catch (e) {
+        console.error("Error guardando ítem del pedido:", e)
+        setSync("error")
+      }
+    })
+  }
+
+  // Cambiar cantidad desde el carrito: optimista + sync con debounce
+  const setCantidadItem = (detalleId: string, cantidad: number) => {
+    if (cantidad < 1 || !pedidoIdRef.current) return
+    setCart((prev) => prev.map((i) => (i.detalleId === detalleId ? { ...i, cantidad } : i)))
+    const t = cantTimers.current.get(detalleId)
+    if (t) clearTimeout(t)
+    cantTimers.current.set(
+      detalleId,
+      setTimeout(() => {
+        cantTimers.current.delete(detalleId)
+        setSync("saving")
+        enqueue(async () => {
+          try {
+            await actualizarCantidadItem(detalleId, pedidoIdRef.current!, cantidad)
+            setSync("idle")
+          } catch (e) {
+            console.error("Error actualizando cantidad:", e)
+            setSync("error")
+            if (pedidoIdRef.current) await refreshPedido(pedidoIdRef.current).catch(() => {})
+          }
+        })
+      }, 600)
+    )
+  }
+
+  const quitarItem = (detalleId: string) => {
+    if (!pedidoIdRef.current) return
+    const t = cantTimers.current.get(detalleId)
+    if (t) {
+      clearTimeout(t)
+      cantTimers.current.delete(detalleId)
+    }
+    setCart((prev) => prev.filter((i) => i.detalleId !== detalleId))
+    setSync("saving")
+    enqueue(async () => {
+      try {
+        await eliminarItemPedido(detalleId, pedidoIdRef.current!)
+        setSync("idle")
+      } catch (e) {
+        console.error("Error quitando ítem:", e)
+        setSync("error")
+        if (pedidoIdRef.current) await refreshPedido(pedidoIdRef.current).catch(() => {})
+      }
+    })
   }
 
   const total = cart.reduce((s, i) => s + i.precio * i.cantidad, 0)
   const totalItems = cart.reduce((s, i) => s + i.cantidad, 0)
 
+  const editandoExistente = !!estadoPedido && estadoPedido !== "en_venta"
+
   const confirmarPedido = async () => {
-    if (!cliente || !cart.length || confirmando) return
+    if (!cliente || !pedidoIdRef.current || !cart.length || confirmando) return
     setConfirmando(true)
     try {
-      const pedido: any = await createPedido({
-        cliente_id: cliente.id,
-        items: cart.map((i) => ({
-          producto_id: i.articulo.id,
-          cantidad: i.cantidad,
-          precio_unitario: i.precio,
-          descuento: 0,
-        })),
-        observaciones: obs || undefined,
-        ...(metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}),
+      // Descargar cambios de cantidad pendientes (debounce) antes de confirmar
+      const pendientes = [...cantTimers.current.keys()]
+      for (const timer of cantTimers.current.values()) clearTimeout(timer)
+      cantTimers.current.clear()
+      await opQueue.current
+      for (const dId of pendientes) {
+        const item = cartRef.current.find((i) => i.detalleId === dId)
+        if (item) await actualizarCantidadItem(dId, pedidoIdRef.current, item.cantidad)
+      }
+      const res: any = await confirmarPedidoVendedor(pedidoIdRef.current, {
+        observaciones: obs,
+        metodo_facturacion_pedido: metodoOverride,
       })
-      setPedidoOk({ numero: pedido?.numero_pedido || "" })
+      setPedidoOk({ numero: res?.numero_pedido || numeroPedido || "", editado: editandoExistente })
       setCart([])
       setVerCarrito(false)
+      pedidoIdRef.current = null
+      setPedidoId(null)
+      setNumeroPedido(null)
+      setEstadoPedido(null)
+      setObs("")
+      setMetodoOverride("")
+      window.history.replaceState(null, "", `/vendedor/pedido/nuevo?cliente=${cliente.id}`)
     } catch (e: any) {
-      alert(`Error al crear el pedido: ${e?.message || e}`)
+      alert(`Error al confirmar el pedido: ${e?.message || e}`)
     } finally {
       setConfirmando(false)
     }
@@ -399,7 +593,7 @@ function NuevoPedidoInner() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center max-w-md w-full space-y-4">
           <p className="text-6xl">✅</p>
-          <h1 className="text-2xl font-bold text-gray-900">Pedido creado</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{pedidoOk.editado ? "Cambios guardados" : "Pedido confirmado"}</h1>
           {pedidoOk.numero && <p className="text-gray-500 text-lg">N° {pedidoOk.numero}</p>}
           <div className="grid grid-cols-1 gap-3 pt-2">
             <button
@@ -523,9 +717,11 @@ function NuevoPedidoInner() {
     q
       ? cliente.nombre
       : nav.s === "home"
-        ? cliente.metodo_facturacion
-          ? `Facturación: ${cliente.metodo_facturacion}`
-          : "Nuevo pedido"
+        ? numeroPedido
+          ? `Pedido Nº ${numeroPedido}${editandoExistente ? " · editando" : " · guardado automático"}`
+          : cliente.metodo_facturacion
+            ? `Facturación: ${cliente.metodo_facturacion}`
+            : "Nuevo pedido"
         : nav.s === "cats"
           ? cliente.nombre
           : `${ctxLabel(nav.ctx)} · ${cliente.nombre}`
@@ -540,6 +736,19 @@ function NuevoPedidoInner() {
             <h1 className="text-lg font-bold truncate">{tituloHeader}</h1>
             <p className="text-emerald-200 text-xs truncate">{subtituloHeader}</p>
           </div>
+          {pedidoId && (
+            <span
+              className={`text-[10px] px-2.5 py-1 rounded-full font-bold shrink-0 ${
+                sync === "saving"
+                  ? "bg-emerald-600 text-emerald-100"
+                  : sync === "error"
+                    ? "bg-red-500 text-white"
+                    : "bg-emerald-800 text-emerald-200"
+              }`}
+            >
+              {sync === "saving" ? "Guardando…" : sync === "error" ? "⚠ Sin guardar" : "✓ Guardado"}
+            </span>
+          )}
         </div>
         {nav.s === "home" && (
           <div className="px-4 pb-3">
@@ -866,12 +1075,12 @@ function NuevoPedidoInner() {
             </div>
           </header>
           <div className="p-4 space-y-4 max-w-2xl mx-auto pb-40">
-            {cart.map((i, idx) => (
-              <div key={i.articulo.id} className="bg-white rounded-xl border border-gray-200 p-3">
+            {cart.map((i) => (
+              <div key={i.detalleId} className="bg-white rounded-xl border border-gray-200 p-3">
                 <div className="flex items-start justify-between gap-2">
                   <p className="font-bold text-gray-900 text-sm leading-snug flex-1">{i.articulo.descripcion}</p>
                   <button
-                    onClick={() => setCart((prev) => prev.filter((_, j) => j !== idx))}
+                    onClick={() => quitarItem(i.detalleId)}
                     className="text-red-500 text-xl leading-none px-1"
                   >
                     ✕
@@ -880,20 +1089,14 @@ function NuevoPedidoInner() {
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() =>
-                        setCart((prev) =>
-                          prev.map((it, j) => (j === idx ? { ...it, cantidad: Math.max(1, it.cantidad - 1) } : it))
-                        )
-                      }
+                      onClick={() => setCantidadItem(i.detalleId, Math.max(1, i.cantidad - 1))}
                       className="w-10 h-10 rounded-lg bg-gray-100 text-xl font-bold text-gray-700"
                     >
                       −
                     </button>
                     <span className="w-10 text-center font-bold text-lg">{i.cantidad}</span>
                     <button
-                      onClick={() =>
-                        setCart((prev) => prev.map((it, j) => (j === idx ? { ...it, cantidad: it.cantidad + 1 } : it)))
-                      }
+                      onClick={() => setCantidadItem(i.detalleId, i.cantidad + 1)}
                       className="w-10 h-10 rounded-lg bg-gray-100 text-xl font-bold text-gray-700"
                     >
                       +
@@ -950,7 +1153,11 @@ function NuevoPedidoInner() {
                 disabled={confirmando || !cart.length}
                 className="w-full bg-emerald-600 disabled:bg-gray-300 text-white rounded-xl py-4 text-lg font-bold"
               >
-                {confirmando ? "Creando pedido..." : "Confirmar pedido"}
+                {confirmando
+                  ? "Guardando..."
+                  : editandoExistente
+                    ? "Guardar cambios"
+                    : "Confirmar pedido"}
               </button>
             </div>
           </div>
