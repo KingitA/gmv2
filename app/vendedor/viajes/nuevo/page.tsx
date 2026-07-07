@@ -9,6 +9,7 @@ interface Zona {
   descripcion: string | null
   dias_visita: string | null
   cantidad_clientes: number
+  mis_clientes: number
 }
 
 const hoy = () => new Date().toISOString().slice(0, 10)
@@ -22,6 +23,7 @@ export default function NuevoViajePage() {
   const [fechaInicio, setFechaInicio] = useState(hoy())
   const [fechaFin, setFechaFin] = useState("")
   const [creando, setCreando] = useState(false)
+  const [verTodas, setVerTodas] = useState(false)
 
   useEffect(() => {
     fetch("/api/vendedor/zonas")
@@ -110,7 +112,7 @@ export default function NuevoViajePage() {
           </div>
         </section>
 
-        {/* Zonas */}
+        {/* Zonas: primero las que tienen clientes tuyos, el resto plegado */}
         <section>
           <h2 className="text-lg font-bold text-gray-700 mb-2">Zonas del viaje</h2>
           {loading ? (
@@ -118,12 +120,15 @@ export default function NuevoViajePage() {
               <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
             </div>
           ) : (
-            <div className="space-y-2">
-              {zonas.map((z) => {
+            (() => {
+              const mias = zonas
+                .filter((z) => z.mis_clientes > 0)
+                .sort((a, b) => b.mis_clientes - a.mis_clientes)
+              const otras = zonas.filter((z) => z.mis_clientes === 0)
+              const ZonaCard = ({ z }: { z: Zona }) => {
                 const activo = sel.has(z.id)
                 return (
                   <button
-                    key={z.id}
                     onClick={() => toggle(z.id)}
                     className={`w-full bg-white rounded-xl border-2 p-3 text-left active:scale-[0.98] ${
                       activo ? "border-emerald-500" : "border-gray-200"
@@ -136,14 +141,53 @@ export default function NuevoViajePage() {
                         </p>
                         {z.descripcion && <p className="text-gray-500 text-sm truncate">{z.descripcion}</p>}
                       </div>
-                      <span className="shrink-0 text-sm font-bold text-emerald-700">
-                        {z.cantidad_clientes} clientes
-                      </span>
+                      <div className="shrink-0 text-right">
+                        {z.mis_clientes > 0 && (
+                          <p className="text-sm font-bold text-emerald-700">{z.mis_clientes} tuyos</p>
+                        )}
+                        <p className="text-xs text-gray-400">{z.cantidad_clientes} clientes</p>
+                      </div>
                     </div>
                   </button>
                 )
-              })}
-            </div>
+              }
+              return (
+                <div className="space-y-2">
+                  {mias.length > 0 && (
+                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 px-1">
+                      Tus zonas
+                    </p>
+                  )}
+                  {mias.map((z) => (
+                    <ZonaCard key={z.id} z={z} />
+                  ))}
+                  {mias.length === 0 &&
+                    // sin clientes propios: mostrar todas directamente
+                    otras.map((z) => <ZonaCard key={z.id} z={z} />)}
+                  {mias.length > 0 && otras.length > 0 && (
+                    <>
+                      {verTodas ? (
+                        <>
+                          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 px-1 pt-2">
+                            Otras zonas
+                          </p>
+                          {otras.map((z) => (
+                            <ZonaCard key={z.id} z={z} />
+                          ))}
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setVerTodas(true)}
+                          className="w-full rounded-xl border border-dashed border-gray-300 p-3 text-sm font-bold text-gray-500 active:scale-[0.98]"
+                        >
+                          Ver las otras {otras.length} zonas ▾
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            })()
           )}
         </section>
       </div>

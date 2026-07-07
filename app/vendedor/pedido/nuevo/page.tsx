@@ -6,10 +6,12 @@ import { formatCurrency } from "@/lib/utils"
 import {
   actualizarCantidadItem,
   agregarItemPedido,
+  aplicarMetodoPedidoVendedor,
   confirmarPedidoVendedor,
   createPedido,
   eliminarItemPedido,
   previewPrecioArticulo,
+  previewPreciosArticulos,
 } from "@/lib/actions/pedidos"
 import {
   ArteRubro,
@@ -177,6 +179,10 @@ function NuevoPedidoInner() {
   const [buscando, setBuscando] = useState(false)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Precios por artículo para las listas del catálogo (batch, por cliente+método)
+  const [precios, setPrecios] = useState<Record<string, { precio: number; precioNeto: number; ivaIncluido: boolean }>>({})
+  const preciosPedidos = useRef<Set<string>>(new Set())
+
   const [sel, setSel] = useState<Articulo | null>(null)
   const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number } | null>(null)
   // Cantidad en el modo elegido; arranca vacía (sin el "1" fantasma)
@@ -312,6 +318,46 @@ function NuevoPedidoInner() {
       .catch(() => {})
   }, [cliente])
 
+  // ── Precios de las listas del catálogo (batch, cache por artículo) ──
+  const cargarPrecios = useCallback(
+    async (arts: Articulo[]) => {
+      if (!cliente || !arts.length) return
+      const ids = arts.map((a) => a.id).filter((id) => !preciosPedidos.current.has(id))
+      if (!ids.length) return
+      for (const id of ids) preciosPedidos.current.add(id)
+      try {
+        const res = await previewPreciosArticulos(
+          cliente.id,
+          ids,
+          metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}
+        )
+        setPrecios((prev) => {
+          const next = { ...prev }
+          for (const p of res) next[p.articulo_id] = { precio: p.precio, precioNeto: p.precioNeto, ivaIncluido: p.ivaIncluido }
+          return next
+        })
+      } catch (e) {
+        console.error("Error cargando precios del listado:", e)
+        for (const id of ids) preciosPedidos.current.delete(id)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cliente, metodoOverride]
+  )
+
+  // Al cambiar el método del pedido, los precios del catálogo se recalculan
+  useEffect(() => {
+    setPrecios({})
+    preciosPedidos.current = new Set()
+    const cargados: Articulo[] = [
+      ...Object.values(listas).flatMap((l) => l || []),
+      ...artsCategoria,
+      ...resultados,
+    ]
+    if (cargados.length) cargarPrecios(cargados)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metodoOverride])
+
   // ── Carga de listas por filtro (novedades/ofertas/habituales) ───────
   const cargarLista = useCallback(
     (tipo: Filtro) => {
@@ -320,11 +366,15 @@ function NuevoPedidoInner() {
       const params = new URLSearchParams({ vista: tipo, cliente: cliente.id })
       fetch(`/api/vendedor/articulos?${params}`)
         .then((r) => r.json())
-        .then((d) => setListas((prev) => ({ ...prev, [tipo]: d.articulos || [] })))
+        .then((d) => {
+          const arts = d.articulos || []
+          setListas((prev) => ({ ...prev, [tipo]: arts }))
+          cargarPrecios(arts)
+        })
         .catch(() => setListas((prev) => ({ ...prev, [tipo]: [] })))
         .finally(() => setCargandoLista(false))
     },
-    [cliente, listas]
+    [cliente, listas, cargarPrecios]
   )
 
   // ── Artículos de una categoría (navegación por rubro) ───────────────
@@ -335,11 +385,15 @@ function NuevoPedidoInner() {
       const params = new URLSearchParams({ vista: "categoria", cliente: cliente.id, categoria: catId })
       fetch(`/api/vendedor/articulos?${params}`)
         .then((r) => r.json())
-        .then((d) => setArtsCategoria(d.articulos || []))
+        .then((d) => {
+          const arts = d.articulos || []
+          setArtsCategoria(arts)
+          cargarPrecios(arts)
+        })
         .catch(() => setArtsCategoria([]))
         .finally(() => setCargandoArts(false))
     },
-    [cliente]
+    [cliente, cargarPrecios]
   )
 
   const abrirFiltro = (tipo: Filtro) => {
@@ -383,7 +437,11 @@ function NuevoPedidoInner() {
       const params = new URLSearchParams({ vista: "buscar", cliente: cliente.id, q: value })
       fetch(`/api/vendedor/articulos?${params}`)
         .then((r) => r.json())
-        .then((d) => setResultados(d.articulos || []))
+        .then((d) => {
+          const arts = d.articulos || []
+          setResultados(arts)
+          cargarPrecios(arts)
+        })
         .catch(() => setResultados([]))
         .finally(() => setBuscando(false))
     }, 400)
@@ -398,7 +456,11 @@ function NuevoPedidoInner() {
     setSelPrecio(null)
     setCargandoPrecio(true)
     try {
-      const p = await previewPrecioArticulo(cliente!.id, a.id, {})
+      const p = await previewPrecioArticulo(
+        cliente!.id,
+        a.id,
+        metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}
+      )
       setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto })
     } catch {
       setSelPrecio(null)
@@ -456,9 +518,29 @@ function NuevoPedidoInner() {
           await refreshPedido(pedidoIdRef.current)
         }
         setSync("idle")
-      } catch (e) {
+      } catch (e: any) {
         console.error("Error guardando ítem del pedido:", e)
         setSync("error")
+        alert(`No se pudo guardar el artículo en el pedido: ${e?.message || e}`)
+      }
+    })
+  }
+
+  // Cambio de método de facturación: si el pedido ya existe, re-precia TODO
+  // el carrito en el server y refresca; el catálogo recalcula por el effect.
+  const cambiarMetodo = (metodo: string) => {
+    setMetodoOverride(metodo)
+    if (!pedidoIdRef.current) return
+    setSync("saving")
+    enqueue(async () => {
+      try {
+        await aplicarMetodoPedidoVendedor(pedidoIdRef.current!, metodo)
+        await refreshPedido(pedidoIdRef.current!)
+        setSync("idle")
+      } catch (e: any) {
+        console.error("Error repreciando el pedido:", e)
+        setSync("error")
+        alert(`No se pudieron recalcular los precios: ${e?.message || e}`)
       }
     })
   }
@@ -686,6 +768,7 @@ function NuevoPedidoInner() {
   // ── Tarjeta de artículo (compartida por todas las listas) ───────────
   const ArticuloCard = ({ a }: { a: Articulo }) => {
     const enCarrito = cart.find((i) => i.articulo.id === a.id)
+    const p = precios[a.id]
     return (
       <button
         onClick={() => abrirArticulo(a)}
@@ -712,15 +795,27 @@ function NuevoPedidoInner() {
               Stock: {a.stock_disponible}
               {a.veces_pedido ? ` · pedido ${a.veces_pedido}×` : ""}
             </p>
-          </div>
-          <div className="text-right shrink-0">
-            {a.descuento_propio > 0 && (
-              <span className="inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold">
-                -{a.descuento_propio}%
+            {enCarrito && (
+              <span className="inline-block bg-emerald-600 text-white px-2 py-0.5 rounded-full text-xs font-bold mt-1">
+                🛒 En pedido: {enCarrito.cantidad} u
               </span>
             )}
-            {enCarrito && (
-              <p className="text-emerald-700 font-bold text-sm mt-1">✓ {enCarrito.cantidad}</p>
+          </div>
+          <div className="text-right shrink-0">
+            {p ? (
+              <>
+                <p className="font-bold text-gray-900">{formatCurrency(p.precio)}</p>
+                <p className={`text-[10px] font-bold ${p.ivaIncluido ? "text-gray-400" : "text-orange-500"}`}>
+                  {p.ivaIncluido ? "IVA incluido" : "sin IVA"}
+                </p>
+              </>
+            ) : (
+              <p className="text-gray-300 text-xs">$ …</p>
+            )}
+            {a.descuento_propio > 0 && (
+              <span className="inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold mt-1">
+                -{a.descuento_propio}%
+              </span>
             )}
           </div>
         </div>
@@ -760,7 +855,7 @@ function NuevoPedidoInner() {
             <h1 className="text-lg font-bold truncate">{tituloHeader}</h1>
             <p className="text-emerald-200 text-xs truncate">{subtituloHeader}</p>
           </div>
-          {pedidoId && (
+          {(pedidoId || sync !== "idle") && (
             <span
               className={`text-[10px] px-2.5 py-1 rounded-full font-bold shrink-0 ${
                 sync === "saving"
@@ -1236,7 +1331,7 @@ function NuevoPedidoInner() {
                 <label className="text-gray-500 text-sm block mb-1">Método de facturación</label>
                 <select
                   value={metodoOverride}
-                  onChange={(e) => setMetodoOverride(e.target.value)}
+                  onChange={(e) => cambiarMetodo(e.target.value)}
                   className="w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
                 >
                   <option value="">Del cliente{cliente.metodo_facturacion ? ` (${cliente.metodo_facturacion})` : ""}</option>
@@ -1244,11 +1339,9 @@ function NuevoPedidoInner() {
                   <option value="Final">Final (Mixto)</option>
                   <option value="Presupuesto">Presupuesto</option>
                 </select>
-                {metodoOverride && (
-                  <p className="text-orange-600 text-xs mt-1">
-                    ⚠ Los precios se recalculan al confirmar con el método elegido.
-                  </p>
-                )}
+                <p className="text-gray-400 text-xs mt-1">
+                  Al cambiar el método, todos los precios del pedido se recalculan al instante.
+                </p>
               </div>
               <div>
                 <label className="text-gray-500 text-sm block mb-1">Observaciones</label>

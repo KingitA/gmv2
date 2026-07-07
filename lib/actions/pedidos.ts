@@ -512,6 +512,94 @@ export async function previewPrecioArticulo(
   }
 }
 
+// Precios de una LISTA de artículos para un cliente en una sola llamada
+// (para mostrar precios en el catálogo del vendedor). Misma resolución que
+// previewPrecioArticulo pero con fetches batcheados y caches compartidos.
+export async function previewPreciosArticulos(
+  clienteId: string,
+  articuloIds: string[],
+  overrides: {
+    metodo_facturacion_pedido?: string
+    lista_precio_pedido_id?: string
+    lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
+    lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
+    lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
+  } = {},
+): Promise<Array<{ articulo_id: string; precio: number; precioNeto: number; ivaIncluido: boolean }>> {
+  if (!articuloIds?.length) return []
+  const ids = [...new Set(articuloIds)].slice(0, 600)
+  const supabase = await createClient()
+
+  const { data: clienteInfo } = await supabase
+    .from("clientes")
+    .select(`
+      id, vendedor_id, metodo_facturacion, lista_precio_id,
+      lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0,
+      lista_perf_plus_id, metodo_perf_plus
+    `)
+    .eq("id", clienteId)
+    .single()
+  if (!clienteInfo) throw new Error("Cliente no encontrado")
+
+  const [{ data: articulos }, { data: descuentosDB }] = await Promise.all([
+    supabase
+      .from("articulos")
+      .select("id,proveedor_id,marca_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)")
+      .in("id", ids),
+    supabase
+      .from("articulos_descuentos")
+      .select("articulo_id,tipo,porcentaje,orden")
+      .in("articulo_id", ids)
+      .order("orden"),
+  ])
+
+  const descPorArt = new Map<string, DescuentoTipado[]>()
+  for (const d of descuentosDB || []) {
+    const list = descPorArt.get(d.articulo_id) || []
+    list.push({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden })
+    descPorArt.set(d.articulo_id, list)
+  }
+
+  const formulasReglas = await fetchFormulasReglas(supabase)
+  const listasCache: Record<string, DatosLista> = {}
+  const condicionesProveedor = await fetchCondicionesProveedor(supabase, clienteId)
+  const condicionesMarca = await fetchCondicionesMarca(supabase, clienteId)
+  const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId)
+
+  const out: Array<{ articulo_id: string; precio: number; precioNeto: number; ivaIncluido: boolean }> = []
+  for (const art of articulos || []) {
+    try {
+      const articulo = { ...art, descuentos: descPorArt.get(art.id) || [] }
+      const segmento = detectarSegmento(articulo)
+      const { cond } = resolverCondSegmento(articulo, condicionesProveedor, condicionesMarca)
+      let listaId: string | null
+      let metodoRaw: string
+      if (cond) {
+        listaId = cond.lista_precio_id
+        metodoRaw = cond.metodo_facturacion || "Final"
+      } else {
+        const r = resolverListaSegmento(segmento, overrides, clienteInfo)
+        listaId = r.listaId
+        metodoRaw = r.metodoRaw
+      }
+      const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
+      const metodo = toMetodoFacturacion(metodoRaw)
+      const bonif = resolverBonifItem(cond, general, viajante, segmento)
+      const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
+      out.push({
+        articulo_id: art.id,
+        precio: precio.precioAlCliente,
+        precioNeto: precio.precioNeto,
+        // precio > neto → el precio mostrado lleva IVA incluido; iguales → sin IVA (presupuesto)
+        ivaIncluido: Math.abs(precio.precioAlCliente - precio.precioNeto) > 0.01,
+      })
+    } catch {
+      // artículo sin precio calculable: se omite de la respuesta
+    }
+  }
+  return out
+}
+
 // ─── CRUD condiciones por proveedor (Feature 1) ──────────────────────────────
 
 // Condiciones por proveedor guardadas en la ficha del cliente (con nombre del proveedor)
@@ -1598,6 +1686,88 @@ export async function guardarItemsPedido(
   return { success: true }
 }
 
+// Re-precia todas las líneas no bonificadas de un pedido con sus overrides
+// actuales (misma resolución que agregarItemPedido: marca > proveedor >
+// override pedido > cliente). `pedido` debe traer SEGMENTO_PEDIDO_COLS +
+// clientes(SEGMENTO_CLIENTE_COLS).
+async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string) {
+  const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
+  const formulasReglas = await fetchFormulasReglas(supabase)
+  const listasCache: Record<string, DatosLista> = {}
+  const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
+  const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
+  const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
+
+  const { data: items } = await supabase
+    .from("pedidos_detalle")
+    .select("id, articulo_id, cantidad, es_bonificado")
+    .eq("pedido_id", pedidoId)
+
+  for (const it of items || []) {
+    if (it.es_bonificado) continue
+    const articulo = await fetchArticuloConDescuentos(supabase, it.articulo_id)
+    const segmentoArt = detectarSegmento(articulo)
+    const { listaId, metodoRaw, metodo, listaDatos, cond } = await resolverListaMetodoItem(
+      supabase, articulo, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas
+    )
+    const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
+    const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
+    const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
+    const ofertaPct = esEspecial ? (articulo.oferta_lista_especial || 0) : (articulo.descuento_propio || 0)
+    const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
+
+    const { error: itemError } = await supabase
+      .from("pedidos_detalle")
+      .update({
+        precio_base: precio.precioNeto,
+        precio_final: precio.precioAlCliente,
+        subtotal: round2(precio.precioAlCliente * it.cantidad),
+        lista_precio_id: listaId,
+        metodo_facturacion_item: metodoRaw,
+        precio_lista: precioListaBruto,
+        descuento_propio_pct: ofertaPct,
+        bonif_general_pct: precio.bonifGeneralPct,
+        bonif_viajante_pct: precio.bonifViajantePct,
+      })
+      .eq("id", it.id)
+    if (itemError) throw itemError
+  }
+}
+
+// Cambia el método de facturación del pedido y re-precia TODO el carrito al
+// instante (incluye pedidos ya "pendientes"). Usado por el módulo vendedor
+// al tocar el selector de método.
+export async function aplicarMetodoPedidoVendedor(pedidoId: string, metodoFacturacion: string) {
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error("No autenticado")
+
+  const { data: pedido } = await supabase
+    .from("pedidos")
+    .select(`id,estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
+    .eq("id", pedidoId)
+    .single()
+  if (!pedido) throw new Error("Pedido no encontrado")
+
+  const metodoNuevo = limpiarCentinela(metodoFacturacion) || null
+  const metodoActual = (pedido as any).metodo_facturacion_pedido || null
+  if (metodoNuevo === metodoActual) return { success: true, sinCambios: true }
+
+  await supabase
+    .from("pedidos")
+    .update({ metodo_facturacion_pedido: metodoNuevo, actualizado_por: user.id })
+    .eq("id", pedidoId)
+  ;(pedido as any).metodo_facturacion_pedido = metodoNuevo
+
+  await repreciarItemsPedido(supabase, pedido, pedidoId)
+  const total = await recalcularTotalPedido(supabase, pedidoId)
+
+  revalidatePath("/clientes-pedidos")
+  return { success: true, total }
+}
+
 // ─── Confirmación del pedido armado en vivo por el vendedor ─────────────────
 // El pedido nace "en_venta" (autoguardado ítem a ítem desde la tablet). Al
 // confirmar: aplica observaciones, re-precia si cambió el método de facturación
@@ -1628,50 +1798,7 @@ export async function confirmarPedidoVendedor(
   if (cambioMetodo) {
     await supabase.from("pedidos").update({ metodo_facturacion_pedido: metodoNuevo }).eq("id", pedidoId)
     ;(pedido as any).metodo_facturacion_pedido = metodoNuevo
-
-    // Re-preciar todas las líneas no bonificadas con el método nuevo (misma
-    // resolución que agregarItemPedido: marca > proveedor > override pedido > cliente)
-    const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
-    const formulasReglas = await fetchFormulasReglas(supabase)
-    const listasCache: Record<string, DatosLista> = {}
-    const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
-    const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
-    const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
-
-    const { data: items } = await supabase
-      .from("pedidos_detalle")
-      .select("id, articulo_id, cantidad, es_bonificado")
-      .eq("pedido_id", pedidoId)
-
-    for (const it of items || []) {
-      if (it.es_bonificado) continue
-      const articulo = await fetchArticuloConDescuentos(supabase, it.articulo_id)
-      const segmentoArt = detectarSegmento(articulo)
-      const { listaId, metodoRaw, metodo, listaDatos, cond } = await resolverListaMetodoItem(
-        supabase, articulo, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas
-      )
-      const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
-      const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
-      const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
-      const ofertaPct = esEspecial ? (articulo.oferta_lista_especial || 0) : (articulo.descuento_propio || 0)
-      const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
-
-      const { error: itemError } = await supabase
-        .from("pedidos_detalle")
-        .update({
-          precio_base: precio.precioNeto,
-          precio_final: precio.precioAlCliente,
-          subtotal: round2(precio.precioAlCliente * it.cantidad),
-          lista_precio_id: listaId,
-          metodo_facturacion_item: metodoRaw,
-          precio_lista: precioListaBruto,
-          descuento_propio_pct: ofertaPct,
-          bonif_general_pct: precio.bonifGeneralPct,
-          bonif_viajante_pct: precio.bonifViajantePct,
-        })
-        .eq("id", it.id)
-      if (itemError) throw itemError
-    }
+    await repreciarItemsPedido(supabase, pedido, pedidoId)
   }
 
   const patch: Record<string, any> = { actualizado_por: user.id }
