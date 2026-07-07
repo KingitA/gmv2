@@ -234,7 +234,7 @@ function PedidoDetalleInner() {
               <p className="text-xs font-bold text-gray-700 mt-1">Cobrar</p>
             </button>
             <button
-              onClick={() => router.push(`/vendedor/clientes/${cliente.id}/devolucion`)}
+              onClick={() => router.push(`/vendedor/clientes/${cliente.id}/devolucion?pedido=${pedido.id}`)}
               className="bg-white rounded-xl border border-gray-200 py-3 text-center active:scale-[0.97]"
             >
               <p className="text-xl">↩️</p>

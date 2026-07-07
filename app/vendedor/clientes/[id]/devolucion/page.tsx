@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { Suspense, useEffect, useRef, useState } from "react"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 
 // Devolución en la calle — contrato docs/CONTRATO-API-VIAJANTES.md
@@ -30,9 +30,18 @@ const CONDICIONES = [
   { key: "cambio", label: "Cambio" },
 ] as const
 
-export default function VendedorDevolucionPage() {
+interface ItemPedido {
+  detalleId: string
+  articulo: Articulo
+  cantidad: number
+  precio_final: number
+}
+
+function VendedorDevolucionInner() {
   const router = useRouter()
   const { id } = useParams<{ id: string }>()
+  const searchParams = useSearchParams()
+  const pedidoParam = searchParams.get("pedido")
 
   const [clienteNombre, setClienteNombre] = useState("")
   const [q, setQ] = useState("")
@@ -43,12 +52,56 @@ export default function VendedorDevolucionPage() {
   const [enviando, setEnviando] = useState(false)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Devolución vinculada a un pedido: sus items como sugerencias con precio real
+  const [pedidoNumero, setPedidoNumero] = useState<string | null>(null)
+  const [itemsPedido, setItemsPedido] = useState<ItemPedido[]>([])
+
   useEffect(() => {
     fetch(`/api/vendedor/cliente/${id}`)
       .then((r) => r.json())
       .then((d) => !d.error && setClienteNombre(d.cliente.nombre))
       .catch(() => {})
   }, [id])
+
+  useEffect(() => {
+    if (!pedidoParam) return
+    fetch(`/api/vendedor/pedidos/${pedidoParam}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) return
+        setPedidoNumero(d.pedido.numero_pedido || null)
+        setItemsPedido(
+          (d.pedido.pedidos_detalle || [])
+            .filter((i: any) => !i.es_bonificado)
+            .map((i: any) => ({
+              detalleId: i.id,
+              articulo: {
+                id: i.articulos?.id || i.articulo_id,
+                sku: i.articulos?.sku ?? null,
+                descripcion: i.articulos?.descripcion || "Artículo",
+                marca: null,
+              },
+              cantidad: i.cantidad,
+              precio_final: i.precio_final || 0,
+            }))
+        )
+      })
+      .catch(() => {})
+  }, [pedidoParam])
+
+  const agregarDelPedido = (ip: ItemPedido) => {
+    if (items.some((i) => i.articulo.id === ip.articulo.id)) return
+    setItems((prev) => [
+      ...prev,
+      {
+        articulo: ip.articulo,
+        cantidad: 1,
+        precio_venta_original: ip.precio_final,
+        motivo: "",
+        condicion: "vendible",
+      },
+    ])
+  }
 
   const buscar = (value: string) => {
     setQ(value)
@@ -98,7 +151,7 @@ export default function VendedorDevolucionPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cliente_id: id,
-          pedido_id: null,
+          pedido_id: pedidoParam || null,
           items: items.map((it) => ({
             articulo_id: it.articulo.id,
             cantidad: it.cantidad,
@@ -134,11 +187,48 @@ export default function VendedorDevolucionPage() {
         <button onClick={() => router.back()} className="text-2xl leading-none px-1">←</button>
         <div className="min-w-0">
           <h1 className="text-lg font-bold">📦 Devolución</h1>
-          <p className="text-emerald-200 text-sm truncate">{clienteNombre}</p>
+          <p className="text-emerald-200 text-sm truncate">
+            {clienteNombre}
+            {pedidoNumero ? ` · Pedido #${pedidoNumero}` : ""}
+          </p>
         </div>
       </header>
 
       <div className="p-4 space-y-4 max-w-2xl mx-auto">
+        {/* Artículos del pedido vinculado (toque = agregar con precio real) */}
+        {itemsPedido.length > 0 && (
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 mb-2 px-1">
+              Del pedido {pedidoNumero ? `#${pedidoNumero}` : ""} — tocá para agregar
+            </p>
+            <div className="space-y-2">
+              {itemsPedido.map((ip) => {
+                const agregado = items.some((i) => i.articulo.id === ip.articulo.id)
+                return (
+                  <button
+                    key={ip.detalleId}
+                    onClick={() => agregarDelPedido(ip)}
+                    disabled={agregado}
+                    className={`w-full rounded-xl border p-3 text-left flex items-center justify-between gap-3 ${
+                      agregado ? "bg-emerald-50 border-emerald-300" : "bg-white border-gray-200 active:scale-[0.98]"
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-gray-900 text-sm truncate">{ip.articulo.descripcion}</p>
+                      <p className="text-gray-400 text-xs">
+                        Pedidas: {ip.cantidad} · {formatCurrency(ip.precio_final)} c/u
+                      </p>
+                    </div>
+                    <span className={`shrink-0 font-bold text-sm ${agregado ? "text-emerald-700" : "text-gray-400"}`}>
+                      {agregado ? "✓ Agregado" : "＋"}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
         {/* Buscador */}
         <section className="relative">
           <input
@@ -267,5 +357,19 @@ export default function VendedorDevolucionPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function VendedorDevolucionPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <VendedorDevolucionInner />
+    </Suspense>
   )
 }
