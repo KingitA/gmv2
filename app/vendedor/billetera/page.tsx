@@ -13,21 +13,57 @@ interface Movimiento {
   fecha: string
 }
 
-interface ComisionPend {
-  id: string
-  monto: number
-  segmento: string | null
-  porcentaje: number | null
-  created_at: string
-  articulos?: { descripcion: string } | null
-}
-
 interface BilleteraData {
   balance: number
   desglose: { cobros: number; retiros: number; debitos: number; creditos: number }
-  comisiones_pendientes: ComisionPend[]
+  comisiones_pendientes: any[]
   total_pendiente_comisiones: number
   historial: Movimiento[]
+}
+
+interface PedidoComision {
+  pedido_id: string
+  numero_pedido: string
+  cliente_id: string | null
+  cliente_nombre: string
+  fecha: string
+  fecha_cobro: string | null
+  total_monto: number
+  total_comision: number
+  cantidad_skus: number
+}
+
+interface ArticuloComision {
+  kardex_id: string
+  sku: string
+  descripcion: string
+  categoria: string
+  cantidad: number
+  precio_unitario: number
+  subtotal: number
+  comision_pct: number
+  comision_monto: number
+}
+
+interface ComisionesData {
+  tipo: string
+  totales: { disponible: number; sin_cobrar: number; retirado: number }
+  pedidos: PedidoComision[]
+}
+
+interface DetalleData {
+  tipo: string
+  articulos?: ArticuloComision[]
+  comprobantes?: {
+    comprobante_id: string
+    numero: string
+    fecha_cobro: string
+    total_neto: number
+    total_iva: number
+    total: number
+    total_comision: number
+    articulos: ArticuloComision[]
+  }[]
 }
 
 const TIPO_LABEL: Record<string, { label: string; icon: string; color: string }> = {
@@ -37,11 +73,8 @@ const TIPO_LABEL: Record<string, { label: string; icon: string; color: string }>
   credito: { label: "Crédito", icon: "➕", color: "text-green-600" },
 }
 
-const SEGMENTO_LABEL: Record<string, string> = {
-  limpieza_bazar: "Limpieza/Bazar",
-  perf0: "Perfumería 0",
-  perf_plus: "Perfumería +",
-}
+const fechaCorta = (f: string | null) =>
+  f ? new Date(f + "T00:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" }) : "—"
 
 export default function VendedorBilleteraPage() {
   const router = useRouter()
@@ -49,6 +82,14 @@ export default function VendedorBilleteraPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<"movimientos" | "comisiones">("movimientos")
+
+  // Comisiones reales (kardex, formato playroom)
+  const [comData, setComData] = useState<ComisionesData | null>(null)
+  const [comTipo, setComTipo] = useState<"cobrada" | "vendida">("cobrada")
+  const [comLoading, setComLoading] = useState(false)
+  const [pedidoSel, setPedidoSel] = useState<PedidoComision | null>(null)
+  const [detalle, setDetalle] = useState<DetalleData | null>(null)
+  const [detalleLoading, setDetalleLoading] = useState(false)
 
   useEffect(() => {
     fetch("/api/vendedor/billetera")
@@ -60,6 +101,33 @@ export default function VendedorBilleteraPage() {
       .catch(() => setError("Error al cargar la billetera"))
       .finally(() => setLoading(false))
   }, [])
+
+  // Carga (y recarga al cambiar el toggle) de comisiones reales
+  useEffect(() => {
+    if (tab !== "comisiones") return
+    setComLoading(true)
+    fetch(`/api/vendedor/comisiones?tipo=${comTipo}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.error) setComData(d)
+      })
+      .catch(() => {})
+      .finally(() => setComLoading(false))
+  }, [tab, comTipo])
+
+  const abrirPedido = async (p: PedidoComision) => {
+    setPedidoSel(p)
+    setDetalle(null)
+    setDetalleLoading(true)
+    try {
+      const r = await fetch(`/api/vendedor/comisiones/detalle?pedido_id=${p.pedido_id}&tipo=${comTipo}`)
+      const d = await r.json()
+      if (!d.error) setDetalle(d)
+    } catch {
+    } finally {
+      setDetalleLoading(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -73,6 +141,88 @@ export default function VendedorBilleteraPage() {
     return (
       <div className="flex items-center justify-center min-h-screen p-8 text-center">
         <p className="text-red-500 text-xl">{error || "Sin datos"}</p>
+      </div>
+    )
+  }
+
+  // ── Drill-down: detalle de un pedido ────────────────────────────────
+  if (pedidoSel) {
+    const ItemRow = ({ a }: { a: ArticuloComision }) => (
+      <div className="bg-white rounded-xl border border-gray-200 p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-gray-900 text-sm leading-snug">{a.descripcion}</p>
+            <p className="text-gray-400 text-xs mt-0.5">
+              SKU {a.sku} · {a.categoria} · ×{a.cantidad} · {formatCurrency(a.precio_unitario)} c/u
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-gray-500 text-xs">{formatCurrency(a.subtotal)}</p>
+            <p className="text-emerald-700 font-bold text-sm">
+              {a.comision_pct ? `${a.comision_pct}% · ` : ""}
+              {formatCurrency(a.comision_monto)}
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-emerald-700 text-white px-5 py-3 sticky top-0 z-10 shadow-md flex items-center gap-3">
+          <button onClick={() => setPedidoSel(null)} className="text-2xl leading-none px-1">←</button>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-bold truncate">
+              Pedido {pedidoSel.numero_pedido !== "—" ? `#${pedidoSel.numero_pedido}` : ""}
+            </h1>
+            <p className="text-emerald-200 text-xs truncate">{pedidoSel.cliente_nombre}</p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-emerald-200 text-[10px]">Comisión</p>
+            <p className="font-bold">{formatCurrency(pedidoSel.total_comision)}</p>
+          </div>
+        </header>
+
+        <div className="p-4 space-y-3 max-w-2xl mx-auto">
+          {detalleLoading ? (
+            <div className="text-center py-12">
+              <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            </div>
+          ) : detalle?.tipo === "vendida" ? (
+            (detalle.articulos || []).map((a) => <ItemRow key={a.kardex_id} a={a} />)
+          ) : (
+            (detalle?.comprobantes || []).map((c) => (
+              <div key={c.comprobante_id} className="space-y-2">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-emerald-900 text-sm">{c.numero}</p>
+                    <p className="text-emerald-700 text-xs">
+                      Cobrado {fechaCorta(c.fecha_cobro)} · Neto {formatCurrency(c.total_neto)} + IVA{" "}
+                      {formatCurrency(c.total_iva)}
+                    </p>
+                  </div>
+                  <p className="font-bold text-emerald-700">{formatCurrency(c.total_comision)}</p>
+                </div>
+                {c.articulos.map((a) => (
+                  <ItemRow key={a.kardex_id} a={a} />
+                ))}
+              </div>
+            ))
+          )}
+          {!detalleLoading &&
+            ((detalle?.tipo === "vendida" && !detalle.articulos?.length) ||
+              (detalle?.tipo === "cobrada" && !detalle.comprobantes?.length)) && (
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
+                Sin ítems con comisión para este pedido.
+              </div>
+            )}
+          <button
+            onClick={() => router.push(`/vendedor/pedidos/${pedidoSel.pedido_id}`)}
+            className="w-full bg-white border border-emerald-600 text-emerald-700 rounded-xl py-3 font-bold"
+          >
+            Ver el pedido completo →
+          </button>
+        </div>
       </div>
     )
   }
@@ -95,7 +245,7 @@ export default function VendedorBilleteraPage() {
               <p className="font-bold">{formatCurrency(data.desglose.cobros)}</p>
             </div>
             <div className="bg-emerald-600/60 rounded-xl px-3 py-2">
-              <p className="text-emerald-200">Comisiones pend.</p>
+              <p className="text-emerald-200">Comisiones a retirar</p>
               <p className="font-bold">{formatCurrency(data.total_pendiente_comisiones)}</p>
             </div>
           </div>
@@ -126,7 +276,7 @@ export default function VendedorBilleteraPage() {
               tab === "comisiones" ? "bg-emerald-600 text-white" : "bg-white text-gray-600 border border-gray-200"
             }`}
           >
-            Comisiones ({data.comisiones_pendientes.length})
+            Comisiones
           </button>
         </div>
 
@@ -162,31 +312,82 @@ export default function VendedorBilleteraPage() {
               Sin movimientos todavía.
             </div>
           )
-        ) : data.comisiones_pendientes.length ? (
-          <div className="space-y-2">
-            {data.comisiones_pendientes.map((cm) => (
-              <div key={cm.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="font-medium text-gray-900 text-sm truncate">
-                    {cm.articulos?.descripcion || "Comisión"}
-                  </p>
-                  <p className="text-gray-400 text-xs">
-                    {new Date(cm.created_at).toLocaleDateString("es-AR")}
-                    {cm.segmento ? ` · ${SEGMENTO_LABEL[cm.segmento] || cm.segmento}` : ""}
-                    {cm.porcentaje ? ` · ${cm.porcentaje}%` : ""}
+        ) : (
+          <>
+            {/* KPIs de comisiones reales */}
+            {comData && (
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-emerald-600 text-white rounded-xl p-3 text-center">
+                  <p className="text-[11px] text-emerald-100 leading-tight">💰 Para retirar</p>
+                  <p className="font-bold text-sm mt-1">{formatCurrency(comData.totales.disponible)}</p>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-xl p-3 text-center">
+                  <p className="text-[11px] text-gray-500 leading-tight">🕐 Sin cobrar</p>
+                  <p className="font-bold text-sm mt-1 text-gray-800">
+                    {formatCurrency(comData.totales.sin_cobrar)}
                   </p>
                 </div>
-                <p className="font-bold text-emerald-700 shrink-0 ml-2">{formatCurrency(Number(cm.monto))}</p>
+                <div className="bg-white border border-gray-200 rounded-xl p-3 text-center">
+                  <p className="text-[11px] text-gray-500 leading-tight">✓ Retirado</p>
+                  <p className="font-bold text-sm mt-1 text-gray-800">{formatCurrency(comData.totales.retirado)}</p>
+                </div>
               </div>
-            ))}
-            <p className="text-gray-400 text-xs text-center pt-1">
-              El retiro de comisiones se coordina con administración.
-            </p>
-          </div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
-            Sin comisiones pendientes.
-          </div>
+            )}
+
+            {/* Toggle mercadería cobrada / vendida */}
+            <div className="flex gap-2">
+              {(["cobrada", "vendida"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setComTipo(t)}
+                  className={`flex-1 py-2 rounded-full text-xs font-bold border ${
+                    comTipo === t
+                      ? "bg-gray-900 text-white border-gray-900"
+                      : "bg-white text-gray-600 border-gray-300"
+                  }`}
+                >
+                  {t === "cobrada" ? "Mercadería cobrada" : "Mercadería vendida"}
+                </button>
+              ))}
+            </div>
+
+            {comLoading ? (
+              <div className="text-center py-10">
+                <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+              </div>
+            ) : comData?.pedidos.length ? (
+              <div className="space-y-2">
+                {comData.pedidos.map((p) => (
+                  <button
+                    key={p.pedido_id}
+                    onClick={() => abrirPedido(p)}
+                    className="w-full bg-white rounded-xl border border-gray-200 p-3 text-left active:scale-[0.98]"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-gray-900 text-sm truncate">{p.cliente_nombre}</p>
+                        <p className="text-gray-400 text-xs mt-0.5">
+                          {p.numero_pedido !== "—" ? `#${p.numero_pedido} · ` : ""}
+                          {comTipo === "cobrada" ? `cobrado ${fechaCorta(p.fecha_cobro)}` : fechaCorta(p.fecha)} ·{" "}
+                          {p.cantidad_skus} SKUs
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-gray-500 text-xs">{formatCurrency(p.total_monto)}</p>
+                        <p className="text-emerald-700 font-bold">{formatCurrency(p.total_comision)}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
+                {comTipo === "cobrada"
+                  ? "Todavía no hay mercadería cobrada con comisión."
+                  : "Sin ventas con comisión registradas."}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
