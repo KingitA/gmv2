@@ -35,11 +35,34 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // Comprobantes con saldo pendiente, más viejos primero (FIFO)
     const { data: comprobantes } = await supabase
       .from("comprobantes_venta")
-      .select("id, tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente, estado_pago, pedido_id")
+      .select(
+        "id, tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente, estado_pago, pedido_id, pedido:pedido_id(numero_pedido)"
+      )
       .eq("cliente_id", id)
       .gt("saldo_pendiente", 0)
       .in("estado_pago", ["pendiente", "parcial"])
       .order("fecha", { ascending: true })
+
+    // Pedidos cobrables sin facturar (anticipo, mismo criterio que el ERP):
+    // sin comprobantes emitidos, sin anticipo previo, y ya confirmados (no en_venta)
+    const { data: pedidosCliente } = await supabase
+      .from("pedidos")
+      .select("id, numero_pedido, fecha, estado, total, pago_contado_10, anticipo_pago_id")
+      .eq("cliente_id", id)
+      .is("eliminado_at", null)
+      .not("estado", "in", "(eliminado,en_venta)")
+      .order("fecha", { ascending: true })
+
+    const { data: compsDePedidos } = await supabase
+      .from("comprobantes_venta")
+      .select("pedido_id")
+      .eq("cliente_id", id)
+      .not("pedido_id", "is", null)
+    const pedidosFacturados = new Set((compsDePedidos || []).map((c: any) => c.pedido_id))
+
+    const pedidosCobrables = (pedidosCliente || []).filter(
+      (p: any) => !pedidosFacturados.has(p.id) && !p.anticipo_pago_id && Number(p.total || 0) > 0
+    )
 
     const { data: pagosRecientes } = await supabase
       .from("pagos_clientes")
@@ -51,6 +74,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({
       cliente: { ...cliente, saldo_actual: Number(saldo?.saldo_actual) || 0 },
       comprobantes: comprobantes || [],
+      pedidos_cobrables: pedidosCobrables,
       pagos_recientes: (pagosRecientes || []).map((p) => ({
         ...p,
         verificado: p.estado === "confirmado" && !!p.confirmado_por,

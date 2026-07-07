@@ -15,6 +15,16 @@ interface Comprobante {
   fecha: string
   total_factura: number
   saldo_pendiente: number
+  pedido_id: string | null
+  pedido?: { numero_pedido: string | null } | null
+}
+
+interface PedidoCobrable {
+  id: string
+  numero_pedido: string | null
+  fecha: string
+  estado: string
+  total: number
 }
 
 interface Cliente {
@@ -58,10 +68,14 @@ export default function VendedorCobrarPage() {
 
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
+  const [pedidosCobrables, setPedidosCobrables] = useState<PedidoCobrable[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [imputaciones, setImputaciones] = useState<Record<string, number>>({})
+  // Pedidos sin facturar seleccionados: monto a cobrar + flag 10% contado
+  const [pedidosSel, setPedidosSel] = useState<Record<string, number>>({})
+  const [contadoSel, setContadoSel] = useState<Record<string, boolean>>({})
   const [pagoACuenta, setPagoACuenta] = useState(0)
   const [metodos, setMetodos] = useState<Metodo[]>([nuevoMetodo()])
   const [cuentas, setCuentas] = useState<CuentaBancaria[]>([])
@@ -78,6 +92,7 @@ export default function VendedorCobrarPage() {
         else {
           setCliente(d.cliente)
           setComprobantes(d.comprobantes || [])
+          setPedidosCobrables(d.pedidos_cobrables || [])
         }
       })
       .catch(() => setError("Error al cargar el cliente"))
@@ -89,7 +104,8 @@ export default function VendedorCobrarPage() {
   }, [id])
 
   const totalImputado = Object.values(imputaciones).reduce((s, m) => s + (m || 0), 0)
-  const totalCobro = totalImputado + (pagoACuenta || 0)
+  const totalPedidos = Object.values(pedidosSel).reduce((s, m) => s + (m || 0), 0)
+  const totalCobro = totalImputado + totalPedidos + (pagoACuenta || 0)
   const totalMetodos = metodos.reduce((s, m) => s + (m.monto || 0), 0)
   const diferencia = Math.round((totalMetodos - totalCobro) * 100) / 100
 
@@ -105,6 +121,46 @@ export default function VendedorCobrarPage() {
   const setMonto = (cpId: string, monto: number, max: number) => {
     setImputaciones((prev) => ({ ...prev, [cpId]: Math.min(Math.max(0, monto), max) }))
   }
+
+  // Pedido sin facturar: al seleccionarlo cobra el total (90% si es contado)
+  const montoAnticipo = (p: PedidoCobrable, contado: boolean) =>
+    Math.round((contado ? p.total * 0.9 : p.total) * 100) / 100
+
+  const togglePedido = (p: PedidoCobrable) => {
+    setPedidosSel((prev) => {
+      const next = { ...prev }
+      if (next[p.id] !== undefined) delete next[p.id]
+      else next[p.id] = montoAnticipo(p, !!contadoSel[p.id])
+      return next
+    })
+  }
+
+  const toggleContado = (p: PedidoCobrable) => {
+    setContadoSel((prev) => {
+      const contado = !prev[p.id]
+      // Si el pedido está seleccionado, reajustar el monto al nuevo modo
+      setPedidosSel((sel) => (sel[p.id] !== undefined ? { ...sel, [p.id]: montoAnticipo(p, contado) } : sel))
+      return { ...prev, [p.id]: contado }
+    })
+  }
+
+  const setMontoPedido = (p: PedidoCobrable, monto: number) => {
+    setPedidosSel((prev) => ({ ...prev, [p.id]: Math.min(Math.max(0, monto), p.total) }))
+  }
+
+  // Agrupar comprobantes por pedido (los sueltos van a "Otros comprobantes")
+  const gruposComprobantes = (() => {
+    const grupos = new Map<string, { titulo: string; comps: Comprobante[] }>()
+    for (const cp of comprobantes) {
+      const key = cp.pedido_id || "otros"
+      const titulo = cp.pedido_id
+        ? `Pedido ${cp.pedido?.numero_pedido ? `#${cp.pedido.numero_pedido}` : ""}`.trim()
+        : "Otros comprobantes"
+      if (!grupos.has(key)) grupos.set(key, { titulo, comps: [] })
+      grupos.get(key)!.comps.push(cp)
+    }
+    return [...grupos.entries()].sort(([a], [b]) => (a === "otros" ? 1 : b === "otros" ? -1 : 0))
+  })()
 
   const updateMetodo = (idx: number, patch: Partial<Metodo>) => {
     setMetodos((prev) => prev.map((m, i) => (i === idx ? { ...m, ...patch } : m)))
@@ -189,6 +245,9 @@ export default function VendedorCobrarPage() {
             imputaciones: Object.entries(imputaciones)
               .filter(([, monto]) => monto > 0)
               .map(([comprobante_id, monto]) => ({ comprobante_id, monto })),
+            pedidos: Object.entries(pedidosSel)
+              .filter(([, monto]) => monto > 0)
+              .map(([pedido_id, monto]) => ({ pedido_id, monto, contado: !!contadoSel[pedido_id] })),
             pago_a_cuenta: pagoACuenta || 0,
           },
         ],
@@ -259,54 +318,125 @@ export default function VendedorCobrarPage() {
       </header>
 
       <div className="p-4 space-y-5 max-w-2xl mx-auto">
-        {/* Comprobantes a imputar */}
-        <section>
-          <h2 className="text-lg font-bold text-gray-700 mb-2">Comprobantes a cobrar</h2>
-          {comprobantes.length ? (
+        {/* Pedidos sin facturar (anticipo) */}
+        {pedidosCobrables.length > 0 && (
+          <section>
+            <h2 className="text-lg font-bold text-gray-700 mb-2">Pedidos sin facturar</h2>
             <div className="space-y-2">
-              {comprobantes.map((cp) => {
-                const activo = imputaciones[cp.id] !== undefined
+              {pedidosCobrables.map((p) => {
+                const activo = pedidosSel[p.id] !== undefined
+                const contado = !!contadoSel[p.id]
                 return (
                   <div
-                    key={cp.id}
+                    key={p.id}
                     className={`bg-white rounded-xl border-2 p-3 ${activo ? "border-emerald-500" : "border-gray-200"}`}
                   >
-                    <button onClick={() => toggleComprobante(cp)} className="w-full flex items-center justify-between text-left">
+                    <button onClick={() => togglePedido(p)} className="w-full flex items-center justify-between text-left">
                       <div>
                         <p className="font-bold text-gray-900">
-                          {activo ? "☑" : "☐"} {cp.tipo_comprobante} {cp.numero_comprobante}
+                          {activo ? "☑" : "☐"} Pedido {p.numero_pedido ? `#${p.numero_pedido}` : ""}
+                          <span className="ml-2 inline-block bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-[10px] font-bold align-middle">
+                            SIN FACTURAR
+                          </span>
                         </p>
                         <p className="text-gray-500 text-sm">
-                          {new Date(cp.fecha + "T00:00:00").toLocaleDateString("es-AR")} · saldo{" "}
-                          {formatCurrency(cp.saldo_pendiente)}
+                          {new Date(p.fecha + "T00:00:00").toLocaleDateString("es-AR")} · total{" "}
+                          {formatCurrency(p.total)}
                         </p>
                       </div>
                     </button>
                     {activo && (
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="text-gray-500 text-sm">Imputar:</span>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          value={imputaciones[cp.id]}
-                          onChange={(e) => setMonto(cp.id, parseFloat(e.target.value) || 0, cp.saldo_pendiente)}
-                          className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
-                        />
-                        <button
-                          onClick={() => setMonto(cp.id, cp.saldo_pendiente, cp.saldo_pendiente)}
-                          className="text-emerald-700 text-sm font-bold px-2"
-                        >
-                          Total
-                        </button>
+                      <div className="mt-2 space-y-2">
+                        <label className="flex items-center gap-2 text-sm text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={contado}
+                            onChange={() => toggleContado(p)}
+                            className="w-5 h-5"
+                          />
+                          10% contado (cobra el 90%, la NC del 10% sale al facturar)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500 text-sm">Cobrar:</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            value={pedidosSel[p.id]}
+                            onChange={(e) => setMontoPedido(p, parseFloat(e.target.value) || 0)}
+                            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
+                          />
+                          <button
+                            onClick={() => setMontoPedido(p, montoAnticipo(p, contado))}
+                            className="text-emerald-700 text-sm font-bold px-2"
+                          >
+                            {contado ? "90%" : "Total"}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
                 )
               })}
             </div>
+          </section>
+        )}
+
+        {/* Comprobantes a imputar, agrupados por pedido */}
+        <section>
+          <h2 className="text-lg font-bold text-gray-700 mb-2">Comprobantes a cobrar</h2>
+          {comprobantes.length ? (
+            <div className="space-y-3">
+              {gruposComprobantes.map(([key, grupo]) => (
+                <div key={key} className="space-y-2">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 px-1">
+                    {grupo.titulo}
+                  </p>
+                  {grupo.comps.map((cp) => {
+                    const activo = imputaciones[cp.id] !== undefined
+                    return (
+                      <div
+                        key={cp.id}
+                        className={`bg-white rounded-xl border-2 p-3 ${activo ? "border-emerald-500" : "border-gray-200"}`}
+                      >
+                        <button onClick={() => toggleComprobante(cp)} className="w-full flex items-center justify-between text-left">
+                          <div>
+                            <p className="font-bold text-gray-900">
+                              {activo ? "☑" : "☐"} {cp.tipo_comprobante} {cp.numero_comprobante}
+                            </p>
+                            <p className="text-gray-500 text-sm">
+                              {new Date(cp.fecha + "T00:00:00").toLocaleDateString("es-AR")} · saldo{" "}
+                              {formatCurrency(cp.saldo_pendiente)}
+                            </p>
+                          </div>
+                        </button>
+                        {activo && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="text-gray-500 text-sm">Imputar:</span>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={imputaciones[cp.id]}
+                              onChange={(e) => setMonto(cp.id, parseFloat(e.target.value) || 0, cp.saldo_pendiente)}
+                              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
+                            />
+                            <button
+                              onClick={() => setMonto(cp.id, cp.saldo_pendiente, cp.saldo_pendiente)}
+                              className="text-emerald-700 text-sm font-bold px-2"
+                            >
+                              Total
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="bg-white rounded-xl border border-gray-200 p-4 text-center text-gray-500">
-              Sin comprobantes pendientes. Podés registrar un pago a cuenta.
+              Sin comprobantes pendientes.
+              {pedidosCobrables.length ? " Podés cobrar un pedido sin facturar o registrar un pago a cuenta." : " Podés registrar un pago a cuenta."}
             </div>
           )}
         </section>
@@ -459,7 +589,11 @@ export default function VendedorCobrarPage() {
       <div className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 p-4">
         <div className="max-w-2xl mx-auto space-y-2">
           <div className="flex justify-between text-sm text-gray-500">
-            <span>Imputado {formatCurrency(totalImputado)} + a cuenta {formatCurrency(pagoACuenta || 0)}</span>
+            <span>
+              Comprob. {formatCurrency(totalImputado)}
+              {totalPedidos > 0 ? ` + pedidos ${formatCurrency(totalPedidos)}` : ""} + a cuenta{" "}
+              {formatCurrency(pagoACuenta || 0)}
+            </span>
             <span>Métodos {formatCurrency(totalMetodos)}</span>
           </div>
           {Math.abs(diferencia) > 0.01 && (

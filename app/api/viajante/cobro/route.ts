@@ -26,9 +26,14 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Validación de totales ──
+    // Además de imputaciones y pago a cuenta, se pueden cobrar pedidos SIN
+    // facturar (anticipo, mismo criterio que el ERP): c.pedidos = [{pedido_id,
+    // monto, contado}] — el monto va como pago a cuenta (sin imputación) y el
+    // flag contado marca pago_contado_10 (NC del 10% al facturar).
     const totalMetodos = metodos.reduce((s: number, m: any) => s + Number(m.monto || 0), 0)
     const montoCliente = (c: any) =>
       (c.imputaciones || []).reduce((s: number, i: any) => s + Number(i.monto || 0), 0) +
+      (c.pedidos || []).reduce((s: number, p: any) => s + Number(p.monto || 0), 0) +
       Number(c.pago_a_cuenta || 0) -
       Number(c.devolucion?.monto_descontado || 0)
     const totalClientes = clientes.reduce((s: number, c: any) => s + montoCliente(c), 0)
@@ -57,6 +62,30 @@ export async function POST(request: NextRequest) {
       for (const imp of c.imputaciones || []) {
         if (!imp.comprobante_id || Number(imp.monto) <= 0) {
           return NextResponse.json({ error: "Imputación inválida" }, { status: 400 })
+        }
+      }
+      for (const p of c.pedidos || []) {
+        if (!p.pedido_id || Number(p.monto) <= 0) {
+          return NextResponse.json({ error: "Pedido anticipado inválido" }, { status: 400 })
+        }
+      }
+    }
+
+    // Validar pedidos anticipados: que existan y sean del cliente indicado
+    const pedidoIds = clientes.flatMap((c: any) => (c.pedidos || []).map((p: any) => p.pedido_id))
+    const pedidosDb = new Map<string, any>()
+    if (pedidoIds.length) {
+      const { data: rows } = await supabase
+        .from("pedidos")
+        .select("id, cliente_id, numero_pedido")
+        .in("id", pedidoIds)
+      for (const r of rows || []) pedidosDb.set(r.id, r)
+      for (const c of clientes) {
+        for (const p of c.pedidos || []) {
+          const row = pedidosDb.get(p.pedido_id)
+          if (!row || row.cliente_id !== c.cliente_id) {
+            return NextResponse.json({ error: `Pedido ${p.pedido_id} inexistente o de otro cliente` }, { status: 400 })
+          }
         }
       }
     }
@@ -96,6 +125,15 @@ export async function POST(request: NextRequest) {
         : session.vendedorIds[0]
       billeteraVendedorId = billeteraVendedorId ?? vendedorId
 
+      // Nota de anticipo a pedidos sin facturar (mismo formato que el ERP)
+      const pedidosAnticipo: any[] = c.pedidos || []
+      const notaAnticipo = pedidosAnticipo.length
+        ? `Anticipo a pedido(s) sin facturar: ${pedidosAnticipo
+            .map((p: any) => pedidosDb.get(p.pedido_id)?.numero_pedido || p.pedido_id)
+            .join(", ")}`
+        : ""
+      const obsPago = [observaciones, notaAnticipo].filter(Boolean).join(" · ") || null
+
       // ── Pago ──
       const { data: pago, error: pagoErr } = await supabase
         .from("pagos_clientes")
@@ -104,7 +142,7 @@ export async function POST(request: NextRequest) {
           vendedor_id: vendedorId,
           monto: montoPago,
           fecha_pago: todayArgentina(),
-          observaciones: observaciones || null,
+          observaciones: obsPago,
           estado: "pendiente_rendicion",
           cobrador_tipo: "viajante",
           creado_por: session.user.id,
@@ -113,6 +151,17 @@ export async function POST(request: NextRequest) {
         .select("id")
         .single()
       if (pagoErr) throw pagoErr
+
+      // ── Pedidos anticipados: vincular al pago; contado marca el 10% ──
+      for (const p of pedidosAnticipo) {
+        await supabase
+          .from("pedidos")
+          .update({
+            anticipo_pago_id: pago.id,
+            ...(p.contado ? { pago_contado_10: true } : {}),
+          })
+          .eq("id", p.pedido_id)
+      }
 
       // ── Detalles por método (proporcional al monto del cliente) ──
       const proporcion = montoPago / totalMetodos
