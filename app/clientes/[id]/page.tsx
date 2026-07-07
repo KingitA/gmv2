@@ -333,6 +333,17 @@ export default function ClienteDetailPage() {
     if (error) {
       alert(`Error al guardar: ${error.message}`)
     } else {
+      // Sello de auditoría best-effort (requiere migración 20260707_clientes_auditoria;
+      // va aparte para no voltear el guardado si la columna todavía no existe)
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          await supabase
+            .from("clientes")
+            .update({ actualizado_por: user.id, actualizado_at: new Date().toISOString() })
+            .eq("id", id)
+        }
+      } catch {}
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id }) }).catch(() => {})
       router.push("/clientes")
     }

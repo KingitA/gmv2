@@ -26,6 +26,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Cliente inexistente o no asignado a vos." }, { status: 404 })
     }
 
+    // Auditoría de la ficha (best-effort: requiere la migración
+    // 20260707_clientes_auditoria; hasta entonces la query falla y queda null)
+    let actualizadoAt: string | null = null
+    let actualizadoPorNombre: string | null = null
+    const { data: audit } = await supabase
+      .from("clientes")
+      .select("actualizado_por, actualizado_at")
+      .eq("id", id)
+      .maybeSingle()
+    if (audit?.actualizado_at) actualizadoAt = audit.actualizado_at
+    if (audit?.actualizado_por) {
+      const { data: perfil } = await supabase
+        .from("profiles")
+        .select("nombre")
+        .eq("id", audit.actualizado_por)
+        .maybeSingle()
+      actualizadoPorNombre = perfil?.nombre || null
+    }
+
     const { data: saldo } = await supabase
       .from("v_saldo_clientes")
       .select("saldo_actual")
@@ -72,7 +91,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .limit(10)
 
     return NextResponse.json({
-      cliente: { ...cliente, saldo_actual: Number(saldo?.saldo_actual) || 0 },
+      cliente: {
+        ...cliente,
+        saldo_actual: Number(saldo?.saldo_actual) || 0,
+        actualizado_at: actualizadoAt,
+        actualizado_por_nombre: actualizadoPorNombre,
+      },
       comprobantes: comprobantes || [],
       pedidos_cobrables: pedidosCobrables,
       pagos_recientes: (pagosRecientes || []).map((p) => ({
@@ -86,9 +110,24 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
 }
 
+// Campos de la ficha que el vendedor puede editar directamente. Todo update
+// queda asentado con actualizado_por + actualizado_at (auditoría).
+const CAMPOS_EDITABLES = [
+  "nombre",
+  "razon_social",
+  "cuit",
+  "direccion",
+  "localidad",
+  "provincia",
+  "telefono",
+  "mail",
+  "condicion_pago",
+  "condicion_entrega",
+] as const
+
 // PATCH /api/vendedor/cliente/[id]
-// Campos editables por el vendedor desde la ficha. Por ahora: reasignar
-// el cliente a cualquier otro vendedor (clientes.vendedor_id).
+// Edita datos de la ficha (whitelist) y/o reasigna el vendedor. Deja
+// registrado quién y cuándo modificó (clientes.actualizado_por/_at).
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireVendedor()
   if (session.error) return session.error
@@ -109,29 +148,53 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Cliente inexistente o no asignado a vos." }, { status: 404 })
     }
 
-    if (!body.vendedor_id || typeof body.vendedor_id !== "string") {
-      return NextResponse.json({ error: "Se requiere vendedor_id." }, { status: 400 })
+    const patch: Record<string, any> = {}
+
+    // Datos de la ficha (solo whitelist)
+    for (const campo of CAMPOS_EDITABLES) {
+      if (body[campo] !== undefined) {
+        const v = typeof body[campo] === "string" ? body[campo].trim() : body[campo]
+        patch[campo] = v === "" ? null : v
+      }
+    }
+    if (patch.nombre === null) {
+      return NextResponse.json({ error: "El nombre no puede quedar vacío." }, { status: 400 })
     }
 
-    const { data: vendedorDestino } = await supabase
-      .from("vendedores")
-      .select("id, nombre")
-      .eq("id", body.vendedor_id)
-      .eq("activo", true)
-      .maybeSingle()
-
-    if (!vendedorDestino) {
-      return NextResponse.json({ error: "Vendedor destino inexistente o inactivo." }, { status: 400 })
+    // Reasignación de vendedor (opcional)
+    let vendedorDestino: { id: string; nombre: string } | null = null
+    if (body.vendedor_id !== undefined) {
+      if (!body.vendedor_id || typeof body.vendedor_id !== "string") {
+        return NextResponse.json({ error: "vendedor_id inválido." }, { status: 400 })
+      }
+      const { data: vd } = await supabase
+        .from("vendedores")
+        .select("id, nombre")
+        .eq("id", body.vendedor_id)
+        .eq("activo", true)
+        .maybeSingle()
+      if (!vd) {
+        return NextResponse.json({ error: "Vendedor destino inexistente o inactivo." }, { status: 400 })
+      }
+      vendedorDestino = vd
+      patch.vendedor_id = vd.id
     }
 
-    const { error } = await supabase
-      .from("clientes")
-      .update({ vendedor_id: vendedorDestino.id })
-      .eq("id", id)
+    if (!Object.keys(patch).length) {
+      return NextResponse.json({ error: "Nada para actualizar." }, { status: 400 })
+    }
 
+    const { error } = await supabase.from("clientes").update(patch).eq("id", id)
     if (error) throw error
 
-    return NextResponse.json({ success: true, vendedor: vendedorDestino })
+    // Sello de auditoría best-effort (requiere migración 20260707_clientes_auditoria;
+    // va aparte para no voltear el guardado si la columna todavía no existe)
+    await supabase
+      .from("clientes")
+      .update({ actualizado_por: session.user.id, actualizado_at: new Date().toISOString() })
+      .eq("id", id)
+
+    return NextResponse.json({ success: true, ...(vendedorDestino ? { vendedor: vendedorDestino } : {}) })
   } catch (error: any) {
     console.error("[vendedor] Error en PATCH /api/vendedor/cliente/[id]:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })

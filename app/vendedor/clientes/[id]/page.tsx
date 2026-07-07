@@ -31,17 +31,35 @@ interface Ficha {
     cuit: string | null
     direccion: string | null
     localidad: string | null
+    provincia: string | null
     telefono: string | null
     mail: string | null
     condicion_iva: string | null
     condicion_pago: string | null
+    condicion_entrega: string | null
     metodo_facturacion: string | null
     vendedor_id: string | null
     saldo_actual: number
+    actualizado_at: string | null
+    actualizado_por_nombre: string | null
   }
   comprobantes: Comprobante[]
   pagos_recientes: Pago[]
 }
+
+// Campos que el vendedor puede editar (espejo del whitelist del PATCH)
+const CAMPOS_FICHA: Array<{ key: string; label: string; tipo?: "tel" | "email" }> = [
+  { key: "nombre", label: "Nombre" },
+  { key: "razon_social", label: "Razón social" },
+  { key: "cuit", label: "CUIT" },
+  { key: "direccion", label: "Dirección" },
+  { key: "localidad", label: "Localidad" },
+  { key: "provincia", label: "Provincia" },
+  { key: "telefono", label: "Teléfono", tipo: "tel" },
+  { key: "mail", label: "Email", tipo: "email" },
+  { key: "condicion_pago", label: "Condición de pago" },
+  { key: "condicion_entrega", label: "Condición de entrega" },
+]
 
 // Badges de doble firma según contrato docs/CONTRATO-API-VIAJANTES.md
 function badgePago(estado: string, verificado: boolean) {
@@ -61,6 +79,9 @@ export default function VendedorClienteFichaPage() {
   const [error, setError] = useState<string | null>(null)
   const [vendedores, setVendedores] = useState<{ id: string; nombre: string }[]>([])
   const [reasignando, setReasignando] = useState(false)
+  const [editando, setEditando] = useState(false)
+  const [form, setForm] = useState<Record<string, string>>({})
+  const [guardando, setGuardando] = useState(false)
 
   const cargar = () => {
     fetch(`/api/vendedor/cliente/${id}`)
@@ -81,6 +102,42 @@ export default function VendedorClienteFichaPage() {
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  const empezarEdicion = () => {
+    if (!data) return
+    const c = data.cliente as any
+    const inicial: Record<string, string> = {}
+    for (const campo of CAMPOS_FICHA) inicial[campo.key] = c[campo.key] || ""
+    setForm(inicial)
+    setEditando(true)
+  }
+
+  const guardarFicha = async () => {
+    if (!data || guardando) return
+    if (!form.nombre?.trim()) {
+      alert("El nombre no puede quedar vacío.")
+      return
+    }
+    setGuardando(true)
+    try {
+      const res = await fetch(`/api/vendedor/cliente/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      })
+      const d = await res.json()
+      if (d.error) {
+        alert(d.error)
+        return
+      }
+      setEditando(false)
+      cargar()
+    } catch {
+      alert("Error de conexión al guardar la ficha.")
+    } finally {
+      setGuardando(false)
+    }
+  }
 
   const reasignar = async (vendedorId: string) => {
     if (!vendedorId || vendedorId === data?.cliente.vendedor_id) return
@@ -253,22 +310,68 @@ export default function VendedorClienteFichaPage() {
 
         {/* Datos del cliente */}
         <section className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 space-y-2">
-          <h2 className="text-lg font-bold text-gray-700 mb-1">Ficha</h2>
-          {cliente.razon_social && <Dato label="Razón social" valor={cliente.razon_social} />}
-          <Dato label="CUIT" valor={cliente.cuit} />
-          <Dato label="Condición IVA" valor={cliente.condicion_iva} />
-          <Dato label="Método facturación" valor={cliente.metodo_facturacion} />
-          <Dato label="Condición de pago" valor={cliente.condicion_pago} />
-          <Dato label="Dirección" valor={[cliente.direccion, cliente.localidad].filter(Boolean).join(", ")} />
-          {cliente.telefono && (
-            <div className="flex justify-between items-center py-1">
-              <span className="text-gray-500 text-sm">Teléfono</span>
-              <a href={`tel:${cliente.telefono}`} className="text-emerald-700 font-bold">
-                📞 {cliente.telefono}
-              </a>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-bold text-gray-700">Ficha</h2>
+            {!editando && (
+              <button onClick={empezarEdicion} className="text-emerald-700 text-sm font-bold">
+                ✏️ Editar
+              </button>
+            )}
+          </div>
+
+          {editando ? (
+            <div className="space-y-3">
+              {CAMPOS_FICHA.map((campo) => (
+                <div key={campo.key}>
+                  <label className="text-gray-500 text-sm block mb-1">{campo.label}</label>
+                  <input
+                    type={campo.tipo || "text"}
+                    value={form[campo.key] || ""}
+                    onChange={(e) => setForm((prev) => ({ ...prev, [campo.key]: e.target.value }))}
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900"
+                  />
+                </div>
+              ))}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  onClick={() => setEditando(false)}
+                  disabled={guardando}
+                  className="bg-white border border-gray-300 text-gray-700 rounded-xl py-3 font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={guardarFicha}
+                  disabled={guardando}
+                  className="bg-emerald-600 disabled:bg-gray-300 text-white rounded-xl py-3 font-bold"
+                >
+                  {guardando ? "Guardando..." : "Guardar"}
+                </button>
+              </div>
             </div>
+          ) : (
+            <>
+              {cliente.razon_social && <Dato label="Razón social" valor={cliente.razon_social} />}
+              <Dato label="CUIT" valor={cliente.cuit} />
+              <Dato label="Condición IVA" valor={cliente.condicion_iva} />
+              <Dato label="Método facturación" valor={cliente.metodo_facturacion} />
+              <Dato label="Condición de pago" valor={cliente.condicion_pago} />
+              <Dato label="Condición de entrega" valor={cliente.condicion_entrega} />
+              <Dato
+                label="Dirección"
+                valor={[cliente.direccion, cliente.localidad, cliente.provincia].filter(Boolean).join(", ")}
+              />
+              {cliente.telefono && (
+                <div className="flex justify-between items-center py-1">
+                  <span className="text-gray-500 text-sm">Teléfono</span>
+                  <a href={`tel:${cliente.telefono}`} className="text-emerald-700 font-bold">
+                    📞 {cliente.telefono}
+                  </a>
+                </div>
+              )}
+              {cliente.mail && <Dato label="Email" valor={cliente.mail} />}
+            </>
           )}
-          {cliente.mail && <Dato label="Email" valor={cliente.mail} />}
 
           <div className="pt-3 border-t border-gray-100">
             <label className="text-gray-500 text-sm block mb-2">Vendedor asignado</label>
@@ -285,6 +388,20 @@ export default function VendedorClienteFichaPage() {
               ))}
             </select>
           </div>
+
+          {cliente.actualizado_at && (
+            <p className="text-gray-400 text-xs pt-2">
+              Última modificación:{" "}
+              {new Date(cliente.actualizado_at).toLocaleString("es-AR", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              {cliente.actualizado_por_nombre ? ` · por ${cliente.actualizado_por_nombre}` : ""}
+            </p>
+          )}
         </section>
       </div>
     </div>
