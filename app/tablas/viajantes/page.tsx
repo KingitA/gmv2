@@ -71,7 +71,7 @@ export default function ViajantesPage() {
 
   const loadUsuarios = async () => {
     const [{ data: users, error }, { data: rolesData }] = await Promise.all([
-      supabase.from("usuarios").select("id, nombre, email").eq("activo", true).order("nombre"),
+      supabase.from("usuarios").select("id, nombre, email").eq("estado", "activo").order("nombre"),
       supabase.from("usuarios_roles").select("usuario_id, roles(nombre)"),
     ])
 
