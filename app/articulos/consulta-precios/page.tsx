@@ -150,16 +150,20 @@ export default function ConsultaPreciosPage() {
       if (clienteSeleccionado.vendedor_id) {
         const { data: vendedor } = await supabase
           .from("vendedores")
-          .select("comision_perfumeria, comision_bazar_limpieza")
+          .select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus")
           .eq("id", clienteSeleccionado.vendedor_id)
           .single()
 
         if (vendedor) {
           const categoria = articuloSeleccionado.categoria?.toLowerCase() || ""
           if (categoria.includes("perfumeria") || categoria.includes("perfume")) {
-            comision_porcentaje = vendedor.comision_perfumeria || 6
+            // Perfumería: c/factura (blanco) usa _plus, resto (negro) usa _0
+            comision_porcentaje =
+              articuloSeleccionado.iva_ventas === "factura"
+                ? vendedor.comision_perfumeria_plus || 6
+                : vendedor.comision_perfumeria_0 || 6
           } else {
-            comision_porcentaje = vendedor.comision_bazar_limpieza || 6
+            comision_porcentaje = vendedor.comision_limpieza_bazar || 6
           }
           console.log("[v0] Comisión vendedor:", comision_porcentaje, "%")
         }
