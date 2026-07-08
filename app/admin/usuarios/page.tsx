@@ -18,6 +18,7 @@ const TODOS_LOS_ROLES = [
   { value: "deposito",       label: "Depósito",       desc: "Solo módulo depósito" },
   { value: "chofer",         label: "Chofer",         desc: "Solo módulo chofer" },
   { value: "vendedor",       label: "Vendedor",       desc: "Módulo vendedor — pedidos y cobranzas en campo" },
+  { value: "mostrador",      label: "Mostrador",      desc: "Venta, cobro y devoluciones en mostrador" },
 ]
 
 const ROL_COLORS: Record<string, string> = {
@@ -26,6 +27,7 @@ const ROL_COLORS: Record<string, string> = {
   deposito:       "bg-orange-100 text-orange-700",
   chofer:         "bg-green-100 text-green-700",
   vendedor:       "bg-teal-100 text-teal-700",
+  mostrador:      "bg-amber-100 text-amber-700",
   viajante:       "bg-slate-100 text-slate-500",
 }
 
