@@ -17,7 +17,7 @@ const TODOS_LOS_ROLES = [
   { value: "administrativo", label: "Administrativo", desc: "ERP sin finanzas/depósito" },
   { value: "deposito",       label: "Depósito",       desc: "Solo módulo depósito" },
   { value: "chofer",         label: "Chofer",         desc: "Solo módulo chofer" },
-  { value: "viajante",       label: "Viajante",       desc: "En desarrollo" },
+  { value: "vendedor",       label: "Vendedor",       desc: "Módulo vendedor — pedidos y cobranzas en campo" },
 ]
 
 const ROL_COLORS: Record<string, string> = {
@@ -25,7 +25,8 @@ const ROL_COLORS: Record<string, string> = {
   administrativo: "bg-blue-100 text-blue-700",
   deposito:       "bg-orange-100 text-orange-700",
   chofer:         "bg-green-100 text-green-700",
-  viajante:       "bg-teal-100 text-teal-700",
+  vendedor:       "bg-teal-100 text-teal-700",
+  viajante:       "bg-slate-100 text-slate-500",
 }
 
 type Usuario = {
