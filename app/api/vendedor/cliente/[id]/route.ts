@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const { data: cliente } = await supabase
       .from("clientes")
       .select(
-        "id, nombre, razon_social, cuit, direccion, localidad, provincia, telefono, mail, condicion_iva, condicion_pago, condicion_entrega, metodo_facturacion, vendedor_id, codigo_cliente"
+        "id, nombre, razon_social, cuit, direccion, localidad, localidad_id, provincia, telefono, mail, condicion_iva, condicion_pago, condicion_entrega, metodo_facturacion, vendedor_id, codigo_cliente"
       )
       .eq("id", id)
       .in("vendedor_id", session.vendedorIds)
@@ -124,6 +124,7 @@ const CAMPOS_EDITABLES = [
   "condicion_pago",
   "condicion_entrega",
   "metodo_facturacion",
+  "localidad_id",
 ] as const
 
 // PATCH /api/vendedor/cliente/[id]

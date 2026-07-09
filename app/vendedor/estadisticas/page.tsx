@@ -82,13 +82,17 @@ export default function VendedorEstadisticasPage() {
             <p className="text-gray-500 text-sm">Pedidos este mes</p>
             <p className="text-xl font-bold text-gray-900 mt-1">{mesActual?.pedidos || 0}</p>
           </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
+          <button
+            onClick={() => router.push("/vendedor/billetera?tab=comisiones")}
+            className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-left active:scale-[0.98] transition-transform"
+          >
             <p className="text-gray-500 text-sm">Comisiones del mes</p>
             <p className="text-xl font-bold text-emerald-700 mt-1">
               {formatCurrency(data.comisiones.generadas_mes)}
             </p>
             <p className="text-gray-400 text-xs">Pend. retiro: {formatCurrency(data.comisiones.pendientes)}</p>
-          </div>
+            <p className="text-emerald-700 text-xs font-bold mt-1">Ver detalle →</p>
+          </button>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4">
             <p className="text-gray-500 text-sm">Deuda de cartera</p>
             <p className="text-xl font-bold text-red-600 mt-1">{formatCurrency(data.cartera.deuda_total)}</p>

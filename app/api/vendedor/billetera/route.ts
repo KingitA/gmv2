@@ -3,9 +3,9 @@ import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 
 // GET /api/vendedor/billetera?page=
-// Billetera del vendedor autenticado (movimientos de sus registros de
-// vendedor) + comisiones pendientes de retiro. Mismo cálculo que la vista
-// admin /api/viajantes/[id]/billetera, resuelto desde la sesión.
+// Billetera del vendedor autenticado. "Plata en la calle" = suma de los pagos
+// que cobró y siguen pendiente_rendicion (no rendidos a oficina), con desglose
+// por método real (pagos_detalle). Los movimientos quedan como historial.
 export async function GET(request: Request) {
   const session = await requireVendedor()
   if (session.error) return session.error
@@ -17,19 +17,37 @@ export async function GET(request: Request) {
     const perPage = 50
     const offset = (page - 1) * perPage
 
-    const { data: balanceData } = await supabase
-      .from("billetera_movimientos")
-      .select("tipo, monto")
-      .in("viajante_id", session.vendedorIds)
+    // Plata en la calle: cobros sin rendir (fuente de verdad: pagos_clientes)
+    const { data: pagosSinRendir } = await supabase
+      .from("pagos_clientes")
+      .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto)")
+      .in("vendedor_id", session.vendedorIds)
+      .eq("estado", "pendiente_rendicion")
 
-    const movimientos = balanceData ?? []
-    const balance = movimientos.reduce((sum, m) => sum + Number(m.monto), 0)
-    const desglose = {
-      cobros: movimientos.filter((m) => m.tipo === "cobro_cliente").reduce((s, m) => s + Number(m.monto), 0),
-      retiros: movimientos.filter((m) => m.tipo === "retiro_comision").reduce((s, m) => s + Number(m.monto), 0),
-      debitos: movimientos.filter((m) => m.tipo === "debito").reduce((s, m) => s + Number(m.monto), 0),
-      creditos: movimientos.filter((m) => m.tipo === "credito").reduce((s, m) => s + Number(m.monto), 0),
+    let efectivo = 0
+    let cheques = 0
+    let transferencias = 0
+    for (const p of pagosSinRendir ?? []) {
+      const detalles: any[] = (p as any).pagos_detalle || []
+      if (detalles.length) {
+        for (const d of detalles) {
+          const tipo = (d.tipo_pago || "").toLowerCase()
+          if (tipo === "efectivo") efectivo += Number(d.monto)
+          else if (tipo === "cheque") cheques += Number(d.monto)
+          else transferencias += Number(d.monto)
+        }
+      } else {
+        // pagos viejos sin detalle: clasificar por forma_pago
+        const forma = ((p as any).forma_pago || "").toLowerCase()
+        if (forma === "cheque") cheques += Number(p.monto)
+        else if (forma === "transferencia") transferencias += Number(p.monto)
+        else efectivo += Number(p.monto)
+      }
     }
+
+    const balance = (pagosSinRendir ?? []).reduce((s, p) => s + Number(p.monto), 0)
+    const desglose = { efectivo, cheques, transferencias }
+    const cantidadSinRendir = (pagosSinRendir ?? []).length
 
     const { data: comisionesPendientes } = await supabase
       .from("comisiones")
@@ -51,6 +69,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       balance,
       desglose,
+      pagos_sin_rendir: cantidadSinRendir,
       comisiones_pendientes: comisionesPendientes ?? [],
       total_pendiente_comisiones: totalPendiente,
       historial: historial ?? [],

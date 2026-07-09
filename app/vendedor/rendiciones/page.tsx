@@ -156,6 +156,9 @@ export default function VendedorRendicionesPage() {
           ) : (
             <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
               🟢 No tenés pagos pendientes de rendición.
+              <p className="text-gray-400 text-sm mt-2">
+                Cada cobro que registres en la calle aparece acá para declararlo y avisarle a oficina.
+              </p>
             </div>
           )}
         </section>
@@ -186,6 +189,18 @@ export default function VendedorRendicionesPage() {
                 placeholder="Opcional..."
               />
             </div>
+            <button
+              onClick={rendir}
+              disabled={enviando || !seleccionados.size}
+              className="w-full bg-emerald-600 disabled:bg-gray-300 text-white rounded-xl py-4 text-lg font-bold"
+            >
+              {enviando
+                ? "Declarando..."
+                : `Declarar rendición · ${seleccionados.size} pagos · ${formatCurrency(totalSeleccionado)}`}
+            </button>
+            <p className="text-gray-400 text-xs text-center">
+              Al declarar, oficina recibe el aviso y confirma cuando le entregás el dinero.
+            </p>
           </section>
         )}
 
@@ -228,7 +243,7 @@ export default function VendedorRendicionesPage() {
       </div>
 
       {pagos.length > 0 && (
-        <div className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 p-4">
+        <div className="fixed bottom-0 inset-x-0 z-20 bg-white border-t border-gray-200 p-4">
           <div className="max-w-2xl mx-auto space-y-1">
             <div className="flex justify-between text-lg">
               <span className="text-gray-500">{seleccionados.size} pagos seleccionados</span>

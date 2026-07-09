@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 
 interface Movimiento {
@@ -15,7 +15,8 @@ interface Movimiento {
 
 interface BilleteraData {
   balance: number
-  desglose: { cobros: number; retiros: number; debitos: number; creditos: number }
+  desglose: { efectivo: number; cheques: number; transferencias: number }
+  pagos_sin_rendir: number
   comisiones_pendientes: any[]
   total_pendiente_comisiones: number
   historial: Movimiento[]
@@ -76,12 +77,16 @@ const TIPO_LABEL: Record<string, { label: string; icon: string; color: string }>
 const fechaCorta = (f: string | null) =>
   f ? new Date(f + "T00:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" }) : "—"
 
-export default function VendedorBilleteraPage() {
+function VendedorBilleteraInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [data, setData] = useState<BilleteraData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<"movimientos" | "comisiones">("movimientos")
+  // ?tab=comisiones abre directo la pestaña de comisiones (link de estadísticas)
+  const [tab, setTab] = useState<"movimientos" | "comisiones">(
+    searchParams.get("tab") === "comisiones" ? "comisiones" : "movimientos"
+  )
 
   // Comisiones reales (kardex, formato playroom)
   const [comData, setComData] = useState<ComisionesData | null>(null)
@@ -239,14 +244,23 @@ export default function VendedorBilleteraPage() {
         <section className="bg-emerald-700 text-white rounded-2xl shadow-md p-6 text-center">
           <p className="text-emerald-200 text-sm">Plata en la calle</p>
           <p className="text-4xl font-bold mt-1">{formatCurrency(data.balance)}</p>
-          <div className="grid grid-cols-2 gap-2 mt-4 text-sm">
-            <div className="bg-emerald-600/60 rounded-xl px-3 py-2">
-              <p className="text-emerald-200">Cobros</p>
-              <p className="font-bold">{formatCurrency(data.desglose.cobros)}</p>
+          <p className="text-emerald-200 text-xs mt-1">
+            {data.pagos_sin_rendir
+              ? `${data.pagos_sin_rendir} ${data.pagos_sin_rendir === 1 ? "cobro" : "cobros"} sin rendir a oficina`
+              : "No tenés cobros sin rendir"}
+          </p>
+          <div className="grid grid-cols-3 gap-2 mt-4 text-sm">
+            <div className="bg-emerald-600/60 rounded-xl px-2 py-2">
+              <p className="text-emerald-200 text-xs">💵 Efectivo</p>
+              <p className="font-bold text-sm">{formatCurrency(data.desglose.efectivo)}</p>
             </div>
-            <div className="bg-emerald-600/60 rounded-xl px-3 py-2">
-              <p className="text-emerald-200">Comisiones a retirar</p>
-              <p className="font-bold">{formatCurrency(data.total_pendiente_comisiones)}</p>
+            <div className="bg-emerald-600/60 rounded-xl px-2 py-2">
+              <p className="text-emerald-200 text-xs">🧾 Cheques</p>
+              <p className="font-bold text-sm">{formatCurrency(data.desglose.cheques)}</p>
+            </div>
+            <div className="bg-emerald-600/60 rounded-xl px-2 py-2">
+              <p className="text-emerald-200 text-xs">🏦 Transf.</p>
+              <p className="font-bold text-sm">{formatCurrency(data.desglose.transferencias)}</p>
             </div>
           </div>
           <button
@@ -391,5 +405,19 @@ export default function VendedorBilleteraPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function VendedorBilleteraPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <VendedorBilleteraInner />
+    </Suspense>
   )
 }

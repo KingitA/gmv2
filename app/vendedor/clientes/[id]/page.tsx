@@ -31,6 +31,7 @@ interface Ficha {
     cuit: string | null
     direccion: string | null
     localidad: string | null
+    localidad_id: string | null
     provincia: string | null
     telefono: string | null
     mail: string | null
@@ -47,19 +48,22 @@ interface Ficha {
   pagos_recientes: Pago[]
 }
 
-// Campos que el vendedor puede editar (espejo del whitelist del PATCH)
-const CAMPOS_FICHA: Array<{ key: string; label: string; tipo?: "tel" | "email" }> = [
+// Campos de texto libre que el vendedor puede editar. Localidad/provincia y
+// las condiciones de pago/entrega se editan con listas (catálogos), no texto.
+const CAMPOS_TEXTO: Array<{ key: string; label: string; tipo?: "tel" | "email" }> = [
   { key: "nombre", label: "Nombre" },
   { key: "razon_social", label: "Razón social" },
   { key: "cuit", label: "CUIT" },
   { key: "direccion", label: "Dirección" },
-  { key: "localidad", label: "Localidad" },
-  { key: "provincia", label: "Provincia" },
   { key: "telefono", label: "Teléfono", tipo: "tel" },
   { key: "mail", label: "Email", tipo: "email" },
-  { key: "condicion_pago", label: "Condición de pago" },
-  { key: "condicion_entrega", label: "Condición de entrega" },
 ]
+
+interface Catalogos {
+  condiciones_pago: { id: string; nombre: string }[]
+  condiciones_entrega: { id: string; codigo: string; nombre: string }[]
+  localidades: { id: string; nombre: string; provincia: string | null }[]
+}
 
 // Badges de doble firma según contrato docs/CONTRATO-API-VIAJANTES.md
 function badgePago(estado: string, verificado: boolean) {
@@ -82,6 +86,11 @@ export default function VendedorClienteFichaPage() {
   const [editando, setEditando] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
   const [guardando, setGuardando] = useState(false)
+  const [catalogos, setCatalogos] = useState<Catalogos>({
+    condiciones_pago: [],
+    condiciones_entrega: [],
+    localidades: [],
+  })
 
   const cargar = () => {
     fetch(`/api/vendedor/cliente/${id}`)
@@ -100,16 +109,40 @@ export default function VendedorClienteFichaPage() {
       .then((r) => r.json())
       .then((d) => Array.isArray(d) && setVendedores(d))
       .catch(() => {})
+    fetch("/api/vendedor/catalogos-ficha")
+      .then((r) => r.json())
+      .then((d) => !d.error && setCatalogos(d))
+      .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // Nombre visible de la condición de entrega (en DB se guarda el código)
+  const nombreEntrega = (codigo: string | null) =>
+    catalogos.condiciones_entrega.find((c) => c.codigo === codigo)?.nombre || codigo
 
   const empezarEdicion = () => {
     if (!data) return
     const c = data.cliente as any
     const inicial: Record<string, string> = {}
-    for (const campo of CAMPOS_FICHA) inicial[campo.key] = c[campo.key] || ""
+    for (const campo of CAMPOS_TEXTO) inicial[campo.key] = c[campo.key] || ""
+    inicial.localidad_id = c.localidad_id || ""
+    inicial.localidad = c.localidad || ""
+    inicial.provincia = c.provincia || ""
+    inicial.condicion_pago = c.condicion_pago || ""
+    inicial.condicion_entrega = c.condicion_entrega || ""
     setForm(inicial)
     setEditando(true)
+  }
+
+  // Elegir localidad completa localidad (texto) y provincia automáticamente
+  const elegirLocalidad = (localidadId: string) => {
+    const loc = catalogos.localidades.find((l) => l.id === localidadId)
+    setForm((prev) => ({
+      ...prev,
+      localidad_id: localidadId,
+      localidad: loc?.nombre || "",
+      provincia: loc?.provincia || "",
+    }))
   }
 
   const guardarFicha = async () => {
@@ -321,7 +354,7 @@ export default function VendedorClienteFichaPage() {
 
           {editando ? (
             <div className="space-y-3">
-              {CAMPOS_FICHA.map((campo) => (
+              {CAMPOS_TEXTO.map((campo) => (
                 <div key={campo.key}>
                   <label className="text-gray-500 text-sm block mb-1">{campo.label}</label>
                   <input
@@ -332,6 +365,61 @@ export default function VendedorClienteFichaPage() {
                   />
                 </div>
               ))}
+
+              <div>
+                <label className="text-gray-500 text-sm block mb-1">Localidad</label>
+                <select
+                  value={form.localidad_id || ""}
+                  onChange={(e) => elegirLocalidad(e.target.value)}
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
+                >
+                  <option value="">
+                    {form.localidad ? `${form.localidad} (sin vincular)` : "Elegir localidad..."}
+                  </option>
+                  {catalogos.localidades.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.nombre}
+                      {l.provincia ? ` — ${l.provincia}` : ""}
+                    </option>
+                  ))}
+                </select>
+                {form.provincia && (
+                  <p className="text-gray-400 text-xs mt-1">Provincia: {form.provincia} (se completa sola)</p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-gray-500 text-sm block mb-1">Condición de pago</label>
+                <select
+                  value={form.condicion_pago || ""}
+                  onChange={(e) => setForm((prev) => ({ ...prev, condicion_pago: e.target.value }))}
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
+                >
+                  <option value="">Sin definir</option>
+                  {catalogos.condiciones_pago.map((c) => (
+                    <option key={c.id} value={c.nombre}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-gray-500 text-sm block mb-1">Condición de entrega</label>
+                <select
+                  value={form.condicion_entrega || ""}
+                  onChange={(e) => setForm((prev) => ({ ...prev, condicion_entrega: e.target.value }))}
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
+                >
+                  <option value="">Sin definir</option>
+                  {catalogos.condiciones_entrega.map((c) => (
+                    <option key={c.id} value={c.codigo}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
                   onClick={() => setEditando(false)}
@@ -356,7 +444,7 @@ export default function VendedorClienteFichaPage() {
               <Dato label="Condición IVA" valor={cliente.condicion_iva} />
               <Dato label="Método facturación" valor={cliente.metodo_facturacion} />
               <Dato label="Condición de pago" valor={cliente.condicion_pago} />
-              <Dato label="Condición de entrega" valor={cliente.condicion_entrega} />
+              <Dato label="Condición de entrega" valor={nombreEntrega(cliente.condicion_entrega)} />
               <Dato
                 label="Dirección"
                 valor={[cliente.direccion, cliente.localidad, cliente.provincia].filter(Boolean).join(", ")}
