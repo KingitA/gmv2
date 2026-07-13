@@ -16,6 +16,8 @@ import {
     Clock, XCircle, Filter, DollarSign
 } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 
@@ -209,6 +211,15 @@ export default function VencimientosPage() {
             </header>
 
             <main className="container mx-auto px-6 py-8 space-y-6">
+                <Tabs defaultValue="calendario">
+                    <TabsList>
+                        <TabsTrigger value="calendario">Calendario</TabsTrigger>
+                        <TabsTrigger value="lista">Lista</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="calendario" className="mt-4">
+                        <CalendarioPagos showCheques={false} onDataChanged={loadVencimientos} />
+                    </TabsContent>
+                    <TabsContent value="lista" className="mt-4 space-y-6">
                 {/* Resumen */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <Card className="border-l-4 border-l-blue-500">
@@ -445,6 +456,8 @@ export default function VencimientosPage() {
                         </div>
                     </CardContent>
                 </Card>
+                    </TabsContent>
+                </Tabs>
             </main>
         </div>
     )

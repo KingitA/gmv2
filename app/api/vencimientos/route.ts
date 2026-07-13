@@ -68,7 +68,8 @@ export async function POST(request: Request) {
     const {
         proveedor_id, tipo, concepto, monto, moneda,
         fecha_vencimiento, recurrencia, recurrencia_hasta,
-        referencia_id, referencia_tipo, observaciones, dias_alerta
+        referencia_id, referencia_tipo, observaciones, dias_alerta,
+        forma_pago, fecha_validez, modalidad, descuentos_aplicados
     } = body
 
     if (!concepto || !fecha_vencimiento) {
@@ -93,6 +94,10 @@ export async function POST(request: Request) {
             referencia_tipo: referencia_tipo || null,
             observaciones: observaciones || null,
             dias_alerta: dias_alerta ?? 3,
+            forma_pago: forma_pago || null,
+            fecha_validez: fecha_validez || null,
+            modalidad: modalidad || null,
+            descuentos_aplicados: descuentos_aplicados ?? false,
             estado: 'pendiente'
         })
         .select('*, proveedores(id, nombre, sigla)')
@@ -205,6 +210,9 @@ async function generarRecurrencias(
             recurrencia_hasta: base.recurrencia_hasta,
             observaciones: base.observaciones,
             dias_alerta: base.dias_alerta,
+            forma_pago: base.forma_pago ?? null,
+            modalidad: base.modalidad ?? null,
+            descuentos_aplicados: base.descuentos_aplicados ?? false,
             estado: 'pendiente'
         })
     }
