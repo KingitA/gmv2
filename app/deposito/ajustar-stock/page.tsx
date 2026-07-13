@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import {
   actualizarDatosArticulo, ajustarStock, getArticuloExtra,
   buscarArticulosDeposito, getProveedoresDeposito, getCategoriasDeposito,
-  getArticulosListado, getArticuloAdyacente, getArticuloPorId,
+  getArticulosListado, getArticuloAdyacente, getArticuloPorId, enviarAInexistente,
 } from "@/lib/actions/deposito"
 import { localMatch } from "@/lib/search/local-match"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
@@ -27,7 +27,7 @@ interface Articulo {
   marca?: string | null
 }
 
-type ListaFiltro = { proveedorId?: string; categoria?: string; soloConOrden?: boolean }
+type ListaFiltro = { proveedorId?: string; categoria?: string; soloConOrden?: boolean; sinCodigo?: boolean }
 type TipoAjuste  = "entrada" | "salida" | "correccion"
 type Seccion     = "datos" | "stock"
 type FiltroPanel = "prov" | "cat" | "lista" | null
@@ -197,6 +197,14 @@ export default function ModificacionArticulosPage() {
     }
   }
 
+  const abrirSinCodigo = async () => {
+    if (panelFiltro === "lista" && listaLabel === "Sin código") { setPanelFiltro(null); return }
+    setPanelFiltro("lista")
+    if (listaLabel !== "Sin código" || listaOrden.length === 0) {
+      await cargarLista({ sinCodigo: true }, "Sin código")
+    }
+  }
+
   const cargarMas = () => cargarLista(listaFiltro, listaLabel, false)
 
   const limpiarLista = () => {
@@ -263,6 +271,7 @@ export default function ModificacionArticulosPage() {
       try { window.history.pushState({ ajusteArt: art.id }, "") } catch { /* ignore */ }
     }
     const filtros = opts.recorrido !== undefined ? opts.recorrido : recorridoRef.current
+    if (filtros?.sinCodigo) setSeccion("datos") // en el recorrido sin código se trabaja sobre el EAN
     try { localStorage.setItem(POS_KEY, JSON.stringify({ artId: art.id, filtros, label: listaLabel })) } catch { /* ignore */ }
     await seleccionar(art)
   }
@@ -286,6 +295,14 @@ export default function ModificacionArticulosPage() {
       })
       originalRef.current = snapActual()
       setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
+      // En el recorrido "sin código", al asignarle EAN el artículo sale de la lista
+      if (recorridoRef.current?.sinCodigo && ean13.length > 0) {
+        setListaOrden(prev => {
+          if (!prev.some(a => a.id === articulo.id)) return prev
+          setListaTotal(t => Math.max(0, t - 1))
+          return prev.filter(a => a.id !== articulo.id)
+        })
+      }
     } catch (e: any) {
       setMsgDatos({ ok: false, txt: e.message || "Error al guardar" })
       throw e
@@ -308,8 +325,11 @@ export default function ModificacionArticulosPage() {
     navegando.current = true
     try {
       await guardarSiCorresponde()
+      const marcaActual = typeof (articulo as any).marca === "object"
+        ? ((articulo as any).marca?.descripcion ?? null)
+        : (articulo.marca ?? null)
       const res = await getArticuloAdyacente(
-        { orden_deposito: articulo.orden_deposito ?? null, descripcion: articulo.descripcion, id: articulo.id },
+        { orden_deposito: articulo.orden_deposito ?? null, descripcion: articulo.descripcion, id: articulo.id, marca: marcaActual },
         dir, recorrido || {}
       )
       if (res.data) {
@@ -324,6 +344,35 @@ export default function ModificacionArticulosPage() {
   }
 
   const volver = async () => { await guardarSiCorresponde(); try { window.history.back() } catch { setArticulo(null); if (recorrido) setPanelFiltro("lista") } }
+
+  // ── Enviar a proveedor INEXISTENTE (descarte para futura eliminación) ──
+  const [enviandoInexistente, setEnviandoInexistente] = useState(false)
+  const mandarAInexistente = async () => {
+    if (!articulo || enviandoInexistente) return
+    if (!confirm(`¿Enviar "${articulo.descripcion}" al proveedor INEXISTENTE?`)) return
+    setEnviandoInexistente(true)
+    try {
+      await enviarAInexistente(articulo.id)
+      toast.success("Enviado a INEXISTENTE")
+      // Sale de la lista del recorrido sin código
+      const artId = articulo.id
+      setListaOrden(prev => {
+        if (!recorridoRef.current?.sinCodigo || !prev.some(a => a.id === artId)) return prev
+        setListaTotal(t => Math.max(0, t - 1))
+        return prev.filter(a => a.id !== artId)
+      })
+      if (recorridoRef.current) {
+        await irAdyacente("next")
+      } else {
+        setArticulo(null)
+        try { window.history.back() } catch { /* ignore */ }
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Error al cambiar el proveedor")
+    } finally {
+      setEnviandoInexistente(false)
+    }
+  }
 
   const limpiarTodo = () => {
     setBusqueda(""); setResultados([]); setArticulo(null)
@@ -522,6 +571,12 @@ export default function ModificacionArticulosPage() {
               <span style={C.chipX} onClick={e => { e.stopPropagation(); limpiarLista() }}>×</span>
             )}
           </button>
+          <button style={C.filterChip(listaLabel === "Sin código" && hayLista)} onClick={abrirSinCodigo}>
+            🚫 Sin código
+            {listaLabel === "Sin código" && hayLista && (
+              <span style={C.chipX} onClick={e => { e.stopPropagation(); limpiarLista() }}>×</span>
+            )}
+          </button>
           {hayFiltroActivo && (
             <button style={{ ...C.filterChip(false) as any, border: "none", color: "#ef4444", fontSize: 13, marginLeft: "auto" }}
               onClick={() => { setFiltroProveedor(null); setFiltroCategoria(null); limpiarLista() }}>
@@ -585,7 +640,17 @@ export default function ModificacionArticulosPage() {
                 <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Cargando...</div>
               )}
               <div ref={listaScrollRef} style={C.filterList}>
-                {listaOrden.map((art, i) => renderListaItem(art, i))}
+                {listaOrden.map((art, i) => (
+                  <div key={art.id}>
+                    {/* Encabezado de grupo por marca en el recorrido sin código */}
+                    {listaFiltro.sinCodigo && (i === 0 || (art.marca ?? null) !== (listaOrden[i - 1].marca ?? null)) && (
+                      <div style={{ padding: "14px 4px 4px", color: "#4338ca", fontWeight: 700, fontSize: 13, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>
+                        {art.marca || "Sin marca"}
+                      </div>
+                    )}
+                    {renderListaItem(art, i)}
+                  </div>
+                ))}
                 {listaOrden.length < listaTotal && !listaCargando && (
                   <button style={C.loadMoreBtn} onClick={cargarMas}>
                     Cargar más ({listaOrden.length} / {listaTotal})
@@ -651,7 +716,11 @@ export default function ModificacionArticulosPage() {
           {enNavegacion && (
             <div style={C.navBar}>
               <button style={C.navBtn} onClick={() => irAdyacente("prev")}>← Anterior</button>
-              <span style={C.navCounter}>{articulo.orden_deposito != null ? `#${articulo.orden_deposito}` : "—"}{listaTotal ? ` / ${listaTotal}` : ""}</span>
+              <span style={C.navCounter}>
+                {recorrido?.sinCodigo
+                  ? (articulo.marca || "Sin marca")
+                  : `${articulo.orden_deposito != null ? `#${articulo.orden_deposito}` : "—"}${listaTotal ? ` / ${listaTotal}` : ""}`}
+              </span>
               <button style={C.navBtn} onClick={() => irAdyacente("next")}>Siguiente →</button>
             </div>
           )}
@@ -735,6 +804,17 @@ export default function ModificacionArticulosPage() {
                 <button style={C.saveBtn("#2563eb",guardandoDatos)} onClick={guardarDatos} disabled={guardandoDatos}>
                   {guardandoDatos?"Guardando...":"Guardar Datos"}
                 </button>
+                <button
+                  style={{ width: "100%", padding: "16px", borderRadius: 16, fontWeight: 700, fontSize: 16, minHeight: 52,
+                    background: "#ffffff", border: "2px solid #fca5a5", color: "#dc2626",
+                    cursor: enviandoInexistente ? "not-allowed" : "pointer", opacity: enviandoInexistente ? 0.6 : 1 }}
+                  onClick={mandarAInexistente} disabled={enviandoInexistente}
+                >
+                  {enviandoInexistente ? "Enviando..." : "🚫 Enviar a INEXISTENTE"}
+                </button>
+                <div style={{ color: "#9ca3af", fontSize: 13, textAlign: "center" as const, marginTop: -4 }}>
+                  Artículo descartado: pasa al proveedor INEXISTENTE para su futura eliminación
+                </div>
               </>
             )}
           </div>

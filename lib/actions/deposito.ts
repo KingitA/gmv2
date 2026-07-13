@@ -124,14 +124,70 @@ export async function getArticuloExtra(id: string) {
   return data
 }
 
+// ── Sin código de barras ──────────────────────────────────────────────
+// Recorrido de artículos sin EAN13 asignado, agrupados por marca.
+// Excluye los del proveedor INEXISTENTE (descartados a la espera de eliminación).
+
+async function getProveedorInexistenteId(sb: any): Promise<string | null> {
+  const { data } = await sb.from("proveedores").select("id").ilike("nombre", "inexistente").limit(1)
+  return data?.[0]?.id ?? null
+}
+
+// Clave de orden del recorrido sin código: marca (sin marca al final) → descripción → id
+const marcaKey = (m: string | null | undefined) => (m ? m.toUpperCase() : "￿")
+const cmpSinCodigo = (x: any, y: any) => {
+  const mx = marcaKey(x.marca), my = marcaKey(y.marca)
+  if (mx !== my) return mx < my ? -1 : 1
+  if (x.descripcion !== y.descripcion) return x.descripcion < y.descripcion ? -1 : 1
+  return x.id < y.id ? -1 : x.id > y.id ? 1 : 0
+}
+
+// Carga TODOS los artículos activos sin EAN (null o array vacío), sin los de
+// proveedor INEXISTENTE, ordenados por marca → descripción. Paginado interno
+// (PostgREST corta en 1000) y orden en memoria porque marca es tabla joinada.
+async function cargarSinCodigo(sb: any): Promise<any[]> {
+  const inexistenteId = await getProveedorInexistenteId(sb)
+  const pageSize = 1000
+  const all: any[] = []
+  for (let from = 0; ; from += pageSize) {
+    let qb = sb
+      .from("articulos")
+      .select(SELECT_LISTADO)
+      .eq("activo", true)
+      .or('ean13.is.null,ean13.eq.{}')
+    if (inexistenteId) qb = qb.or(`proveedor_id.is.null,proveedor_id.neq.${inexistenteId}`)
+    const { data, error } = await qb.order("id", { ascending: true }).range(from, from + pageSize - 1)
+    if (error) throw new Error(error.message)
+    all.push(...(data || []))
+    if (!data || data.length < pageSize) break
+  }
+  return all.map(mapListado).sort(cmpSinCodigo)
+}
+
+// Cambia el proveedor del artículo a INEXISTENTE (descarte para futura eliminación).
+export async function enviarAInexistente(articuloId: string) {
+  const sb = createAdminClient()
+  const inexistenteId = await getProveedorInexistenteId(sb)
+  if (!inexistenteId) throw new Error('No existe el proveedor "INEXISTENTE" en la base')
+  const { error } = await sb.from("articulos").update({ proveedor_id: inexistenteId }).eq("id", articuloId)
+  if (error) throw new Error(error.message)
+  return { success: true }
+}
+
 export async function getArticulosListado(
-  filtros: { proveedorId?: string; categoria?: string; soloConOrden?: boolean },
+  filtros: { proveedorId?: string; categoria?: string; soloConOrden?: boolean; sinCodigo?: boolean },
   page: number = 0
 ): Promise<{ data: any[]; total: number; error?: string }> {
   try {
     const sb = createAdminClient()
     const limit = 100
     const offset = page * limit
+
+    if (filtros.sinCodigo) {
+      const all = await cargarSinCodigo(sb)
+      return { data: all.slice(offset, offset + limit), total: all.length }
+    }
+
     let qb = sb
       .from("articulos")
       .select("id, sku, descripcion, ean13, codigo_bulto, orden_deposito, stock_actual, unidades_por_bulto, unidad_de_medida, marcas!marca_id(descripcion)", { count: "exact" })
@@ -171,11 +227,29 @@ export async function getArticuloPorId(id: string): Promise<{ data: any | null }
  * Sólo usa filtros numéricos/null (no mete descripcion en strings de PostgREST, que rompen con comas/paréntesis).
  */
 export async function getArticuloAdyacente(
-  actual: { orden_deposito: number | null; descripcion: string; id: string },
+  actual: { orden_deposito: number | null; descripcion: string; id: string; marca?: string | null },
   dir: "next" | "prev",
-  filtros: { proveedorId?: string; categoria?: string }
+  filtros: { proveedorId?: string; categoria?: string; sinCodigo?: boolean }
 ): Promise<{ data: any | null }> {
   const sb = createAdminClient()
+
+  // Recorrido "sin código": cursor sobre (marca, descripción, id) contra la lista
+  // recalculada — así el adyacente es correcto aunque el artículo actual ya haya
+  // salido del filtro (se le asignó EAN o se envió a INEXISTENTE).
+  if (filtros.sinCodigo) {
+    const all = await cargarSinCodigo(sb)
+    const clave = { marca: actual.marca ?? null, descripcion: actual.descripcion, id: actual.id }
+    if (dir === "next") {
+      const sig = all.find((a) => cmpSinCodigo(a, clave) > 0)
+      return { data: sig ?? null }
+    }
+    let prev: any = null
+    for (const a of all) {
+      if (cmpSinCodigo(a, clave) < 0) prev = a
+      else break
+    }
+    return { data: prev }
+  }
   const base = () => {
     let qb = sb.from("articulos").select(SELECT_LISTADO).eq("activo", true)
     if (filtros.proveedorId) qb = qb.eq("proveedor_id", filtros.proveedorId)
