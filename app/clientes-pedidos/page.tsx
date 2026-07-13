@@ -282,16 +282,22 @@ export default function ClientesPedidosPage() {
   const cargarComprobantesExistentes = async () => {
     try {
       const pedidoIds = pedidos.map((p) => p.id)
-      const { data, error } = await supabase
-        .from("comprobantes_venta")
-        .select("id, tipo_comprobante, numero_comprobante, total_factura, pedido_id, anulado_en")
-        .in("pedido_id", pedidoIds)
-
-      if (error) throw error
+      // El .in() con cientos de UUIDs revienta el límite de URL de PostgREST
+      // y la query fallaba en silencio (el panel nunca veía los comprobantes).
+      // Se consulta en tandas de 100.
+      const data: any[] = []
+      for (let i = 0; i < pedidoIds.length; i += 100) {
+        const { data: page, error } = await supabase
+          .from("comprobantes_venta")
+          .select("id, tipo_comprobante, numero_comprobante, total_factura, pedido_id, anulado_en")
+          .in("pedido_id", pedidoIds.slice(i, i + 100))
+        if (error) throw error
+        data.push(...(page || []))
+      }
 
       // Agrupar comprobantes por pedido_id
       const comprobantesAgrupados: { [pedidoId: string]: Comprobante[] } = {}
-      data?.forEach((comp: any) => {
+      data.forEach((comp: any) => {
         if (!comprobantesAgrupados[comp.pedido_id]) {
           comprobantesAgrupados[comp.pedido_id] = []
         }

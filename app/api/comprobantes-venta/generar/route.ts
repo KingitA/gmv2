@@ -70,6 +70,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 })
     }
 
+    // ─── Guard: el pedido ya tiene comprobantes vigentes → no regenerar ───
+    // Evita la doble emisión por doble click / UI desactualizada. Para volver
+    // a generar hay que anular los comprobantes existentes primero.
+    const { data: yaEmitidos } = await supabase
+      .from("comprobantes_venta")
+      .select("id, tipo_comprobante, numero_comprobante")
+      .eq("pedido_id", pedido_id)
+      .is("anulado_en", null)
+    if (yaEmitidos?.length) {
+      return NextResponse.json(
+        {
+          error: `El pedido ya tiene comprobantes emitidos: ${yaEmitidos
+            .map((c: any) => `${c.tipo_comprobante} ${c.numero_comprobante}`)
+            .join(", ")}. Para regenerar, primero anulá los existentes.`,
+          error_code: "PEDIDO_YA_FACTURADO",
+          comprobantes: yaEmitidos,
+        },
+        { status: 409 },
+      )
+    }
+
     // ─── Validaciones del cliente antes de continuar ───
     if (!pedido.cliente.cuit || pedido.cliente.cuit.trim() === "") {
       return NextResponse.json({
