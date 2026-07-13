@@ -21,9 +21,26 @@ export async function GET() {
 
     if (error) throw error
 
+    // Excluir pagos ya declarados en una rendición abierta (están "en viaje
+    // a oficina", no se vuelven a rendir)
+    const declarados = new Set<string>()
+    const { data: abiertas } = await supabase
+      .from("rendiciones")
+      .select("id")
+      .in("cobrador_id", session.vendedorIds)
+      .eq("estado", "abierta")
+    if (abiertas?.length) {
+      const { data: items } = await supabase
+        .from("rendicion_items")
+        .select("pago_id")
+        .in("rendicion_id", abiertas.map((r) => r.id))
+      for (const it of items || []) declarados.add(it.pago_id)
+    }
+    const pagosFiltrados = (pagos || []).filter((p: any) => !declarados.has(p.id))
+
     let totalEfectivo = 0
     let totalOtros = 0
-    const resultado = (pagos || []).map((p: any) => {
+    const resultado = pagosFiltrados.map((p: any) => {
       const detalles: any[] = p.pagos_detalle || []
       const efectivo = detalles
         .filter((d) => (d.tipo_pago || "").toLowerCase() === "efectivo")

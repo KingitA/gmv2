@@ -496,8 +496,12 @@ export default function ConsultaPreciosPage() {
                 <span>+${desglose.impuestos_monto.toFixed(2)}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-bold text-xl text-green-600">
-                <span>PRECIO FINAL:</span>
+                <span>PRECIO FINAL (CTA CTE):</span>
                 <span>{desglose.precio_final_redondeado}</span>
+              </div>
+              <div className="flex justify-between font-bold text-lg text-emerald-700">
+                <span>PRECIO CONTADO (-10%):</span>
+                <span>${Math.ceil(desglose.precio_final * 0.9)}</span>
               </div>
             </CardContent>
           </Card>

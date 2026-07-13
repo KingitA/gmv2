@@ -180,11 +180,11 @@ function NuevoPedidoInner() {
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Precios por artículo para las listas del catálogo (batch, por cliente+método)
-  const [precios, setPrecios] = useState<Record<string, { precio: number; precioNeto: number; ivaIncluido: boolean }>>({})
+  const [precios, setPrecios] = useState<Record<string, { precio: number; precioNeto: number; contado: number; ivaIncluido: boolean }>>({})
   const preciosPedidos = useRef<Set<string>>(new Set())
 
   const [sel, setSel] = useState<Articulo | null>(null)
-  const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number } | null>(null)
+  const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number; contado: number } | null>(null)
   // Cantidad en el modo elegido; arranca vacía (sin el "1" fantasma)
   const [selCantidad, setSelCantidad] = useState<number | "">("")
   const [selModo, setSelModo] = useState<"unidad" | "fraccion" | "bulto">("unidad")
@@ -336,7 +336,8 @@ function NuevoPedidoInner() {
         )
         setPrecios((prev) => {
           const next = { ...prev }
-          for (const p of res) next[p.articulo_id] = { precio: p.precio, precioNeto: p.precioNeto, ivaIncluido: p.ivaIncluido }
+          for (const p of res)
+            next[p.articulo_id] = { precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, ivaIncluido: p.ivaIncluido }
           return next
         })
       } catch (e) {
@@ -470,7 +471,7 @@ function NuevoPedidoInner() {
         a.id,
         metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}
       )
-      setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto })
+      setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto, contado: p.contado })
     } catch {
       setSelPrecio(null)
     } finally {
@@ -845,7 +846,14 @@ function NuevoPedidoInner() {
           <div className="text-right shrink-0">
             {p ? (
               <>
-                <p className="font-bold text-gray-900">{formatCurrency(p.precio)}</p>
+                <p className="font-bold text-gray-900 leading-tight">
+                  <span className="text-[10px] text-gray-400 font-medium">CC </span>
+                  {formatCurrency(p.precio)}
+                </p>
+                <p className="font-bold text-emerald-700 text-sm leading-tight">
+                  <span className="text-[10px] text-emerald-500 font-medium">Ctdo </span>
+                  {formatCurrency(p.contado)}
+                </p>
                 <p className={`text-[10px] font-bold ${p.ivaIncluido ? "text-gray-400" : "text-orange-500"}`}>
                   {p.ivaIncluido ? "IVA incluido" : "sin IVA"}
                 </p>
@@ -1312,14 +1320,20 @@ function NuevoPedidoInner() {
                 <div className="w-6 h-6 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
               ) : selPrecio ? (
                 <>
-                  <p className="text-3xl font-bold text-gray-900">{formatCurrency(selPrecio.precio)}</p>
+                  <p className="text-3xl font-bold text-gray-900">
+                    {formatCurrency(selPrecio.precio)}
+                    <span className="text-sm text-gray-400 font-medium"> cta cte</span>
+                  </p>
+                  <p className="text-emerald-700 font-bold mt-0.5">
+                    {formatCurrency(selPrecio.contado)} <span className="text-xs font-medium">contado (-10%)</span>
+                  </p>
                   {Math.abs(selPrecio.precio - selPrecio.precioNeto) > 0.01 ? (
                     <p className="text-gray-500 text-sm mt-1">
                       Neto {formatCurrency(selPrecio.precioNeto)} + IVA{" "}
                       {formatCurrency(selPrecio.precio - selPrecio.precioNeto)}
                     </p>
                   ) : (
-                    <p className="text-gray-500 text-sm mt-1">IVA incluido</p>
+                    <p className="text-gray-500 text-sm mt-1">Sin IVA incluido</p>
                   )}
                 </>
               ) : (

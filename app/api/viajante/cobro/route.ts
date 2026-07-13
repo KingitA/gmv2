@@ -52,9 +52,10 @@ export async function POST(request: NextRequest) {
     const clienteIds = clientes.map((c: any) => c.cliente_id)
     const { data: clientesDb } = await supabase
       .from("clientes")
-      .select("id, vendedor_id")
+      .select("id, vendedor_id, nombre")
       .in("id", clienteIds)
     const vendedorDe = new Map((clientesDb || []).map((c) => [c.id, c.vendedor_id]))
+    const nombreDe = new Map((clientesDb || []).map((c) => [c.id, c.nombre]))
     for (const c of clientes) {
       if (!vendedorDe.has(c.cliente_id)) {
         return NextResponse.json({ error: `Cliente ${c.cliente_id} no encontrado` }, { status: 404 })
@@ -239,7 +240,7 @@ export async function POST(request: NextRequest) {
         tipo: "cobro_cliente",
         medio: medioDominante,
         monto: montoPago,
-        concepto: `Cobro en calle`,
+        concepto: `Cobro ${nombreDe.get(c.cliente_id) || "cliente"}`,
         referencia_id: pago.id,
         referencia_tipo: "pago_cliente",
         fecha: new Date().toISOString(),

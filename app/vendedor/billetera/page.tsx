@@ -17,6 +17,7 @@ interface BilleteraData {
   balance: number
   desglose: { efectivo: number; cheques: number; transferencias: number }
   pagos_sin_rendir: number
+  en_viaje: { total: number; cantidad: number }
   comisiones_pendientes: any[]
   total_pendiente_comisiones: number
   historial: Movimiento[]
@@ -263,14 +264,23 @@ function VendedorBilleteraInner() {
               <p className="font-bold text-sm">{formatCurrency(data.desglose.transferencias)}</p>
             </div>
           </div>
+          {data.en_viaje?.total > 0 && (
+            <div className="bg-amber-400/20 border border-amber-300/40 rounded-xl px-3 py-2 mt-3 text-sm">
+              <p className="text-amber-100">
+                📦 En viaje a oficina: <span className="font-bold">{formatCurrency(data.en_viaje.total)}</span>{" "}
+                ({data.en_viaje.cantidad} {data.en_viaje.cantidad === 1 ? "cobro" : "cobros"}) — esperando
+                confirmación
+              </p>
+            </div>
+          )}
           <button
             onClick={() => router.push("/vendedor/rendiciones")}
             className="w-full bg-white text-emerald-700 rounded-xl py-3 font-bold mt-4 active:scale-[0.98] transition-transform"
           >
-            📤 Rendir cobranzas
+            🧾 Rendiciones
           </button>
           <p className="text-emerald-200 text-xs mt-2">
-            Vos declarás la rendición; oficina la confirma (doble firma).
+            Vos rendís el dinero; oficina lo confirma al recibirlo (doble firma).
           </p>
         </section>
 

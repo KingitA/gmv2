@@ -435,6 +435,10 @@ export default function ClientesPedidosPage() {
       // Recargar pedidos y comprobantes
       await cargarPedidos()
       await cargarComprobantesExistentes()
+
+      // Abrir el PDF del primer comprobante generado (si el navegador lo permite)
+      const primero = result.comprobantes?.[0]
+      if (primero?.id) window.open(`/api/comprobantes-venta/${primero.id}/pdf`, "_blank")
     } catch (error: any) {
       console.error("Error generando comprobantes:", error)
       alert(error.message || "Error al generar comprobantes")
@@ -1171,7 +1175,17 @@ export default function ClientesPedidosPage() {
                       ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Generando</>
                       : <><Receipt className="h-3.5 w-3.5 mr-1.5" />Generar</>}
                   </Button>
-                ) : <div />}
+                ) : (
+                  // Ya tiene comprobantes: acceso directo al PDF del primero vigente
+                  <Button size="sm"
+                    onClick={() => {
+                      const vigente = (comprobantesGenerados[pedidoSeleccionado.id] || []).find((c) => !c.anulado_en)
+                      if (vigente) verComprobante(vigente.id)
+                    }}
+                    className="bg-emerald-500 text-white hover:bg-emerald-600 font-semibold shadow-sm">
+                    <Receipt className="h-3.5 w-3.5 mr-1.5" />Ver comprobante
+                  </Button>
+                )}
                 <Button size="sm" onClick={() => window.open(`/api/comprobantes-venta/preview?pedido_id=${pedidoSeleccionado.id}`, "_blank")}
                   className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                   <FileText className="h-3.5 w-3.5 mr-1.5" />Vista previa
