@@ -78,6 +78,14 @@ function PagosClientesContent() {
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [historialCargado, setHistorialCargado] = useState(false)
 
+  // ── Historial unificado: rendiciones + viajes por rendir ──
+  const [rendicionesU, setRendicionesU] = useState<any[]>([])
+  const [viajesPendU, setViajesPendU] = useState<any[]>([])
+  const [cajasFondos, setCajasFondos] = useState<any[]>([])
+  const [rendicionSel, setRendicionSel] = useState<any | null>(null)
+  const [cajaSel, setCajaSel] = useState("")
+  const [confirmandoRend, setConfirmandoRend] = useState(false)
+
   // ── Rendición de viajes ──
   const [viajesRendicion, setViajesRendicion] = useState<any[]>([])
   const [cargandoViajes, setCargandoViajes] = useState(false)
@@ -388,15 +396,146 @@ function PagosClientesContent() {
   const loadHistorial = async () => {
     setCargandoHistorial(true)
     try {
-      const res = await fetch("/api/pagos-clientes")
+      const [res, resumenRes, cajasRes] = await Promise.all([
+        fetch("/api/pagos-clientes"),
+        fetch("/api/pagos-clientes/rendiciones-resumen"),
+        fetch("/api/finanzas/cajas"),
+      ])
       const data = await res.json()
       setHistorial(Array.isArray(data) ? data : [])
+      const resumen = await resumenRes.json()
+      if (!resumen.error) {
+        setRendicionesU(resumen.rendiciones || [])
+        setViajesPendU(resumen.viajes_pendientes || [])
+      }
+      const cajas = await cajasRes.json()
+      if (!cajas.error) {
+        setCajasFondos(
+          (cajas.cuentas || []).filter((c: any) => c.cuenta_tipo === "CAJA" || c.cuenta_tipo === "BANCO")
+        )
+      }
       setHistorialCargado(true)
     } catch {
       toast.error("Error cargando historial")
     } finally {
       setCargandoHistorial(false)
     }
+  }
+
+  // Confirmar una rendición completa (todos sus pagos de una) desde el historial
+  const confirmarRendicion = async (forzar = false) => {
+    if (!rendicionSel || !cajaSel || confirmandoRend) return
+    const caja = cajasFondos.find((c) => c.cuenta_id === cajaSel)
+    setConfirmandoRend(true)
+    try {
+      const res = await fetch(`/api/finanzas/rendiciones/${rendicionSel.id}/confirmar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caja_destino_tipo: caja?.cuenta_tipo || "CAJA",
+          caja_destino_id: cajaSel,
+          forzar_diferencia: forzar,
+        }),
+      })
+      const d = await res.json()
+      if (res.status === 409 && d.requiere_forzar) {
+        setConfirmandoRend(false)
+        if (confirm(`${d.error}\n\n¿Confirmar igual documentando la diferencia?`)) {
+          return confirmarRendicion(true)
+        }
+        return
+      }
+      if (!res.ok || d.error) {
+        toast.error(d.error || "Error al confirmar la rendición")
+        return
+      }
+      toast.success("Rendición confirmada: todos los pagos quedaron aprobados")
+      setRendicionSel(null)
+      setCajaSel("")
+      loadHistorial()
+    } catch {
+      toast.error("Error de conexión al confirmar")
+    } finally {
+      setConfirmandoRend(false)
+    }
+  }
+
+  // Fila de un pago suelto en el historial unificado
+  const renderFilaPago = (p: PagoHistorial) => {
+    const recibo = Array.isArray(p.recibos) ? p.recibos[0] : p.recibos
+    const esAnulado = p.estado === "anulado"
+    return (
+      <tr key={p.id} className={`border-t ${esAnulado ? "bg-red-50/50 opacity-60" : "hover:bg-muted/20"}`}>
+        <td className={`p-3 ${esAnulado ? "line-through text-muted-foreground" : ""}`}>{fmtFecha(p.fecha_pago)}</td>
+        <td className={`p-3 font-mono text-xs ${esAnulado ? "line-through text-muted-foreground" : ""}`}>{recibo?.numero_recibo || "—"}</td>
+        <td className="p-3">{p.clientes?.razon_social || p.clientes?.nombre || "—"}</td>
+        <td className="p-3">
+          <div className="flex gap-1 flex-wrap">
+            {[...new Set((p.pagos_detalle || []).map((d: any) => d.tipo_pago))].map((tipo: any) => (
+              <span key={tipo} title={tipo} className="text-lg leading-none">{tiposBadge[tipo] || "💳"}</span>
+            ))}
+          </div>
+        </td>
+        <td className={`p-3 text-right font-mono font-semibold ${esAnulado ? "line-through text-muted-foreground" : ""}`}>${fmtARS(Number(p.monto))}</td>
+        <td className="p-3 text-center">
+          <Badge
+            className={
+              esAnulado
+                ? "bg-red-100 text-red-700 border-0"
+                : p.estado === "confirmado"
+                ? "bg-green-100 text-green-700 border-0"
+                : "bg-yellow-100 text-yellow-700 border-0"
+            }
+          >
+            {esAnulado ? "Anulado" : p.estado}
+          </Badge>
+        </td>
+        <td className="p-3 text-center">
+          <div className="flex items-center justify-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => window.open(`/api/pagos-clientes/${p.id}/recibo`, "_blank")}
+              disabled={!recibo}
+              className="h-7"
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1" /> Recibo
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7" onClick={() => verComprobantes(p.id)}>
+              📎 Comprobantes
+            </Button>
+            {(p.estado === "pendiente" || p.estado === "pendiente_rendicion") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-green-700 hover:text-green-800 hover:bg-green-50"
+                disabled={confirmandoPago === p.id}
+                onClick={() => confirmarPagoHistorial(p.id)}
+              >
+                {confirmandoPago === p.id
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
+                Confirmar
+              </Button>
+            )}
+            {!esAnulado && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                disabled={anulando === p.id}
+                onClick={() => { setConfirmAnularId(p.id); setMotivoAnulacion("") }}
+              >
+                {anulando === p.id
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Ban className="h-3.5 w-3.5 mr-1" />}
+                Anular
+              </Button>
+            )}
+          </div>
+        </td>
+      </tr>
+    )
   }
 
   const [fotosPago, setFotosPago] = useState<{ url: string; nombre: string | null }[] | null>(null)
@@ -715,13 +854,15 @@ function PagosClientesContent() {
           ) : (
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <p className="text-sm text-muted-foreground">{historial.length} pagos registrados</p>
+                <p className="text-sm text-muted-foreground">
+                  {historial.length} pagos · {rendicionesU.length} rendiciones
+                </p>
                 <Button variant="ghost" size="sm" onClick={loadHistorial}>
                   <RotateCcw className="h-4 w-4 mr-1" /> Actualizar
                 </Button>
               </div>
 
-              {historial.length === 0 ? (
+              {historial.length === 0 && rendicionesU.length === 0 && viajesPendU.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">No hay pagos registrados</div>
               ) : (
                 <div className="border rounded-xl overflow-hidden">
@@ -730,7 +871,7 @@ function PagosClientesContent() {
                       <tr>
                         <th className="p-3 text-left">Fecha</th>
                         <th className="p-3 text-left">Recibo</th>
-                        <th className="p-3 text-left">Cliente</th>
+                        <th className="p-3 text-left">Cliente / Rendición</th>
                         <th className="p-3 text-left">Métodos</th>
                         <th className="p-3 text-right">Monto</th>
                         <th className="p-3 text-center">Estado</th>
@@ -738,87 +879,97 @@ function PagosClientesContent() {
                       </tr>
                     </thead>
                     <tbody>
-                      {historial.map((p) => {
-                        const recibo = Array.isArray(p.recibos) ? p.recibos[0] : p.recibos
-                        const esAnulado = p.estado === "anulado"
-                        return (
-                          <tr key={p.id} className={`border-t ${esAnulado ? "bg-red-50/50 opacity-60" : "hover:bg-muted/20"}`}>
-                            <td className={`p-3 ${esAnulado ? "line-through text-muted-foreground" : ""}`}>{fmtFecha(p.fecha_pago)}</td>
-                            <td className={`p-3 font-mono text-xs ${esAnulado ? "line-through text-muted-foreground" : ""}`}>{recibo?.numero_recibo || "—"}</td>
-                            <td className="p-3">{p.clientes?.razon_social || p.clientes?.nombre || "—"}</td>
-                            <td className="p-3">
-                              <div className="flex gap-1 flex-wrap">
-                                {[...new Set((p.pagos_detalle || []).map((d: any) => d.tipo_pago))].map((tipo: any) => (
-                                  <span key={tipo} title={tipo} className="text-lg leading-none">{tiposBadge[tipo] || "💳"}</span>
-                                ))}
-                              </div>
-                            </td>
-                            <td className={`p-3 text-right font-mono font-semibold ${esAnulado ? "line-through text-muted-foreground" : ""}`}>${fmtARS(Number(p.monto))}</td>
-                            <td className="p-3 text-center">
-                              <Badge
-                                className={
-                                  esAnulado
-                                    ? "bg-red-100 text-red-700 border-0"
-                                    : p.estado === "confirmado"
-                                    ? "bg-green-100 text-green-700 border-0"
-                                    : "bg-yellow-100 text-yellow-700 border-0"
-                                }
+                      {/* Filas unificadas: rendiciones + viajes por rendir + pagos sueltos.
+                          Los pagos dentro de una rendición o de un viaje pendiente no se
+                          listan sueltos: se aprueban desde su rendición. */}
+                      {(() => {
+                        const enRendicion = new Set<string>(rendicionesU.flatMap((r: any) => r.pago_ids || []))
+                        const enViajePend = new Set<string>(viajesPendU.flatMap((v: any) => v.pago_ids || []))
+                        const filas: Array<{ key: string; orden: string; tipo: string; data: any }> = [
+                          ...historial
+                            .filter((p) => !enRendicion.has(p.id) && !enViajePend.has(p.id))
+                            .map((p) => ({ key: `p-${p.id}`, orden: p.fecha_pago || "", tipo: "pago", data: p })),
+                          ...rendicionesU.map((r: any) => ({
+                            key: `r-${r.id}`,
+                            orden: r.created_at || r.fecha || "",
+                            tipo: "rendicion",
+                            data: r,
+                          })),
+                          ...viajesPendU.map((v: any) => ({
+                            key: `v-${v.viaje_id}`,
+                            orden: v.ultima_fecha || "",
+                            tipo: "viaje",
+                            data: v,
+                          })),
+                        ].sort((a, b) => b.orden.localeCompare(a.orden))
+
+                        return filas.map((fila) => {
+                          if (fila.tipo === "rendicion") {
+                            const r = fila.data
+                            const abierta = r.estado === "abierta"
+                            return (
+                              <tr
+                                key={fila.key}
+                                onClick={() => { setRendicionSel(r); setCajaSel("") }}
+                                className={`border-t cursor-pointer ${
+                                  abierta ? "bg-amber-50 hover:bg-amber-100" : "bg-emerald-50/50 hover:bg-emerald-50"
+                                }`}
                               >
-                                {esAnulado ? "Anulado" : p.estado}
-                              </Badge>
-                            </td>
-                            <td className="p-3 text-center">
-                              <div className="flex items-center justify-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => window.open(`/api/pagos-clientes/${p.id}/recibo`, "_blank")}
-                                  disabled={!recibo}
-                                  className="h-7"
-                                >
-                                  <ExternalLink className="h-3.5 w-3.5 mr-1" /> Recibo
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7"
-                                  onClick={() => verComprobantes(p.id)}
-                                >
-                                  📎 Comprobantes
-                                </Button>
-                                {(p.estado === "pendiente" || p.estado === "pendiente_rendicion") && (
+                                <td className="p-3">{fmtFecha(r.created_at || r.fecha)}</td>
+                                <td className="p-3 font-mono text-xs">—</td>
+                                <td className="p-3 font-semibold">
+                                  🧾 RENDICIÓN — {r.titulo}
+                                  <span className="text-muted-foreground font-normal"> · {r.cantidad_pagos} pagos</span>
+                                </td>
+                                <td className="p-3 text-muted-foreground text-xs">
+                                  ef. {fmtARS(r.efectivo_declarado)}
+                                </td>
+                                <td className="p-3 text-right font-mono font-semibold">${fmtARS(r.total)}</td>
+                                <td className="p-3 text-center">
+                                  <Badge className={abierta ? "bg-amber-100 text-amber-700 border-0" : "bg-green-100 text-green-700 border-0"}>
+                                    {abierta ? "🚚 En viaje" : "Confirmada"}
+                                  </Badge>
+                                </td>
+                                <td className="p-3 text-center">
+                                  <Button variant="ghost" size="sm" className="h-7">
+                                    Ver detalle {abierta ? "· Confirmar" : ""}
+                                  </Button>
+                                </td>
+                              </tr>
+                            )
+                          }
+                          if (fila.tipo === "viaje") {
+                            const v = fila.data
+                            return (
+                              <tr key={fila.key} className="border-t bg-purple-50/60 hover:bg-purple-50">
+                                <td className="p-3">{fmtFecha(v.ultima_fecha)}</td>
+                                <td className="p-3 font-mono text-xs">—</td>
+                                <td className="p-3 font-semibold">
+                                  🚚 {v.nombre}
+                                  <span className="text-muted-foreground font-normal"> · {v.cantidad_pagos} pagos por rendir</span>
+                                </td>
+                                <td className="p-3" />
+                                <td className="p-3 text-right font-mono font-semibold">${fmtARS(v.total)}</td>
+                                <td className="p-3 text-center">
+                                  <Badge className="bg-purple-100 text-purple-700 border-0">Por rendir</Badge>
+                                </td>
+                                <td className="p-3 text-center">
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="h-7 text-green-700 hover:text-green-800 hover:bg-green-50"
-                                    disabled={confirmandoPago === p.id}
-                                    onClick={() => confirmarPagoHistorial(p.id)}
+                                    className="h-7"
+                                    onClick={() => window.open(`/viajes/${v.viaje_id}/rendicion`, "_self")}
                                   >
-                                    {confirmandoPago === p.id
-                                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
-                                    Confirmar
+                                    Abrir rendición →
                                   </Button>
-                                )}
-                                {!esAnulado && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                    disabled={anulando === p.id}
-                                    onClick={() => { setConfirmAnularId(p.id); setMotivoAnulacion("") }}
-                                  >
-                                    {anulando === p.id
-                                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      : <Ban className="h-3.5 w-3.5 mr-1" />}
-                                    Anular
-                                  </Button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )
-                      })}
+                                </td>
+                              </tr>
+                            )
+                          }
+                          const p = fila.data
+                          return renderFilaPago(p)
+                        })
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -914,6 +1065,165 @@ function PagosClientesContent() {
           </div>
         </div>
       )}
+
+      {/* ── Detalle de rendición: desglose completo + confirmar todo de una ── */}
+      <Dialog open={!!rendicionSel} onOpenChange={(open) => { if (!open) setRendicionSel(null) }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          {rendicionSel && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  🧾 RENDICIÓN — {rendicionSel.titulo}
+                  <Badge
+                    className={
+                      rendicionSel.estado === "abierta"
+                        ? "bg-amber-100 text-amber-700 border-0"
+                        : "bg-green-100 text-green-700 border-0"
+                    }
+                  >
+                    {rendicionSel.estado === "abierta" ? "🚚 En viaje" : "Confirmada"}
+                  </Badge>
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4 text-sm">
+                {/* Pagos incluidos */}
+                <div>
+                  <p className="text-xs font-bold text-muted-foreground uppercase mb-2">
+                    Pagos incluidos ({rendicionSel.cantidad_pagos})
+                  </p>
+                  <div className="border rounded-lg divide-y">
+                    {rendicionSel.pagos.map((p: any) => (
+                      <div key={p.id} className="flex items-center justify-between px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{p.cliente_nombre}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {fmtFecha(p.fecha_pago)} · {p.metodos}
+                          </p>
+                        </div>
+                        <p className="font-mono font-semibold shrink-0 ml-2">${fmtARS(p.monto)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Efectivo */}
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-muted/40 rounded-lg p-2">
+                    <p className="text-[10px] text-muted-foreground uppercase">Efectivo declarado</p>
+                    <p className="font-mono font-semibold">${fmtARS(rendicionSel.efectivo_declarado)}</p>
+                  </div>
+                  <div className="bg-muted/40 rounded-lg p-2">
+                    <p className="text-[10px] text-muted-foreground uppercase">Efectivo registrado</p>
+                    <p className="font-mono font-semibold">${fmtARS(rendicionSel.efectivo_registrado)}</p>
+                  </div>
+                  <div className={`rounded-lg p-2 ${Math.abs(rendicionSel.diferencia) > 0.01 ? "bg-red-50" : "bg-muted/40"}`}>
+                    <p className="text-[10px] text-muted-foreground uppercase">Diferencia</p>
+                    <p className={`font-mono font-semibold ${Math.abs(rendicionSel.diferencia) > 0.01 ? "text-red-600" : ""}`}>
+                      ${fmtARS(rendicionSel.diferencia)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Gastos y fondos del viaje */}
+                {(rendicionSel.gastos?.length > 0 || rendicionSel.fondos?.length > 0) && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {rendicionSel.gastos?.length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold text-muted-foreground uppercase mb-1">Gastos del viaje</p>
+                        <div className="border rounded-lg divide-y">
+                          {rendicionSel.gastos.map((g: any, i: number) => (
+                            <div key={i} className="flex justify-between px-3 py-1.5 text-xs">
+                              <span className="truncate">{g.concepto || "Gasto"}</span>
+                              <span className="font-mono text-red-600 shrink-0 ml-2">${fmtARS(Math.abs(g.monto))}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {rendicionSel.fondos?.length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold text-muted-foreground uppercase mb-1">Efectivo entregado al chofer</p>
+                        <div className="border rounded-lg divide-y">
+                          {rendicionSel.fondos.map((g: any, i: number) => (
+                            <div key={i} className="flex justify-between px-3 py-1.5 text-xs">
+                              <span className="truncate">{g.concepto || "Fondo"}</span>
+                              <span className="font-mono shrink-0 ml-2">${fmtARS(g.monto)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Retiros del viajante en el período */}
+                {rendicionSel.retiros?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-muted-foreground uppercase mb-1">Retiros de comisión del período</p>
+                    <div className="border rounded-lg divide-y">
+                      {rendicionSel.retiros.map((g: any, i: number) => (
+                        <div key={i} className="flex justify-between px-3 py-1.5 text-xs">
+                          <span className="truncate">{fmtFecha(g.fecha)} · {g.concepto || "Retiro"}</span>
+                          <span className="font-mono text-red-600 shrink-0 ml-2">${fmtARS(Math.abs(g.monto))}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {rendicionSel.observaciones && (
+                  <p className="text-xs text-muted-foreground">Obs: {rendicionSel.observaciones}</p>
+                )}
+                {rendicionSel.confirmado_at && (
+                  <p className="text-xs text-muted-foreground">
+                    Confirmada el {new Date(rendicionSel.confirmado_at).toLocaleString("es-AR")}
+                  </p>
+                )}
+
+                {/* Confirmación en lote */}
+                {rendicionSel.estado === "abierta" && (
+                  <div className="border-t pt-3 space-y-2">
+                    <Label className="text-xs">Caja destino del efectivo</Label>
+                    <div className="flex gap-2">
+                      <select
+                        value={cajaSel}
+                        onChange={(e) => setCajaSel(e.target.value)}
+                        className="flex-1 border rounded-lg px-3 py-2 text-sm bg-white"
+                      >
+                        <option value="">Elegir caja/banco...</option>
+                        {cajasFondos.map((c: any) => (
+                          <option key={c.cuenta_id} value={c.cuenta_id}>
+                            {c.cuenta_tipo === "BANCO" ? "🏦" : "💵"} {c.nombre}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        onClick={() => confirmarRendicion(false)}
+                        disabled={!cajaSel || confirmandoRend}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        {confirmandoRend ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <CheckCircle className="h-4 w-4 mr-1.5" />
+                            Confirmar todo ({rendicionSel.cantidad_pagos})
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Aprueba todos los pagos de la rendición de una sola vez: el efectivo entra a la caja
+                      elegida y las transferencias pasan a conciliación bancaria.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ── Confirmación anulación ── */}
       <AlertDialog open={!!confirmAnularId} onOpenChange={(open) => { if (!open) setConfirmAnularId(null) }}>
