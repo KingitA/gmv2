@@ -78,9 +78,10 @@ function PagosClientesContent() {
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [historialCargado, setHistorialCargado] = useState(false)
 
-  // ── Historial unificado: rendiciones + viajes por rendir ──
+  // ── Historial unificado: rendiciones + viajes y vendedores por rendir ──
   const [rendicionesU, setRendicionesU] = useState<any[]>([])
   const [viajesPendU, setViajesPendU] = useState<any[]>([])
+  const [vendedoresPendU, setVendedoresPendU] = useState<any[]>([])
   const [cajasFondos, setCajasFondos] = useState<any[]>([])
   const [rendicionSel, setRendicionSel] = useState<any | null>(null)
   const [cajaSel, setCajaSel] = useState("")
@@ -407,6 +408,7 @@ function PagosClientesContent() {
       if (!resumen.error) {
         setRendicionesU(resumen.rendiciones || [])
         setViajesPendU(resumen.viajes_pendientes || [])
+        setVendedoresPendU(resumen.vendedores_pendientes || [])
       }
       const cajas = await cajasRes.json()
       if (!cajas.error) {
@@ -855,7 +857,8 @@ function PagosClientesContent() {
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <p className="text-sm text-muted-foreground">
-                  {historial.length} pagos · {rendicionesU.length} rendiciones
+                  {historial.length} pagos · {rendicionesU.length + viajesPendU.length + vendedoresPendU.length}{" "}
+                  rendiciones
                 </p>
                 <Button variant="ghost" size="sm" onClick={loadHistorial}>
                   <RotateCcw className="h-4 w-4 mr-1" /> Actualizar
@@ -885,9 +888,10 @@ function PagosClientesContent() {
                       {(() => {
                         const enRendicion = new Set<string>(rendicionesU.flatMap((r: any) => r.pago_ids || []))
                         const enViajePend = new Set<string>(viajesPendU.flatMap((v: any) => v.pago_ids || []))
+                        const enVendPend = new Set<string>(vendedoresPendU.flatMap((v: any) => v.pago_ids || []))
                         const filas: Array<{ key: string; orden: string; tipo: string; data: any }> = [
                           ...historial
-                            .filter((p) => !enRendicion.has(p.id) && !enViajePend.has(p.id))
+                            .filter((p) => !enRendicion.has(p.id) && !enViajePend.has(p.id) && !enVendPend.has(p.id))
                             .map((p) => ({ key: `p-${p.id}`, orden: p.fecha_pago || "", tipo: "pago", data: p })),
                           ...rendicionesU.map((r: any) => ({
                             key: `r-${r.id}`,
@@ -899,6 +903,12 @@ function PagosClientesContent() {
                             key: `v-${v.viaje_id}`,
                             orden: v.ultima_fecha || "",
                             tipo: "viaje",
+                            data: v,
+                          })),
+                          ...vendedoresPendU.map((v: any) => ({
+                            key: `vp-${v.cobrador_id}`,
+                            orden: v.ultima_fecha || "",
+                            tipo: "vendedor_pendiente",
                             data: v,
                           })),
                         ].sort((a, b) => b.orden.localeCompare(a.orden))
@@ -941,26 +951,58 @@ function PagosClientesContent() {
                           if (fila.tipo === "viaje") {
                             const v = fila.data
                             return (
-                              <tr key={fila.key} className="border-t bg-purple-50/60 hover:bg-purple-50">
+                              <tr
+                                key={fila.key}
+                                onClick={() => window.open(`/viajes/${v.viaje_id}/rendicion`, "_self")}
+                                className="border-t bg-purple-50/60 hover:bg-purple-50 cursor-pointer"
+                              >
                                 <td className="p-3">{fmtFecha(v.ultima_fecha)}</td>
                                 <td className="p-3 font-mono text-xs">—</td>
                                 <td className="p-3 font-semibold">
-                                  🚚 {v.nombre}
-                                  <span className="text-muted-foreground font-normal"> · {v.cantidad_pagos} pagos por rendir</span>
+                                  🚚 RENDICIÓN — {v.nombre}
+                                  <span className="text-muted-foreground font-normal"> · {v.cantidad_pagos} pagos</span>
                                 </td>
-                                <td className="p-3" />
+                                <td className="p-3 text-muted-foreground text-xs">
+                                  💵 ${fmtARS(v.desglose?.efectivo || 0)}
+                                  {v.desglose?.cheques_cantidad ? ` · 🧾 ${v.desglose.cheques_cantidad}` : ""}
+                                </td>
                                 <td className="p-3 text-right font-mono font-semibold">${fmtARS(v.total)}</td>
                                 <td className="p-3 text-center">
                                   <Badge className="bg-purple-100 text-purple-700 border-0">Por rendir</Badge>
                                 </td>
                                 <td className="p-3 text-center">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7"
-                                    onClick={() => window.open(`/viajes/${v.viaje_id}/rendicion`, "_self")}
-                                  >
-                                    Abrir rendición →
+                                  <Button variant="ghost" size="sm" className="h-7">
+                                    Abrir detalle del viaje →
+                                  </Button>
+                                </td>
+                              </tr>
+                            )
+                          }
+                          if (fila.tipo === "vendedor_pendiente") {
+                            const v = fila.data
+                            return (
+                              <tr
+                                key={fila.key}
+                                onClick={() => { setRendicionSel({ ...v, tipo: "pendiente_vendedor" }); setCajaSel("") }}
+                                className="border-t bg-sky-50/70 hover:bg-sky-50 cursor-pointer"
+                              >
+                                <td className="p-3">{fmtFecha(v.ultima_fecha)}</td>
+                                <td className="p-3 font-mono text-xs">—</td>
+                                <td className="p-3 font-semibold">
+                                  🧾 RENDICIÓN — {v.titulo}
+                                  <span className="text-muted-foreground font-normal"> · {v.cantidad_pagos} cobros</span>
+                                </td>
+                                <td className="p-3 text-muted-foreground text-xs">
+                                  💵 ${fmtARS(v.desglose?.efectivo || 0)}
+                                  {v.desglose?.cheques_cantidad ? ` · 🧾 ${v.desglose.cheques_cantidad}` : ""}
+                                </td>
+                                <td className="p-3 text-right font-mono font-semibold">${fmtARS(v.total)}</td>
+                                <td className="p-3 text-center">
+                                  <Badge className="bg-sky-100 text-sky-700 border-0">Sin declarar</Badge>
+                                </td>
+                                <td className="p-3 text-center">
+                                  <Button variant="ghost" size="sm" className="h-7">
+                                    Ver detalle
                                   </Button>
                                 </td>
                               </tr>
@@ -1076,17 +1118,42 @@ function PagosClientesContent() {
                   🧾 RENDICIÓN — {rendicionSel.titulo}
                   <Badge
                     className={
-                      rendicionSel.estado === "abierta"
+                      rendicionSel.tipo === "pendiente_vendedor"
+                        ? "bg-sky-100 text-sky-700 border-0"
+                        : rendicionSel.estado === "abierta"
                         ? "bg-amber-100 text-amber-700 border-0"
                         : "bg-green-100 text-green-700 border-0"
                     }
                   >
-                    {rendicionSel.estado === "abierta" ? "🚚 En viaje" : "Confirmada"}
+                    {rendicionSel.tipo === "pendiente_vendedor"
+                      ? "Sin declarar"
+                      : rendicionSel.estado === "abierta"
+                      ? "🚚 En viaje"
+                      : "Confirmada"}
                   </Badge>
                 </DialogTitle>
               </DialogHeader>
 
               <div className="space-y-4 text-sm">
+                {/* Qué tiene que entregar: efectivo y cheques */}
+                {rendicionSel.desglose && (
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-2">
+                      <p className="text-[10px] text-emerald-600 uppercase font-bold">💵 Efectivo a recibir</p>
+                      <p className="font-mono font-semibold">${fmtARS(rendicionSel.desglose.efectivo)}</p>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">🧾 Cheques</p>
+                      <p className="font-mono font-semibold">
+                        {rendicionSel.desglose.cheques_cantidad} × ${fmtARS(rendicionSel.desglose.cheques_monto)}
+                      </p>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2">
+                      <p className="text-[10px] text-slate-500 uppercase font-bold">🏦 Transferencias</p>
+                      <p className="font-mono font-semibold">${fmtARS(rendicionSel.desglose.transferencias)}</p>
+                    </div>
+                  </div>
+                )}
                 {/* Pagos incluidos */}
                 <div>
                   <p className="text-xs font-bold text-muted-foreground uppercase mb-2">
@@ -1107,23 +1174,32 @@ function PagosClientesContent() {
                   </div>
                 </div>
 
-                {/* Efectivo */}
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="bg-muted/40 rounded-lg p-2">
-                    <p className="text-[10px] text-muted-foreground uppercase">Efectivo declarado</p>
-                    <p className="font-mono font-semibold">${fmtARS(rendicionSel.efectivo_declarado)}</p>
+                {/* Efectivo declarado vs registrado (solo rendiciones declaradas) */}
+                {rendicionSel.tipo !== "pendiente_vendedor" && (
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-muted/40 rounded-lg p-2">
+                      <p className="text-[10px] text-muted-foreground uppercase">Efectivo declarado</p>
+                      <p className="font-mono font-semibold">${fmtARS(rendicionSel.efectivo_declarado)}</p>
+                    </div>
+                    <div className="bg-muted/40 rounded-lg p-2">
+                      <p className="text-[10px] text-muted-foreground uppercase">Efectivo registrado</p>
+                      <p className="font-mono font-semibold">${fmtARS(rendicionSel.efectivo_registrado)}</p>
+                    </div>
+                    <div className={`rounded-lg p-2 ${Math.abs(rendicionSel.diferencia) > 0.01 ? "bg-red-50" : "bg-muted/40"}`}>
+                      <p className="text-[10px] text-muted-foreground uppercase">Diferencia</p>
+                      <p className={`font-mono font-semibold ${Math.abs(rendicionSel.diferencia) > 0.01 ? "text-red-600" : ""}`}>
+                        ${fmtARS(rendicionSel.diferencia)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="bg-muted/40 rounded-lg p-2">
-                    <p className="text-[10px] text-muted-foreground uppercase">Efectivo registrado</p>
-                    <p className="font-mono font-semibold">${fmtARS(rendicionSel.efectivo_registrado)}</p>
-                  </div>
-                  <div className={`rounded-lg p-2 ${Math.abs(rendicionSel.diferencia) > 0.01 ? "bg-red-50" : "bg-muted/40"}`}>
-                    <p className="text-[10px] text-muted-foreground uppercase">Diferencia</p>
-                    <p className={`font-mono font-semibold ${Math.abs(rendicionSel.diferencia) > 0.01 ? "text-red-600" : ""}`}>
-                      ${fmtARS(rendicionSel.diferencia)}
-                    </p>
-                  </div>
-                </div>
+                )}
+
+                {rendicionSel.tipo === "pendiente_vendedor" && (
+                  <p className="text-xs text-sky-700 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
+                    El vendedor todavía no rindió este dinero desde su app. Los montos de arriba son lo que
+                    debería entregar cuando cierre la rendición.
+                  </p>
+                )}
 
                 {/* Gastos y fondos del viaje */}
                 {(rendicionSel.gastos?.length > 0 || rendicionSel.fondos?.length > 0) && (
