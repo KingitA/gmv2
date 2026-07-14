@@ -64,6 +64,7 @@ const LIVE_NOMBRE: Partial<Record<CajaKey, string>> = {
   mercadopago: "MercadoPago",
   acciones: "Bolsa - Acciones",
   fondos_comunes: "Bolsa - FCI",
+  cauciones: "Bolsa - Cauciones",
   cedears: "Bolsa - CEDEARs",
   obligaciones: "Bolsa - Obligaciones Negociables",
 }
