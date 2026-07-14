@@ -92,6 +92,7 @@ export function CalendarioPagos({
     const [dialogOpen, setDialogOpen] = useState(false)
     const [form, setForm] = useState({
         proveedor: null as any,
+        tipo: "factura",
         concepto: "",
         monto: "",
         forma_pago: "transferencia",
@@ -221,7 +222,7 @@ export function CalendarioPagos({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     proveedor_id: form.proveedor?.id || null,
-                    tipo: "factura",
+                    tipo: form.tipo,
                     concepto,
                     monto,
                     fecha_vencimiento: form.fecha_vencimiento,
@@ -240,7 +241,7 @@ export function CalendarioPagos({
             toast.success("Vencimiento creado")
             setDialogOpen(false)
             setForm({
-                proveedor: null, concepto: "", monto: "", forma_pago: "transferencia",
+                proveedor: null, tipo: "factura", concepto: "", monto: "", forma_pago: "transferencia",
                 fecha_vencimiento: hoyISO(), fecha_validez: "", modalidad: "deposito",
                 descuentos_aplicados: false, observaciones: "",
             })
@@ -295,23 +296,38 @@ export function CalendarioPagos({
                             <Button size="sm" className="gap-1"><Plus className="h-4 w-4" /> Nuevo pago</Button>
                         </DialogTrigger>
                         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                            <DialogHeader><DialogTitle>Nuevo pago a proveedor</DialogTitle></DialogHeader>
+                            <DialogHeader><DialogTitle>Nuevo pago / gasto</DialogTitle></DialogHeader>
                             <form onSubmit={crearVencimiento} className="space-y-4">
-                                <div>
-                                    <Label>Proveedor</Label>
-                                    <EntitySearchSelect
-                                        entity="proveedores"
-                                        placeholder="Buscar proveedor..."
-                                        value={form.proveedor}
-                                        onSelect={(p: any) => setForm({ ...form, proveedor: p })}
-                                    />
+                                <div className="grid grid-cols-[130px_1fr] gap-4">
+                                    <div>
+                                        <Label>Tipo *</Label>
+                                        <Select value={form.tipo} onValueChange={(v) => setForm({ ...form, tipo: v })}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="factura">Factura</SelectItem>
+                                                <SelectItem value="servicio">Servicio</SelectItem>
+                                                <SelectItem value="impuesto">Impuesto / VEP</SelectItem>
+                                                <SelectItem value="seguro">Seguro</SelectItem>
+                                                <SelectItem value="otro">Otro gasto</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label>Proveedor {form.tipo === "factura" ? "" : "(opcional)"}</Label>
+                                        <EntitySearchSelect
+                                            entity="proveedores"
+                                            placeholder={form.tipo === "factura" ? "Buscar proveedor..." : "Gasto sin proveedor..."}
+                                            value={form.proveedor}
+                                            onSelect={(p: any) => setForm({ ...form, proveedor: p })}
+                                        />
+                                    </div>
                                 </div>
                                 <div>
-                                    <Label>Concepto</Label>
+                                    <Label>Concepto {form.proveedor ? "" : "*"}</Label>
                                     <Input
                                         value={form.concepto}
                                         onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-                                        placeholder={form.proveedor?.nombre ? `${form.proveedor.nombre} (por defecto)` : "Ej: Factura A 0001-00045678"}
+                                        placeholder={form.proveedor?.nombre ? `${form.proveedor.nombre} (por defecto)` : "Ej: SICORE, VEP 931, expensas, seguro cuota 3..."}
                                     />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
