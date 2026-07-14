@@ -11,6 +11,7 @@ import Link from "next/link"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import { AjustarSaldoDialog, type CuentaAjustable } from "@/components/finanzas/ajustar-saldo-dialog"
 import { ImportChequesDialog } from "@/components/finanzas/import-cheques-dialog"
+import { ChequesEmitidosPanel, type ChequeEmitido } from "@/components/finanzas/cheques-emitidos-panel"
 
 // ─── Estructura de cajas ─────────────────────────────────────────────────────
 
@@ -97,6 +98,7 @@ export default function FinanzasPage() {
   // Cheques en cartera + vencimientos pendientes (dispo + tablero)
   const [cheques, setCheques] = useState<Array<{ id: string; numero: string; monto: number; fecha_vencimiento: string; color: string; es_echeq: boolean }>>([])
   const [vencs, setVencs] = useState<Array<{ id: string; monto: number; fecha_vencimiento: string; estado: string }>>([])
+  const [emitidos, setEmitidos] = useState<ChequeEmitido[]>([])
 
   // Diálogos
   const [cuentaEdit, setCuentaEdit] = useState<CuentaAjustable | null>(null)
@@ -108,11 +110,12 @@ export default function FinanzasPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
   const load = async () => {
     setLoading(true)
-    const [{ data }, liveRes, chequesRes, vencsRes] = await Promise.all([
+    const [{ data }, liveRes, chequesRes, vencsRes, emitidosRes] = await Promise.all([
       sb.from("finanzas_saldos").select("id, caja_key, monto, fecha").order("fecha", { ascending: true }),
       fetch("/api/finanzas/cajas").then(r => r.json()).catch(() => ({ cuentas: [] })),
-      fetch("/api/cheques?estado=EN_CARTERA").then(r => r.json()).catch(() => ({ cheques: [] })),
+      fetch("/api/cheques?estado=EN_CARTERA&tipo=TERCERO").then(r => r.json()).catch(() => ({ cheques: [] })),
       fetch("/api/vencimientos?estado=pendiente").then(r => r.json()).catch(() => []),
+      fetch("/api/cheques?estado=ENTREGADO_A_PROVEEDOR&tipo=PROPIO").then(r => r.json()).catch(() => ({ cheques: [] })),
     ])
     setSaldos((data || []) as any)
     const live: Record<string, number> = {}
@@ -123,6 +126,7 @@ export default function FinanzasPage() {
     setCuentas(liveRes.cuentas || [])
     setCheques(chequesRes.cheques || [])
     setVencs(Array.isArray(vencsRes) ? vencsRes : [])
+    setEmitidos(emitidosRes.cheques || [])
     setLoading(false)
   }
 
@@ -173,7 +177,17 @@ export default function FinanzasPage() {
   const cajaLiquida = cuentas.reduce((s, c) => s + Number(c.saldos?.BLANCO ?? 0) + Number(c.saldos?.NEGRO ?? 0), 0)
   const chequesHasta = cheques.filter(c => c.fecha_vencimiento <= dispoFecha).reduce((s, c) => s + Number(c.monto), 0)
   const pagosHasta = vencs.filter(v => v.fecha_vencimiento <= dispoFecha).reduce((s, v) => s + Number(v.monto), 0)
-  const dispoSaldo = cajaLiquida + chequesHasta - pagosHasta
+  // Cheques propios sin debitar: comprometen desde su fecha de pago mientras
+  // la ventana de 30 días no haya vencido respecto de hoy.
+  const mas30 = (iso: string) => {
+    const d = new Date(iso + "T00:00:00")
+    d.setDate(d.getDate() + 30)
+    return d.toISOString().slice(0, 10)
+  }
+  const emitidosHasta = emitidos
+    .filter(c => c.fecha_vencimiento <= dispoFecha && mas30(c.fecha_vencimiento) >= today())
+    .reduce((s, c) => s + Number(c.monto), 0)
+  const dispoSaldo = cajaLiquida + chequesHasta - pagosHasta - emitidosHasta
 
   // Selected subset
   const selectedList = CAJAS.filter(c => selected.has(c.key))
@@ -359,6 +373,13 @@ export default function FinanzasPage() {
               )
             })}
           </div>
+          <div className="mt-3">
+            <ChequesEmitidosPanel
+              emitidos={emitidos}
+              loading={loading}
+              onChanged={() => { load(); setCalKey(k => k + 1) }}
+            />
+          </div>
         </div>
 
         {/* ── Disponibilidad a fecha ── */}
@@ -387,6 +408,10 @@ export default function FinanzasPage() {
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">− Pagos que vencen hasta esa fecha</div>
                 <div className="font-mono text-base font-bold text-red-600">{fmt(pagosHasta)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">− Cheques emitidos que pueden debitarse</div>
+                <div className="font-mono text-base font-bold text-red-600">{fmt(emitidosHasta)}</div>
               </div>
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">= Te queda</div>

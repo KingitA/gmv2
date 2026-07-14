@@ -13,6 +13,7 @@ import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { formatCurrency } from "@/lib/utils"
 import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -76,8 +77,10 @@ export function CalendarioPagos({
 }) {
     const [vencimientos, setVencimientos] = useState<Vencimiento[]>([])
     const [cheques, setCheques] = useState<ChequeCartera[]>([])
+    const [emitidos, setEmitidos] = useState<ChequeCartera[]>([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
+    const [prefillEmitidos, setPrefillEmitidos] = useState<PrefillEmitidos | null>(null)
 
     // Filtros
     const [formasActivas, setFormasActivas] = useState<Set<string>>(new Set(Object.keys(FORMAS)))
@@ -107,10 +110,16 @@ export function CalendarioPagos({
         setLoading(true)
         try {
             const reqs: Promise<any>[] = [fetch("/api/vencimientos?estado=pendiente").then((r) => r.json())]
-            if (showCheques) reqs.push(fetch("/api/cheques?estado=EN_CARTERA").then((r) => r.json()))
-            const [vencs, chq] = await Promise.all(reqs)
+            if (showCheques) {
+                reqs.push(fetch("/api/cheques?estado=EN_CARTERA&tipo=TERCERO").then((r) => r.json()))
+                reqs.push(fetch("/api/cheques?estado=ENTREGADO_A_PROVEEDOR&tipo=PROPIO").then((r) => r.json()))
+            }
+            const [vencs, chq, emit] = await Promise.all(reqs)
             setVencimientos(Array.isArray(vencs) ? vencs : [])
-            if (showCheques) setCheques(chq?.cheques || [])
+            if (showCheques) {
+                setCheques(chq?.cheques || [])
+                setEmitidos(emit?.cheques || [])
+            }
         } catch (e) {
             console.error(e)
             toast.error("Error cargando el calendario")
@@ -144,12 +153,21 @@ export function CalendarioPagos({
         return m
     }, [cheques, showCheques, verCheques])
 
+    const emitidosPorFecha = useMemo(() => {
+        const m: Record<string, ChequeCartera[]> = {}
+        if (showCheques && verCheques) emitidos.forEach((c) => { (m[c.fecha_vencimiento] ||= []).push(c) })
+        return m
+    }, [emitidos, showCheques, verCheques])
+
     const meses = useMemo(() => {
         const set = new Set<string>()
         visibles.forEach((v) => set.add(v.fecha_vencimiento.slice(0, 7)))
-        if (showCheques && verCheques) cheques.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
+        if (showCheques && verCheques) {
+            cheques.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
+            emitidos.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
+        }
         return [...set].sort().map((s) => ({ y: Number(s.slice(0, 4)), m: Number(s.slice(5, 7)) - 1 }))
-    }, [visibles, cheques, showCheques, verCheques])
+    }, [visibles, cheques, emitidos, showCheques, verCheques])
 
     const seleccionados = useMemo(
         () => vencimientos.filter((v) => seleccion.has(v.id)),
@@ -180,7 +198,7 @@ export function CalendarioPagos({
             return n
         })
 
-    async function marcarPagados(ids: string[]) {
+    async function marcarPagados(ids: string[], vencCheque?: Vencimiento) {
         if (!ids.length) return
         if (!confirm(`¿Marcar ${ids.length === 1 ? "este pago" : `estos ${ids.length} pagos`} como pagado${ids.length > 1 ? "s" : ""}?`)) return
         setSaving(true)
@@ -204,6 +222,17 @@ export function CalendarioPagos({
             })
             await load()
             onDataChanged?.()
+            // Pago con cheque: ofrecer registrar los cheques emitidos
+            if (vencCheque && vencCheque.forma_pago === "cheque" && !fallidos) {
+                setPrefillEmitidos({
+                    proveedor: vencCheque.proveedores
+                        ? { id: vencCheque.proveedores.id, nombre: vencCheque.proveedores.nombre }
+                        : null,
+                    vencimiento_id: vencCheque.id,
+                    monto: Number(vencCheque.monto),
+                    fecha: vencCheque.fecha_validez || vencCheque.fecha_vencimiento,
+                })
+            }
         } finally {
             setSaving(false)
         }
@@ -467,13 +496,15 @@ export function CalendarioPagos({
                                             const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
                                             const pagos = porFecha[key] || []
                                             const chqs = chequesPorFecha[key] || []
+                                            const emits = emitidosPorFecha[key] || []
                                             const dsum = pagos.reduce((a, p) => a + Number(p.monto), 0)
                                             const chqSum = chqs.reduce((a, c) => a + Number(c.monto), 0)
+                                            const emitSum = emits.reduce((a, c) => a + Number(c.monto), 0)
                                             const expandido = diasExpandidos.has(key)
                                             return (
                                                 <div
                                                     key={key}
-                                                    className={`flex min-h-[84px] flex-col gap-1 rounded-md border p-1 ${pagos.length || chqs.length ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50/50"} ${key === hoy ? "ring-2 ring-amber-400" : ""}`}
+                                                    className={`flex min-h-[84px] flex-col gap-1 rounded-md border p-1 ${pagos.length || chqs.length || emits.length ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50/50"} ${key === hoy ? "ring-2 ring-amber-400" : ""}`}
                                                 >
                                                     <div className="flex items-center justify-between px-0.5">
                                                         <span className={`font-mono text-[11px] font-semibold ${pagos.length ? "text-slate-700" : "text-slate-400"}`}>{d}</span>
@@ -516,7 +547,7 @@ export function CalendarioPagos({
                                                                     </span>
                                                                 </button>
                                                                 <button
-                                                                    onClick={(ev) => { ev.stopPropagation(); marcarPagados([p.id]) }}
+                                                                    onClick={(ev) => { ev.stopPropagation(); marcarPagados([p.id], p) }}
                                                                     title="Marcar como pagado"
                                                                     className="absolute right-0.5 top-0.5 hidden rounded p-0.5 text-emerald-600 hover:bg-emerald-600 hover:text-white group-hover/chip:block"
                                                                 >
@@ -544,6 +575,35 @@ export function CalendarioPagos({
                                                                 <span className="mt-0.5 block space-y-0.5">
                                                                     {chqs.map((c) => (
                                                                         <span key={c.id} className="flex justify-between font-mono text-[8.5px] text-emerald-800">
+                                                                            <span>#{c.numero}{c.es_echeq ? " (e)" : c.color === "NEGRO" ? " (N)" : ""}</span>
+                                                                            <span>{formatCurrency(Number(c.monto))}</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                    {emits.length > 0 && (
+                                                        <button
+                                                            onClick={() =>
+                                                                setDiasExpandidos((prev) => {
+                                                                    const n = new Set(prev)
+                                                                    const k2 = `emit:${key}`
+                                                                    n.has(k2) ? n.delete(k2) : n.add(k2)
+                                                                    return n
+                                                                })
+                                                            }
+                                                            title={`Cheques emitidos: cobrables desde ${fmtCorta(key)} y por 30 días`}
+                                                            className="rounded-md border border-dashed border-red-500 bg-red-50 px-1.5 py-0.5 text-left hover:bg-red-100"
+                                                        >
+                                                            <span className="flex justify-between text-[9px] font-bold text-red-700">
+                                                                <span>▼ {emits.length} emit.</span>
+                                                                <span className="font-mono">{formatCurrency(emitSum)}</span>
+                                                            </span>
+                                                            {diasExpandidos.has(`emit:${key}`) && (
+                                                                <span className="mt-0.5 block space-y-0.5">
+                                                                    {emits.map((c) => (
+                                                                        <span key={c.id} className="flex justify-between font-mono text-[8.5px] text-red-800">
                                                                             <span>#{c.numero}{c.es_echeq ? " (e)" : c.color === "NEGRO" ? " (N)" : ""}</span>
                                                                             <span>{formatCurrency(Number(c.monto))}</span>
                                                                         </span>
@@ -649,10 +709,18 @@ export function CalendarioPagos({
                             Total visible con estos filtros: <b className="font-mono">{formatCurrency(totalVisible)}</b>.
                             El <AlertTriangle className="inline h-3 w-3 text-amber-500" /> marca pagos <b>sin descuentos aplicados</b> (chequear NC / retenciones).
                             <Landmark className="ml-1 inline h-3 w-3" /> = depósito · <HandCoins className="inline h-3 w-3" /> = entrega en caja.
+                            {showCheques && <> Verde punteado = <b>cheques en cartera</b> que vencen ese día · rojo punteado = <b>cheques emitidos</b> cobrables desde ese día (30 días de ventana).</>}
                         </p>
                     </div>
                 </div>
             </div>
+
+            <ChequesEmitidosDialog
+                open={!!prefillEmitidos}
+                onOpenChange={(o) => { if (!o) setPrefillEmitidos(null) }}
+                prefill={prefillEmitidos}
+                onSaved={() => { load(); onDataChanged?.() }}
+            />
         </div>
     )
 }
