@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
     const clientes = new Map((clientesRes.data || []).map((c: any) => [c.id, c.nombre]))
     const cuentas = new Map((cuentasRes.data || []).map((c: any) => [c.id, c.nombre]))
-    const proveedores = new Map((proveedoresRes.data || []).map((p: any) => [p.id, p.sigla || p.nombre]))
+    const proveedores = new Map((proveedoresRes.data || []).map((p: any) => [p.id, p.nombre]))
 
     return NextResponse.json({
       cheques: (cheques || []).map((c) => ({

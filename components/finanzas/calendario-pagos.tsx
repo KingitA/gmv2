@@ -10,7 +10,8 @@ import {
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
-import { formatCurrency } from "@/lib/utils"
+import { FechaInput } from "@/components/finanzas/fecha-input"
+import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
@@ -56,10 +57,7 @@ const MES_NOMBRES = [
 const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
 const formaDe = (v: Vencimiento) => v.forma_pago || "sin_forma"
-const hoyISO = () => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
+const hoyISO = () => todayArgentina()
 const fmtCorta = (iso: string) => {
     const [, m, d] = iso.split("-")
     return `${d}/${m}`
@@ -86,6 +84,7 @@ export function CalendarioPagos({
     const [formasActivas, setFormasActivas] = useState<Set<string>>(new Set(Object.keys(FORMAS)))
     const [filtroModalidad, setFiltroModalidad] = useState<string>("todas")
     const [verCheques, setVerCheques] = useState(true)
+    const [verSaldados, setVerSaldados] = useState(false)
 
     // Selección (cinta)
     const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
@@ -109,13 +108,13 @@ export function CalendarioPagos({
     const load = useCallback(async () => {
         setLoading(true)
         try {
-            const reqs: Promise<any>[] = [fetch("/api/vencimientos?estado=pendiente").then((r) => r.json())]
+            const reqs: Promise<any>[] = [fetch("/api/vencimientos?estado=todos").then((r) => r.json())]
             if (showCheques) {
                 reqs.push(fetch("/api/cheques?estado=EN_CARTERA&tipo=TERCERO").then((r) => r.json()))
                 reqs.push(fetch("/api/cheques?estado=ENTREGADO_A_PROVEEDOR&tipo=PROPIO").then((r) => r.json()))
             }
             const [vencs, chq, emit] = await Promise.all(reqs)
-            setVencimientos(Array.isArray(vencs) ? vencs : [])
+            setVencimientos(Array.isArray(vencs) ? vencs.filter((v: Vencimiento) => v.estado !== "cancelado") : [])
             if (showCheques) {
                 setCheques(chq?.cheques || [])
                 setEmitidos(emit?.cheques || [])
@@ -131,14 +130,23 @@ export function CalendarioPagos({
     useEffect(() => { load() }, [load])
 
     // ── Derivados ──────────────────────────────────────────────────────────
+    const pasaFiltros = useCallback(
+        (v: Vencimiento) =>
+            formasActivas.has(formaDe(v)) &&
+            (filtroModalidad === "todas" || v.modalidad === filtroModalidad),
+        [formasActivas, filtroModalidad]
+    )
+
+    // Pendientes (operables: se seleccionan, se marcan pagados)
     const visibles = useMemo(
-        () =>
-            vencimientos.filter(
-                (v) =>
-                    formasActivas.has(formaDe(v)) &&
-                    (filtroModalidad === "todas" || v.modalidad === filtroModalidad)
-            ),
-        [vencimientos, formasActivas, filtroModalidad]
+        () => vencimientos.filter((v) => v.estado !== "pagado" && pasaFiltros(v)),
+        [vencimientos, pasaFiltros]
+    )
+
+    // Saldados (solo visualización, con el filtro activado)
+    const saldados = useMemo(
+        () => (verSaldados ? vencimientos.filter((v) => v.estado === "pagado" && pasaFiltros(v)) : []),
+        [vencimientos, pasaFiltros, verSaldados]
     )
 
     const porFecha = useMemo(() => {
@@ -146,6 +154,12 @@ export function CalendarioPagos({
         visibles.forEach((v) => { (m[v.fecha_vencimiento] ||= []).push(v) })
         return m
     }, [visibles])
+
+    const saldadosPorFecha = useMemo(() => {
+        const m: Record<string, Vencimiento[]> = {}
+        saldados.forEach((v) => { (m[v.fecha_vencimiento] ||= []).push(v) })
+        return m
+    }, [saldados])
 
     const chequesPorFecha = useMemo(() => {
         const m: Record<string, ChequeCartera[]> = {}
@@ -162,12 +176,13 @@ export function CalendarioPagos({
     const meses = useMemo(() => {
         const set = new Set<string>()
         visibles.forEach((v) => set.add(v.fecha_vencimiento.slice(0, 7)))
+        saldados.forEach((v) => set.add(v.fecha_vencimiento.slice(0, 7)))
         if (showCheques && verCheques) {
             cheques.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
             emitidos.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
         }
         return [...set].sort().map((s) => ({ y: Number(s.slice(0, 4)), m: Number(s.slice(5, 7)) - 1 }))
-    }, [visibles, cheques, emitidos, showCheques, verCheques])
+    }, [visibles, saldados, cheques, emitidos, showCheques, verCheques])
 
     const seleccionados = useMemo(
         () => vencimientos.filter((v) => seleccion.has(v.id)),
@@ -238,12 +253,31 @@ export function CalendarioPagos({
         }
     }
 
+    async function volverAPendiente(id: string) {
+        if (!confirm("¿Volver este pago a pendiente?")) return
+        setSaving(true)
+        try {
+            const res = await fetch("/api/vencimientos", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, estado: "pendiente" }),
+            })
+            if (!res.ok) toast.error("No se pudo revertir")
+            else toast.success("Pago vuelto a pendiente")
+            await load()
+            onDataChanged?.()
+        } finally {
+            setSaving(false)
+        }
+    }
+
     async function crearVencimiento(e: React.FormEvent) {
         e.preventDefault()
         const monto = parseFloat(form.monto.replace(/\./g, "").replace(",", "."))
         if (!monto || monto <= 0) { toast.error("Monto inválido"); return }
         const concepto = form.concepto.trim() || form.proveedor?.nombre || ""
         if (!concepto) { toast.error("Ingresá un concepto o elegí un proveedor"); return }
+        if (!form.fecha_vencimiento) { toast.error("Fecha de pago inválida (dd/mm/aaaa)"); return }
         setSaving(true)
         try {
             const res = await fetch("/api/vencimientos", {
@@ -310,6 +344,13 @@ export function CalendarioPagos({
                         <SelectItem value="entrega">Solo entrega</SelectItem>
                     </SelectContent>
                 </Select>
+                <button
+                    onClick={() => setVerSaldados((v) => !v)}
+                    className={`flex items-center gap-1.5 rounded-full border border-slate-400 px-3 py-1 text-xs font-semibold text-slate-600 transition-all ${verSaldados ? "bg-slate-100 shadow-sm" : "opacity-40"}`}
+                >
+                    <CheckCircle2 className="h-3 w-3" />
+                    Saldados
+                </button>
                 {showCheques && (
                     <button
                         onClick={() => setVerCheques((v) => !v)}
@@ -385,19 +426,17 @@ export function CalendarioPagos({
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <Label>Fecha de pago *</Label>
-                                        <Input
-                                            type="date"
+                                        <FechaInput
                                             value={form.fecha_vencimiento}
-                                            onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })}
+                                            onChange={(iso) => setForm({ ...form, fecha_vencimiento: iso })}
                                             required
                                         />
                                     </div>
                                     <div>
                                         <Label>Fecha validez</Label>
-                                        <Input
-                                            type="date"
+                                        <FechaInput
                                             value={form.fecha_validez}
-                                            onChange={(e) => setForm({ ...form, fecha_validez: e.target.value })}
+                                            onChange={(iso) => setForm({ ...form, fecha_validez: iso })}
                                         />
                                         <p className="mt-1 text-[11px] text-muted-foreground">
                                             Ej: cheques a 30 días. Vacío = misma fecha.
@@ -495,6 +534,7 @@ export function CalendarioPagos({
                                             const d = i + 1
                                             const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
                                             const pagos = porFecha[key] || []
+                                            const pagados = saldadosPorFecha[key] || []
                                             const chqs = chequesPorFecha[key] || []
                                             const emits = emitidosPorFecha[key] || []
                                             const dsum = pagos.reduce((a, p) => a + Number(p.monto), 0)
@@ -504,7 +544,7 @@ export function CalendarioPagos({
                                             return (
                                                 <div
                                                     key={key}
-                                                    className={`flex min-h-[84px] flex-col gap-1 rounded-md border p-1 ${pagos.length || chqs.length || emits.length ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50/50"} ${key === hoy ? "ring-2 ring-amber-400" : ""}`}
+                                                    className={`flex min-h-[84px] flex-col gap-1 rounded-md border p-1 ${pagos.length || pagados.length || chqs.length || emits.length ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50/50"} ${key === hoy ? "ring-2 ring-amber-400" : ""}`}
                                                 >
                                                     <div className="flex items-center justify-between px-0.5">
                                                         <span className={`font-mono text-[11px] font-semibold ${pagos.length ? "text-slate-700" : "text-slate-400"}`}>{d}</span>
@@ -515,7 +555,7 @@ export function CalendarioPagos({
                                                     {pagos.map((p) => {
                                                         const f = FORMAS[formaDe(p)]
                                                         const sel = seleccion.has(p.id)
-                                                        const nombre = p.proveedores?.sigla || p.proveedores?.nombre || p.concepto
+                                                        const nombre = p.proveedores?.nombre || p.concepto
                                                         return (
                                                             <div key={p.id} className="group/chip relative">
                                                                 <button
@@ -552,6 +592,34 @@ export function CalendarioPagos({
                                                                     className="absolute right-0.5 top-0.5 hidden rounded p-0.5 text-emerald-600 hover:bg-emerald-600 hover:text-white group-hover/chip:block"
                                                                 >
                                                                     <CheckCircle2 className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                    {pagados.map((p) => {
+                                                        const f = FORMAS[formaDe(p)]
+                                                        const nombre = p.proveedores?.nombre || p.concepto
+                                                        return (
+                                                            <div key={p.id} className="group/chip relative">
+                                                                <div
+                                                                    title={`PAGADO · ${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}`}
+                                                                    className="w-full rounded-md border border-slate-300 bg-slate-100 px-1.5 py-1 opacity-70"
+                                                                    style={{ borderLeftWidth: 3, borderLeftColor: f.color }}
+                                                                >
+                                                                    <span className="flex items-center gap-1 text-[10px] font-semibold leading-tight text-slate-500">
+                                                                        <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" />
+                                                                        <span className="truncate line-through">{nombre}</span>
+                                                                    </span>
+                                                                    <span className="block font-mono text-[9.5px] text-slate-400 line-through">
+                                                                        {formatCurrency(Number(p.monto))}
+                                                                    </span>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => volverAPendiente(p.id)}
+                                                                    title="Volver a pendiente"
+                                                                    className="absolute right-0.5 top-0.5 hidden rounded p-0.5 text-slate-500 hover:bg-slate-600 hover:text-white group-hover/chip:block"
+                                                                >
+                                                                    ↩
                                                                 </button>
                                                             </div>
                                                         )
@@ -649,7 +717,7 @@ export function CalendarioPagos({
                                         >
                                             <span className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: FORMAS[formaDe(v)].color }} />
                                             <span className="min-w-0 flex-1 truncate">
-                                                {v.proveedores?.sigla || v.proveedores?.nombre || v.concepto}
+                                                {v.proveedores?.nombre || v.concepto}
                                                 <span className="block text-[9px] text-muted-foreground">{fmtCorta(v.fecha_vencimiento)}</span>
                                             </span>
                                             <span className="font-medium">{formatCurrency(Number(v.monto))}</span>

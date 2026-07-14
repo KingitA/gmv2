@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { todayArgentina } from "@/lib/utils"
 
 /**
  * POST /api/cheques/emitidos — registrar cheques propios entregados a un
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No hay cheques para registrar" }, { status: 400 })
     }
 
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = todayArgentina()
     const invalidas: number[] = []
     const inserts = rows
       .map((r, i) => {

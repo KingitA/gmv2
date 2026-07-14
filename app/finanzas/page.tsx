@@ -12,6 +12,8 @@ import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import { AjustarSaldoDialog, type CuentaAjustable } from "@/components/finanzas/ajustar-saldo-dialog"
 import { ImportChequesDialog } from "@/components/finanzas/import-cheques-dialog"
 import { ChequesEmitidosPanel, type ChequeEmitido } from "@/components/finanzas/cheques-emitidos-panel"
+import { FechaInput } from "@/components/finanzas/fecha-input"
+import { todayArgentina } from "@/lib/utils"
 
 // ─── Estructura de cajas ─────────────────────────────────────────────────────
 
@@ -77,7 +79,7 @@ const fmtShort = (n: number) => {
   return `$${n.toFixed(0)}`
 }
 
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => todayArgentina()
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -389,11 +391,10 @@ export default function FinanzasPage() {
               <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1">
                 <Wallet className="h-3.5 w-3.5" /> ¿Cuánto tengo al…?
               </span>
-              <input
-                type="date"
+              <FechaInput
                 value={dispoFecha}
-                onChange={(e) => setDispoFecha(e.target.value || today())}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                onChange={(iso) => setDispoFecha(iso || today())}
+                className="w-[130px] rounded-lg border-slate-300 px-3 py-1.5"
               />
             </div>
             <div className="flex flex-wrap items-baseline gap-x-7 gap-y-2">

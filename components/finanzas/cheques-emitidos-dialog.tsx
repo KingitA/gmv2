@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
-import { formatCurrency } from "@/lib/utils"
+import { FechaInput } from "@/components/finanzas/fecha-input"
+import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -27,10 +28,7 @@ export interface PrefillEmitidos {
     fecha?: string
 }
 
-const hoyISO = () => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
+const hoyISO = () => todayArgentina()
 
 const filaVacia = (fecha?: string): FilaCheque => ({
     banco: "",
@@ -154,8 +152,8 @@ export function ChequesEmitidosDialog({
                                 </div>
                                 <div>
                                     <Label className="text-[10px]">Fecha de pago *</Label>
-                                    <Input className="h-8 font-mono text-xs" type="date" value={f.fecha_vencimiento}
-                                        onChange={(e) => setFila(i, { fecha_vencimiento: e.target.value })} />
+                                    <FechaInput className="h-8 text-xs" value={f.fecha_vencimiento}
+                                        onChange={(iso) => setFila(i, { fecha_vencimiento: iso })} />
                                 </div>
                                 <div>
                                     <Label className="text-[10px]">Tipo</Label>

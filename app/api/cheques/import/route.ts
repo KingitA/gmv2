@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { todayArgentina } from "@/lib/utils"
 
 type Cartera = "BLANCO" | "NEGRO" | "ECHEQ"
 
@@ -115,7 +116,7 @@ export async function POST(request: Request) {
           .from("cheques")
           .update({
             estado: "COBRADO",
-            observaciones: `Baja por sincronización Excel ${new Date().toISOString().slice(0, 10)}`,
+            observaciones: `Baja por sincronización Excel ${todayArgentina()}`,
           })
           .in("id", idsBaja)
         if (errBaja) throw errBaja

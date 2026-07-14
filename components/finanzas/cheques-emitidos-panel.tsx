@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { CheckCircle2, Loader2, PenLine, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog } from "./cheques-emitidos-dialog"
+import { FechaInput } from "./fecha-input"
 
 export interface ChequeEmitido {
     id: string
@@ -18,10 +19,7 @@ export interface ChequeEmitido {
     proveedor_nombre?: string | null
 }
 
-const hoyISO = () => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
+const hoyISO = () => todayArgentina()
 
 const mas30 = (iso: string) => {
     const d = new Date(iso + "T00:00:00")
@@ -128,11 +126,10 @@ export function ChequesEmitidosPanel({
                                     </span>
                                     <span className="font-mono text-sm font-bold">{formatCurrency(Number(c.monto))}</span>
                                     <span className="flex items-center gap-1">
-                                        <input
-                                            type="date"
+                                        <FechaInput
                                             value={fechas[c.id] || hoy}
-                                            onChange={(e) => setFechas((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                                            className="rounded border border-slate-200 px-1 py-0.5 font-mono text-[10px]"
+                                            onChange={(iso) => setFechas((prev) => ({ ...prev, [c.id]: iso || hoy }))}
+                                            className="h-6 w-[92px] px-1 py-0.5 text-[10px]"
                                         />
                                         <Button
                                             size="sm"

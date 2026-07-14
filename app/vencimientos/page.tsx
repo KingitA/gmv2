@@ -19,7 +19,7 @@ import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import Link from "next/link"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, todayArgentina } from "@/lib/utils"
 
 const TIPOS_VENCIMIENTO = [
     { value: "factura", label: "Factura" },
@@ -66,7 +66,7 @@ export default function VencimientosPage() {
         tipo: "factura",
         concepto: "",
         monto: 0,
-        fecha_vencimiento: new Date().toISOString().split("T")[0],
+        fecha_vencimiento: todayArgentina(),
         recurrencia: "",
         recurrencia_hasta: "",
         observaciones: "",
@@ -154,7 +154,7 @@ export default function VencimientosPage() {
             tipo: "factura",
             concepto: "",
             monto: 0,
-            fecha_vencimiento: new Date().toISOString().split("T")[0],
+            fecha_vencimiento: todayArgentina(),
             recurrencia: "",
             recurrencia_hasta: "",
             observaciones: "",
@@ -417,7 +417,7 @@ export default function VencimientosPage() {
                                                     </Badge>
                                                 </TableCell>
                                                 <TableCell className="text-muted-foreground">
-                                                    {v.proveedores?.sigla || v.proveedores?.nombre || "—"}
+                                                    {v.proveedores?.nombre || "—"}
                                                 </TableCell>
                                                 <TableCell className="max-w-[250px] truncate">{v.concepto}</TableCell>
                                                 <TableCell className="text-right font-medium">
