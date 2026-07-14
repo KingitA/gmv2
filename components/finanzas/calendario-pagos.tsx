@@ -84,6 +84,7 @@ export function CalendarioPagos({
     const [formasActivas, setFormasActivas] = useState<Set<string>>(new Set(Object.keys(FORMAS)))
     const [filtroModalidad, setFiltroModalidad] = useState<string>("todas")
     const [verCheques, setVerCheques] = useState(true)
+    const [verEmitidos, setVerEmitidos] = useState(true)
     const [verSaldados, setVerSaldados] = useState(false)
 
     // Selección (cinta)
@@ -169,20 +170,18 @@ export function CalendarioPagos({
 
     const emitidosPorFecha = useMemo(() => {
         const m: Record<string, ChequeCartera[]> = {}
-        if (showCheques && verCheques) emitidos.forEach((c) => { (m[c.fecha_vencimiento] ||= []).push(c) })
+        if (showCheques && verEmitidos) emitidos.forEach((c) => { (m[c.fecha_vencimiento] ||= []).push(c) })
         return m
-    }, [emitidos, showCheques, verCheques])
+    }, [emitidos, showCheques, verEmitidos])
 
     const meses = useMemo(() => {
         const set = new Set<string>()
         visibles.forEach((v) => set.add(v.fecha_vencimiento.slice(0, 7)))
         saldados.forEach((v) => set.add(v.fecha_vencimiento.slice(0, 7)))
-        if (showCheques && verCheques) {
-            cheques.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
-            emitidos.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
-        }
+        if (showCheques && verCheques) cheques.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
+        if (showCheques && verEmitidos) emitidos.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
         return [...set].sort().map((s) => ({ y: Number(s.slice(0, 4)), m: Number(s.slice(5, 7)) - 1 }))
-    }, [visibles, saldados, cheques, emitidos, showCheques, verCheques])
+    }, [visibles, saldados, cheques, emitidos, showCheques, verCheques, verEmitidos])
 
     const seleccionados = useMemo(
         () => vencimientos.filter((v) => seleccion.has(v.id)),
@@ -352,13 +351,22 @@ export function CalendarioPagos({
                     Saldados
                 </button>
                 {showCheques && (
-                    <button
-                        onClick={() => setVerCheques((v) => !v)}
-                        className={`flex items-center gap-1.5 rounded-full border border-emerald-600 px-3 py-1 text-xs font-semibold text-emerald-700 transition-all ${verCheques ? "bg-emerald-50" : "opacity-40 line-through"}`}
-                    >
-                        <span className="h-2 w-2 rounded-sm bg-emerald-600" />
-                        Cheques en cartera
-                    </button>
+                    <>
+                        <button
+                            onClick={() => setVerCheques((v) => !v)}
+                            className={`flex items-center gap-1.5 rounded-full border border-emerald-600 px-3 py-1 text-xs font-semibold text-emerald-700 transition-all ${verCheques ? "bg-emerald-50" : "opacity-40 line-through"}`}
+                        >
+                            <span className="h-2 w-2 rounded-sm bg-emerald-600" />
+                            Cheques en cartera
+                        </button>
+                        <button
+                            onClick={() => setVerEmitidos((v) => !v)}
+                            className={`flex items-center gap-1.5 rounded-full border border-red-500 px-3 py-1 text-xs font-semibold text-red-600 transition-all ${verEmitidos ? "bg-red-50" : "opacity-40 line-through"}`}
+                        >
+                            <span className="h-2 w-2 rounded-sm bg-red-500" />
+                            Cheques emitidos
+                        </button>
+                    </>
                 )}
                 <div className="ml-auto">
                     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
