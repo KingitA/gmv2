@@ -79,6 +79,8 @@ export function CalendarioPagos({
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [prefillEmitidos, setPrefillEmitidos] = useState<PrefillEmitidos | null>(null)
+    const [chequeChoice, setChequeChoice] = useState<Vencimiento | null>(null)
+    const [mesesSaldadosAbiertos, setMesesSaldadosAbiertos] = useState<Set<string>>(new Set())
 
     // Filtros
     const [formasActivas, setFormasActivas] = useState<Set<string>>(new Set(Object.keys(FORMAS)))
@@ -144,11 +146,31 @@ export function CalendarioPagos({
         [vencimientos, pasaFiltros]
     )
 
-    // Saldados (solo visualización, con el filtro activado)
+    // Saldados (solo visualización, con el filtro activado). Los del mes
+    // vigente (y futuros) van al calendario; los de meses anteriores a una
+    // lista desplegable por mes para no inflar el calendario con historia.
+    const mesActual = hoyISO().slice(0, 7)
     const saldados = useMemo(
         () => (verSaldados ? vencimientos.filter((v) => v.estado === "pagado" && pasaFiltros(v)) : []),
         [vencimientos, pasaFiltros, verSaldados]
     )
+    const saldadosCalendario = useMemo(
+        () => saldados.filter((v) => v.fecha_vencimiento.slice(0, 7) >= mesActual),
+        [saldados, mesActual]
+    )
+    const saldadosAnteriores = useMemo(() => {
+        const porMes: Record<string, Vencimiento[]> = {}
+        saldados
+            .filter((v) => v.fecha_vencimiento.slice(0, 7) < mesActual)
+            .forEach((v) => { (porMes[v.fecha_vencimiento.slice(0, 7)] ||= []).push(v) })
+        return Object.entries(porMes)
+            .sort((a, b) => b[0].localeCompare(a[0]))
+            .map(([mes, items]) => ({
+                mes,
+                items: items.sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento)),
+                total: items.reduce((s, v) => s + Number(v.monto), 0),
+            }))
+    }, [saldados, mesActual])
 
     const porFecha = useMemo(() => {
         const m: Record<string, Vencimiento[]> = {}
@@ -158,9 +180,9 @@ export function CalendarioPagos({
 
     const saldadosPorFecha = useMemo(() => {
         const m: Record<string, Vencimiento[]> = {}
-        saldados.forEach((v) => { (m[v.fecha_vencimiento] ||= []).push(v) })
+        saldadosCalendario.forEach((v) => { (m[v.fecha_vencimiento] ||= []).push(v) })
         return m
-    }, [saldados])
+    }, [saldadosCalendario])
 
     const chequesPorFecha = useMemo(() => {
         const m: Record<string, ChequeCartera[]> = {}
@@ -177,11 +199,11 @@ export function CalendarioPagos({
     const meses = useMemo(() => {
         const set = new Set<string>()
         visibles.forEach((v) => set.add(v.fecha_vencimiento.slice(0, 7)))
-        saldados.forEach((v) => set.add(v.fecha_vencimiento.slice(0, 7)))
+        saldadosCalendario.forEach((v) => set.add(v.fecha_vencimiento.slice(0, 7)))
         if (showCheques && verCheques) cheques.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
         if (showCheques && verEmitidos) emitidos.forEach((c) => set.add(c.fecha_vencimiento.slice(0, 7)))
         return [...set].sort().map((s) => ({ y: Number(s.slice(0, 4)), m: Number(s.slice(5, 7)) - 1 }))
-    }, [visibles, saldados, cheques, emitidos, showCheques, verCheques, verEmitidos])
+    }, [visibles, saldadosCalendario, cheques, emitidos, showCheques, verCheques, verEmitidos])
 
     const seleccionados = useMemo(
         () => vencimientos.filter((v) => seleccion.has(v.id)),
@@ -236,16 +258,9 @@ export function CalendarioPagos({
             })
             await load()
             onDataChanged?.()
-            // Pago con cheque: ofrecer registrar los cheques emitidos
+            // Pago con cheque: preguntar si fue con cheques de terceros o propios
             if (vencCheque && vencCheque.forma_pago === "cheque" && !fallidos) {
-                setPrefillEmitidos({
-                    proveedor: vencCheque.proveedores
-                        ? { id: vencCheque.proveedores.id, nombre: vencCheque.proveedores.nombre }
-                        : null,
-                    vencimiento_id: vencCheque.id,
-                    monto: Number(vencCheque.monto),
-                    fecha: vencCheque.fecha_validez || vencCheque.fecha_vencimiento,
-                })
+                setChequeChoice(vencCheque)
             }
         } finally {
             setSaving(false)
@@ -696,6 +711,59 @@ export function CalendarioPagos({
                             )
                         })
                     )}
+
+                    {/* Saldados de meses anteriores (desplegables) */}
+                    {verSaldados && saldadosAnteriores.length > 0 && (
+                        <section className="rounded-xl border bg-white p-4 shadow-sm">
+                            <h2 className="mb-2 px-1 text-base font-bold text-slate-600">Saldados de meses anteriores</h2>
+                            <div className="space-y-1.5">
+                                {saldadosAnteriores.map(({ mes, items, total }) => {
+                                    const abierto = mesesSaldadosAbiertos.has(mes)
+                                    const [y, m] = mes.split("-").map(Number)
+                                    return (
+                                        <div key={mes} className="rounded-lg border border-slate-200">
+                                            <button
+                                                onClick={() =>
+                                                    setMesesSaldadosAbiertos((prev) => {
+                                                        const n = new Set(prev)
+                                                        n.has(mes) ? n.delete(mes) : n.add(mes)
+                                                        return n
+                                                    })
+                                                }
+                                                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-slate-50"
+                                            >
+                                                <span className="flex items-center gap-2 font-semibold text-slate-700">
+                                                    <span className={`transition-transform ${abierto ? "rotate-90" : ""}`}>▸</span>
+                                                    {MES_NOMBRES[m - 1]} {y}
+                                                    <span className="font-normal text-muted-foreground">({items.length} pagos)</span>
+                                                </span>
+                                                <span className="font-mono text-sm font-bold text-slate-600">{formatCurrency(total)}</span>
+                                            </button>
+                                            {abierto && (
+                                                <div className="space-y-0.5 border-t border-slate-100 px-3 py-2">
+                                                    {items.map((v) => (
+                                                        <div key={v.id} className="group/sal flex items-baseline gap-2 rounded px-1 py-0.5 text-xs hover:bg-slate-50">
+                                                            <span className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: FORMAS[formaDe(v)].color }} />
+                                                            <span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">{fmtCorta(v.fecha_vencimiento)}</span>
+                                                            <span className="min-w-0 flex-1 truncate text-slate-600">{v.proveedores?.nombre || v.concepto}</span>
+                                                            <span className="font-mono font-medium text-slate-600">{formatCurrency(Number(v.monto))}</span>
+                                                            <button
+                                                                onClick={() => volverAPendiente(v.id)}
+                                                                title="Volver a pendiente"
+                                                                className="hidden rounded px-1 text-slate-400 hover:bg-slate-600 hover:text-white group-hover/sal:block"
+                                                            >
+                                                                ↩
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </section>
+                    )}
                 </div>
 
                 {/* Cinta de pagos */}
@@ -790,6 +858,57 @@ export function CalendarioPagos({
                     </div>
                 </div>
             </div>
+
+            {/* Pago con cheque: ¿terceros o propios? */}
+            <Dialog open={!!chequeChoice} onOpenChange={(o) => { if (!o) setChequeChoice(null) }}>
+                <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>¿Con qué cheques pagaste?</DialogTitle>
+                    </DialogHeader>
+                    {chequeChoice && (
+                        <p className="text-sm text-muted-foreground">
+                            {chequeChoice.proveedores?.nombre || chequeChoice.concepto} · <b className="font-mono">{formatCurrency(Number(chequeChoice.monto))}</b>
+                        </p>
+                    )}
+                    <div className="grid grid-cols-1 gap-2">
+                        <Button
+                            variant="outline"
+                            className="h-auto justify-start py-3 text-left"
+                            onClick={() => setChequeChoice(null)}
+                        >
+                            <span>
+                                <span className="block font-semibold">Cheques de terceros</span>
+                                <span className="block text-xs font-normal text-muted-foreground">
+                                    De la cartera — no hace falta cargar nada más.
+                                </span>
+                            </span>
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="h-auto justify-start py-3 text-left"
+                            onClick={() => {
+                                const v = chequeChoice!
+                                setChequeChoice(null)
+                                setPrefillEmitidos({
+                                    proveedor: v.proveedores
+                                        ? { id: v.proveedores.id, nombre: v.proveedores.nombre }
+                                        : null,
+                                    vencimiento_id: v.id,
+                                    monto: Number(v.monto),
+                                    fecha: v.fecha_validez || v.fecha_vencimiento,
+                                })
+                            }}
+                        >
+                            <span>
+                                <span className="block font-semibold">Cheques propios</span>
+                                <span className="block text-xs font-normal text-muted-foreground">
+                                    Emitidos por vos — cargás número, banco y fecha de pago.
+                                </span>
+                            </span>
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <ChequesEmitidosDialog
                 open={!!prefillEmitidos}
