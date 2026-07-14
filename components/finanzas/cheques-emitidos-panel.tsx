@@ -129,7 +129,8 @@ export function ChequesEmitidosPanel({
                                         <FechaInput
                                             value={fechas[c.id] || hoy}
                                             onChange={(iso) => setFechas((prev) => ({ ...prev, [c.id]: iso || hoy }))}
-                                            className="h-6 w-[92px] px-1 py-0.5 text-[10px]"
+                                            containerClassName="w-[110px]"
+                                            className="h-6 px-1 py-0.5 text-[10px]"
                                         />
                                         <Button
                                             size="sm"

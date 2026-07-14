@@ -394,7 +394,8 @@ export default function FinanzasPage() {
               <FechaInput
                 value={dispoFecha}
                 onChange={(iso) => setDispoFecha(iso || today())}
-                className="w-[130px] rounded-lg border-slate-300 px-3 py-1.5"
+                containerClassName="w-[150px]"
+                className="rounded-lg border-slate-300 px-3 py-1.5"
               />
             </div>
             <div className="flex flex-wrap items-baseline gap-x-7 gap-y-2">
