@@ -106,7 +106,7 @@ export default function FinanzasPage() {
   // Diálogos
   const [cuentaEdit, setCuentaEdit] = useState<CuentaAjustable | null>(null)
   const [importOpen, setImportOpen] = useState(false)
-  const [importCartera, setImportCartera] = useState<"BLANCO" | "NEGRO" | "ECHEQ">("BLANCO")
+  const [importCartera, setImportCartera] = useState<"AUTO" | "BLANCO" | "NEGRO" | "ECHEQ">("AUTO")
   const [dispoFecha, setDispoFecha] = useState(today())
   const [calKey, setCalKey] = useState(0)
 
@@ -354,7 +354,12 @@ export default function FinanzasPage() {
               </div>
               <span className="text-sm font-semibold text-slate-600">{fmt(chequesTotal)}</span>
             </div>
-            <span className="text-xs text-slate-400">Se actualizan importando los Excel de cada cartera</span>
+            <button
+              onClick={() => { setImportCartera("AUTO"); setImportOpen(true) }}
+              className="flex items-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 transition-colors"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5" /> Importar Excel único (detecta E / - / /)
+            </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {(Object.entries(carteras) as Array<[string, { label: string; items: typeof cheques }]>).map(([k, cart]) => {

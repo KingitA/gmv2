@@ -13,11 +13,19 @@ import { FileSpreadsheet, Loader2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 type Cartera = "BLANCO" | "NEGRO" | "ECHEQ"
+type ModoCartera = "AUTO" | Cartera
 
-const CARTERAS: Record<Cartera, string> = {
+const MODOS: Record<ModoCartera, string> = {
+    AUTO: "Detección automática (E / - / /)",
     BLANCO: "Cheques blanco",
     NEGRO: "Cheques negro",
     ECHEQ: "Echeqs",
+}
+
+const CARTERA_LABEL: Record<Cartera, { label: string; className: string }> = {
+    BLANCO: { label: "Blanco", className: "bg-slate-100 text-slate-700" },
+    NEGRO: { label: "Negro", className: "bg-slate-800 text-white" },
+    ECHEQ: { label: "Echeq", className: "bg-blue-100 text-blue-700" },
 }
 
 interface Fila {
@@ -25,26 +33,53 @@ interface Fila {
     monto: number
     fecha_vencimiento: string
     banco?: string
+    cartera: Cartera
+    sinMarca: boolean
+}
+
+/**
+ * Clasifica un número de cheque según la convención del sistema externo:
+ *   empieza con E            → echeq
+ *   empieza o termina con -  → negro
+ *   empieza o termina con /  → blanco
+ * Devuelve el número limpio (sin marcadores) y la cartera detectada.
+ */
+function detectarCartera(raw: string): { numero: string; cartera: Cartera; sinMarca: boolean } {
+    const t = raw.trim()
+    let cartera: Cartera | null = null
+    if (/^[eE]\d/.test(t)) cartera = "ECHEQ"
+    else if (/^-|-$/.test(t)) cartera = "NEGRO"
+    else if (/^\/|\/$/.test(t)) cartera = "BLANCO"
+    let numero = t.replace(/^[eE](?=\d)/, "").replace(/^[/\-]+/, "").replace(/[/\-]+$/, "").trim()
+    return { numero, cartera: cartera ?? "BLANCO", sinMarca: cartera === null }
 }
 
 /** Detecta columnas por nombre de header (flexible) y normaliza filas. */
-function parseSheet(data: any[][]): { filas: Fila[]; errores: string[] } {
+function parseSheet(data: any[][], modo: ModoCartera): { filas: Fila[]; errores: string[] } {
     const errores: string[] = []
     if (!data.length) return { filas: [], errores: ["Archivo vacío"] }
 
     const norm = (s: any) => String(s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
     const headers = data[0].map(norm)
-    const idxDe = (...cands: string[]) => headers.findIndex((h) => cands.some((c) => h.includes(c)))
+    const usados = new Set<number>()
+    const idxDe = (...cands: string[]) => {
+        for (const c of cands) {
+            const i = headers.findIndex((h, idx) => h.includes(c) && !usados.has(idx))
+            if (i >= 0) { usados.add(i); return i }
+        }
+        return -1
+    }
 
-    const iFecha = idxDe("venc", "fecha")
-    const iMonto = idxDe("monto", "importe", "valor")
+    // Orden importa: primero fecha (captura "fech.valor"), después monto/importe
+    const iFecha = idxDe("venc", "fech", "valor")
     const iNumero = idxDe("numero", "nro", "cheque", "n°")
+    const iMonto = idxDe("monto", "importe", "valor")
     const iBanco = idxDe("banco")
 
     if (iFecha < 0 || iMonto < 0 || iNumero < 0) {
         return {
             filas: [],
-            errores: [`No se detectaron las columnas. Se esperan headers con "fecha"/"vencimiento", "monto"/"importe" y "numero"/"nro". Encontrados: ${data[0].join(", ")}`],
+            errores: [`No se detectaron las columnas. Se esperan headers con fecha ("fecha"/"vencimiento"/"fech.valor"), monto ("monto"/"importe") y número ("numero"/"nro"/"cheque"). Encontrados: ${data[0].join(", ")}`],
         }
     }
 
@@ -53,7 +88,6 @@ function parseSheet(data: any[][]): { filas: Fila[]; errores: string[] } {
             return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`
         }
         if (typeof v === "number") {
-            // Serial de Excel
             const d = XLSX.SSF.parse_date_code(v)
             if (d) return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`
             return null
@@ -84,16 +118,23 @@ function parseSheet(data: any[][]): { filas: Fila[]; errores: string[] } {
         if (vacia) return
         const fecha = toISO(row[iFecha])
         const monto = toMonto(row[iMonto])
-        const numero = String(row[iNumero] ?? "").trim()
-        if (!fecha || !monto || !numero) {
+        const rawNumero = String(row[iNumero] ?? "").trim()
+        if (!fecha || !monto || !rawNumero) {
             errores.push(`Fila ${i + 2}: ${!fecha ? "fecha inválida" : !monto ? "monto inválido" : "sin número"}`)
             return
         }
+        const det = detectarCartera(rawNumero)
+        if (!det.numero) {
+            errores.push(`Fila ${i + 2}: número inválido ("${rawNumero}")`)
+            return
+        }
         filas.push({
-            numero,
+            numero: det.numero,
             monto,
             fecha_vencimiento: fecha,
             banco: iBanco >= 0 ? String(row[iBanco] ?? "").trim() || undefined : undefined,
+            cartera: modo === "AUTO" ? det.cartera : modo,
+            sinMarca: modo === "AUTO" ? det.sinMarca : false,
         })
     })
     return { filas, errores }
@@ -102,21 +143,30 @@ function parseSheet(data: any[][]): { filas: Fila[]; errores: string[] } {
 export function ImportChequesDialog({
     open,
     onOpenChange,
-    carteraInicial = "BLANCO",
+    carteraInicial = "AUTO",
     onImported,
 }: {
     open: boolean
     onOpenChange: (o: boolean) => void
-    carteraInicial?: Cartera
+    carteraInicial?: ModoCartera
     onImported?: () => void
 }) {
-    const [cartera, setCartera] = useState<Cartera>(carteraInicial)
+    const [modo, setModo] = useState<ModoCartera>(carteraInicial)
     const [filas, setFilas] = useState<Fila[]>([])
     const [errores, setErrores] = useState<string[]>([])
     const [archivo, setArchivo] = useState<string>("")
     const [darBaja, setDarBaja] = useState(false)
     const [saving, setSaving] = useState(false)
     const fileRef = useRef<HTMLInputElement>(null)
+    const [ultimaData, setUltimaData] = useState<any[][] | null>(null)
+
+    function procesar(data: any[][], nombreArchivo: string, m: ModoCartera) {
+        const { filas: f, errores: err } = parseSheet(data, m)
+        setFilas(f)
+        setErrores(err)
+        setArchivo(nombreArchivo)
+        if (!f.length) toast.error("No se pudo leer ningún cheque del archivo")
+    }
 
     async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
         const file = e.target.files?.[0]
@@ -126,16 +176,18 @@ export function ImportChequesDialog({
             const wb = XLSX.read(buffer, { type: "array", cellDates: true })
             const ws = wb.Sheets[wb.SheetNames[0]]
             const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" })
-            const { filas: f, errores: err } = parseSheet(data)
-            setFilas(f)
-            setErrores(err)
-            setArchivo(file.name)
-            if (!f.length) toast.error("No se pudo leer ningún cheque del archivo")
+            setUltimaData(data)
+            procesar(data, file.name, modo)
         } catch (err: any) {
             toast.error(`Error leyendo el archivo: ${err.message}`)
         } finally {
             if (fileRef.current) fileRef.current.value = ""
         }
+    }
+
+    function cambiarModo(m: ModoCartera) {
+        setModo(m)
+        if (ultimaData) procesar(ultimaData, archivo, m)
     }
 
     async function importar() {
@@ -145,15 +197,31 @@ export function ImportChequesDialog({
             const res = await fetch("/api/cheques/import", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ cartera, cheques: filas, dar_baja_faltantes: darBaja }),
+                body: JSON.stringify({
+                    cartera: modo,
+                    cheques: filas.map((f) => ({
+                        numero: f.numero,
+                        monto: f.monto,
+                        fecha_vencimiento: f.fecha_vencimiento,
+                        banco: f.banco,
+                        cartera: f.cartera,
+                    })),
+                    dar_baja_faltantes: darBaja,
+                }),
             })
             const json = await res.json()
             if (!res.ok) throw new Error(json.error || "Error importando cheques")
+            const porCartera = json.por_cartera
+                ? Object.entries(json.por_cartera as Record<string, any>)
+                    .map(([k, r]) => `${CARTERA_LABEL[k as Cartera]?.label ?? k}: ${r.insertados} nuevos`)
+                    .join(" · ")
+                : ""
             toast.success(
-                `${CARTERAS[cartera]}: ${json.insertados} nuevos, ${json.ya_existian} ya existían${json.dados_de_baja ? `, ${json.dados_de_baja} dados de baja` : ""}`
+                `${json.insertados} nuevos, ${json.ya_existian} ya existían${json.dados_de_baja ? `, ${json.dados_de_baja} dados de baja` : ""}${porCartera ? ` (${porCartera})` : ""}`
             )
             setFilas([])
             setArchivo("")
+            setUltimaData(null)
             onOpenChange(false)
             onImported?.()
         } catch (e: any) {
@@ -164,9 +232,13 @@ export function ImportChequesDialog({
     }
 
     const total = filas.reduce((a, f) => a + f.monto, 0)
+    const sinMarca = filas.filter((f) => f.sinMarca).length
+    const resumen = (["BLANCO", "NEGRO", "ECHEQ"] as Cartera[])
+        .map((k) => ({ k, n: filas.filter((f) => f.cartera === k).length }))
+        .filter((r) => r.n > 0)
 
     return (
-        <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) { setFilas([]); setErrores([]); setArchivo("") } }}>
+        <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) { setFilas([]); setErrores([]); setArchivo(""); setUltimaData(null) } }}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
@@ -177,10 +249,10 @@ export function ImportChequesDialog({
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <Label>Cartera</Label>
-                            <Select value={cartera} onValueChange={(v) => setCartera(v as Cartera)}>
+                            <Select value={modo} onValueChange={(v) => cambiarModo(v as ModoCartera)}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {Object.entries(CARTERAS).map(([k, l]) => (
+                                    {Object.entries(MODOS).map(([k, l]) => (
                                         <SelectItem key={k} value={k}>{l}</SelectItem>
                                     ))}
                                 </SelectContent>
@@ -201,7 +273,8 @@ export function ImportChequesDialog({
                         </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        Columnas esperadas (por nombre, en cualquier orden): <b>fecha de vencimiento</b>, <b>monto</b>, <b>número</b>. Banco es opcional.
+                        Columnas esperadas: <b>fecha valor / vencimiento</b>, <b>número</b> y <b>monto / importe</b> (banco opcional).
+                        {modo === "AUTO" && <> En detección automática el número define la cartera: <b>E…</b> = echeq · <b>-</b> al inicio o final = negro · <b>/</b> al inicio o final = blanco. Los marcadores se quitan del número al guardar.</>}
                     </p>
 
                     {errores.length > 0 && (
@@ -218,7 +291,7 @@ export function ImportChequesDialog({
                                         <TableRow>
                                             <TableHead className="text-xs">Vencimiento</TableHead>
                                             <TableHead className="text-xs">Número</TableHead>
-                                            <TableHead className="text-xs">Banco</TableHead>
+                                            <TableHead className="text-xs">Cartera</TableHead>
                                             <TableHead className="text-right text-xs">Monto</TableHead>
                                         </TableRow>
                                     </TableHeader>
@@ -227,15 +300,26 @@ export function ImportChequesDialog({
                                             <TableRow key={i}>
                                                 <TableCell className="py-1 font-mono text-xs">{f.fecha_vencimiento}</TableCell>
                                                 <TableCell className="py-1 font-mono text-xs">{f.numero}</TableCell>
-                                                <TableCell className="py-1 text-xs">{f.banco || "S/D"}</TableCell>
+                                                <TableCell className="py-1 text-xs">
+                                                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${CARTERA_LABEL[f.cartera].className}`}>
+                                                        {CARTERA_LABEL[f.cartera].label}
+                                                    </span>
+                                                    {f.sinMarca && <span className="ml-1 text-[10px] text-amber-600" title="Número sin marcador E / - / — se asume blanco">⚠ sin marca</span>}
+                                                </TableCell>
                                                 <TableCell className="py-1 text-right font-mono text-xs">{formatCurrency(f.monto)}</TableCell>
                                             </TableRow>
                                         ))}
                                     </TableBody>
                                 </Table>
                             </div>
-                            <div className="flex items-center justify-between text-sm">
-                                <span className="text-muted-foreground">{filas.length} cheques</span>
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                                <span className="text-muted-foreground">
+                                    {filas.length} cheques
+                                    {resumen.length > 0 && (
+                                        <> · {resumen.map((r) => `${r.n} ${CARTERA_LABEL[r.k].label.toLowerCase()}`).join(" · ")}</>
+                                    )}
+                                    {sinMarca > 0 && <span className="ml-1 text-amber-600">({sinMarca} sin marca → blanco)</span>}
+                                </span>
                                 <span className="font-mono font-bold">{formatCurrency(total)}</span>
                             </div>
                             <label className="flex items-start gap-2 rounded-lg border p-3 cursor-pointer">
@@ -243,7 +327,7 @@ export function ImportChequesDialog({
                                 <span className="text-sm">
                                     <span className="font-medium">Dar de baja los que no figuran en el Excel</span>
                                     <span className="block text-xs text-muted-foreground">
-                                        Los cheques de esta cartera que estén EN CARTERA en el sistema pero no en el archivo se marcan como COBRADOS. Usalo solo si el Excel es la foto completa de la cartera.
+                                        Los cheques EN CARTERA {modo === "AUTO" ? "de las tres carteras" : "de esta cartera"} que no estén en el archivo se marcan como COBRADOS. Usalo solo si el Excel es la foto completa.
                                     </span>
                                 </span>
                             </label>
