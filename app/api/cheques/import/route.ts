@@ -68,47 +68,75 @@ export async function POST(request: Request) {
     }
 
     const supabase = createAdminClient()
-    const carteras: Cartera[] =
-      carteraGlobal === "AUTO"
-        ? ([...new Set(limpias.map((c) => c.cartera))] as Cartera[])
-        : [carteraGlobal as Cartera]
 
+    // Clave lógica sin banco (los imports usan banco "S/D"; un mismo cheque
+    // cargado por cobranza puede tener banco real — no hay que duplicarlo)
     const keyOf = (c: { numero: string; monto: number | string; fecha_vencimiento: string }) =>
       `${String(c.numero).trim()}|${Number(c.monto)}|${c.fecha_vencimiento}`
 
-    const resumen: Record<string, { insertados: number; ya_existian: number; dados_de_baja: number }> = {}
+    // Deduplicar filas repetidas dentro del mismo Excel (violarían la unique key)
+    const vistos = new Set<string>()
+    let duplicadosExcel = 0
+    const unicas = limpias.filter((c) => {
+      const k = keyOf(c)
+      if (vistos.has(k)) { duplicadosExcel++; return false }
+      vistos.add(k)
+      return true
+    })
+
+    // Todos los cheques existentes con esos números, sin importar estado/cartera
+    const numeros = [...new Set(unicas.map((c) => c.numero))]
+    const existentes = new Map<string, { id: string; estado: string; tipo: string }>()
+    for (let i = 0; i < numeros.length; i += 200) {
+      const { data, error } = await supabase
+        .from("cheques")
+        .select("id, numero, monto, fecha_vencimiento, estado, tipo")
+        .in("numero", numeros.slice(i, i + 200))
+      if (error) throw error
+      for (const c of data || []) existentes.set(keyOf(c), { id: c.id, estado: c.estado, tipo: c.tipo })
+    }
+
+    const carteras: Cartera[] =
+      carteraGlobal === "AUTO"
+        ? ([...new Set(unicas.map((c) => c.cartera))] as Cartera[])
+        : [carteraGlobal as Cartera]
+
+    const resumen: Record<string, { insertados: number; ya_existian: number; reactivados: number; dados_de_baja: number; conflictos: number }> = {}
 
     for (const cartera of carteras) {
       const color = cartera === "NEGRO" ? "NEGRO" : "BLANCO"
       const esEcheq = cartera === "ECHEQ"
-      const delGrupo = limpias.filter((c) => c.cartera === cartera)
+      const delGrupo = unicas.filter((c) => c.cartera === cartera)
 
-      // Cartera actual en el sistema (misma combinación color + es_echeq)
-      const { data: actuales, error: errActuales } = await supabase
-        .from("cheques")
-        .select("id, numero, monto, fecha_vencimiento, banco")
-        .eq("estado", "EN_CARTERA")
-        .eq("tipo", "TERCERO")
-        .eq("color", color)
-        .eq("es_echeq", esEcheq)
-      if (errActuales) throw errActuales
+      const nuevos: any[] = []
+      const idsReactivar: string[] = []
+      let yaExistian = 0
+      let conflictos = 0
 
-      const existentes = new Set((actuales || []).map(keyOf))
-      const enExcel = new Set(delGrupo.map(keyOf))
-
-      const nuevos = delGrupo
-        .filter((c) => !existentes.has(keyOf(c)))
-        .map((c) => ({
-          tipo: "TERCERO",
-          estado: "EN_CARTERA",
-          banco: c.banco,
-          numero: c.numero,
-          monto: c.monto,
-          fecha_vencimiento: c.fecha_vencimiento,
-          color,
-          es_echeq: esEcheq,
-          observaciones: `Importado por Excel (cartera ${cartera.toLowerCase()})`,
-        }))
+      for (const c of delGrupo) {
+        const ex = existentes.get(keyOf(c))
+        if (!ex) {
+          nuevos.push({
+            tipo: "TERCERO",
+            estado: "EN_CARTERA",
+            banco: c.banco,
+            numero: c.numero,
+            monto: c.monto,
+            fecha_vencimiento: c.fecha_vencimiento,
+            color,
+            es_echeq: esEcheq,
+            observaciones: `Importado por Excel (cartera ${cartera.toLowerCase()})`,
+          })
+        } else if (ex.estado === "EN_CARTERA") {
+          yaExistian++
+        } else if (ex.estado === "COBRADO" && ex.tipo === "TERCERO") {
+          // Sigue figurando en el Excel: se lo dio de baja de más → reactivar
+          idsReactivar.push(ex.id)
+        } else {
+          // DEPOSITADO / ENTREGADO / RECHAZADO / propio: no tocar, solo avisar
+          conflictos++
+        }
+      }
 
       let insertados = 0
       if (nuevos.length) {
@@ -119,9 +147,36 @@ export async function POST(request: Request) {
         insertados = count ?? nuevos.length
       }
 
+      let reactivados = 0
+      if (idsReactivar.length) {
+        const { error: errReact } = await supabase
+          .from("cheques")
+          .update({
+            estado: "EN_CARTERA",
+            color,
+            es_echeq: esEcheq,
+            observaciones: `Reactivado por Excel ${todayArgentina()} (cartera ${cartera.toLowerCase()})`,
+          })
+          .in("id", idsReactivar)
+        if (errReact) throw errReact
+        reactivados = idsReactivar.length
+      }
+
       let dadosDeBaja = 0
       if (darBaja) {
-        const idsBaja = (actuales || []).filter((c) => !enExcel.has(keyOf(c))).map((c) => c.id)
+        // EN_CARTERA de esta cartera que no figuran en el Excel
+        const { data: actuales, error: errActuales } = await supabase
+          .from("cheques")
+          .select("id, numero, monto, fecha_vencimiento")
+          .eq("estado", "EN_CARTERA")
+          .eq("tipo", "TERCERO")
+          .eq("color", color)
+          .eq("es_echeq", esEcheq)
+        if (errActuales) throw errActuales
+        const enExcel = new Set(delGrupo.map(keyOf))
+        const idsBaja = (actuales || [])
+          .filter((c) => !enExcel.has(keyOf(c)) && !idsReactivar.includes(c.id))
+          .map((c) => c.id)
         if (idsBaja.length) {
           const { error: errBaja } = await supabase
             .from("cheques")
@@ -135,17 +190,20 @@ export async function POST(request: Request) {
         }
       }
 
-      resumen[cartera] = { insertados, ya_existian: delGrupo.length - nuevos.length, dados_de_baja: dadosDeBaja }
+      resumen[cartera] = { insertados, ya_existian: yaExistian, reactivados, dados_de_baja: dadosDeBaja, conflictos }
     }
 
-    const tot = (k: "insertados" | "ya_existian" | "dados_de_baja") =>
+    const tot = (k: "insertados" | "ya_existian" | "reactivados" | "dados_de_baja" | "conflictos") =>
       Object.values(resumen).reduce((s, r) => s + r[k], 0)
 
     return NextResponse.json({
       success: true,
       insertados: tot("insertados"),
       ya_existian: tot("ya_existian"),
+      reactivados: tot("reactivados"),
       dados_de_baja: tot("dados_de_baja"),
+      conflictos: tot("conflictos"),
+      duplicados_excel: duplicadosExcel,
       por_cartera: resumen,
       filas_invalidas: invalidas,
     })

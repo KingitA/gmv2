@@ -216,8 +216,15 @@ export function ImportChequesDialog({
                     .map(([k, r]) => `${CARTERA_LABEL[k as Cartera]?.label ?? k}: ${r.insertados} nuevos`)
                     .join(" · ")
                 : ""
+            const extras = [
+                json.reactivados ? `${json.reactivados} reactivados` : "",
+                json.dados_de_baja ? `${json.dados_de_baja} dados de baja` : "",
+                json.duplicados_excel ? `${json.duplicados_excel} repetidos en el Excel` : "",
+                json.conflictos ? `${json.conflictos} con conflicto (depositados/emitidos, sin tocar)` : "",
+            ].filter(Boolean).join(", ")
             toast.success(
-                `${json.insertados} nuevos, ${json.ya_existian} ya existían${json.dados_de_baja ? `, ${json.dados_de_baja} dados de baja` : ""}${porCartera ? ` (${porCartera})` : ""}`
+                `${json.insertados} nuevos, ${json.ya_existian} ya existían${extras ? `, ${extras}` : ""}${porCartera ? ` (${porCartera})` : ""}`,
+                { duration: 8000 }
             )
             setFilas([])
             setArchivo("")
