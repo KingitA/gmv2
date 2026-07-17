@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
-import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2 } from "lucide-react"
+import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
 
@@ -21,6 +21,7 @@ import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanz
 interface Vencimiento {
     id: string
     proveedor_id: string | null
+    tipo: string
     concepto: string
     monto: number
     fecha_vencimiento: string
@@ -29,6 +30,7 @@ interface Vencimiento {
     modalidad: string | null
     descuentos_aplicados: boolean
     estado: string
+    observaciones: string | null
     proveedores?: { id: string; nombre: string; sigla: string | null } | null
 }
 
@@ -81,11 +83,14 @@ export function CalendarioPagos({
     const [prefillEmitidos, setPrefillEmitidos] = useState<PrefillEmitidos | null>(null)
     const [chequeChoice, setChequeChoice] = useState<Vencimiento | null>(null)
     const [mesesSaldadosAbiertos, setMesesSaldadosAbiertos] = useState<Set<string>>(new Set())
+    const [mesesPlegados, setMesesPlegados] = useState<Set<string>>(new Set())
+    const plegadosInicializados = useRef(false)
 
     // Filtros
     const [formasActivas, setFormasActivas] = useState<Set<string>>(new Set(Object.keys(FORMAS)))
     const [filtroModalidad, setFiltroModalidad] = useState<string>("todas")
-    const [verCheques, setVerCheques] = useState(true)
+    // Cartera y saldados arrancan apagados para no ensuciar la vista
+    const [verCheques, setVerCheques] = useState(false)
     const [verEmitidos, setVerEmitidos] = useState(true)
     const [verSaldados, setVerSaldados] = useState(false)
 
@@ -93,8 +98,9 @@ export function CalendarioPagos({
     const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
     const [diasExpandidos, setDiasExpandidos] = useState<Set<string>>(new Set())
 
-    // Alta
+    // Alta / edición
     const [dialogOpen, setDialogOpen] = useState(false)
+    const [editando, setEditando] = useState<Vencimiento | null>(null)
     const [form, setForm] = useState({
         proveedor: null as any,
         tipo: "factura",
@@ -205,6 +211,17 @@ export function CalendarioPagos({
         return [...set].sort().map((s) => ({ y: Number(s.slice(0, 4)), m: Number(s.slice(5, 7)) - 1 }))
     }, [visibles, saldadosCalendario, cheques, emitidos, showCheques, verCheques, verEmitidos])
 
+    // Al cargar por primera vez, los meses anteriores al vigente arrancan plegados
+    useEffect(() => {
+        if (plegadosInicializados.current || meses.length === 0) return
+        plegadosInicializados.current = true
+        setMesesPlegados(new Set(
+            meses
+                .map(({ y, m }) => `${y}-${String(m + 1).padStart(2, "0")}`)
+                .filter((k) => k < mesActual)
+        ))
+    }, [meses, mesActual])
+
     const seleccionados = useMemo(
         () => vencimientos.filter((v) => seleccion.has(v.id)),
         [vencimientos, seleccion]
@@ -285,7 +302,33 @@ export function CalendarioPagos({
         }
     }
 
-    async function crearVencimiento(e: React.FormEvent) {
+    function resetForm() {
+        setEditando(null)
+        setForm({
+            proveedor: null, tipo: "factura", concepto: "", monto: "", forma_pago: "transferencia",
+            fecha_vencimiento: hoyISO(), fecha_validez: "", modalidad: "deposito",
+            descuentos_aplicados: false, observaciones: "",
+        })
+    }
+
+    function abrirEdicion(v: Vencimiento) {
+        setEditando(v)
+        setForm({
+            proveedor: v.proveedores ? { id: v.proveedores.id, nombre: v.proveedores.nombre } : null,
+            tipo: v.tipo || "factura",
+            concepto: v.concepto || "",
+            monto: String(Number(v.monto)),
+            forma_pago: v.forma_pago || "transferencia",
+            fecha_vencimiento: v.fecha_vencimiento,
+            fecha_validez: v.fecha_validez || "",
+            modalidad: v.modalidad || "deposito",
+            descuentos_aplicados: !!v.descuentos_aplicados,
+            observaciones: v.observaciones || "",
+        })
+        setDialogOpen(true)
+    }
+
+    async function guardarVencimiento(e: React.FormEvent) {
         e.preventDefault()
         const monto = parseFloat(form.monto.replace(/\./g, "").replace(",", "."))
         if (!monto || monto <= 0) { toast.error("Monto inválido"); return }
@@ -294,34 +337,31 @@ export function CalendarioPagos({
         if (!form.fecha_vencimiento) { toast.error("Fecha de pago inválida (dd/mm/aaaa)"); return }
         setSaving(true)
         try {
+            const payload = {
+                proveedor_id: form.proveedor?.id || null,
+                tipo: form.tipo,
+                concepto,
+                monto,
+                fecha_vencimiento: form.fecha_vencimiento,
+                fecha_validez: form.fecha_validez || null,
+                forma_pago: form.forma_pago,
+                modalidad: form.modalidad,
+                descuentos_aplicados: form.descuentos_aplicados,
+                observaciones: form.observaciones || null,
+            }
             const res = await fetch("/api/vencimientos", {
-                method: "POST",
+                method: editando ? "PUT" : "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    proveedor_id: form.proveedor?.id || null,
-                    tipo: form.tipo,
-                    concepto,
-                    monto,
-                    fecha_vencimiento: form.fecha_vencimiento,
-                    fecha_validez: form.fecha_validez || null,
-                    forma_pago: form.forma_pago,
-                    modalidad: form.modalidad,
-                    descuentos_aplicados: form.descuentos_aplicados,
-                    observaciones: form.observaciones || null,
-                }),
+                body: JSON.stringify(editando ? { id: editando.id, ...payload } : payload),
             })
             if (!res.ok) {
                 const err = await res.json()
-                toast.error(err.error || "Error al crear el vencimiento")
+                toast.error(err.error || `Error al ${editando ? "modificar" : "crear"} el vencimiento`)
                 return
             }
-            toast.success("Vencimiento creado")
+            toast.success(editando ? "Vencimiento modificado" : "Vencimiento creado")
             setDialogOpen(false)
-            setForm({
-                proveedor: null, tipo: "factura", concepto: "", monto: "", forma_pago: "transferencia",
-                fecha_vencimiento: hoyISO(), fecha_validez: "", modalidad: "deposito",
-                descuentos_aplicados: false, observaciones: "",
-            })
+            resetForm()
             await load()
             onDataChanged?.()
         } finally {
@@ -384,13 +424,13 @@ export function CalendarioPagos({
                     </>
                 )}
                 <div className="ml-auto">
-                    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                    <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm() }}>
                         <DialogTrigger asChild>
                             <Button size="sm" className="gap-1"><Plus className="h-4 w-4" /> Nuevo pago</Button>
                         </DialogTrigger>
                         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                            <DialogHeader><DialogTitle>Nuevo pago / gasto</DialogTitle></DialogHeader>
-                            <form onSubmit={crearVencimiento} className="space-y-4">
+                            <DialogHeader><DialogTitle>{editando ? "Editar pago / gasto" : "Nuevo pago / gasto"}</DialogTitle></DialogHeader>
+                            <form onSubmit={guardarVencimiento} className="space-y-4">
                                 <div className="grid grid-cols-[130px_1fr] gap-4">
                                     <div>
                                         <Label>Tipo *</Label>
@@ -497,9 +537,9 @@ export function CalendarioPagos({
                                     />
                                 </div>
                                 <div className="flex justify-end gap-2">
-                                    <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+                                    <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm() }}>Cancelar</Button>
                                     <Button type="submit" disabled={saving}>
-                                        {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} Crear
+                                        {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} {editando ? "Guardar cambios" : "Crear"}
                                     </Button>
                                 </div>
                             </form>
@@ -533,10 +573,27 @@ export function CalendarioPagos({
                             const startIdx = (first.getDay() + 6) % 7
                             const daysInMonth = new Date(y, m + 1, 0).getDate()
 
+                            const mesKey = `${y}-${String(m + 1).padStart(2, "0")}`
+                            const plegado = mesesPlegados.has(mesKey)
                             return (
-                                <section key={`${y}-${m}`} className="rounded-xl border bg-white p-4 shadow-sm">
-                                    <h2 className="mb-3 flex flex-wrap items-baseline gap-3 px-1 text-base font-bold">
-                                        {MES_NOMBRES[m]} {y}
+                                <section key={mesKey} className="rounded-xl border bg-white p-4 shadow-sm">
+                                    <h2 className={`flex flex-wrap items-center gap-3 px-1 text-base font-bold ${plegado ? "mb-0" : "mb-3"}`}>
+                                        <button
+                                            onClick={() =>
+                                                setMesesPlegados((prev) => {
+                                                    const n = new Set(prev)
+                                                    n.has(mesKey) ? n.delete(mesKey) : n.add(mesKey)
+                                                    return n
+                                                })
+                                            }
+                                            title={plegado ? "Desplegar mes" : "Plegar mes"}
+                                            className="flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-slate-100"
+                                        >
+                                            {plegado
+                                                ? <ChevronRight className="h-4 w-4 text-slate-400" />
+                                                : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                                            {MES_NOMBRES[m]} {y}
+                                        </button>
                                         {min > 0 && (
                                             <span className="text-xs font-semibold text-emerald-600">▲ entra {formatCurrency(min)}</span>
                                         )}
@@ -544,6 +601,7 @@ export function CalendarioPagos({
                                             ▼ sale {formatCurrency(mtot)}
                                         </span>
                                     </h2>
+                                    {!plegado && (<>
                                     <div className="mb-1 grid grid-cols-7 gap-1">
                                         {DOW.map((d) => (
                                             <span key={d} className="pl-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{d}</span>
@@ -609,13 +667,22 @@ export function CalendarioPagos({
                                                                         )}
                                                                     </span>
                                                                 </button>
-                                                                <button
-                                                                    onClick={(ev) => { ev.stopPropagation(); marcarPagados([p.id], p) }}
-                                                                    title="Marcar como pagado"
-                                                                    className="absolute right-0.5 top-0.5 hidden rounded p-0.5 text-emerald-600 hover:bg-emerald-600 hover:text-white group-hover/chip:block"
-                                                                >
-                                                                    <CheckCircle2 className="h-3.5 w-3.5" />
-                                                                </button>
+                                                                <div className="absolute right-0.5 top-0.5 hidden flex-col gap-0.5 group-hover/chip:flex">
+                                                                    <button
+                                                                        onClick={(ev) => { ev.stopPropagation(); marcarPagados([p.id], p) }}
+                                                                        title="Marcar como pagado"
+                                                                        className="rounded bg-white/80 p-0.5 text-emerald-600 hover:bg-emerald-600 hover:text-white"
+                                                                    >
+                                                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(ev) => { ev.stopPropagation(); abrirEdicion(p) }}
+                                                                        title="Editar"
+                                                                        className="rounded bg-white/80 p-0.5 text-slate-500 hover:bg-slate-600 hover:text-white"
+                                                                    >
+                                                                        <Pencil className="h-3.5 w-3.5" />
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                         )
                                                     })}
@@ -707,6 +774,7 @@ export function CalendarioPagos({
                                             )
                                         })}
                                     </div>
+                                    </>)}
                                 </section>
                             )
                         })

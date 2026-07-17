@@ -177,7 +177,8 @@ export default function FinanzasPage() {
   const chequesTotal = cheques.reduce((s, c) => s + Number(c.monto), 0)
 
   // ── Disponibilidad a fecha ────────────────────────────────────────────────
-  const cajaLiquida = cuentas.reduce((s, c) => s + Number(c.saldos?.BLANCO ?? 0) + Number(c.saldos?.NEGRO ?? 0), 0)
+  // Caja líquida = solo las cajas SELECCIONADAS en las tarjetas de arriba
+  const cajaLiquida = CAJAS.filter(c => selected.has(c.key)).reduce((s, c) => s + latestOf(c.key), 0)
   const chequesHasta = cheques.filter(c => c.fecha_vencimiento <= dispoFecha).reduce((s, c) => s + Number(c.monto), 0)
   const pagosHasta = vencs.filter(v => v.fecha_vencimiento <= dispoFecha).reduce((s, v) => s + Number(v.monto), 0)
   // Cheques propios sin debitar: comprometen desde su fecha de pago mientras
@@ -406,7 +407,7 @@ export default function FinanzasPage() {
             </div>
             <div className="flex flex-wrap items-baseline gap-x-7 gap-y-2">
               <div>
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Caja líquida</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Caja líquida (cajas seleccionadas)</div>
                 <div className="font-mono text-base font-bold text-slate-700">{fmt(cajaLiquida)}</div>
               </div>
               <div>
