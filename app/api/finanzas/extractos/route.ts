@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { createHash } from "crypto"
+import { importarExtracto } from "@/lib/finanzas/extractos-import"
 
 /**
  * Extractos bancarios (Fase G1, migración 20260723).
@@ -92,90 +92,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "cuenta_bancaria_id y movimientos son obligatorios" }, { status: 400 })
     }
 
-    const invalidas: number[] = []
-    const limpias: { fecha: string; descripcion: string; monto: number; referencia_externa: string | null }[] = []
-    movimientos.forEach((m: any, i: number) => {
-      const fecha = String(m.fecha ?? "").trim()
-      const monto = Number(m.monto)
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || isNaN(monto) || monto === 0) {
-        invalidas.push(i + 1)
-        return
-      }
-      limpias.push({
-        fecha,
-        descripcion: String(m.descripcion ?? "").trim(),
-        monto,
-        referencia_externa: m.referencia_externa ? String(m.referencia_externa).trim() : null,
-      })
-    })
-    if (!limpias.length) {
-      return NextResponse.json({ error: `Ninguna fila válida (inválidas: ${invalidas.join(", ")})` }, { status: 400 })
-    }
-
-    // Referencia determinística cuando el banco no da una: misma fila del
-    // mismo archivo → mismo hash → el UNIQUE dedupe re-importaciones.
-    const vistos = new Map<string, number>()
-    for (const m of limpias) {
-      if (!m.referencia_externa) {
-        const base = `${m.fecha}|${m.monto.toFixed(2)}|${m.descripcion.toLowerCase()}`
-        const n = (vistos.get(base) ?? 0) + 1
-        vistos.set(base, n)
-        m.referencia_externa = "h:" + createHash("md5").update(`${base}|${n}`).digest("hex").slice(0, 20)
-      }
-    }
-
-    const fechas = limpias.map((m) => m.fecha).sort()
     const supabase = createAdminClient()
-
-    const { data: extracto, error: extErr } = await supabase
-      .from("banco_extractos")
-      .insert({
-        cuenta_bancaria_id,
-        fuente: body.fuente || "excel",
-        periodo_desde: body.periodo_desde || fechas[0],
-        periodo_hasta: body.periodo_hasta || fechas[fechas.length - 1],
-        saldo_inicial: body.saldo_inicial ?? null,
-        saldo_final: body.saldo_final ?? null,
-        importado_por: auth.user?.id ?? null,
-      })
-      .select("id")
-      .single()
-    if (extErr) throw extErr
-
-    // upsert ignorando duplicados (idempotencia por cuenta+referencia)
-    const { data: insertados, error: movErr } = await supabase
-      .from("banco_extractos_movimientos")
-      .upsert(
-        limpias.map((m) => ({
-          extracto_id: extracto.id,
-          cuenta_bancaria_id,
-          fecha: m.fecha,
-          descripcion: m.descripcion || null,
-          referencia_externa: m.referencia_externa,
-          monto: m.monto,
-        })),
-        { onConflict: "cuenta_bancaria_id,referencia_externa", ignoreDuplicates: true }
-      )
-      .select("id")
-    if (movErr) throw movErr
-
-    const nuevos = insertados?.length ?? 0
-    const duplicados = limpias.length - nuevos
-
-    const { data: match, error: matchErr } = await supabase.rpc("extracto_matchear", {
-      p_extracto_id: extracto.id,
+    const res = await importarExtracto(supabase, {
+      cuenta_bancaria_id,
+      fuente: body.fuente || "excel",
+      movimientos,
+      periodo_desde: body.periodo_desde ?? null,
+      periodo_hasta: body.periodo_hasta ?? null,
+      saldo_inicial: body.saldo_inicial ?? null,
+      saldo_final: body.saldo_final ?? null,
+      importado_por: auth.user?.id ?? null,
     })
-    if (matchErr) throw matchErr
 
-    return NextResponse.json({
-      success: true,
-      extracto_id: extracto.id,
-      total_filas: movimientos.length,
-      importados: nuevos,
-      duplicados,
-      invalidas,
-      matching: match,
-    })
+    return NextResponse.json({ success: true, total_filas: movimientos.length, ...res })
   } catch (error: any) {
     console.error("[finanzas/extractos] POST error:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })

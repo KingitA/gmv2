@@ -195,6 +195,25 @@ export default function ConciliacionPage() {
             <Button variant="outline" onClick={() => setImportOpen(true)} disabled={!cuentaId}>
               <Upload className="h-4 w-4 mr-2" /> Importar extracto
             </Button>
+            {cuentaNombre.toLowerCase().includes("mercado") && (
+              <Button variant="outline" disabled={accionando !== null}
+                onClick={async () => {
+                  setAccionando("mp-sync")
+                  try {
+                    const res = await fetch("/api/finanzas/extractos/mp", { method: "POST" })
+                    const d = await res.json()
+                    if (!res.ok) throw new Error(d.error)
+                    toast({ title: `MP sincronizado: ${d.importados ?? 0} nuevos, ${d.matching?.sugeridos ?? 0} sugeridos` })
+                    loadMovs()
+                  } catch (e: any) {
+                    toast({ variant: "destructive", title: "Error MP", description: e.message })
+                  } finally {
+                    setAccionando(null)
+                  }
+                }}>
+                <RefreshCw className="h-4 w-4 mr-2" /> Sincronizar MP
+              </Button>
+            )}
             {pendientes.length > 0 && (
               <Button variant="ghost" disabled={accionando !== null}
                 onClick={async () => {
