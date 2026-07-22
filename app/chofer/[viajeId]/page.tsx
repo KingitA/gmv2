@@ -21,6 +21,7 @@ interface PedidoChofer {
   total_a_cobrar: number
   cobrado: number
   devuelto: number
+  remitos?: Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }>
 }
 
 interface ViajeData {
@@ -152,6 +153,21 @@ export default function ViajeDashboardPage() {
         <div className="mt-2 bg-blue-50 rounded-lg px-3 py-2 flex justify-between items-center">
           <span className="text-blue-700 text-sm font-medium">Total a cobrar:</span>
           <span className="text-blue-800 font-bold">{formatCurrency(pedido.total_a_cobrar)}</span>
+        </div>
+      )}
+
+      {(pedido.remitos?.length ?? 0) > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {pedido.remitos!.map((r) => (
+            <button
+              key={r.id}
+              disabled={r.estado_pdf !== "generado"}
+              onClick={(e) => { e.stopPropagation(); window.open(`/api/remitos/${r.id}/pdf`, "_blank") }}
+              className="flex-1 py-2 rounded-xl bg-sky-100 text-sky-800 font-bold text-sm border border-sky-200 active:scale-95 transition-transform disabled:opacity-50"
+            >
+              📄 Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}
+            </button>
+          ))}
         </div>
       )}
 

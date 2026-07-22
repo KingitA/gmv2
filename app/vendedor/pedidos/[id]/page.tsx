@@ -61,6 +61,8 @@ function PedidoDetalleInner() {
   const pedidoId = params.id
 
   const [pedido, setPedido] = useState<PedidoDetalle | null>(null)
+  const [comprobantes, setComprobantes] = useState<Array<{ id: string; tipo_comprobante: string; numero_comprobante: string; estado_pdf: string }>>([])
+  const [remitos, setRemitos] = useState<Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sync, setSync] = useState<"idle" | "saving" | "error">("idle")
@@ -73,6 +75,8 @@ function PedidoDetalleInner() {
       const d = await r.json()
       if (d.error) throw new Error(d.error)
       setPedido(d.pedido)
+      setComprobantes(d.comprobantes || [])
+      setRemitos(d.remitos || [])
       setError(null)
     } catch (e: any) {
       setError(e?.message || "No se pudo cargar el pedido")
@@ -331,6 +335,43 @@ function PedidoDetalleInner() {
             </>
           )}
         </div>
+
+        {/* Comprobantes y remitos: PDFs congelados del pedido facturado */}
+        {(comprobantes.length > 0 || remitos.length > 0) && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 px-1">
+              Comprobantes y remitos
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {comprobantes.map((c) => (
+                <button
+                  key={c.id}
+                  disabled={c.estado_pdf !== "generado"}
+                  onClick={() => window.open(`/api/comprobantes-venta/${c.id}/pdf`, "_blank")}
+                  className="bg-white rounded-xl border border-emerald-200 py-3 px-2 text-center active:scale-[0.97] disabled:opacity-50"
+                >
+                  <p className="text-xl">🧾</p>
+                  <p className="text-xs font-bold text-emerald-700 mt-1">
+                    {c.tipo_comprobante} {c.numero_comprobante}
+                  </p>
+                </button>
+              ))}
+              {remitos.map((r) => (
+                <button
+                  key={r.id}
+                  disabled={r.estado_pdf !== "generado"}
+                  onClick={() => window.open(`/api/remitos/${r.id}/pdf`, "_blank")}
+                  className="bg-white rounded-xl border border-sky-200 py-3 px-2 text-center active:scale-[0.97] disabled:opacity-50"
+                >
+                  <p className="text-xl">📄</p>
+                  <p className="text-xs font-bold text-sky-700 mt-1">
+                    Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Observaciones */}
         {pedido.observaciones && (

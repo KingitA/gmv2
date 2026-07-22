@@ -69,6 +69,24 @@ export async function GET(
       devolucionesPorCliente.set(d.cliente_id, (devolucionesPorCliente.get(d.cliente_id) || 0) + Number(d.monto_total))
     }
 
+    // Remitos activos de los pedidos del viaje (el chofer los lleva impresos y
+    // puede reabrirlos desde el celular)
+    const pedidoIds = (pedidos || []).map((p: any) => p.id)
+    const remitosPorPedido = new Map<string, any[]>()
+    if (pedidoIds.length > 0) {
+      const { data: remitosViaje } = await supabase
+        .from("remitos")
+        .select("id, tipo_remito, numero_remito, pedido_id, estado_pdf")
+        .in("pedido_id", pedidoIds)
+        .eq("estado", "activo")
+      for (const r of remitosViaje || []) {
+        if (!remitosPorPedido.has(r.pedido_id)) remitosPorPedido.set(r.pedido_id, [])
+        remitosPorPedido.get(r.pedido_id)!.push({
+          id: r.id, tipo_remito: r.tipo_remito, numero_remito: r.numero_remito, estado_pdf: r.estado_pdf,
+        })
+      }
+    }
+
     const pedidosConDatos = await Promise.all(
       (pedidos || []).map(async (pedido: any) => {
         // Saldo previo: comprobantes pendientes de otros pedidos
@@ -105,6 +123,7 @@ export async function GET(
           total_a_cobrar: saldo_anterior + (Number(pedido.total) || 0),
           cobrado,
           devuelto,
+          remitos: remitosPorPedido.get(pedido.id) || [],
         }
       })
     )

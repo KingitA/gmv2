@@ -30,7 +30,19 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Pedido inexistente o no asignado a vos." }, { status: 404 })
     }
 
-    return NextResponse.json({ pedido })
+    // Comprobantes y remitos del pedido (para abrir los PDF desde la app)
+    const { data: comprobantes } = await supabase
+      .from("comprobantes_venta")
+      .select("id, tipo_comprobante, numero_comprobante, anulado_en, estado_pdf")
+      .eq("pedido_id", id)
+      .is("anulado_en", null)
+    const { data: remitos } = await supabase
+      .from("remitos")
+      .select("id, tipo_remito, numero_remito, estado_pdf")
+      .eq("pedido_id", id)
+      .eq("estado", "activo")
+
+    return NextResponse.json({ pedido, comprobantes: comprobantes ?? [], remitos: remitos ?? [] })
   } catch (error: any) {
     console.error("[vendedor] Error en GET /api/vendedor/pedidos/[id]:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
