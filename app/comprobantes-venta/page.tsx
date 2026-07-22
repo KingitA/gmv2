@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Card, CardContent } from "@/components/ui/card"
-import { Search, FileText, Loader2, CheckCircle2, Plus, AlertTriangle, ExternalLink, Ban } from "lucide-react"
+import { Search, FileText, Loader2, CheckCircle2, Plus, AlertTriangle, ExternalLink, Ban, Truck } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { localMatch } from "@/lib/search/local-match"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -41,6 +41,15 @@ type Comprobante = {
   pedidos?: {
     numero_pedido: string
   }
+}
+
+type RemitoRow = {
+  id: string
+  tipo_remito: string
+  numero_remito: string
+  comprobante_id: string
+  estado: string
+  estado_pdf: string
 }
 
 type Pedido = {
@@ -88,6 +97,7 @@ export default function ComprobantesVentaPage() {
   const [descargandoPDF, setDescargandoPDF] = useState<string | null>(null)
   const [modalPedidosAbierto, setModalPedidosAbierto] = useState(false)
   const [anulando, setAnulando] = useState<string | null>(null)
+  const [remitosPorComprobante, setRemitosPorComprobante] = useState<Record<string, RemitoRow>>({})
   const [confirmAnular, setConfirmAnular] = useState<Comprobante | null>(null)
   const [errorCorrecion, setErrorCorrecion] = useState<{
     mensaje: string
@@ -217,6 +227,15 @@ export default function ComprobantesVentaPage() {
 
       if (error) throw error
       setComprobantes(data || [])
+
+      // Remitos indexados por comprobante (solo activos: los anulados no se ofrecen)
+      const { data: remitosData } = await supabase
+        .from("remitos")
+        .select("id, tipo_remito, numero_remito, comprobante_id, estado, estado_pdf")
+        .eq("estado", "activo")
+      const porComprobante: Record<string, RemitoRow> = {}
+      for (const r of (remitosData ?? []) as RemitoRow[]) porComprobante[r.comprobante_id] = r
+      setRemitosPorComprobante(porComprobante)
     } catch (error) {
       console.error("[v0] Error cargando comprobantes:", error)
       alert("Error al cargar comprobantes")
@@ -523,6 +542,17 @@ export default function ComprobantesVentaPage() {
                         >
                           <FileText className="h-4 w-4" />
                         </Button>
+                        {remitosPorComprobante[comp.id] && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => window.open(`/api/remitos/${remitosPorComprobante[comp.id].id}/pdf`, '_blank')}
+                            disabled={remitosPorComprobante[comp.id].estado_pdf !== 'generado'}
+                            title={`Remito ${remitosPorComprobante[comp.id].tipo_remito === 'REM' ? 'R' : 'X'} ${remitosPorComprobante[comp.id].numero_remito}${remitosPorComprobante[comp.id].estado_pdf !== 'generado' ? ' (PDF pendiente)' : ''}`}
+                          >
+                            <Truck className="h-4 w-4 text-sky-700" />
+                          </Button>
+                        )}
                         {!comp.anulado_en && TIPO_INVERSO_LABEL[comp.tipo_comprobante] && (
                           <Button
                             variant="outline"

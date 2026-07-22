@@ -147,6 +147,15 @@ type Comprobante = {
   anulado_en: string | null
 }
 
+type Remito = {
+  id: string
+  tipo_remito: string
+  numero_remito: string
+  pedido_id: string
+  estado: string
+  estado_pdf: string
+}
+
 const ESTADOS_PEDIDO = [
   { value: "en_venta", label: "En Venta", color: "bg-amber-500" },
   { value: "pendiente", label: "Pendiente", color: "bg-yellow-500" },
@@ -176,6 +185,8 @@ export default function ClientesPedidosPage() {
   const [guardandoCambios, setGuardandoCambios] = useState(false)
   const [generandoComprobante, setGenerandoComprobante] = useState<string | null>(null)
   const [comprobantesGenerados, setComprobantesGenerados] = useState<{ [pedidoId: string]: Comprobante[] }>({})
+  const [remitosGenerados, setRemitosGenerados] = useState<{ [pedidoId: string]: Remito[] }>({})
+  const [generandoRemitos, setGenerandoRemitos] = useState(false)
   const [modalDetalleAbierto, setModalDetalleAbierto] = useState(false)
   const [pedidoAEliminar, setPedidoAEliminar] = useState<Pedido | null>(null)
   const [eliminando, setEliminando] = useState(false)
@@ -304,6 +315,23 @@ export default function ClientesPedidosPage() {
         comprobantesAgrupados[comp.pedido_id].push(comp)
       })
       setComprobantesGenerados(comprobantesAgrupados)
+
+      // Remitos de esos pedidos (mismas tandas de 100 por el límite de URL)
+      const remitosData: any[] = []
+      for (let i = 0; i < pedidoIds.length; i += 100) {
+        const { data: page, error } = await supabase
+          .from("remitos")
+          .select("id, tipo_remito, numero_remito, pedido_id, estado, estado_pdf")
+          .in("pedido_id", pedidoIds.slice(i, i + 100))
+        if (error) throw error
+        remitosData.push(...(page || []))
+      }
+      const remitosAgrupados: { [pedidoId: string]: Remito[] } = {}
+      remitosData.forEach((rem: any) => {
+        if (!remitosAgrupados[rem.pedido_id]) remitosAgrupados[rem.pedido_id] = []
+        remitosAgrupados[rem.pedido_id].push(rem)
+      })
+      setRemitosGenerados(remitosAgrupados)
     } catch (error) {
       console.error("Error cargando comprobantes:", error)
     }
@@ -455,6 +483,33 @@ export default function ClientesPedidosPage() {
 
   const verComprobante = (comprobanteId: string) => {
     window.open(`/api/comprobantes-venta/${comprobanteId}/pdf`, "_blank")
+  }
+
+  const verRemito = (remitoId: string) => {
+    window.open(`/api/remitos/${remitoId}/pdf`, "_blank")
+  }
+
+  const generarRemitos = async (pedidoId: string) => {
+    try {
+      setGenerandoRemitos(true)
+      const res = await fetch("/api/remitos/generar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pedido_id: pedidoId }),
+      })
+      const result = await res.json()
+      if (!res.ok) throw new Error(result.error || "Error generando remitos")
+      const partes: string[] = []
+      if (result.generados?.length) partes.push(`Generados:\n${result.generados.map((r: any) => `Remito ${r.tipo_remito === "REM" ? "R" : "X"} ${r.numero_remito}`).join("\n")}`)
+      if (result.omitidos?.length) partes.push(`Omitidos:\n${result.omitidos.join("\n")}`)
+      if (result.errores?.length) partes.push(`Errores:\n${result.errores.join("\n")}`)
+      alert(partes.join("\n\n") || "Sin cambios")
+      await cargarComprobantesExistentes()
+    } catch (error: any) {
+      alert(`Error generando remitos: ${error.message}`)
+    } finally {
+      setGenerandoRemitos(false)
+    }
   }
 
   const imprimirPedido = async (pedido: Pedido) => {
@@ -1311,6 +1366,30 @@ export default function ClientesPedidosPage() {
                         <ExternalLink className="h-3 w-3 ml-1.5 opacity-70" />
                       </Button>
                     ))}
+                    {remitosGenerados[pedidoSeleccionado.id]?.map((rem) => (
+                      <Button key={rem.id} size="sm" onClick={() => verRemito(rem.id)}
+                        disabled={rem.estado_pdf !== "generado"}
+                        className={rem.estado === "anulado"
+                          ? "bg-slate-400 hover:bg-slate-500 text-white text-xs h-8 shadow-sm line-through"
+                          : "bg-sky-700 hover:bg-sky-800 text-white text-xs h-8 shadow-sm"}>
+                        <Truck className="h-3.5 w-3.5 mr-1.5" />
+                        Remito {rem.tipo_remito === "REM" ? "R" : "X"} {rem.numero_remito}
+                        {rem.estado === "anulado" ? " (Anulado)" : rem.estado_pdf !== "generado" ? " (PDF pendiente)" : ""}
+                        <ExternalLink className="h-3 w-3 ml-1.5 opacity-70" />
+                      </Button>
+                    ))}
+                    {/* Reintento/backfill: hay comprobantes vigentes pero ningún remito activo.
+                        El endpoint decide si corresponde (mostrador → lo omite). */}
+                    {comprobantesGenerados[pedidoSeleccionado.id].some((c) => !c.anulado_en && ["FA", "FB", "PRES"].includes(c.tipo_comprobante)) &&
+                      !remitosGenerados[pedidoSeleccionado.id]?.some((r) => r.estado === "activo") &&
+                      pedidoSeleccionado.condicion_entrega !== "retira_mostrador" && (
+                      <Button size="sm" variant="outline" disabled={generandoRemitos}
+                        onClick={() => generarRemitos(pedidoSeleccionado.id)}
+                        className="text-xs h-8 border-sky-700 text-sky-700 hover:bg-sky-50">
+                        <Truck className="h-3.5 w-3.5 mr-1.5" />
+                        {generandoRemitos ? "Generando..." : "Generar remitos"}
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
