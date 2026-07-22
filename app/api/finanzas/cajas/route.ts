@@ -16,7 +16,7 @@ export async function GET() {
     const supabase = await createClient()
 
     const [cajasRes, bancosRes, inversionRes, saldosRes] = await Promise.all([
-      supabase.from("cajas_financieras").select("id, nombre").order("nombre"),
+      supabase.from("cajas_financieras").select("id, nombre").eq("activo", true).order("nombre"),
       supabase.from("cuentas_bancarias").select("id, nombre, banco").eq("activo", true).order("nombre"),
       supabase.from("cuentas_inversion").select("id, nombre, tipo_instrumento").eq("activo", true).order("nombre"),
       supabase.from("saldos_financieros").select("cuenta_tipo, cuenta_id, color, saldo"),

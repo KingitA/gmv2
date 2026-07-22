@@ -86,15 +86,17 @@ export async function POST(request: Request) {
     const supabase = createAdminClient()
 
     if (body.action === "abrir") {
-      const { fecha, cuenta_id, color } = body
-      if (!fecha || !cuenta_id || !color) {
-        return NextResponse.json({ error: "fecha, cuenta_id y color son obligatorios" }, { status: 400 })
+      const { fecha, cuenta_id } = body
+      if (!fecha || !cuenta_id) {
+        return NextResponse.json({ error: "fecha y cuenta_id son obligatorios" }, { status: 400 })
       }
+      // El "color" blanco/negro es una categorización de cheques, no de cajas.
+      // El ledger guarda los saldos de caja bajo BLANCO; acá queda interno.
       const { data, error } = await supabase.rpc("cierre_caja_abrir", {
         p_fecha: fecha,
         p_cuenta_tipo: "CAJA",
         p_cuenta_id: cuenta_id,
-        p_color: color,
+        p_color: "BLANCO",
         p_usuario_id: auth.user?.id ?? null,
       })
       if (error) throw error

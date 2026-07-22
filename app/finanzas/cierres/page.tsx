@@ -10,7 +10,6 @@ import { useToast } from "@/hooks/use-toast"
 import { ArrowLeft, RefreshCw, Lock, Banknote, ShieldCheck, CheckCircle2 } from "lucide-react"
 import Link from "next/link"
 import { FechaInput } from "@/components/finanzas/fecha-input"
-import { MoneyColorBadge } from "@/components/finanzas/MoneyColorBadge"
 import { todayArgentina, formatDateAR } from "@/lib/utils"
 
 // Regla del sistema: el punto delimita centavos → "1000.5" = $1.000,50
@@ -25,7 +24,8 @@ const fmt = (n: number) =>
 const BILLETES = [20000, 10000, 2000, 1000, 500, 200, 100]
 
 type Caja = { cuenta_id: string; nombre: string; saldos: { BLANCO: number; NEGRO: number } }
-type Color = "BLANCO" | "NEGRO"
+// El "color" (blanco/negro) es una categorización de CHEQUES, no de cajas.
+// El ledger interno guarda los saldos de caja bajo BLANCO; la UI no lo expone.
 
 export default function CierresCajaPage() {
   const { toast } = useToast()
@@ -36,7 +36,6 @@ export default function CierresCajaPage() {
   // Wizard
   const [cierreId, setCierreId] = useState<string | null>(null)
   const [caja, setCaja] = useState<Caja | null>(null)
-  const [color, setColor] = useState<Color>("BLANCO")
   const [paso, setPaso] = useState<1 | 2 | 3>(1)
   const [desglose, setDesglose] = useState<Record<number, string>>({})
   const [contadoTexto, setContadoTexto] = useState("")
@@ -72,7 +71,7 @@ export default function CierresCajaPage() {
     [desglose]
   )
   const contado = contadoManual ? parseMonto(contadoTexto) : sumaDesglose
-  const teorico = caja ? caja.saldos[color] : 0
+  const teorico = caja ? caja.saldos.BLANCO : 0
   const diferencia = contado === null ? null : contado - teorico
 
   // Pagos del día sin segunda firma: efectivo y cheque marcados por defecto;
@@ -89,16 +88,16 @@ export default function CierresCajaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cierreId])
 
-  const abrir = async (c: Caja, col: Color) => {
+  const abrir = async (c: Caja) => {
     try {
       const res = await fetch("/api/finanzas/cierres", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "abrir", fecha, cuenta_id: c.cuenta_id, color: col }),
+        body: JSON.stringify({ action: "abrir", fecha, cuenta_id: c.cuenta_id }),
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error)
-      setCaja(c); setColor(col); setCierreId(d.cierre_id); setPaso(1)
+      setCaja(c); setCierreId(d.cierre_id); setPaso(1)
       if (d.ya_abierto) toast({ title: "Cierre ya abierto — se retoma" })
     } catch (e: any) {
       toast({ variant: "destructive", title: "No se pudo abrir el cierre", description: e.message })
@@ -148,8 +147,8 @@ export default function CierresCajaPage() {
   }
 
   const cierresHoy = data?.cierres || []
-  const cierreDe = (cuentaId: string, col: Color) =>
-    cierresHoy.find((c: any) => c.cuenta_id === cuentaId && c.color === col)
+  const cierreDe = (cuentaId: string) =>
+    cierresHoy.find((c: any) => c.cuenta_id === cuentaId)
 
   return (
     <div className="min-h-screen bg-background">
@@ -184,34 +183,33 @@ export default function CierresCajaPage() {
               <Card><CardContent className="py-12 animate-pulse bg-muted/30" /></Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(data?.cajas || []).map((c: Caja) => (
-                  <Card key={c.cuenta_id}>
-                    <CardContent className="pt-6 space-y-3">
-                      <p className="font-semibold text-lg">{c.nombre}</p>
-                      {(["BLANCO", "NEGRO"] as Color[]).map((col) => {
-                        const hecho = cierreDe(c.cuenta_id, col)
-                        return (
-                          <div key={col} className="flex items-center justify-between border rounded-lg px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <MoneyColorBadge color={col} />
-                              <span className="font-medium tabular-nums">{fmt(c.saldos[col])}</span>
-                            </div>
-                            {hecho?.estado === "CONFIRMADO" ? (
-                              <Badge className="bg-green-100 text-green-800">
-                                <CheckCircle2 className="h-3 w-3 mr-1" /> Cerrada
-                                {Number(hecho.diferencia) !== 0 && ` (dif ${fmt(Number(hecho.diferencia))})`}
-                              </Badge>
-                            ) : (
-                              <Button size="sm" onClick={() => abrir(c, col)}>
-                                {hecho ? "Retomar cierre" : "Iniciar cierre"}
-                              </Button>
-                            )}
+                {(data?.cajas || []).map((c: Caja) => {
+                  const hecho = cierreDe(c.cuenta_id)
+                  return (
+                    <Card key={c.cuenta_id}>
+                      <CardContent className="pt-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold text-lg">{c.nombre}</p>
+                            <p className="text-sm text-muted-foreground">
+                              Saldo del sistema: <span className="font-medium tabular-nums text-foreground">{fmt(c.saldos.BLANCO)}</span>
+                            </p>
                           </div>
-                        )
-                      })}
-                    </CardContent>
-                  </Card>
-                ))}
+                          {hecho?.estado === "CONFIRMADO" ? (
+                            <Badge className="bg-green-100 text-green-800">
+                              <CheckCircle2 className="h-3 w-3 mr-1" /> Cerrada
+                              {Number(hecho.diferencia) !== 0 && ` (dif ${fmt(Number(hecho.diferencia))})`}
+                            </Badge>
+                          ) : (
+                            <Button size="sm" onClick={() => abrir(c)}>
+                              {hecho ? "Retomar cierre" : "Iniciar cierre"}
+                            </Button>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
               </div>
             )}
           </section>
@@ -223,7 +221,7 @@ export default function CierresCajaPage() {
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <Lock className="h-5 w-5 text-muted-foreground" />
-                Cierre {caja.nombre} <MoneyColorBadge color={color} /> — {formatDateAR(fecha)}
+                Cierre {caja.nombre} — {formatDateAR(fecha)}
               </h2>
               <Button variant="ghost" size="sm" onClick={resetWizard}>Cancelar</Button>
             </div>
@@ -379,7 +377,6 @@ export default function CierresCajaPage() {
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-3 py-2 font-medium">Fecha</th>
                     <th className="px-3 py-2 font-medium">Caja</th>
-                    <th className="px-3 py-2 font-medium">Color</th>
                     <th className="px-3 py-2 font-medium text-right">Teórico</th>
                     <th className="px-3 py-2 font-medium text-right">Contado</th>
                     <th className="px-3 py-2 font-medium text-right">Diferencia</th>
@@ -391,7 +388,6 @@ export default function CierresCajaPage() {
                     <tr key={h.id} className="border-b last:border-0">
                       <td className="px-3 py-2">{formatDateAR(h.fecha)}</td>
                       <td className="px-3 py-2">{(data?.cajas || []).find((c: Caja) => c.cuenta_id === h.cuenta_id)?.nombre ?? "—"}</td>
-                      <td className="px-3 py-2"><MoneyColorBadge color={h.color} /></td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt(Number(h.saldo_teorico))}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt(Number(h.saldo_contado))}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${Number(h.diferencia) !== 0 ? "text-red-700 font-semibold" : ""}`}>
