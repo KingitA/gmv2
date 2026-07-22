@@ -38,6 +38,8 @@ export function ImportExtractoDialog({
   const [errores, setErrores] = useState<string[]>([])
   const [archivo, setArchivo] = useState("")
   const [subiendo, setSubiendo] = useState(false)
+  const [leyendoPdf, setLeyendoPdf] = useState(false)
+  const [meta, setMeta] = useState<{ fuente: string; saldo_inicial?: number | null; saldo_final?: number | null; periodo_desde?: string | null; periodo_hasta?: string | null }>({ fuente: "excel" })
   const fileRef = useRef<HTMLInputElement>(null)
 
   const norm = (s: any) =>
@@ -76,27 +78,70 @@ export function ImportExtractoDialog({
     return isNaN(n) ? 0 : neg ? -n : n
   }
 
+  const parsePdf = async (file: File) => {
+    setLeyendoPdf(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      const res = await fetch("/api/finanzas/extractos/pdf", { method: "POST", body: fd })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error)
+      setMovs(d.movimientos || [])
+      setMeta({
+        fuente: "pdf",
+        saldo_inicial: d.saldo_inicial,
+        saldo_final: d.saldo_final,
+        periodo_desde: d.periodo_desde,
+        periodo_hasta: d.periodo_hasta,
+      })
+      if (d.saldo_inicial != null && d.saldo_final != null) {
+        const suma = (d.movimientos || []).reduce((s: number, m: Mov) => s + m.monto, 0)
+        const esperado = Number(d.saldo_final) - Number(d.saldo_inicial)
+        if (Math.abs(suma - esperado) > 1) {
+          setErrores([
+            `⚠ Control de saldos: los movimientos suman ${fmt(suma)} pero el extracto dice ${fmt(esperado)} (final − inicial). Revisá el preview antes de importar.`,
+          ])
+        }
+      }
+    } catch (e: any) {
+      setErrores([`No se pudo leer el PDF: ${e.message}`])
+    } finally {
+      setLeyendoPdf(false)
+    }
+  }
+
   const parseFile = async (file: File) => {
     setArchivo(file.name)
     setErrores([])
     setMovs([])
+    setMeta({ fuente: "excel" })
+    if (file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf") {
+      await parsePdf(file)
+      return
+    }
     try {
       const buf = await file.arrayBuffer()
       const wb = XLSX.read(buf, { cellDates: true })
       const sheet = wb.Sheets[wb.SheetNames[0]]
       const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })
 
-      // Buscar la fila de headers (los extractos suelen traer título arriba)
+      // Buscar la fila de headers (los extractos suelen traer título o bloques
+      // de saldo arriba — ej. MercadoPago pone INITIAL_BALANCE en la fila 1 y
+      // los headers reales en la fila 4). Sinónimos ES + EN.
+      const esFecha = (x: string) => x.includes("fecha") || x.includes("date")
+      const esImporte = (x: string) =>
+        x.includes("debito") || x.includes("credito") || x.includes("debit") || x.includes("credit") ||
+        x.includes("importe") || x.includes("monto") || x.includes("amount")
       let hIdx = -1
       for (let i = 0; i < Math.min(data.length, 15); i++) {
         const h = data[i].map(norm)
-        if (h.some((x) => x.includes("fecha")) && h.some((x) => x.includes("debito") || x.includes("credito") || x.includes("importe") || x.includes("monto"))) {
+        if (h.some(esFecha) && h.some(esImporte)) {
           hIdx = i
           break
         }
       }
       if (hIdx < 0) {
-        setErrores(["No se detectó la fila de encabezados. Se esperan columnas con 'fecha' y 'débito'/'crédito' (o 'importe')."])
+        setErrores(["No se detectó la fila de encabezados. Se esperan columnas con fecha ('fecha'/'date') y débito/crédito o importe ('importe'/'amount')."])
         return
       }
       const headers = data[hIdx].map(norm)
@@ -107,12 +152,12 @@ export function ImportExtractoDialog({
         }
         return -1
       }
-      const iFecha = idxDe("fecha")
-      const iDesc = idxDe("concepto", "descrip", "detalle", "movimiento", "operacion", "leyenda")
-      const iDeb = idxDe("debito")
-      const iCred = idxDe("credito")
-      const iImp = idxDe("importe", "monto")
-      const iRef = idxDe("comprobante", "referencia", "nro. operacion", "numero de operacion", "id")
+      const iFecha = idxDe("fecha", "release_date", "date")
+      const iDesc = idxDe("concepto", "descrip", "detalle", "movimiento", "transaction_type", "description", "operacion", "leyenda")
+      const iDeb = idxDe("debito", "debit")
+      const iCred = idxDe("credito", "credit")
+      const iImp = idxDe("net_amount", "importe", "monto", "amount")
+      const iRef = idxDe("comprobante", "referencia", "reference", "comprob", "nro. operacion", "numero de operacion", "id")
 
       const filas: Mov[] = []
       const errs: string[] = []
@@ -154,7 +199,15 @@ export function ImportExtractoDialog({
       const res = await fetch("/api/finanzas/extractos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cuenta_bancaria_id: cuentaId, fuente: "excel", movimientos: movs }),
+        body: JSON.stringify({
+          cuenta_bancaria_id: cuentaId,
+          fuente: meta.fuente,
+          saldo_inicial: meta.saldo_inicial ?? undefined,
+          saldo_final: meta.saldo_final ?? undefined,
+          periodo_desde: meta.periodo_desde ?? undefined,
+          periodo_hasta: meta.periodo_hasta ?? undefined,
+          movimientos: movs,
+        }),
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error)
@@ -189,15 +242,18 @@ export function ImportExtractoDialog({
         <input
           ref={fileRef}
           type="file"
-          accept=".xlsx,.xls,.csv"
+          accept=".xlsx,.xls,.csv,.pdf"
           className="hidden"
           onChange={(e) => e.target.files?.[0] && parseFile(e.target.files[0])}
         />
         <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={() => fileRef.current?.click()}>
-            <Upload className="h-4 w-4 mr-2" /> Elegir archivo
+          <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={leyendoPdf}>
+            {leyendoPdf ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+            Elegir archivo
           </Button>
-          <span className="text-sm text-muted-foreground">{archivo || "Excel o CSV del homebanking"}</span>
+          <span className="text-sm text-muted-foreground">
+            {leyendoPdf ? "Leyendo PDF con OCR… puede tardar un minuto" : archivo || "Excel, CSV o PDF del banco"}
+          </span>
         </div>
 
         {errores.length > 0 && (

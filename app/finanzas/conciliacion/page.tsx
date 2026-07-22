@@ -23,6 +23,7 @@ const ESTADO_BADGE: Record<string, { label: string; cls: string }> = {
   SUGERIDO: { label: "Sugerido", cls: "bg-sky-100 text-sky-800" },
   CONCILIADO: { label: "Conciliado", cls: "bg-green-100 text-green-800" },
   REGISTRADO_EGRESO: { label: "Egreso registrado", cls: "bg-violet-100 text-violet-800" },
+  REGISTRADO_INGRESO: { label: "Ingreso registrado", cls: "bg-emerald-100 text-emerald-800" },
   IGNORADO: { label: "Ignorado", cls: "bg-slate-100 text-slate-600" },
 }
 
@@ -263,6 +264,15 @@ export default function ConciliacionPage() {
                               <Button size="sm" disabled={accionando !== null}
                                 onClick={() => accion({ action: "conciliar", mov_id: m.id }, "Movimiento conciliado")}>
                                 {accionando === m.id ? "…" : "✓ Conciliar"}
+                              </Button>
+                            )}
+                            {m.estado_matching === "PENDIENTE" && !esDebito && (
+                              <Button size="sm" variant="outline" disabled={accionando !== null}
+                                onClick={() => accion(
+                                  { action: "ingreso", mov_id: m.id },
+                                  "Ingreso registrado (kardex + saldo)"
+                                )}>
+                                {accionando === m.id ? "…" : "Registrar ingreso"}
                               </Button>
                             )}
                             {m.estado_matching === "PENDIENTE" && esDebito && (

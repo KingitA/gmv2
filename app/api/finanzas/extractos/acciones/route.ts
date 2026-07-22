@@ -57,6 +57,17 @@ export async function POST(request: Request) {
       return NextResponse.json(data)
     }
 
+    if (body.action === "ingreso") {
+      if (!body.mov_id) return NextResponse.json({ error: "mov_id es obligatorio" }, { status: 400 })
+      const { data, error } = await supabase.rpc("extracto_registrar_ingreso", {
+        p_mov_id: body.mov_id,
+        p_usuario_id: uid,
+        p_concepto: body.concepto ?? null,
+      })
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      return NextResponse.json(data)
+    }
+
     if (body.action === "ignorar") {
       if (!body.mov_id) return NextResponse.json({ error: "mov_id es obligatorio" }, { status: 400 })
       const { data, error } = await supabase.rpc("extracto_ignorar", { p_mov_id: body.mov_id, p_usuario_id: uid })
