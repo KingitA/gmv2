@@ -306,6 +306,14 @@ export async function POST(
       })
       .eq('id', original.id)
 
+    // El remito del comprobante anulado también se anula. Su PDF no se toca
+    // (inmutable): solo cambia el estado para que no acompañe más mercadería.
+    await supabase
+      .from('remitos')
+      .update({ estado: 'anulado' })
+      .eq('comprobante_id', original.id)
+      .eq('estado', 'activo')
+
     // ─── 10. Avanzar numeración ───
     await supabase
       .from('numeracion_comprobantes')

@@ -19,6 +19,7 @@ import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
+import { generarRemitosParaPedido, type ResultadoRemitos } from "@/lib/remitos/generar-remito"
 
 type CondicionSegmento = {
   lista_precio_id: string | null
@@ -595,12 +596,25 @@ export async function POST(request: Request) {
       }
     }
 
+    // ─── 10. Remitos según condición de entrega ───
+    // entregamos_nosotros → orig+dup · transporte → orig+dup+trip · mostrador → sin remito.
+    // Nunca bloquea la facturación: los comprobantes ya tienen CAE. Si falla,
+    // queda registrado en remitos.errores y se reintenta con POST /api/remitos/generar.
+    let remitos: ResultadoRemitos = { generados: [], omitidos: [], errores: [] }
+    try {
+      remitos = await generarRemitosParaPedido(supabase, pedido_id, auth.user.id)
+    } catch (remErr: any) {
+      console.error('[Remitos] Error generando remitos del pedido', pedido_id, remErr.message)
+      remitos.errores.push(remErr.message)
+    }
+
     return NextResponse.json({
       success: true,
       comprobantes: comprobantesGenerados,
       metodo_facturacion: metodoFacturacion,
       total_pedido: round2(totalPedido),
       bonificacion_contado: bonificacion,
+      remitos,
     })
   } catch (error: any) {
     console.error("[Generar Comprobantes] Error:", error)
