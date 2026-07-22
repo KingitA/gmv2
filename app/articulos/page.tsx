@@ -371,14 +371,16 @@ export default function ArticulosPage() {
   const handleImgUpload=async(e:React.ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0]; if(!file) return
     setImgUploading(true)
-    const ext=file.name.split(".").pop()
-    const path=`${Date.now()}.${ext}`
-    const{error}=await sb.storage.from("articulos-imagenes").upload(path,file,{upsert:true})
-    if(!error){
-      const{data}=sb.storage.from("articulos-imagenes").getPublicUrl(path)
-      setFf(p=>({...p,imagen_url:data.publicUrl}))
-    } else alert(`Error subiendo imagen: ${error.message}`)
-    setImgUploading(false)
+    try{
+      const fd=new FormData()
+      fd.append("file",file)
+      if(fa?.id && fa.id!=="__new__") fd.append("articuloId",fa.id)
+      const res=await fetch("/api/articulos/imagen",{method:"POST",body:fd})
+      const data=await res.json()
+      if(res.ok && data.url){ setFf(p=>({...p,imagen_url:data.url})) }
+      else alert(`Error subiendo imagen: ${data.error||res.statusText}`)
+    }catch(err:any){ alert(`Error subiendo imagen: ${err.message}`) }
+    finally{ setImgUploading(false); e.target.value="" }
   }
 
   // Sublista columns
