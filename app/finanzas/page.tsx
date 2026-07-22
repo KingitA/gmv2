@@ -300,6 +300,11 @@ export default function FinanzasPage() {
           <p className="text-xs text-slate-400">Patrimonio total: <span className="font-semibold text-slate-700">{fmt(grandTotal)}</span></p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/finanzas/tablero">
+            <button className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 transition-colors">
+              Tablero →
+            </button>
+          </Link>
           <Link href="/finanzas/cierres">
             <button className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 transition-colors">
               Cierre de caja →
