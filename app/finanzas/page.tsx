@@ -299,22 +299,22 @@ export default function FinanzasPage() {
           <h1 className="text-lg font-bold text-slate-800">Finanzas</h1>
           <p className="text-xs text-slate-400">Patrimonio total: <span className="font-semibold text-slate-700">{fmt(grandTotal)}</span></p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/finanzas/tablero">
-            <button className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 transition-colors">
-              Tablero →
-            </button>
-          </Link>
-          <Link href="/finanzas/cierres">
-            <button className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 transition-colors">
-              Cierre de caja →
-            </button>
-          </Link>
-          <Link href="/finanzas/cajas">
-            <button className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 transition-colors">
-              Operar cajas →
-            </button>
-          </Link>
+        <div className="flex items-center gap-2 flex-wrap">
+          {[
+            { href: "/finanzas/tablero", label: "Tablero" },
+            { href: "/finanzas/cierres", label: "Cierre de caja" },
+            { href: "/finanzas/cajas", label: "Operar cajas" },
+            { href: "/finanzas/pendiente-rendir", label: "Rendiciones" },
+            { href: "/finanzas/conciliacion", label: "Conciliación" },
+            { href: "/finanzas/cheques", label: "Cheques" },
+            { href: "/finanzas/egresos", label: "Egresos" },
+          ].map((l) => (
+            <Link key={l.href} href={l.href}>
+              <button className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 transition-colors">
+                {l.label} →
+              </button>
+            </Link>
+          ))}
         </div>
         <div className="text-right">
           <div className="text-xs text-slate-400">Seleccionado</div>
