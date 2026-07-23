@@ -7,10 +7,6 @@
         {
             "path": "/api/cron/padron-iibb-check",
             "schedule": "0 9 1 * *"
-        },
-        {
-            "path": "/api/cron/mp-sync",
-            "schedule": "*/30 * * * *"
         }
     ]
 }
