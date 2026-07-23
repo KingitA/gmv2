@@ -3,15 +3,12 @@ import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 
 /**
- * POST /api/ordenes-pago/[id]/confirmar — confirma la OP vía RPC atómica
- * op_confirmar (migración 20260726_i1): CC proveedor + retenciones +
- * imputaciones + vencimientos + kardex (baja saldos de caja/banco) +
- * cheques ENTREGADO_A_PROVEEDOR, todo en una transacción con guards
- * de idempotencia.
+ * POST /api/ordenes-pago/[id]/anular — reversa completa de una OP pagada
+ * vía RPC op_anular (migración 20260726_i1): contrapartidas en kardex
+ * (restauran saldos), cheques de terceros vuelven a cartera, propios se
+ * anulan, CC del proveedor con contra-asiento, vencimientos a pendiente.
  *
- * Body opcional: { caja_id?, cuenta_bancaria_id? } — de dónde sale la plata.
- *   caja_id: origen del efectivo (default Caja Grande)
- *   cuenta_bancaria_id: origen de transferencias (obligatorio si la OP incluye alguna)
+ * Body: { motivo? }
  */
 export async function POST(
     request: Request,
@@ -25,17 +22,16 @@ export async function POST(
         const body = await request.json().catch(() => ({}))
         const supabase = createAdminClient()
 
-        const { data, error } = await supabase.rpc('op_confirmar', {
+        const { data, error } = await supabase.rpc('op_anular', {
             p_op_id: opId,
             p_usuario_id: auth.user?.id ?? null,
-            p_caja_id: body.caja_id ?? null,
-            p_cuenta_banco_id: body.cuenta_bancaria_id ?? null,
+            p_motivo: body.motivo ?? null,
         })
         if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
         return NextResponse.json(data)
     } catch (error: any) {
-        console.error('Error confirming OP:', error)
+        console.error('Error anulando OP:', error)
         return NextResponse.json({ error: error.message }, { status: 500 })
     }
 }

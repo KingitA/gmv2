@@ -1,5 +1,18 @@
 "use server"
 
+/**
+ * ⚠️ CIRCUITO LEGACY EN RETIRADA (Fase I, 28-07-2026).
+ * Las RPCs fin_* de este archivo (fin_confirmar_pago_pendiente,
+ * fin_crear_pago_proveedor, fin_depositar_cheque) escriben saldos SIN pasar
+ * por el kardex — el circuito vigente es:
+ *   · cobranzas   → cobranza_confirmar / pago_verificar
+ *   · proveedores → op_confirmar / op_anular (ordenes_pago, migración 20260726_i1)
+ *   · cheques     → caja_depositar_cheque / caja_acreditar_cheque
+ * Único consumidor restante: app/finanzas/proveedores/pagos/page.tsx (pagos
+ * sugeridos por IA). NO agregar nuevos usos; al migrar esa pantalla a OP,
+ * eliminar este archivo y dropear las RPCs fin_*.
+ */
+
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import { LegacyAdapter } from "../services/legacy-adapter"
