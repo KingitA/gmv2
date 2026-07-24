@@ -105,8 +105,13 @@ export async function POST(request: Request) {
                 items: { type: "string" },
                 description: "2 a 3 consultas de búsqueda para encontrarlo en el catálogo, de más específica a más general",
               },
+              sinonimos: {
+                type: "array",
+                items: { type: "string" },
+                description: "3 a 5 nombres alternativos MUY cortos con los que un catálogo podría listar este producto (ej. para una emulsión corporal: 'crema', 'crema corporal', 'anti age'; para un trapo de piso: 'trapo', 'trapo gris')",
+              },
             },
-            required: ["ean13", "marca", "producto", "medida", "color", "terminos_busqueda"],
+            required: ["ean13", "marca", "producto", "medida", "color", "terminos_busqueda", "sinonimos"],
             additionalProperties: false,
           },
         },
@@ -150,17 +155,115 @@ Los términos de búsqueda deben parecerse a descripciones de catálogo mayorist
       }
     }
 
-    // Búsqueda híbrida con los términos sugeridos, hasta juntar resultados
+    // ── Etapa 1: recuperar ANCHO ──
+    // Muchas consultas degradadas (términos armados + producto + sinónimos +
+    // marca) + artículos de la marca detectada. Los candidatos pueden ser
+    // malos: la decisión fina la toma el re-rank de la etapa 2. Esto cubre
+    // catálogos con descripciones pobres ("Anti-age Manos x 90 ml 24b" sin
+    // la marca) que ninguna búsqueda léxica/vectorial matchearía sola.
+    const consultas: string[] = [
+      ...(deteccion.terminos_busqueda || []),
+      deteccion.producto,
+      ...(deteccion.sinonimos || []),
+      [deteccion.producto, deteccion.medida].filter(Boolean).join(" "),
+      deteccion.marca,
+    ]
+      .filter((q: any) => typeof q === "string" && q.trim().length >= 3)
+      .map((q: string) => q.trim())
+      .filter((q, i, arr) => arr.indexOf(q) === i)
+      .slice(0, 9)
+
     const vistos = new Set<string>()
-    const articulos: any[] = []
-    for (const term of (deteccion.terminos_busqueda || []).slice(0, 3)) {
-      if (articulos.length >= 8) break
-      const res = await buscarHibrido(supabase, term, 8)
-      for (const a of res) {
+    const candidatos: any[] = []
+    const sumar = (arts: any[]) => {
+      for (const a of arts) {
         if (!vistos.has(a.id)) {
           vistos.add(a.id)
-          articulos.push(a)
+          candidatos.push(a)
         }
+      }
+    }
+
+    for (const term of consultas) {
+      if (candidatos.length >= 40) break
+      sumar(await buscarHibrido(supabase, term, 8))
+    }
+
+    // Candidatos directos por marca (campo, no palabra): si el catálogo tiene
+    // la marca cargada, sus artículos entran aunque la descripción no la nombre
+    if (deteccion.marca) {
+      const { data: marcaRow } = await supabase
+        .from("marcas")
+        .select("id")
+        .ilike("descripcion", `%${String(deteccion.marca).trim()}%`)
+        .limit(1)
+        .maybeSingle()
+      if (marcaRow?.id) {
+        const { data: deMarca } = await supabase
+          .from("articulos")
+          .select(ARTICULO_SELECT)
+          .eq("marca_id", marcaRow.id)
+          .eq("activo", true)
+          .limit(25)
+        sumar((deMarca || []).map((a: any) => mapArticuloVendedor(a)))
+      }
+    }
+
+    // ── Etapa 2: re-rank — Claude elige entre los candidatos ──
+    // La búsqueda de texto no sabe que "Anti-age Manos x 90 ml" es la crema
+    // Hinds de la foto; el modelo, viendo la detección y la lista, sí.
+    let articulos = candidatos.slice(0, 10)
+    if (candidatos.length) {
+      try {
+        const listado = candidatos
+          .slice(0, 60)
+          .map((a, i) => `${i}| ${a.descripcion}${a.marca ? ` | marca: ${a.marca}` : ""}${a.sku ? ` | sku ${a.sku}` : ""}`)
+          .join("\n")
+
+        const rerank = await getAnthropic().messages.create({
+          model: "claude-opus-4-8",
+          max_tokens: 512,
+          output_config: {
+            format: {
+              type: "json_schema",
+              schema: {
+                type: "object",
+                properties: {
+                  indices: {
+                    type: "array",
+                    items: { type: "integer" },
+                    description: "Índices de los candidatos que pueden ser el producto de la foto, del más al menos probable, máximo 6. Vacío si ninguno corresponde.",
+                  },
+                },
+                required: ["indices"],
+                additionalProperties: false,
+              },
+            },
+          },
+          messages: [
+            {
+              role: "user",
+              content: `Un vendedor mayorista sacó una foto de un producto y el sistema detectó: "${descripcion}".
+
+Estos son los candidatos del catálogo (las descripciones son abreviadas y muchas veces omiten la marca o usan jerga interna — "Anti-age Manos x 90 ml" puede ser una crema Hinds Anti-Age aunque no diga Hinds):
+
+${listado}
+
+Devolvé los índices de los candidatos que realmente pueden ser ese producto (mismo tipo de producto y, si figura, medida compatible), del más al menos probable. Sé permisivo con abreviaturas y marcas omitidas, estricto con el tipo de producto: un shampoo no es una crema.`,
+            },
+          ],
+        })
+        if (rerank.stop_reason !== "refusal") {
+          const rtxt = rerank.content.find((b: any) => b.type === "text") as any
+          const indices: number[] = JSON.parse(rtxt?.text || "{}").indices || []
+          const elegidos = indices
+            .filter((i) => i >= 0 && i < candidatos.length)
+            .map((i) => candidatos[i])
+          if (elegidos.length) articulos = elegidos
+          else articulos = [] // el modelo revisó y ninguno corresponde
+        }
+      } catch (e) {
+        console.error("[buscar-foto] re-rank falló, devuelvo candidatos crudos:", e)
       }
     }
 

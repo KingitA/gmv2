@@ -198,7 +198,10 @@ export function BuscarPorFoto({ onSelect, onClose }: Props) {
               </div>
             ) : (
               <p className="bg-gray-50 rounded-xl p-4 text-center text-gray-500 text-sm">
-                No se encontraron artículos parecidos en el catálogo. Probá con otra foto o buscá por texto.
+                No se encontraron artículos parecidos en el catálogo.
+                <span className="block mt-1 font-medium text-gray-700">
+                  👉 Sacale foto al código de barras (atrás del producto): ese match es exacto.
+                </span>
               </p>
             )}
 
