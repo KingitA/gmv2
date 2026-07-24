@@ -59,8 +59,22 @@ export function BuscarPorFoto({ onSelect, onClose }: Props) {
   const [estado, setEstado] = useState<"inicio" | "analizando" | "resultados">("inicio")
   const [preview, setPreview] = useState<string | null>(null)
   const [deteccion, setDeteccion] = useState<string | null>(null)
+  const [porEan, setPorEan] = useState(false)
   const [sugerencias, setSugerencias] = useState<Sugerencia[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  // Aprendizaje: al confirmar una sugerencia de FOTO (no de código de barras),
+  // la detección queda como alias del artículo — la próxima vez matchea directo.
+  const elegir = (a: Sugerencia) => {
+    if (deteccion && !porEan) {
+      fetch("/api/vendedor/buscar-foto/confirmar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ articulo_id: a.id, descripcion_detectada: deteccion }),
+      }).catch(() => {})
+    }
+    onSelect(a)
+  }
 
   const procesar = async (file: File | null | undefined) => {
     if (!file) return
@@ -81,6 +95,7 @@ export function BuscarPorFoto({ onSelect, onClose }: Props) {
       if (!res.ok || d.error) throw new Error(d.error || "No se pudo analizar la foto.")
 
       setDeteccion(d.descripcion_detectada || null)
+      setPorEan(Boolean(ean || d.ean_detectado))
       setSugerencias(d.articulos || [])
       setEstado("resultados")
     } catch (e: any) {
@@ -175,7 +190,7 @@ export function BuscarPorFoto({ onSelect, onClose }: Props) {
                 {sugerencias.map((a) => (
                   <button
                     key={a.id}
-                    onClick={() => onSelect(a)}
+                    onClick={() => elegir(a)}
                     className="w-full bg-white rounded-xl border border-gray-200 p-3 text-left flex items-center gap-3 active:scale-[0.98] transition-transform"
                   >
                     {a.imagen_url ? (
