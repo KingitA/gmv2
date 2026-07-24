@@ -22,6 +22,8 @@ import {
   tinteRubro,
   type Tinte,
 } from "./catalogo-ui"
+import { ZoomImageOverlay } from "@/components/vendedor/zoom-image"
+import { BuscarPorFoto } from "@/components/vendedor/buscar-por-foto"
 
 interface Articulo {
   id: string
@@ -97,6 +99,13 @@ interface CatalogoRubro {
 }
 
 type Filtro = "novedades" | "ofertas" | "habituales"
+
+// Clave de agrupamiento por categoría/subcategoría con fallback al nombre:
+// los artículos nuevos pueden venir sin FK (categoria_id null) pero con el
+// nombre en texto — sin esto todos caerían juntos en "Otros".
+const claveCategoria = (a: Articulo) => a.categoria_id || (a.categoria_nombre ? `n:${a.categoria_nombre}` : "otros")
+const claveSubcategoria = (a: Articulo) =>
+  a.subcategoria_id || (a.subcategoria_nombre ? `n:${a.subcategoria_nombre}` : null)
 
 type Ctx = { tipo: Filtro } | { tipo: "rubro"; rubroId: string; rubroNombre: string }
 
@@ -184,6 +193,8 @@ function NuevoPedidoInner() {
   const preciosPedidos = useRef<Set<string>>(new Set())
 
   const [sel, setSel] = useState<Articulo | null>(null)
+  const [zoomFoto, setZoomFoto] = useState<string | null>(null)
+  const [buscarFoto, setBuscarFoto] = useState(false)
   const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number; contado: number } | null>(null)
   // Cantidad en el modo elegido; arranca vacía (sin el "1" fantasma)
   const [selCantidad, setSelCantidad] = useState<number | "">("")
@@ -694,12 +705,12 @@ function NuevoPedidoInner() {
     const lista = listas[nav.ctx.tipo] || []
     const grupos = new Map<string, { id: string | null; nombre: string; cantidad: number; rubroNombre: string | null }>()
     for (const a of lista) {
-      const key = a.categoria_id || "otros"
+      const key = claveCategoria(a)
       const g = grupos.get(key)
       if (g) g.cantidad += 1
       else
         grupos.set(key, {
-          id: a.categoria_id,
+          id: key,
           nombre: a.categoria_nombre || "Otros",
           cantidad: 1,
           rubroNombre: a.rubro_nombre,
@@ -713,8 +724,8 @@ function NuevoPedidoInner() {
     if (nav.s !== "arts") return []
     let base: Articulo[]
     if (nav.ctx.tipo === "rubro") base = artsCategoria
-    else base = (listas[nav.ctx.tipo] || []).filter((a) => (a.categoria_id || "otros") === (nav.catId || "otros"))
-    if (subSel) base = base.filter((a) => a.subcategoria_id === subSel)
+    else base = (listas[nav.ctx.tipo] || []).filter((a) => claveCategoria(a) === (nav.catId || "otros"))
+    if (subSel) base = base.filter((a) => claveSubcategoria(a) === subSel)
     return base
   }, [nav, artsCategoria, listas, subSel])
 
@@ -724,13 +735,14 @@ function NuevoPedidoInner() {
     const base =
       nav.ctx.tipo === "rubro"
         ? artsCategoria
-        : (listas[nav.ctx.tipo] || []).filter((a) => (a.categoria_id || "otros") === (nav.catId || "otros"))
+        : (listas[nav.ctx.tipo] || []).filter((a) => claveCategoria(a) === (nav.catId || "otros"))
     const m = new Map<string, { id: string; nombre: string; cantidad: number }>()
     for (const a of base) {
-      if (!a.subcategoria_id) continue
-      const g = m.get(a.subcategoria_id)
+      const key = claveSubcategoria(a)
+      if (!key) continue
+      const g = m.get(key)
       if (g) g.cantidad += 1
-      else m.set(a.subcategoria_id, { id: a.subcategoria_id, nombre: a.subcategoria_nombre || "—", cantidad: 1 })
+      else m.set(key, { id: key, nombre: a.subcategoria_nombre || "—", cantidad: 1 })
     }
     return [...m.values()].sort((a, b) => b.cantidad - a.cantidad)
   }, [nav, artsCategoria, listas])
@@ -929,8 +941,8 @@ function NuevoPedidoInner() {
           </button>
         </div>
         {nav.s === "home" && (
-          <div className="px-4 pb-3">
-            <div className="relative">
+          <div className="px-4 pb-3 flex gap-2">
+            <div className="relative flex-1">
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
@@ -948,6 +960,20 @@ function NuevoPedidoInner() {
                 className="w-full rounded-xl pl-11 pr-4 py-3 text-gray-900 text-lg bg-white outline-none"
               />
             </div>
+            <button
+              onClick={() => setBuscarFoto(true)}
+              className="w-[52px] rounded-xl bg-emerald-600 border border-emerald-500 flex items-center justify-center shrink-0 active:scale-95 transition-transform"
+              title="Buscar con la cámara: código de barras o foto del producto"
+            >
+              <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6 text-white" aria-hidden>
+                <path
+                  d="M4 8.5c0-1.1.9-2 2-2h1.4l1.2-1.8c.2-.3.5-.5.8-.5h5.2c.3 0 .6.2.8.5l1.2 1.8H18c1.1 0 2 .9 2 2V17c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V8.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                />
+                <circle cx="12" cy="12.5" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+              </svg>
+            </button>
           </div>
         )}
       </header>
@@ -1280,23 +1306,30 @@ function NuevoPedidoInner() {
       {sel && (
         <div className="fixed inset-0 z-30 flex items-end bg-black/40" onClick={() => setSel(null)}>
           <div
-            className="bg-white w-full rounded-t-3xl p-5 max-w-2xl mx-auto space-y-4"
+            className="bg-white w-full rounded-t-3xl p-5 max-w-2xl mx-auto space-y-4 max-h-[92dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start gap-3">
-              {sel.imagen_url ? (
-                <img
-                  src={sel.imagen_url}
-                  alt=""
-                  className="w-16 h-16 rounded-xl object-cover bg-gray-100 shrink-0"
-                />
-              ) : null}
-              <div className="min-w-0 flex-1">
-                <p className="font-bold text-gray-900 text-lg leading-snug">{sel.descripcion}</p>
-                <p className="text-gray-500 text-sm mt-1">
-                  {[sel.marca, sel.proveedor].filter(Boolean).join(" · ")}
-                </p>
-              </div>
+            {/* Foto protagonista: aprovecha el ancho del sheet; tap = zoom */}
+            {sel.imagen_url && (
+              <button
+                onClick={() => setZoomFoto(sel.imagen_url)}
+                className="relative w-full h-48 sm:h-56 rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden active:opacity-90 -mt-1"
+              >
+                <img src={sel.imagen_url} alt={sel.descripcion} className="w-full h-full object-contain" />
+                <span className="absolute bottom-2 right-2 bg-black/50 text-white text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                  <svg viewBox="0 0 24 24" fill="none" className="w-3.5 h-3.5" aria-hidden>
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                    <path d="M16.5 16.5 21 21M11 8v6M8 11h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  Zoom
+                </span>
+              </button>
+            )}
+            <div className="min-w-0">
+              <p className="font-bold text-gray-900 text-lg leading-snug">{sel.descripcion}</p>
+              <p className="text-gray-500 text-sm mt-1">
+                {[sel.marca, sel.proveedor].filter(Boolean).join(" · ")}
+              </p>
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500">
               {sel.sku && <span>SKU {sel.sku}</span>}
@@ -1418,6 +1451,20 @@ function NuevoPedidoInner() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Zoom de foto de artículo */}
+      {zoomFoto && <ZoomImageOverlay src={zoomFoto} alt={sel?.descripcion} onClose={() => setZoomFoto(null)} />}
+
+      {/* Búsqueda por cámara/foto */}
+      {buscarFoto && (
+        <BuscarPorFoto
+          onClose={() => setBuscarFoto(false)}
+          onSelect={(a) => {
+            setBuscarFoto(false)
+            abrirArticulo(a as unknown as Articulo)
+          }}
+        />
       )}
 
       {/* Barra de carrito */}

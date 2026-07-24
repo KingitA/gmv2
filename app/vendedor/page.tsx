@@ -136,6 +136,14 @@ export default function VendedorHomePage() {
             <p className="text-emerald-100 text-sm mt-1">Levantar pedido</p>
           </button>
           <button
+            onClick={() => router.push("/vendedor/pago")}
+            className="bg-emerald-800 rounded-2xl shadow-sm p-5 text-left text-white active:scale-95 transition-transform"
+          >
+            <p className="text-3xl mb-2">💵</p>
+            <p className="text-lg font-bold">Pago</p>
+            <p className="text-emerald-200 text-sm mt-1">Cobrar a un cliente</p>
+          </button>
+          <button
             onClick={() => router.push("/vendedor/pedidos")}
             className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-left active:scale-95 transition-transform"
           >
@@ -172,9 +180,10 @@ export default function VendedorHomePage() {
           {data?.ultimos_pedidos?.length ? (
             <div className="space-y-3">
               {data.ultimos_pedidos.map((p) => (
-                <div
+                <button
                   key={p.id}
-                  className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex items-center justify-between"
+                  onClick={() => router.push(`/vendedor/pedidos/${p.id}`)}
+                  className="w-full bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex items-center justify-between text-left active:scale-[0.98] transition-transform"
                 >
                   <div className="min-w-0">
                     <p className="font-bold text-gray-900 truncate">
@@ -198,7 +207,7 @@ export default function VendedorHomePage() {
                       {p.estado.toUpperCase()}
                     </span>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           ) : (

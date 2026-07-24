@@ -90,6 +90,34 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .order("fecha_pago", { ascending: false })
       .limit(10)
 
+    // Devoluciones sin confirmar (todavía no tienen NC/reversa emitida) —
+    // la pantalla de cobro las muestra junto al pedido para que el vendedor
+    // sepa que ese saldo va a bajar cuando la oficina las procese.
+    const { data: devolucionesPendientes } = await supabase
+      .from("devoluciones")
+      .select("id, numero_devolucion, pedido_id, monto_total, created_at")
+      .eq("cliente_id", id)
+      .eq("estado", "pendiente")
+      .order("created_at", { ascending: false })
+
+    // Vista unificada para la pantalla de cobro: TODOS los pedidos vigentes
+    // del cliente con su estado; el front les asocia comprobantes (por
+    // pedido_id) y devoluciones. "cobrable" = sin facturar y sin anticipo
+    // previo (se puede cobrar el pedido completo como anticipo).
+    const pedidosCobro = (pedidosCliente || [])
+      .map((p: any) => ({
+        id: p.id,
+        numero_pedido: p.numero_pedido,
+        fecha: p.fecha,
+        estado: p.estado,
+        total: Number(p.total || 0),
+        pago_contado_10: !!p.pago_contado_10,
+        anticipo_pago_id: p.anticipo_pago_id || null,
+        facturado: pedidosFacturados.has(p.id),
+        cobrable: !pedidosFacturados.has(p.id) && !p.anticipo_pago_id && Number(p.total || 0) > 0,
+      }))
+      .sort((a: any, b: any) => (a.fecha < b.fecha ? 1 : -1))
+
     return NextResponse.json({
       cliente: {
         ...cliente,
@@ -99,6 +127,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       },
       comprobantes: comprobantes || [],
       pedidos_cobrables: pedidosCobrables,
+      pedidos_cobro: pedidosCobro,
+      devoluciones_pendientes: devolucionesPendientes || [],
       pagos_recientes: (pagosRecientes || []).map((p) => ({
         ...p,
         verificado: p.estado === "confirmado" && !!p.confirmado_por,
