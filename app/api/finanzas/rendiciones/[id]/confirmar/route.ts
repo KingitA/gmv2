@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { colorOverride, resolverColorPendientes } from "@/lib/actions/color-cheque"
 
 /**
  * POST /api/finanzas/rendiciones/[id]/confirmar — oficina confirma una
@@ -9,7 +11,8 @@ import { requireAuth } from "@/lib/auth"
  * a conciliación, diferencia documentada.
  *
  * Body: { caja_destino_tipo?: "CAJA", caja_destino_id, efectivo_declarado?,
- *         pagos_verificados?, forzar_diferencia? }
+ *         pagos_verificados?, forzar_diferencia?,
+ *         colores_cheque?: { [pago_id]: "BLANCO" | "NEGRO" } }
  */
 export async function POST(
   request: NextRequest,
@@ -27,10 +30,42 @@ export async function POST(
       efectivo_declarado,
       pagos_verificados,
       forzar_diferencia,
+      colores_cheque,
     } = body
 
     if (!caja_destino_id) {
       return NextResponse.json({ error: "caja_destino_id es requerido" }, { status: 400 })
+    }
+
+    // El RPC confirma los pagos dentro de SQL (sin pasar por confirmarCobranza),
+    // así que los cheques en color PENDIENTE se resuelven acá antes: color
+    // explícito de la oficina > derivado de las imputaciones actuales del pago.
+    // Si alguno queda sin resolver se corta con mensaje claro (el kardex solo
+    // admite BLANCO/NEGRO y la transacción del RPC fallaría igual, pero fea).
+    const { data: items } = await supabase
+      .from("rendicion_items")
+      .select("pago_id")
+      .eq("rendicion_id", rendicionId)
+    const admin = createAdminClient()
+    const pagosSinColor: string[] = []
+    for (const it of items || []) {
+      const { pendiente } = await resolverColorPendientes(
+        supabase,
+        admin,
+        it.pago_id,
+        colorOverride(colores_cheque?.[it.pago_id]),
+      )
+      if (pendiente) pagosSinColor.push(it.pago_id)
+    }
+    if (pagosSinColor.length) {
+      return NextResponse.json(
+        {
+          error:
+            "Hay cheques con color PENDIENTE (pagos a cuenta sin imputaciones). Asigná BLANCO o NEGRO a cada pago antes de confirmar la rendición.",
+          pagos_sin_color: pagosSinColor,
+        },
+        { status: 400 },
+      )
     }
 
     const { data, error } = await supabase.rpc("rendicion_confirmar", {

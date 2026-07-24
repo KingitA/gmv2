@@ -18,6 +18,10 @@ export default function RevisionPagosPage() {
   const [motivoRechazo, setMotivoRechazo] = useState("")
   const [comprobantes, setComprobantes] = useState<any[]>([])
   const [imputaciones, setImputaciones] = useState<Record<string, number>>({})
+  // Color BLANCO/NEGRO asignado por la oficina a cheques que quedaron
+  // PENDIENTE (pago a cuenta sin imputaciones). Sin asignación y sin
+  // imputaciones, el backend rechaza la confirmación.
+  const [coloresCheque, setColoresCheque] = useState<Record<string, string>>({})
   const [confirmandoLote, setConfirmandoLote] = useState(false)
   const { toast } = useToast()
 
@@ -69,6 +73,7 @@ export default function RevisionPagosPage() {
           usuario_confirmador: "admin", // TODO: obtener del usuario actual
           accion: "confirmar",
           imputaciones: imputacionesArray.length > 0 ? imputacionesArray : undefined,
+          color_cheques: coloresCheque[pagoId] || undefined,
         }),
       })
 
@@ -209,11 +214,46 @@ export default function RevisionPagosPage() {
                           <span className="font-semibold">${Number(det.monto).toFixed(2)}</span>
                           {det.numero_cheque && <span className="text-muted-foreground">• Ch. {det.numero_cheque}</span>}
                           {det.banco && <span className="text-muted-foreground">• {det.banco}</span>}
+                          {det.color_cheque && (
+                            <Badge variant={det.color_cheque === "PENDIENTE" ? "destructive" : "outline"}>
+                              {det.color_cheque}
+                            </Badge>
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
                 </div>
+
+                {pago.detalles?.some((d: any) => d.color_cheque === "PENDIENTE") && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+                    <Label className="font-semibold text-amber-800">
+                      Cheque(s) sin color — pago a cuenta
+                    </Label>
+                    <p className="text-xs text-amber-700 mt-1 mb-3">
+                      Si imputás comprobantes acá, el color se calcula solo (mayoría a presupuesto = negro).
+                      Si confirmás sin imputar, elegí el color:
+                    </p>
+                    <div className="flex gap-2">
+                      {["BLANCO", "NEGRO"].map((c) => (
+                        <Button
+                          key={c}
+                          type="button"
+                          size="sm"
+                          variant={coloresCheque[pago.id] === c ? "default" : "outline"}
+                          onClick={() =>
+                            setColoresCheque({
+                              ...coloresCheque,
+                              [pago.id]: coloresCheque[pago.id] === c ? "" : c,
+                            })
+                          }
+                        >
+                          {c}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {pago.observaciones && (
                   <div>

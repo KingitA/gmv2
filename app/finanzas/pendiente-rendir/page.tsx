@@ -22,6 +22,10 @@ export default function PendienteRendirPage() {
   const [confirmandoRendicion, setConfirmandoRendicion] = useState<string | null>(null)
   const [cajaDestino, setCajaDestino] = useState("")
   const [forzar, setForzar] = useState<Record<string, boolean>>({})
+  // Pagos a cuenta con cheques en color PENDIENTE detectados al intentar
+  // confirmar: la oficina elige BLANCO/NEGRO y se reintenta con ese color.
+  const [pagosSinColor, setPagosSinColor] = useState<Record<string, string[]>>({})
+  const [colorElegido, setColorElegido] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -53,9 +57,25 @@ export default function PendienteRendirPage() {
           caja_destino_tipo: "CAJA",
           caja_destino_id: cajaDestino,
           forzar_diferencia: Boolean(forzar[rendicionId]),
+          ...(colorElegido[rendicionId] && pagosSinColor[rendicionId]?.length
+            ? {
+                colores_cheque: Object.fromEntries(
+                  pagosSinColor[rendicionId].map((pagoId) => [pagoId, colorElegido[rendicionId]]),
+                ),
+              }
+            : {}),
         }),
       })
       const d = await res.json()
+      if (res.status === 400 && Array.isArray(d.pagos_sin_color) && d.pagos_sin_color.length) {
+        setPagosSinColor((prev) => ({ ...prev, [rendicionId]: d.pagos_sin_color }))
+        toast({
+          variant: "destructive",
+          title: "Cheques sin color (pago a cuenta)",
+          description: "Elegí BLANCO o NEGRO para esos cheques y volvé a confirmar.",
+        })
+        return
+      }
       if (res.status === 409 && d.requiere_forzar) {
         setForzar((prev) => ({ ...prev, [rendicionId]: true }))
         toast({
@@ -156,13 +176,34 @@ export default function PendienteRendirPage() {
                       {r.observaciones && ` · ${r.observaciones}`}
                     </p>
                   </div>
-                  <Button
-                    disabled={confirmandoRendicion === r.id || !cajaDestino}
-                    variant={forzar[r.id] ? "destructive" : "default"}
-                    onClick={() => confirmarRendicion(r.id)}
-                  >
-                    {confirmandoRendicion === r.id ? "..." : forzar[r.id] ? "Confirmar CON diferencia" : "✓ Confirmar rendición"}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {(pagosSinColor[r.id]?.length ?? 0) > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-amber-700 font-medium">Color cheques a cuenta:</span>
+                        {["BLANCO", "NEGRO"].map((c) => (
+                          <Button
+                            key={c}
+                            size="sm"
+                            variant={colorElegido[r.id] === c ? "default" : "outline"}
+                            onClick={() => setColorElegido((prev) => ({ ...prev, [r.id]: c }))}
+                          >
+                            {c}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                    <Button
+                      disabled={
+                        confirmandoRendicion === r.id ||
+                        !cajaDestino ||
+                        Boolean(pagosSinColor[r.id]?.length && !colorElegido[r.id])
+                      }
+                      variant={forzar[r.id] ? "destructive" : "default"}
+                      onClick={() => confirmarRendicion(r.id)}
+                    >
+                      {confirmandoRendicion === r.id ? "..." : forzar[r.id] ? "Confirmar CON diferencia" : "✓ Confirmar rendición"}
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>

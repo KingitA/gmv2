@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 
 // ─── GET: listar pagos con filtros ───────────────────────────
 export async function GET(request: NextRequest) {
@@ -203,8 +204,18 @@ export async function POST(request: NextRequest) {
     }
 
     // ── 2. Crear detalles de métodos de pago ──
+    // Color de cheques: override manual del operador > derivado de la
+    // imputación (>50% a PRES ⇒ NEGRO, sino BLANCO) > PENDIENTE (a cuenta,
+    // la oficina lo asigna al confirmar). "ECHEQ" del OCR/selector no es un
+    // color: marca es_echeq y el color sale de la misma regla.
+    const colorDerivado = await derivarColorCheque(supabase, imputaciones)
+
     for (const metodo of metodos as any[]) {
       let cheque_id: string | null = null
+      const esEcheq = metodo.color_cheque === "ECHEQ" || Boolean(metodo.es_echeq)
+      const colorFinal =
+        colorOverride(metodo.color_cheque) || colorOverride(color) || colorDerivado || COLOR_PENDIENTE
+      const colorMetodo = metodo.tipo === "cheque" || metodo.tipo === "deposito" ? colorFinal : null
 
       // Si es cheque de tercero: crear registro en tabla cheques
       if (metodo.tipo === "cheque") {
@@ -218,7 +229,8 @@ export async function POST(request: NextRequest) {
             fecha_emision: metodo.fecha_emision || null,
             fecha_vencimiento: metodo.fecha_cheque,
             monto: metodo.monto,
-            color: color || "BLANCO",
+            color: colorFinal,
+            es_echeq: esEcheq,
             cliente_origen_id: cliente_id,
           })
           .select("id")
@@ -246,7 +258,7 @@ export async function POST(request: NextRequest) {
           fecha_cheque: metodo.fecha_cheque || null,
           localidad: metodo.localidad || null,
           cuit_emisor: metodo.cuit_emisor || null,
-          color_cheque: metodo.color_cheque || null,
+          color_cheque: colorMetodo,
           cheque_id,
           // depósito
           fecha_deposito: metodo.fecha_deposito || null,
@@ -271,7 +283,7 @@ export async function POST(request: NextRequest) {
                 numero: item.numero_cheque || null,
                 fecha_vencimiento: item.fecha_pago_cheque || null,
                 monto: item.monto,
-                color: color || "BLANCO",
+                color: colorFinal,
                 cliente_origen_id: cliente_id,
               })
               .select("id")

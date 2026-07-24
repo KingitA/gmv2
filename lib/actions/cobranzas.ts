@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { resolverColorPendientes, type ColorCheque } from "@/lib/actions/color-cheque"
 
 export interface ConfirmarCobranzaResult {
   numero_recibo: string | null
@@ -24,15 +25,27 @@ export interface ConfirmarCobranzaResult {
  * recibo ni kardex. La usan el alta ERP (confirmación en el acto), la revisión
  * de pagos y la rendición de viaje/vendedor.
  *
+ * Color de cheques: los cheques de pagos sin imputaciones quedan en color
+ * PENDIENTE al crearse. Confirmar exige color definido (el kardex solo admite
+ * BLANCO/NEGRO): si se pasa `colorCheques` se asigna acá a los PENDIENTE del
+ * pago (cheques + pagos_detalle); si aún queda alguno PENDIENTE, se corta con
+ * error antes de tocar nada.
+ *
  * @param supabase cliente con permisos de escritura (server/admin)
- * @param _admin   conservado por compatibilidad de firma (la numeración ahora
- *                 se resuelve dentro del RPC SECURITY DEFINER)
+ * @param admin    cliente service-role: asigna color en la tabla cheques
  */
 export async function confirmarCobranza(
   supabase: SupabaseClient,
-  _admin: SupabaseClient,
-  { pagoId, usuarioId }: { pagoId: string; usuarioId: string },
+  admin: SupabaseClient,
+  { pagoId, usuarioId, colorCheques }: { pagoId: string; usuarioId: string; colorCheques?: ColorCheque },
 ): Promise<ConfirmarCobranzaResult> {
+  const { pendiente } = await resolverColorPendientes(supabase, admin, pagoId, colorCheques)
+  if (pendiente) {
+    throw new Error(
+      "El pago tiene cheques con color PENDIENTE (pago a cuenta sin imputaciones). Asigná BLANCO o NEGRO antes de confirmar.",
+    )
+  }
+
   const { data, error } = await supabase.rpc("cobranza_confirmar", {
     p_pago_id: pagoId,
     p_usuario_id: usuarioId,

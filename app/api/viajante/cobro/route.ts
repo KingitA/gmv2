@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { todayArgentina } from "@/lib/utils"
+import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 
 /**
  * POST /api/viajante/cobro — cobro en la calle del viajante (Fase E).
@@ -165,6 +166,12 @@ export async function POST(request: NextRequest) {
       }
 
       // ── Detalles por método (proporcional al monto del cliente) ──
+      // Color de cheques: derivado de las imputaciones de ESTE cliente
+      // (>50% a PRES ⇒ NEGRO, sino BLANCO); override manual del viajante si
+      // vino explícito; sin imputaciones ⇒ PENDIENTE (oficina asigna al rendir).
+      const colorCliente =
+        (await derivarColorCheque(supabase, c.imputaciones)) || COLOR_PENDIENTE
+
       const proporcion = montoPago / totalMetodos
       for (const m of metodos) {
         const montoDetalle =
@@ -185,7 +192,7 @@ export async function POST(request: NextRequest) {
               fecha_emision: todayArgentina(),
               fecha_vencimiento: m.fecha_cheque || todayArgentina(),
               monto: montoDetalle,
-              color: m.color || "BLANCO",
+              color: colorOverride(m.color) || colorCliente,
               es_echeq: Boolean(m.es_echeq),
               cliente_origen_id: c.cliente_id,
             })
@@ -203,7 +210,7 @@ export async function POST(request: NextRequest) {
           fecha_cheque: m.fecha_cheque || null,
           referencia: m.referencia_transferencia || null,
           cuenta_bancaria_id: m.cuenta_bancaria_id || null,
-          color_cheque: m.color || null,
+          color_cheque: m.tipo === "cheque" ? colorOverride(m.color) || colorCliente : null,
           cheque_id: chequeId,
         })
       }

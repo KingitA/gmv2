@@ -22,7 +22,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const supabase = await createClient()
     const body = await request.json()
     const { id } = await params
-    const { usuario_confirmador, accion, motivo_rechazo, imputaciones } = body // accion: 'confirmar' | 'rechazar'
+    // accion: 'confirmar' | 'rechazar'. color_cheques (BLANCO|NEGRO): asignación
+    // de la oficina para cheques que quedaron PENDIENTE (pago a cuenta).
+    const { usuario_confirmador, accion, motivo_rechazo, imputaciones, color_cheques } = body
 
     if (!usuario_confirmador || !accion) {
       return NextResponse.json({ error: "usuario_confirmador y accion son requeridos" }, { status: 400 })
@@ -47,6 +49,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       const result = await confirmarCobranza(supabase, admin, {
         pagoId: id,
         usuarioId: auth.user.id,
+        colorCheques: color_cheques,
       })
 
       // ── Comisiones 'cobrada' + billetera para comprobantes saldados ──

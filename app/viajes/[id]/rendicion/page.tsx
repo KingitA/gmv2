@@ -38,6 +38,10 @@ export default function RendicionPage() {
   const [loading, setLoading] = useState(true)
   const [confirmando, setConfirmando] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  // Cheques de pagos a cuenta que quedaron con color PENDIENTE: el backend
+  // rechaza la rendición hasta que la oficina elija BLANCO/NEGRO.
+  const [pagosSinColor, setPagosSinColor] = useState<string[]>([])
+  const [colorCheques, setColorCheques] = useState<string>("")
 
   // Conciliación de la rendición
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set())
@@ -91,11 +95,19 @@ export default function RendicionPage() {
           efectivo_declarado: parseFloat(efectivoContado) || 0,
           pagos_verificados: [...seleccionados],
           forzar_diferencia: forzarDiferencia,
+          ...(colorCheques && pagosSinColor.length
+            ? { colores_cheque: Object.fromEntries(pagosSinColor.map((id) => [id, colorCheques])) }
+            : {}),
         }),
       })
       const d = await res.json()
       if (d.success) {
         router.push(`/viajes/${viajeId}`)
+      } else if (res.status === 400 && Array.isArray(d.pagos_sin_color) && d.pagos_sin_color.length) {
+        setPagosSinColor(d.pagos_sin_color)
+        alert(
+          "Hay cheques de pagos a cuenta sin color asignado. Al volver a confirmar, elegí BLANCO o NEGRO en el modal."
+        )
       } else if (res.status === 409 && d.requiere_forzar) {
         setForzarDiferencia(true)
         alert(
@@ -425,6 +437,29 @@ export default function RendicionPage() {
                 </p>
               )}
             </div>
+            {pagosSinColor.length > 0 && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 space-y-2">
+                <p className="text-xs text-amber-800 font-medium">
+                  Cheques de pagos a cuenta sin color — elegí uno para continuar:
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {["BLANCO", "NEGRO"].map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setColorCheques(colorCheques === c ? "" : c)}
+                      className={`py-2 rounded-lg border-2 text-sm font-bold ${
+                        colorCheques === c
+                          ? "border-green-600 bg-green-600 text-white"
+                          : "border-gray-300 text-gray-600"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => setShowConfirm(false)}
@@ -434,7 +469,7 @@ export default function RendicionPage() {
               </button>
               <button
                 onClick={handleConfirmar}
-                disabled={confirmando}
+                disabled={confirmando || (pagosSinColor.length > 0 && !colorCheques)}
                 className="py-3 rounded-xl bg-green-600 text-white font-bold disabled:opacity-50"
               >
                 {confirmando ? "Procesando..." : "Confirmar"}

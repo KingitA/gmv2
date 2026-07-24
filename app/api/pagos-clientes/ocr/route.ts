@@ -23,7 +23,7 @@ const OCR_SCHEMA: any = {
           fecha_cheque: { type: SchemaType.STRING },
           cuit_emisor: { type: SchemaType.STRING },
           localidad: { type: SchemaType.STRING },
-          color_cheque: { type: SchemaType.STRING },
+          color_cheque: { type: SchemaType.STRING, description: "ECHEQ solo si es cheque electrónico; en papel no devolver este campo" },
           cbu_destino: { type: SchemaType.STRING },
           cvu_destino: { type: SchemaType.STRING },
           fecha_transferencia: { type: SchemaType.STRING },
@@ -64,7 +64,9 @@ interface OCRResultMetodo {
   fecha_cheque?: string  // fecha de pago/vencimiento
   cuit_emisor?: string
   localidad?: string
-  color_cheque?: "BLANCO" | "NEGRO" | "ECHEQ"
+  // Solo "ECHEQ" (detectable en la imagen). El color BLANCO/NEGRO no sale del
+  // OCR: lo deriva el sistema según la imputación del pago (PRES ⇒ NEGRO).
+  color_cheque?: "ECHEQ"
   // transferencia
   cbu_destino?: string
   cvu_destino?: string
@@ -103,13 +105,13 @@ Para cada comprobante que encuentres, devolvé un objeto con sus datos:
 CHEQUE:
 - tipo: "cheque"
 - numero_cheque: número del cheque (ej: "12345678")
-- banco_emisor: nombre del banco que emite el cheque
+- banco_emisor: nombre del banco que emite el cheque (suele encontrarse en la parte izquierda del cheque con su logo, deduci cual es sin adivinar)
 - fecha_emision: fecha de emisión (formato YYYY-MM-DD)
 - fecha_cheque: fecha de pago/vencimiento (formato YYYY-MM-DD)
-- monto: importe numérico sin simbolos de moneda
+- monto: importe numérico sin simbolos de moneda, tene en cuenta que va a estar escrito con letras y numeros, deben coincidir, devolve el monto en numeros. Debes interpretar teniendo en cuenta que un importe puede estar separando decimales con coma y miles con punto, o viceversa.
 - cuit_emisor: CUIT del titular del cheque. BUSCALO CON PRIORIDAD ALTA — es un número de 11 dígitos que puede aparecer en cualquiera de estos formatos: "CUIT: 20-12345678-9", "C.U.I.T.: 20-12345678-9", "CT: 20-12345678-9", "CT 20-12345678-9", o sin guiones como "20123456789". También puede estar en la línea inferior del cheque junto al número de cuenta. Normalmente empieza con 20, 23, 24, 27 (persona física) o 30, 33, 34 (empresa). Devolvé SIEMPRE en formato XX-XXXXXXXX-X con guiones (ej: "20-12345678-9"). Si aparece sin guiones (11 dígitos seguidos), convertilo al formato con guiones.
 - localidad: ciudad/localidad del cheque si es visible
-- color_cheque: "ECHEQ" si es electrónico, sino "BLANCO" (nunca "NEGRO" por OCR)
+- color_cheque: "ECHEQ" únicamente si es un cheque electrónico; si es cheque en papel devolvé null (el color NO se determina por la imagen)
 
 TRANSFERENCIA:
 - tipo: "transferencia"

@@ -171,7 +171,9 @@ function PagosClientesContent() {
           fecha_cheque: r.fecha_cheque || "",
           cuit_emisor: r.cuit_emisor || "",
           localidad: r.localidad || "",
-          color_cheque: r.color_cheque || "BLANCO",
+          // El OCR solo detecta ECHEQ; el color BLANCO/NEGRO lo deriva el
+          // backend según la imputación (o queda PENDIENTE si es a cuenta).
+          color_cheque: r.color_cheque === "ECHEQ" ? "ECHEQ" : undefined,
         }
         if (r.tipo === "transferencia") return {
           ...base,
@@ -234,7 +236,7 @@ function PagosClientesContent() {
     const cheque_compartido = chequeMetodo ? {
       banco: chequeMetodo.banco_emisor, numero: chequeMetodo.numero_cheque,
       fecha_cheque: chequeMetodo.fecha_cheque, monto: Number(chequeMetodo.monto),
-      color: chequeMetodo.color_cheque || "BLANCO",
+      color: chequeMetodo.color_cheque,
     } : null
 
     // Distribución greedy de cada método entre los clientes según su porción

@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 
 // POST /api/cobranzas
 // Cobranza de UN cobro físico que abarca varios clientes/CUITs (caso "Tandil").
@@ -59,6 +60,14 @@ export async function POST(request: NextRequest) {
     }
 
     // ── 1. Cheque compartido (una sola fila en cheques) ──
+    // Su color se deriva del agregado de imputaciones de TODOS los clientes
+    // (>50% a PRES ⇒ NEGRO); override manual posible; sin imputaciones ⇒ PENDIENTE.
+    const todasImputaciones = (asignaciones as any[]).flatMap((a: any) => a.imputaciones || [])
+    const colorCompartido =
+      colorOverride(cheque_compartido?.color) ||
+      (await derivarColorCheque(supabase, todasImputaciones)) ||
+      COLOR_PENDIENTE
+
     let sharedChequeId: string | null = null
     if (cheque_compartido) {
       const { data: chq, error: chErr } = await admin
@@ -71,7 +80,8 @@ export async function POST(request: NextRequest) {
           fecha_emision: cheque_compartido.fecha_emision || null,
           fecha_vencimiento: cheque_compartido.fecha_cheque || todayArgentina(),
           monto: cheque_compartido.monto,
-          color: cheque_compartido.color || "BLANCO",
+          color: colorCompartido,
+          es_echeq: cheque_compartido.color === "ECHEQ" || Boolean(cheque_compartido.es_echeq),
         })
         .select("id")
         .single()
@@ -103,6 +113,8 @@ export async function POST(request: NextRequest) {
     for (const asig of asignaciones as any[]) {
       if (!asig.cliente_id || !asig.metodos?.length) continue
       const montoCliente = montoMetodos(asig.metodos)
+      const colorAsignacion =
+        (await derivarColorCheque(supabase, asig.imputaciones)) || COLOR_PENDIENTE
 
       const { data: pago, error: pagoErr } = await supabase
         .from("pagos_clientes")
@@ -124,6 +136,11 @@ export async function POST(request: NextRequest) {
       // Métodos / detalle del cliente
       for (const m of asig.metodos as any[]) {
         let cheque_id: string | null = null
+        // Compartido: hereda el color del cheque físico único; propio: override
+        // manual > derivado de las imputaciones de este cliente > PENDIENTE.
+        const colorMetodo = m.usa_cheque_compartido && sharedChequeId
+          ? colorCompartido
+          : colorOverride(m.color_cheque) || colorAsignacion
         if (m.tipo === "cheque") {
           if (m.usa_cheque_compartido && sharedChequeId) {
             cheque_id = sharedChequeId
@@ -138,7 +155,8 @@ export async function POST(request: NextRequest) {
                 fecha_emision: m.fecha_emision || null,
                 fecha_vencimiento: m.fecha_cheque || todayArgentina(),
                 monto: m.monto,
-                color: m.color_cheque || "BLANCO",
+                color: colorMetodo,
+                es_echeq: m.color_cheque === "ECHEQ" || Boolean(m.es_echeq),
                 cliente_origen_id: asig.cliente_id,
               })
               .select("id")
@@ -162,7 +180,7 @@ export async function POST(request: NextRequest) {
           fecha_cheque: m.fecha_cheque || null,
           localidad: m.localidad || null,
           cuit_emisor: m.cuit_emisor || null,
-          color_cheque: m.color_cheque || null,
+          color_cheque: m.tipo === "cheque" || m.tipo === "deposito" ? colorMetodo : null,
           cheque_id,
           fecha_deposito: m.fecha_deposito || null,
         })

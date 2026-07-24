@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
+import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 
 // POST /api/chofer/viaje/[id]/cobro
 // Registra un cobro del chofer con estado='pendiente_rendicion'.
@@ -91,6 +92,10 @@ export async function POST(
     }
 
     // Crear detalles de pago por método
+    // Color de cheques: derivado de las imputaciones del cobro (>50% a PRES ⇒
+    // NEGRO, sino BLANCO); override manual si vino explícito; sin imputaciones
+    // ⇒ PENDIENTE (oficina asigna al confirmar la rendición).
+    const colorCobro = (await derivarColorCheque(supabase, imputaciones)) || COLOR_PENDIENTE
     const chequesInsert: Array<{ chequeData: any; index: number }> = []
     const detallesInsert: any[] = []
 
@@ -108,6 +113,7 @@ export async function POST(
         detalle.fecha_transferencia = metodo.fecha_transferencia || null
         detalle.numero_comprobante_pago = metodo.numero_comprobante || null
       } else if (metodo.tipo === "cheque") {
+        const colorMetodo = colorOverride(metodo.color_cheque) || colorCobro
         chequesInsert.push({
           chequeData: {
             tipo: "TERCERO",
@@ -117,7 +123,8 @@ export async function POST(
             fecha_emision: metodo.fecha_emision || null,
             fecha_vencimiento: metodo.fecha_cheque || todayArgentina(),
             monto: metodo.monto,
-            color: metodo.color_cheque || "NEGRO",
+            color: colorMetodo,
+            es_echeq: metodo.color_cheque === "ECHEQ" || Boolean(metodo.es_echeq),
             cliente_origen_id: cliente_id,
           },
           index: detallesInsert.length,
@@ -126,7 +133,7 @@ export async function POST(
         detalle.banco = metodo.banco_emisor || null
         detalle.fecha_cheque = metodo.fecha_cheque || null
         detalle.cuit_emisor = metodo.cuit_emisor || null
-        detalle.color_cheque = metodo.color_cheque || "NEGRO"
+        detalle.color_cheque = colorMetodo
       }
 
       detallesInsert.push(detalle)
@@ -178,14 +185,18 @@ export async function POST(
           .single()
         if (!pagoEx) continue
 
+        const colorEx = (await derivarColorCheque(supabase, ex.imputaciones)) || COLOR_PENDIENTE
         for (const m of ex.metodos) {
           let chequeIdEx: string | null = null
+          const colorMetodoEx = colorOverride(m.color_cheque) || colorEx
           if (m.tipo === "cheque") {
             const { data: chq } = await supabase.from("cheques").insert({
               tipo: "TERCERO", estado: "EN_CARTERA",
               banco: m.banco_emisor || "", numero: m.numero_cheque || "",
               fecha_emision: m.fecha_emision || null, fecha_vencimiento: m.fecha_cheque || todayArgentina(),
-              monto: m.monto, color: m.color_cheque || "NEGRO", cliente_origen_id: ex.cliente_id,
+              monto: m.monto, color: colorMetodoEx,
+              es_echeq: m.color_cheque === "ECHEQ" || Boolean(m.es_echeq),
+              cliente_origen_id: ex.cliente_id,
             }).select("id").single()
             chequeIdEx = chq?.id || null
           }
@@ -194,7 +205,9 @@ export async function POST(
             caja_id: m.caja_id || null, cuenta_bancaria_id: m.cuenta_bancaria_id || null,
             fecha_transferencia: m.fecha_transferencia || null, numero_comprobante_pago: m.numero_comprobante || null,
             banco: m.banco_emisor || null, numero_cheque: m.numero_cheque || null, fecha_cheque: m.fecha_cheque || null,
-            cuit_emisor: m.cuit_emisor || null, color_cheque: m.color_cheque || null, cheque_id: chequeIdEx,
+            cuit_emisor: m.cuit_emisor || null,
+            color_cheque: m.tipo === "cheque" ? colorMetodoEx : null,
+            cheque_id: chequeIdEx,
           })
         }
         if (ex.imputaciones?.length) {

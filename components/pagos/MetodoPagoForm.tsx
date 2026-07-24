@@ -62,7 +62,10 @@ const tipoLabels: Record<TipoPago, string> = {
   deposito: "Depósito",
 }
 
-const colorLabels = { BLANCO: "Blanco", NEGRO: "Negro", ECHEQ: "Echeq" }
+// AUTO: el color lo deriva el sistema según la imputación del pago (>50% a
+// presupuesto ⇒ NEGRO; sino BLANCO; a cuenta ⇒ PENDIENTE hasta confirmar).
+// Blanco/Negro acá son override manual explícito del operador.
+const colorLabels = { AUTO: "Auto (según imputación)", BLANCO: "Blanco", NEGRO: "Negro", ECHEQ: "Echeq" }
 
 function genId() { return Math.random().toString(36).slice(2) }
 
@@ -212,7 +215,7 @@ export function MetodoPagoForm({ metodos, onChange }: Props) {
               </div>
               <div>
                 <Label className="text-xs">Color</Label>
-                <Select value={m.color_cheque || "BLANCO"} onValueChange={(v) => updateMetodo(m.id, { color_cheque: v as any })}>
+                <Select value={m.color_cheque || "AUTO"} onValueChange={(v) => updateMetodo(m.id, { color_cheque: v === "AUTO" ? undefined : (v as any) })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {(Object.entries(colorLabels)).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}

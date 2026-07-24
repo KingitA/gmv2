@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { nowArgentina } from "@/lib/utils"
+import { colorOverride, resolverColorPendientes } from "@/lib/actions/color-cheque"
 
 /**
  * POST /api/viajes/[id]/confirmar-rendicion
@@ -40,6 +42,7 @@ export async function POST(
       pagos_verificados,
       forzar_diferencia,
       observaciones,
+      colores_cheque, // { [pago_id]: "BLANCO" | "NEGRO" } para cheques PENDIENTE
       // compat con la UI anterior
       caja_destino_efectivo,
     } = body
@@ -76,6 +79,32 @@ export async function POST(
     }
     if (!pagoIds.length) {
       return NextResponse.json({ error: "El viaje no tiene pagos pendientes de rendición" }, { status: 400 })
+    }
+
+    // ── 0. Resolver cheques con color PENDIENTE (pagos a cuenta) ──
+    // rendicion_confirmar confirma dentro de SQL (kardex solo admite
+    // BLANCO/NEGRO): color explícito de la oficina > derivado de las
+    // imputaciones actuales del pago; sin resolver → 400 con la lista.
+    const admin = createAdminClient()
+    const pagosSinColor: string[] = []
+    for (const pagoId of pagoIds) {
+      const { pendiente } = await resolverColorPendientes(
+        supabase,
+        admin,
+        pagoId,
+        colorOverride(colores_cheque?.[pagoId]),
+      )
+      if (pendiente) pagosSinColor.push(pagoId)
+    }
+    if (pagosSinColor.length) {
+      return NextResponse.json(
+        {
+          error:
+            "Hay cheques con color PENDIENTE (pagos a cuenta sin imputaciones). Asigná BLANCO o NEGRO a cada pago antes de confirmar la rendición.",
+          pagos_sin_color: pagosSinColor,
+        },
+        { status: 400 },
+      )
     }
 
     // ── 1. Crear la rendición ──
