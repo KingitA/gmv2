@@ -135,8 +135,9 @@ FOR EACH ROW
 EXECUTE FUNCTION articulos_sync_taxonomia_fk();
 
 -- ═══ 3. CLIENTES — trigger bidireccional localidad ═══
--- localidad_id manda sobre localidad/provincia/zona (que se derivan del
--- catálogo). Si cambia el texto, se re-resuelve el FK por nombre.
+-- localidad_id manda sobre localidad/provincia (que se derivan del catálogo;
+-- la zona NO es columna de clientes: se deriva por join localidades→zonas).
+-- Si cambia el texto, se re-resuelve el FK por nombre.
 CREATE OR REPLACE FUNCTION clientes_sync_localidad_fk()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -163,17 +164,15 @@ BEGIN
     WHERE lower(trim(nombre)) = lower(trim(NEW.localidad));
   END IF;
 
-  -- Con FK resuelto: texto, provincia y zona se canonicalizan desde el catálogo
+  -- Con FK resuelto: texto y provincia se canonicalizan desde el catálogo
   IF NEW.localidad_id IS NOT NULL THEN
-    SELECT l.nombre, l.provincia, z.nombre AS zona
+    SELECT l.nombre, l.provincia
     INTO v_loc
     FROM localidades l
-    LEFT JOIN zonas z ON z.id = l.zona_id
     WHERE l.id = NEW.localidad_id;
     IF FOUND THEN
       NEW.localidad := v_loc.nombre;
       IF COALESCE(trim(v_loc.provincia), '') <> '' THEN NEW.provincia := v_loc.provincia; END IF;
-      IF v_loc.zona IS NOT NULL THEN NEW.zona := v_loc.zona; END IF;
     END IF;
   END IF;
 
@@ -215,27 +214,22 @@ WHERE a.categoria_id = c.id AND COALESCE(trim(a.categoria), '') = '';
 UPDATE articulos a SET subcategoria = s.nombre FROM subcategorias s
 WHERE a.subcategoria_id = s.id AND COALESCE(trim(a.subcategoria), '') = '';
 
--- 4b. Clientes con FK: canonicalizar texto + provincia + zona desde el catálogo
+-- 4b. Clientes con FK: canonicalizar texto + provincia desde el catálogo
 --     (arregla los 16 con texto distinto y los 38 con provincia contradictoria)
 UPDATE clientes c
 SET localidad = l.nombre,
-    provincia = CASE WHEN COALESCE(trim(l.provincia), '') <> '' THEN l.provincia ELSE c.provincia END,
-    zona      = COALESCE(z.nombre, c.zona)
+    provincia = CASE WHEN COALESCE(trim(l.provincia), '') <> '' THEN l.provincia ELSE c.provincia END
 FROM localidades l
-LEFT JOIN zonas z ON z.id = l.zona_id
 WHERE c.localidad_id = l.id
   AND (lower(trim(COALESCE(c.localidad, ''))) IS DISTINCT FROM lower(trim(l.nombre))
-       OR (COALESCE(trim(l.provincia), '') <> '' AND lower(trim(COALESCE(c.provincia, ''))) IS DISTINCT FROM lower(trim(l.provincia)))
-       OR (z.nombre IS NOT NULL AND lower(trim(COALESCE(c.zona, ''))) IS DISTINCT FROM lower(trim(z.nombre))));
+       OR (COALESCE(trim(l.provincia), '') <> '' AND lower(trim(COALESCE(c.provincia, ''))) IS DISTINCT FROM lower(trim(l.provincia))));
 
 -- 4c. Clientes sin FK cuyo texto matchea el catálogo: resolver + canonicalizar
 UPDATE clientes c
 SET localidad_id = l.id,
     localidad = l.nombre,
-    provincia = CASE WHEN COALESCE(trim(l.provincia), '') <> '' THEN l.provincia ELSE c.provincia END,
-    zona      = COALESCE(z.nombre, c.zona)
+    provincia = CASE WHEN COALESCE(trim(l.provincia), '') <> '' THEN l.provincia ELSE c.provincia END
 FROM localidades l
-LEFT JOIN zonas z ON z.id = l.zona_id
 WHERE c.localidad_id IS NULL
   AND lower(trim(COALESCE(c.localidad, ''))) = lower(trim(l.nombre));
 
