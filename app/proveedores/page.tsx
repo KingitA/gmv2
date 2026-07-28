@@ -300,7 +300,7 @@ export default function ProveedoresPage() {
               </CardContent>
             </Card>
           </Link>
-          <Link href="/comprobantes" className="group">
+          <Link href="/ordenes-compra/nc-pendientes" className="group">
             <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-green-500 hover:border-l-green-600">
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
@@ -308,8 +308,8 @@ export default function ProveedoresPage() {
                     <FileText className="h-6 w-6 text-green-600" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-lg">Comprobantes</h3>
-                    <p className="text-sm text-muted-foreground">Facturas y comprobantes</p>
+                    <h3 className="font-semibold text-lg">NC Proveedores</h3>
+                    <p className="text-sm text-muted-foreground">Notas de crédito esperadas y sin imputar</p>
                   </div>
                 </div>
               </CardContent>

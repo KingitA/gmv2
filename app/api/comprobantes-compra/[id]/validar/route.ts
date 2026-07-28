@@ -29,16 +29,35 @@ export async function POST(
         const proveedorId = comprobante.proveedor_id || (comprobante.orden_compra as any)?.proveedor_id;
         const ocId = (comprobante.orden_compra as any)?.id;
 
-        // 1. Update kardex pendiente → confirmado for this OC
+        // 1. Update kardex pendiente → confirmado for this OC.
+        // En OC mixtas (parte factura, parte adquisición de stock) cada
+        // comprobante confirma solo las líneas de su régimen: una factura
+        // confirma lo blanco, una adquisición lo negro; 'mixto' con cualquiera.
         if (ocId) {
-            await supabase.from('kardex')
-                .update({
-                    estado: 'confirmado',
-                    comprobante_compra_id: comprobante_id,
-                    fecha: comprobante.fecha_comprobante || nowArgentina(),
-                })
+            const esAdquisicion = ['Adquisicion', 'Reversa'].includes(comprobante.tipo_comprobante);
+            const { data: pendientes } = await supabase.from('kardex')
+                .select('id, articulo_iva_compras')
                 .eq('orden_compra_id', ocId)
                 .eq('estado', 'pendiente');
+
+            const idsAConfirmar = (pendientes || [])
+                .filter((k: any) => {
+                    const regimen = k.articulo_iva_compras;
+                    if (!regimen || regimen === 'mixto') return true;
+                    return esAdquisicion ? regimen === 'adquisicion_stock' : regimen === 'factura';
+                })
+                .map((k: any) => k.id);
+
+            if (idsAConfirmar.length > 0) {
+                await supabase.from('kardex')
+                    .update({
+                        estado: 'confirmado',
+                        comprobante_compra_id: comprobante_id,
+                        fecha: comprobante.fecha_comprobante || nowArgentina(),
+                        color_dinero: esAdquisicion ? 'NEGRO' : 'BLANCO',
+                    })
+                    .in('id', idsAConfirmar);
+            }
 
             // 1b. Revalorizar kardex ingresado a $0 (flujo depósito sin factura):
             // usar los precios del detalle de este comprobante.

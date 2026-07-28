@@ -243,9 +243,9 @@ function DetalleOrdenDialog({ orden, onClose }: { orden: OrdenCompra; onClose: (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => (window.location.href = `/recepcion/${comp.id}`)}
+                        onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/verificacion`)}
                       >
-                        Recepcionar
+                        Verificar
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -635,8 +635,10 @@ export default function OrdenesCompraPage() {
     loadOrdenes()
   }
 
-  const enviarPorEmail = async (orden: OrdenCompra) => {
-    alert(`Funcionalidad de envío por email para orden ${orden.numero_orden} (próximamente)`)
+  // Descarga la OC como PDF o Excel (un solo archivo con cantidades totales,
+  // EAN13/SKU/descripción/precios/descuentos/IVA) para enviar al proveedor.
+  const descargarOrden = (orden: OrdenCompra, formato: "pdf" | "xlsx") => {
+    window.open(`/api/ordenes-compra/${orden.id}/pdf${formato === "xlsx" ? "?formato=xlsx" : ""}`, "_blank")
   }
 
   const eliminarOrden = async (orden: OrdenCompra) => {
@@ -705,13 +707,8 @@ export default function OrdenesCompraPage() {
   }
 
   const irARecepcion = (orden: OrdenCompra) => {
-    // Si ya tiene comprobantes, ir al último
-    if (orden.comprobantes && orden.comprobantes.length > 0) {
-      const ultimoComprobante = orden.comprobantes[orden.comprobantes.length - 1]
-      window.location.href = `/recepcion/${ultimoComprobante.id}`
-    } else {
-      alert("Primero debés cargar un comprobante para esta orden")
-    }
+    // Flujo moderno: la verificación triple (OC vs físico vs facturado)
+    window.location.href = `/ordenes-compra/${orden.id}/verificacion`
   }
 
   const handleImportSuccess = (items: any[], proveedorId: string) => {
@@ -1123,15 +1120,16 @@ export default function OrdenesCompraPage() {
                       <div className="flex gap-2 flex-wrap">
                         {/* PENDIENTE: editar artículos + enviar */}
                         {orden.estado === "pendiente" && (
-                          <>
-                            <Button variant="outline" size="sm" onClick={() => abrirEditarOrden(orden)}>
-                              <Pencil className="h-4 w-4 mr-1" /> Editar
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => enviarPorEmail(orden)}>
-                              <Send className="h-4 w-4 mr-1" /> Enviar
-                            </Button>
-                          </>
+                          <Button variant="outline" size="sm" onClick={() => abrirEditarOrden(orden)}>
+                            <Pencil className="h-4 w-4 mr-1" /> Editar
+                          </Button>
                         )}
+                        <Button variant="outline" size="sm" title="Descargar PDF para enviar al proveedor" onClick={() => descargarOrden(orden, "pdf")}>
+                          <Send className="h-4 w-4 mr-1" /> PDF
+                        </Button>
+                        <Button variant="outline" size="sm" title="Descargar Excel para enviar al proveedor" onClick={() => descargarOrden(orden, "xlsx")}>
+                          Excel
+                        </Button>
 
                         {/* ENVIADA / EN CAMINO: cargar comprobantes */}
                         {(orden.estado === "enviada" || orden.estado === "confirmada" || orden.estado === "en_camino") && (

@@ -161,6 +161,15 @@ export async function insertarKardex(
 ): Promise<void> {
   const signo = TIPOS_SALIDA.includes(input.tipo_movimiento) ? -1 : 1
 
+  // En compras, derivar color_dinero del régimen del artículo si no viene dado:
+  // adquisicion_stock → NEGRO (sin comprobante fiscal), factura → BLANCO.
+  // 'mixto' queda null (se define por comprobante al validar).
+  let colorDinero = input.color_dinero ?? null
+  if (!colorDinero && (input.tipo_movimiento === 'compra' || input.tipo_movimiento === 'devolucion_compra')) {
+    if (articuloInfo?.iva_compras === 'adquisicion_stock') colorDinero = 'NEGRO'
+    else if (articuloInfo?.iva_compras === 'factura') colorDinero = 'BLANCO'
+  }
+
   // Calcular margen solo en ventas donde tenemos precio_costo
   let margen_unitario: number | null = null
   let margen_porcentaje: number | null = null
@@ -222,7 +231,7 @@ export async function insertarKardex(
     tipo_comprobante: input.tipo_comprobante ?? null,
     numero_comprobante: input.numero_comprobante ?? null,
     metodo_facturacion: input.metodo_facturacion ?? null,
-    color_dinero: input.color_dinero ?? null,
+    color_dinero: colorDinero,
     va_en_comprobante: input.va_en_comprobante ?? null,
 
     percepcion_iva_pct: input.percepcion_iva_pct ?? 0,
