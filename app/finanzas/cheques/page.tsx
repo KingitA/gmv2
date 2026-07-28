@@ -129,14 +129,17 @@ export default function ChequesPage() {
 
   const filaBase = (c: Cheque) => (
     <>
-      <TableCell className="font-medium">
-        {c.banco} {c.es_echeq && <Badge variant="secondary" className="ml-1">e-cheq</Badge>}
-      </TableCell>
+      <TableCell className="font-medium">{c.banco}</TableCell>
       <TableCell>{c.numero}</TableCell>
       <TableCell>{c.cliente_nombre ?? "—"}</TableCell>
       <TableCell>{fecha(c.fecha_vencimiento)}</TableCell>
       <TableCell className="font-bold">{fmt(c.monto)}</TableCell>
-      <TableCell><MoneyColorBadge color={c.color as any} /></TableCell>
+      <TableCell>
+        <span className="inline-flex items-center gap-1.5">
+          <MoneyColorBadge color={c.color as any} />
+          {c.es_echeq && <Badge variant="secondary">e-cheq</Badge>}
+        </span>
+      </TableCell>
     </>
   )
 

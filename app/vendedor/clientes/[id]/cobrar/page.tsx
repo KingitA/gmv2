@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { BcraDeudorChip } from "@/components/pagos/BcraDeudorChip"
 
 // Pantalla de cobro del viajante — contrato docs/CONTRATO-API-VIAJANTES.md
 // (POST /api/viajante/cobro). Flujo pensado para la calle:
@@ -56,6 +57,7 @@ interface Metodo {
   banco: string
   numero_cheque: string
   fecha_cheque: string
+  cuit_emisor: string
   es_echeq: boolean
   referencia_transferencia: string
   cuenta_bancaria_id: string
@@ -83,6 +85,7 @@ const nuevoMetodo = (tipo: Metodo["tipo"]): Metodo => ({
   banco: "",
   numero_cheque: "",
   fecha_cheque: "",
+  cuit_emisor: "",
   es_echeq: false,
   referencia_transferencia: "",
   cuenta_bancaria_id: "",
@@ -246,6 +249,7 @@ export default function VendedorCobrarPage() {
             banco: r.banco_emisor || "",
             numero_cheque: r.numero_cheque || "",
             fecha_cheque: r.fecha_cheque || "",
+            cuit_emisor: r.cuit_emisor || "",
             es_echeq: r.color_cheque === "ECHEQ",
           })
         } else if (r.tipo === "transferencia") {
@@ -305,6 +309,7 @@ export default function VendedorCobrarPage() {
           banco: m.tipo === "cheque" ? m.banco : null,
           numero_cheque: m.tipo === "cheque" ? m.numero_cheque : null,
           fecha_cheque: m.tipo === "cheque" ? m.fecha_cheque : null,
+          cuit_emisor: m.tipo === "cheque" ? m.cuit_emisor || null : null,
           es_echeq: m.tipo === "cheque" ? m.es_echeq : false,
           referencia_transferencia: m.tipo === "transferencia" ? m.referencia_transferencia || null : null,
           cuenta_bancaria_id: m.tipo === "transferencia" ? m.cuenta_bancaria_id : null,
@@ -675,6 +680,16 @@ export default function VendedorCobrarPage() {
                       />
                       Es e-cheq
                     </label>
+                    <input
+                      value={m.cuit_emisor}
+                      onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })}
+                      placeholder="CUIT emisor (20-12345678-9)"
+                      inputMode="numeric"
+                      className="col-span-2 rounded-lg border border-gray-300 px-3 py-2"
+                    />
+                    <div className="col-span-2">
+                      <BcraDeudorChip cuit={m.cuit_emisor} />
+                    </div>
                   </div>
                 )}
                 {m.tipo === "transferencia" && (

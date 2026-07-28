@@ -208,6 +208,7 @@ export async function POST(request: NextRequest) {
           banco: m.banco || null,
           numero_cheque: m.numero_cheque || null,
           fecha_cheque: m.fecha_cheque || null,
+          cuit_emisor: m.tipo === "cheque" ? m.cuit_emisor || null : null,
           referencia: m.referencia_transferencia || null,
           cuenta_bancaria_id: m.cuenta_bancaria_id || null,
           color_cheque: m.tipo === "cheque" ? colorOverride(m.color) || colorCliente : null,

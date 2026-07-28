@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Trash2, Plus } from "lucide-react"
 import { DepositoItemsForm } from "./DepositoItemsForm"
 import { DateInputAR } from "@/components/ui/date-input-ar"
+import { BcraDeudorChip } from "./BcraDeudorChip"
 
 export type TipoPago = "efectivo" | "transferencia" | "cheque" | "deposito"
 
@@ -221,6 +222,9 @@ export function MetodoPagoForm({ metodos, onChange }: Props) {
                     {(Object.entries(colorLabels)).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="col-span-2">
+                <BcraDeudorChip cuit={m.cuit_emisor} />
               </div>
             </div>
           )}
