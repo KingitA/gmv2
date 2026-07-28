@@ -11,13 +11,10 @@ import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { todayArgentina } from "@/lib/utils"
 
-const TIPOS = [
-  { v: "servicio", l: "Servicio (hosting, internet, alarma…)" },
-  { v: "impuesto", l: "Impuesto" },
-  { v: "vep", l: "VEP (931, IVA…)" },
-  { v: "seguro", l: "Seguro" },
-  { v: "otro", l: "Otro gasto" },
-]
+import { CATEGORIAS_GASTO } from "@/lib/finanzas/categorias-gasto"
+
+// Para el alta de gastos no ofrecemos "factura" (eso va por proveedores)
+const TIPOS = CATEGORIAS_GASTO.filter((c) => c.value !== "factura")
 const RECURRENCIAS = [
   { v: "ninguna", l: "Pago único" },
   { v: "mensual", l: "Todos los meses" },
@@ -43,7 +40,7 @@ export function NuevoGastoDialog({
   onSaved?: () => void
 }) {
   const [concepto, setConcepto] = useState("")
-  const [tipo, setTipo] = useState("servicio")
+  const [tipo, setTipo] = useState("servicios")
   const [monto, setMonto] = useState("")
   const [esEstimado, setEsEstimado] = useState(false)
   const [fecha, setFecha] = useState(todayArgentina())
@@ -54,7 +51,7 @@ export function NuevoGastoDialog({
   const [saving, setSaving] = useState(false)
 
   const reset = () => {
-    setConcepto(""); setTipo("servicio"); setMonto(""); setEsEstimado(false)
+    setConcepto(""); setTipo("servicios"); setMonto(""); setEsEstimado(false)
     setFecha(todayArgentina()); setRecurrencia("mensual"); setFinCiclo("")
     setFormaPago("transferencia"); setModalidad("deposito")
   }
@@ -121,7 +118,7 @@ export function NuevoGastoDialog({
               <Label>Tipo</Label>
               <Select value={tipo} onValueChange={setTipo}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{TIPOS.map(t => <SelectItem key={t.v} value={t.v}>{t.l}</SelectItem>)}</SelectContent>
+                <SelectContent>{TIPOS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>

@@ -437,10 +437,15 @@ export function CalendarioPagos({
                                         <Select value={form.tipo} onValueChange={(v) => setForm({ ...form, tipo: v })}>
                                             <SelectTrigger><SelectValue /></SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="factura">Factura</SelectItem>
-                                                <SelectItem value="servicio">Servicio</SelectItem>
-                                                <SelectItem value="impuesto">Impuesto / VEP</SelectItem>
-                                                <SelectItem value="seguro">Seguro</SelectItem>
+                                                <SelectItem value="factura">Factura de proveedor</SelectItem>
+                                                <SelectItem value="sueldos">Sueldos</SelectItem>
+                                                <SelectItem value="cargas_sociales">Cargas sociales (931, sindicatos, OS)</SelectItem>
+                                                <SelectItem value="impuestos">Impuestos (IVA, IIBB, CM, municipal)</SelectItem>
+                                                <SelectItem value="servicios">Servicios (luz, expensas, teléfono, web)</SelectItem>
+                                                <SelectItem value="honorarios">Honorarios (contador, programador)</SelectItem>
+                                                <SelectItem value="seguros">Seguros (vida, flota)</SelectItem>
+                                                <SelectItem value="vehiculos">Vehículos (gastos extra de flota)</SelectItem>
+                                                <SelectItem value="socios">Socios (adelantos / participaciones)</SelectItem>
                                                 <SelectItem value="otro">Otro gasto</SelectItem>
                                             </SelectContent>
                                         </Select>

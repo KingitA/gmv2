@@ -22,11 +22,15 @@ import Link from "next/link"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
 
 const TIPOS_VENCIMIENTO = [
-    { value: "factura", label: "Factura" },
-    { value: "servicio", label: "Servicio" },
-    { value: "impuesto", label: "Impuesto / VEP" },
-    { value: "seguro", label: "Seguro" },
-    { value: "vep", label: "VEP" },
+    { value: "factura", label: "Factura de proveedor" },
+    { value: "sueldos", label: "Sueldos" },
+    { value: "cargas_sociales", label: "Cargas sociales" },
+    { value: "impuestos", label: "Impuestos" },
+    { value: "servicios", label: "Servicios" },
+    { value: "honorarios", label: "Honorarios" },
+    { value: "seguros", label: "Seguros" },
+    { value: "vehiculos", label: "Vehículos" },
+    { value: "socios", label: "Socios" },
     { value: "otro", label: "Otro" },
 ]
 

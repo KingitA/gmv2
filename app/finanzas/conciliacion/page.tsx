@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select"
 import { ImportExtractoDialog } from "@/components/finanzas/import-extracto-dialog"
 import { formatDateAR } from "@/lib/utils"
+import { labelCategoria, egresoDeCategoria } from "@/lib/finanzas/categorias-gasto"
 
 const fmt = (n: number) =>
   n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -156,14 +157,10 @@ export default function ConciliacionPage() {
       return `${m.kardex_contable.tipo_movimiento} — ${m.kardex_contable.concepto ?? ""} ${fmt(Number(m.kardex_contable.monto))}`
     }
     if (m.vencimientos) {
-      return `Cuota: ${m.vencimientos.concepto} (${m.vencimientos.tipo}) — vence ${formatDateAR(m.vencimientos.fecha_vencimiento)}`
+      return `Cuota: ${m.vencimientos.concepto} (${labelCategoria(m.vencimientos.tipo)}) — vence ${formatDateAR(m.vencimientos.fecha_vencimiento)}`
     }
     return null
   }
-
-  // Categoría de egreso sugerida según el tipo del vencimiento
-  const categoriaDeVenc = (tipo?: string) =>
-    tipo === "vep" || tipo === "impuesto" ? "IMPUESTOS" : "OPERATIVO"
 
   return (
     <div className="min-h-screen bg-background">
@@ -297,7 +294,7 @@ export default function ConciliacionPage() {
                             {m.estado_matching === "SUGERIDO" && !m.kardex_id && m.vencimientos && (
                               <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={accionando !== null}
                                 onClick={() => accion(
-                                  { action: "saldar_venc", mov_id: m.id, vencimiento_id: m.vencimientos.id, categoria: categoriaDeVenc(m.vencimientos.tipo) },
+                                  { action: "saldar_venc", mov_id: m.id, vencimiento_id: m.vencimientos.id, categoria: egresoDeCategoria(m.vencimientos.tipo) },
                                   "Cuota saldada: egreso registrado y vencimiento pagado"
                                 )}>
                                 {accionando === m.id ? "…" : "✓ Saldar cuota"}
