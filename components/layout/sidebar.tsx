@@ -41,8 +41,10 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Compras',
     items: [
+      { label: 'Órdenes de Compra', href: '/ordenes-compra', icon: '🛒' },
       { label: 'Proveedores', href: '/proveedores', icon: '🏭' },
       { label: 'Listas de Precios', href: '/listas-proveedores', icon: '📋' },
+      { label: 'Vencimientos', href: '/vencimientos', icon: '⏰' },
     ],
   },
   {

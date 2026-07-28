@@ -50,7 +50,7 @@ export async function POST(
 
             const { data: item } = await supabase
                 .from('recepciones_items')
-                .select(`articulo_id, precio_real, precio_oc, precio_documentado,
+                .select(`articulo_id, precio_real, precio_oc, precio_documentado, cantidad_documentada, cantidad_fisica,
                     articulo:articulos(sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual)`)
                 .eq('id', item_id)
                 .single();
@@ -66,12 +66,14 @@ export async function POST(
                     await supabase.from('articulos').update({ precio_compra: valor_real }).eq('id', item.articulo_id);
                     await supabase.from('recepciones_items').update({ precio_real: valor_real, precio_verificado: true }).eq('id', item_id);
                 } else if (accion === 'B') {
-                    // No asumir: generate NC in CC proveedor
-                    const montoDif = (valor_real - (item.precio_oc || 0)) * (item as any).cantidad_documentada || 0;
+                    // No asumir: generate NC in CC proveedor.
+                    // Cantidad: lo documentado en factura; si no hay, lo recibido físico.
+                    const cantidadNC = Number(item.cantidad_documentada || item.cantidad_fisica || 0);
+                    const montoDif = Math.round((valor_real - (item.precio_oc || 0)) * cantidadNC * 100) / 100;
                     await supabase.from('cuenta_corriente_proveedores').insert({
                         proveedor_id: proveedorId,
                         tipo_movimiento: 'nota_credito',
-                        monto: montoDif,
+                        monto: -Math.abs(montoDif),
                         descripcion: descripcion || `NC por diferencia precio artículo`,
                         referencia_id: recepcion_id,
                         referencia_tipo: 'recepcion',

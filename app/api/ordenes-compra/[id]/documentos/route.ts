@@ -236,6 +236,13 @@ export async function POST(
         console.error('[Docs OC] Error creando comprobante:', compError.message);
     }
 
+    // Vincular documento → comprobante (permite revertir al eliminar el doc)
+    if (comprobante && doc) {
+        await supabase.from('recepciones_documentos')
+            .update({ comprobante_id: comprobante.id })
+            .eq('id', doc.id);
+    }
+
     // Matching de artículos OCR → comprobantes_compra_detalle + actualizar recepciones_items
     const detalleCreado: any[] = [];
     if (ocrResult.items.length > 0 && comprobante) {
@@ -245,6 +252,7 @@ export async function POST(
             recepcion_id: recepcion.id,
             proveedor_id: oc.proveedor_id,
             items: ocrResult.items,
+            documento_id: doc?.id,
         });
         detalleCreado.push(...matches);
     }
@@ -280,11 +288,20 @@ export async function DELETE(
 
     const { data: doc } = await supabase
         .from('recepciones_documentos')
-        .select('id, storage_path, recepcion_id')
+        .select('id, storage_path, recepcion_id, comprobante_id')
         .eq('id', documento_id)
         .single();
 
     if (!doc) return NextResponse.json({ error: 'Documento no encontrado' }, { status: 404 });
+
+    // Revertir lo que el OCR de este documento aplicó (detalle + cantidades documentadas)
+    if (doc.comprobante_id) {
+        const { revertirComprobanteOCR } = await import('@/lib/services/detalle');
+        const { error: revertError } = await revertirComprobanteOCR(supabase, doc.comprobante_id);
+        if (revertError) {
+            return NextResponse.json({ error: revertError }, { status: 409 });
+        }
+    }
 
     if (doc.storage_path) {
         await supabase.storage.from('comprobantes').remove([doc.storage_path]);

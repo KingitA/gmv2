@@ -6,7 +6,7 @@ import { MatchingEngine } from "@/lib/matching/matcher";
 import { ImportItemRaw } from "@/lib/matching/types";
 import { requireAuth } from '@/lib/auth'
 import { todayArgentina } from '@/lib/utils'
-import { matchAndCreateDetalle } from '@/lib/services/detalle'
+import { matchAndCreateDetalle, revertirComprobanteOCR } from '@/lib/services/detalle'
 
 function mapTipoComprobante(ocr: string | null | undefined, tipoDocumento: string): string {
     if (!ocr) {
@@ -140,6 +140,13 @@ export async function POST(
                     descuento_fuera_factura: compMeta?.descuento_global || 0,
                 }).select().single();
                 comprobante = comp;
+
+                // Vincular documento → comprobante (permite revertir al eliminar el doc)
+                if (comp) {
+                    await supabase.from('recepciones_documentos')
+                        .update({ comprobante_id: comp.id })
+                        .eq('id', doc.id);
+                }
             }
         }
 
@@ -181,12 +188,6 @@ export async function POST(
     }
 }
 
-async function revertOCRData(supabase: any, recepcion_id: string, ocrData: any) {
-    // Revert logic simplified for stability, assumes existing function signature or skipped if unused 
-    // in this specific file context (but it is used in DELETE).
-    // Ideally should be improved, but staying safe to existing logic.
-    return;
-}
 
 async function processOCRData(supabase: any, recepcion_id: string, ocrData: any) {
     if (!ocrData.items || ocrData.items.length === 0) return [];
@@ -379,8 +380,11 @@ export async function DELETE(
             await supabase.storage.from("comprobantes").remove([storagePath]);
         }
 
-        if (doc.datos_ocr && doc.datos_ocr.items) {
-            await revertOCRData(supabase, recepcion_id, doc.datos_ocr);
+        if (doc.comprobante_id) {
+            const { error: revertError } = await revertirComprobanteOCR(supabase, doc.comprobante_id);
+            if (revertError) {
+                return NextResponse.json({ error: revertError }, { status: 409 });
+            }
         }
 
         const { error: deleteError } = await supabase

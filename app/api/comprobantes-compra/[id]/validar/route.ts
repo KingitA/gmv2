@@ -39,6 +39,47 @@ export async function POST(
                 })
                 .eq('orden_compra_id', ocId)
                 .eq('estado', 'pendiente');
+
+            // 1b. Revalorizar kardex ingresado a $0 (flujo depósito sin factura):
+            // usar los precios del detalle de este comprobante.
+            const { data: detalle } = await supabase
+                .from('comprobantes_compra_detalle')
+                .select('articulo_id, precio_unitario, descuento1')
+                .eq('comprobante_id', comprobante_id)
+                .not('articulo_id', 'is', null);
+
+            if (detalle && detalle.length > 0) {
+                // El kardex de depósito lleva recepcion_id (no orden_compra_id)
+                const { data: recs } = await supabase
+                    .from('recepciones').select('id').eq('orden_compra_id', ocId);
+                const recIds = (recs || []).map((r: any) => r.id);
+
+                const orFilter = recIds.length > 0
+                    ? `orden_compra_id.eq.${ocId},recepcion_id.in.(${recIds.join(',')})`
+                    : `orden_compra_id.eq.${ocId}`;
+
+                const { data: kardexCero } = await supabase
+                    .from('kardex')
+                    .select('id, articulo_id, cantidad')
+                    .or(orFilter)
+                    .eq('tipo_movimiento', 'compra')
+                    .eq('precio_unitario_final', 0);
+
+                for (const k of kardexCero || []) {
+                    const det = detalle.find((d: any) => d.articulo_id === k.articulo_id);
+                    if (!det) continue;
+                    const precio = Number(det.precio_unitario || 0) * (1 - Number(det.descuento1 || 0) / 100);
+                    if (precio <= 0) continue;
+                    const cantidad = Number(k.cantidad || 0);
+                    await supabase.from('kardex').update({
+                        precio_lista: det.precio_unitario,
+                        precio_unitario_final: precio,
+                        subtotal_neto: Math.round(precio * cantidad * 100) / 100,
+                        subtotal_total: Math.round(precio * cantidad * 100) / 100,
+                        comprobante_compra_id: comprobante_id,
+                    }).eq('id', k.id);
+                }
+            }
         }
 
         // 2. Mark comprobante as validated
@@ -48,14 +89,32 @@ export async function POST(
             validado_at: nowArgentina(),
         }).eq('id', comprobante_id);
 
-        // 3. Create vencimiento if fecha_vencimiento is set
-        if (comprobante.fecha_vencimiento && comprobante.total_factura_declarado > 0) {
+        // 3. Create vencimiento. Si el comprobante no trae fecha_vencimiento
+        // (típico de los creados por OCR), calcularla con los días de pago del proveedor.
+        let fechaVencimiento = comprobante.fecha_vencimiento;
+        if (!fechaVencimiento && proveedorId && comprobante.fecha_comprobante) {
+            const { data: prov } = await supabase
+                .from('proveedores')
+                .select('dias_vencimiento')
+                .eq('id', proveedorId)
+                .maybeSingle();
+            const dias = Number(prov?.dias_vencimiento || 0);
+            if (dias > 0) {
+                const base = new Date(comprobante.fecha_comprobante + 'T00:00:00');
+                base.setDate(base.getDate() + dias);
+                fechaVencimiento = base.toISOString().slice(0, 10);
+                await supabase.from('comprobantes_compra')
+                    .update({ fecha_vencimiento: fechaVencimiento })
+                    .eq('id', comprobante_id);
+            }
+        }
+        if (fechaVencimiento && comprobante.total_factura_declarado > 0) {
             try {
                 await supabase.from('vencimientos').insert({
                     comprobante_compra_id: comprobante_id,
                     proveedor_id: proveedorId,
                     monto: comprobante.total_factura_declarado,
-                    fecha_vencimiento: comprobante.fecha_vencimiento,
+                    fecha_vencimiento: fechaVencimiento,
                     estado: 'pendiente',
                     descripcion: `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante}`,
                 });

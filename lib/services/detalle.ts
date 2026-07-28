@@ -153,3 +153,55 @@ export async function matchAndCreateDetalle(supabase: any, params: {
 
     return matched;
 }
+
+// Revierte lo que el OCR de un documento aplicó: resta cantidades documentadas
+// de recepciones_items (vía comprobantes_compra_detalle.recepcion_item_id) y
+// elimina detalle + comprobante creado por ese documento.
+// Devuelve error si el comprobante ya fue validado (tiene CC/vencimientos).
+export async function revertirComprobanteOCR(supabase: any, comprobante_id: string): Promise<{ error?: string }> {
+    const { data: comprobante } = await supabase
+        .from('comprobantes_compra')
+        .select('id, estado')
+        .eq('id', comprobante_id)
+        .maybeSingle();
+
+    if (!comprobante) return {};
+    if (comprobante.estado === 'validado' || comprobante.estado === 'cerrado') {
+        return { error: 'El comprobante ya fue validado — anulá la validación antes de eliminar el documento' };
+    }
+
+    const { data: detalle } = await supabase
+        .from('comprobantes_compra_detalle')
+        .select('id, recepcion_item_id, cantidad_facturada')
+        .eq('comprobante_id', comprobante_id);
+
+    for (const det of detalle || []) {
+        if (!det.recepcion_item_id) continue;
+        const { data: item } = await supabase
+            .from('recepciones_items')
+            .select('id, cantidad_documentada, factor_conversion, fuera_de_oc, cantidad_fisica')
+            .eq('id', det.recepcion_item_id)
+            .maybeSingle();
+        if (!item) continue;
+
+        const factor = Number(item.factor_conversion || 1);
+        const restar = Number(det.cantidad_facturada || 0) * factor;
+        const nuevaCant = Math.max(0, Number(item.cantidad_documentada || 0) - restar);
+
+        // Línea creada solo por este documento (fuera de OC, sin recepción física): eliminarla
+        if (item.fuera_de_oc && nuevaCant === 0 && Number(item.cantidad_fisica || 0) === 0) {
+            await supabase.from('recepciones_items').delete().eq('id', item.id);
+        } else {
+            await supabase.from('recepciones_items')
+                .update({
+                    cantidad_documentada: nuevaCant,
+                    ...(nuevaCant === 0 ? { precio_documentado: 0 } : {}),
+                })
+                .eq('id', item.id);
+        }
+    }
+
+    await supabase.from('comprobantes_compra_detalle').delete().eq('comprobante_id', comprobante_id);
+    await supabase.from('comprobantes_compra').delete().eq('id', comprobante_id);
+    return {};
+}

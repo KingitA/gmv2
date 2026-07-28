@@ -267,7 +267,27 @@ export default function CargarComprobantesPage() {
     loadComprobantes()
   }
 
+  const validarComprobante = async (comp: any) => {
+    if (!confirm(`¿Validar ${comp.tipo_comprobante} ${comp.numero_comprobante}?\n\nEsto imputa la factura a la cuenta corriente del proveedor, confirma el kardex y genera el vencimiento de pago.`)) return
+    try {
+      const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'Error al validar el comprobante')
+        return
+      }
+      loadComprobantes()
+    } catch {
+      alert('Error de conexión')
+    }
+  }
+
   const eliminarComprobante = async (comprobanteId: string) => {
+    const comp = comprobantes.find(c => c.id === comprobanteId)
+    if (comp?.estado === 'validado') {
+      alert('El comprobante ya fue validado: tiene movimientos en cuenta corriente y vencimientos. No se puede eliminar desde acá.')
+      return
+    }
     if (!confirm("¿Estás seguro de eliminar este comprobante? Esta acción no se puede deshacer.")) return
 
     console.log("[v0] Intentando eliminar comprobante:", comprobanteId)
@@ -715,8 +735,16 @@ export default function CargarComprobantesPage() {
                                 <X className="h-4 w-4" />
                               </Button>
                             </>
+                          ) : comp.estado === 'validado' ? (
+                            <Badge className="bg-green-100 text-green-700 border-green-300" variant="outline">
+                              <CheckCircle2 className="h-3 w-3 mr-1" /> Validado
+                            </Badge>
                           ) : (
                             <>
+                              <Button variant="ghost" size="icon" title="Validar comprobante (imputa CC + vencimiento)"
+                                onClick={() => validarComprobante(comp)}>
+                                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                              </Button>
                               <Button variant="ghost" size="icon" onClick={() => iniciarEdicion(comp)}>
                                 <Edit className="h-4 w-4" />
                               </Button>
