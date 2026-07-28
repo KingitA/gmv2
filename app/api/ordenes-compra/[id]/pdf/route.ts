@@ -51,6 +51,10 @@ export async function GET(
             const precioLista = Number(d.precio_unitario || 0);
             const precioNeto = descuentos.reduce((p, desc) => p * (1 - desc / 100), precioLista);
             const cantidad = Number(d.cantidad_pedida || 0);
+            // El precio es POR UNIDAD; si se pide por bulto, las unidades reales
+            // son cantidad × unidades_por_bulto (misma lógica que la pantalla de OC).
+            const unidadesPorBulto = Number(d.articulo?.unidades_por_bulto || 1);
+            const unidadesTotales = d.tipo_cantidad === 'bulto' ? cantidad * unidadesPorBulto : cantidad;
             const ean = Array.isArray(d.articulo?.ean13) ? d.articulo.ean13[0] : d.articulo?.ean13;
             return {
                 ean13: ean || null,
@@ -58,10 +62,12 @@ export async function GET(
                 descripcion: d.articulo?.descripcion || '—',
                 cantidad,
                 tipo_cantidad: d.tipo_cantidad,
+                unidades_por_bulto: unidadesPorBulto,
+                unidades_totales: unidadesTotales,
                 precio_unitario: precioLista,
                 descuentos,
                 precio_neto: Math.round(precioNeto * 100) / 100,
-                total_linea: Math.round(precioNeto * cantidad * 100) / 100,
+                total_linea: Math.round(precioNeto * unidadesTotales * 100) / 100,
             };
         });
 
@@ -95,7 +101,7 @@ export async function GET(
                 subtotal_neto: subtotal,
                 iva,
                 total: Math.round((subtotal + iva) * 100) / 100,
-                unidades: lineas.reduce((s, l) => s + l.cantidad, 0),
+                unidades: lineas.reduce((s, l) => s + l.unidades_totales, 0),
             },
         };
 
@@ -108,6 +114,8 @@ export async function GET(
                 'Descripción': l.descripcion,
                 'Cantidad': l.cantidad,
                 'Tipo': l.tipo_cantidad || 'unidad',
+                'Unid/Bulto': l.unidades_por_bulto,
+                'Unidades': l.unidades_totales,
                 'Precio Lista': l.precio_unitario,
                 'Desc 1 %': l.descuentos[0],
                 'Desc 2 %': l.descuentos[1],
@@ -124,6 +132,7 @@ export async function GET(
             const ws = XLSX.utils.json_to_sheet(filas);
             ws['!cols'] = [
                 { wch: 15 }, { wch: 8 }, { wch: 45 }, { wch: 9 }, { wch: 8 },
+                { wch: 10 }, { wch: 10 },
                 { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
                 { wch: 12 }, { wch: 12 },
             ];

@@ -53,14 +53,15 @@ const s = StyleSheet.create({
   rowAlt:    { backgroundColor: '#f5f5f5' },
   td:        { fontSize: 7.5, color: '#444' },
   tdBold:    { fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#111' },
-  cEan:      { width: 72 },
-  cSku:      { width: 42 },
+  cEan:      { width: 66 },
+  cSku:      { width: 36 },
   cDesc:     { flex: 1 },
-  cCant:     { width: 38, textAlign: 'center' },
-  cPrecio:   { width: 52, textAlign: 'right' },
-  cDesc4:    { width: 52, textAlign: 'center' },
-  cNeto:     { width: 52, textAlign: 'right' },
-  cTotal:    { width: 60, textAlign: 'right' },
+  cCant:     { width: 36, textAlign: 'center' },
+  cUnid:     { width: 40, textAlign: 'center' },
+  cPrecio:   { width: 48, textAlign: 'right' },
+  cDesc4:    { width: 48, textAlign: 'center' },
+  cNeto:     { width: 48, textAlign: 'right' },
+  cTotal:    { width: 58, textAlign: 'right' },
 
   spacer:    { flex: 1 },
   footer:    { marginLeft: 4 },
@@ -83,12 +84,14 @@ export interface OrdenCompraPDFLinea {
   ean13?: string | null
   sku?: string | null
   descripcion: string
-  cantidad: number
+  cantidad: number              // bultos o unidades según tipo_cantidad
   tipo_cantidad?: string | null
-  precio_unitario: number       // precio de lista (neto, sin IVA)
+  unidades_por_bulto: number
+  unidades_totales: number      // cantidad × unidades_por_bulto si es bulto
+  precio_unitario: number       // precio de lista POR UNIDAD (neto, sin IVA)
   descuentos: number[]          // [d1, d2, d3, d4] en %
-  precio_neto: number           // precio post-descuentos (sin IVA)
-  total_linea: number           // precio_neto * cantidad
+  precio_neto: number           // precio unitario post-descuentos (sin IVA)
+  total_linea: number           // precio_neto * unidades_totales
 }
 
 export interface OrdenCompraPDFData {
@@ -177,6 +180,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
             <Text style={[s.thText, s.cSku]}>SKU</Text>
             <Text style={[s.thText, s.cDesc]}>Descripción</Text>
             <Text style={[s.thText, s.cCant]}>Cant.</Text>
+            <Text style={[s.thText, s.cUnid]}>Unid.</Text>
             <Text style={[s.thText, s.cPrecio]}>P. Lista</Text>
             <Text style={[s.thText, s.cDesc4]}>Desc.</Text>
             <Text style={[s.thText, s.cNeto]}>P. Neto</Text>
@@ -191,6 +195,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
               <Text style={[s.td, s.cSku, { fontSize: 7, color: '#888' }]}>{l.sku ?? ''}</Text>
               <Text style={[s.tdBold, s.cDesc]}>{l.descripcion}</Text>
               <Text style={[s.tdBold, s.cCant]}>{String(l.cantidad)}{l.tipo_cantidad === 'bulto' ? ' blt' : ''}</Text>
+              <Text style={[s.td, s.cUnid]}>{String(l.unidades_totales)}</Text>
               <Text style={[s.td, s.cPrecio]}>${fmtARS(l.precio_unitario)}</Text>
               <Text style={[s.td, s.cDesc4]}>{fmtDesc(l.descuentos)}</Text>
               <Text style={[s.td, s.cNeto]}>${fmtARS(l.precio_neto)}</Text>
@@ -209,7 +214,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
             </View>
             <View style={s.totNums}>
               <View style={s.totRow}>
-                <Text style={s.totLbl}>Total unidades / bultos</Text>
+                <Text style={s.totLbl}>Total unidades</Text>
                 <Text style={s.totVal}>{String(totales.unidades)}</Text>
               </View>
               <View style={s.totRow}>
