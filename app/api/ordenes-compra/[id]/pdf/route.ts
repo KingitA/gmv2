@@ -22,12 +22,16 @@ export async function GET(
         const formato = new URL(request.url).searchParams.get('formato') || 'pdf';
         const supabase = createAdminClient();
 
-        const { data: orden } = await supabase
+        const { data: orden, error: ordenErr } = await supabase
             .from('ordenes_compra')
-            .select('*, proveedor:proveedores(nombre, razon_social, cuit, direccion, telefono, email)')
+            .select('*, proveedor:proveedores(nombre, cuit, direccion, localidad, telefono, email)')
             .eq('id', ordenId)
             .maybeSingle();
 
+        if (ordenErr) {
+            console.error('[OC PDF] Error cargando orden:', ordenErr.message);
+            return NextResponse.json({ error: ordenErr.message }, { status: 500 });
+        }
         if (!orden) return NextResponse.json({ error: 'Orden no encontrada' }, { status: 404 });
 
         const { data: detalle } = await supabase
@@ -80,9 +84,9 @@ export async function GET(
                 logo_url: empresa.logo_url,
             } : null,
             proveedor: {
-                nombre: orden.proveedor?.nombre || orden.proveedor?.razon_social || '—',
+                nombre: orden.proveedor?.nombre || '—',
                 cuit: orden.proveedor?.cuit,
-                direccion: orden.proveedor?.direccion,
+                direccion: [orden.proveedor?.direccion, orden.proveedor?.localidad].filter(Boolean).join(', ') || null,
                 telefono: orden.proveedor?.telefono,
                 email: orden.proveedor?.email,
             },
