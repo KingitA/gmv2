@@ -4,11 +4,14 @@ import { resolveFactorConversion } from '@/lib/services/conversion';
 // Matches OCR items against catalog, creates comprobantes_compra_detalle rows,
 // and updates recepciones_items with documented prices/quantities.
 // Used by both the ERP documents route and the deposito OCR route.
+// Persists EVERY line (matched or not) with suggestion metadata so the
+// "Revisar matches" UI can correct them and feed the learning loop.
 export async function matchAndCreateDetalle(supabase: any, params: {
     comprobante_id: string;
     recepcion_id: string;
     proveedor_id: string;
     items: any[];
+    documento_id?: string;
 }) {
     const engine = new MatchingEngine();
 
@@ -23,32 +26,67 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         .eq('id', params.proveedor_id)
         .maybeSingle();
 
+    const currentRecItems: any[] = recItems || [];
     const detalleRows: any[] = [];
     const matched: any[] = [];
 
     for (const item of params.items) {
         const matchResult = await engine.resolveItem(
-            { description: item.descripcion, code: item.codigo, price: item.precio_unitario },
+            { description: item.descripcion, code: item.codigo, ean: item.ean, price: item.precio_unitario },
             params.proveedor_id
         );
 
-        if (matchResult.status !== 'matched' || !matchResult.bestCandidate?.sku_id) {
+        const best = matchResult.bestCandidate;
+        const isMatched = matchResult.status === 'matched' && !!best?.sku_id;
+        const isSuggestion = !isMatched && !!best?.sku_id && best.confidence_level === 'suggestion';
+
+        const baseRow = {
+            comprobante_id: params.comprobante_id,
+            cantidad_facturada: item.cantidad || 1,
+            precio_unitario: item.precio_unitario || 0,
+            descuento1: item.descuento || 0,
+            descripcion_proveedor: item.descripcion,
+            codigo_proveedor: item.codigo,
+            match_score: best?.score ?? null,
+        };
+
+        if (!isMatched) {
             detalleRows.push({
-                comprobante_id: params.comprobante_id,
+                ...baseRow,
                 articulo_id: null,
-                cantidad_facturada: item.cantidad || 1,
-                precio_unitario: item.precio_unitario || 0,
-                descuento1: item.descuento || 0,
-                descripcion_proveedor: item.descripcion,
-                codigo_proveedor: item.codigo,
+                articulo_sugerido_id: isSuggestion ? best!.sku_id : null,
+                match_estado: isSuggestion ? 'sugerido' : 'sin_match',
+                recepcion_item_id: null,
                 tipo_cantidad: 'unidad',
                 costo_final: (item.precio_unitario || 0) * (item.cantidad || 1),
             });
             continue;
         }
 
-        const articuloId = matchResult.bestCandidate.sku_id;
-        const recItem = (recItems || []).find((ri: any) => ri.articulo_id === articuloId);
+        const articuloId = best!.sku_id;
+        let recItem = currentRecItems.find((ri: any) => ri.articulo_id === articuloId);
+
+        // Ítem facturado que no estaba en la OC: crear la línea de recepción
+        // marcada fuera_de_oc para que depósito y verificación la vean.
+        if (!recItem) {
+            const { data: nuevaLinea } = await supabase
+                .from('recepciones_items')
+                .insert({
+                    recepcion_id: params.recepcion_id,
+                    articulo_id: articuloId,
+                    cantidad_oc: 0,
+                    cantidad_fisica: 0,
+                    estado_linea: 'pendiente',
+                    fuera_de_oc: true,
+                })
+                .select('*, articulo:articulos(id, sku, unidades_por_bulto, precio_compra, iva_compras)')
+                .single();
+            if (nuevaLinea) {
+                recItem = nuevaLinea;
+                currentRecItems.push(nuevaLinea);
+            }
+        }
+
         const articulo = recItem?.articulo;
 
         const conversion = resolveFactorConversion({
@@ -63,22 +101,37 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         const cantBase = (item.cantidad || 0) * conversion.factor;
 
         detalleRows.push({
-            comprobante_id: params.comprobante_id,
+            ...baseRow,
             articulo_id: articuloId,
-            cantidad_facturada: item.cantidad || 1,
-            precio_unitario: item.precio_unitario || 0,
-            descuento1: item.descuento || 0,
-            descripcion_proveedor: item.descripcion,
-            codigo_proveedor: item.codigo,
+            articulo_sugerido_id: null,
+            match_estado: 'auto',
+            recepcion_item_id: recItem?.id ?? null,
             tipo_cantidad: conversion.factor === 1 ? 'unidad' : 'bulto',
             costo_final: (item.precio_unitario || 0) * (1 - (item.descuento || 0) / 100),
         });
 
+        if (conversion.requiresReview) {
+            await supabase.from('ocr_conversion_warnings').insert({
+                recepcion_id: params.recepcion_id,
+                documento_id: params.documento_id,
+                proveedor_id: params.proveedor_id,
+                articulo_id: articuloId,
+                descripcion_ocr: item.descripcion || '',
+                cantidad_ocr: item.cantidad,
+                warning_type: conversion.warningType || '',
+                warning_message: conversion.warningMessage || '',
+                conversion_attempted: conversion,
+            }).then(({ error }: any) => {
+                if (error) console.error('[matchAndCreateDetalle] warning insert error:', error.message);
+            });
+        }
+
         if (recItem) {
+            // Acumular (no pisar): puede haber varios documentos por recepción.
             await supabase
                 .from('recepciones_items')
                 .update({
-                    cantidad_documentada: cantBase,
+                    cantidad_documentada: Number(recItem.cantidad_documentada || 0) + cantBase,
                     precio_documentado: item.precio_unitario || 0,
                     precio_real: item.precio_unitario || recItem.precio_oc || 0,
                     cantidad_base: cantBase,
@@ -87,6 +140,7 @@ export async function matchAndCreateDetalle(supabase: any, params: {
                     requires_review: conversion.requiresReview,
                 })
                 .eq('id', recItem.id);
+            recItem.cantidad_documentada = Number(recItem.cantidad_documentada || 0) + cantBase;
         }
 
         matched.push({ articulo_id: articuloId, descripcion: item.descripcion });

@@ -37,16 +37,31 @@ export class MatchingEngine {
             };
         }
 
-        // LAYER 1: Vector Search (Semantic)
+        // LAYER 1: Candidate generation — trigram (search_articulos, léxico) + vector (semántico)
         if (!descriptionStr) {
             return { bestCandidate: null, allCandidates: [], status: 'pending' };
         }
 
-        const embedding = await this.generateEmbedding(descriptionStr);
-        const vectorCandidates = await this.findVectorMatches(embedding);
+        const [trigramCandidates, vectorCandidates] = await Promise.all([
+            this.findTrigramMatches(descriptionStr),
+            this.generateEmbedding(descriptionStr).then(emb => this.findVectorMatches(emb)),
+        ]);
+
+        // Merge pools by article id, keeping the best score (both scales are 0-1)
+        const pool = new Map<string, MatchCandidate>();
+        for (const c of [...trigramCandidates, ...vectorCandidates]) {
+            const existing = pool.get(c.sku_id);
+            if (!existing) {
+                pool.set(c.sku_id, c);
+            } else if (c.score > existing.score) {
+                pool.set(c.sku_id, { ...c, signals: [...existing.signals, ...c.signals] });
+            } else {
+                existing.signals.push(...c.signals);
+            }
+        }
 
         // LAYER 2: Re-ranking
-        const reranked = vectorCandidates.map(candidate => {
+        const reranked = [...pool.values()].map(candidate => {
             return this.applyReranking(candidate, safeItem, features); // Use safeItem
         });
 
@@ -107,13 +122,15 @@ export class MatchingEngine {
         }
 
         // 2. Check by EAN (Global check, ignoring provider)
+        // articulos.ean13 es TEXT[] desde 20260424_ean13_array.sql
         if (item.ean) {
-            const { data } = await getSupabase()
+            const { data: eanRows } = await getSupabase()
                 .from('articulos')
                 .select('id, descripcion, sku')
-                .eq('codigo_barras', item.ean)
-                .maybeSingle();
+                .contains('ean13', [String(item.ean)])
+                .limit(1);
 
+            const data = eanRows?.[0];
             if (data) {
                 return {
                     sku_id: data.id,
@@ -186,21 +203,56 @@ export class MatchingEngine {
         }
     }
 
+    // Hidrata sku/descripcion de una lista de (id, score) contra articulos.
+    private async hydrateCandidates(
+        rows: { id: string; score: number }[],
+        method: MatchCandidate['method'],
+        signalLabel: string
+    ): Promise<MatchCandidate[]> {
+        if (rows.length === 0) return [];
+        const { data: arts } = await getSupabase()
+            .from('articulos')
+            .select('id, descripcion, sku')
+            .in('id', rows.map(r => r.id));
+        const byId = new Map((arts || []).map((a: any) => [a.id, a]));
+        return rows
+            .filter(r => byId.has(r.id))
+            .map(r => {
+                const art = byId.get(r.id)!;
+                return {
+                    sku_id: r.id,
+                    sku_code: art.sku,
+                    sku_name: art.descripcion,
+                    score: r.score,
+                    method,
+                    signals: [{ type: 'embedding_score' as const, score_impact: 0, description: `${signalLabel}: ${(r.score * 100).toFixed(1)}%` }],
+                    confidence_level: 'low' as const,
+                };
+            });
+    }
+
+    // Capa léxica: RPC search_articulos (trigram token-AND typo-tolerante sobre
+    // search_text, que ya indexa los alias/códigos de proveedor). El score crudo
+    // (word_similarity + bonos de prefijo/substring) se mapea a 0.60-0.90 para
+    // que un hit trigram solo nunca auto-apruebe sin verificación de medida.
+    private async findTrigramMatches(description: string): Promise<MatchCandidate[]> {
+        const { data, error } = await getSupabase().rpc('search_articulos', {
+            q: description,
+            match_count: 10
+        });
+        if (error) {
+            console.error("Trigram search error:", error);
+            return [];
+        }
+        const rows = (data || []).map((r: any) => ({
+            id: r.id as string,
+            score: Math.min(0.60 + 0.30 * Math.min(Number(r.score) || 0, 1), 0.90),
+        }));
+        return this.hydrateCandidates(rows, 'trigram', 'Trigram score');
+    }
+
     private async findVectorMatches(embedding: number[]): Promise<MatchCandidate[]> {
-        // using rpc to call pgvector function provided by Supabase or raw SQL
-        // We'll use a direct RPC call if we set up a function, or raw query.
-        // For simplicity and safety with RLS/types, direct RPC is best if the function exists.
-        // BUT we didn't create a match_articulos function in the migration yet. 
-        // Let's assume we can query directly or we need to add the function.
-        // Adding the function via migration is cleaner. I will use the 'match_documents' style pattern.
-
-        // WAIT: I didn't create the rpc function in 051. I should probably add it or do a raw query.
-        // Raw query from client is harder. I will assume I can create the function in a follow-up or just use `supabase.rpc`.
-        // Let's implement dynamic SQL via rpc or just fetch all? No fetching all is bad.
-        // We will use the standard Supabase pgvector 'match_documents' pattern.
-
-        // For now, I'll assume we can't easily add the RPC function from here without another migration step.
-        // I will write the code assuming 'match_articulos' exists, and I will ADD A MIGRATION STEP shortly to create it.
+        if (!embedding || embedding.length === 0) return [];
 
         const { data: candidates, error } = await getSupabase().rpc('match_articulos', {
             query_embedding: embedding,
@@ -213,15 +265,9 @@ export class MatchingEngine {
             return [];
         }
 
-        return (candidates || []).map((c: any) => ({
-            sku_id: c.id,
-            sku_code: c.codigo_interno,
-            sku_name: c.descripcion,
-            score: c.similarity, // Base cosine similarity
-            method: 'vector',
-            signals: [{ type: 'embedding_score', score_impact: 0, description: `Vector similarity: ${(c.similarity * 100).toFixed(1)}%` }],
-            confidence_level: 'low'
-        }));
+        // match_articulos devuelve solo (id, similarity) — hidratar nombres
+        const rows = (candidates || []).map((c: any) => ({ id: c.id as string, score: Number(c.similarity) || 0 }));
+        return this.hydrateCandidates(rows, 'vector', 'Vector similarity');
     }
 
     private applyReranking(candidate: MatchCandidate, inputItem: ImportItemRaw, inputFeatures: ReturnType<typeof extractFeatures>): MatchCandidate {

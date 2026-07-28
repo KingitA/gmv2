@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { RevisarMatches } from "./revisar-matches"
 
 const TIPO_DOC_LABELS: Record<string, string> = {
   factura: 'Factura', remito: 'Remito', adquisicion: 'Adquisición',
@@ -436,6 +437,9 @@ export default function CargarComprobantesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── REVISAR MATCHES (líneas OCR sin vincular al catálogo) ── */}
+      <RevisarMatches comprobantes={comprobantes} onResolved={loadComprobantes} />
 
       <Card>
         <CardHeader>

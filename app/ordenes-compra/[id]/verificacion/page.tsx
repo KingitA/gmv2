@@ -46,6 +46,7 @@ export default function VerificacionOCPage() {
     const [orden, setOrden] = useState<any>(null)
     const [rows, setRows] = useState<VerRow[]>([])
     const [comprobantes, setComprobantes] = useState<CompData[]>([])
+    const [sinMatch, setSinMatch] = useState(0)
     const [loading, setLoading] = useState(true)
     const [recepcionId, setRecepcionId] = useState<string | null>(null)
     const [transportes, setTransportes] = useState<any[]>([])
@@ -90,9 +91,10 @@ export default function VerificacionOCPage() {
         if (compIds.length > 0) {
             const { data: det } = await supabase
                 .from("comprobantes_compra_detalle")
-                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, tipo_cantidad")
+                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, tipo_cantidad, match_estado")
                 .in("comprobante_id", compIds)
             compDetalle = det || []
+            setSinMatch(compDetalle.filter((d: any) => d.match_estado === "sugerido" || d.match_estado === "sin_match").length)
         }
 
         const { data: recepciones } = await supabase
@@ -298,6 +300,18 @@ export default function VerificacionOCPage() {
                     )}
                 </div>
             </div>
+
+            {sinMatch > 0 && (
+                <div className="mb-4 p-3 border border-amber-300 bg-amber-50 rounded-lg flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-sm text-amber-800">
+                        <strong>{sinMatch} ítem{sinMatch !== 1 ? "s" : ""} de comprobantes sin vincular al catálogo.</strong>{" "}
+                        La verificación de precios y cantidades no los incluye hasta que se confirmen.
+                    </p>
+                    <Link href={`/ordenes-compra/${ordenId}/comprobantes`}>
+                        <Button size="sm" variant="outline" className="border-amber-400 text-amber-800">Revisar matches</Button>
+                    </Link>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <Card className="border-l-4 border-l-blue-500">

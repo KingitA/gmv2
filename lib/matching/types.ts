@@ -1,4 +1,4 @@
-export type MatchMethod = 'exact_code' | 'exact_ean' | 'exact_name' | 'vector' | 'manual' | 'none';
+export type MatchMethod = 'exact_code' | 'exact_ean' | 'exact_name' | 'trigram' | 'vector' | 'manual' | 'none';
 
 export interface MatchSignal {
     type: 'brand' | 'measure' | 'unit' | 'content' | 'embedding_score';

@@ -143,18 +143,27 @@ export async function POST(
             }
         }
 
-        // 5. Create comprobante_compra_detalle from OCR items (even unmatched, to show in verificacion)
+        // 5. Create comprobante_compra_detalle from OCR items (even unmatched, to show in verificacion).
+        // matchAndCreateDetalle también actualiza recepciones_items (cantidades/precios documentados),
+        // así que processOCRData solo corre cuando NO se creó comprobante — correr ambos duplicaba
+        // cantidad_documentada.
+        let processingResults: any[] = [];
         if (comprobante && ocrResult.items.length > 0 && proveedorId) {
             await matchAndCreateDetalle(supabase, {
                 comprobante_id: comprobante.id,
                 recepcion_id,
                 proveedor_id: proveedorId,
                 items: ocrResult.items,
+                documento_id: doc.id,
             });
+        } else if (!comprobante && ocrResult.items.length > 0) {
+            // 6. Sin comprobante (recepción sin OC vinculada) — actualizar items directo.
+            // Si el comprobante ya existía (duplicado), no reprocesar: ya se contó.
+            const yaExistia = ordenCompraId && ocrResult.comprobante?.numero_comprobante;
+            if (!yaExistia) {
+                processingResults = await processOCRData(supabase, recepcion_id, ocrResult);
+            }
         }
-
-        // 6. Update reception items based on OCR
-        const processingResults = await processOCRData(supabase, recepcion_id, ocrResult);
 
         return NextResponse.json({
             success: true,
