@@ -102,6 +102,31 @@ export function VencimientoEditDialog({
     }
   }
 
+  const marcarPagado = async () => {
+    if (!confirm(`¿Marcar "${titulo}" como pagado?`)) return
+    setSaving(true)
+    try {
+      const res = await fetch("/api/vencimientos", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: venc.id, estado: "pagado" }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error)
+      toast.success(
+        formaPago === "cheque"
+          ? "Pago marcado. Registrá con qué cheques fue desde el calendario completo (para descargarlos de cartera)."
+          : "Pago marcado como pagado"
+      )
+      onOpenChange(false)
+      onSaved?.()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const eliminar = async () => {
     if (!confirm(`¿Eliminar el pago "${titulo}" por ${monto}? Queda cancelado (no se borra el registro).`)) return
     setSaving(true)
@@ -168,9 +193,12 @@ export function VencimientoEditDialog({
             <input type="checkbox" className="h-4 w-4" checked={descuentos} onChange={(e) => setDescuentos(e.target.checked)} />
             Descuentos / NC ya aplicados (listo para pagar)
           </label>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button type="button" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 mr-auto" disabled={saving} onClick={eliminar}>
               Eliminar
+            </Button>
+            <Button type="button" variant="outline" className="text-green-700 border-green-300 hover:bg-green-50" disabled={saving} onClick={marcarPagado}>
+              ✓ Marcar pagado
             </Button>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
             <Button type="button" disabled={saving} onClick={guardar}>
