@@ -175,7 +175,33 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const supabase = await createClient()
-    const { recepcion_id, articulo_id, cantidad_fisica, finalizar } = await request.json()
+    const { recepcion_id, articulo_id, cantidad_fisica, finalizar, conformidad } = await request.json()
+
+    // Control de bultos / conformidad al transporte (paso previo al escaneo)
+    if (conformidad) {
+      const { transporte_id, bultos_declarados, bultos_recibidos, estado, observaciones } = conformidad
+      if (!["conforme", "no_conforme", "omitida"].includes(estado)) {
+        return NextResponse.json({ error: "Estado de conformidad inválido" }, { status: 400 })
+      }
+      if (estado === "no_conforme" && !observaciones?.trim()) {
+        return NextResponse.json({ error: "Si los bultos no coinciden, la observación es obligatoria" }, { status: 400 })
+      }
+      const { data, error } = await supabase
+        .from("recepciones")
+        .update({
+          transporte_id: transporte_id || null,
+          bultos_declarados: bultos_declarados ?? null,
+          bultos_recibidos: bultos_recibidos ?? null,
+          conformidad_transporte: estado,
+          conformidad_observaciones: observaciones || null,
+          conformidad_at: nowArgentina(),
+        })
+        .eq("id", recepcion_id)
+        .select()
+        .single()
+      if (error) throw error
+      return NextResponse.json(data)
+    }
 
     if (finalizar) {
       // Finalizar recepción: actualizar stock y cerrar

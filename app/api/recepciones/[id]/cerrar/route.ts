@@ -84,12 +84,14 @@ export async function POST(
 
         const { data: recepcion } = await supabase
             .from('recepciones')
-            .select('proveedor_id, orden_compra:ordenes_compra(id, proveedor_id)')
+            .select('proveedor_id, transporte_id, orden_compra:ordenes_compra(id, proveedor_id)')
             .eq('id', recepcion_id)
             .single();
 
         const proveedorId = recepcion?.proveedor_id || (recepcion?.orden_compra as any)?.proveedor_id;
         const ocId = (recepcion?.orden_compra as any)?.id;
+        // Transporte por defecto: el registrado en el control de bultos de la recepción
+        const transporteDefault = recepcion?.transporte_id || null;
 
         const results = [];
 
@@ -155,10 +157,10 @@ export async function POST(
                     // Empresa absorbs: just adjust, no extra movement
                     await supabase.from('recepciones_items').update({ cantidad_diferencia_destino: 'empresa' }).eq('id', item_id);
 
-                } else if (accion === 'B' && transporte_id) {
+                } else if (accion === 'B' && (transporte_id || transporteDefault)) {
                     // Transporte: create CC transporte entry
                     await supabase.from('cuenta_corriente_transportes').insert({
-                        transporte_id,
+                        transporte_id: transporte_id || transporteDefault,
                         tipo_movimiento: 'faltante_mercaderia',
                         monto: Math.round(precioBase * cantidadDif * 100) / 100,
                         descripcion: descripcion || `Faltante ${cantidadDif} unidades artículo ${articuloInfo?.sku}`,

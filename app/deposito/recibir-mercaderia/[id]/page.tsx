@@ -199,6 +199,47 @@ export default function RecibirMercaderiaDetallePage() {
   const [verDocumentos, setVerDocumentos] = useState(false)
   const [tipoDocDeposito, setTipoDocDeposito] = useState<"remito"|"factura"|"foto">("remito")
 
+  // ── Control de bultos / conformidad transporte ──
+  const [transportes, setTransportes] = useState<any[]>([])
+  const [transporteSel, setTransporteSel] = useState("")
+  const [bultosDeclarados, setBultosDeclarados] = useState("")
+  const [bultosRecibidos, setBultosRecibidos] = useState("")
+  const [bultosObs, setBultosObs] = useState("")
+  const [guardandoBultos, setGuardandoBultos] = useState(false)
+  const necesitaControlBultos = recepcion && !recepcion.conformidad_transporte
+
+  useEffect(() => {
+    if (!necesitaControlBultos) return
+    fetch("/api/transportes").then(r=>r.json()).then(d=>{ if (Array.isArray(d)) setTransportes(d.filter((t:any)=>t.activo!==false)) }).catch(()=>{})
+  }, [necesitaControlBultos])
+
+  const guardarConformidad = async (estado: "conforme"|"no_conforme"|"omitida") => {
+    if (!recepcion) return
+    const decl = parseInt(bultosDeclarados)||0
+    const recib = parseInt(bultosRecibidos)||0
+    if (estado !== "omitida") {
+      if (decl <= 0 || recib < 0) { showToast("Cargá los bultos del remito y los contados","err"); return }
+      if (estado === "no_conforme" && !bultosObs.trim()) { showToast("Si faltan bultos, la observación es obligatoria","err"); return }
+    }
+    setGuardandoBultos(true)
+    try {
+      const r = await fetch("/api/deposito/recepciones", {
+        method: "PATCH", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ recepcion_id: recepcion.id, conformidad: {
+          transporte_id: transporteSel || null,
+          bultos_declarados: estado === "omitida" ? null : decl,
+          bultos_recibidos: estado === "omitida" ? null : recib,
+          estado, observaciones: bultosObs || null,
+        }}),
+      })
+      const data = await r.json()
+      if (!r.ok) { showToast(data.error||"Error al guardar","err"); return }
+      setRecepcion((prev:any)=>({ ...prev, ...data }))
+      showToast(estado === "omitida" ? "Control salteado (quedó registrado)" : "✓ Control de bultos registrado","ok")
+    } catch { showToast("Error de conexión","err") }
+    finally { setGuardandoBultos(false) }
+  }
+
   const subirFoto = async (file:File) => {
     if (!recepcion) return; setSubiendo(true)
     try {
@@ -258,6 +299,70 @@ export default function RecibirMercaderiaDetallePage() {
   ) : null
 
   if (loading) return <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"60vh", color:C.light }}>Cargando orden...</div>
+
+  // ── CONTROL DE BULTOS (paso previo al escaneo, opcional con aviso) ──
+  if (necesitaControlBultos) {
+    const decl = parseInt(bultosDeclarados)||0
+    const recib = parseInt(bultosRecibidos)||0
+    const difieren = decl > 0 && bultosRecibidos !== "" && decl !== recib
+    return (
+      <div style={{ background:C.bg, minHeight:"calc(100dvh - 64px)", padding:20, display:"flex", flexDirection:"column", gap:14 }}>
+        {Toast}
+        <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:20, padding:20 }}>
+          <div style={{ fontSize:12, color:C.light, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Antes de escanear</div>
+          <div style={{ fontSize:22, fontWeight:800, color:C.text }}>🚚 Control de bultos</div>
+          <div style={{ fontSize:14, color:C.sub, marginTop:6, lineHeight:1.4 }}>
+            Contá los bultos contra el remito del transporte antes de firmar. Si faltan, quedará registrado para reclamar al transporte.
+          </div>
+        </div>
+
+        <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:20, padding:18, display:"flex", flexDirection:"column", gap:12 }}>
+          <div>
+            <div style={{ color:C.sub, fontSize:14, marginBottom:6 }}>Transporte</div>
+            <select value={transporteSel} onChange={e=>setTransporteSel(e.target.value)}
+              style={{ width:"100%", background:C.bg, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"14px 12px", fontSize:16, color:C.text, fontWeight:600 }}>
+              <option value="">Sin transporte / retiro propio</option>
+              {transportes.map(t=>(<option key={t.id} value={t.id}>{t.nombre}</option>))}
+            </select>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div>
+              <div style={{ color:C.sub, fontSize:14, marginBottom:6 }}>Bultos según remito</div>
+              <input type="number" inputMode="numeric" value={bultosDeclarados} onChange={e=>setBultosDeclarados(e.target.value)}
+                style={{ width:"100%", background:C.bg, color:C.text, fontSize:32, fontWeight:800, textAlign:"center", borderRadius:12, padding:"12px", border:`2px solid ${C.border}`, outline:"none", boxSizing:"border-box" }} />
+            </div>
+            <div>
+              <div style={{ color:C.sub, fontSize:14, marginBottom:6 }}>Bultos contados</div>
+              <input type="number" inputMode="numeric" value={bultosRecibidos} onChange={e=>setBultosRecibidos(e.target.value)}
+                style={{ width:"100%", background:difieren?C.redL:C.bg, color:difieren?C.red:C.text, fontSize:32, fontWeight:800, textAlign:"center", borderRadius:12, padding:"12px", border:`2px solid ${difieren?C.redB:C.border}`, outline:"none", boxSizing:"border-box" }} />
+            </div>
+          </div>
+          {difieren && (
+            <div style={{ background:C.redL, border:`1.5px solid ${C.redB}`, borderRadius:12, padding:12 }}>
+              <div style={{ color:C.red, fontWeight:700, fontSize:14, marginBottom:8 }}>
+                ⚠ Faltan {Math.abs(decl-recib)} bulto{Math.abs(decl-recib)!==1?"s":""} — NO firmes conforme. Detallá qué pasó:
+              </div>
+              <textarea value={bultosObs} onChange={e=>setBultosObs(e.target.value)} rows={2}
+                placeholder="Ej: llegaron 18 de 20 bultos, faltan 2 cajas de..."
+                style={{ width:"100%", background:C.white, border:`1.5px solid ${C.redB}`, borderRadius:10, padding:10, fontSize:15, boxSizing:"border-box" }} />
+            </div>
+          )}
+        </div>
+
+        <button onClick={()=>guardarConformidad(difieren ? "no_conforme" : "conforme")} disabled={guardandoBultos}
+          style={{ background: difieren?C.orange:C.green, color:"#fff", fontWeight:800, fontSize:19, padding:20, borderRadius:20, border:"none", cursor:"pointer", opacity:guardandoBultos?0.5:1 }}>
+          {guardandoBultos ? "..." : difieren ? "⚠ Registrar con faltante de bultos" : "✓ Bultos OK — empezar a escanear"}
+        </button>
+        <button onClick={()=>guardarConformidad("omitida")} disabled={guardandoBultos}
+          style={{ background:C.white, color:C.sub, fontWeight:600, padding:14, borderRadius:16, border:`1.5px solid ${C.border}`, cursor:"pointer", fontSize:15 }}>
+          Saltear control (queda registrado)
+        </button>
+        <div style={{ color:C.light, fontSize:13, textAlign:"center" }}>
+          Después sacale foto al remito firmado desde "Documentos"
+        </div>
+      </div>
+    )
+  }
 
   // ── MODAL CANTIDAD ──
   if (articuloSel) return (
