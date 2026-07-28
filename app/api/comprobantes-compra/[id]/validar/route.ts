@@ -82,61 +82,74 @@ export async function POST(
             }
         }
 
-        // 2. Mark comprobante as validated
+        // 2. Mark comprobante as validated (con saldo para el circuito de imputación NC)
+        const esCredito = ['NC', 'NCA', 'NCB', 'NCC', 'Reversa'].includes(comprobante.tipo_comprobante);
+        const total = comprobante.total_factura_declarado || 0;
         await supabase.from('comprobantes_compra').update({
             estado: 'validado',
             validado_por: auth.user.id,
             validado_at: nowArgentina(),
+            saldo_pendiente: esCredito ? -total : total,
+            estado_pago: 'pendiente',
         }).eq('id', comprobante_id);
 
-        // 3. Create vencimiento. Si el comprobante no trae fecha_vencimiento
-        // (típico de los creados por OCR), calcularla con los días de pago del proveedor.
-        let fechaVencimiento = comprobante.fecha_vencimiento;
-        if (!fechaVencimiento && proveedorId && comprobante.fecha_comprobante) {
-            const { data: prov } = await supabase
-                .from('proveedores')
-                .select('dias_vencimiento')
-                .eq('id', proveedorId)
-                .maybeSingle();
-            const dias = Number(prov?.dias_vencimiento || 0);
-            if (dias > 0) {
-                const base = new Date(comprobante.fecha_comprobante + 'T00:00:00');
-                base.setDate(base.getDate() + dias);
-                fechaVencimiento = base.toISOString().slice(0, 10);
-                await supabase.from('comprobantes_compra')
-                    .update({ fecha_vencimiento: fechaVencimiento })
-                    .eq('id', comprobante_id);
-            }
-        }
-        if (fechaVencimiento && comprobante.total_factura_declarado > 0) {
-            try {
-                await supabase.from('vencimientos').insert({
-                    comprobante_compra_id: comprobante_id,
-                    proveedor_id: proveedorId,
-                    monto: comprobante.total_factura_declarado,
-                    fecha_vencimiento: fechaVencimiento,
-                    estado: 'pendiente',
-                    descripcion: `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante}`,
-                });
-            } catch (e: any) { console.warn('[Validar] vencimiento insert skipped:', e.message); }
-        }
-
-        // 4. Replace provisional CC entry: delete orden_compra provisional, insert real factura entry
+        // 3. Replace provisional CC entry: delete orden_compra provisional, insert real entry
+        let ccMovId: string | null = null;
         if (ocId && proveedorId) {
             await supabase.from('cuenta_corriente_proveedores')
                 .delete()
                 .eq('referencia_id', ocId)
                 .eq('referencia_tipo', 'orden_compra');
 
-            await supabase.from('cuenta_corriente_proveedores').insert({
+            const { data: ccMov } = await supabase.from('cuenta_corriente_proveedores').insert({
                 proveedor_id: proveedorId,
-                tipo_movimiento: 'factura',
-                monto: comprobante.total_factura_declarado || 0,
+                tipo_movimiento: esCredito ? 'nota_credito' : 'factura',
+                monto: esCredito ? -total : total,
                 descripcion: `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante} — OC ${(comprobante.orden_compra as any)?.numero_orden}`,
                 referencia_id: comprobante_id,
                 referencia_tipo: 'comprobante_compra',
+                numero_comprobante: comprobante.numero_comprobante,
+                tipo_comprobante: comprobante.tipo_comprobante,
                 fecha: comprobante.fecha_comprobante || nowArgentina(),
-            });
+            }).select('id').single();
+            ccMovId = ccMov?.id || null;
+        }
+
+        // 4. Create vencimiento (solo débitos). Si el comprobante no trae
+        // fecha_vencimiento (típico OCR), calcularla con los días del proveedor.
+        // Referenciado por movimiento de CC (referencia_tipo='cuenta_corriente'),
+        // que es como op_confirmar los marca pagados.
+        if (!esCredito) {
+            let fechaVencimiento = comprobante.fecha_vencimiento;
+            if (!fechaVencimiento && proveedorId && comprobante.fecha_comprobante) {
+                const { data: prov } = await supabase
+                    .from('proveedores')
+                    .select('dias_vencimiento')
+                    .eq('id', proveedorId)
+                    .maybeSingle();
+                const dias = Number(prov?.dias_vencimiento || 0);
+                if (dias > 0) {
+                    const base = new Date(comprobante.fecha_comprobante + 'T00:00:00');
+                    base.setDate(base.getDate() + dias);
+                    fechaVencimiento = base.toISOString().slice(0, 10);
+                    await supabase.from('comprobantes_compra')
+                        .update({ fecha_vencimiento: fechaVencimiento })
+                        .eq('id', comprobante_id);
+                }
+            }
+            if (fechaVencimiento && total > 0) {
+                const { error: vencErr } = await supabase.from('vencimientos').insert({
+                    proveedor_id: proveedorId,
+                    tipo: 'factura',
+                    concepto: `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante} — OC ${(comprobante.orden_compra as any)?.numero_orden || ''}`,
+                    monto: total,
+                    fecha_vencimiento: fechaVencimiento,
+                    estado: 'pendiente',
+                    referencia_id: ccMovId || comprobante_id,
+                    referencia_tipo: ccMovId ? 'cuenta_corriente' : 'comprobante_compra',
+                });
+                if (vencErr) console.warn('[Validar] vencimiento insert skipped:', vencErr.message);
+            }
         }
 
         return NextResponse.json({ success: true, comprobante_id });

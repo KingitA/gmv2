@@ -9,12 +9,60 @@ import { nowArgentina } from '@/lib/utils';
 //   decisions: [{
 //     item_id: string,
 //     tipo: 'precio' | 'mercaderia',
-//     accion: 'A' | 'B' | 'C',  // A=empresa, B=transporte, C=proveedor
+//     accion: 'A' | 'B' | 'C' | 'D',  // A=empresa, B=transporte, C=proveedor, D=descuento fuera de factura (solo precio)
 //     transporte_id?: string,    // for accion B
 //     valor_real: number,        // real quantity or price
 //     descripcion?: string,
 //   }]
 // }
+//
+// Las imputaciones al proveedor NO acreditan la CC directamente: crean una NC
+// 'esperada' (comprobantes_compra estado=esperada, origen_nc) que se confirma
+// con ncp_registrar cuando llega el documento y se imputa contra la factura
+// con ccp_imputar_credito. Así la CC refleja la deuda real hasta que la NC llega.
+
+async function crearNCEsperada(supabase: any, params: {
+    proveedor_id: string;
+    orden_compra_id?: string | null;
+    monto: number;
+    origen: 'descuento_fuera_factura' | 'faltante' | 'devolucion' | 'diferencia_precio';
+    descripcion?: string;
+    ajusta_stock?: boolean;
+}) {
+    // Factura asociada: el último débito validado/cargado de la OC
+    let asociadoId: string | null = null;
+    if (params.orden_compra_id) {
+        const { data: fa } = await supabase
+            .from('comprobantes_compra')
+            .select('id')
+            .eq('orden_compra_id', params.orden_compra_id)
+            .not('tipo_comprobante', 'in', '(NC,NCA,NCB,NCC,Reversa)')
+            .neq('estado', 'esperada')
+            .order('fecha_comprobante', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        asociadoId = fa?.id || null;
+    }
+
+    const { data: nc, error } = await supabase.from('comprobantes_compra').insert({
+        orden_compra_id: params.orden_compra_id || null,
+        proveedor_id: params.proveedor_id,
+        tipo_comprobante: 'NC',
+        numero_comprobante: `ESPERADA-${Date.now()}`,
+        fecha_comprobante: nowArgentina().slice(0, 10),
+        total_factura_declarado: Math.round(params.monto * 100) / 100,
+        total_neto: Math.round(params.monto * 100) / 100,
+        total_iva: 0,
+        estado: 'esperada',
+        origen_nc: params.origen,
+        comprobante_asociado_id: asociadoId,
+        ajusta_stock: params.ajusta_stock ?? false,
+        foto_url: null,
+    }).select('id').single();
+
+    if (error) console.error('[cerrar] Error creando NC esperada:', error.message);
+    return nc?.id || null;
+}
 
 export async function POST(
     request: NextRequest,
@@ -61,24 +109,43 @@ export async function POST(
             const precioBase = item.precio_real || item.precio_documentado || item.precio_oc || 0;
 
             if (tipo === 'precio') {
+                // Precio facturado real: lo documentado por OCR, o lo que mande el front
+                const precioFacturado = Number(item.precio_documentado || valor_real || 0);
+                const precioAcordado = Number(item.precio_oc || 0);
+                // Cantidad: lo documentado en factura; si no hay, lo recibido físico.
+                const cantidadNC = Number(item.cantidad_documentada || item.cantidad_fisica || 0);
+                const montoDif = Math.abs(Math.round((precioFacturado - precioAcordado) * cantidadNC * 100) / 100);
+
                 if (accion === 'A') {
                     // Asumir: update precio_compra on articulo
-                    await supabase.from('articulos').update({ precio_compra: valor_real }).eq('id', item.articulo_id);
-                    await supabase.from('recepciones_items').update({ precio_real: valor_real, precio_verificado: true }).eq('id', item_id);
-                } else if (accion === 'B') {
-                    // No asumir: generate NC in CC proveedor.
-                    // Cantidad: lo documentado en factura; si no hay, lo recibido físico.
-                    const cantidadNC = Number(item.cantidad_documentada || item.cantidad_fisica || 0);
-                    const montoDif = Math.round((valor_real - (item.precio_oc || 0)) * cantidadNC * 100) / 100;
-                    await supabase.from('cuenta_corriente_proveedores').insert({
-                        proveedor_id: proveedorId,
-                        tipo_movimiento: 'nota_credito',
-                        monto: -Math.abs(montoDif),
-                        descripcion: descripcion || `NC por diferencia precio artículo`,
-                        referencia_id: recepcion_id,
-                        referencia_tipo: 'recepcion',
-                        fecha: nowArgentina(),
-                    });
+                    const nuevoPrecio = precioFacturado || valor_real;
+                    await supabase.from('articulos').update({ precio_compra: nuevoPrecio }).eq('id', item.articulo_id);
+                    await supabase.from('recepciones_items').update({ precio_real: nuevoPrecio, precio_verificado: true }).eq('id', item_id);
+                } else if (accion === 'B' || accion === 'C') {
+                    // Reclamo al proveedor: NC esperada por diferencia de precio
+                    if (proveedorId && montoDif > 0) {
+                        await crearNCEsperada(supabase, {
+                            proveedor_id: proveedorId,
+                            orden_compra_id: ocId,
+                            monto: montoDif,
+                            origen: 'diferencia_precio',
+                            descripcion,
+                        });
+                    }
+                    await supabase.from('recepciones_items').update({ precio_verificado: true }).eq('id', item_id);
+                } else if (accion === 'D') {
+                    // Descuento fuera de factura: compré a 95, factura llega a 100,
+                    // la NC del 5% llega a fin de mes/trimestre. La factura se paga
+                    // completa; queda la NC esperada para reclamar e imputar.
+                    if (proveedorId && montoDif > 0) {
+                        await crearNCEsperada(supabase, {
+                            proveedor_id: proveedorId,
+                            orden_compra_id: ocId,
+                            monto: montoDif,
+                            origen: 'descuento_fuera_factura',
+                            descripcion,
+                        });
+                    }
                     await supabase.from('recepciones_items').update({ precio_verificado: true }).eq('id', item_id);
                 }
             } else if (tipo === 'mercaderia') {
@@ -142,16 +209,17 @@ export async function POST(
                         if (art) await supabase.from('articulos').update({ stock_actual: Math.max(0, (art.stock_actual || 0) - cantidadDif) }).eq('id', item.articulo_id);
                     }
 
-                    // CC proveedor credit
+                    // NC esperada del proveedor por el faltante/devolución.
+                    // El stock ya se ajustó arriba (la mercadería no está/se devuelve);
+                    // la CC se acredita recién cuando llega la NC (ncp_registrar).
                     if (proveedorId) {
-                        await supabase.from('cuenta_corriente_proveedores').insert({
+                        await crearNCEsperada(supabase, {
                             proveedor_id: proveedorId,
-                            tipo_movimiento: 'devolucion_mercaderia',
-                            monto: -Math.round(precioBase * cantidadDif * 100) / 100,
+                            orden_compra_id: ocId,
+                            monto: Math.round(precioBase * cantidadDif * 100) / 100,
+                            origen: 'faltante',
                             descripcion: descripcion || `Devolución ${cantidadDif} unidades al proveedor`,
-                            referencia_id: recepcion_id,
-                            referencia_tipo: 'recepcion',
-                            fecha: nowArgentina(),
+                            ajusta_stock: false,
                         });
                     }
 

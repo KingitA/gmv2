@@ -44,6 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: 'Órdenes de Compra', href: '/ordenes-compra', icon: '🛒' },
       { label: 'Proveedores', href: '/proveedores', icon: '🏭' },
       { label: 'Listas de Precios', href: '/listas-proveedores', icon: '📋' },
+      { label: 'NC Proveedores', href: '/ordenes-compra/nc-pendientes', icon: '📉' },
       { label: 'Vencimientos', href: '/vencimientos', icon: '⏰' },
     ],
   },

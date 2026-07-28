@@ -54,7 +54,7 @@ export default function VerificacionOCPage() {
     // Resolution dialog state
     const [resolviendoRow, setResolviendoRow] = useState<VerRow | null>(null)
     const [resolucionTipo, setResolucionTipo] = useState<'mercaderia' | 'precio'>('mercaderia')
-    const [resolucionAccion, setResolucionAccion] = useState<'A' | 'B' | 'C'>('A')
+    const [resolucionAccion, setResolucionAccion] = useState<'A' | 'B' | 'C' | 'D'>('A')
     const [resolucionTransporte, setResolucionTransporte] = useState<string>('')
     const [resolucionDesc, setResolucionDesc] = useState<string>('')
     const [resolviendoItems, setResolviendoItems] = useState<Set<string>>(new Set())
@@ -243,7 +243,7 @@ export default function VerificacionOCPage() {
             return
         }
 
-        const destino = resolucionAccion === 'A' ? 'empresa' : resolucionAccion === 'B' ? 'transporte' : 'proveedor'
+        const destino = resolucionAccion === 'A' ? 'empresa' : resolucionAccion === 'B' ? 'transporte' : resolucionAccion === 'D' ? 'nc-esperada' : 'proveedor'
         setResoluciones(prev => ({ ...prev, [resolviendoRow.articulo_id]: destino }))
         setResolviendoRow(null)
     }
@@ -389,7 +389,7 @@ export default function VerificacionOCPage() {
 
                             <div className="space-y-2">
                                 <Label>Tipo de diferencia</Label>
-                                <Select value={resolucionTipo} onValueChange={(v: any) => setResolucionTipo(v)}>
+                                <Select value={resolucionTipo} onValueChange={(v: any) => { setResolucionTipo(v); setResolucionAccion('A') }}>
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="mercaderia">Diferencia de mercadería (cantidad)</SelectItem>
@@ -401,11 +401,15 @@ export default function VerificacionOCPage() {
                             <div className="space-y-2">
                                 <Label>¿A quién se imputa?</Label>
                                 <div className="grid gap-2">
-                                    {[
+                                    {(resolucionTipo === 'precio' ? [
+                                        { value: 'A', label: '↩ Empresa absorbe', desc: 'Se acepta el precio facturado y se actualiza el costo del artículo', color: 'border-gray-300' },
+                                        { value: 'C', label: '🏭 Proveedor — reclamar NC', desc: 'Queda una NC esperada por la diferencia de precio para reclamar al proveedor', color: 'border-red-300' },
+                                        { value: 'D', label: '📉 Descuento fuera de factura', desc: 'El proveedor factura sin el descuento y manda la NC a fin de mes/trimestre. Queda como NC esperada.', color: 'border-purple-300' },
+                                    ] : [
                                         { value: 'A', label: '↩ Empresa absorbe', desc: 'Se desestima la diferencia, sin movimiento en cuentas', color: 'border-gray-300' },
                                         { value: 'B', label: '🚚 Transporte', desc: 'Se registra en la cuenta corriente del transporte', color: 'border-blue-300' },
-                                        { value: 'C', label: '🏭 Proveedor', desc: 'Se genera devolución y movimiento en CC proveedor', color: 'border-red-300' },
-                                    ].map(opt => (
+                                        { value: 'C', label: '🏭 Proveedor', desc: 'Devolución con ajuste de stock + NC esperada para reclamar', color: 'border-red-300' },
+                                    ]).map(opt => (
                                         <button key={opt.value}
                                             onClick={() => setResolucionAccion(opt.value as any)}
                                             className={`text-left p-3 rounded-lg border-2 transition-colors ${resolucionAccion === opt.value ? opt.color + ' bg-muted' : 'border-muted hover:border-muted-foreground/30'}`}>
