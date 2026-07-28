@@ -137,7 +137,9 @@ export default function ConciliacionPage() {
     }
   }
 
-  const sugeridos = useMemo(() => movs.filter((m) => m.estado_matching === "SUGERIDO"), [movs])
+  // Solo los sugeridos con match en kardex van al lote; las cuotas sugeridas
+  // (vencimientos) se saldan una a una con su propio botón.
+  const sugeridos = useMemo(() => movs.filter((m) => m.estado_matching === "SUGERIDO" && m.kardex_id), [movs])
   const pendientes = useMemo(() => movs.filter((m) => m.estado_matching === "PENDIENTE"), [movs])
   const cuentaNombre = bancos.find((b) => b.cuenta_id === cuentaId)?.nombre ?? ""
 
@@ -153,8 +155,15 @@ export default function ConciliacionPage() {
     if (m.kardex_contable) {
       return `${m.kardex_contable.tipo_movimiento} — ${m.kardex_contable.concepto ?? ""} ${fmt(Number(m.kardex_contable.monto))}`
     }
+    if (m.vencimientos) {
+      return `Cuota: ${m.vencimientos.concepto} (${m.vencimientos.tipo}) — vence ${formatDateAR(m.vencimientos.fecha_vencimiento)}`
+    }
     return null
   }
+
+  // Categoría de egreso sugerida según el tipo del vencimiento
+  const categoriaDeVenc = (tipo?: string) =>
+    tipo === "vep" || tipo === "impuesto" ? "IMPUESTOS" : "OPERATIVO"
 
   return (
     <div className="min-h-screen bg-background">
@@ -279,10 +288,19 @@ export default function ConciliacionPage() {
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-end gap-2 flex-wrap">
-                            {m.estado_matching === "SUGERIDO" && (
+                            {m.estado_matching === "SUGERIDO" && m.kardex_id && (
                               <Button size="sm" disabled={accionando !== null}
                                 onClick={() => accion({ action: "conciliar", mov_id: m.id }, "Movimiento conciliado")}>
                                 {accionando === m.id ? "…" : "✓ Conciliar"}
+                              </Button>
+                            )}
+                            {m.estado_matching === "SUGERIDO" && !m.kardex_id && m.vencimientos && (
+                              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={accionando !== null}
+                                onClick={() => accion(
+                                  { action: "saldar_venc", mov_id: m.id, vencimiento_id: m.vencimientos.id, categoria: categoriaDeVenc(m.vencimientos.tipo) },
+                                  "Cuota saldada: egreso registrado y vencimiento pagado"
+                                )}>
+                                {accionando === m.id ? "…" : "✓ Saldar cuota"}
                               </Button>
                             )}
                             {m.estado_matching === "PENDIENTE" && !esDebito && (

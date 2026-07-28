@@ -13,6 +13,7 @@ import { ActualizarSaldosDialog } from "@/components/finanzas/actualizar-saldos-
 import { ImportChequesDialog } from "@/components/finanzas/import-cheques-dialog"
 import { ChequesEmitidosPanel, type ChequeEmitido } from "@/components/finanzas/cheques-emitidos-panel"
 import { VencimientoEditDialog, type VencimientoEditable } from "@/components/finanzas/vencimiento-edit-dialog"
+import { NuevoGastoDialog } from "@/components/finanzas/nuevo-gasto-dialog"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { todayArgentina } from "@/lib/utils"
 
@@ -133,6 +134,7 @@ export default function FinanzasPage() {
 
   // Secciones plegables / diálogos
   const [showCalendario, setShowCalendario] = useState(false)
+  const [nuevoGastoOpen, setNuevoGastoOpen] = useState(false)
   const [showEvolucion, setShowEvolucion] = useState(false)
   const [cuentaEdit, setCuentaEdit] = useState<CuentaAjustable | null>(null)
   const [saldosDiaOpen, setSaldosDiaOpen] = useState(false)
@@ -147,7 +149,7 @@ export default function FinanzasPage() {
       fetch("/api/finanzas/cajas").then(r => r.json()).catch(() => ({ cuentas: [] })),
       fetch("/api/cheques?estado=EN_CARTERA&tipo=TERCERO").then(r => r.json()).catch(() => ({ cheques: [] })),
       fetch("/api/cheques?estado=DEPOSITADO&tipo=TERCERO").then(r => r.json()).catch(() => ({ cheques: [] })),
-      fetch("/api/vencimientos?estado=pendiente").then(r => r.json()).catch(() => []),
+      fetch("/api/vencimientos?estado=pendiente&mantener=1").then(r => r.json()).catch(() => []),
       fetch("/api/cheques?estado=ENTREGADO_A_PROVEEDOR&tipo=PROPIO").then(r => r.json()).catch(() => ({ cheques: [] })),
       fetch("/api/finanzas/evolucion").then(r => r.json()).catch(() => ({ serie: [], cuentas: [] })),
     ])
@@ -361,6 +363,7 @@ export default function FinanzasPage() {
         <span className="w-14 shrink-0 text-xs font-semibold text-slate-400">{fmtDiaCorto(item.fecha)}</span>
         <span className="flex-1 font-medium text-slate-700 truncate">
           {v.proveedores?.nombre || v.concepto || "Pago"}
+          {v.es_estimado && <span className="ml-2 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-800">≈ ESTIMADO</span>}
           {v.modalidad === "entrega" && <span className="ml-2 text-xs text-slate-400 font-normal">lo retiran por caja</span>}
           {v.descuentos_aplicados === false && <span className="ml-2 text-xs font-bold text-red-600">⚠ sin descuentos aplicados</span>}
         </span>
@@ -598,6 +601,12 @@ export default function FinanzasPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <h2 className="text-[16px] font-bold text-slate-800">Lo que hay que pagar</h2>
+            <button
+              onClick={() => setNuevoGastoOpen(true)}
+              className="rounded-full bg-indigo-600 px-3.5 py-1 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors"
+            >
+              + Nuevo gasto
+            </button>
             {([30, 60, 90] as const).map(h => (
               <button key={h} onClick={() => setHorizonte(h)}
                 className={`rounded-full px-3.5 py-1 text-xs font-semibold border transition-colors ${
@@ -714,6 +723,11 @@ export default function FinanzasPage() {
         venc={vencEdit}
         open={!!vencEdit}
         onOpenChange={(o) => { if (!o) setVencEdit(null) }}
+        onSaved={reloadAll}
+      />
+      <NuevoGastoDialog
+        open={nuevoGastoOpen}
+        onOpenChange={setNuevoGastoOpen}
         onSaved={reloadAll}
       />
     </div>

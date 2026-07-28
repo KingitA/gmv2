@@ -57,6 +57,20 @@ export async function POST(request: Request) {
       return NextResponse.json(data)
     }
 
+    if (body.action === "saldar_venc") {
+      if (!body.mov_id || !body.vencimiento_id || !body.categoria) {
+        return NextResponse.json({ error: "mov_id, vencimiento_id y categoria son obligatorios" }, { status: 400 })
+      }
+      const { data, error } = await supabase.rpc("extracto_saldar_vencimiento", {
+        p_mov_id: body.mov_id,
+        p_vencimiento_id: body.vencimiento_id,
+        p_categoria: body.categoria,
+        p_usuario_id: uid,
+      })
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      return NextResponse.json(data)
+    }
+
     if (body.action === "ingreso") {
       if (!body.mov_id) return NextResponse.json({ error: "mov_id es obligatorio" }, { status: 400 })
       const { data, error } = await supabase.rpc("extracto_registrar_ingreso", {

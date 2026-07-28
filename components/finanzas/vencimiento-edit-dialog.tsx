@@ -18,6 +18,7 @@ export interface VencimientoEditable {
   forma_pago?: string | null
   modalidad?: string | null
   descuentos_aplicados?: boolean | null
+  es_estimado?: boolean | null
   proveedores?: { nombre?: string | null } | null
 }
 
@@ -42,6 +43,7 @@ export function VencimientoEditDialog({
   const [formaPago, setFormaPago] = useState("transferencia")
   const [modalidad, setModalidad] = useState("deposito")
   const [descuentos, setDescuentos] = useState(false)
+  const [estimado, setEstimado] = useState(false)
   const [concepto, setConcepto] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -52,6 +54,7 @@ export function VencimientoEditDialog({
       setFormaPago(venc.forma_pago || "transferencia")
       setModalidad(venc.modalidad || "deposito")
       setDescuentos(Boolean(venc.descuentos_aplicados))
+      setEstimado(Boolean(venc.es_estimado))
       setConcepto(venc.concepto ?? "")
     }
   }, [venc, open])
@@ -87,6 +90,7 @@ export function VencimientoEditDialog({
           forma_pago: formaPago,
           modalidad,
           descuentos_aplicados: descuentos,
+          es_estimado: estimado,
           concepto: concepto || null,
         }),
       })
@@ -154,8 +158,12 @@ export function VencimientoEditDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Monto</Label>
-              <Input inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} className="tabular-nums" />
-              <p className="mt-1 text-[11px] text-muted-foreground">Punto = centavos</p>
+              <Input inputMode="decimal" value={monto}
+                onChange={(e) => { setMonto(e.target.value); if (estimado) setEstimado(false) }}
+                className="tabular-nums" />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Punto = centavos{venc.es_estimado ? " · era estimado: al corregirlo queda firme" : ""}
+              </p>
             </div>
             <div>
               <Label>Vence</Label>
@@ -192,6 +200,10 @@ export function VencimientoEditDialog({
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input type="checkbox" className="h-4 w-4" checked={descuentos} onChange={(e) => setDescuentos(e.target.checked)} />
             Descuentos / NC ya aplicados (listo para pagar)
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" className="h-4 w-4" checked={estimado} onChange={(e) => setEstimado(e.target.checked)} />
+            El monto es un estimado (todavía no llegó el real)
           </label>
           <div className="flex items-center gap-2 flex-wrap">
             <Button type="button" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 mr-auto" disabled={saving} onClick={eliminar}>

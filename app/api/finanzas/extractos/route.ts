@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     if (extractoId) {
       const { data, error } = await supabase
         .from("banco_extractos_movimientos")
-        .select("*, pagos_clientes(id, monto, cliente_id, clientes(nombre)), kardex_contable(id, tipo_movimiento, concepto, monto, fecha)")
+        .select("*, pagos_clientes(id, monto, cliente_id, clientes(nombre)), kardex_contable(id, tipo_movimiento, concepto, monto, fecha), vencimientos(id, concepto, tipo, monto, fecha_vencimiento, es_estimado)")
         .eq("extracto_id", extractoId)
         .order("fecha", { ascending: true })
       if (error) throw error
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     if (searchParams.get("pendientes") && cuentaId) {
       const { data, error } = await supabase
         .from("banco_extractos_movimientos")
-        .select("*, pagos_clientes(id, monto, cliente_id, clientes(nombre)), kardex_contable(id, tipo_movimiento, concepto, monto, fecha)")
+        .select("*, pagos_clientes(id, monto, cliente_id, clientes(nombre)), kardex_contable(id, tipo_movimiento, concepto, monto, fecha), vencimientos(id, concepto, tipo, monto, fecha_vencimiento, es_estimado)")
         .eq("cuenta_bancaria_id", cuentaId)
         .in("estado_matching", ["PENDIENTE", "SUGERIDO"])
         .order("fecha", { ascending: true })

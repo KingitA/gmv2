@@ -18,6 +18,13 @@ export async function GET(request: Request) {
 
     const supabase = createAdminClient()
 
+    // Mantenimiento rolling de series recurrentes + renovaciones de ciclo
+    // (idempotente y barato; el panel de finanzas lo pide con ?mantener=1)
+    if (searchParams.get('mantener')) {
+        const { error: mantErr } = await supabase.rpc('vencimientos_mantener', { p_horizonte_meses: 6 })
+        if (mantErr) console.error('[vencimientos] mantener:', mantErr.message)
+    }
+
     let query = supabase
         .from('vencimientos')
         .select('*, proveedores(id, nombre, sigla, cuit)')
@@ -69,7 +76,8 @@ export async function POST(request: Request) {
         proveedor_id, tipo, concepto, monto, moneda,
         fecha_vencimiento, recurrencia, recurrencia_hasta,
         referencia_id, referencia_tipo, observaciones, dias_alerta,
-        forma_pago, fecha_validez, modalidad, descuentos_aplicados
+        forma_pago, fecha_validez, modalidad, descuentos_aplicados,
+        es_estimado
     } = body
 
     if (!concepto || !fecha_vencimiento) {
@@ -98,6 +106,7 @@ export async function POST(request: Request) {
             fecha_validez: fecha_validez || null,
             modalidad: modalidad || null,
             descuentos_aplicados: descuentos_aplicados ?? false,
+            es_estimado: es_estimado ?? false,
             estado: 'pendiente'
         })
         .select('*, proveedores(id, nombre, sigla)')
@@ -213,6 +222,7 @@ async function generarRecurrencias(
             forma_pago: base.forma_pago ?? null,
             modalidad: base.modalidad ?? null,
             descuentos_aplicados: base.descuentos_aplicados ?? false,
+            es_estimado: base.es_estimado ?? false,
             estado: 'pendiente'
         })
     }
