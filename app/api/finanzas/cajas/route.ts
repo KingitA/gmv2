@@ -19,7 +19,7 @@ export async function GET() {
       supabase.from("cajas_financieras").select("id, nombre").eq("activo", true).order("nombre"),
       supabase.from("cuentas_bancarias").select("id, nombre, banco").eq("activo", true).order("nombre"),
       supabase.from("cuentas_inversion").select("id, nombre, tipo_instrumento").eq("activo", true).order("nombre"),
-      supabase.from("saldos_financieros").select("cuenta_tipo, cuenta_id, color, saldo"),
+      supabase.from("saldos_financieros").select("cuenta_tipo, cuenta_id, color, saldo, updated_at"),
     ])
 
     const saldos = saldosRes.data || []
@@ -27,6 +27,13 @@ export async function GET() {
       const blanco = saldos.find((s) => s.cuenta_tipo === tipo && s.cuenta_id === id && s.color === "BLANCO")
       const negro = saldos.find((s) => s.cuenta_tipo === tipo && s.cuenta_id === id && s.color === "NEGRO")
       return { BLANCO: Number(blanco?.saldo ?? 0), NEGRO: Number(negro?.saldo ?? 0) }
+    }
+    const updatedDe = (tipo: string, id: string) => {
+      const fechas = saldos
+        .filter((s) => s.cuenta_tipo === tipo && s.cuenta_id === id && (s as any).updated_at)
+        .map((s) => (s as any).updated_at as string)
+        .sort()
+      return fechas[fechas.length - 1] ?? null
     }
 
     const cuentas = [
@@ -36,6 +43,7 @@ export async function GET() {
         nombre: c.nombre,
         grupo: "EFECTIVO",
         saldos: saldoDe("CAJA", c.id),
+        updated_at: updatedDe("CAJA", c.id),
       })),
       ...(bancosRes.data || []).map((b) => ({
         cuenta_tipo: "BANCO",
@@ -43,6 +51,7 @@ export async function GET() {
         nombre: b.nombre,
         grupo: "BANCOS",
         saldos: saldoDe("BANCO", b.id),
+        updated_at: updatedDe("BANCO", b.id),
       })),
       ...((inversionRes.data as any[]) || []).map((i) => ({
         cuenta_tipo: "INVERSION",
@@ -50,6 +59,7 @@ export async function GET() {
         nombre: i.nombre,
         grupo: "BOLSA",
         saldos: saldoDe("INVERSION", i.id),
+        updated_at: updatedDe("INVERSION", i.id),
       })),
     ]
 

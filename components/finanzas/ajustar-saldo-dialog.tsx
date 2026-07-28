@@ -47,8 +47,11 @@ export function AjustarSaldoDialog({
 
     if (!cuenta) return null
 
+    // Regla del sistema: el punto delimita centavos → "1000.5" = $1.000,50
     const parse = (s: string) => {
-        const n = parseFloat(s.replace(/\./g, "").replace(",", "."))
+        const t = s.trim().replace(",", ".")
+        if (!t || !/^-?\d+(\.\d{0,2})?$/.test(t)) return null
+        const n = Number(t)
         return isNaN(n) ? null : n
     }
 
@@ -105,19 +108,21 @@ export function AjustarSaldoDialog({
                 </DialogHeader>
                 <form onSubmit={guardar} className="space-y-4">
                     <div>
-                        <Label>Saldo blanco</Label>
+                        <Label>Saldo</Label>
                         <Input inputMode="decimal" value={blanco} onChange={(e) => setBlanco(e.target.value)} />
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                            Actual: {formatCurrency(Number(cuenta.saldos.BLANCO ?? 0))}
+                            Actual: {formatCurrency(Number(cuenta.saldos.BLANCO ?? 0))} · el punto son centavos (1000.5 = $1.000,50)
                         </p>
                     </div>
-                    <div>
-                        <Label>Saldo negro</Label>
-                        <Input inputMode="decimal" value={negro} onChange={(e) => setNegro(e.target.value)} />
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                            Actual: {formatCurrency(Number(cuenta.saldos.NEGRO ?? 0))}
-                        </p>
-                    </div>
+                    {Number(cuenta.saldos.NEGRO ?? 0) !== 0 && (
+                        <div>
+                            <Label>Saldo negro (legacy)</Label>
+                            <Input inputMode="decimal" value={negro} onChange={(e) => setNegro(e.target.value)} />
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                                Actual: {formatCurrency(Number(cuenta.saldos.NEGRO ?? 0))}
+                            </p>
+                        </div>
+                    )}
                     <div>
                         <Label>Motivo (opcional)</Label>
                         <Input
