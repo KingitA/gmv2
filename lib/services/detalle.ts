@@ -39,6 +39,15 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         .eq('id', params.proveedor_id)
         .maybeSingle();
 
+    // iva_porcentaje es NOT NULL sin default: obligatorio en cada fila.
+    // Adquisición/Reversa van sin IVA; el resto 21% (único IVA del proyecto).
+    const { data: compData } = await supabase
+        .from('comprobantes_compra')
+        .select('tipo_comprobante')
+        .eq('id', params.comprobante_id)
+        .maybeSingle();
+    const ivaPorcentaje = ['Adquisicion', 'Reversa', 'ADQ', 'REV'].includes(compData?.tipo_comprobante) ? 0 : 21;
+
     const currentRecItems: any[] = recItems || [];
     const detalleRows: any[] = [];
     const matched: any[] = [];
@@ -61,6 +70,7 @@ export async function matchAndCreateDetalle(supabase: any, params: {
             descuento1: descuentoPct,
             descripcion_proveedor: item.descripcion,
             codigo_proveedor: item.codigo,
+            iva_porcentaje: ivaPorcentaje,
             match_score: best?.score ?? null,
         };
 
