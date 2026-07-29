@@ -7,6 +7,7 @@ import { downloadAttachment, downloadDriveFileAndExport, downloadPublicDriveFile
 import { getSupabaseAdmin } from './supabase-admin'
 import { processOrder, processOrderText, processOrderTextMulti, type ParseResult } from '@/lib/actions/ai-order-import'
 import Anthropic from '@anthropic-ai/sdk'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 // Lazy singleton for Claude
 let _anthropic: Anthropic | null = null
@@ -470,12 +471,10 @@ export async function processEmailAsOrder(
                     candidateClients = vendedorClientes
                 } else {
                     // No vendedor: load all active clients (limited fields to keep prompt small)
-                    const { data: allClients } = await db
+                    candidateClients = await fetchAllRows(() => db
                         .from('clientes')
                         .select('id, nombre, codigo_cliente, direccion, localidad, mail')
-                        .eq('activo', true)
-                        .limit(500)
-                    candidateClients = allClients || []
+                        .eq('activo', true))
                 }
 
                 if (candidateClients.length > 0) {

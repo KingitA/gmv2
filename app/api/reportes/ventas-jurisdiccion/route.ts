@@ -18,6 +18,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 const TIPOS_FISCALES = ['FA', 'FB', 'NCA', 'NCB', 'NDA', 'NDB']
 
@@ -37,22 +38,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Paginar el kardex del período (solo movimientos de comprobantes fiscales)
-    const filas: any[] = []
-    let offset = 0
-    const PAGE = 1000
-    for (;;) {
-      const { data, error } = await supabase
-        .from('kardex')
-        .select('provincia_destino, tipo_comprobante, tipo_movimiento, signo, subtotal_neto, subtotal_iva, subtotal_total')
-        .in('tipo_comprobante', TIPOS_FISCALES)
-        .gte('fecha', desde)
-        .lte('fecha', hasta)
-        .range(offset, offset + PAGE - 1)
-      if (error) throw error
-      filas.push(...(data ?? []))
-      if (!data || data.length < PAGE) break
-      offset += PAGE
-    }
+    // fetchAllRows pagina de a 1000 con orden estable por id
+    const filas: any[] = await fetchAllRows(() => supabase
+      .from('kardex')
+      .select('provincia_destino, tipo_comprobante, tipo_movimiento, signo, subtotal_neto, subtotal_iva, subtotal_total')
+      .in('tipo_comprobante', TIPOS_FISCALES)
+      .gte('fecha', desde)
+      .lte('fecha', hasta))
 
     // Agrupar por provincia de destino — NC restan (signo +1 en kardex pero es crédito)
     const porJurisdiccion = new Map<string, { neto: number; iva: number; total: number; movimientos: number }>()

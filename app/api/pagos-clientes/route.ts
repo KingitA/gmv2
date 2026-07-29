@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
+import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 
 // ─── GET: listar pagos con filtros ───────────────────────────
 export async function GET(request: NextRequest) {
@@ -20,43 +21,35 @@ export async function GET(request: NextRequest) {
     const fecha_hasta = searchParams.get("fecha_hasta")
 
     // Consulta base sin joins de FK potencialmente problemáticos
-    let query = supabase
-      .from("pagos_clientes")
-      .select("*")
-      .order("created_at", { ascending: false })
+    const pagos = await fetchAllRows(() => {
+      let query = supabase
+        .from("pagos_clientes")
+        .select("*")
+        .order("created_at", { ascending: false })
 
-    if (cliente_id) query = query.eq("cliente_id", cliente_id)
-    if (estado) query = query.eq("estado", estado)
-    if (fecha_desde) query = query.gte("fecha_pago", fecha_desde)
-    if (fecha_hasta) query = query.lte("fecha_pago", fecha_hasta)
+      if (cliente_id) query = query.eq("cliente_id", cliente_id)
+      if (estado) query = query.eq("estado", estado)
+      if (fecha_desde) query = query.gte("fecha_pago", fecha_desde)
+      if (fecha_hasta) query = query.lte("fecha_pago", fecha_hasta)
 
-    const { data, error } = await query
-    if (error) throw error
-
-    const pagos = data || []
+      return query
+    })
     if (pagos.length === 0) return NextResponse.json([])
 
     const pagoIds = pagos.map((p: any) => p.id)
     const clienteIds = [...new Set(pagos.map((p: any) => p.cliente_id).filter(Boolean))]
 
-    // Cargar clientes, detalles e imputaciones en batch (3 queries para todos los pagos)
-    const [
-      { data: clientesData },
-      { data: detallesData },
-      { data: imputacionesData },
-    ] = await Promise.all([
-      clienteIds.length
-        ? supabase.from("clientes").select("id, nombre, razon_social, cuit").in("id", clienteIds)
-        : Promise.resolve({ data: [] }),
-      supabase.from("pagos_detalle").select("*").in("pago_id", pagoIds),
-      supabase.from("imputaciones").select("*, comprobante:comprobantes_venta(tipo_comprobante, numero_comprobante, total_factura)").in("pago_id", pagoIds),
+    // Cargar clientes, detalles e imputaciones en batch (tandas para todos los pagos)
+    const [clientesData, detallesData, imputacionesData] = await Promise.all([
+      fetchByIds((chunk) => supabase.from("clientes").select("id, nombre, razon_social, cuit").in("id", chunk), clienteIds),
+      fetchByIds((chunk) => supabase.from("pagos_detalle").select("*").in("pago_id", chunk), pagoIds),
+      fetchByIds((chunk) => supabase.from("imputaciones").select("*, comprobante:comprobantes_venta(tipo_comprobante, numero_comprobante, total_factura)").in("pago_id", chunk), pagoIds),
     ])
 
     // Cargar recibos por batch (tabla puede no existir)
     let recibosData: any[] = []
     try {
-      const { data: rd } = await supabase.from("recibos").select("id, numero_recibo, pdf_url, fecha, pago_id").in("pago_id", pagoIds)
-      recibosData = rd || []
+      recibosData = await fetchByIds((chunk) => supabase.from("recibos").select("id, numero_recibo, pdf_url, fecha, pago_id").in("pago_id", chunk), pagoIds)
     } catch { /* tabla no existe aún */ }
 
     // Indexar por pago_id

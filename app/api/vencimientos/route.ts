@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 // GET /api/vencimientos - Listar vencimientos con filtros
 export async function GET(request: Request) {
@@ -25,43 +26,45 @@ export async function GET(request: Request) {
         if (mantErr) console.error('[vencimientos] mantener:', mantErr.message)
     }
 
-    let query = supabase
-        .from('vencimientos')
-        .select('*, proveedores(id, nombre, sigla, cuit)')
-        .order('fecha_vencimiento', { ascending: true })
+    try {
+        const data = await fetchAllRows(() => {
+            let query = supabase
+                .from('vencimientos')
+                .select('*, proveedores(id, nombre, sigla, cuit)')
+                .order('fecha_vencimiento', { ascending: true })
 
-    if (estado && estado !== 'todos') {
-        query = query.eq('estado', estado)
-    }
-    if (proveedorId) {
-        query = query.eq('proveedor_id', proveedorId)
-    }
-    if (tipo && tipo !== 'todos') {
-        query = query.eq('tipo', tipo)
-    }
-    if (desde) {
-        query = query.gte('fecha_vencimiento', desde)
-    }
-    if (hasta) {
-        query = query.lte('fecha_vencimiento', hasta)
-    }
-    if (proximosNDias) {
-        const hoy = todayArgentina()
-        const limite = new Date(hoy)
-        limite.setDate(limite.getDate() + parseInt(proximosNDias))
-        query = query
-            .gte('fecha_vencimiento', hoy)
-            .lte('fecha_vencimiento', limite.toISOString().split('T')[0])
-            .in('estado', ['pendiente', 'vencido'])
-    }
+            if (estado && estado !== 'todos') {
+                query = query.eq('estado', estado)
+            }
+            if (proveedorId) {
+                query = query.eq('proveedor_id', proveedorId)
+            }
+            if (tipo && tipo !== 'todos') {
+                query = query.eq('tipo', tipo)
+            }
+            if (desde) {
+                query = query.gte('fecha_vencimiento', desde)
+            }
+            if (hasta) {
+                query = query.lte('fecha_vencimiento', hasta)
+            }
+            if (proximosNDias) {
+                const hoy = todayArgentina()
+                const limite = new Date(hoy)
+                limite.setDate(limite.getDate() + parseInt(proximosNDias))
+                query = query
+                    .gte('fecha_vencimiento', hoy)
+                    .lte('fecha_vencimiento', limite.toISOString().split('T')[0])
+                    .in('estado', ['pendiente', 'vencido'])
+            }
 
-    const { data, error } = await query
+            return query
+        })
 
-    if (error) {
+        return NextResponse.json(data)
+    } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 })
     }
-
-    return NextResponse.json(data || [])
 }
 
 // POST /api/vencimientos - Crear vencimiento

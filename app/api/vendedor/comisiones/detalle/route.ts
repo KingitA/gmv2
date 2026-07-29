@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 // GET /api/vendedor/comisiones/detalle?pedido_id=&tipo=cobrada|vendida
 // Drill-down de un pedido: artículos con precio, % comisión y comisión.
@@ -19,21 +20,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "pedido_id requerido" }, { status: 400 })
     }
 
-    let q = supabase
-      .from("kardex")
-      .select(
-        "id, articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, cantidad, subtotal_total, precio_unitario_final, comision_viajante_pct, comision_viajante_monto, comprobante_venta_id, fecha_comprobante_cobrado, comprobante_cobrado"
-      )
-      .eq("pedido_id", pedidoId)
-      .eq("tipo_movimiento", "venta")
-      .not("comision_viajante_monto", "is", null)
-      .neq("comision_viajante_monto", 0)
-      .eq("pedido_eliminado", false)
-      .in("vendedor_id", session.vendedorIds)
-    if (tipo === "cobrada") q = q.eq("comprobante_cobrado", true)
-
-    const { data: rows, error } = await q
-    if (error) throw error
+    const rows = await fetchAllRows(() => {
+      let q = supabase
+        .from("kardex")
+        .select(
+          "id, articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, cantidad, subtotal_total, precio_unitario_final, comision_viajante_pct, comision_viajante_monto, comprobante_venta_id, fecha_comprobante_cobrado, comprobante_cobrado"
+        )
+        .eq("pedido_id", pedidoId)
+        .eq("tipo_movimiento", "venta")
+        .not("comision_viajante_monto", "is", null)
+        .neq("comision_viajante_monto", 0)
+        .eq("pedido_eliminado", false)
+        .in("vendedor_id", session.vendedorIds)
+      if (tipo === "cobrada") q = q.eq("comprobante_cobrado", true)
+      return q
+    })
 
     const mapArticulo = (r: any) => ({
       kardex_id: r.id,

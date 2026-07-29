@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 // GET /api/ordenes-pago
 export async function GET(request: Request) {
@@ -14,34 +15,36 @@ export async function GET(request: Request) {
 
     const supabase = createAdminClient()
 
-    let query = supabase
-        .from('ordenes_pago')
-        .select(`
-            *,
-            proveedores(id, nombre, sigla, cuit),
-            ordenes_pago_detalle(*),
-            ordenes_pago_imputaciones(
-                *,
-                comprobantes_compra(id, tipo_comprobante, numero_comprobante, total_factura_declarado),
-                vencimientos(id, concepto, monto, fecha_vencimiento)
-            )
-        `)
-        .order('created_at', { ascending: false })
+    try {
+        const data = await fetchAllRows(() => {
+            let query = supabase
+                .from('ordenes_pago')
+                .select(`
+                    *,
+                    proveedores(id, nombre, sigla, cuit),
+                    ordenes_pago_detalle(*),
+                    ordenes_pago_imputaciones(
+                        *,
+                        comprobantes_compra(id, tipo_comprobante, numero_comprobante, total_factura_declarado),
+                        vencimientos(id, concepto, monto, fecha_vencimiento)
+                    )
+                `)
+                .order('created_at', { ascending: false })
 
-    if (estado && estado !== 'todos') {
-        query = query.eq('estado', estado)
-    }
-    if (proveedorId) {
-        query = query.eq('proveedor_id', proveedorId)
-    }
+            if (estado && estado !== 'todos') {
+                query = query.eq('estado', estado)
+            }
+            if (proveedorId) {
+                query = query.eq('proveedor_id', proveedorId)
+            }
 
-    const { data, error } = await query
+            return query
+        })
 
-    if (error) {
+        return NextResponse.json(data)
+    } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 })
     }
-
-    return NextResponse.json(data || [])
 }
 
 // POST /api/ordenes-pago - Crear orden de pago

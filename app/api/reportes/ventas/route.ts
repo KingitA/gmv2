@@ -23,6 +23,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 const TIPOS_VENTA = ["venta", "nota_credito_venta", "nota_debito_venta"]
 
@@ -93,29 +94,32 @@ export async function GET(request: NextRequest) {
 
     // ── Totales agregados ─────────────────────────────────────────────────────
     // Segunda query sin paginación para totales del filtro completo
-    let totalesQuery = supabase
-      .from("kardex")
-      .select("subtotal_neto, subtotal_iva, subtotal_total, cantidad, precio_costo, margen_unitario, signo")
-      .in("tipo_movimiento", TIPOS_VENTA)
+    // (fetchAllRows pagina de a 1000 para superar el corte de PostgREST)
+    const totalesData = await fetchAllRows(() => {
+      let totalesQuery = supabase
+        .from("kardex")
+        .select("subtotal_neto, subtotal_iva, subtotal_total, cantidad, precio_costo, margen_unitario, signo, articulo_categoria, fecha")
+        .in("tipo_movimiento", TIPOS_VENTA)
 
-    if (desde) totalesQuery = totalesQuery.gte("fecha", `${desde}T00:00:00`)
-    if (hasta) totalesQuery = totalesQuery.lte("fecha", `${hasta}T23:59:59`)
-    if (clienteId) totalesQuery = totalesQuery.eq("cliente_id", clienteId)
-    if (proveedorId) totalesQuery = totalesQuery.eq("articulo_proveedor_id", proveedorId)
-    if (vendedorId) totalesQuery = totalesQuery.eq("vendedor_id", vendedorId)
-    if (listaPrecioId) totalesQuery = totalesQuery.eq("lista_precio_id", listaPrecioId)
-    if (tipoComprobante) totalesQuery = totalesQuery.eq("tipo_comprobante", tipoComprobante)
-    if (metodoFacturacion) totalesQuery = totalesQuery.eq("metodo_facturacion", metodoFacturacion)
-    if (categoria) totalesQuery = totalesQuery.ilike("articulo_categoria", `%${categoria}%`)
-    if (articuloId) totalesQuery = totalesQuery.eq("articulo_id", articuloId)
-    if (colorDinero) totalesQuery = totalesQuery.eq("color_dinero", colorDinero)
+      if (desde) totalesQuery = totalesQuery.gte("fecha", `${desde}T00:00:00`)
+      if (hasta) totalesQuery = totalesQuery.lte("fecha", `${hasta}T23:59:59`)
+      if (clienteId) totalesQuery = totalesQuery.eq("cliente_id", clienteId)
+      if (proveedorId) totalesQuery = totalesQuery.eq("articulo_proveedor_id", proveedorId)
+      if (vendedorId) totalesQuery = totalesQuery.eq("vendedor_id", vendedorId)
+      if (listaPrecioId) totalesQuery = totalesQuery.eq("lista_precio_id", listaPrecioId)
+      if (tipoComprobante) totalesQuery = totalesQuery.eq("tipo_comprobante", tipoComprobante)
+      if (metodoFacturacion) totalesQuery = totalesQuery.eq("metodo_facturacion", metodoFacturacion)
+      if (categoria) totalesQuery = totalesQuery.ilike("articulo_categoria", `%${categoria}%`)
+      if (articuloId) totalesQuery = totalesQuery.eq("articulo_id", articuloId)
+      if (colorDinero) totalesQuery = totalesQuery.eq("color_dinero", colorDinero)
 
-    const { data: totalesData } = await totalesQuery
+      return totalesQuery
+    })
 
     let total_neto = 0, total_iva = 0, total_bruto = 0
     let total_costo = 0, total_margen = 0, total_unidades = 0
 
-    for (const f of totalesData || []) {
+    for (const f of totalesData) {
       const s = f.signo === -1 ? 1 : -1   // venta = signo -1, pero para el total sumamos positivo
       total_neto += (f.subtotal_neto || 0) * s
       total_iva += (f.subtotal_iva || 0) * s
@@ -130,7 +134,7 @@ export async function GET(request: NextRequest) {
 
     // ── Agrupación opcional ───────────────────────────────────────────────────
     let agrupado: any[] | null = null
-    if (agruparPor && totalesData) {
+    if (agruparPor) {
       const grupos: Record<string, any> = {}
       for (const f of totalesData) {
         let key: string

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,13 +17,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Obtener comprobantes de venta
-    const { data: comprobantes, error: comprobantesError } = await supabase
+    const comprobantes = await fetchAllRows(() => supabase
       .from("comprobantes_venta")
       .select("*")
       .eq("cliente_id", cliente_id)
-      .order("fecha", { ascending: false })
-
-    if (comprobantesError) throw comprobantesError
+      .order("fecha", { ascending: false }))
 
     // Obtener pagos de clientes (nuevos, desde CRM)
     const { data: pagosClientes, error: pagosClientesError } = await supabase
@@ -42,11 +41,11 @@ export async function GET(request: NextRequest) {
     const saldoTotal = Number(saldoRow?.saldo_actual ?? 0)
 
     // Extracto (libro mayor) para la UI
-    const { data: movimientos } = await supabase
+    const movimientos = await fetchAllRows(() => supabase
       .from("cuenta_corriente_clientes")
       .select("fecha, tipo_movimiento, debe, haber, numero_comprobante, observaciones, referencia_tipo, referencia_id")
       .eq("cliente_id", cliente_id)
-      .order("fecha", { ascending: false })
+      .order("fecha", { ascending: false }))
 
     // Separar comprobantes por estado
     const hoy = todayArgentina()
@@ -57,7 +56,7 @@ export async function GET(request: NextRequest) {
     const comprobantesPagados = comprobantes?.filter((c) => c.saldo_pendiente === 0) || []
 
     // Obtener pedidos del cliente
-    const { data: pedidos, error: pedidosError } = await supabase
+    const pedidos = await fetchAllRows(() => supabase
       .from("pedidos")
       .select(`
         *,
@@ -70,9 +69,7 @@ export async function GET(request: NextRequest) {
         )
       `)
       .eq("cliente_id", cliente_id)
-      .order("fecha", { ascending: false })
-
-    if (pedidosError) throw pedidosError
+      .order("fecha", { ascending: false }))
 
     return NextResponse.json({
       success: true,

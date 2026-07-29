@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { hybridSearchIds } from "@/lib/search/hybrid"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { ARTICULO_SELECT as SELECT, mapArticuloVendedor as mapArticulo } from "@/lib/vendedor/articulos-select"
 
 // GET /api/vendedor/articulos?vista=habituales|ofertas|novedades|categoria|buscar&cliente=&q=&categoria=&subcategoria=
@@ -109,14 +110,16 @@ export async function GET(request: Request) {
 
     if (vista === "categoria") {
       if (!categoriaId) return NextResponse.json({ error: "Se requiere categoría." }, { status: 400 })
-      let query = supabase
-        .from("articulos")
-        .select(SELECT)
-        .eq("activo", true)
-        .eq("categoria_id", categoriaId)
-      if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
-      const { data: articulos } = await query.order("descripcion").limit(500)
-      return NextResponse.json({ articulos: (articulos || []).map((a: any) => mapArticulo(a)) })
+      const articulos = await fetchAllRows(() => {
+        let query = supabase
+          .from("articulos")
+          .select(SELECT)
+          .eq("activo", true)
+          .eq("categoria_id", categoriaId)
+        if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
+        return query.order("descripcion")
+      })
+      return NextResponse.json({ articulos: articulos.map((a: any) => mapArticulo(a)) })
     }
 
     // buscar

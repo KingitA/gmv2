@@ -22,6 +22,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 // ── Constantes ──────────────────────────────────────────────────────────────
 
@@ -92,7 +93,9 @@ export async function GET(request: NextRequest) {
     const hasta   = `${anio}-${mes.padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
     // ── Consulta de comprobantes fiscales del período ─────────────────────
-    const { data: rows, error } = await supabase
+    // fetchAllRows pagina de a 1000 (corte silencioso de PostgREST) y agrega
+    // id como desempate de orden estable
+    const rows = await fetchAllRows(() => supabase
       .from('comprobantes_venta')
       .select(`
         tipo_comprobante,
@@ -115,9 +118,7 @@ export async function GET(request: NextRequest) {
       .lte('fecha', hasta)
       .in('tipo_comprobante', [...TIPOS_FISCALES])
       .order('fecha', { ascending: true })
-      .order('numero_comprobante', { ascending: true })
-
-    if (error) throw new Error('Error consultando comprobantes: ' + error.message)
+      .order('numero_comprobante', { ascending: true }))
 
     // ── Estructurar filas ──────────────────────────────────────────────────
     type Fila = {
@@ -143,7 +144,7 @@ export async function GET(request: NextRequest) {
 
     const filas: Fila[] = []
 
-    for (const row of rows ?? []) {
+    for (const row of rows) {
       const tipo = row.tipo_comprobante
       const tm   = TM_CODE[tipo]
       if (!tm) continue

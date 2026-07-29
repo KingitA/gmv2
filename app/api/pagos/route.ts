@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -13,7 +14,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const estado = searchParams.get("estado") || "pendiente"
 
-    const { data: pagos, error } = await supabase
+    const pagos = await fetchAllRows(() => supabase
       .from("pagos_clientes")
       .select(
         `
@@ -23,13 +24,11 @@ export async function GET(request: NextRequest) {
       `
       )
       .eq("estado", estado)
-      .order("created_at", { ascending: false })
-
-    if (error) throw error
+      .order("created_at", { ascending: false }))
 
     // Obtener detalle de cada pago (formas de pago)
     const pagosConDetalle = await Promise.all(
-      (pagos || []).map(async (pago) => {
+      pagos.map(async (pago) => {
         const { data: detalles } = await supabase.from("pagos_detalle").select("*").eq("pago_id", pago.id)
 
         return {

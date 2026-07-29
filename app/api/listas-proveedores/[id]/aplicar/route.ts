@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { nowArgentina } from '@/lib/utils';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 
 export async function POST(
     request: NextRequest,
@@ -22,16 +23,16 @@ export async function POST(
 
         if (!lista) return NextResponse.json({ error: 'Lista not found' }, { status: 404 });
 
-        const { data: items } = await supabase
+        const items = await fetchAllRows(() => supabase
             .from('listas_proveedores_items')
             .select(`*, articulo:articulos(precio_compra)`)
             .eq('lista_id', lista_id)
-            .eq('estado_item', 'pendiente');
+            .eq('estado_item', 'pendiente'));
 
         const aplicados = [];
         const errors = [];
 
-        for (const item of (items || [])) {
+        for (const item of items) {
             if (!item.articulo_id) continue;
 
             const articuloActual = Array.isArray(item.articulo) ? item.articulo[0] : item.articulo;

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireAuth()
@@ -15,12 +16,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const offset = (page - 1) * perPage
 
     // Balance total
-    const { data: balanceData } = await supabase
-      .from("billetera_movimientos")
-      .select("tipo, monto")
-      .eq("viajante_id", id)
+    const balanceData = await fetchAllRows(() =>
+      supabase
+        .from("billetera_movimientos")
+        .select("tipo, monto")
+        .eq("viajante_id", id)
+    )
 
-    const movimientos = balanceData ?? []
+    const movimientos = balanceData
     const balance = movimientos.reduce((sum, m) => sum + Number(m.monto), 0)
     const desglose = {
       cobros: movimientos.filter(m => m.tipo === "cobro_cliente").reduce((s, m) => s + Number(m.monto), 0),
@@ -30,15 +33,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Comisiones pendientes de cobrar (tipo='cobrada', pagado=false)
-    const { data: comisionesPendientes } = await supabase
-      .from("comisiones")
-      .select("id, monto, segmento, cantidad, precio_neto_unitario, porcentaje, created_at, pedido_id, comprobante_venta_id, articulo_id, articulos(descripcion)")
-      .eq("viajante_id", id)
-      .eq("tipo", "cobrada")
-      .eq("pagado", false)
-      .order("created_at", { ascending: false })
+    const comisionesPendientes = await fetchAllRows(() =>
+      supabase
+        .from("comisiones")
+        .select("id, monto, segmento, cantidad, precio_neto_unitario, porcentaje, created_at, pedido_id, comprobante_venta_id, articulo_id, articulos(descripcion)")
+        .eq("viajante_id", id)
+        .eq("tipo", "cobrada")
+        .eq("pagado", false)
+        .order("created_at", { ascending: false })
+    )
 
-    const totalPendiente = (comisionesPendientes ?? []).reduce((s, c) => s + Number(c.monto), 0)
+    const totalPendiente = comisionesPendientes.reduce((s, c) => s + Number(c.monto), 0)
 
     // Movimientos paginados
     const { data: historial, count } = await supabase
@@ -51,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({
       balance,
       desglose,
-      comisiones_pendientes: comisionesPendientes ?? [],
+      comisiones_pendientes: comisionesPendientes,
       total_pendiente_comisiones: totalPendiente,
       historial: historial ?? [],
       total: count ?? 0,

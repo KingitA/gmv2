@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 // GET /api/vendedor/comisiones?tipo=cobrada|vendida
 // Comisiones REALES del vendedor desde kardex (misma fuente que el playroom):
@@ -17,10 +18,8 @@ export async function GET(req: NextRequest) {
     const tipo = searchParams.get("tipo") === "vendida" ? "vendida" : "cobrada"
 
     // Todas las filas de venta con comisión del vendedor (paginado)
-    const PAGE = 1000
-    const rows: any[] = []
-    for (let from = 0; ; from += PAGE) {
-      const { data: page, error } = await supabase
+    const rows = await fetchAllRows(() =>
+      supabase
         .from("kardex")
         .select(
           "id, pedido_id, numero_pedido, cliente_id, fecha, fecha_comprobante_cobrado, articulo_id, subtotal_total, comision_viajante_monto, comprobante_cobrado"
@@ -30,24 +29,17 @@ export async function GET(req: NextRequest) {
         .neq("comision_viajante_monto", 0)
         .eq("pedido_eliminado", false)
         .in("vendedor_id", session.vendedorIds)
-        .range(from, from + PAGE - 1)
-      if (error) throw error
-      rows.push(...(page || []))
-      if (!page || page.length < PAGE) break
-    }
+    )
 
     // Estado de pago de cada comisión (tabla comisiones, por kardex_id)
     const pagadoPorKardex = new Map<string, boolean>()
-    for (let from = 0; ; from += PAGE) {
-      const { data: page, error } = await supabase
+    const comisionesRows = await fetchAllRows(() =>
+      supabase
         .from("comisiones")
         .select("kardex_id, pagado")
         .in("viajante_id", session.vendedorIds)
-        .range(from, from + PAGE - 1)
-      if (error) throw error
-      for (const c of page || []) if (c.kardex_id) pagadoPorKardex.set(c.kardex_id, !!c.pagado)
-      if (!page || page.length < PAGE) break
-    }
+    )
+    for (const c of comisionesRows) if (c.kardex_id) pagadoPorKardex.set(c.kardex_id, !!c.pagado)
 
     // Totales sobre TODO el historial
     let disponible = 0

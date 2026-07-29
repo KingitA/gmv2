@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { padEan13, padEanArray } from '@/lib/utils/ean'
+import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all'
 
 // GET — List importaciones with optional filters
 export async function GET(request: NextRequest) {
@@ -26,25 +27,24 @@ export async function GET(request: NextRequest) {
         // If we have proveedor_id, load ALL articles from that provider for comparison
         let articulosProveedor: any[] = []
         if (data.proveedor_id) {
-            const { data: arts } = await supabase
+            articulosProveedor = await fetchAllRows(() => supabase
                 .from('articulos')
                 .select('id, sku, descripcion, precio_compra, ean13, unidades_por_bulto, porcentaje_ganancia, categoria, rubro, iva_compras, iva_ventas, descuento1, descuento2, descuento3, descuento4, proveedor_id')
                 .eq('proveedor_id', data.proveedor_id)
                 .eq('activo', true)
-                .order('descripcion')
-            articulosProveedor = arts || []
+                .order('descripcion'))
 
             // Also load descuentos tipados for these articles
             if (articulosProveedor.length > 0) {
                 const artIds = articulosProveedor.map((a: any) => a.id)
-                const { data: descs } = await supabase
+                const descs = await fetchByIds((chunk) => supabase
                     .from('articulos_descuentos')
                     .select('articulo_id, tipo, porcentaje, orden')
-                    .in('articulo_id', artIds)
-                    .order('orden')
+                    .in('articulo_id', chunk)
+                    .order('orden'), artIds)
 
                 const descMap: Record<string, any[]> = {}
-                for (const d of (descs || [])) {
+                for (const d of descs) {
                     if (!descMap[d.articulo_id]) descMap[d.articulo_id] = []
                     descMap[d.articulo_id].push(d)
                 }

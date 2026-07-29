@@ -25,6 +25,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 // Tipo de comprobante según tabla Comprobantes Ventas del Libro IVA Digital (3 dígitos)
 const TIPO_LID: Record<string, string> = {
@@ -78,7 +79,9 @@ export async function GET(request: NextRequest) {
     const hastaDate = new Date(parseInt(anio), parseInt(mes), 0) // último día del mes
     const hasta = `${anio}-${mes}-${String(hastaDate.getDate()).padStart(2, '0')}`
 
-    const { data: comprobantes, error } = await supabase
+    // fetchAllRows pagina de a 1000 (corte silencioso de PostgREST) y agrega
+    // id como desempate de orden estable
+    const comprobantes = await fetchAllRows(() => supabase
       .from('comprobantes_venta')
       .select(`
         id, tipo_comprobante, numero_comprobante, punto_venta, fecha,
@@ -90,14 +93,12 @@ export async function GET(request: NextRequest) {
       .gte('fecha', desde)
       .lte('fecha', hasta)
       .order('fecha', { ascending: true })
-      .order('numero_comprobante', { ascending: true })
-
-    if (error) throw error
+      .order('numero_comprobante', { ascending: true }))
 
     const lineasCbte: string[] = []
     const lineasAlic: string[] = []
 
-    for (const comp of comprobantes ?? []) {
+    for (const comp of comprobantes) {
       const cli = (comp as any).clientes
       const tipoLid = TIPO_LID[comp.tipo_comprobante]
       if (!tipoLid) continue

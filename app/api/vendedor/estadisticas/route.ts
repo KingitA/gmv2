@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 // GET /api/vendedor/estadisticas
 // KPIs del vendedor autenticado: ventas por mes (últimos 6), top clientes
@@ -17,14 +18,16 @@ export async function GET() {
     desde.setDate(1)
     const desdeStr = desde.toISOString().slice(0, 10)
 
-    const { data: pedidos } = await supabase
-      .from("pedidos")
-      .select("fecha, total, estado, cliente_id, clientes(nombre)")
-      .in("vendedor_id", session.vendedorIds)
-      .is("eliminado_at", null)
-      .neq("estado", "cancelado")
-      .gte("fecha", desdeStr)
-      .order("fecha", { ascending: true })
+    const pedidos = await fetchAllRows(() =>
+      supabase
+        .from("pedidos")
+        .select("fecha, total, estado, cliente_id, clientes(nombre)")
+        .in("vendedor_id", session.vendedorIds)
+        .is("eliminado_at", null)
+        .neq("estado", "cancelado")
+        .gte("fecha", desdeStr)
+        .order("fecha", { ascending: true })
+    )
 
     // Ventas por mes
     const meses = new Map<string, { total: number; pedidos: number }>()
@@ -65,11 +68,13 @@ export async function GET() {
       .slice(0, 5)
 
     // Comisiones
-    const { data: comisiones } = await supabase
-      .from("comisiones")
-      .select("monto, pagado, tipo, created_at")
-      .in("viajante_id", session.vendedorIds)
-      .eq("tipo", "cobrada")
+    const comisiones = await fetchAllRows(() =>
+      supabase
+        .from("comisiones")
+        .select("monto, pagado, tipo, created_at")
+        .in("viajante_id", session.vendedorIds)
+        .eq("tipo", "cobrada")
+    )
     const comisionesPendientes = (comisiones || [])
       .filter((c) => !c.pagado)
       .reduce((s, c) => s + Number(c.monto), 0)

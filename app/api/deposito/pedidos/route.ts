@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 export async function GET() {
   const auth = await requireAuth()
@@ -9,7 +10,7 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    const { data: pedidos, error } = await supabase
+    const pedidos = await fetchAllRows(() => supabase
       .from("pedidos")
       .select(`
         id, numero_pedido, estado, fecha, prioridad, observaciones, created_at,
@@ -21,11 +22,9 @@ export async function GET() {
       `)
       .in("estado", ["pendiente", "en_preparacion", "impreso"])
       .neq("estado", "eliminado")
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: true }))
 
-    if (error) throw error
-
-    const pedidosConProgreso = (pedidos || []).map(p => {
+    const pedidosConProgreso = pedidos.map(p => {
       const detalles = p.pedidos_detalle || []
       const total = detalles.length
       const resueltos = detalles.filter((d: any) =>

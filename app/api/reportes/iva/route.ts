@@ -13,6 +13,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -33,14 +34,14 @@ export async function GET(request: NextRequest) {
     const hastaTs = `${hasta}T23:59:59`
 
     // ── 1. IVA Ventas (Débito Fiscal) — desde kardex, ventas con IVA discriminado ──
-    const { data: kardexVentas } = await supabase
+    const kardexVentas = await fetchAllRows(() => supabase
       .from("kardex")
       .select("subtotal_neto, subtotal_iva, subtotal_total, iva_porcentaje, iva_incluido, tipo_comprobante, provincia_destino, percepcion_iva_monto, percepcion_iibb_monto, percepcion_ganancias_monto")
       .eq("tipo_movimiento", "venta")
       .eq("iva_incluido", false)          // solo facturas A/B/C con IVA discriminado
       .in("tipo_comprobante", ["FA", "FB", "NCA", "NCB", "NDA", "NDB"])  // solo fiscales — PRES/REV/REM nunca van a reportes fiscales
       .gte("fecha", desdeTs)
-      .lte("fecha", hastaTs)
+      .lte("fecha", hastaTs))
 
     let debito_fiscal_21 = 0
     let debito_fiscal_10 = 0
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
     const ganancias_por_provincia: Record<string, number> = {}
     let percepciones_iva_total = 0
 
-    for (const f of kardexVentas || []) {
+    for (const f of kardexVentas) {
       const iva = f.subtotal_iva || 0
       const neto = f.subtotal_neto || 0
       base_imponible_ventas += neto
@@ -67,17 +68,17 @@ export async function GET(request: NextRequest) {
     }
 
     // Percepciones desde comprobantes_venta (para comprobantes anteriores al kardex o con percepcion_iva > 0)
-    const { data: compVenta } = await supabase
+    const compVenta = await fetchAllRows(() => supabase
       .from("comprobantes_venta")
       .select("percepcion_iva, percepcion_iibb, total_iva, total_neto, tipo_comprobante, clientes(provincia)")
       .gte("fecha", desde)
       .lte("fecha", hasta)
       .in("tipo_comprobante", ["FA", "FB", "NCA", "NCB", "NDA", "NDB"])
-      .gt("percepcion_iva", 0)
+      .gt("percepcion_iva", 0))
 
     // Sumar percepciones de comprobantes que no están en kardex
     const kardexCompIds = new Set<string>()
-    for (const cv of compVenta || []) {
+    for (const cv of compVenta) {
       const percIva  = Number(cv.percepcion_iva  ?? 0)
       const percIibb = Number(cv.percepcion_iibb ?? 0)
       if (percIva > 0)  percepciones_iva_total += percIva
@@ -88,7 +89,7 @@ export async function GET(request: NextRequest) {
     }
 
     // ── 2. IVA Compras (Crédito Fiscal) — desde comprobantes_compra_detalle ──
-    const { data: comprasDetalle } = await supabase
+    const comprasDetalle = await fetchAllRows(() => supabase
       .from("comprobantes_compra_detalle")
       .select(`
         cantidad_facturada, precio_unitario, iva_porcentaje,
@@ -98,14 +99,14 @@ export async function GET(request: NextRequest) {
         )
       `)
       .gte("comprobante.fecha_comprobante", desde)
-      .lte("comprobante.fecha_comprobante", hasta)
+      .lte("comprobante.fecha_comprobante", hasta))
 
     let credito_fiscal_21 = 0
     let credito_fiscal_10 = 0
     let credito_fiscal_0 = 0
     let base_imponible_compras = 0
 
-    for (const d of comprasDetalle || []) {
+    for (const d of comprasDetalle) {
       const comp = Array.isArray(d.comprobante) ? d.comprobante[0] : d.comprobante
       if (!comp) continue
       // Solo facturas A (tipo_comprobante FA) generan crédito fiscal
@@ -129,15 +130,15 @@ export async function GET(request: NextRequest) {
     const r = (n: number) => Math.round(n * 100) / 100
 
     // ── Comprobantes de venta — resumen por tipo ──────────────────────────────
-    const { data: compVentaResumen } = await supabase
+    const compVentaResumen = await fetchAllRows(() => supabase
       .from("comprobantes_venta")
       .select("tipo_comprobante, total_neto, total_iva, total_factura, percepcion_iva, percepcion_iibb")
       .gte("fecha", desde)
       .lte("fecha", hasta)
-      .in("tipo_comprobante", ["FA", "FB", "NCA", "NCB", "NDA", "NDB"])
+      .in("tipo_comprobante", ["FA", "FB", "NCA", "NCB", "NDA", "NDB"]))
 
     const resumen_por_tipo: Record<string, { cantidad: number; neto: number; iva: number; total: number }> = {}
-    for (const cv of compVentaResumen || []) {
+    for (const cv of compVentaResumen) {
       const tipo = cv.tipo_comprobante || "?"
       if (!resumen_por_tipo[tipo]) resumen_por_tipo[tipo] = { cantidad: 0, neto: 0, iva: 0, total: 0 }
       resumen_por_tipo[tipo].cantidad++

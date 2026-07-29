@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 // GET /api/vendedor/billetera?page=
 // Billetera del vendedor autenticado. "Plata en la calle" = suma de los pagos
@@ -69,21 +70,24 @@ export async function GET(request: Request) {
     const cantidadSinRendir = enCalle.length
     const enViajeTotal = enViaje.reduce((s, p) => s + Number(p.monto), 0)
 
-    const { data: comisionesPendientes } = await supabase
-      .from("comisiones")
-      .select("id, monto, segmento, porcentaje, created_at, pedido_id, articulos(descripcion)")
-      .in("viajante_id", session.vendedorIds)
-      .eq("tipo", "cobrada")
-      .eq("pagado", false)
-      .order("created_at", { ascending: false })
+    const comisionesPendientes = await fetchAllRows(() =>
+      supabase
+        .from("comisiones")
+        .select("id, monto, segmento, porcentaje, created_at, pedido_id, articulos(descripcion)")
+        .in("viajante_id", session.vendedorIds)
+        .eq("tipo", "cobrada")
+        .eq("pagado", false)
+        .order("created_at", { ascending: false })
+    )
 
-    const totalPendiente = (comisionesPendientes ?? []).reduce((s, c) => s + Number(c.monto), 0)
+    const totalPendiente = comisionesPendientes.reduce((s, c) => s + Number(c.monto), 0)
 
     const { data: historial, count } = await supabase
       .from("billetera_movimientos")
       .select("id, tipo, medio, monto, concepto, fecha, referencia_id, referencia_tipo", { count: "exact" })
       .in("viajante_id", session.vendedorIds)
       .order("fecha", { ascending: false })
+      .order("id", { ascending: true })
       .range(offset, offset + perPage - 1)
 
     // Enriquecer movimientos genéricos: "Cobro {cliente} · métodos" en vez de
@@ -120,7 +124,7 @@ export async function GET(request: Request) {
       desglose,
       pagos_sin_rendir: cantidadSinRendir,
       en_viaje: { total: enViajeTotal, cantidad: enViaje.length },
-      comisiones_pendientes: comisionesPendientes ?? [],
+      comisiones_pendientes: comisionesPendientes,
       total_pendiente_comisiones: totalPendiente,
       historial: historialEnriquecido,
       total: count ?? 0,

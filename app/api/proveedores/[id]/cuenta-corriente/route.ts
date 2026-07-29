@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextResponse } from "next/server";
 import { requireAuth } from '@/lib/auth'
+import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all'
 
 export async function GET(
     request: Request,
@@ -14,15 +15,13 @@ export async function GET(
 
     try {
         // 1. Fetch Movements
-        const { data: movimientos, error: movError } = await supabase
+        const movimientos = await fetchAllRows(() => supabase
             .from("cuenta_corriente_proveedores")
             .select("*")
             .eq("proveedor_id", proveedorId)
-            .order("fecha", { ascending: false });
+            .order("fecha", { ascending: false }));
 
-        if (movError) throw movError;
-
-        if (!movimientos || movimientos.length === 0) {
+        if (movimientos.length === 0) {
             return NextResponse.json({
                 totales: { comprobantes: 0, facturado: 0, pagado: 0, saldo: 0 },
                 comprobantes: []
@@ -31,13 +30,29 @@ export async function GET(
 
         const movIds = movimientos.map(m => m.id);
 
-        // 2. Fetch Imputations
-        const { data: allImputaciones, error: impError } = await supabase
-            .from("imputaciones_proveedores")
-            .select("*")
-            .or(`id_movimiento_pago.in.(${movIds.join(',')}),id_movimiento_documento.in.(${movIds.join(',')})`);
-
-        if (impError) console.warn("Error fetching imputations:", impError);
+        // 2. Fetch Imputations (por tandas para evitar URLs gigantes)
+        let allImputaciones: any[] = [];
+        try {
+            const [porPago, porDocumento] = await Promise.all([
+                fetchByIds((chunk) => supabase
+                    .from("imputaciones_proveedores")
+                    .select("*")
+                    .in("id_movimiento_pago", chunk), movIds),
+                fetchByIds((chunk) => supabase
+                    .from("imputaciones_proveedores")
+                    .select("*")
+                    .in("id_movimiento_documento", chunk), movIds),
+            ]);
+            const seen = new Set<string>();
+            for (const imp of [...porPago, ...porDocumento]) {
+                if (!seen.has(imp.id)) {
+                    seen.add(imp.id);
+                    allImputaciones.push(imp);
+                }
+            }
+        } catch (impError) {
+            console.warn("Error fetching imputations:", impError);
+        }
 
         // 3. Calculate Balance and Totals
         let totalFacturado = 0;

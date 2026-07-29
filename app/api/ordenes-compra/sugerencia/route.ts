@@ -1,6 +1,19 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
+import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all';
+
+// Trae TODAS las filas de kardex para una lista grande de articulo_ids:
+// parte los ids en tandas (URLs cortas) y pagina cada tanda (sin corte en 1000).
+async function fetchAllByArticuloIds(buildQuery: (chunk: string[]) => any, ids: string[], chunkSize = 200) {
+    const out: any[] = [];
+    for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const rows = await fetchAllRows(() => buildQuery(chunk));
+        out.push(...rows);
+    }
+    return out;
+}
 
 export async function GET(request: NextRequest) {
     const auth = await requireAuth();
@@ -20,65 +33,66 @@ export async function GET(request: NextRequest) {
     const supabase = createAdminClient();
 
     // 1. Get articulos associated with this provider
-    const { data: articulosProveedor } = await supabase
+    const articulosProveedor = await fetchAllRows(() => supabase
         .from('articulos_proveedores')
         .select('articulo_id')
-        .eq('proveedor_id', proveedor_id);
+        .eq('proveedor_id', proveedor_id), 'articulo_id');
 
-    const articuloIds = (articulosProveedor || []).map((a: any) => a.articulo_id);
+    const articuloIds = articulosProveedor.map((a: any) => a.articulo_id);
 
     if (articuloIds.length === 0) {
         return NextResponse.json({ items: [] });
     }
 
     // 2. Calculate sales volume per article in the period
-    let kardexQuery = supabase
-        .from('kardex')
-        .select('articulo_id, cantidad')
-        .eq('tipo_movimiento', 'venta')
-        .eq('signo', -1)
-        .in('articulo_id', articuloIds)
-        .gte('fecha', fecha_desde)
-        .lte('fecha', fecha_hasta);
+    const ventas = await fetchAllByArticuloIds((chunk) => {
+        let kardexQuery = supabase
+            .from('kardex')
+            .select('articulo_id, cantidad')
+            .eq('tipo_movimiento', 'venta')
+            .eq('signo', -1)
+            .in('articulo_id', chunk)
+            .gte('fecha', fecha_desde)
+            .lte('fecha', fecha_hasta);
 
-    if (tipo_venta === 'facturada') {
-        kardexQuery = kardexQuery.not('comprobante_venta_id', 'is', null);
-    }
-
-    const { data: ventas } = await kardexQuery;
+        if (tipo_venta === 'facturada') {
+            kardexQuery = kardexQuery.not('comprobante_venta_id', 'is', null);
+        }
+        return kardexQuery;
+    }, articuloIds);
 
     // Aggregate sales by article
     const ventasPorArticulo: Record<string, number> = {};
-    for (const v of (ventas || [])) {
+    for (const v of ventas) {
         ventasPorArticulo[v.articulo_id] = (ventasPorArticulo[v.articulo_id] || 0) + Number(v.cantidad);
     }
 
     // 3. Get stock en camino (OC active, kardex pendiente)
-    const { data: stockEnCamino } = await supabase
+    const stockEnCamino = await fetchAllByArticuloIds((chunk) => supabase
         .from('kardex')
         .select('articulo_id, cantidad')
         .eq('tipo_movimiento', 'compra')
         .eq('estado', 'pendiente')
-        .in('articulo_id', articuloIds);
+        .in('articulo_id', chunk), articuloIds);
 
     const stockEnCaminoPorArticulo: Record<string, number> = {};
-    for (const s of (stockEnCamino || [])) {
+    for (const s of stockEnCamino) {
         stockEnCaminoPorArticulo[s.articulo_id] = (stockEnCaminoPorArticulo[s.articulo_id] || 0) + Number(s.cantidad);
     }
 
     // 4. Get current stock and article details
-    const { data: articulos } = await supabase
+    const articulos = await fetchByIds((chunk) => supabase
         .from('articulos')
         .select('id, sku, descripcion, precio_compra, stock_actual, unidades_por_bulto')
-        .in('id', articuloIds)
-        .eq('activo', true);
+        .in('id', chunk)
+        .eq('activo', true), articuloIds);
 
     // 5. Calculate suggestions
     const fechaDesdeDate = new Date(fecha_desde);
     const fechaHastaDate = new Date(fecha_hasta);
     const diasPeriodo = Math.max(1, Math.round((fechaHastaDate.getTime() - fechaDesdeDate.getTime()) / (1000 * 60 * 60 * 24)));
 
-    const items = (articulos || []).map((articulo: any) => {
+    const items = articulos.map((articulo: any) => {
         const totalVendido = ventasPorArticulo[articulo.id] || 0;
         const stockActual = Number(articulo.stock_actual || 0);
         const stockCamino = stockEnCaminoPorArticulo[articulo.id] || 0;

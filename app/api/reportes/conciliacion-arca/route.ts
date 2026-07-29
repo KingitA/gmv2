@@ -16,6 +16,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { TIPO_CBTE_ARCA, type AmbienteARCA } from '@/lib/arca/tipos'
 import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, consultarComprobante } from '@/lib/arca/wsfev1'
@@ -82,14 +83,16 @@ export async function GET() {
       const ultimoArca = await ultimoAutorizado(ambiente, ta.token, ta.sign, cuitEmpresa, pvNum, cbteTipo)
 
       // Números existentes en la DB para este tipo + PV fiscal
-      const { data: rows } = await supabase
+      // (fetchAllRows pagina de a 1000: con >1000 facturas el corte de PostgREST
+      //  generaba falsos "huérfanos")
+      const rows = await fetchAllRows(() => supabase
         .from('comprobantes_venta')
         .select('numero_comprobante, fecha, cae, total_factura')
         .eq('tipo_comprobante', tipo)
-        .eq('punto_venta', puntoVenta)
+        .eq('punto_venta', puntoVenta))
 
       const numerosDB = new Map<number, { fecha: string; cae: string | null; total: number }>()
-      for (const r of rows ?? []) {
+      for (const r of rows) {
         const nro = parseInt((r.numero_comprobante ?? '').split('-')[1] ?? '', 10)
         if (!isNaN(nro)) numerosDB.set(nro, { fecha: r.fecha, cae: r.cae, total: Number(r.total_factura ?? 0) })
       }

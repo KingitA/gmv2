@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const force = searchParams.get('force') === 'true'
 
     try {
-        let query = supabase.from("articulos").select("id").range(offset, offset + limit - 1)
+        let query = supabase.from("articulos").select("id").order('id', { ascending: true }).range(offset, offset + limit - 1)
 
         if (!force) {
             // Only process products without embeddings

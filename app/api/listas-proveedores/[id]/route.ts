@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 
 export async function GET(
     request: NextRequest,
@@ -20,11 +21,11 @@ export async function GET(
 
     if (error || !lista) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    const { data: items } = await supabase
+    const items = await fetchAllRows(() => supabase
         .from('listas_proveedores_items')
         .select(`*, articulo:articulos(sku, descripcion, precio_compra, descuento1, descuento2, descuento3, descuento4)`)
         .eq('lista_id', id)
-        .order('created_at');
+        .order('created_at'));
 
-    return NextResponse.json({ lista, items: items || [] });
+    return NextResponse.json({ lista, items });
 }

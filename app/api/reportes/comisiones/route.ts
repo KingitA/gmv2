@@ -17,6 +17,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -78,21 +79,24 @@ export async function GET(request: NextRequest) {
 
     // ── Totales ────────────────────────────────────────────────────────────────
     // Totales completos sin paginación
-    let totalesQuery = supabase
-      .from("comisiones")
-      .select("monto, pagado, comprobante_cobrado")
+    // (fetchAllRows pagina de a 1000 para superar el corte de PostgREST)
+    const totalesData = await fetchAllRows(() => {
+      let totalesQuery = supabase
+        .from("comisiones")
+        .select("monto, pagado, comprobante_cobrado, viajante_id")
 
-    if (vendedorId) totalesQuery = totalesQuery.eq("viajante_id", vendedorId)
-    if (soloCobrables) totalesQuery = totalesQuery.eq("comprobante_cobrado", true)
-    if (pagadoFilter !== null) totalesQuery = totalesQuery.eq("pagado", pagadoFilter === "true")
+      if (vendedorId) totalesQuery = totalesQuery.eq("viajante_id", vendedorId)
+      if (soloCobrables) totalesQuery = totalesQuery.eq("comprobante_cobrado", true)
+      if (pagadoFilter !== null) totalesQuery = totalesQuery.eq("pagado", pagadoFilter === "true")
 
-    const { data: totalesData } = await totalesQuery
+      return totalesQuery
+    })
 
     let total_cobrables = 0
     let total_pagado = 0
     let total_pendiente_cobro = 0  // cobrable pero no pagada todavía
 
-    for (const c of totalesData || []) {
+    for (const c of totalesData) {
       const monto = c.monto || 0
       if (c.comprobante_cobrado && !c.pagado) total_pendiente_cobro += monto
       if (c.pagado) total_pagado += monto
@@ -101,7 +105,7 @@ export async function GET(request: NextRequest) {
 
     // ── Agrupación por vendedor ────────────────────────────────────────────────
     const porVendedor: Record<string, any> = {}
-    for (const c of totalesData || []) {
+    for (const c of totalesData) {
       const vid = (c as any).viajante_id || "sin_vendedor"
       if (!porVendedor[vid]) {
         porVendedor[vid] = { viajante_id: vid, total: 0, cobrable: 0, pagado: 0, pendiente: 0 }

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 /**
  * GET /api/finanzas/evolucion — serie diaria de saldos por cuenta, derivada
@@ -14,18 +15,18 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    const [kardexRes, cajasRes, bancosRes, invRes] = await Promise.all([
-      supabase
-        .from("kardex_contable")
-        .select("fecha, origen_tipo, origen_id, destino_tipo, destino_id, saldo_origen_after, saldo_destino_after")
-        .or("saldo_origen_after.not.is.null,saldo_destino_after.not.is.null")
-        .order("fecha", { ascending: true })
-        .limit(5000),
+    const [kardexRows, cajasRes, bancosRes, invRes] = await Promise.all([
+      fetchAllRows(() =>
+        supabase
+          .from("kardex_contable")
+          .select("fecha, origen_tipo, origen_id, destino_tipo, destino_id, saldo_origen_after, saldo_destino_after")
+          .or("saldo_origen_after.not.is.null,saldo_destino_after.not.is.null")
+          .order("fecha", { ascending: true })
+      ),
       supabase.from("cajas_financieras").select("id, nombre").eq("activo", true),
       supabase.from("cuentas_bancarias").select("id, nombre").eq("activo", true),
       supabase.from("cuentas_inversion").select("id, nombre").eq("activo", true),
     ])
-    if (kardexRes.error) throw kardexRes.error
 
     const nombres = new Map<string, string>()
     for (const c of cajasRes.data || []) nombres.set(c.id, c.nombre)
@@ -42,7 +43,7 @@ export async function GET() {
       if (!porDia.has(dia)) porDia.set(dia, new Map())
       porDia.get(dia)!.set(nombre, Number(saldo))
     }
-    for (const k of kardexRes.data || []) {
+    for (const k of kardexRows) {
       registrar(k.fecha, k.origen_id, k.saldo_origen_after)
       registrar(k.fecha, k.destino_id, k.saldo_destino_after)
     }

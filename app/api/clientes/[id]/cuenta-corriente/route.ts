@@ -3,6 +3,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from '@/lib/auth';
 import { getSaldosCliente } from '@/lib/cuenta-corriente/saldo';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,7 @@ export async function GET(
 
         // 2. Fetch comprobantes (invoices and credit notes)
         // Note: Using estado_pago instead of estado as per database schema
-        const { data: comprobantes, error: comprobantesError } = await supabase
+        const comprobantes = await fetchAllRows(() => supabase
             .from("comprobantes_venta")
             .select(`
         id,
@@ -57,19 +58,11 @@ export async function GET(
         estado_pago
       `)
             .eq("cliente_id", cliente_id)
-            .order("fecha", { ascending: false });
-
-        if (comprobantesError) {
-            console.error("[v0] Error fetching comprobantes:", comprobantesError);
-        }
+            .order("fecha", { ascending: false }));
 
         console.log("[DEBUG] Cliente ID:", cliente_id);
         console.log("[DEBUG] Cliente data:", cliente);
-        console.log("[DEBUG] Comprobantes encontrados:", comprobantes?.length || 0);
-
-        if (comprobantesError) {
-            console.error("[DEBUG] Error en query de comprobantes:", comprobantesError);
-        }
+        console.log("[DEBUG] Comprobantes encontrados:", comprobantes.length);
 
         // Fetch pedido numbers for comprobantes that have pedido_id
         const comprobantesConPedido = await Promise.all(
@@ -94,7 +87,7 @@ export async function GET(
         );
 
         // 3. Fetch pagos (payments) with imputations
-        const { data: pagos, error: pagosError } = await supabase
+        const pagos = await fetchAllRows(() => supabase
             .from("pagos_clientes")
             .select(`
         id,
@@ -106,11 +99,7 @@ export async function GET(
         created_at
       `)
             .eq("cliente_id", cliente_id)
-            .order("fecha_pago", { ascending: false });
-
-        if (pagosError) {
-            console.error("[v0] Error fetching pagos:", pagosError);
-        }
+            .order("fecha_pago", { ascending: false }));
 
         // For each payment, fetch imputations
         const pagosConImputaciones = await Promise.all(
@@ -139,7 +128,7 @@ export async function GET(
         );
 
         // 4. Fetch devoluciones (returns)
-        const { data: devoluciones, error: devolucionesError } = await supabase
+        const devoluciones = await fetchAllRows(() => supabase
             .from("devoluciones")
             .select(`
         id,
@@ -150,27 +139,23 @@ export async function GET(
         observaciones
       `)
             .eq("cliente_id", cliente_id)
-            .order("created_at", { ascending: false });
+            .order("created_at", { ascending: false }));
 
         // Comprobantes reales del cliente (la tabla 'cuenta_corriente' singular no
         // existe; el feature de "pedidos pendientes de facturación" estaba muerto).
         const allComprobantes = [...(comprobantesConPedido || [])];
         allComprobantes.sort((a: any, b: any) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
 
-        if (devolucionesError) {
-            console.error("[v0] Error fetching devoluciones:", devolucionesError);
-        }
-
         // 5. Saldo total = fuente única: libro mayor. Doble saldo: real vs proyectado.
         const saldos = await getSaldosCliente(supabase, cliente_id);
         const saldo_total = saldos.saldo_real;
 
         // Extracto (libro mayor) para la UI
-        const { data: movimientos } = await supabase
+        const movimientos = await fetchAllRows(() => supabase
             .from("cuenta_corriente_clientes")
             .select("fecha, tipo_movimiento, debe, haber, numero_comprobante, observaciones, referencia_tipo, referencia_id")
             .eq("cliente_id", cliente_id)
-            .order("fecha", { ascending: false });
+            .order("fecha", { ascending: false }));
 
         // 6. Format response
         const response = {

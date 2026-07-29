@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,12 +18,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Se requiere cliente_id" }, { status: 400 })
     }
 
-    // Construir query
-    let query = supabase
-      .from("pedidos_detalle")
-      .select(`
+    // Construir query — pedidos!inner para que los filtros sobre el embed
+    // realmente excluyan las filas padre (sin !inner, PostgREST solo anula el embed)
+    const ventas = await fetchAllRows(() => {
+      let query = supabase
+        .from("pedidos_detalle")
+        .select(`
         *,
-        pedidos (
+        pedidos!inner (
           numero_pedido,
           fecha,
           estado
@@ -33,23 +36,22 @@ export async function GET(request: NextRequest) {
           ean13
         )
       `)
-      .eq("pedidos.cliente_id", cliente_id)
+        .eq("pedidos.cliente_id", cliente_id)
 
-    if (fecha_desde) {
-      query = query.gte("pedidos.fecha", fecha_desde)
-    }
+      if (fecha_desde) {
+        query = query.gte("pedidos.fecha", fecha_desde)
+      }
 
-    if (fecha_hasta) {
-      query = query.lte("pedidos.fecha", fecha_hasta)
-    }
+      if (fecha_hasta) {
+        query = query.lte("pedidos.fecha", fecha_hasta)
+      }
 
-    if (articulo_id) {
-      query = query.eq("articulo_id", articulo_id)
-    }
+      if (articulo_id) {
+        query = query.eq("articulo_id", articulo_id)
+      }
 
-    const { data: ventas, error: ventasError } = await query.order("pedidos.fecha", { ascending: false })
-
-    if (ventasError) throw ventasError
+      return query.order("pedidos.fecha", { ascending: false })
+    })
 
     return NextResponse.json({
       success: true,

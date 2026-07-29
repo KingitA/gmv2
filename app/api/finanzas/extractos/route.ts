@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { importarExtracto } from "@/lib/finanzas/extractos-import"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 /**
  * Extractos bancarios (Fase G1, migración 20260723).
@@ -30,25 +31,27 @@ export async function GET(request: Request) {
 
     const extractoId = searchParams.get("extracto_id")
     if (extractoId) {
-      const { data, error } = await supabase
-        .from("banco_extractos_movimientos")
-        .select("*, pagos_clientes(id, monto, cliente_id, clientes(nombre)), kardex_contable(id, tipo_movimiento, concepto, monto, fecha), vencimientos(id, concepto, tipo, monto, fecha_vencimiento, es_estimado)")
-        .eq("extracto_id", extractoId)
-        .order("fecha", { ascending: true })
-      if (error) throw error
-      return NextResponse.json({ movimientos: data || [] })
+      const data = await fetchAllRows(() =>
+        supabase
+          .from("banco_extractos_movimientos")
+          .select("*, pagos_clientes(id, monto, cliente_id, clientes(nombre)), kardex_contable(id, tipo_movimiento, concepto, monto, fecha), vencimientos(id, concepto, tipo, monto, fecha_vencimiento, es_estimado)")
+          .eq("extracto_id", extractoId)
+          .order("fecha", { ascending: true })
+      )
+      return NextResponse.json({ movimientos: data })
     }
 
     const cuentaId = searchParams.get("cuenta_id")
     if (searchParams.get("pendientes") && cuentaId) {
-      const { data, error } = await supabase
-        .from("banco_extractos_movimientos")
-        .select("*, pagos_clientes(id, monto, cliente_id, clientes(nombre)), kardex_contable(id, tipo_movimiento, concepto, monto, fecha), vencimientos(id, concepto, tipo, monto, fecha_vencimiento, es_estimado)")
-        .eq("cuenta_bancaria_id", cuentaId)
-        .in("estado_matching", ["PENDIENTE", "SUGERIDO"])
-        .order("fecha", { ascending: true })
-      if (error) throw error
-      return NextResponse.json({ movimientos: data || [] })
+      const data = await fetchAllRows(() =>
+        supabase
+          .from("banco_extractos_movimientos")
+          .select("*, pagos_clientes(id, monto, cliente_id, clientes(nombre)), kardex_contable(id, tipo_movimiento, concepto, monto, fecha), vencimientos(id, concepto, tipo, monto, fecha_vencimiento, es_estimado)")
+          .eq("cuenta_bancaria_id", cuentaId)
+          .in("estado_matching", ["PENDIENTE", "SUGERIDO"])
+          .order("fecha", { ascending: true })
+      )
+      return NextResponse.json({ movimientos: data })
     }
 
     let q = supabase
