@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Plus, Trash2, Edit, Save, X, Upload, FileText, FileImage, Loader2, Eye, CheckCircle2 } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { nowArgentina, todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { RevisarMatches } from "./revisar-matches"
@@ -401,7 +401,7 @@ export default function CargarComprobantesPage() {
               <AlertDescription className="text-green-800">
                 <strong>Comprobante creado automáticamente</strong>
                 {ultimoOCR.comprobante?.numero_comprobante && ` · ${ultimoOCR.comprobante.numero_comprobante}`}
-                {ultimoOCR.comprobante?.total_factura && ` · Total: $${Number(ultimoOCR.comprobante.total_factura).toFixed(2)}`}
+                {ultimoOCR.comprobante?.total_factura && ` · Total: ${formatCurrency(Number(ultimoOCR.comprobante.total_factura))}`}
                 {ultimoOCR.items_detectados > 0 && ` · ${ultimoOCR.items_detectados} artículo${ultimoOCR.items_detectados !== 1 ? 's' : ''} detectado${ultimoOCR.items_detectados !== 1 ? 's' : ''}`}
                 {ultimoOCR.items_vinculados > 0 && `, ${ultimoOCR.items_vinculados} vinculado${ultimoOCR.items_vinculados !== 1 ? 's' : ''}`}
                 <span className="text-green-700 text-xs block mt-1">El comprobante aparece en la lista de abajo con todos los datos extraídos del OCR.</span>
@@ -434,7 +434,7 @@ export default function CargarComprobantesPage() {
                         <div className="flex items-center gap-2 flex-wrap mt-0.5">
                           <Badge variant="outline" className="text-xs">{TIPO_DOC_LABELS[doc.tipo_documento] || doc.tipo_documento}</Badge>
                           {nroComp && <span className="text-xs text-muted-foreground">{nroComp}</span>}
-                          {totalDoc && <span className="text-xs text-muted-foreground">${Number(totalDoc).toFixed(2)}</span>}
+                          {totalDoc && <span className="text-xs text-muted-foreground">{formatCurrency(Number(totalDoc))}</span>}
                           {doc.procesado && <Badge variant="secondary" className="text-xs">OCR ✓</Badge>}
                         </div>
                       </div>
@@ -589,12 +589,12 @@ export default function CargarComprobantesPage() {
                     {Math.abs(calcularDiferencia()) > 0.01 && (
                       <Alert>
                         <AlertDescription>
-                          Diferencia de redondeo: ${calcularDiferencia().toFixed(2)}
+                          Diferencia de redondeo: {formatCurrency(calcularDiferencia())}
                           <br />
                           <span className="text-xs text-muted-foreground">
-                            Suma de conceptos: $
-                            {(totalNeto + totalIVA + percepcionIVA + percepcionIIBB + retencionGanancias).toFixed(2)} |
-                            Total factura: ${totalFacturaDeclarado.toFixed(2)}
+                            Suma de conceptos:{" "}
+                            {formatCurrency((totalNeto + totalIVA + percepcionIVA + percepcionIIBB + retencionGanancias))} |
+                            Total factura: {formatCurrency(totalFacturaDeclarado)}
                           </span>
                         </AlertDescription>
                       </Alert>
@@ -643,7 +643,7 @@ export default function CargarComprobantesPage() {
                     <TableRow key={comp.id}>
                       <TableCell>{comp.tipo_comprobante}</TableCell>
                       <TableCell className="font-medium">{comp.numero_comprobante}</TableCell>
-                      <TableCell>{new Date(comp.fecha_comprobante).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</TableCell>
+                      <TableCell>{formatDateAR(comp.fecha_comprobante)}</TableCell>
 
                       <TableCell>
                         {estaEditando ? (
@@ -655,7 +655,7 @@ export default function CargarComprobantesPage() {
                             onChange={(e) => setEditNeto(Number.parseFloat(e.target.value) || 0)}
                           />
                         ) : (
-                          `$${(comp.total_neto || 0).toFixed(2)}`
+                          `${formatCurrency((comp.total_neto || 0))}`
                         )}
                       </TableCell>
 
@@ -669,7 +669,7 @@ export default function CargarComprobantesPage() {
                             onChange={(e) => setEditIVA(Number.parseFloat(e.target.value) || 0)}
                           />
                         ) : comp.total_iva > 0 ? (
-                          `$${comp.total_iva.toFixed(2)}`
+                          `${formatCurrency(comp.total_iva)}`
                         ) : (
                           "-"
                         )}
@@ -685,7 +685,7 @@ export default function CargarComprobantesPage() {
                             onChange={(e) => setEditPercepIVA(Number.parseFloat(e.target.value) || 0)}
                           />
                         ) : comp.percepcion_iva_monto > 0 ? (
-                          `$${comp.percepcion_iva_monto.toFixed(2)}`
+                          `${formatCurrency(comp.percepcion_iva_monto)}`
                         ) : (
                           "-"
                         )}
@@ -701,7 +701,7 @@ export default function CargarComprobantesPage() {
                             onChange={(e) => setEditPercepIIBB(Number.parseFloat(e.target.value) || 0)}
                           />
                         ) : comp.percepcion_iibb_monto > 0 ? (
-                          `$${comp.percepcion_iibb_monto.toFixed(2)}`
+                          `${formatCurrency(comp.percepcion_iibb_monto)}`
                         ) : (
                           "-"
                         )}
@@ -717,13 +717,13 @@ export default function CargarComprobantesPage() {
                             onChange={(e) => setEditRetGanancias(Number.parseFloat(e.target.value) || 0)}
                           />
                         ) : comp.retencion_ganancias_monto > 0 ? (
-                          `$${comp.retencion_ganancias_monto.toFixed(2)}`
+                          `${formatCurrency(comp.retencion_ganancias_monto)}`
                         ) : (
                           "-"
                         )}
                       </TableCell>
 
-                      <TableCell className="font-bold text-primary">${totalFinal.toFixed(2)}</TableCell>
+                      <TableCell className="font-bold text-primary">{formatCurrency(totalFinal)}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">
                           {estaEditando ? (
@@ -766,13 +766,13 @@ export default function CargarComprobantesPage() {
             <div className="flex justify-between text-lg">
               <span>Total NETO (sin impuestos):</span>
               <span className="font-semibold">
-                ${comprobantes.reduce((sum, comp) => sum + (comp.total_neto || 0), 0).toFixed(2)}
+                {formatCurrency(comprobantes.reduce((sum, comp) => sum + (comp.total_neto || 0), 0))}
               </span>
             </div>
             <div className="flex justify-between text-xl font-bold border-t pt-2">
               <span>Total FINAL con impuestos:</span>
               <span className="text-primary">
-                ${comprobantes.reduce((sum, comp) => sum + comp.total_factura_declarado, 0).toFixed(2)}
+                {formatCurrency(comprobantes.reduce((sum, comp) => sum + comp.total_factura_declarado, 0))}
               </span>
             </div>
           </div>

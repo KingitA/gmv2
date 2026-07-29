@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ArrowLeft, FileMinus, Loader2, CheckCircle2 } from "lucide-react"
 import Link from "next/link"
-import { todayArgentina } from "@/lib/utils"
+import { todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
 
 const ORIGEN_LABELS: Record<string, string> = {
     descuento_fuera_factura: "Descuento fuera de factura",
@@ -153,7 +153,7 @@ export default function NCPendientesPage() {
                 <Card className="border-l-4 border-l-amber-500">
                     <CardContent className="py-3 px-4">
                         <p className="text-xs text-muted-foreground">Total esperado</p>
-                        <p className="text-xl font-bold">${totalEsperado.toFixed(2)}</p>
+                        <p className="text-xl font-bold">{formatCurrency(totalEsperado)}</p>
                     </CardContent>
                 </Card>
             </div>
@@ -194,7 +194,7 @@ export default function NCPendientesPage() {
                                                 {nc.asociado ? `${nc.asociado.tipo_comprobante} ${nc.asociado.numero_comprobante}` : "—"}
                                             </TableCell>
                                             <TableCell className="text-right font-semibold">
-                                                ${Number(nc.total_factura_declarado || 0).toFixed(2)}
+                                                {formatCurrency(Number(nc.total_factura_declarado || 0))}
                                             </TableCell>
                                             <TableCell className={`text-right ${dias > 45 ? "text-red-600 font-bold" : dias > 30 ? "text-amber-600" : ""}`}>
                                                 {dias}
@@ -234,9 +234,9 @@ export default function NCPendientesPage() {
                                     <TableRow key={nc.id}>
                                         <TableCell className="font-medium">{nc.proveedor?.nombre || "—"}</TableCell>
                                         <TableCell>{nc.tipo_comprobante} {nc.numero_comprobante}</TableCell>
-                                        <TableCell>{new Date(nc.fecha_comprobante).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}</TableCell>
+                                        <TableCell>{formatDateAR(nc.fecha_comprobante)}</TableCell>
                                         <TableCell className="text-right font-semibold text-green-700">
-                                            ${Math.abs(Number(nc.saldo_pendiente || 0)).toFixed(2)}
+                                            {formatCurrency(Math.abs(Number(nc.saldo_pendiente || 0)))}
                                         </TableCell>
                                         <TableCell>
                                             <Button size="sm" variant="outline" onClick={() => imputarManual(nc)}
@@ -262,8 +262,8 @@ export default function NCPendientesPage() {
                             <div className="p-3 bg-muted rounded-lg text-sm">
                                 <p className="font-semibold">{registrando.proveedor?.nombre}</p>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {ORIGEN_LABELS[registrando.origen_nc] || registrando.origen_nc} · esperado $
-                                    {Number(registrando.total_factura_declarado || 0).toFixed(2)}
+                                    {ORIGEN_LABELS[registrando.origen_nc] || registrando.origen_nc} · esperado{" "}
+                                    {formatCurrency(Number(registrando.total_factura_declarado || 0))}
                                 </p>
                             </div>
                             <div>

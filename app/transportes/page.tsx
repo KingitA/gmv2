@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Truck, Loader2 } from "lucide-react"
+import { formatCurrency, formatDateAR } from "@/lib/utils"
 
 const TIPO_LABELS: Record<string, string> = {
     faltante_mercaderia: "Faltante de mercadería",
@@ -106,7 +107,7 @@ export default function TransportesPage() {
                 <Card className="border-l-4 border-l-blue-500">
                     <CardContent className="py-3 px-4">
                         <p className="text-xs text-muted-foreground">Deuda total de transportes</p>
-                        <p className="text-xl font-bold">${totalDeuda.toFixed(2)}</p>
+                        <p className="text-xl font-bold">{formatCurrency(totalDeuda)}</p>
                     </CardContent>
                 </Card>
             </div>
@@ -133,7 +134,7 @@ export default function TransportesPage() {
                                         <TableCell className="font-mono text-sm">{t.cuit || "—"}</TableCell>
                                         <TableCell>{t.telefono || "—"}</TableCell>
                                         <TableCell className={`text-right font-semibold ${Number(t.saldo) > 0 ? "text-red-600" : ""}`}>
-                                            ${Number(t.saldo || 0).toFixed(2)}
+                                            {formatCurrency(Number(t.saldo || 0))}
                                         </TableCell>
                                         <TableCell>
                                             <Button size="sm" variant="outline" onClick={() => abrirCC(t)}>Ver CC</Button>
@@ -152,7 +153,7 @@ export default function TransportesPage() {
                         <DialogTitle className="flex items-center gap-2">
                             {ccAbierta?.nombre}
                             <Badge variant={saldo > 0 ? "destructive" : "secondary"}>
-                                Saldo ${saldo.toFixed(2)}
+                                Saldo {formatCurrency(saldo)}
                             </Badge>
                         </DialogTitle>
                     </DialogHeader>
@@ -204,14 +205,14 @@ export default function TransportesPage() {
                                         {movimientos.map((m) => (
                                             <TableRow key={m.id}>
                                                 <TableCell className="text-xs">
-                                                    {new Date(m.fecha).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}
+                                                    {formatDateAR(m.fecha)}
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant="outline">{TIPO_LABELS[m.tipo_movimiento] || m.tipo_movimiento}</Badge>
                                                 </TableCell>
                                                 <TableCell className="text-sm">{m.descripcion || "—"}</TableCell>
                                                 <TableCell className={`text-right font-semibold ${Number(m.monto) < 0 ? "text-green-700" : ""}`}>
-                                                    ${Number(m.monto).toFixed(2)}
+                                                    {formatCurrency(Number(m.monto))}
                                                 </TableCell>
                                             </TableRow>
                                         ))}

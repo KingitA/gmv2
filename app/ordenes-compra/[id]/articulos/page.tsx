@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Search, Plus, Trash2, Save, AlertTriangle } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
+import { formatCurrency } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -358,7 +359,7 @@ export default function CargarArticulosPage() {
                       <div className="text-xs text-muted-foreground">SKU: {item.articulo?.sku}</div>
                     </TableCell>
                     <TableCell>{item.cantidad_pedida || item.cantidad} {item.tipo_cantidad}</TableCell>
-                    <TableCell>${(item.precio_unitario || 0).toFixed(2)}</TableCell>
+                    <TableCell>{formatCurrency((item.precio_unitario || 0))}</TableCell>
                     <TableCell>{item.descuento1 || 0}%</TableCell>
                     <TableCell>{item.descuento2 || 0}%</TableCell>
                     <TableCell>{item.descuento3 || 0}%</TableCell>
@@ -437,7 +438,7 @@ export default function CargarArticulosPage() {
                       <TableCell className="font-semibold">{art.descripcion}</TableCell>
                       <TableCell className="font-semibold text-indigo-600">{art.marca?.descripcion || "—"}</TableCell>
                       <TableCell>{art.unidades_por_bulto}</TableCell>
-                      <TableCell>${(art.precio_compra || 0).toFixed(2)}</TableCell>
+                      <TableCell>{formatCurrency((art.precio_compra || 0))}</TableCell>
                       <TableCell>
                         <Button size="sm" onClick={() => seleccionarArticulo(art)}>
                           Seleccionar
@@ -598,7 +599,7 @@ export default function CargarArticulosPage() {
                       className="w-full"
                     />
                   </TableCell>
-                  <TableCell className="font-bold text-primary">${calcularPrecioNeto(item).toFixed(2)}</TableCell>
+                  <TableCell className="font-bold text-primary">{formatCurrency(calcularPrecioNeto(item))}</TableCell>
                   <TableCell>
                     <Button
                       variant="ghost"
@@ -616,15 +617,15 @@ export default function CargarArticulosPage() {
           <div className="border-t pt-4 space-y-2">
             <div className="flex justify-between text-lg">
               <span>Total NETO Comprobantes:</span>
-              <span className="font-bold">${totalNetoComprobantes.toFixed(2)}</span>
+              <span className="font-bold">{formatCurrency(totalNetoComprobantes)}</span>
             </div>
             <div className="flex justify-between text-lg">
               <span>Total NETO Artículos:</span>
-              <span className="font-bold">${totalNeto.toFixed(2)}</span>
+              <span className="font-bold">{formatCurrency(totalNeto)}</span>
             </div>
             <div className="flex justify-between text-xl font-bold">
               <span>Diferencia:</span>
-              <span className={coincide ? "text-green-600" : "text-amber-600"}>${diferencia.toFixed(2)}</span>
+              <span className={coincide ? "text-green-600" : "text-amber-600"}>{formatCurrency(diferencia)}</span>
             </div>
             {coincide && (
               <div className="bg-green-50 border border-green-200 p-3 rounded-md text-green-800 text-center">
@@ -633,14 +634,14 @@ export default function CargarArticulosPage() {
             )}
             {!coincide && !diferenciaSignificativa && (
               <div className="bg-blue-50 border border-blue-200 p-3 rounded-md text-blue-800 text-center">
-                ℹ️ Diferencia de redondeo: ${Math.abs(diferencia).toFixed(2)} - Podés guardar y ajustar después si es
+                ℹ️ Diferencia de redondeo: {formatCurrency(Math.abs(diferencia))} - Podés guardar y ajustar después si es
                 necesario
               </div>
             )}
             {!coincide && diferenciaSignificativa && (
               <div className="bg-amber-50 border border-amber-200 p-3 rounded-md text-amber-800 text-center flex items-center justify-center gap-2">
                 <AlertTriangle className="h-4 w-4" />
-                Diferencia significativa: ${Math.abs(diferencia).toFixed(2)} - Revisá los valores antes de guardar
+                Diferencia significativa: {formatCurrency(Math.abs(diferencia))} - Revisá los valores antes de guardar
               </div>
             )}
           </div>
@@ -660,7 +661,7 @@ export default function CargarArticulosPage() {
                   SKU: {articuloSeleccionado.sku} | {articuloSeleccionado.unidades_por_bulto} unid/bulto
                 </div>
                 <div className="text-sm font-medium mt-2">
-                  Precio: ${(articuloSeleccionado.precio_compra || 0).toFixed(2)}
+                  Precio: {formatCurrency((articuloSeleccionado.precio_compra || 0))}
                 </div>
               </div>
               <div>
@@ -812,7 +813,7 @@ export default function CargarArticulosPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmar Guardado con Diferencia</AlertDialogTitle>
             <AlertDialogDescription>
-              Hay una diferencia de <strong>${Math.abs(diferencia).toFixed(2)}</strong> entre el total de comprobantes y
+              Hay una diferencia de <strong>{formatCurrency(Math.abs(diferencia))}</strong> entre el total de comprobantes y
               el total de artículos.
               <br />
               <br />

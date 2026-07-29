@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Check, Loader2, Link2 } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
+import { formatCurrency } from "@/lib/utils"
 
 // Líneas de comprobantes cuyo OCR no matcheó (o matcheó con dudas) contra el
 // catálogo. Confirmar una línea enseña la equivalencia al sistema
@@ -108,7 +109,7 @@ export function RevisarMatches({
                                     <p className="text-sm font-medium">{row.descripcion_proveedor || "(sin descripción)"}</p>
                                     <p className="text-xs text-muted-foreground">
                                         {row.codigo_proveedor && <>Cód. proveedor: {row.codigo_proveedor} · </>}
-                                        Cant: {Number(row.cantidad_facturada || 0)} · ${Number(row.precio_unitario || 0).toFixed(2)} ·{" "}
+                                        Cant: {Number(row.cantidad_facturada || 0)} · {formatCurrency(Number(row.precio_unitario || 0))} ·{" "}
                                         {row.comprobante.tipo_comprobante} {row.comprobante.numero_comprobante}
                                     </p>
                                 </div>

@@ -15,7 +15,7 @@ import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import type { Proveedor, OrdenCompra } from "@/lib/types"
 import { ImportOrderDialog } from "@/components/ordenes/ImportOrderDialog"
-import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { nowArgentina, todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -222,9 +222,9 @@ function DetalleOrdenDialog({ orden, onClose }: { orden: OrdenCompra; onClose: (
                   <TableRow key={comp.id}>
                     <TableCell>{comp.tipo_comprobante}</TableCell>
                     <TableCell className="font-medium">{comp.numero_comprobante}</TableCell>
-                    <TableCell>{new Date(comp.fecha_comprobante).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</TableCell>
-                    <TableCell>${comp.total_factura_declarado.toFixed(2)}</TableCell>
-                    <TableCell>${comp.total_calculado.toFixed(2)}</TableCell>
+                    <TableCell>{formatDateAR(comp.fecha_comprobante)}</TableCell>
+                    <TableCell>{formatCurrency(comp.total_factura_declarado)}</TableCell>
+                    <TableCell>{formatCurrency(comp.total_calculado)}</TableCell>
                     <TableCell>
                       <span
                         className={`px-2 py-1 rounded-full text-xs ${comp.estado === "pendiente_recepcion"
@@ -256,16 +256,16 @@ function DetalleOrdenDialog({ orden, onClose }: { orden: OrdenCompra; onClose: (
             <div className="mt-4 space-y-2 border-t pt-4">
               <div className="flex justify-between text-lg">
                 <span>Total Facturado (todos los comprobantes):</span>
-                <span className="font-bold">${totalFacturado.toFixed(2)}</span>
+                <span className="font-bold">{formatCurrency(totalFacturado)}</span>
               </div>
               <div className="flex justify-between text-lg">
                 <span>Total Calculado (todos los comprobantes):</span>
-                <span className="font-bold">${totalCalculado.toFixed(2)}</span>
+                <span className="font-bold">{formatCurrency(totalCalculado)}</span>
               </div>
               <div className="flex justify-between text-xl font-bold">
                 <span>Diferencia:</span>
                 <span className={Math.abs(totalFacturado - totalCalculado) < 0.01 ? "text-green-600" : "text-red-600"}>
-                  ${(totalFacturado - totalCalculado).toFixed(2)}
+                  {formatCurrency((totalFacturado - totalCalculado))}
                 </span>
               </div>
             </div>
@@ -822,7 +822,7 @@ export default function OrdenesCompraPage() {
                           <strong className="ml-2 text-primary">{articulosConCantidad}</strong> con cantidad asignada
                         </div>
                         <div className="flex gap-4 items-center">
-                          <div className="text-lg font-bold">Total: ${totalOrden.toFixed(2)}</div>
+                          <div className="text-lg font-bold">Total: {formatCurrency(totalOrden)}</div>
                           <Button
                             variant="outline"
                             size="sm"
@@ -998,7 +998,7 @@ export default function OrdenesCompraPage() {
                                       />
                                     </TableCell>
                                     <TableCell className="w-36 font-medium">
-                                      {item.cantidad_pedida > 0 ? `$${calcularSubtotal(item).toFixed(2)}` : "-"}
+                                      {item.cantidad_pedida > 0 ? `${formatCurrency(calcularSubtotal(item))}` : "-"}
                                     </TableCell>
                                   </TableRow>
                                 )
@@ -1086,7 +1086,7 @@ export default function OrdenesCompraPage() {
                 return (
                   <TableRow key={orden.id}>
                     <TableCell className="font-medium">{orden.proveedor?.nombre}</TableCell>
-                    <TableCell>{new Date(orden.fecha_orden ?? orden.fecha_emision).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</TableCell>
+                    <TableCell>{formatDateAR(orden.fecha_orden ?? orden.fecha_emision)}</TableCell>
                     <TableCell>
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                         orden.estado === "pendiente" ? "bg-yellow-100 text-yellow-800" 
@@ -1231,7 +1231,7 @@ export default function OrdenesCompraPage() {
                       <TableRow key={art.id} className="cursor-pointer hover:bg-accent" onClick={() => agregarArticuloExterno(art)}>
                         <TableCell>
                           <ArticuloResultRow articulo={art} size="sm" />
-                          <div className="text-xs text-muted-foreground mt-0.5">${art.precio_compra?.toFixed(2) || '0.00'}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{formatCurrency(art.precio_compra || 0)}</div>
                         </TableCell>
                         <TableCell className="text-right">
                           <Button variant="ghost" size="sm">Agregar</Button>
