@@ -85,7 +85,7 @@ FORMATO JSON:
       "precio_unitario": number o null,
       "precio_bulto": number o null,
       "unidades_por_bulto": number o null,
-      "descuento": number o null,
+      "descuento": number o null (PORCENTAJE de descuento de la línea, ej 5 para 5%; si la factura solo muestra el descuento en pesos, calculá el porcentaje sobre precio x cantidad),
       "unidad_medida": "UN/BTO/CJ/etc o null"
     }
   ]

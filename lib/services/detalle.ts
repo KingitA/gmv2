@@ -1,6 +1,19 @@
 import { MatchingEngine } from '@/lib/matching/matcher';
 import { resolveFactorConversion } from '@/lib/services/conversion';
 
+// El OCR a veces devuelve el descuento como MONTO en pesos en vez de %.
+// Las columnas descuentoN son numeric(5,2): un monto grande revienta el insert.
+// Heurística: >100 no es un porcentaje → convertirlo a % sobre precio × cantidad.
+function normalizarDescuentoPct(descuento: any, precioUnitario: any, cantidad: any): number {
+    const d = Number(descuento || 0);
+    if (d <= 0) return 0;
+    if (d <= 100) return Math.round(d * 100) / 100;
+    const base = Number(precioUnitario || 0) * Number(cantidad || 0);
+    if (base <= 0) return 0;
+    const pct = (d / base) * 100;
+    return Math.min(99.99, Math.round(pct * 100) / 100);
+}
+
 // Matches OCR items against catalog, creates comprobantes_compra_detalle rows,
 // and updates recepciones_items with documented prices/quantities.
 // Used by both the ERP documents route and the deposito OCR route.
@@ -40,11 +53,12 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         const isMatched = matchResult.status === 'matched' && !!best?.sku_id;
         const isSuggestion = !isMatched && !!best?.sku_id && best.confidence_level === 'suggestion';
 
+        const descuentoPct = normalizarDescuentoPct(item.descuento, item.precio_unitario, item.cantidad);
         const baseRow = {
             comprobante_id: params.comprobante_id,
             cantidad_facturada: item.cantidad || 1,
             precio_unitario: item.precio_unitario || 0,
-            descuento1: item.descuento || 0,
+            descuento1: descuentoPct,
             descripcion_proveedor: item.descripcion,
             codigo_proveedor: item.codigo,
             match_score: best?.score ?? null,
@@ -58,7 +72,7 @@ export async function matchAndCreateDetalle(supabase: any, params: {
                 match_estado: isSuggestion ? 'sugerido' : 'sin_match',
                 recepcion_item_id: null,
                 tipo_cantidad: 'unidad',
-                costo_final: (item.precio_unitario || 0) * (item.cantidad || 1),
+                costo_final: Math.round((item.precio_unitario || 0) * (1 - descuentoPct / 100) * 100) / 100,
             });
             continue;
         }
@@ -107,7 +121,7 @@ export async function matchAndCreateDetalle(supabase: any, params: {
             match_estado: 'auto',
             recepcion_item_id: recItem?.id ?? null,
             tipo_cantidad: conversion.factor === 1 ? 'unidad' : 'bulto',
-            costo_final: (item.precio_unitario || 0) * (1 - (item.descuento || 0) / 100),
+            costo_final: Math.round((item.precio_unitario || 0) * (1 - descuentoPct / 100) * 100) / 100,
         });
 
         if (conversion.requiresReview) {
@@ -148,7 +162,16 @@ export async function matchAndCreateDetalle(supabase: any, params: {
 
     if (detalleRows.length > 0) {
         const { error } = await supabase.from('comprobantes_compra_detalle').insert(detalleRows);
-        if (error) console.error('[matchAndCreateDetalle] Insert error:', error.message);
+        if (error) {
+            // Insert resiliente: una línea inválida no debe perder las demás
+            console.error('[matchAndCreateDetalle] Batch insert error, reintentando por fila:', error.message);
+            for (const row of detalleRows) {
+                const { error: rowError } = await supabase.from('comprobantes_compra_detalle').insert(row);
+                if (rowError) {
+                    console.error('[matchAndCreateDetalle] Fila descartada:', rowError.message, row.descripcion_proveedor);
+                }
+            }
+        }
     }
 
     return matched;
