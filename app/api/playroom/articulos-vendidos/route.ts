@@ -60,7 +60,10 @@ export async function GET(req: NextRequest) {
     else if (tipoComp === 'presupuesto') query = query.in('tipo_comprobante', ['PRES', 'REV'])
     if (fuente === 'comprobante') query = query.not('comprobante_venta_id', 'is', null)
 
-    // Paginate to bypass Supabase PostgREST max_rows server-side cap (default 1000)
+    // Paginate to bypass Supabase PostgREST max_rows server-side cap (default 1000).
+    // ORDER BY estable: sin él Postgres no garantiza el orden entre páginas y
+    // se duplican/pierden filas (inflaba unidades y montos del reporte)
+    query = query.order('id', { ascending: true })
     const PAGE_SIZE = 1000
     const movimientos: any[] = []
     let offset = 0

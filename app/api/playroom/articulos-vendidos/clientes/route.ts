@@ -58,10 +58,21 @@ export async function GET(req: NextRequest) {
     if (tipoComp === 'factura')          query = query.in('tipo_comprobante', ['FA', 'FB', 'FC'])
     else if (tipoComp === 'presupuesto') query = query.in('tipo_comprobante', ['PRES', 'REV'])
 
-    const { data: movimientos, error } = await query
+    // Paginado con ORDER BY estable (PostgREST corta en 1000 filas por default)
+    query = query.order('id', { ascending: true })
+    const PAGE_SIZE = 1000
+    const movimientos: any[] = []
+    let offset = 0
+    while (true) {
+      const { data: page, error: pageError } = await query.range(offset, offset + PAGE_SIZE - 1)
+      if (pageError) throw pageError
+      if (!page?.length) break
+      movimientos.push(...page)
+      if (page.length < PAGE_SIZE) break
+      offset += PAGE_SIZE
+    }
 
-    if (error) throw error
-    if (!movimientos?.length) {
+    if (!movimientos.length) {
       return NextResponse.json({ clientes: [], totales: { unidades: 0, revenue: 0 } })
     }
 

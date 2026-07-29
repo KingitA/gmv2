@@ -35,6 +35,9 @@ export async function GET(req: NextRequest) {
 
       if (tipo === 'cobrada') q = q.eq('comprobante_cobrado', true)
 
+      // ORDER BY estable: sin él la paginación duplica/pierde filas
+      q = q.order('id', { ascending: true })
+
       const { data: page, error } = await q.range(offset, offset + PAGE_SIZE - 1)
       if (error) throw error
       if (!page?.length) break

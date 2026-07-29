@@ -76,7 +76,8 @@ export async function GET(req: NextRequest) {
       if (comprobanteId) q = q.eq('comprobante_venta_id', comprobanteId)
       if (clienteId) q = q.eq('cliente_id', clienteId)
 
-      return q
+      // ORDER BY estable: sin él la paginación duplica/pierde filas
+      return q.order('id', { ascending: true })
     }
 
     // ── VENDIDA: comisiones por fecha de creación del movimiento ─────────────
