@@ -7,6 +7,7 @@ import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
 import PlayroomFilters, { defaultFilters } from '@/components/playroom/PlayroomFilters'
 import ComparativoBadge from '@/components/playroom/ComparativoBadge'
+import MultiSelect from '@/components/playroom/MultiSelect'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
 
@@ -19,8 +20,10 @@ interface ArticuloRow {
   proveedor: string
   unidades: number
   unidades_anterior: number
-  revenue: number
-  revenue_anterior: number
+  neto: number
+  neto_anterior: number
+  iva: number
+  revenue: number   // total con impuestos
   variacion_pct: number
   costo_total: number
   margen_bruto_pct: number | null
@@ -38,27 +41,35 @@ interface ClienteDetalleRow {
   nombre: string
   localidad: string
   unidades: number
+  neto: number
   revenue: number
   precio_unitario: number
   porcentaje: number
 }
 
 interface AdvFilters {
-  vendedor_id: string
-  tipo_comprobante: string   // '' | 'factura' | 'presupuesto'
-  provincia: string
-  condicion_iva: string      // '' | substring para ilike
-  localidad: string
-  zona: string
-  con_descuento: string      // '' | 'mercaderia' | 'general' | 'viajante' | 'comercial' | 'financiero' | 'sin_descuento'
+  vendedor_ids: string[]
+  tipo_comprobante: string     // '' | 'factura' | 'presupuesto'
+  provincias: string[]
+  condiciones_iva: string[]
+  localidades: string[]
+  zonas: string[]
+  con_descuento: string        // '' | 'mercaderia' | 'general' | 'viajante' | 'comercial' | 'financiero' | 'sin_descuento'
   cliente_id: string
 }
 
 const ADV_EMPTY: AdvFilters = {
-  vendedor_id: '', tipo_comprobante: '', provincia: '',
-  condicion_iva: '', localidad: '', zona: '',
+  vendedor_ids: [], tipo_comprobante: '', provincias: [],
+  condiciones_iva: [], localidades: [], zonas: [],
   con_descuento: '', cliente_id: '',
 }
+
+const CONDICIONES_IVA = [
+  { value: 'Responsable Inscripto', label: 'Resp. Inscripto' },
+  { value: 'Monotributo',           label: 'Monotributo' },
+  { value: 'Consumidor Final',      label: 'Consumidor Final' },
+  { value: 'Exento',                label: 'Exento' },
+]
 
 const ABC_COLOR: Record<string, string> = { A: '#7c3aed', B: '#06b6d4', C: '#6b7280' }
 
@@ -147,18 +158,28 @@ const COLUMNS: Column<ArticuloRow>[] = [
     exportValue: v => String(v),
   },
   {
-    key: 'revenue', label: 'Venta neta', sortable: true, align: 'right',
+    key: 'neto', label: 'Venta neta', sortable: true, align: 'right',
     render: v => <span className="font-mono font-semibold">{ars(v)}</span>,
     exportValue: v => String(v),
   },
   {
-    key: 'revenue_anterior', label: 'Período ant.', sortable: true, align: 'right',
+    key: 'iva', label: 'Impuestos', sortable: true, align: 'right',
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.45)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    exportValue: v => String(v),
+  },
+  {
+    key: 'revenue', label: 'Total', sortable: true, align: 'right',
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.7)' }}>{ars(v)}</span>,
+    exportValue: v => String(v),
+  },
+  {
+    key: 'neto_anterior', label: 'Período ant.', sortable: true, align: 'right',
     render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? ars(v) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'variacion_pct', label: 'Var. %', sortable: true, align: 'right',
-    render: (v, row) => row.revenue_anterior > 0
+    render: (v, row) => row.neto_anterior > 0
       ? <ComparativoBadge pct={v} size="sm" />
       : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => `${Number(v).toFixed(1)}%`,
@@ -188,18 +209,18 @@ export default function ArticulosVendidos() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Frontend-only filters
-  const [abcFiltro, setAbcFiltro] = useState('Todos')
-  const [rubroFiltro, setRubroFiltro] = useState('Todos')
-  const [proveedorFiltro, setProveedorFiltro] = useState('Todos')
-  const [marcaFiltro, setMarcaFiltro] = useState('Todos')
+  // Frontend-only filters (multi: lista vacía = todos)
+  const [abcFiltro, setAbcFiltro] = useState<string[]>([])
+  const [rubroFiltro, setRubroFiltro] = useState<string[]>([])
+  const [proveedorFiltro, setProveedorFiltro] = useState<string[]>([])
+  const [marcaFiltro, setMarcaFiltro] = useState<string[]>([])
   const [searchText, setSearchText] = useState('')
   const [fuente, setFuente] = useState<'' | 'pedido' | 'comprobante'>('')
   const [sortBy, setSortBy] = useState<'revenue' | 'unidades'>('revenue')
 
   // Sidebar
   const [selectedArticulo, setSelectedArticulo] = useState<ArticuloRow | null>(null)
-  const [clienteDetalle, setClienteDetalle] = useState<{ clientes: ClienteDetalleRow[]; totales: { unidades: number; revenue: number } } | null>(null)
+  const [clienteDetalle, setClienteDetalle] = useState<{ clientes: ClienteDetalleRow[]; totales: { unidades: number; neto: number; revenue: number } } | null>(null)
   const [clienteLoading, setClienteLoading] = useState(false)
   const [panelWidth, setPanelWidth] = useState(560)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -242,14 +263,14 @@ export default function ArticulosVendidos() {
     setClienteLoading(true)
     const params = new URLSearchParams({ articulo_id: selectedArticulo.articulo_id, from: filters.dateFrom, to: filters.dateTo })
     if (fuente) params.set('fuente', fuente)
-    if (advFilters.vendedor_id)      params.set('vendedor_id', advFilters.vendedor_id)
-    if (advFilters.tipo_comprobante) params.set('tipo_comprobante', advFilters.tipo_comprobante)
-    if (advFilters.provincia)        params.set('provincia', advFilters.provincia)
-    if (advFilters.condicion_iva)    params.set('condicion_iva', advFilters.condicion_iva)
-    if (advFilters.localidad)        params.set('localidad', advFilters.localidad)
-    if (advFilters.zona)             params.set('zona', advFilters.zona)
-    if (advFilters.con_descuento)    params.set('con_descuento', advFilters.con_descuento)
-    if (advFilters.cliente_id)       params.set('cliente_id', advFilters.cliente_id)
+    if (advFilters.vendedor_ids.length)    params.set('vendedor_id', advFilters.vendedor_ids.join(','))
+    if (advFilters.tipo_comprobante)       params.set('tipo_comprobante', advFilters.tipo_comprobante)
+    if (advFilters.provincias.length)      params.set('provincia', advFilters.provincias.join(','))
+    if (advFilters.condiciones_iva.length) params.set('condicion_iva', advFilters.condiciones_iva.join(','))
+    if (advFilters.localidades.length)     params.set('localidad', advFilters.localidades.join(','))
+    if (advFilters.zonas.length)           params.set('zona', advFilters.zonas.join(','))
+    if (advFilters.con_descuento)          params.set('con_descuento', advFilters.con_descuento)
+    if (advFilters.cliente_id)             params.set('cliente_id', advFilters.cliente_id)
     fetch(`/api/playroom/articulos-vendidos/clientes?${params}`)
       .then(r => r.json())
       .then(d => setClienteDetalle(d))
@@ -262,15 +283,15 @@ export default function ArticulosVendidos() {
     setError(null)
     try {
       const params = new URLSearchParams({ from: f.dateFrom, to: f.dateTo, compare: f.comparePeriod })
-      if (adv.vendedor_id)    params.set('vendedor_id', adv.vendedor_id)
-      if (adv.tipo_comprobante) params.set('tipo_comprobante', adv.tipo_comprobante)
-      if (adv.provincia)      params.set('provincia', adv.provincia)
-      if (adv.condicion_iva)  params.set('condicion_iva', adv.condicion_iva)
-      if (adv.localidad)      params.set('localidad', adv.localidad)
-      if (adv.zona)           params.set('zona', adv.zona)
-      if (adv.con_descuento)  params.set('con_descuento', adv.con_descuento)
-      if (adv.cliente_id)     params.set('cliente_id', adv.cliente_id)
-      if (fuenteVal)          params.set('fuente', fuenteVal)
+      if (adv.vendedor_ids.length)    params.set('vendedor_id', adv.vendedor_ids.join(','))
+      if (adv.tipo_comprobante)       params.set('tipo_comprobante', adv.tipo_comprobante)
+      if (adv.provincias.length)      params.set('provincia', adv.provincias.join(','))
+      if (adv.condiciones_iva.length) params.set('condicion_iva', adv.condiciones_iva.join(','))
+      if (adv.localidades.length)     params.set('localidad', adv.localidades.join(','))
+      if (adv.zonas.length)           params.set('zona', adv.zonas.join(','))
+      if (adv.con_descuento)          params.set('con_descuento', adv.con_descuento)
+      if (adv.cliente_id)             params.set('cliente_id', adv.cliente_id)
+      if (fuenteVal)                  params.set('fuente', fuenteVal)
       const res = await fetch(`/api/playroom/articulos-vendidos?${params}`)
       if (!res.ok) throw new Error(`Error ${res.status}`)
       setApiData(await res.json())
@@ -286,16 +307,16 @@ export default function ArticulosVendidos() {
   const rows = apiData?.rows ?? []
 
   // Opciones de filtros frontend derivadas de los datos
-  const rubros     = useMemo(() => ['Todos', ...new Set(rows.map(r => r.rubro).filter(r => r !== '—'))], [rows])
-  const proveedores = useMemo(() => ['Todos', ...new Set(rows.map(r => r.proveedor).filter(r => r !== '—'))], [rows])
-  const marcas     = useMemo(() => ['Todos', ...new Set(rows.map(r => r.marca).filter(r => r !== '—'))], [rows])
+  const rubros      = useMemo(() => [...new Set(rows.map(r => r.rubro).filter(r => r !== '—'))].sort().map(v => ({ value: v, label: v })), [rows])
+  const proveedores = useMemo(() => [...new Set(rows.map(r => r.proveedor).filter(r => r !== '—'))].sort().map(v => ({ value: v, label: v })), [rows])
+  const marcas      = useMemo(() => [...new Set(rows.map(r => r.marca).filter(r => r !== '—'))].sort().map(v => ({ value: v, label: v })), [rows])
 
   const filtered = useMemo(() => {
     const base = rows.filter(r => {
-      if (abcFiltro !== 'Todos' && r.clasificacion !== abcFiltro) return false
-      if (rubroFiltro !== 'Todos' && r.rubro !== rubroFiltro) return false
-      if (proveedorFiltro !== 'Todos' && r.proveedor !== proveedorFiltro) return false
-      if (marcaFiltro !== 'Todos' && r.marca !== marcaFiltro) return false
+      if (abcFiltro.length && !abcFiltro.includes(r.clasificacion)) return false
+      if (rubroFiltro.length && !rubroFiltro.includes(r.rubro)) return false
+      if (proveedorFiltro.length && !proveedorFiltro.includes(r.proveedor)) return false
+      if (marcaFiltro.length && !marcaFiltro.includes(r.marca)) return false
       if (searchText) {
         const q = searchText.toLowerCase()
         if (!r.descripcion.toLowerCase().includes(q) && !r.sku.toLowerCase().includes(q)) return false
@@ -303,34 +324,36 @@ export default function ArticulosVendidos() {
       return true
     })
     if (sortBy === 'unidades') return [...base].sort((a, b) => b.unidades - a.unidades)
-    return base // ya viene ordenado por revenue desde la API
+    return base // ya viene ordenado por venta neta desde la API
   }, [rows, abcFiltro, rubroFiltro, proveedorFiltro, marcaFiltro, searchText, sortBy])
 
   // KPIs calculados sobre las filas filtradas (incluye filtros frontend:
   // proveedor, marca, rubro, ABC, búsqueda) para que coincidan con la tabla
   const kpis = useMemo(() => {
-    const totalRevenue = filtered.reduce((s, r) => s + r.revenue, 0)
+    const totalNeto  = filtered.reduce((s, r) => s + r.neto, 0)
+    const totalIva   = filtered.reduce((s, r) => s + r.iva, 0)
+    const totalConIva = filtered.reduce((s, r) => s + r.revenue, 0)
     const skusActivos = filtered.filter(r => r.unidades > 0).length
-    const avgMargen = filtered.filter(r => r.margen_bruto_pct !== null).length > 0
-      ? filtered.reduce((s, r) => s + (r.margen_bruto_pct ?? 0) * r.revenue, 0) / filtered.reduce((s, r) => s + r.revenue, 0)
+    const avgMargen = filtered.filter(r => r.margen_bruto_pct !== null).length > 0 && totalNeto > 0
+      ? filtered.reduce((s, r) => s + (r.margen_bruto_pct ?? 0) * r.neto, 0) / totalNeto
       : null
-    const byRevenue = [...filtered].sort((a, b) => b.revenue - a.revenue)
-    const top10Rev = byRevenue.slice(0, 10).reduce((s, r) => s + r.revenue, 0)
-    const concPct = totalRevenue > 0 ? (top10Rev / totalRevenue) * 100 : 0
-    return { skusActivos, avgMargen, concPct, totalRevenue }
+    const byNeto = [...filtered].sort((a, b) => b.neto - a.neto)
+    const top10Neto = byNeto.slice(0, 10).reduce((s, r) => s + r.neto, 0)
+    const concPct = totalNeto > 0 ? (top10Neto / totalNeto) * 100 : 0
+    return { skusActivos, avgMargen, concPct, totalNeto, totalIva, totalConIva }
   }, [filtered])
 
   const chartData = useMemo(() =>
     filtered.slice(0, 15).map(r => ({
       name: r.sku,
       desc: r.descripcion,
-      value: sortBy === 'unidades' ? r.unidades : r.revenue,
+      value: sortBy === 'unidades' ? r.unidades : r.neto,
       clasificacion: r.clasificacion,
     }))
   , [filtered, sortBy])
 
   // Cantidad de filtros avanzados activos
-  const advCount = Object.values(advFilters).filter(Boolean).length
+  const advCount = Object.values(advFilters).filter(v => Array.isArray(v) ? v.length > 0 : Boolean(v)).length
 
   const resetAdv = () => { setAdvFilters(ADV_EMPTY) }
 
@@ -350,31 +373,32 @@ export default function ArticulosVendidos() {
         <div className="flex items-center gap-1.5">
           <FieldLabel>ABC</FieldLabel>
           <div className="flex gap-1">
-            {['Todos', 'A', 'B', 'C'].map(s => (
-              <FilterBtn key={s} label={s} active={abcFiltro === s} color={ABC_COLOR[s] ?? '#7c3aed'} onClick={() => setAbcFiltro(s)} />
+            <FilterBtn label="Todos" active={abcFiltro.length === 0} onClick={() => setAbcFiltro([])} />
+            {['A', 'B', 'C'].map(s => (
+              <FilterBtn
+                key={s}
+                label={s}
+                active={abcFiltro.includes(s)}
+                color={ABC_COLOR[s]}
+                onClick={() => setAbcFiltro(f => f.includes(s) ? f.filter(x => x !== s) : [...f, s])}
+              />
             ))}
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
           <FieldLabel>Rubro</FieldLabel>
-          <Sel value={rubroFiltro} onChange={setRubroFiltro}>
-            {rubros.map(r => <option key={r} value={r}>{r}</option>)}
-          </Sel>
+          <MultiSelect options={rubros} values={rubroFiltro} onChange={setRubroFiltro} width={140} searchable />
         </div>
 
         <div className="flex items-center gap-1.5">
           <FieldLabel>Proveedor</FieldLabel>
-          <Sel value={proveedorFiltro} onChange={setProveedorFiltro}>
-            {proveedores.map(p => <option key={p} value={p}>{p}</option>)}
-          </Sel>
+          <MultiSelect options={proveedores} values={proveedorFiltro} onChange={setProveedorFiltro} width={170} searchable />
         </div>
 
         <div className="flex items-center gap-1.5">
           <FieldLabel>Marca</FieldLabel>
-          <Sel value={marcaFiltro} onChange={setMarcaFiltro}>
-            {marcas.map(m => <option key={m} value={m}>{m}</option>)}
-          </Sel>
+          <MultiSelect options={marcas} values={marcaFiltro} onChange={setMarcaFiltro} width={150} searchable />
         </div>
 
         {/* Toggle vendida / facturada */}
@@ -442,10 +466,13 @@ export default function ArticulosVendidos() {
         >
           <div className="flex items-center gap-1.5">
             <FieldLabel>Viajante</FieldLabel>
-            <Sel value={advFilters.vendedor_id} onChange={v => setAdvFilters(f => ({ ...f, vendedor_id: v }))}>
-              <option value="">Todos</option>
-              {vendedores.map(v => <option key={v.id} value={v.id}>{v.nombre}</option>)}
-            </Sel>
+            <MultiSelect
+              options={vendedores.map(v => ({ value: v.id, label: v.nombre }))}
+              values={advFilters.vendedor_ids}
+              onChange={v => setAdvFilters(f => ({ ...f, vendedor_ids: v }))}
+              width={180}
+              searchable
+            />
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -459,37 +486,48 @@ export default function ArticulosVendidos() {
 
           <div className="flex items-center gap-1.5">
             <FieldLabel>Provincia</FieldLabel>
-            <Sel value={advFilters.provincia} onChange={v => setAdvFilters(f => ({ ...f, provincia: v }))}>
-              <option value="">Todas</option>
-              {PROVINCIAS_AR.map(p => <option key={p} value={p}>{p}</option>)}
-            </Sel>
+            <MultiSelect
+              options={PROVINCIAS_AR.map(p => ({ value: p, label: p }))}
+              values={advFilters.provincias}
+              onChange={v => setAdvFilters(f => ({ ...f, provincias: v }))}
+              placeholder="Todas"
+              width={160}
+              searchable
+            />
           </div>
 
           <div className="flex items-center gap-1.5">
             <FieldLabel>Tipo cliente</FieldLabel>
-            <Sel value={advFilters.condicion_iva} onChange={v => setAdvFilters(f => ({ ...f, condicion_iva: v }))}>
-              <option value="">Todos</option>
-              <option value="Responsable Inscripto">Resp. Inscripto</option>
-              <option value="Monotributo">Monotributo</option>
-              <option value="Consumidor Final">Consumidor Final</option>
-              <option value="Exento">Exento</option>
-            </Sel>
+            <MultiSelect
+              options={CONDICIONES_IVA}
+              values={advFilters.condiciones_iva}
+              onChange={v => setAdvFilters(f => ({ ...f, condiciones_iva: v }))}
+              width={160}
+            />
           </div>
 
           <div className="flex items-center gap-1.5">
             <FieldLabel>Localidad</FieldLabel>
-            <Sel value={advFilters.localidad} onChange={v => setAdvFilters(f => ({ ...f, localidad: v }))}>
-              <option value="">Todas</option>
-              {localidades.map(l => <option key={l} value={l}>{l}</option>)}
-            </Sel>
+            <MultiSelect
+              options={localidades.map(l => ({ value: l, label: l }))}
+              values={advFilters.localidades}
+              onChange={v => setAdvFilters(f => ({ ...f, localidades: v }))}
+              placeholder="Todas"
+              width={170}
+              searchable
+            />
           </div>
 
           <div className="flex items-center gap-1.5">
             <FieldLabel>Zona</FieldLabel>
-            <Sel value={advFilters.zona} onChange={v => setAdvFilters(f => ({ ...f, zona: v }))}>
-              <option value="">Todas</option>
-              {zonas.map(z => <option key={z} value={z}>{z}</option>)}
-            </Sel>
+            <MultiSelect
+              options={zonas.map(z => ({ value: z, label: z }))}
+              values={advFilters.zonas}
+              onChange={v => setAdvFilters(f => ({ ...f, zonas: v }))}
+              placeholder="Todas"
+              width={150}
+              searchable
+            />
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -539,8 +577,9 @@ export default function ArticulosVendidos() {
       />
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard label="Venta neta total" value={loading ? '...' : ars(kpis.totalRevenue)} subLabel={loading ? '' : `${filtered.length} SKUs vendidos`} loading={loading} />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <KPICard label="Venta neta total" value={loading ? '...' : ars(kpis.totalNeto)} subLabel={loading ? '' : `${filtered.length} SKUs vendidos`} loading={loading} />
+        <KPICard label="Total c/impuestos" value={loading ? '...' : ars(kpis.totalConIva)} subLabel={loading ? '' : `Impuestos ${ars(kpis.totalIva)}`} loading={loading} />
         <KPICard label="SKUs con movimiento" value={loading ? '...' : kpis.skusActivos} loading={loading} />
         <KPICard
           label="Margen bruto promedio"
@@ -555,7 +594,7 @@ export default function ArticulosVendidos() {
       {!loading && chartData.length > 0 && (
         <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
           <p className="text-[10px] font-semibold uppercase tracking-widest mb-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            Top {chartData.length} artículos — {sortBy === 'unidades' ? 'por Cantidad vendida' : `Venta neta · ${ars(kpis.totalRevenue)} total`}
+            Top {chartData.length} artículos — {sortBy === 'unidades' ? 'por Cantidad vendida' : `Venta neta · ${ars(kpis.totalNeto)} total`}
           </p>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData} margin={{ left: 10, right: 10, top: 0, bottom: 60 }}>
@@ -649,14 +688,18 @@ export default function ArticulosVendidos() {
 
             {/* Totales */}
             {clienteDetalle && !clienteLoading && (
-              <div className="flex gap-6 px-5 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <div>
                   <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Total unidades</p>
                   <p className="text-base font-semibold text-white font-mono">{clienteDetalle.totales.unidades.toLocaleString('es-AR')}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Venta neta total</p>
-                  <p className="text-base font-semibold text-white font-mono">{ars(clienteDetalle.totales.revenue)}</p>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Venta neta</p>
+                  <p className="text-base font-semibold text-white font-mono">{ars(clienteDetalle.totales.neto ?? clienteDetalle.totales.revenue)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Total c/imp.</p>
+                  <p className="text-base font-semibold font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>{ars(clienteDetalle.totales.revenue)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Clientes</p>
@@ -705,7 +748,7 @@ export default function ArticulosVendidos() {
                           {c.precio_unitario > 0 ? ars(c.precio_unitario) : '—'}
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: '#a78bfa' }}>
-                          {ars(c.revenue)}
+                          {ars(c.neto ?? c.revenue)}
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <div className="flex items-center justify-end gap-1.5">
