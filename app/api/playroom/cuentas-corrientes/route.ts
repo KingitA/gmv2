@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { todayArgentina } from '@/lib/utils'
 
 const TIPOS_VENTA = ['FA', 'FB', 'FC']
 
@@ -32,12 +33,14 @@ export async function GET() {
     const clienteMap = new Map((clientes ?? []).map(c => [c.id, c]))
     const vendedorMap = new Map((vendedores ?? []).map(v => [v.id, v.nombre]))
 
-    const hoy = new Date()
+    // Fecha de hoy en Argentina, anclada a mediodía UTC para comparar contra
+    // fechas DATE (que JS parsea como medianoche UTC) sin corrimiento de día
+    const hoy = new Date(todayArgentina() + 'T12:00:00Z')
 
     // Calcular antigüedad de cada comprobante
     const withAge = comprobantes.map(c => {
-      const ref = c.fecha_vencimiento ?? c.fecha
-      const dias = Math.floor((hoy.getTime() - new Date(ref).getTime()) / (1000 * 60 * 60 * 24))
+      const ref = (c.fecha_vencimiento ?? c.fecha)?.slice(0, 10)
+      const dias = Math.floor((hoy.getTime() - new Date(ref + 'T12:00:00Z').getTime()) / (1000 * 60 * 60 * 24))
       const saldo = Number(c.saldo_pendiente)
       return { ...c, dias_mora: Math.max(0, dias), saldo }
     })

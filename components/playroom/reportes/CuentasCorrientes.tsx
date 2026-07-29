@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
+import { formatDateAR } from '@/lib/utils'
 import type { Column } from '@/components/playroom/DataTable'
 
 interface CCRow {
@@ -121,7 +122,7 @@ const COLUMNS: Column<CCRow>[] = [
   },
   {
     key: 'comprobante_mas_viejo', label: 'Comp. más viejo', sortable: true,
-    render: v => v ? new Date(v).toLocaleDateString('es-AR') : '—',
+    render: v => v ? formatDateAR(v) : '—',
     exportValue: v => v ?? '',
   },
   {

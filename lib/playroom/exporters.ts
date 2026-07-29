@@ -1,3 +1,5 @@
+import { todayArgentina } from '@/lib/utils'
+
 export function exportToCSV<T extends Record<string, any>>(
   data: T[],
   columns: { key: string; label: string; exportValue?: (value: any, row: T) => string }[],
@@ -13,7 +15,7 @@ export function exportToCSV<T extends Record<string, any>>(
   )
   const csv = [headers, ...rows].join('\n')
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-  triggerDownload(blob, `${filename}_${new Date().toISOString().slice(0, 10)}.csv`)
+  triggerDownload(blob, `${filename}_${todayArgentina()}.csv`)
 }
 
 // ─── ARCA fiscal formats ──────────────────────────────────────────────────────
@@ -92,7 +94,7 @@ export function exportLibroIVACSV(rows: FiscalARCARow[], filename: string) {
   })
   const txt = [header, ...lines].join('\r\n')
   const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' })
-  triggerDownload(blob, `${filename}_${new Date().toISOString().slice(0, 10)}.csv`)
+  triggerDownload(blob, `${filename}_${todayArgentina()}.csv`)
 }
 
 /**
@@ -166,7 +168,7 @@ export function exportLibroIVATXTFormatted(rows: FiscalARCARow[], filename: stri
   ].join('\r\n')
 
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' })
-  triggerDownload(blob, `${filename}_${new Date().toISOString().slice(0, 10)}.txt`)
+  triggerDownload(blob, `${filename}_${todayArgentina()}.txt`)
 }
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -199,7 +201,7 @@ export function exportLibroIVATXT(
   })
   const txt = lines.join('\r\n')
   const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' })
-  triggerDownload(blob, `${filename}_${new Date().toISOString().slice(0, 10)}.txt`)
+  triggerDownload(blob, `${filename}_${todayArgentina()}.txt`)
 }
 
 function formatMontoTXT(val: number): string {

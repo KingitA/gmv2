@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { todayArgentina } from '@/lib/utils'
 
 interface ChatMessageProps {
   role: 'user' | 'assistant'
@@ -45,7 +46,7 @@ function DataTableInline({ data }: { data: any[] }) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `megasur_export_${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `megasur_export_${todayArgentina()}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }

@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
+import { formatDateAR } from '@/lib/utils'
 import type { Column } from '@/components/playroom/DataTable'
 
 type Sugerencia = 'OK' | 'Devolver' | 'Liquidar'
@@ -87,7 +88,7 @@ const COLUMNS: Column<RotacionRow>[] = [
   },
   {
     key: 'ultima_venta', label: 'Última venta', sortable: true,
-    render: v => v ? new Date(v).toLocaleDateString('es-AR') : <span style={{ color: 'rgba(255,255,255,0.25)' }}>Sin ventas</span>,
+    render: v => v ? formatDateAR(v) : <span style={{ color: 'rgba(255,255,255,0.25)' }}>Sin ventas</span>,
     exportValue: v => v ?? '',
   },
   {

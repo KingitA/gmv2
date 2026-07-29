@@ -98,6 +98,7 @@ export default function PlayroomPage() {
             year: 'numeric',
             month: 'long',
             day: 'numeric',
+            timeZone: 'America/Argentina/Buenos_Aires',
           })}
         </p>
       </div>

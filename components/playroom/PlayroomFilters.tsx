@@ -1,6 +1,8 @@
 'use client'
 
 import { CalendarRange, RefreshCw } from 'lucide-react'
+import { FechaInput } from '@/components/finanzas/fecha-input'
+import { todayArgentina } from '@/lib/utils'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
 
 interface PlayroomFiltersProps {
@@ -11,10 +13,10 @@ interface PlayroomFiltersProps {
   extras?: React.ReactNode
 }
 
-const now = new Date()
+const hoy = todayArgentina()
 export const defaultFilters: PlayroomFiltersState = {
-  dateFrom: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
-  dateTo: now.toISOString().slice(0, 10),
+  dateFrom: hoy.slice(0, 7) + '-01',
+  dateTo: hoy,
   comparePeriod: 'none',
 }
 
@@ -51,21 +53,21 @@ export default function PlayroomFilters({
 
       <div className="flex items-center gap-2">
         <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Desde</label>
-        <input
-          type="date"
+        <FechaInput
           value={filters.dateFrom}
-          onChange={e => set('dateFrom', e.target.value)}
-          style={inputStyle}
+          onChange={iso => { if (iso) set('dateFrom', iso) }}
+          containerClassName="w-[128px]"
+          className="h-8 border-white/10 bg-[#1f2937] text-[13px] text-white"
         />
       </div>
 
       <div className="flex items-center gap-2">
         <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Hasta</label>
-        <input
-          type="date"
+        <FechaInput
           value={filters.dateTo}
-          onChange={e => set('dateTo', e.target.value)}
-          style={inputStyle}
+          onChange={iso => { if (iso) set('dateTo', iso) }}
+          containerClassName="w-[128px]"
+          className="h-8 border-white/10 bg-[#1f2937] text-[13px] text-white"
         />
       </div>
 

@@ -6,6 +6,7 @@ import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
 import PlayroomFilters, { defaultFilters } from '@/components/playroom/PlayroomFilters'
 import ComparativoBadge from '@/components/playroom/ComparativoBadge'
+import { formatDateAR } from '@/lib/utils'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
 
@@ -109,7 +110,7 @@ const COLUMNS: Column<ClienteRow>[] = [
   },
   {
     key: 'ultima_compra', label: 'Última compra', sortable: true,
-    render: v => v ? new Date(v).toLocaleDateString('es-AR') : '—',
+    render: v => v ? formatDateAR(v) : '—',
     exportValue: v => v ?? '',
   },
   {

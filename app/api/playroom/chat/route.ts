@@ -2,6 +2,12 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireAuth } from '@/lib/auth'
+import { todayArgentina } from '@/lib/utils'
+
+function diasAtrasArgentina(dias: number): string {
+  return new Date(Date.now() - dias * 86400000)
+    .toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' })
+}
 
 const anthropic = new Anthropic()
 
@@ -83,8 +89,8 @@ type ToolInput = {
 }
 
 async function ejecutarTool(name: string, input: any, supabase: any): Promise<any> {
-  const hoy = new Date().toISOString().slice(0, 10)
-  const primerDiaMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+  const hoy = todayArgentina()
+  const primerDiaMes = hoy.slice(0, 7) + '-01'
 
   if (name === 'consultar_ventas') {
     const { desde = primerDiaMes, hasta = hoy, agrupar_por = 'cliente', solo_arca = true, limit = 20 } = input as ToolInput['consultar_ventas']
@@ -156,7 +162,7 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
 
     let filtered = articulos
     if (sin_movimiento_dias) {
-      const cutoff = new Date(Date.now() - sin_movimiento_dias * 86400000).toISOString().slice(0, 10)
+      const cutoff = diasAtrasArgentina(sin_movimiento_dias)
       filtered = articulos.filter((a: any) => !a.ultima_venta || a.ultima_venta < cutoff)
     }
 
@@ -188,7 +194,7 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
 
     let filtered = clientes
     if (sin_compra_dias) {
-      const cutoff = new Date(Date.now() - sin_compra_dias * 86400000).toISOString().slice(0, 10)
+      const cutoff = diasAtrasArgentina(sin_compra_dias)
       filtered = clientes.filter((c: any) => !c.ultima_compra || c.ultima_compra < cutoff)
     }
 
