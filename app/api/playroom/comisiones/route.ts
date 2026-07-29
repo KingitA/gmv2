@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
-import { getPreviousPeriod, getSameLastYear, fetchByIds } from '@/lib/playroom/queries'
+import { getPreviousPeriod, getSameLastYear, fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
 
 function firstDayOfMonthArgentina(): string {
@@ -33,8 +33,59 @@ export async function GET(req: NextRequest) {
       meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, tipo: tipoFiltro },
     }
 
-    const { data: vendedores } = await supabase.from('vendedores').select('id, nombre')
-    const vendedoresMap = new Map((vendedores ?? []).map(v => [v.id, v.nombre]))
+    const vendedores = await fetchAllRows(() => supabase.from('vendedores').select('id, nombre'))
+    const vendedoresMap = new Map(vendedores.map(v => [v.id, v.nombre]))
+
+    // ── Camino rápido (RPC): sin filtros granulares, agrega en Postgres ────────
+    if (!clienteId && !pedidoId && !articuloId && !comprobanteId) {
+      const rpcRows = await fetchAllRows(() => supabase.rpc('playroom_comisiones_viajantes', {
+        p_from: dateFrom,
+        p_to: dateTo,
+        p_prev_from: prev.from,
+        p_prev_to: prev.to,
+        p_tipo: tipoFiltro,
+        p_viajante_id: viajanteId || null,
+      }), 'vendedor_id')
+
+      const rows = rpcRows
+        .map((r: any) => {
+          const devengado = Number(r.devengado ?? 0)
+          const devengadoPrev = Number(r.devengado_prev ?? 0)
+          return {
+            viajante_id: r.vendedor_id ?? 'sin_vendedor',
+            nombre: vendedoresMap.get(r.vendedor_id) ?? r.vendedor_id ?? 'Sin vendedor',
+            devengado,
+            devengado_anterior: devengadoPrev,
+            variacion_pct: devengadoPrev > 0
+              ? ((devengado - devengadoPrev) / Math.abs(devengadoPrev)) * 100
+              : devengado > 0 ? 100 : 0,
+            cobrable: Number(r.cobrable ?? 0),
+            pagado: Number(r.pagado ?? 0),
+            pendiente_cobro: Number(r.pendiente ?? 0),
+            cantidad_pedidos: Number(r.cantidad_pedidos ?? 0),
+            cantidad_clientes: Number(r.cantidad_clientes ?? 0),
+            por_segmento: r.por_segmento ?? {},
+          }
+        })
+        .filter(r => r.devengado !== 0 || r.devengado_anterior !== 0)
+        .sort((a, b) => b.devengado - a.devengado)
+
+      if (!rows.length) return NextResponse.json(empty)
+
+      return NextResponse.json({
+        rows,
+        summary: {
+          total_devengado: rows.reduce((s, r) => s + r.devengado, 0),
+          total_cobrable: rows.reduce((s, r) => s + r.cobrable, 0),
+          total_pagado: rows.reduce((s, r) => s + r.pagado, 0),
+          total_pendiente: rows.reduce((s, r) => s + r.pendiente_cobro, 0),
+        },
+        meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, tipo: tipoFiltro },
+      })
+    }
+
+    // ── Camino con filtros granulares (cliente/pedido/artículo/comprobante):
+    //    conjuntos chicos, se mantiene el escaneo paginado del kardex ──────────
 
     type Agg = {
       devengado: number; devengadoPrev: number

@@ -25,30 +25,20 @@ export async function GET() {
     const marcaMap = new Map(marcas.map(m => [m.id, m.descripcion]))
     const rubroMap = new Map(rubros.map(r => [r.id, r.nombre]))
 
-    // Todo el kardex de ventas (incluye precio_costo como fallback de costo)
-    const kardex = await fetchAllRows(() => supabase
-      .from('kardex')
-      .select('articulo_id, fecha, cantidad, precio_costo')
-      .eq('tipo_movimiento', 'venta'))
+    // Agregado del kardex en Postgres (RPC): última venta, unidades 90d y
+    // último costo por artículo — escala a millones de movimientos
+    const kardexAgg = await fetchAllRows(() => supabase.rpc('playroom_rotacion_kardex'), 'articulo_id')
 
     const now = new Date()
-    const hace90 = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString()
 
-    // Mapa: última venta, unidades vendidas en 90 días, y último precio_costo conocido
     const ultimaVentaMap = new Map<string, string>()
     const vel90Map = new Map<string, number>()
     const costoPorKardexMap = new Map<string, number>()
 
-    for (const row of kardex ?? []) {
-      const prev = ultimaVentaMap.get(row.articulo_id)
-      if (!prev || row.fecha > prev) {
-        ultimaVentaMap.set(row.articulo_id, row.fecha)
-        // Guardamos el precio_costo de la venta más reciente como fallback
-        if (Number(row.precio_costo) > 0) costoPorKardexMap.set(row.articulo_id, Number(row.precio_costo))
-      }
-      if (row.fecha >= hace90) {
-        vel90Map.set(row.articulo_id, (vel90Map.get(row.articulo_id) ?? 0) + Number(row.cantidad))
-      }
+    for (const row of kardexAgg) {
+      if (row.ultima_venta) ultimaVentaMap.set(row.articulo_id, row.ultima_venta)
+      if (Number(row.unidades_90d) > 0) vel90Map.set(row.articulo_id, Number(row.unidades_90d))
+      if (Number(row.costo_ultima_venta) > 0) costoPorKardexMap.set(row.articulo_id, Number(row.costo_ultima_venta))
     }
 
     const result = articulos.map(a => {

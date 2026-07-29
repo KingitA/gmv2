@@ -2,8 +2,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireAuth } from '@/lib/auth'
-import { todayArgentina } from '@/lib/utils'
-import { fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
+import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
+import { fetchAllRows } from '@/lib/playroom/queries'
 
 function diasAtrasArgentina(dias: number): string {
   return new Date(Date.now() - dias * 86400000)
@@ -95,109 +95,111 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
 
   if (name === 'consultar_ventas') {
     const { desde = primerDiaMes, hasta = hoy, agrupar_por = 'cliente', solo_arca = true, limit = 20 } = input as ToolInput['consultar_ventas']
-    const tipos = solo_arca ? ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC'] : ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC', 'PRES', 'REV']
 
-    const comprobantes = await fetchAllRows(() => supabase
-      .from('comprobantes_venta')
-      .select('cliente_id, tipo_comprobante, fecha, total_factura, total_neto')
-      .gte('fecha', desde)
-      .lte('fecha', hasta)
-      .in('tipo_comprobante', tipos))
+    // Por artículo o vendedor: ventas reales desde el kardex (RPC agregada)
+    if (agrupar_por === 'articulo') {
+      const rows = await fetchAllRows(() => supabase.rpc('playroom_articulos_vendidos', {
+        p_from: desde, p_to: hasta, p_prev_from: desde, p_prev_to: hasta,
+      }), 'articulo_id')
+      const out = rows
+        .filter((r: any) => Number(r.neto) > 0)
+        .sort((a: any, b: any) => Number(b.neto) - Number(a.neto))
+        .slice(0, limit)
+        .map((r: any) => ({
+          sku: r.sku, descripcion: r.descripcion,
+          unidades: Math.round(Number(r.unidades)),
+          neto: Math.round(Number(r.neto)),
+          total: Math.round(Number(r.total)),
+        }))
+      const totalNeto = rows.reduce((s: number, r: any) => s + Number(r.neto ?? 0), 0)
+      return { resultado: out, meta: { desde, hasta, total_neto: Math.round(totalNeto), filas: out.length, fuente: 'kardex (todas las ventas)' } }
+    }
 
-    if (!comprobantes.length) return { resultado: [], meta: { desde, hasta, total: 0 } }
-
-    if (agrupar_por === 'cliente') {
-      const clienteIds = [...new Set(comprobantes.map((c: any) => c.cliente_id).filter(Boolean))] as string[]
-      const clientes = await fetchByIds(chunk => supabase.from('clientes').select('id, nombre_razon_social, nombre').in('id', chunk), clienteIds)
-      const cMap = new Map(clientes.map((c: any) => [c.id, c.nombre_razon_social ?? c.nombre]))
-
-      const agg = new Map<string, { total: number; neto: number; count: number }>()
-      for (const c of comprobantes) {
-        const key = c.cliente_id ?? 'sin_cliente'
-        const signo = ['NCA', 'NCB', 'NCC'].includes(c.tipo_comprobante) ? -1 : 1
-        if (!agg.has(key)) agg.set(key, { total: 0, neto: 0, count: 0 })
+    if (agrupar_por === 'vendedor') {
+      const movs = await fetchAllRows(() => supabase
+        .from('kardex')
+        .select('vendedor_id, tipo_movimiento, subtotal_neto, subtotal_total')
+        .in('tipo_movimiento', ['venta', 'nota_credito_venta'])
+        .eq('pedido_eliminado', false)
+        .gte('fecha', startOfDayArgentina(desde))
+        .lte('fecha', endOfDayArgentina(hasta)))
+      if (!movs.length) return { resultado: [], meta: { desde, hasta, total: 0 } }
+      const vendedores = await fetchAllRows(() => supabase.from('vendedores').select('id, nombre'))
+      const vMap = new Map(vendedores.map((v: any) => [v.id, v.nombre]))
+      const agg = new Map<string, { neto: number; total: number }>()
+      for (const m of movs) {
+        const key = m.vendedor_id ?? 'sin_vendedor'
+        const signo = m.tipo_movimiento === 'nota_credito_venta' ? -1 : 1
+        if (!agg.has(key)) agg.set(key, { neto: 0, total: 0 })
         const a = agg.get(key)!
-        a.total += Number(c.total_factura ?? 0) * signo
-        a.neto += Number(c.total_neto ?? 0) * signo
-        a.count++
+        a.neto += Number(m.subtotal_neto ?? m.subtotal_total ?? 0) * signo
+        a.total += Number(m.subtotal_total ?? 0) * signo
       }
       const rows = [...agg.entries()]
-        .map(([id, a]) => ({ cliente: cMap.get(id) ?? id, total: Math.round(a.total), neto: Math.round(a.neto), comprobantes: a.count }))
-        .sort((a, b) => b.total - a.total)
+        .map(([id, a]) => ({ vendedor: vMap.get(id) ?? id, neto: Math.round(a.neto), total: Math.round(a.total) }))
+        .sort((a, b) => b.neto - a.neto)
         .slice(0, limit)
-      const totalGeneral = [...agg.values()].reduce((s, a) => s + a.total, 0)
-      return { resultado: rows, meta: { desde, hasta, total: Math.round(totalGeneral), filas: rows.length } }
+      return { resultado: rows, meta: { desde, hasta, fuente: 'kardex (todas las ventas)' } }
     }
 
-    if (agrupar_por === 'tipo_comprobante') {
-      const agg = new Map<string, { total: number; count: number }>()
-      for (const c of comprobantes) {
-        const k = c.tipo_comprobante
-        if (!agg.has(k)) agg.set(k, { total: 0, count: 0 })
-        agg.get(k)!.total += Number(c.total_factura ?? 0)
-        agg.get(k)!.count++
+    // Cliente / tipo_comprobante / día: comprobantes agregados en Postgres (RPC)
+    const agrupar = agrupar_por === 'tipo_comprobante' ? 'tipo_comprobante' : agrupar_por === 'dia' ? 'dia' : 'cliente'
+    const rows = await fetchAllRows(() => supabase.rpc('playroom_chat_ventas', {
+      p_from: desde, p_to: hasta, p_solo_arca: solo_arca, p_agrupar: agrupar,
+    }), 'clave')
+
+    if (!rows.length) return { resultado: [], meta: { desde, hasta, total: 0 } }
+
+    if (agrupar === 'tipo_comprobante') {
+      return {
+        resultado: rows.map((r: any) => ({ tipo: r.clave, total: Math.round(Number(r.total)), neto: Math.round(Number(r.neto)), count: Number(r.comprobantes) })),
+        meta: { desde, hasta },
       }
-      return { resultado: [...agg.entries()].map(([tipo, a]) => ({ tipo, total: Math.round(a.total), count: a.count })), meta: { desde, hasta } }
     }
 
-    if (agrupar_por === 'dia') {
-      const agg = new Map<string, number>()
-      for (const c of comprobantes) {
-        const k = c.fecha.slice(0, 10)
-        agg.set(k, (agg.get(k) ?? 0) + Number(c.total_factura ?? 0))
+    if (agrupar === 'dia') {
+      return {
+        resultado: [...rows]
+          .sort((a: any, b: any) => a.clave.localeCompare(b.clave))
+          .map((r: any) => ({ fecha: r.clave, total: Math.round(Number(r.total)) })),
+        meta: { desde, hasta },
       }
-      return { resultado: [...agg.entries()].sort().map(([fecha, total]) => ({ fecha, total: Math.round(total) })), meta: { desde, hasta } }
     }
 
-    return { resultado: comprobantes.slice(0, limit), meta: { desde, hasta } }
+    const totalGeneral = rows.reduce((s: number, r: any) => s + Number(r.total ?? 0), 0)
+    const out = [...rows]
+      .sort((a: any, b: any) => Number(b.total) - Number(a.total))
+      .slice(0, limit)
+      .map((r: any) => ({ cliente: r.clave, total: Math.round(Number(r.total)), neto: Math.round(Number(r.neto)), comprobantes: Number(r.comprobantes) }))
+    return { resultado: out, meta: { desde, hasta, total: Math.round(totalGeneral), filas: out.length } }
   }
 
   if (name === 'consultar_stock') {
     const { sin_movimiento_dias, stock_min = 1, rubro, limit = 20 } = input as ToolInput['consultar_stock']
 
-    // Paginado: hay más de 1000 artículos y PostgREST corta en 1000
-    const articulos = await fetchAllRows(() => {
-      let q = supabase.from('articulos').select('id, sku, descripcion, rubro, stock_actual, ultimo_costo').gte('stock_actual', stock_min)
-      if (rubro) q = q.ilike('rubro', `%${rubro}%`)
-      return q
-    })
-    if (!articulos.length) return { resultado: [], meta: {} }
+    // Agregación en Postgres (RPC): stock + última venta calculada desde kardex
+    const all = await fetchAllRows(() => supabase.rpc('playroom_chat_stock', {
+      p_stock_min: stock_min,
+      p_rubro: rubro || null,
+      p_sin_movimiento_dias: sin_movimiento_dias ?? null,
+    }), 'sku')
+    if (!all.length) return { resultado: [], meta: {} }
 
-    // Última venta por artículo desde el kardex (articulos no tiene esa columna)
-    const ventas = await fetchAllRows(() => supabase
-      .from('kardex')
-      .select('articulo_id, fecha')
-      .eq('tipo_movimiento', 'venta'))
-    const ultimaVentaMap = new Map<string, string>()
-    for (const v of ventas) {
-      const prev = ultimaVentaMap.get(v.articulo_id)
-      if (!prev || v.fecha > prev) ultimaVentaMap.set(v.articulo_id, v.fecha)
-    }
-
-    let filtered = articulos
-    if (sin_movimiento_dias) {
-      const cutoff = diasAtrasArgentina(sin_movimiento_dias)
-      filtered = articulos.filter((a: any) => {
-        const uv = ultimaVentaMap.get(a.id)
-        return !uv || uv.slice(0, 10) < cutoff
-      })
-    }
-
-    const rows = filtered
+    const rows = [...all]
+      .sort((a: any, b: any) => Number(b.capital) - Number(a.capital))
+      .slice(0, limit)
       .map((a: any) => ({
         sku: a.sku,
         descripcion: a.descripcion,
         rubro: a.rubro,
-        stock: a.stock_actual,
-        costo_unitario: a.ultimo_costo ?? 0,
-        capital: Math.round((a.stock_actual ?? 0) * (a.ultimo_costo ?? 0)),
-        ultima_venta: ultimaVentaMap.get(a.id)?.slice(0, 10) ?? 'nunca',
+        stock: Number(a.stock),
+        costo_unitario: Number(a.costo_unitario ?? 0),
+        capital: Math.round(Number(a.capital ?? 0)),
+        ultima_venta: a.ultima_venta ?? 'nunca',
       }))
-      .sort((a: any, b: any) => b.capital - a.capital)
-      .slice(0, limit)
 
-    const totalCapital = filtered.reduce((s: number, a: any) => s + (a.stock_actual ?? 0) * (a.ultimo_costo ?? 0), 0)
-    return { resultado: rows, meta: { total_articulos: filtered.length, capital_total: Math.round(totalCapital) } }
+    const totalCapital = all.reduce((s: number, a: any) => s + Number(a.capital ?? 0), 0)
+    return { resultado: rows, meta: { total_articulos: all.length, capital_total: Math.round(totalCapital) } }
   }
 
   if (name === 'consultar_clientes') {
@@ -232,40 +234,27 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
   if (name === 'consultar_comisiones') {
     const { desde = primerDiaMes, hasta = hoy, solo_pendientes = false } = input as ToolInput['consultar_comisiones']
 
-    // Paginado: la tabla comisiones ya supera las 1000 filas
-    const comisiones = await fetchAllRows(() => {
-      let q = supabase.from('comisiones').select('viajante_id, monto, porcentaje, pagado, comprobante_cobrado, pedidos(fecha)')
-      if (solo_pendientes) q = q.eq('comprobante_cobrado', true).eq('pagado', false)
-      return q
-    })
-    if (!comisiones.length) return { resultado: [], meta: { desde, hasta } }
+    // RPC sobre kardex: la fuente viva de comisiones (la tabla `comisiones`
+    // está congelada desde 2026-05-18 y daba datos viejos)
+    const [rpcRows, vendedores] = await Promise.all([
+      fetchAllRows(() => supabase.rpc('playroom_comisiones_viajantes', {
+        p_from: desde, p_to: hasta, p_prev_from: desde, p_prev_to: hasta, p_tipo: 'vendida',
+      }), 'vendedor_id'),
+      fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
+    ])
+    if (!rpcRows.length) return { resultado: [], meta: { desde, hasta } }
 
-    const filtered = comisiones.filter((c: any) => {
-      const f = (c.pedidos as any)?.fecha?.slice(0, 10)
-      return f && f >= desde && f <= hasta
-    })
+    const vMap = new Map(vendedores.map((v: any) => [v.id, v.nombre]))
 
-    const agg = new Map<string, { devengado: number; cobrable: number; pagado: number; pendiente: number }>()
-    for (const c of filtered) {
-      const vid = c.viajante_id ?? 'sin_vendedor'
-      if (!agg.has(vid)) agg.set(vid, { devengado: 0, cobrable: 0, pagado: 0, pendiente: 0 })
-      const a = agg.get(vid)!
-      a.devengado += Number(c.monto ?? 0)
-      if (c.comprobante_cobrado) a.cobrable += Number(c.monto ?? 0)
-      if (c.pagado) a.pagado += Number(c.monto ?? 0)
-      if (c.comprobante_cobrado && !c.pagado) a.pendiente += Number(c.monto ?? 0)
-    }
-
-    const { data: vendedores } = await supabase.from('vendedores').select('id, nombre')
-    const vMap = new Map((vendedores ?? []).map((v: any) => [v.id, v.nombre]))
-
-    const rows = [...agg.entries()].map(([vid, a]) => ({
-      vendedor: vMap.get(vid) ?? vid,
-      devengado: Math.round(a.devengado),
-      cobrable: Math.round(a.cobrable),
-      pagado: Math.round(a.pagado),
-      pendiente: Math.round(a.pendiente),
+    let rows = rpcRows.map((r: any) => ({
+      vendedor: vMap.get(r.vendedor_id) ?? r.vendedor_id ?? 'sin_vendedor',
+      devengado: Math.round(Number(r.devengado ?? 0)),
+      cobrable: Math.round(Number(r.cobrable ?? 0)),
+      pagado: Math.round(Number(r.pagado ?? 0)),
+      pendiente: Math.round(Number(r.pendiente ?? 0)),
     })).sort((a, b) => b.devengado - a.devengado)
+
+    if (solo_pendientes) rows = rows.filter(r => r.pendiente > 0)
 
     return { resultado: rows, meta: { desde, hasta } }
   }
