@@ -236,12 +236,20 @@ export default function ArticulosVendidos() {
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  // Cargar clientes del artículo seleccionado
+  // Cargar clientes del artículo seleccionado — respeta los mismos filtros que el reporte
   useEffect(() => {
     if (!selectedArticulo) { setClienteDetalle(null); return }
     setClienteLoading(true)
     const params = new URLSearchParams({ articulo_id: selectedArticulo.articulo_id, from: filters.dateFrom, to: filters.dateTo })
     if (fuente) params.set('fuente', fuente)
+    if (advFilters.vendedor_id)      params.set('vendedor_id', advFilters.vendedor_id)
+    if (advFilters.tipo_comprobante) params.set('tipo_comprobante', advFilters.tipo_comprobante)
+    if (advFilters.provincia)        params.set('provincia', advFilters.provincia)
+    if (advFilters.condicion_iva)    params.set('condicion_iva', advFilters.condicion_iva)
+    if (advFilters.localidad)        params.set('localidad', advFilters.localidad)
+    if (advFilters.zona)             params.set('zona', advFilters.zona)
+    if (advFilters.con_descuento)    params.set('con_descuento', advFilters.con_descuento)
+    if (advFilters.cliente_id)       params.set('cliente_id', advFilters.cliente_id)
     fetch(`/api/playroom/articulos-vendidos/clientes?${params}`)
       .then(r => r.json())
       .then(d => setClienteDetalle(d))
@@ -298,16 +306,19 @@ export default function ArticulosVendidos() {
     return base // ya viene ordenado por revenue desde la API
   }, [rows, abcFiltro, rubroFiltro, proveedorFiltro, marcaFiltro, searchText, sortBy])
 
+  // KPIs calculados sobre las filas filtradas (incluye filtros frontend:
+  // proveedor, marca, rubro, ABC, búsqueda) para que coincidan con la tabla
   const kpis = useMemo(() => {
-    const totalRevenue = apiData?.meta.totalRevenue ?? 0
-    const skusActivos = rows.filter(r => r.unidades > 0).length
+    const totalRevenue = filtered.reduce((s, r) => s + r.revenue, 0)
+    const skusActivos = filtered.filter(r => r.unidades > 0).length
     const avgMargen = filtered.filter(r => r.margen_bruto_pct !== null).length > 0
       ? filtered.reduce((s, r) => s + (r.margen_bruto_pct ?? 0) * r.revenue, 0) / filtered.reduce((s, r) => s + r.revenue, 0)
       : null
-    const top10Rev = rows.slice(0, 10).reduce((s, r) => s + r.revenue, 0)
+    const byRevenue = [...filtered].sort((a, b) => b.revenue - a.revenue)
+    const top10Rev = byRevenue.slice(0, 10).reduce((s, r) => s + r.revenue, 0)
     const concPct = totalRevenue > 0 ? (top10Rev / totalRevenue) * 100 : 0
     return { skusActivos, avgMargen, concPct, totalRevenue }
-  }, [rows, filtered, apiData])
+  }, [filtered])
 
   const chartData = useMemo(() =>
     filtered.slice(0, 15).map(r => ({
@@ -529,7 +540,7 @@ export default function ArticulosVendidos() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard label="Venta neta total" value={loading ? '...' : ars(kpis.totalRevenue)} subLabel={loading ? '' : `${rows.length} SKUs vendidos`} loading={loading} />
+        <KPICard label="Venta neta total" value={loading ? '...' : ars(kpis.totalRevenue)} subLabel={loading ? '' : `${filtered.length} SKUs vendidos`} loading={loading} />
         <KPICard label="SKUs con movimiento" value={loading ? '...' : kpis.skusActivos} loading={loading} />
         <KPICard
           label="Margen bruto promedio"
@@ -567,7 +578,7 @@ export default function ArticulosVendidos() {
             {(['A', 'B', 'C'] as const).map(k => (
               <div key={k} className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm" style={{ background: ABC_COLOR[k] }} />
-                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Clase {k} · {rows.filter(r => r.clasificacion === k).length} SKUs</span>
+                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Clase {k} · {filtered.filter(r => r.clasificacion === k).length} SKUs</span>
               </div>
             ))}
           </div>
