@@ -87,7 +87,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ultima)
     }
 
-    // Detalle de la OC (cantidades pedidas y precios)
+    // Detalle de la OC (cantidades pedidas y precios) + proveedor
+    const { data: ocData } = await supabase
+      .from("ordenes_compra")
+      .select("proveedor_id")
+      .eq("id", orden_compra_id)
+      .maybeSingle()
+
     const { data: detalles } = await supabase
       .from("ordenes_compra_detalle")
       .select("articulo_id, cantidad_pedida, precio_unitario")
@@ -127,6 +133,7 @@ export async function POST(request: NextRequest) {
       .from("recepciones")
       .insert({
         orden_compra_id,
+        proveedor_id: ocData?.proveedor_id || null,
         estado: "en_proceso",
         usuario_id: user?.id,
         numero_tanda: (ultima?.numero_tanda || 0) + 1,

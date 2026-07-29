@@ -54,9 +54,23 @@ export async function POST(
         let proveedorId = recepcion?.proveedor_id;
         let ordenCompraId = recepcion?.orden_compra_id;
 
+        // Las recepciones creadas desde depósito no guardan proveedor_id:
+        // tomarlo de la OC (y persistirlo) para que el comprobante se auto-cree.
+        if (!proveedorId && ordenCompraId) {
+            const { data: oc } = await supabase
+                .from("ordenes_compra")
+                .select("proveedor_id")
+                .eq("id", ordenCompraId)
+                .maybeSingle();
+            if (oc?.proveedor_id) {
+                proveedorId = oc.proveedor_id;
+                await supabase.from("recepciones").update({ proveedor_id: proveedorId }).eq("id", recepcion_id);
+            }
+        }
+
         if (proveedorId) {
-            const { data: prv } = await supabase.from("proveedores").select("nombre, razon_social").eq("id", proveedorId).maybeSingle();
-            proveedorNombre = prv?.nombre || prv?.razon_social;
+            const { data: prv } = await supabase.from("proveedores").select("nombre").eq("id", proveedorId).maybeSingle();
+            proveedorNombre = prv?.nombre || undefined;
         }
 
         // 1. Upload image to Storage
