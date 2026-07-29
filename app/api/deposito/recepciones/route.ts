@@ -82,8 +82,9 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle()
 
-    // Tanda en curso → retomarla
-    if (ultima && ultima.estado !== "finalizada") {
+    // Tanda en curso → retomarla. Si ya está finalizada, NO se abre otra:
+    // los faltantes no se reciben después, se repiden con una OC nueva.
+    if (ultima) {
       return NextResponse.json(ultima)
     }
 
@@ -99,36 +100,13 @@ export async function POST(request: NextRequest) {
       .select("articulo_id, cantidad_pedida, precio_unitario")
       .eq("orden_compra_id", orden_compra_id)
 
-    // Cantidades ya recibidas en tandas anteriores (por artículo)
-    const recibidas: Record<string, number> = {}
-    if (ultima) {
-      const { data: previas } = await supabase
-        .from("recepciones")
-        .select("recepciones_items(articulo_id, cantidad_fisica)")
-        .eq("orden_compra_id", orden_compra_id)
-        .not("estado", "eq", "cancelada")
-      for (const rec of previas || []) {
-        for (const it of (rec as any).recepciones_items || []) {
-          recibidas[it.articulo_id] = (recibidas[it.articulo_id] || 0) + Number(it.cantidad_fisica || 0)
-        }
-      }
-    }
+    const itemsNuevos = (detalles || []).map((d: any) => ({
+      articulo_id: d.articulo_id,
+      pendiente: Number(d.cantidad_pedida || 0),
+      precio_oc: d.precio_unitario || 0,
+    }))
 
-    // Items de la nueva tanda: lo pendiente de cada artículo
-    const itemsNuevos = (detalles || [])
-      .map((d: any) => ({
-        articulo_id: d.articulo_id,
-        pendiente: Number(d.cantidad_pedida || 0) - (recibidas[d.articulo_id] || 0),
-        precio_oc: d.precio_unitario || 0,
-      }))
-      .filter((d) => d.pendiente > 0)
-
-    if (ultima && itemsNuevos.length === 0) {
-      // Nada pendiente: devolver la última tanda finalizada
-      return NextResponse.json(ultima)
-    }
-
-    // Crear recepción (tanda 1 o siguiente)
+    // Crear recepción
     const { data: nueva, error } = await supabase
       .from("recepciones")
       .insert({
@@ -281,8 +259,9 @@ export async function PATCH(request: NextRequest) {
         .update({ estado: "finalizada", fecha_fin: nowArgentina() })
         .eq("id", recepcion_id)
 
-      // Update OC: recibida_completa solo si el acumulado de todas las tandas
-      // cubre lo pedido; si queda pendiente, sigue recibida_parcial (multi-tanda).
+      // Update OC. El proveedor NO envía los pendientes después: la recepción
+      // cierra la OC; lo que no vino queda visible en verificación como
+      // "incompleto vs OC" y se repide con el botón "Generar OC con faltantes".
       const { data: rec } = await supabase
         .from("recepciones")
         .select("orden_compra_id")
@@ -290,37 +269,9 @@ export async function PATCH(request: NextRequest) {
         .single()
 
       if (rec?.orden_compra_id) {
-        const { data: detallesOC } = await supabase
-          .from("ordenes_compra_detalle")
-          .select("articulo_id, cantidad_pedida")
-          .eq("orden_compra_id", rec.orden_compra_id)
-
-        const { data: todasRec } = await supabase
-          .from("recepciones")
-          .select("recepciones_items(articulo_id, cantidad_fisica, estado_linea)")
-          .eq("orden_compra_id", rec.orden_compra_id)
-          .not("estado", "eq", "cancelada")
-
-        const recibidas: Record<string, number> = {}
-        let hayFaltantesMarcados = false
-        for (const r of todasRec || []) {
-          for (const it of (r as any).recepciones_items || []) {
-            recibidas[it.articulo_id] = (recibidas[it.articulo_id] || 0) + Number(it.cantidad_fisica || 0)
-            if (it.estado_linea === "faltante") hayFaltantesMarcados = true
-          }
-        }
-
-        const quedaPendiente = (detallesOC || []).some(
-          (d: any) => Number(d.cantidad_pedida || 0) - (recibidas[d.articulo_id] || 0) > 0
-        )
-
-        // Los faltantes marcados explícitamente se resuelven en verificación
-        // (empresa/transporte/proveedor) — no dejan la OC abierta.
-        const estadoOC = quedaPendiente && !hayFaltantesMarcados ? "recibida_parcial" : "recibida_completa"
-
         await supabase
           .from("ordenes_compra")
-          .update({ estado: estadoOC })
+          .update({ estado: "recibida_completa" })
           .eq("id", rec.orden_compra_id)
       }
 

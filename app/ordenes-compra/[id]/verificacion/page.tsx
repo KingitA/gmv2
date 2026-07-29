@@ -337,6 +337,53 @@ export default function VerificacionOCPage() {
         router.push("/ordenes-compra")
     }
 
+    // Los faltantes de fábrica no se reciben después: se repiden.
+    // Crea una OC nueva con lo que el proveedor no envió, a los precios
+    // y descuentos de la OC original.
+    async function generarOCFaltantes() {
+        const faltantes = rows.filter(r => r.pendiente_oc > 0)
+        if (faltantes.length === 0) return
+
+        const resumen = faltantes.map(r => `· ${r.sku} — ${r.pendiente_oc}${r.es_bulto ? " blt" : " u"} — ${r.descripcion}`).join("\n")
+        if (!confirm(`¿Generar una nueva OC con estos faltantes?\n\n${resumen}`)) return
+
+        const { data: ocDetalle } = await supabase
+            .from("ordenes_compra_detalle")
+            .select("articulo_id, tipo_cantidad, precio_unitario, descuento1, descuento2, descuento3, descuento4")
+            .eq("orden_compra_id", ordenId)
+
+        const items = faltantes.map(r => {
+            const det = (ocDetalle || []).find((d: any) => d.articulo_id === r.articulo_id)
+            return {
+                articulo_id: r.articulo_id,
+                cantidad_pedida: r.pendiente_oc,
+                tipo_cantidad: det?.tipo_cantidad || "bulto",
+                precio_unitario: det?.precio_unitario || 0,
+                descuento1: det?.descuento1 || 0,
+                descuento2: det?.descuento2 || 0,
+                descuento3: det?.descuento3 || 0,
+                descuento4: det?.descuento4 || 0,
+            }
+        })
+
+        const res = await fetch("/api/ordenes-compra/crear", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                proveedor_id: orden?.proveedor_id,
+                observaciones: `Reposición de faltantes de ${orden?.numero_orden}`,
+                items,
+            }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+            alert(data.error || "Error al generar la OC")
+            return
+        }
+        alert(`OC de reposición creada: ${data.orden?.numero_orden || "OK"}`)
+        router.push("/ordenes-compra")
+    }
+
     async function generarOrdenPago() {
         // Pre-fill the OP with OC data and navigate
         const params = new URLSearchParams({
@@ -371,6 +418,11 @@ export default function VerificacionOCPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
+                    {rows.some(r => r.pendiente_oc > 0) && (
+                        <Button onClick={generarOCFaltantes} variant="outline" className="gap-2 border-amber-400 text-amber-700 hover:bg-amber-50">
+                            <FileText className="h-4 w-4" /> Generar OC con faltantes
+                        </Button>
+                    )}
                     {allOK && (
                         <>
                             <Button onClick={finalizarOC} className="gap-2 bg-green-600 hover:bg-green-700">
