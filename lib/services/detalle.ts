@@ -28,10 +28,29 @@ export async function matchAndCreateDetalle(supabase: any, params: {
 }) {
     const engine = new MatchingEngine();
 
+    // Buscar items en TODAS las tandas de la OC, no solo la recepción actual:
+    // la factura puede llegar en una tanda posterior a la que escaneó la
+    // mercadería (multi-tanda) y la documentación debe caer sobre la fila real.
+    const { data: recActual } = await supabase
+        .from('recepciones')
+        .select('orden_compra_id')
+        .eq('id', params.recepcion_id)
+        .maybeSingle();
+
+    let recepcionIds = [params.recepcion_id];
+    if (recActual?.orden_compra_id) {
+        const { data: todas } = await supabase
+            .from('recepciones')
+            .select('id')
+            .eq('orden_compra_id', recActual.orden_compra_id)
+            .neq('estado', 'cancelada');
+        if (todas?.length) recepcionIds = todas.map((r: any) => r.id);
+    }
+
     const { data: recItems } = await supabase
         .from('recepciones_items')
         .select('*, articulo:articulos(id, sku, unidades_por_bulto, precio_compra, iva_compras)')
-        .eq('recepcion_id', params.recepcion_id);
+        .in('recepcion_id', recepcionIds);
 
     const { data: proveedor } = await supabase
         .from('proveedores')
@@ -88,7 +107,13 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         }
 
         const articuloId = best!.sku_id;
-        let recItem = currentRecItems.find((ri: any) => ri.articulo_id === articuloId);
+        // Preferir la fila real de la OC (no fuera_de_oc); entre varias tandas,
+        // la que tenga recepción física; última opción, cualquiera.
+        const candidatas = currentRecItems.filter((ri: any) => ri.articulo_id === articuloId);
+        let recItem =
+            candidatas.find((ri: any) => !ri.fuera_de_oc && Number(ri.cantidad_fisica || 0) > 0) ||
+            candidatas.find((ri: any) => !ri.fuera_de_oc) ||
+            candidatas[0];
 
         // Ítem facturado que no estaba en la OC: crear la línea de recepción
         // marcada fuera_de_oc para que depósito y verificación la vean.

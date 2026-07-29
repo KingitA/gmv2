@@ -170,8 +170,20 @@ export default function RecibirMercaderiaDetallePage() {
     try {
       const cantidad = esFaltante ? 0 : parseFloat(cantidadInput)||0
       await patchItem(articuloSel.id, esFaltante ? 0 : cantidad)
-      setItems(prev=>prev.map(i=>i.articulo_id===articuloSel.id
-        ? {...i, cantidad_fisica: esFaltante?0:cantidad, estado_linea: esFaltante?"faltante":cantidad>0?"ok":"pendiente"} : i))
+      setItems(prev => {
+        const existe = prev.some(i=>i.articulo_id===articuloSel.id)
+        const nuevoEstado = (esFaltante?"faltante":cantidad>0?"ok":"pendiente") as RecepcionItem["estado_linea"]
+        if (existe) {
+          return prev.map(i=>i.articulo_id===articuloSel.id
+            ? {...i, cantidad_fisica: esFaltante?0:cantidad, estado_linea: nuevoEstado} : i)
+        }
+        // Artículo no pedido: agregarlo a la lista como fuera de OC
+        return [...prev, {
+          id: `local-${articuloSel.id}`, articulo_id: articuloSel.id,
+          cantidad_oc: 0, cantidad_fisica: esFaltante?0:cantidad, estado_linea: nuevoEstado,
+          articulos: { sku: articuloSel.sku, descripcion: `⚠ ${articuloSel.descripcion} (NO PEDIDO)` },
+        } as RecepcionItem]
+      })
       showToast(esFaltante?"Marcado como faltante":"✓ Guardado","ok")
       setArticuloSel(null); setItemActivo(null); setCantidadInput("")
     } catch { showToast("Error al guardar","err") }
@@ -373,10 +385,17 @@ export default function RecibirMercaderiaDetallePage() {
         <div style={{ fontSize:20, fontWeight:800, color:C.text, lineHeight:1.3 }}>{articuloSel.descripcion}{articuloMarcaSuffix(articuloSel)}</div>
         <div style={{ fontSize:14, color:C.sub, fontFamily:"monospace", marginTop:8 }}>{articuloInfoLine(articuloSel)}</div>
       </div>
-      {itemActivo && (
+      {itemActivo ? (
         <div style={{ background:C.greenL, border:`1.5px solid ${C.greenB}`, borderRadius:16, padding:"16px 20px", textAlign:"center" }}>
           <div style={{ color:C.green, fontSize:13, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em" }}>Cantidad en OC</div>
           <div style={{ color:C.green, fontWeight:800, fontSize:52, lineHeight:1.1 }}>{itemActivo.cantidad_oc}</div>
+        </div>
+      ) : (
+        <div style={{ background:C.redL, border:`1.5px solid ${C.redB}`, borderRadius:16, padding:"16px 20px", textAlign:"center" }}>
+          <div style={{ color:C.red, fontSize:14, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em" }}>⚠ NO PEDIDO EN ESTA OC</div>
+          <div style={{ color:C.red, fontSize:14, marginTop:6, lineHeight:1.4 }}>
+            Si lo recibís igual, queda registrado como "fuera de OC" y la oficina lo va a ver en la verificación.
+          </div>
         </div>
       )}
       <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:20, padding:18 }}>

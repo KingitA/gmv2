@@ -28,13 +28,17 @@ interface VerRow {
     articulo_id: string
     sku: string
     descripcion: string
-    cant_oc: number
-    precio_oc: number
-    cant_recibida: number
+    cant_oc: number              // en la unidad pedida (bultos si tipo bulto)
+    unidades_por_bulto: number
+    es_bulto: boolean
+    precio_oc: number            // NETO por unidad pedida (lista − D1..D4, × unid/bulto si bulto)
+    cant_recibida: number        // suma de todas las tandas (bultos)
     // Per-comprobante data filled dynamically
-    comp_data: Record<string, { cantidad: number; precio: number }> // keyed by comprobante id
+    comp_data: Record<string, { cantidad: number; precio: number }> // keyed by comprobante id; precio NETO por línea
     cant_total_facturada: number
-    status: "ok" | "diferencia_cantidad" | "diferencia_precio" | "faltante" | "ambas"
+    pendiente_oc: number         // lo que el proveedor no envió vs OC (ni recibido ni facturado)
+    no_pedido: boolean           // recibido/facturado sin estar en la OC
+    status: "ok" | "diferencia_cantidad" | "diferencia_precio" | "faltante" | "ambas" | "no_pedido"
 }
 
 export default function VerificacionOCPage() {
@@ -49,6 +53,7 @@ export default function VerificacionOCPage() {
     const [sinMatch, setSinMatch] = useState(0)
     const [loading, setLoading] = useState(true)
     const [recepcionId, setRecepcionId] = useState<string | null>(null)
+    const [recepcionIds, setRecepcionIds] = useState<string[]>([])
     const [transportes, setTransportes] = useState<any[]>([])
 
     // Resolution dialog state
@@ -91,7 +96,7 @@ export default function VerificacionOCPage() {
         if (compIds.length > 0) {
             const { data: det } = await supabase
                 .from("comprobantes_compra_detalle")
-                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, tipo_cantidad, match_estado")
+                .select("comprobante_id, articulo_id, cantidad_facturada, precio_unitario, descuento1, tipo_cantidad, match_estado")
                 .in("comprobante_id", compIds)
             compDetalle = det || []
             setSinMatch(compDetalle.filter((d: any) => d.match_estado === "sugerido" || d.match_estado === "sin_match").length)
@@ -104,25 +109,29 @@ export default function VerificacionOCPage() {
         let recItems: any[] = []
         if (recepciones && recepciones.length > 0) {
             setRecepcionId(recepciones[0].id)
+            setRecepcionIds(recepciones.map(r => r.id))
             const { data } = await supabase
                 .from("recepciones_items").select("*, cantidad_diferencia_destino")
                 .in("recepcion_id", recepciones.map(r => r.id))
             recItems = data || []
         }
 
-        // Build comprobantes data with article-level info from detalle table
+        // Build comprobantes data with article-level info from detalle table.
+        // El precio se guarda NETO (precio − descuento de línea) para poder
+        // compararlo contra el precio neto de la OC.
         const compDataList: CompData[] = (comps || []).map((c: any) => {
             const items: Record<string, { cantidad: number; precio: number }> = {}
             const detalleRows = compDetalle.filter((d: any) => d.comprobante_id === c.id)
 
             for (const det of detalleRows) {
                 if (det.articulo_id) {
+                    const precioNeto = (Number(det.precio_unitario) || 0) * (1 - (Number(det.descuento1) || 0) / 100)
                     if (items[det.articulo_id]) {
                         items[det.articulo_id].cantidad += Number(det.cantidad_facturada) || 0
                     } else {
                         items[det.articulo_id] = {
                             cantidad: Number(det.cantidad_facturada) || 0,
-                            precio: Number(det.precio_unitario) || 0
+                            precio: Math.round(precioNeto * 100) / 100,
                         }
                     }
                 }
@@ -138,53 +147,124 @@ export default function VerificacionOCPage() {
         })
         setComprobantes(compDataList)
 
-        // Build rows
-        const verRows: VerRow[] = (ocItems || []).map((item: any) => {
-            const artId = item.articulo_id
-            const upb = item.articulo?.unidades_por_bulto || 1
-            const cantOC = item.tipo_cantidad === "bulto" ? item.cantidad_pedida * upb : item.cantidad_pedida
-            const precioOC = Number(item.precio_unitario) || 0
+        // Recibido por artículo: SUMA de todas las tandas. Las filas fuera_de_oc
+        // de artículos que SÍ están en la OC son duplicados de documentación
+        // vieja — no suman recibido.
+        const ocArtIds = new Set((ocItems || []).map((i: any) => i.articulo_id))
+        const recibidoPorArt: Record<string, number> = {}
+        const faltanteMarcado: Record<string, boolean> = {}
+        for (const ri of recItems) {
+            if (ri.fuera_de_oc && ocArtIds.has(ri.articulo_id)) continue
+            recibidoPorArt[ri.articulo_id] = (recibidoPorArt[ri.articulo_id] || 0) + Number(ri.cantidad_fisica || 0)
+            if (ri.estado_linea === "faltante") faltanteMarcado[ri.articulo_id] = true
+        }
 
-            const recItem = recItems.find(ri => ri.articulo_id === artId)
-            const cantRecibida = recItem ? Number(recItem.cantidad_fisica) : 0
+        const TOLERANCIA_PRECIO = 0.005 // 0.5%: cubre redondeos de OCR/conversión de descuentos
 
-            // Collect per-comprobante data
+        const buildRow = (params: {
+            artId: string, sku: string, descripcion: string, upb: number, esBulto: boolean,
+            cantOC: number, precioOCNeto: number, noPedido: boolean,
+        }): VerRow => {
+            const { artId, sku, descripcion, upb, esBulto, cantOC, precioOCNeto, noPedido } = params
+            const cantRecibida = recibidoPorArt[artId] || 0
+
             const compDataForArt: Record<string, { cantidad: number; precio: number }> = {}
             let cantTotalFacturada = 0
-
+            let precioFANeto: number | null = null
             for (const cd of compDataList) {
                 const artData = cd.items[artId]
                 if (artData) {
                     compDataForArt[cd.id] = artData
-                    // NC/NDA subtract
                     if (cd.tipo.startsWith("NC") || cd.tipo.startsWith("ND")) {
                         cantTotalFacturada -= artData.cantidad
                     } else {
                         cantTotalFacturada += artData.cantidad
+                        if (precioFANeto === null && artData.precio > 0) precioFANeto = artData.precio
                     }
                 }
             }
 
-            const hasComps = compDataList.length > 0
             const hasOCRData = Object.keys(compDataForArt).length > 0
 
-            let diffCant = hasOCRData ? cantTotalFacturada - cantRecibida : cantOC - cantRecibida
+            // Diferencia de cantidad: lo FACTURADO vs lo RECIBIDO (misma unidad: bultos)
+            const diffCant = hasOCRData ? cantTotalFacturada - cantRecibida : 0
+            // Diferencia de precio: neto factura vs neto OC (ambos por bulto/unidad de pedido)
+            const difPrecio = precioFANeto !== null && precioOCNeto > 0
+                ? Math.abs(precioFANeto - precioOCNeto) / precioOCNeto > TOLERANCIA_PRECIO
+                : false
+            // Lo que el proveedor no envió vs la OC (ni recibido ni facturado): faltante de fábrica
+            const pendienteOC = Math.max(0, cantOC - Math.max(cantRecibida, cantTotalFacturada))
+
             let status: VerRow["status"] = "ok"
-            if (Math.abs(diffCant) > 0.01) status = "diferencia_cantidad"
-            if (cantRecibida === 0 && cantOC > 0) status = "faltante"
+            if (noPedido) status = "no_pedido"
+            else if (cantRecibida === 0 && cantOC > 0) status = "faltante"
+            else if (Math.abs(diffCant) > 0.01 && difPrecio) status = "ambas"
+            else if (Math.abs(diffCant) > 0.01) status = "diferencia_cantidad"
+            else if (difPrecio) status = "diferencia_precio"
 
             return {
-                articulo_id: artId,
-                sku: item.articulo?.sku || "",
-                descripcion: item.articulo?.descripcion || "",
-                cant_oc: cantOC,
-                precio_oc: precioOC,
+                articulo_id: artId, sku, descripcion,
+                cant_oc: cantOC, unidades_por_bulto: upb, es_bulto: esBulto,
+                precio_oc: precioOCNeto,
                 cant_recibida: cantRecibida,
                 comp_data: compDataForArt,
                 cant_total_facturada: cantTotalFacturada,
-                status
+                pendiente_oc: pendienteOC,
+                no_pedido: noPedido,
+                status,
             }
+        }
+
+        // Filas de la OC (cantidades y precios en la unidad pedida: bultos)
+        const verRows: VerRow[] = (ocItems || []).map((item: any) => {
+            const upb = item.articulo?.unidades_por_bulto || 1
+            const esBulto = item.tipo_cantidad === "bulto"
+            const descuentos = [item.descuento1, item.descuento2, item.descuento3, item.descuento4]
+                .map((d: any) => Number(d) || 0)
+            const precioNetoUnit = descuentos.reduce((p, d) => p * (1 - d / 100), Number(item.precio_unitario) || 0)
+            return buildRow({
+                artId: item.articulo_id,
+                sku: item.articulo?.sku || "",
+                descripcion: item.articulo?.descripcion || "",
+                upb, esBulto,
+                cantOC: Number(item.cantidad_pedida) || 0,
+                precioOCNeto: Math.round(precioNetoUnit * (esBulto ? upb : 1) * 100) / 100,
+                noPedido: false,
+            })
         })
+
+        // Artículos NO pedidos: recibidos (fuera_de_oc) o facturados sin estar en la OC
+        const extraIds = new Set<string>()
+        for (const ri of recItems) {
+            if (ri.fuera_de_oc && !ocArtIds.has(ri.articulo_id)) extraIds.add(ri.articulo_id)
+        }
+        for (const cd of compDataList) {
+            for (const artId of Object.keys(cd.items)) {
+                if (!ocArtIds.has(artId)) extraIds.add(artId)
+            }
+        }
+        if (extraIds.size > 0) {
+            const { data: extraArts } = await supabase
+                .from("articulos")
+                .select("id, sku, descripcion, unidades_por_bulto")
+                .in("id", [...extraIds])
+            for (const art of extraArts || []) {
+                // Lo recibido fuera de OC sí cuenta como recibido acá
+                recibidoPorArt[art.id] = recItems
+                    .filter(ri => ri.articulo_id === art.id)
+                    .reduce((s, ri) => s + Number(ri.cantidad_fisica || 0), 0)
+                verRows.push(buildRow({
+                    artId: art.id,
+                    sku: art.sku || "",
+                    descripcion: art.descripcion || "",
+                    upb: art.unidades_por_bulto || 1,
+                    esBulto: true,
+                    cantOC: 0,
+                    precioOCNeto: 0,
+                    noPedido: true,
+                }))
+            }
+        }
 
         setRows(verRows)
         setLoading(false)
@@ -204,17 +284,20 @@ export default function VerificacionOCPage() {
     }
 
     async function confirmarResolucion() {
-        if (!resolviendoRow || !recepcionId) return
+        if (!resolviendoRow || recepcionIds.length === 0) return
 
-        // Find the recepciones_item for this articulo
-        const { data: recItems } = await supabase
+        // Buscar el ítem en TODAS las tandas (preferir la fila real de la OC)
+        const { data: candidatos } = await supabase
             .from('recepciones_items')
-            .select('id, cantidad_oc, cantidad_fisica')
-            .eq('recepcion_id', recepcionId)
+            .select('id, recepcion_id, cantidad_oc, cantidad_fisica, fuera_de_oc')
+            .in('recepcion_id', recepcionIds)
             .eq('articulo_id', resolviendoRow.articulo_id)
-            .maybeSingle()
 
-        if (!recItems) {
+        const recItem = (candidatos || []).find(c => !c.fuera_de_oc && Number(c.cantidad_fisica || 0) > 0)
+            || (candidatos || []).find(c => !c.fuera_de_oc)
+            || (candidatos || [])[0]
+
+        if (!recItem) {
             alert('No se encontró el ítem en la recepción')
             setResolviendoRow(null)
             return
@@ -223,7 +306,7 @@ export default function VerificacionOCPage() {
         const cantFaltante = resolviendoRow.cant_oc - resolviendoRow.cant_recibida
 
         const decision = {
-            item_id: recItems.id,
+            item_id: recItem.id,
             tipo: resolucionTipo,
             accion: resolucionAccion,
             transporte_id: resolucionAccion === 'B' ? resolucionTransporte : undefined,
@@ -231,7 +314,7 @@ export default function VerificacionOCPage() {
             descripcion: resolucionDesc || undefined,
         }
 
-        const res = await fetch(`/api/recepciones/${recepcionId}/cerrar`, {
+        const res = await fetch(`/api/recepciones/${recItem.recepcion_id}/cerrar`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ decisions: [decision] }),
@@ -473,7 +556,7 @@ export default function VerificacionOCPage() {
                                 {showMultipleComps && (
                                     <TableHead className="text-right font-bold">Total Fact.</TableHead>
                                 )}
-                                <TableHead className="text-right">Precio OC</TableHead>
+                                <TableHead className="text-right">Precio OC<br /><span className="text-[10px] text-muted-foreground font-normal">neto c/desc.</span></TableHead>
                                 {comprobantes.map(c => (
                                     <TableHead key={`h-pre-${c.id}`} className="text-right text-xs">
                                         Precio {c.tipo}<br /><span className="text-[10px] text-muted-foreground">{c.numero}</span>
@@ -492,17 +575,20 @@ export default function VerificacionOCPage() {
                                 const hasDiff = row.status !== "ok"
 
                                 return (
-                                    <TableRow key={row.articulo_id} className={hasDiff ? "bg-orange-50/50" : ""}>
+                                    <TableRow key={row.articulo_id} className={row.no_pedido ? "bg-purple-50/50" : hasDiff ? "bg-orange-50/50" : ""}>
                                         <TableCell>
                                             {row.status === "ok" ? <CheckCircle2 className="h-4 w-4 text-green-500" />
                                                 : row.status === "faltante" ? <XCircle className="h-4 w-4 text-red-500" />
-                                                    : <AlertTriangle className="h-4 w-4 text-orange-500" />}
+                                                    : row.no_pedido ? <AlertTriangle className="h-4 w-4 text-purple-500" />
+                                                        : <AlertTriangle className="h-4 w-4 text-orange-500" />}
                                         </TableCell>
                                         <TableCell className="font-mono text-xs">{row.sku}</TableCell>
                                         <TableCell className="text-sm max-w-[180px] truncate">{row.descripcion}</TableCell>
-                                        <TableCell className="text-right font-mono">{row.cant_oc}</TableCell>
+                                        <TableCell className="text-right font-mono">
+                                            {row.cant_oc}{row.es_bulto && row.cant_oc > 0 ? <span className="text-[10px] text-muted-foreground"> blt ({row.cant_oc * row.unidades_por_bulto} u)</span> : null}
+                                        </TableCell>
                                         <TableCell className={`text-right font-mono ${hasDiff ? "text-orange-600 font-bold" : ""}`}>
-                                            {row.cant_recibida}
+                                            {row.cant_recibida}{row.es_bulto && row.cant_recibida > 0 ? <span className="text-[10px] text-muted-foreground"> blt</span> : null}
                                         </TableCell>
                                         {/* Cant per comprobante */}
                                         {comprobantes.map(c => {
@@ -529,9 +615,23 @@ export default function VerificacionOCPage() {
                                             )
                                         })}
                                         <TableCell className="text-center">
-                                            <Badge className={`text-xs ${row.status === "ok" ? "bg-green-500" : "bg-orange-500"}`}>
-                                                {row.status === "ok" ? "OK" : row.status === "faltante" ? "Faltante" : "Δ Cant."}
-                                            </Badge>
+                                            <div className="flex flex-col items-center gap-1">
+                                                <Badge className={`text-xs ${row.status === "ok" ? "bg-green-500"
+                                                    : row.status === "no_pedido" ? "bg-purple-500" : "bg-orange-500"}`}>
+                                                    {row.status === "ok" ? "OK"
+                                                        : row.status === "faltante" ? "Faltante"
+                                                            : row.status === "no_pedido" ? "NO PEDIDO"
+                                                                : row.status === "diferencia_precio" ? "Δ Precio"
+                                                                    : row.status === "ambas" ? "Δ Cant. + Precio"
+                                                                        : "Δ Cant."}
+                                                </Badge>
+                                                {row.pendiente_oc > 0 && row.status !== "faltante" && (
+                                                    <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-400"
+                                                        title="El proveedor no envió ni facturó esta cantidad de la OC (faltante de fábrica: no se debe, pero quedó sin cubrir)">
+                                                        Incompleto: −{row.pendiente_oc}{row.es_bulto ? " blt" : ""} vs OC
+                                                    </Badge>
+                                                )}
+                                            </div>
                                         </TableCell>
                                         <TableCell className="text-right">
                                             {hasDiff && resoluciones[row.articulo_id] ? (

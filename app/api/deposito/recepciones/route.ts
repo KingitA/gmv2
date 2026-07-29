@@ -340,17 +340,35 @@ export async function PATCH(request: NextRequest) {
       estadoLinea = "ok"
       cantidadReal = cantidad_fisica
     }
-    const { data: item, error } = await supabase
+    const { data: actualizados, error } = await supabase
       .from("recepciones_items")
       .update({ cantidad_fisica: cantidadReal, estado_linea: estadoLinea })
       .eq("recepcion_id", recepcion_id)
       .eq("articulo_id", articulo_id)
       .select()
-      .single()
 
     if (error) throw error
 
-    return NextResponse.json(item)
+    // Artículo escaneado que NO está en la OC: registrarlo igual como
+    // fuera_de_oc para que la verificación lo muestre (pedido 0, recibido N).
+    if (!actualizados || actualizados.length === 0) {
+      const { data: nuevo, error: insError } = await supabase
+        .from("recepciones_items")
+        .insert({
+          recepcion_id,
+          articulo_id,
+          cantidad_oc: 0,
+          cantidad_fisica: cantidadReal,
+          estado_linea: estadoLinea,
+          fuera_de_oc: true,
+        })
+        .select()
+        .single()
+      if (insError) throw insError
+      return NextResponse.json({ ...nuevo, fuera_de_oc: true })
+    }
+
+    return NextResponse.json(actualizados[0])
   } catch (error: any) {
     console.error("[deposito] Error PATCH recepcion:", error)
     return NextResponse.json({ error: "Error al actualizar recepción" }, { status: 500 })
