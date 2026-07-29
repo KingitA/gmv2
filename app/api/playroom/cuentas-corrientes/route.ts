@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { todayArgentina } from '@/lib/utils'
+import { fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 
 const TIPOS_VENTA = ['FA', 'FB', 'FC']
 
@@ -8,30 +9,27 @@ export async function GET() {
   try {
     const supabase = createAdminClient()
 
-    // Comprobantes con saldo pendiente
-    const { data: comprobantes, error } = await supabase
+    // Comprobantes con saldo pendiente (paginado)
+    const comprobantes = await fetchAllRows(() => supabase
       .from('comprobantes_venta')
       .select('id, cliente_id, pedido_id, tipo_comprobante, numero_comprobante, punto_venta, fecha, fecha_vencimiento, total_factura, saldo_pendiente, estado_pago')
       .in('tipo_comprobante', TIPOS_VENTA)
-      .gt('saldo_pendiente', 0)
+      .gt('saldo_pendiente', 0))
 
-    if (error) throw error
-    if (!comprobantes?.length) return NextResponse.json({ rows: [], summary: { total: 0, t0_30: 0, t31_60: 0, t61_90: 0, t90_mas: 0 } })
+    if (!comprobantes.length) return NextResponse.json({ rows: [], summary: { total: 0, t0_30: 0, t31_60: 0, t61_90: 0, t90_mas: 0 } })
 
-    // Vendedor desde pedidos
-    const pedidoIds = [...new Set(comprobantes.map(c => c.pedido_id).filter(Boolean))]
-    const { data: pedidos } = pedidoIds.length
-      ? await supabase.from('pedidos').select('id, vendedor_id').in('id', pedidoIds)
-      : { data: [] }
-    const pedVendMap = new Map((pedidos ?? []).map(p => [p.id, p.vendedor_id]))
+    // Vendedor desde pedidos (lookup por tandas)
+    const pedidoIds = [...new Set(comprobantes.map(c => c.pedido_id).filter(Boolean))] as string[]
+    const pedidos = await fetchByIds(chunk => supabase.from('pedidos').select('id, vendedor_id').in('id', chunk), pedidoIds)
+    const pedVendMap = new Map(pedidos.map(p => [p.id, p.vendedor_id]))
 
-    // Clientes y vendedores
-    const [{ data: clientes }, { data: vendedores }] = await Promise.all([
-      supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id'),
-      supabase.from('vendedores').select('id, nombre'),
+    // Clientes y vendedores (paginado)
+    const [clientes, vendedores] = await Promise.all([
+      fetchAllRows(() => supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id')),
+      fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
     ])
-    const clienteMap = new Map((clientes ?? []).map(c => [c.id, c]))
-    const vendedorMap = new Map((vendedores ?? []).map(v => [v.id, v.nombre]))
+    const clienteMap = new Map(clientes.map(c => [c.id, c]))
+    const vendedorMap = new Map(vendedores.map(v => [v.id, v.nombre]))
 
     // Fecha de hoy en Argentina, anclada a mediodía UTC para comparar contra
     // fechas DATE (que JS parsea como medianoche UTC) sin corrimiento de día

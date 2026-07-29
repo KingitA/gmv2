@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
-import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
+import { getPreviousPeriod, getSameLastYear, fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 import { todayArgentina } from '@/lib/utils'
 
 const TIPOS_VENTA = ['FA', 'FB', 'FC']
@@ -19,31 +19,28 @@ export async function GET(req: NextRequest) {
       ? getSameLastYear(dateFrom, dateTo)
       : getPreviousPeriod(dateFrom, dateTo)
 
-    // Todos los comprobantes de venta/NC en ambos períodos
-    const { data: comprobantes, error } = await supabase
+    // Todos los comprobantes de venta/NC en ambos períodos (paginado)
+    const comprobantes = await fetchAllRows(() => supabase
       .from('comprobantes_venta')
       .select('id, cliente_id, pedido_id, tipo_comprobante, fecha, total_factura, saldo_pendiente')
       .gte('fecha', prev.from)
       .lte('fecha', dateTo)
-      .in('tipo_comprobante', [...TIPOS_VENTA, ...TIPOS_NC])
+      .in('tipo_comprobante', [...TIPOS_VENTA, ...TIPOS_NC]))
 
-    if (error) throw error
-    if (!comprobantes?.length) return NextResponse.json({ rows: [], meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, totalFact: 0 } })
+    if (!comprobantes.length) return NextResponse.json({ rows: [], meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, totalFact: 0 } })
 
-    // Vendedor desde pedidos
-    const pedidoIds = [...new Set(comprobantes.map(c => c.pedido_id).filter(Boolean))]
-    const { data: pedidos } = pedidoIds.length
-      ? await supabase.from('pedidos').select('id, vendedor_id').in('id', pedidoIds)
-      : { data: [] }
-    const pedVendMap = new Map((pedidos ?? []).map(p => [p.id, p.vendedor_id]))
+    // Vendedor desde pedidos (lookup por tandas)
+    const pedidoIds = [...new Set(comprobantes.map(c => c.pedido_id).filter(Boolean))] as string[]
+    const pedidos = await fetchByIds(chunk => supabase.from('pedidos').select('id, vendedor_id').in('id', chunk), pedidoIds)
+    const pedVendMap = new Map(pedidos.map(p => [p.id, p.vendedor_id]))
 
-    // Clientes y vendedores
-    const [{ data: clientes }, { data: vendedores }] = await Promise.all([
-      supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id, tipo_canal'),
-      supabase.from('vendedores').select('id, nombre'),
+    // Clientes y vendedores (paginado)
+    const [clientes, vendedores] = await Promise.all([
+      fetchAllRows(() => supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id, tipo_canal')),
+      fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
     ])
-    const clienteMap = new Map((clientes ?? []).map(c => [c.id, c]))
-    const vendedorMap = new Map((vendedores ?? []).map(v => [v.id, v.nombre]))
+    const clienteMap = new Map(clientes.map(c => [c.id, c]))
+    const vendedorMap = new Map(vendedores.map(v => [v.id, v.nombre]))
 
     const isVenta = (t: string) => TIPOS_VENTA.includes(t?.trim())
     const isNC = (t: string) => TIPOS_NC.includes(t?.trim())

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireAuth } from '@/lib/auth'
 import { todayArgentina } from '@/lib/utils'
+import { fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 
 function diasAtrasArgentina(dias: number): string {
   return new Date(Date.now() - dias * 86400000)
@@ -96,19 +97,19 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
     const { desde = primerDiaMes, hasta = hoy, agrupar_por = 'cliente', solo_arca = true, limit = 20 } = input as ToolInput['consultar_ventas']
     const tipos = solo_arca ? ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC'] : ['FA', 'FB', 'FC', 'NCA', 'NCB', 'NCC', 'PRES', 'REV']
 
-    const { data: comprobantes } = await supabase
+    const comprobantes = await fetchAllRows(() => supabase
       .from('comprobantes_venta')
       .select('cliente_id, tipo_comprobante, fecha, total_factura, total_neto')
       .gte('fecha', desde)
       .lte('fecha', hasta)
-      .in('tipo_comprobante', tipos)
+      .in('tipo_comprobante', tipos))
 
-    if (!comprobantes?.length) return { resultado: [], meta: { desde, hasta, total: 0 } }
+    if (!comprobantes.length) return { resultado: [], meta: { desde, hasta, total: 0 } }
 
     if (agrupar_por === 'cliente') {
-      const clienteIds = [...new Set(comprobantes.map((c: any) => c.cliente_id).filter(Boolean))]
-      const { data: clientes } = await supabase.from('clientes').select('id, nombre_razon_social, nombre').in('id', clienteIds)
-      const cMap = new Map((clientes ?? []).map((c: any) => [c.id, c.nombre_razon_social ?? c.nombre]))
+      const clienteIds = [...new Set(comprobantes.map((c: any) => c.cliente_id).filter(Boolean))] as string[]
+      const clientes = await fetchByIds(chunk => supabase.from('clientes').select('id, nombre_razon_social, nombre').in('id', chunk), clienteIds)
+      const cMap = new Map(clientes.map((c: any) => [c.id, c.nombre_razon_social ?? c.nombre]))
 
       const agg = new Map<string, { total: number; neto: number; count: number }>()
       for (const c of comprobantes) {
@@ -154,16 +155,32 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
   if (name === 'consultar_stock') {
     const { sin_movimiento_dias, stock_min = 1, rubro, limit = 20 } = input as ToolInput['consultar_stock']
 
-    let q = supabase.from('articulos').select('id, sku, descripcion, rubro, stock_actual, ultimo_costo, ultima_venta').gte('stock_actual', stock_min)
-    if (rubro) q = q.ilike('rubro', `%${rubro}%`)
+    // Paginado: hay más de 1000 artículos y PostgREST corta en 1000
+    const articulos = await fetchAllRows(() => {
+      let q = supabase.from('articulos').select('id, sku, descripcion, rubro, stock_actual, ultimo_costo').gte('stock_actual', stock_min)
+      if (rubro) q = q.ilike('rubro', `%${rubro}%`)
+      return q
+    })
+    if (!articulos.length) return { resultado: [], meta: {} }
 
-    const { data: articulos } = await q.limit(500)
-    if (!articulos?.length) return { resultado: [], meta: {} }
+    // Última venta por artículo desde el kardex (articulos no tiene esa columna)
+    const ventas = await fetchAllRows(() => supabase
+      .from('kardex')
+      .select('articulo_id, fecha')
+      .eq('tipo_movimiento', 'venta'))
+    const ultimaVentaMap = new Map<string, string>()
+    for (const v of ventas) {
+      const prev = ultimaVentaMap.get(v.articulo_id)
+      if (!prev || v.fecha > prev) ultimaVentaMap.set(v.articulo_id, v.fecha)
+    }
 
     let filtered = articulos
     if (sin_movimiento_dias) {
       const cutoff = diasAtrasArgentina(sin_movimiento_dias)
-      filtered = articulos.filter((a: any) => !a.ultima_venta || a.ultima_venta < cutoff)
+      filtered = articulos.filter((a: any) => {
+        const uv = ultimaVentaMap.get(a.id)
+        return !uv || uv.slice(0, 10) < cutoff
+      })
     }
 
     const rows = filtered
@@ -174,7 +191,7 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
         stock: a.stock_actual,
         costo_unitario: a.ultimo_costo ?? 0,
         capital: Math.round((a.stock_actual ?? 0) * (a.ultimo_costo ?? 0)),
-        ultima_venta: a.ultima_venta ?? 'nunca',
+        ultima_venta: ultimaVentaMap.get(a.id)?.slice(0, 10) ?? 'nunca',
       }))
       .sort((a: any, b: any) => b.capital - a.capital)
       .slice(0, limit)
@@ -186,11 +203,12 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
   if (name === 'consultar_clientes') {
     const { con_deuda, desde, hasta, sin_compra_dias, limit = 20 } = input as ToolInput['consultar_clientes']
 
-    let q = supabase.from('clientes').select('id, nombre_razon_social, nombre, localidad, saldo_cuenta_corriente, ultima_compra')
-    if (con_deuda) q = q.gt('saldo_cuenta_corriente', 0)
-
-    const { data: clientes } = await q.limit(500)
-    if (!clientes?.length) return { resultado: [], meta: {} }
+    const clientes = await fetchAllRows(() => {
+      let q = supabase.from('clientes').select('id, nombre_razon_social, nombre, localidad, saldo_cuenta_corriente, ultima_compra')
+      if (con_deuda) q = q.gt('saldo_cuenta_corriente', 0)
+      return q
+    })
+    if (!clientes.length) return { resultado: [], meta: {} }
 
     let filtered = clientes
     if (sin_compra_dias) {
@@ -214,11 +232,13 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
   if (name === 'consultar_comisiones') {
     const { desde = primerDiaMes, hasta = hoy, solo_pendientes = false } = input as ToolInput['consultar_comisiones']
 
-    let q = supabase.from('comisiones').select('viajante_id, monto, porcentaje, pagado, comprobante_cobrado, pedidos(fecha)')
-    if (solo_pendientes) q = q.eq('comprobante_cobrado', true).eq('pagado', false)
-
-    const { data: comisiones } = await q
-    if (!comisiones?.length) return { resultado: [], meta: { desde, hasta } }
+    // Paginado: la tabla comisiones ya supera las 1000 filas
+    const comisiones = await fetchAllRows(() => {
+      let q = supabase.from('comisiones').select('viajante_id, monto, porcentaje, pagado, comprobante_cobrado, pedidos(fecha)')
+      if (solo_pendientes) q = q.eq('comprobante_cobrado', true).eq('pagado', false)
+      return q
+    })
+    if (!comisiones.length) return { resultado: [], meta: { desde, hasta } }
 
     const filtered = comisiones.filter((c: any) => {
       const f = (c.pedidos as any)?.fecha?.slice(0, 10)

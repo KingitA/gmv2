@@ -1,36 +1,35 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { fetchAllRows } from '@/lib/playroom/queries'
 
 export async function GET() {
   try {
     const supabase = createAdminClient()
 
-    // Artículos activos
-    const { data: articulos, error: artError } = await supabase
+    // Artículos activos (paginado: son más de 1000)
+    const articulos = await fetchAllRows(() => supabase
       .from('articulos')
       .select('id, sku, descripcion, stock_actual, ultimo_costo, precio_compra, precio_base, rubro, rubro_id, categoria, proveedor_id, marca_id')
-      .eq('activo', true)
+      .eq('activo', true))
 
-    if (artError) throw artError
-    if (!articulos?.length) return NextResponse.json([])
+    if (!articulos.length) return NextResponse.json([])
 
     // Proveedores, marcas y rubros (para nombres)
-    const [{ data: proveedores }, { data: marcas }, { data: rubros }] = await Promise.all([
-      supabase.from('proveedores').select('id, nombre, sigla'),
-      supabase.from('marcas').select('id, descripcion'),
-      supabase.from('rubros').select('id, nombre'),
+    const [proveedores, marcas, rubros] = await Promise.all([
+      fetchAllRows(() => supabase.from('proveedores').select('id, nombre, sigla')),
+      fetchAllRows(() => supabase.from('marcas').select('id, descripcion')),
+      fetchAllRows(() => supabase.from('rubros').select('id, nombre')),
     ])
 
-    const provMap = new Map((proveedores ?? []).map(p => [p.id, p.sigla || p.nombre]))
-    const marcaMap = new Map((marcas ?? []).map(m => [m.id, m.descripcion]))
-    const rubroMap = new Map((rubros ?? []).map(r => [r.id, r.nombre]))
+    const provMap = new Map(proveedores.map(p => [p.id, p.sigla || p.nombre]))
+    const marcaMap = new Map(marcas.map(m => [m.id, m.descripcion]))
+    const rubroMap = new Map(rubros.map(r => [r.id, r.nombre]))
 
     // Todo el kardex de ventas (incluye precio_costo como fallback de costo)
-    const { data: kardex } = await supabase
+    const kardex = await fetchAllRows(() => supabase
       .from('kardex')
       .select('articulo_id, fecha, cantidad, precio_costo')
-      .eq('tipo_movimiento', 'venta')
-      .limit(50000)
+      .eq('tipo_movimiento', 'venta'))
 
     const now = new Date()
     const hace90 = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString()

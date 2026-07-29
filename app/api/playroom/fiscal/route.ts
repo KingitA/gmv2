@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { todayArgentina } from '@/lib/utils'
+import { fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 
 const TIPO_LABELS: Record<string, string> = {
   FA: 'Fact. A', FB: 'Fact. B', FC: 'Fact. C',
@@ -46,24 +47,22 @@ export async function GET(req: NextRequest) {
 
     const tiposFiltro = soloARCA ? TIPOS_ARCA : Object.keys(TIPO_LABELS)
 
-    const { data: comprobantes, error } = await supabase
+    // Paginado; el orden fecha+numero se mantiene y el helper agrega id como desempate
+    const comprobantes = await fetchAllRows(() => supabase
       .from('comprobantes_venta')
       .select('id, cliente_id, pedido_id, tipo_comprobante, numero_comprobante, punto_venta, fecha, total_factura, total_neto, total_iva, saldo_pendiente, estado_pago, percepcion_iva, percepcion_iibb')
       .gte('fecha', dateFrom)
       .lte('fecha', dateTo)
       .in('tipo_comprobante', tiposFiltro)
       .order('fecha', { ascending: true })
-      .order('numero_comprobante', { ascending: true })
+      .order('numero_comprobante', { ascending: true }))
 
-    if (error) throw error
-    if (!comprobantes?.length) return NextResponse.json({ rows: [], summary: [] })
+    if (!comprobantes.length) return NextResponse.json({ rows: [], summary: [] })
 
-    // Clientes
-    const clienteIds = [...new Set(comprobantes.map(c => c.cliente_id).filter(Boolean))]
-    const { data: clientes } = clienteIds.length
-      ? await supabase.from('clientes').select('id, nombre, nombre_razon_social, cuit, condicion_iva, provincia').in('id', clienteIds)
-      : { data: [] }
-    const clienteMap = new Map((clientes ?? []).map(c => [c.id, c]))
+    // Clientes (lookup por tandas)
+    const clienteIds = [...new Set(comprobantes.map(c => c.cliente_id).filter(Boolean))] as string[]
+    const clientes = await fetchByIds(chunk => supabase.from('clientes').select('id, nombre, nombre_razon_social, cuit, condicion_iva, provincia').in('id', chunk), clienteIds)
+    const clienteMap = new Map(clientes.map(c => [c.id, c]))
 
     const rows = comprobantes.map(c => {
       const cl = clienteMap.get(c.cliente_id)

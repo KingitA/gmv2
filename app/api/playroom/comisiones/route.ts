@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
-import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
+import { getPreviousPeriod, getSameLastYear, fetchByIds } from '@/lib/playroom/queries'
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
 
 function firstDayOfMonthArgentina(): string {
@@ -101,15 +101,16 @@ export async function GET(req: NextRequest) {
 
     if (!kardexRows.length) return NextResponse.json(empty)
 
-    // Obtener flag pagado desde tabla comisiones (join por kardex_id)
+    // Obtener flag pagado desde tabla comisiones (join por kardex_id, por tandas:
+    // con .in() de miles de ids la URL explota y el resultado se corta en 1000)
     const kardexIds = kardexRows.map(r => r.id)
-    const { data: comisionesRows } = await supabase
+    const comisionesRows = await fetchByIds(chunk => supabase
       .from('comisiones')
       .select('kardex_id, pagado')
-      .in('kardex_id', kardexIds)
+      .in('kardex_id', chunk), kardexIds)
 
     const pagadoMap = new Map<string, boolean>(
-      (comisionesRows ?? []).map(c => [c.kardex_id, c.pagado])
+      comisionesRows.map(c => [c.kardex_id, c.pagado])
     )
 
     for (const k of kardexRows) {

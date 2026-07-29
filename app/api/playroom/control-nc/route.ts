@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
-import { getPreviousPeriod, getSameLastYear } from '@/lib/playroom/queries'
+import { getPreviousPeriod, getSameLastYear, fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 import { todayArgentina } from '@/lib/utils'
 
 const TIPOS_NC = ['NCA', 'NCB', 'NCC']
@@ -19,23 +19,20 @@ export async function GET(req: NextRequest) {
       ? getSameLastYear(dateFrom, dateTo)
       : getPreviousPeriod(dateFrom, dateTo)
 
-    // NCs y facturas en ambos períodos para calcular ratio
-    const { data: comprobantes, error } = await supabase
+    // NCs y facturas en ambos períodos para calcular ratio (paginado)
+    const comprobantes = await fetchAllRows(() => supabase
       .from('comprobantes_venta')
       .select('id, cliente_id, tipo_comprobante, fecha, total_factura, numero_comprobante, punto_venta')
       .gte('fecha', prev.from)
       .lte('fecha', dateTo)
-      .in('tipo_comprobante', [...TIPOS_NC, ...TIPOS_VENTA])
+      .in('tipo_comprobante', [...TIPOS_NC, ...TIPOS_VENTA]))
 
-    if (error) throw error
-    if (!comprobantes?.length) return NextResponse.json({ rows: [], summary: { total_nc: 0, total_nc_prev: 0, total_facturado: 0, ratio_pct: 0 } })
+    if (!comprobantes.length) return NextResponse.json({ rows: [], summary: { total_nc: 0, total_nc_prev: 0, total_facturado: 0, ratio_pct: 0 } })
 
-    // Clientes
-    const clienteIds = [...new Set(comprobantes.map(c => c.cliente_id).filter(Boolean))]
-    const { data: clientes } = clienteIds.length
-      ? await supabase.from('clientes').select('id, nombre, nombre_razon_social').in('id', clienteIds)
-      : { data: [] }
-    const clienteMap = new Map((clientes ?? []).map(c => [c.id, c]))
+    // Clientes (lookup por tandas)
+    const clienteIds = [...new Set(comprobantes.map(c => c.cliente_id).filter(Boolean))] as string[]
+    const clientes = await fetchByIds(chunk => supabase.from('clientes').select('id, nombre, nombre_razon_social').in('id', chunk), clienteIds)
+    const clienteMap = new Map(clientes.map(c => [c.id, c]))
 
     // Agregar NCs por cliente
     type Agg = {
