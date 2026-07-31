@@ -76,20 +76,11 @@ export async function POST(request: Request) {
         Number(retencion_iva || 0) + Number(retencion_suss || 0)
     const netoAPagar = montoTotal
 
-    // Generar número de OP
-    const { data: ultimaOp } = await supabase
-        .from('ordenes_pago')
-        .select('numero_op')
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-    let numeroOp = 'OP-000001'
-    if (ultimaOp && ultimaOp.length > 0 && ultimaOp[0].numero_op) {
-        const parts = ultimaOp[0].numero_op.split('-')
-        if (parts.length === 2) {
-            const next = parseInt(parts[1]) + 1
-            numeroOp = `OP-${String(next).padStart(6, '0')}`
-        }
+    // Número de OP atómico (RPC con FOR UPDATE sobre numeracion_comprobantes;
+    // formato 0001-XXXXXXXX, compatible con el Nº de comprobante del TXT SICORE)
+    const { data: numeroOp, error: numErr } = await supabase.rpc('op_siguiente_numero')
+    if (numErr || !numeroOp) {
+        return NextResponse.json({ error: `No se pudo numerar la OP: ${numErr?.message ?? 'sin número'}` }, { status: 500 })
     }
 
     // 1. Crear cabecera
