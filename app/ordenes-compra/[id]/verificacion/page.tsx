@@ -39,6 +39,7 @@ interface VerRow {
     cant_total_facturada: number
     pendiente_oc: number         // lo que el proveedor no envió vs OC (ni recibido ni facturado)
     no_pedido: boolean           // recibido/facturado sin estar en la OC
+    resuelto: string | null      // diferencia ya imputada (empresa/transporte/proveedor/nc)
     status: "ok" | "diferencia_cantidad" | "diferencia_precio" | "faltante" | "ambas" | "no_pedido"
 }
 
@@ -154,7 +155,12 @@ export default function VerificacionOCPage() {
         const ocArtIds = new Set((ocItems || []).map((i: any) => i.articulo_id))
         const recibidoPorArt: Record<string, number> = {}
         const faltanteMarcado: Record<string, boolean> = {}
+        // Diferencias ya resueltas desde el dialog (persisten en recepciones_items)
+        const precioResuelto: Record<string, boolean> = {}
+        const cantResuelta: Record<string, string> = {}
         for (const ri of recItems) {
+            if (ri.precio_verificado) precioResuelto[ri.articulo_id] = true
+            if (ri.cantidad_diferencia_destino) cantResuelta[ri.articulo_id] = ri.cantidad_diferencia_destino
             if (ri.fuera_de_oc && ocArtIds.has(ri.articulo_id)) continue
             recibidoPorArt[ri.articulo_id] = (recibidoPorArt[ri.articulo_id] || 0) + Number(ri.cantidad_fisica || 0)
             if (ri.estado_linea === "faltante") faltanteMarcado[ri.articulo_id] = true
@@ -203,6 +209,17 @@ export default function VerificacionOCPage() {
             else if (Math.abs(diffCant) > 0.01) status = "diferencia_cantidad"
             else if (difPrecio) status = "diferencia_precio"
 
+            // Diferencias ya resueltas (imputadas a empresa/transporte/proveedor
+            // o NC esperada) pasan a OK con su etiqueta — habilitan finalizar.
+            let resuelto: string | null = null
+            if (status === "diferencia_precio" && precioResuelto[artId]) {
+                status = "ok"; resuelto = "precio"
+            } else if ((status === "faltante" || status === "diferencia_cantidad") && cantResuelta[artId]) {
+                status = "ok"; resuelto = cantResuelta[artId]
+            } else if (status === "ambas" && precioResuelto[artId] && cantResuelta[artId]) {
+                status = "ok"; resuelto = cantResuelta[artId]
+            }
+
             return {
                 articulo_id: artId, sku, descripcion,
                 cant_oc: cantOC, unidades_por_bulto: upb, es_bulto: esBulto,
@@ -212,6 +229,7 @@ export default function VerificacionOCPage() {
                 cant_total_facturada: cantTotalFacturada,
                 pendiente_oc: pendienteOC,
                 no_pedido: noPedido,
+                resuelto,
                 status,
             }
         }
@@ -332,8 +350,31 @@ export default function VerificacionOCPage() {
         setResolviendoRow(null)
     }
 
+    // Finalizar = validar los comprobantes pendientes (reemplaza la provisión
+    // de CC por los comprobantes reales + vencimientos + kardex confirmado)
+    // y cerrar la OC.
     async function finalizarOC() {
-        if (!confirm("¿Finalizar esta OC?")) return
+        const sinResolver = rows.filter(r => r.status !== "ok").length
+        const aviso = sinResolver > 0
+            ? `\n\n⚠ Hay ${sinResolver} artículo(s) con diferencias SIN resolver.`
+            : ""
+        if (!confirm(`¿Finalizar esta OC?\n\nSe validan los comprobantes pendientes: la provisión de la cuenta corriente se reemplaza por los comprobantes reales y se generan los vencimientos de pago.${aviso}`)) return
+
+        const { data: pendientes } = await supabase
+            .from("comprobantes_compra")
+            .select("id, tipo_comprobante, numero_comprobante")
+            .eq("orden_compra_id", ordenId)
+            .not("estado", "in", "(validado,cerrado,esperada)")
+
+        for (const comp of pendientes || []) {
+            const res = await fetch(`/api/comprobantes-compra/${comp.id}/validar`, { method: "POST" })
+            if (!res.ok) {
+                const data = await res.json()
+                alert(`Error validando ${comp.tipo_comprobante} ${comp.numero_comprobante}: ${data.error || "error"}`)
+                return
+            }
+        }
+
         await supabase.from("ordenes_compra").update({ estado: "finalizada" }).eq("id", ordenId)
         router.push("/ordenes-compra")
     }
@@ -424,15 +465,16 @@ export default function VerificacionOCPage() {
                             <FileText className="h-4 w-4" /> Generar OC con faltantes
                         </Button>
                     )}
-                    {allOK && (
-                        <>
-                            <Button onClick={finalizarOC} className="gap-2 bg-green-600 hover:bg-green-700">
-                                <CheckCircle2 className="h-4 w-4" /> Finalizar OC
-                            </Button>
-                            <Button onClick={generarOrdenPago} variant="outline" className="gap-2">
-                                <CreditCard className="h-4 w-4" /> Generar Orden de Pago
-                            </Button>
-                        </>
+                    {tieneComps && orden?.estado !== "finalizada" && (
+                        <Button onClick={finalizarOC}
+                            className={`gap-2 ${allOK ? "bg-green-600 hover:bg-green-700" : "bg-orange-500 hover:bg-orange-600"}`}>
+                            <CheckCircle2 className="h-4 w-4" /> Finalizar OC
+                        </Button>
+                    )}
+                    {tieneComps && (
+                        <Button onClick={generarOrdenPago} variant="outline" className="gap-2">
+                            <CreditCard className="h-4 w-4" /> Generar Orden de Pago
+                        </Button>
                     )}
                 </div>
             </div>
@@ -646,6 +688,11 @@ export default function VerificacionOCPage() {
                                                                     : row.status === "ambas" ? "Δ Cant. + Precio"
                                                                         : "Δ Cant."}
                                                 </Badge>
+                                                {row.resuelto && (
+                                                    <Badge variant="outline" className="text-[10px] text-green-700 border-green-300">
+                                                        Resuelto{row.resuelto === "precio" ? " (precio)" : ` → ${row.resuelto}`}
+                                                    </Badge>
+                                                )}
                                                 {row.pendiente_oc > 0 && row.status !== "faltante" && (
                                                     <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-400"
                                                         title="El proveedor no envió ni facturó esta cantidad de la OC (faltante de fábrica: no se debe, pero quedó sin cubrir)">

@@ -111,11 +111,25 @@ export async function POST(request: NextRequest) {
             return sum + precio * cantidadBase;
         }, 0);
 
+        // La provisión anticipa la deuda REAL: neto + IVA + percepciones del
+        // proveedor (misma fórmula que el desglose de comprobantes). Al validar
+        // la factura, la provisión se reemplaza por los comprobantes reales.
+        const { data: provPercep } = await supabase
+            .from('proveedores')
+            .select('percepcion_iva, percepcion_iibb, retencion_ganancias')
+            .eq('id', proveedor_id)
+            .maybeSingle();
+        const factorImpuestos = 1 + 0.21
+            + (Number(provPercep?.percepcion_iva) || 0) / 100
+            + (Number(provPercep?.percepcion_iibb) || 0) / 100
+            + (Number(provPercep?.retencion_ganancias) || 0) / 100;
+        const totalProvision = Math.round(totalOrden * factorImpuestos * 100) / 100;
+
         await supabase.from('cuenta_corriente_proveedores').insert({
             proveedor_id,
             tipo_movimiento: 'orden_compra',
-            monto: Math.round(totalOrden * 100) / 100,
-            descripcion: `Provisión OC: ${numeroOrden}`,
+            monto: totalProvision,
+            descripcion: `Provisión OC: ${numeroOrden} (neto ${Math.round(totalOrden * 100) / 100} + imp. estimados)`,
             referencia_id: orden.id,
             referencia_tipo: 'orden_compra',
             fecha: nowArgentina(),
