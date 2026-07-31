@@ -12,6 +12,7 @@ export interface ExtractedItem {
     precio_bulto: number | null;
     unidades_por_bulto: number | null;
     descuento: number | null;
+    total_linea: number | null;
     unidad_medida: string | null;
     source_row?: any;
 }
@@ -27,6 +28,9 @@ export interface ComprobanteMeta {
     percepcion_iibb: number | null;
     retencion_ganancias: number | null;
     descuento_global: number | null;
+    impuestos_discriminados: boolean | null;
+    leyenda_no_valido_factura: boolean | null;
+    tiene_precios: boolean | null;
 }
 
 export interface ParseResult {
@@ -35,6 +39,42 @@ export interface ParseResult {
     raw_text?: string;
     metadata?: any;
     error?: string;
+}
+
+// Infiere el tipo de comprobante combinando el texto del documento con señales
+// fiscales, para no tener que elegirlo a mano en cada carga:
+// - Dice "Factura A/B/C" Y discrimina impuestos → FA/FB/FC
+// - Dice factura pero SIN impuestos discriminados, o leyenda "no válido como
+//   factura" → Adquisición (entra stock, se debe y se paga, pero sin circuito fiscal)
+// - No dice factura pero tiene precios → Adquisición
+// - Sin precios → Remito (solo respaldo de cantidades)
+// - NC/ND explícitas se respetan
+export function inferirTipoComprobante(parsed: ParseResult, tipoDocumento?: string): string {
+    const meta = parsed.comprobante;
+    const texto = (meta?.tipo_comprobante || '').toUpperCase().trim();
+
+    if (texto === 'NC' || texto.includes('NOTA DE CR')) return 'NC';
+    if (texto === 'ND' || texto.includes('NOTA DE D')) return 'NC';
+
+    const tienePrecios = meta?.tiene_precios ?? (parsed.items || []).some(i => Number(i.precio_unitario || 0) > 0 || Number(i.total_linea || 0) > 0);
+    if (!tienePrecios) return 'Remito';
+
+    const noValido = meta?.leyenda_no_valido_factura === true;
+    const impuestosOK = (meta?.impuestos_discriminados === true)
+        || Number(meta?.total_iva || 0) > 0
+        || Number(meta?.percepcion_iva || 0) > 0
+        || Number(meta?.percepcion_iibb || 0) > 0;
+
+    const diceFactura = texto === 'FA' || texto === 'FB' || texto === 'FC' || texto.includes('FACTURA');
+
+    if (diceFactura && impuestosOK && !noValido) {
+        if (texto === 'FB' || texto.includes('FACTURA B')) return 'FB';
+        if (texto === 'FC' || texto.includes('FACTURA C')) return 'FC';
+        return 'FA';
+    }
+
+    // Con precios pero sin respaldo fiscal (o leyenda no-válido): adquisición de stock
+    return 'Adquisicion';
 }
 
 export async function processWithGemini(
@@ -75,17 +115,21 @@ FORMATO JSON:
     "percepcion_iva": number o null,
     "percepcion_iibb": number o null,
     "retencion_ganancias": number o null,
-    "descuento_global": number o null
+    "descuento_global": number o null,
+    "impuestos_discriminados": boolean (true si el documento discrimina IVA/percepciones como conceptos separados),
+    "leyenda_no_valido_factura": boolean (true si dice "documento no válido como factura" o similar),
+    "tiene_precios": boolean (true si los ítems tienen precios)
   },
   "items": [
     {
       "descripcion": "texto exacto del producto",
       "codigo": "EAN/SKU/codigo proveedor o null",
       "cantidad": number,
-      "precio_unitario": number o null,
+      "precio_unitario": number o null (el precio de lista BRUTO, ANTES de bonificaciones; si la factura muestra unitario bruto, bonificaciones y unitario neto, usá el BRUTO acá),
       "precio_bulto": number o null,
       "unidades_por_bulto": number o null,
-      "descuento": number o null (PORCENTAJE de descuento de la línea, ej 5 para 5%; si la factura solo muestra el descuento en pesos, calculá el porcentaje sobre precio x cantidad),
+      "descuento": number o null (PORCENTAJE total de bonificaciones de la línea, ej 5 para 5%; si son escalonadas como -2 -38 -5 listalas asi: "2+38+5" NO, devolvé el porcentaje EQUIVALENTE combinado; si la factura solo muestra el descuento en pesos, calculá el porcentaje sobre precio x cantidad),
+      "total_linea": number o null (el IMPORTE final de la línea tal como figura en el documento — es el dato más confiable),
       "unidad_medida": "UN/BTO/CJ/etc o null"
     }
   ]
@@ -195,6 +239,7 @@ export async function parseExcel(file: File): Promise<ParseResult> {
                 precio_bulto: colMap.precio_bulto > -1 ? parseNumber(row[colMap.precio_bulto]) : null,
                 unidades_por_bulto: colMap.unidades_por_bulto > -1 ? parseNumber(row[colMap.unidades_por_bulto]) : null,
                 descuento: colMap.descuento > -1 ? parseNumber(row[colMap.descuento]) : null,
+                total_linea: null,
                 unidad_medida: null,
                 source_row: row
             });

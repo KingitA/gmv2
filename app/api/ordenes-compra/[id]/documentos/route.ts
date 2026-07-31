@@ -1,25 +1,9 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { processWithGemini } from '@/lib/services/ocr';
+import { processWithGemini , inferirTipoComprobante } from '@/lib/services/ocr';
 import { todayArgentina } from '@/lib/utils';
 
-// Mapeo tipo OCR → tipo interno
-function mapTipoComprobante(ocr: string | null | undefined, tipoDocumento: string): string {
-    if (!ocr) {
-        const map: Record<string, string> = { factura: 'FA', remito: 'Adquisicion', adquisicion: 'Adquisicion', nota_credito: 'NC' };
-        return map[tipoDocumento] || 'FA';
-    }
-    const s = ocr.toUpperCase().trim();
-    if (s === 'FA' || s.includes('FACTURA A')) return 'FA';
-    if (s === 'FB' || s.includes('FACTURA B')) return 'FB';
-    if (s === 'FC' || s.includes('FACTURA C')) return 'FC';
-    if (s.includes('REMITO')) return 'Adquisicion';
-    if (s.includes('ADQUIS')) return 'Adquisicion';
-    if (s === 'NC' || s.includes('NOTA DE CR')) return 'NC';
-    if (s === 'ND' || s.includes('NOTA DE D')) return 'NC';
-    return 'FA';
-}
 
 // GET /api/ordenes-compra/[id]/documentos
 // Returns documents with signed URLs for viewing
@@ -198,12 +182,13 @@ export async function POST(
         .single();
 
     // Auto-crear comprobante_compra desde los datos del OCR
-    const tipoComp = mapTipoComprobante(compMeta?.tipo_comprobante, tipo_documento);
+    const tipoComp = inferirTipoComprobante(ocrResult, tipo_documento);
+    const sinIva = tipoComp === 'Adquisicion' || tipoComp === 'Remito';
     const numeroComp = numeroExtraido || `PENDIENTE-${Date.now()}`;
     const fechaComp = compMeta?.fecha || todayArgentina();
     const totalFactura = compMeta?.total_factura || 0;
-    const totalNeto = compMeta?.subtotal_neto || (totalFactura > 0 ? totalFactura / 1.21 : 0);
-    const totalIva = compMeta?.total_iva || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0);
+    const totalNeto = sinIva ? totalFactura : (compMeta?.subtotal_neto || (totalFactura > 0 ? totalFactura / 1.21 : 0));
+    const totalIva = sinIva ? 0 : (compMeta?.total_iva || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0));
     const percIva = compMeta?.percepcion_iva || 0;
     const percIibb = compMeta?.percepcion_iibb || 0;
     const retGanancias = compMeta?.retencion_ganancias || 0;

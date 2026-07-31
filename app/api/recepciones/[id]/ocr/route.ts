@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from "next/server";
-import { processWithGemini } from "@/lib/services/ocr";
+import { processWithGemini, inferirTipoComprobante } from "@/lib/services/ocr";
 import { resolveFactorConversion, UnidadFactura } from "@/lib/services/conversion";
 import { MatchingEngine } from "@/lib/matching/matcher";
 import { ImportItemRaw } from "@/lib/matching/types";
@@ -8,19 +8,6 @@ import { requireAuth } from '@/lib/auth'
 import { todayArgentina } from '@/lib/utils'
 import { matchAndCreateDetalle, revertirComprobanteOCR } from '@/lib/services/detalle'
 
-function mapTipoComprobante(ocr: string | null | undefined, tipoDocumento: string): string {
-    if (!ocr) {
-        const map: Record<string, string> = { factura: 'FA', remito: 'Adquisicion', adquisicion: 'Adquisicion', nota_credito: 'NC' };
-        return map[tipoDocumento] || 'FA';
-    }
-    const s = ocr.toUpperCase().trim();
-    if (s === 'FA' || s.includes('FACTURA A')) return 'FA';
-    if (s === 'FB' || s.includes('FACTURA B')) return 'FB';
-    if (s === 'FC' || s.includes('FACTURA C')) return 'FC';
-    if (s.includes('REMITO') || s.includes('ADQUIS')) return 'Adquisicion';
-    if (s === 'NC' || s.includes('NOTA DE CR') || s === 'ND' || s.includes('NOTA DE D')) return 'NC';
-    return 'FA';
-}
 
 export async function POST(
     request: NextRequest,
@@ -130,10 +117,11 @@ export async function POST(
             }
 
             if (!skipCreate) {
-                const tipoComp = mapTipoComprobante(compMeta?.tipo_comprobante, tipo_documento);
+                const tipoComp = inferirTipoComprobante(ocrResult, tipo_documento);
+                const sinIva = tipoComp === 'Adquisicion' || tipoComp === 'Remito';
                 const totalFactura = compMeta?.total_factura || 0;
-                const totalNeto = compMeta?.subtotal_neto || (totalFactura > 0 ? totalFactura / 1.21 : 0);
-                const totalIva = compMeta?.total_iva || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0);
+                const totalNeto = sinIva ? totalFactura : (compMeta?.subtotal_neto || (totalFactura > 0 ? totalFactura / 1.21 : 0));
+                const totalIva = sinIva ? 0 : (compMeta?.total_iva || (totalNeto > 0 && totalFactura > 0 ? totalFactura - totalNeto : 0));
 
                 const { data: comp } = await supabase.from('comprobantes_compra').insert({
                     orden_compra_id: ordenCompraId,

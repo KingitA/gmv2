@@ -81,11 +81,33 @@ export async function matchAndCreateDetalle(supabase: any, params: {
         const isMatched = matchResult.status === 'matched' && !!best?.sku_id;
         const isSuggestion = !isMatched && !!best?.sku_id && best.confidence_level === 'suggestion';
 
-        const descuentoPct = normalizarDescuentoPct(item.descuento, item.precio_unitario, item.cantidad);
+        // Coherencia de precios contra el IMPORTE de línea (el dato más confiable
+        // de la factura). Detecta cuando el OCR extrajo el unitario YA NETO y
+        // también las bonificaciones — sin este control se descontaba dos veces.
+        let precioUnitario = Number(item.precio_unitario || 0);
+        let descuentoPct = normalizarDescuentoPct(item.descuento, item.precio_unitario, item.cantidad);
+        const totalLinea = Number(item.total_linea || 0);
+        const cantidadItem = Number(item.cantidad || 0);
+        if (totalLinea > 0 && cantidadItem > 0 && precioUnitario > 0) {
+            const netoReal = totalLinea / cantidadItem;
+            const err = (x: number) => Math.abs(x - netoReal) / netoReal;
+            if (err(precioUnitario * (1 - descuentoPct / 100)) > 0.01) {
+                if (err(precioUnitario) <= 0.01) {
+                    // El precio extraído ya venía con las bonificaciones aplicadas
+                    descuentoPct = 0;
+                } else {
+                    // Nada cuadra: confiar en importe ÷ cantidad
+                    precioUnitario = Math.round(netoReal * 100) / 100;
+                    descuentoPct = 0;
+                }
+            }
+        }
+        const precioNeto = Math.round(precioUnitario * (1 - descuentoPct / 100) * 100) / 100;
+
         const baseRow = {
             comprobante_id: params.comprobante_id,
             cantidad_facturada: item.cantidad || 1,
-            precio_unitario: item.precio_unitario || 0,
+            precio_unitario: precioUnitario,
             descuento1: descuentoPct,
             descripcion_proveedor: item.descripcion,
             codigo_proveedor: item.codigo,
@@ -101,7 +123,7 @@ export async function matchAndCreateDetalle(supabase: any, params: {
                 match_estado: isSuggestion ? 'sugerido' : 'sin_match',
                 recepcion_item_id: null,
                 tipo_cantidad: 'unidad',
-                costo_final: Math.round((item.precio_unitario || 0) * (1 - descuentoPct / 100) * 100) / 100,
+                costo_final: precioNeto,
             });
             continue;
         }
@@ -156,7 +178,7 @@ export async function matchAndCreateDetalle(supabase: any, params: {
             match_estado: 'auto',
             recepcion_item_id: recItem?.id ?? null,
             tipo_cantidad: conversion.factor === 1 ? 'unidad' : 'bulto',
-            costo_final: Math.round((item.precio_unitario || 0) * (1 - descuentoPct / 100) * 100) / 100,
+            costo_final: precioNeto,
         });
 
         if (conversion.requiresReview) {
@@ -181,8 +203,8 @@ export async function matchAndCreateDetalle(supabase: any, params: {
                 .from('recepciones_items')
                 .update({
                     cantidad_documentada: Number(recItem.cantidad_documentada || 0) + cantBase,
-                    precio_documentado: item.precio_unitario || 0,
-                    precio_real: item.precio_unitario || recItem.precio_oc || 0,
+                    precio_documentado: precioNeto,
+                    precio_real: precioNeto || recItem.precio_oc || 0,
                     cantidad_base: cantBase,
                     factor_conversion: conversion.factor,
                     conversion_source: conversion.source,

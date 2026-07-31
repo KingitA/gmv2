@@ -194,7 +194,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
               <Text style={[s.td, s.cEan, { fontSize: 7, color: '#888' }]}>{l.ean13 ?? ''}</Text>
               <Text style={[s.td, s.cSku, { fontSize: 7, color: '#888' }]}>{l.sku ?? ''}</Text>
               <Text style={[s.tdBold, s.cDesc]}>{l.descripcion}</Text>
-              <Text style={[s.tdBold, s.cCant]}>{String(l.cantidad)}{l.tipo_cantidad === 'bulto' ? ' blt' : ''}</Text>
+              <Text style={[s.tdBold, s.cCant]}>{String(l.cantidad)}{l.tipo_cantidad === 'bulto' ? ' BUL' : ''}</Text>
               <Text style={[s.td, s.cUnid]}>{String(l.unidades_totales)}</Text>
               <Text style={[s.td, s.cPrecio]}>${fmtARS(l.precio_unitario)}</Text>
               <Text style={[s.td, s.cDesc4]}>{fmtDesc(l.descuentos)}</Text>

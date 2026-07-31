@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { ComprobantesSection } from "./comprobantes-section"
 
 interface CompData {
     id: string
@@ -344,7 +345,7 @@ export default function VerificacionOCPage() {
         const faltantes = rows.filter(r => r.pendiente_oc > 0)
         if (faltantes.length === 0) return
 
-        const resumen = faltantes.map(r => `· ${r.sku} — ${r.pendiente_oc}${r.es_bulto ? " blt" : " u"} — ${r.descripcion}`).join("\n")
+        const resumen = faltantes.map(r => `· ${r.sku} — ${r.pendiente_oc}${r.es_bulto ? " BUL" : " u"} — ${r.descripcion}`).join("\n")
         if (!confirm(`¿Generar una nueva OC con estos faltantes?\n\n${resumen}`)) return
 
         const { data: ocDetalle } = await supabase
@@ -437,14 +438,11 @@ export default function VerificacionOCPage() {
             </div>
 
             {sinMatch > 0 && (
-                <div className="mb-4 p-3 border border-amber-300 bg-amber-50 rounded-lg flex items-center justify-between gap-3 flex-wrap">
+                <div className="mb-4 p-3 border border-amber-300 bg-amber-50 rounded-lg">
                     <p className="text-sm text-amber-800">
-                        <strong>{sinMatch} ítem{sinMatch !== 1 ? "s" : ""} de comprobantes sin vincular al catálogo.</strong>{" "}
-                        La verificación de precios y cantidades no los incluye hasta que se confirmen.
+                        <strong>{sinMatch} ítem{sinMatch !== 1 ? "s" : ""} de comprobantes sin vincular al catálogo</strong> —
+                        confirmalos en "Revisar matches" (más abajo); hasta entonces la verificación no los incluye.
                     </p>
-                    <Link href={`/ordenes-compra/${ordenId}/comprobantes`}>
-                        <Button size="sm" variant="outline" className="border-amber-400 text-amber-800">Revisar matches</Button>
-                    </Link>
                 </div>
             )}
 
@@ -467,39 +465,10 @@ export default function VerificacionOCPage() {
                 </Card>
             </div>
 
-            {!tieneComps && (
-                <Card className="mb-6 border-orange-200 bg-orange-50">
-                    <CardContent className="py-4 flex items-center gap-3">
-                        <AlertTriangle className="h-5 w-5 text-orange-500" />
-                        <div>
-                            <p className="text-sm font-medium text-orange-800">Sin comprobantes vinculados</p>
-                            <p className="text-xs text-orange-600">Cargá la factura para completar la verificación.</p>
-                        </div>
-                        <Button variant="outline" size="sm" className="ml-auto"
-                            onClick={() => router.push(`/ordenes-compra/${ordenId}/comprobantes`)}>
-                            <FileText className="h-4 w-4 mr-1" /> Cargar comprobante
-                        </Button>
-                    </CardContent>
-                </Card>
-            )}
-
-            {tieneComps && (
-                <Card className="mb-6">
-                    <CardHeader className="py-3">
-                        <CardTitle className="text-sm flex items-center gap-2"><FileText className="h-4 w-4" /> Comprobantes vinculados</CardTitle>
-                    </CardHeader>
-                    <CardContent className="py-2">
-                        <div className="flex gap-3 flex-wrap">
-                            {comprobantes.map(c => (
-                                <Badge key={c.id} variant="outline" className="text-xs py-1 px-3">
-                                    {c.tipo} {c.numero} — {formatCurrency(c.total)}
-                                    {Object.keys(c.items).length > 0 && <span className="ml-1 text-green-600">✓ detalle</span>}
-                                </Badge>
-                            ))}
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
+            {/* ── COMPROBANTES: subir (múltiple, sin bloquear), editar, validar, eliminar + revisar matches ── */}
+            <div className="mb-6">
+                <ComprobantesSection ordenId={ordenId} onChanged={loadAll} />
+            </div>
 
             {/* ── DIALOG RESOLUCIÓN FALTANTES ── */}
             <Dialog open={!!resolviendoRow} onOpenChange={open => !open && setResolviendoRow(null)}>
@@ -637,10 +606,10 @@ export default function VerificacionOCPage() {
                                         <TableCell className="font-mono text-xs">{row.sku}</TableCell>
                                         <TableCell className="text-sm max-w-[180px] truncate">{row.descripcion}</TableCell>
                                         <TableCell className="text-right font-mono">
-                                            {row.cant_oc}{row.es_bulto && row.cant_oc > 0 ? <span className="text-[10px] text-muted-foreground"> blt ({row.cant_oc * row.unidades_por_bulto} u)</span> : null}
+                                            {row.cant_oc}{row.es_bulto && row.cant_oc > 0 ? <span className="text-[10px] text-muted-foreground"> BUL ({row.cant_oc * row.unidades_por_bulto} u)</span> : null}
                                         </TableCell>
                                         <TableCell className={`text-right font-mono ${hasDiff ? "text-orange-600 font-bold" : ""}`}>
-                                            {row.cant_recibida}{row.es_bulto && row.cant_recibida > 0 ? <span className="text-[10px] text-muted-foreground"> blt</span> : null}
+                                            {row.cant_recibida}{row.es_bulto && row.cant_recibida > 0 ? <span className="text-[10px] text-muted-foreground"> BUL</span> : null}
                                         </TableCell>
                                         {/* Cant per comprobante */}
                                         {comprobantes.map(c => {
@@ -680,7 +649,7 @@ export default function VerificacionOCPage() {
                                                 {row.pendiente_oc > 0 && row.status !== "faltante" && (
                                                     <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-400"
                                                         title="El proveedor no envió ni facturó esta cantidad de la OC (faltante de fábrica: no se debe, pero quedó sin cubrir)">
-                                                        Incompleto: −{row.pendiente_oc}{row.es_bulto ? " blt" : ""} vs OC
+                                                        Incompleto: −{row.pendiente_oc}{row.es_bulto ? " BUL" : ""} vs OC
                                                     </Badge>
                                                 )}
                                             </div>

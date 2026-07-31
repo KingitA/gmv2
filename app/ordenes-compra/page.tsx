@@ -1135,7 +1135,7 @@ export default function OrdenesCompraPage() {
                         {(orden.estado === "enviada" || orden.estado === "confirmada" || orden.estado === "en_camino") && (
                           <>
                             <Button variant="outline" size="sm"
-                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/comprobantes`)}>
+                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/verificacion`)}>
                               <FileText className="h-4 w-4 mr-1" /> Cargar comprobante
                             </Button>
                           </>
@@ -1149,7 +1149,7 @@ export default function OrdenesCompraPage() {
                               <CheckCircle2 className="h-4 w-4 mr-1" /> Verificar
                             </Button>
                             <Button variant="outline" size="sm"
-                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/comprobantes`)}>
+                              onClick={() => (window.location.href = `/ordenes-compra/${orden.id}/verificacion`)}>
                               <FileText className="h-4 w-4 mr-1" /> Comprobantes
                             </Button>
                           </>

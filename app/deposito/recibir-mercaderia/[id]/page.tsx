@@ -427,7 +427,7 @@ export default function RecibirMercaderiaDetallePage() {
         <button onClick={()=>setVerDocumentos(false)} style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:12, padding:"8px 16px", fontSize:14, fontWeight:600, cursor:"pointer" }}>← Volver</button>
       </div>
       <div style={{ marginBottom:14, display:"flex", gap:8 }}>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{if(e.target.files?.[0])subirFoto(e.target.files[0]); e.target.value=""}} />
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple style={{ display:"none" }} onChange={e=>{Array.from(e.target.files||[]).forEach(file=>subirFoto(file)); e.target.value=""}} />
         <select value={tipoDocDeposito} onChange={e=>setTipoDocDeposito(e.target.value as any)}
           style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"10px 12px", fontSize:13, color:C.text, fontWeight:600, flex:1 }}>
           <option value="remito">Remito</option>
