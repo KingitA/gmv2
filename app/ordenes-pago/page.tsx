@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Plus, DollarSign, CheckCircle2, XCircle, Eye } from "lucide-react"
+import { ArrowLeft, Plus, DollarSign, CheckCircle2, XCircle, Eye, FileText, Receipt } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 
@@ -207,6 +207,19 @@ export default function OrdenesPagoPage() {
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <div className="flex gap-1 justify-end">
+                                                    <a href={`/api/ordenes-pago/${op.id}/pdf`} target="_blank" rel="noreferrer">
+                                                        <Button variant="ghost" size="sm" title="PDF de la orden de pago">
+                                                            <FileText className="h-4 w-4" />
+                                                        </Button>
+                                                    </a>
+                                                    {op.estado === "pagada" && Number(op.retencion_ganancias || 0) > 0 && (
+                                                        <a href={`/api/ordenes-pago/${op.id}/certificado`} target="_blank" rel="noreferrer">
+                                                            <Button variant="ghost" size="sm" className="text-orange-600 hover:bg-orange-50"
+                                                                title="Certificado de retención RG 830">
+                                                                <Receipt className="h-4 w-4" />
+                                                            </Button>
+                                                        </a>
+                                                    )}
                                                     {op.estado === "pendiente" && (
                                                         <>
                                                             <Button variant="ghost" size="sm"
