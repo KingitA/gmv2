@@ -117,6 +117,8 @@ export default function FinanzasPage() {
   const [depositados, setDepositados] = useState<Array<{ monto: number }>>([])
   const [vencs, setVencs] = useState<any[]>([])
   const [emitidos, setEmitidos] = useState<ChequeEmitido[]>([])
+  // Retención de Ganancias proyectada por vencimiento (R4): el neto real a pagar
+  const [proyRet, setProyRet] = useState<Record<string, { retencion: number; neto: number }>>({})
   const [evolucion, setEvolucion] = useState<{ serie: any[]; cuentas: string[] }>({ serie: [], cuentas: [] })
 
   // Selección
@@ -144,7 +146,7 @@ export default function FinanzasPage() {
 
   const load = async () => {
     setLoading(true)
-    const [{ data }, liveRes, chequesRes, depRes, vencsRes, emitidosRes, evoRes] = await Promise.all([
+    const [{ data }, liveRes, chequesRes, depRes, vencsRes, emitidosRes, evoRes, proyRes] = await Promise.all([
       sb.from("finanzas_saldos").select("caja_key, monto, fecha").order("fecha", { ascending: true }),
       fetch("/api/finanzas/cajas").then(r => r.json()).catch(() => ({ cuentas: [] })),
       fetch("/api/cheques?estado=EN_CARTERA&tipo=TERCERO").then(r => r.json()).catch(() => ({ cheques: [] })),
@@ -152,6 +154,7 @@ export default function FinanzasPage() {
       fetch("/api/vencimientos?estado=pendiente&mantener=1").then(r => r.json()).catch(() => []),
       fetch("/api/cheques?estado=ENTREGADO_A_PROVEEDOR&tipo=PROPIO").then(r => r.json()).catch(() => ({ cheques: [] })),
       fetch("/api/finanzas/evolucion").then(r => r.json()).catch(() => ({ serie: [], cuentas: [] })),
+      fetch("/api/finanzas/proyeccion-retenciones").then(r => r.json()).catch(() => ({ proyeccion: {} })),
     ])
     setSaldos((data || []) as any)
     const live: Record<string, number> = {}
@@ -165,6 +168,7 @@ export default function FinanzasPage() {
     setVencs(Array.isArray(vencsRes) ? vencsRes : [])
     setEmitidos(emitidosRes.cheques || [])
     setEvolucion(evoRes.serie ? evoRes : { serie: [], cuentas: [] })
+    setProyRet(proyRes.proyeccion || {})
     setLoading(false)
   }
 
@@ -226,8 +230,11 @@ export default function FinanzasPage() {
   // ── Matriz de liquidez ─────────────────────────────────────────────────────
   const setDias = (d: 7 | 15 | 30) => { setDispoDias(d); setDispoFecha(addDias(today(), d)) }
   const vencsHasta = vencs.filter(v => v.fecha_vencimiento <= dispoFecha)
+  // Neto proyectado (R4): si hay retención de Ganancias proyectada, lo que sale
+  // de la caja es el neto — la retención se ingresa después por SICORE.
+  const montoNetoVenc = (v: any) => (proyRet[v.id] ? proyRet[v.id].neto : Number(v.monto))
   const salePorForma = (formas: string[]) =>
-    vencsHasta.filter(v => formas.includes(v.forma_pago || "transferencia")).reduce((s, v) => s + Number(v.monto), 0)
+    vencsHasta.filter(v => formas.includes(v.forma_pago || "transferencia")).reduce((s, v) => s + montoNetoVenc(v), 0)
 
   const saleEfectivo = salePorForma(["efectivo"])
   const saleBancos = salePorForma(["transferencia"]) + emitidosHasta(dispoFecha)
@@ -239,7 +246,7 @@ export default function FinanzasPage() {
   const quedaBancos = bancosSel + entraBancos - saleBancos
   const quedaCheques = chequesSelTotal - saleCheques
 
-  const sale30 = vencs.filter(v => v.fecha_vencimiento <= addDias(today(), 30)).reduce((s, v) => s + Number(v.monto), 0)
+  const sale30 = vencs.filter(v => v.fecha_vencimiento <= addDias(today(), 30)).reduce((s, v) => s + montoNetoVenc(v), 0)
     + emitidosHasta(addDias(today(), 30))
 
   const proxEfectivo = vencsHasta.filter(v => (v.forma_pago || "") === "efectivo").sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))[0]
@@ -368,7 +375,14 @@ export default function FinanzasPage() {
           {v.descuentos_aplicados === false && <span className="ml-2 text-xs font-bold text-red-600">⚠ sin descuentos aplicados</span>}
         </span>
         <span className={`rounded-md px-2 py-0.5 text-[10.5px] font-bold tracking-wide ${medio.cls}`}>{medio.label}</span>
-        <span className="font-semibold text-slate-800" style={NUM}>{fmt(Number(v.monto))}</span>
+        <span className="text-right">
+          <span className="font-semibold text-slate-800 block" style={NUM}>{fmt(proyRet[v.id] ? proyRet[v.id].neto : Number(v.monto))}</span>
+          {proyRet[v.id] && (
+            <span className="text-[10.5px] text-orange-700 block" style={NUM}>
+              neto de ret. Gcias ≈ {fmt(proyRet[v.id].retencion)} (bruto {fmt(Number(v.monto))})
+            </span>
+          )}
+        </span>
         <ChevronRight className="h-4 w-4 text-slate-300" />
       </div>
     )
