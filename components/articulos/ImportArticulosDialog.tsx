@@ -146,6 +146,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [doneResult, setDoneResult] = useState<any>(null)
+  const [warnings, setWarnings] = useState<{ sku: string; campo: string; valor: string }[]>([])
 
   function reset() {
     setStep("upload")
@@ -159,6 +160,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     setLoading(false)
     setError(null)
     setDoneResult(null)
+    setWarnings([])
   }
 
   // ─── Step 1: Upload ──────────────────────────────────────────────────────
@@ -237,7 +239,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
   const OFERTA_RE = /^(.*?)\s*\(\s*(\d+(?:[.,]\d+)?)\s*%\s*\)\s*$/
 
   /** Convierte las filas de Excel al formato ArticleUpdateRow según el mapeo */
-  function buildRows(): any[] {
+  function buildRows(): { rows: any[]; warnings: { sku: string; campo: string; valor: string }[] } {
     const colIndexMap: Record<string, number> = {}
 
     headers.forEach((h, i) => {
@@ -247,14 +249,17 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     })
 
     const NUMERIC_GT0 = ["unidades_por_bulto","cantidad_fraccion","precio_compra","porcentaje_ganancia","precio_base","precio_base_contado","precio_lista_especial"]
+    const warnings: { sku: string; campo: string; valor: string }[] = []
+    const skuIdxG = colIndexMap["sku"]
 
-    return excelRows
+    const rows = excelRows
       .filter(row => {
         const skuIdx = colIndexMap["sku"]
         return skuIdx !== undefined && String(row[skuIdx] ?? "").trim() !== ""
       })
       .map(row => {
         const obj: Record<string, any> = {}
+        const skuRow = String(row[skuIdxG] ?? "").trim()
 
         for (const [field, idx] of Object.entries(colIndexMap)) {
           const val = row[idx]
@@ -265,6 +270,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             // Numérico estricto > 0
             const n = parseFloat(str.replace(",", "."))
             if (!isNaN(n) && n > 0) obj[field] = n
+            else warnings.push({ sku: skuRow, campo: fieldLabel(field), valor: str })
 
           } else if (field === "descripcion") {
             // Guarda descripción limpia; si tenía "(15%)" también setea descuento_propio
@@ -288,6 +294,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             // Deducción por símbolo del Excel (0 / + / ½). Si no se reconoce, no se importa ese campo.
             const mapped = field === "iva_compras" ? mapIvaCompras(str) : mapIvaVentas(str)
             if (mapped) obj[field] = mapped
+            else warnings.push({ sku: skuRow, campo: fieldLabel(field), valor: str })
 
           } else {
             obj[field] = str
@@ -297,6 +304,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
         return obj
       })
       .filter(r => r.sku)
+
+    return { rows, warnings }
   }
 
   async function handlePreview() {
@@ -306,7 +315,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     setLoading(true)
 
     try {
-      const rows = buildRows()
+      const { rows, warnings } = buildRows()
+      setWarnings(warnings)
       console.log("[import] buildRows →", rows.length, "filas válidas", rows.slice(0,3))
       const conOferta = rows.filter(r => r.descuento_propio !== undefined)
       console.log("[import] filas con descuento_propio:", conOferta.length, conOferta.map(r => ({ sku: r.sku, descuento_propio: r.descuento_propio })))
@@ -351,7 +361,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
     setLoading(true)
 
     try {
-      const rows = buildRows()
+      const { rows, warnings } = buildRows()
+      setWarnings(warnings)
       const res = await fetch("/api/articulos/import-bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -405,6 +416,24 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
+        )}
+
+        {/* Valores que NO se importaron (para corregir y re-subir) */}
+        {(step === "preview" || step === "done") && warnings.length > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs">
+            <div className="font-semibold text-amber-800 mb-1">
+              ⚠️ {warnings.length} valor{warnings.length !== 1 ? "es" : ""} no reconocido{warnings.length !== 1 ? "s" : ""} — NO se importaron:
+            </div>
+            <div className="max-h-28 overflow-y-auto text-amber-700 space-y-0.5">
+              {warnings.slice(0, 100).map((w, i) => (
+                <div key={i}>
+                  SKU <span className="font-mono font-medium">{w.sku || "—"}</span> · {w.campo}: "<span className="font-mono">{w.valor}</span>"
+                </div>
+              ))}
+              {warnings.length > 100 && <div className="italic">…y {warnings.length - 100} más.</div>}
+            </div>
+            <div className="text-amber-600 mt-1">Corregí esos valores en el Excel y volvé a subirlo.</div>
+          </div>
         )}
 
         {/* ── STEP 1: UPLOAD ── */}

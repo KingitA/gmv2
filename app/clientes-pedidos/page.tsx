@@ -131,22 +131,39 @@ type PedidoDetalle = {
   }
 }
 
+const SEG_LABEL: Record<string, string> = {
+  limpieza_bazar: "Limpieza/Bazar",
+  perf0: "Perfumería 0",
+  perf_medio: "Perfumería ½",
+  perf_plus: "Perfumería +",
+}
+
 /**
- * Resumen de las bonificaciones del cliente para mostrar en la cabecera del pedido
- * (modal y nota impresa). Devuelve strings tipo "−10% viajante" / "−5% mercadería".
+ * Resumen de descuentos para la cabecera del pedido (modal y nota impresa).
+ * - viajante / general: config del cliente (tabla bonificaciones), con su segmento.
+ * - mercadería: valor efectivo DEL PEDIDO (bonif_mercaderia_pct), que puede ser "solo
+ *   para este pedido" (override); si no, cae al de la ficha del cliente.
+ * Devuelve strings tipo "−10% viajante (Limpieza/Bazar)" / "−5% mercadería".
  */
-function resumenBonificaciones(bonifs: { tipo?: string; porcentaje?: number }[]): string[] {
+function resumenBonificaciones(
+  bonifs: { tipo?: string; porcentaje?: number; segmento?: string | null }[],
+  mercaderiaPct?: number | null,
+): string[] {
   const seen = new Set<string>()
   const out: string[] = []
   for (const b of bonifs || []) {
+    if (b.tipo === "mercaderia") continue // la mercadería se toma del pedido (abajo)
     const pct = Number(b?.porcentaje) || 0
     if (pct <= 0) continue
-    const key = `${b.tipo}-${pct}`
+    const key = `${b.tipo}-${pct}-${b.segmento || ""}`
     if (seen.has(key)) continue
     seen.add(key)
-    const nombre = b.tipo === "general" ? "general" : b.tipo === "mercaderia" ? "mercadería" : "viajante"
-    out.push(`−${pct}% ${nombre}`)
+    const nombre = b.tipo === "general" ? "general" : "viajante"
+    const seg = b.segmento && b.segmento !== "todos" ? ` (${SEG_LABEL[b.segmento] || b.segmento})` : ""
+    out.push(`−${pct}% ${nombre}${seg}`)
   }
+  const m = Number(mercaderiaPct) || 0
+  if (m > 0) out.push(`−${m}% mercadería`)
   return out
 }
 
@@ -201,6 +218,7 @@ export default function ClientesPedidosPage() {
   const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Pedido | null>(null)
   const [detallesPedido, setDetallesPedido] = useState<PedidoDetalle[]>([])
   const [bonifCliente, setBonifCliente] = useState<{ tipo?: string; porcentaje?: number; segmento?: string | null }[]>([])
+  const [mercPctPedido, setMercPctPedido] = useState<number | null>(null)
   const [viajeAsignado, setViajeAsignado] = useState<string>("")
   const [cargando, setCargando] = useState(true)
   const [sortColumn, setSortColumn] = useState<string>("numero_pedido")
@@ -241,18 +259,25 @@ export default function ClientesPedidosPage() {
     }
   }, [searchParams])
 
-  // Bonificaciones del cliente del pedido abierto (para mostrar el descuento en la cabecera)
+  // Descuentos del pedido abierto para la cabecera: bonificaciones del cliente
+  // (viajante/general por segmento) + mercadería efectiva del pedido (puede ser override).
   useEffect(() => {
-    const cid = pedidoSeleccionado?.cliente_id
-    if (!cid) { setBonifCliente([]); return }
+    const p = pedidoSeleccionado
+    if (!p?.cliente_id) { setBonifCliente([]); setMercPctPedido(null); return }
     supabase
       .from("bonificaciones")
       .select("tipo, porcentaje, segmento")
-      .eq("cliente_id", cid)
+      .eq("cliente_id", p.cliente_id)
       .eq("activo", true)
       .in("tipo", ["general", "mercaderia", "viajante"])
       .then(({ data }) => setBonifCliente(data || []))
-  }, [pedidoSeleccionado?.cliente_id])
+    supabase
+      .from("pedidos")
+      .select("bonif_mercaderia_pct")
+      .eq("id", p.id)
+      .single()
+      .then(({ data }) => setMercPctPedido((data as any)?.bonif_mercaderia_pct ?? null))
+  }, [pedidoSeleccionado?.id])
 
   useEffect(() => {
     supabase.from("listas_precio").select("id, nombre, recargo_limpieza_bazar, recargo_perfumeria_negro, recargo_perfumeria_blanco").eq("activo", true).then(({ data }) => setListasPrecio(data || []))
@@ -550,13 +575,18 @@ export default function ClientesPedidosPage() {
 
   const imprimirPedido = async (pedido: Pedido) => {
     try {
-      // Cargar bonificaciones del cliente para mostrar en impresión
+      // Cargar bonificaciones del cliente + mercadería efectiva del pedido (para la cabecera)
       const { data: bonifs } = await supabase
         .from("bonificaciones")
         .select("tipo, porcentaje, segmento")
         .eq("cliente_id", pedido.cliente_id)
         .eq("activo", true)
         .in("tipo", ["general", "mercaderia", "viajante"])
+      const { data: pedidoMerc } = await supabase
+        .from("pedidos").select("bonif_mercaderia_pct").eq("id", pedido.id).single()
+      const mercEfectiva = (pedidoMerc as any)?.bonif_mercaderia_pct != null
+        ? (pedidoMerc as any).bonif_mercaderia_pct
+        : ((bonifs || []).find((b: any) => b.tipo === "mercaderia")?.porcentaje ?? 0)
 
       const bonifLines = (segKey: string | null) => {
         const rows = (bonifs || []).filter(b => b.segmento === segKey || b.segmento === "todos" || !b.segmento)
@@ -694,7 +724,7 @@ export default function ClientesPedidosPage() {
                   }
                 })()}
                 ${(() => {
-                  const desc = resumenBonificaciones(bonifs || [])
+                  const desc = resumenBonificaciones(bonifs || [], mercEfectiva)
                   return desc.length
                     ? `<div class="label" style="margin-top: 8px;">Descuento</div><div class="value" style="color:#c2410c;font-weight:bold;">${desc.join(" · ")}</div>`
                     : ""
@@ -1345,7 +1375,10 @@ export default function ClientesPedidosPage() {
                   <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-2">Facturación y Precios</p>
                   <p className="font-bold text-slate-800 text-sm">{getMetodoDisplay(pedidoSeleccionado)}</p>
                   <p className="text-xs text-slate-700 mt-1.5 font-semibold">{getListaDisplay(pedidoSeleccionado)}</p>
-                  {resumenBonificaciones(bonifCliente).map((txt, i) => (
+                  {resumenBonificaciones(
+                    bonifCliente,
+                    mercPctPedido != null ? mercPctPedido : (bonifCliente.find(b => b.tipo === "mercaderia")?.porcentaje ?? 0),
+                  ).map((txt, i) => (
                     <p key={i} className="text-xs text-orange-700 mt-1 font-bold">{txt}</p>
                   ))}
                 </div>
