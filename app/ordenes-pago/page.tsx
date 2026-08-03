@@ -14,6 +14,12 @@ export default function OrdenesPagoPage() {
     const [ordenes, setOrdenes] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [filtroEstado, setFiltroEstado] = useState("todos")
+    const [mesExport, setMesExport] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 7))
+
+    const finDeMes = (ym: string) => {
+        const [y, m] = ym.split("-").map(Number)
+        return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`
+    }
 
     useEffect(() => { loadOrdenes() }, [filtroEstado])
 
@@ -150,6 +156,22 @@ export default function OrdenesPagoPage() {
                                     <Button className="gap-2"><Plus className="h-4 w-4" /> Nueva Orden de Pago</Button>
                                 </Link>
                             </div>
+                        </div>
+                        {/* Paquete mensual del contador: planilla PDF + TXT SICORE */}
+                        <div className="flex items-center gap-2 mt-3 flex-wrap text-sm">
+                            <span className="text-muted-foreground">Retenciones para el contador:</span>
+                            <input
+                                type="month"
+                                className="rounded-md border px-2 py-1 text-sm"
+                                value={mesExport}
+                                onChange={e => setMesExport(e.target.value)}
+                            />
+                            <a href={`/api/retenciones/export?formato=planilla&desde=${mesExport}-01&hasta=${finDeMes(mesExport)}`} target="_blank" rel="noreferrer">
+                                <Button variant="outline" size="sm">Planilla PDF</Button>
+                            </a>
+                            <a href={`/api/retenciones/export?formato=txt&desde=${mesExport}-01&hasta=${finDeMes(mesExport)}`}>
+                                <Button variant="outline" size="sm">TXT SICORE</Button>
+                            </a>
                         </div>
                     </CardHeader>
                     <CardContent className="p-0">

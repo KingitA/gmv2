@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer"
+import React, { type JSXElementConstructor, type ReactElement } from "react"
+import { ReciboPDF, type ReciboPDFData } from "@/lib/pdf/recibo-template"
 
 const fmtARS = (n: number | null | undefined) =>
   Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -183,6 +186,80 @@ export async function GET(
     )
     const totalMetodos = detalles.reduce((s: number, d: any) => s + Number(d.monto), 0)
     const netoCobrado = totalMetodos - totalRetenciones
+
+    // ── PDF por defecto (R5) — ?html=1 conserva la vista HTML imprimible ──
+    if (new URL(request.url).searchParams.get("html") !== "1") {
+      const { data: empresa } = await supabase
+        .from("configuracion_empresa")
+        .select("razon_social, cuit, direccion, logo_url")
+        .limit(1)
+        .single()
+
+      const metodos = detalles.map((det: any) => {
+        let label = labelMetodo(det, cajaMap, bancoMap)
+        let nota: string | undefined
+        const subItems: string[] = []
+
+        if (det.tipo_pago === "cheque" && det.cheque_id && chequeMap.has(det.cheque_id)) {
+          const ch = chequeMap.get(det.cheque_id)
+          label = `Cheque ${ch.numero || det.numero_cheque || ""}${ch.banco ? ` (${ch.banco})` : ""}`
+            + `${ch.fecha_vencimiento ? ` — vto. ${fmtFecha(ch.fecha_vencimiento)}` : ""}`
+            + ` — Total cheque: $${fmtARS(ch.monto)}`
+          if (ch.coClientes.length > 0) {
+            const co = ch.coClientes
+              .map((c: any) => `${c.nombre}${c.direccion ? ` (${c.direccion})` : ""} — $${fmtARS(c.monto)}`)
+              .join("; ")
+            nota = `Cheque compartido por $${fmtARS(ch.monto)}. Imputado a esta cuenta: $${fmtARS(det.monto)}. Se adjunta el pago junto con: ${co}.`
+          }
+        }
+        if (det.tipo_pago === "deposito") {
+          for (const it of depositoItemsMap.get(det.id) || []) {
+            subItems.push(
+              it.tipo_item === "cheque"
+                ? `└ Cheque ${it.numero_cheque || ""} ${it.banco_emisor ? `(${it.banco_emisor})` : ""} vto. ${fmtFecha(it.fecha_pago_cheque)} — $${fmtARS(it.monto)}`
+                : `└ Efectivo — Nro. dep. ${it.nro_comprobante_deposito_ef || ""} — $${fmtARS(it.monto)}`
+            )
+          }
+        }
+        return { label, monto: Number(det.monto), subItems, nota }
+      })
+
+      const dataPdf: ReciboPDFData = {
+        empresa: {
+          razon_social: empresa?.razon_social ?? "GM DISTRIBUIDORA",
+          cuit: empresa?.cuit ?? "—",
+          direccion: empresa?.direccion,
+          logo_url: empresa?.logo_url,
+        },
+        recibo: { numero: numeroRecibo, fecha: pago.fecha_pago },
+        cliente: {
+          nombre: cliente?.razon_social || cliente?.nombre_razon_social || cliente?.nombre || "—",
+          cuit: cliente?.cuit,
+          direccion: cliente?.direccion,
+        },
+        imputaciones: (imputaciones || []).map((imp: any) => ({
+          tipo: imp.comprobante?.tipo_comprobante,
+          numero: imp.comprobante?.numero_comprobante,
+          fecha: imp.comprobante?.fecha,
+          total: Number(imp.comprobante?.total_factura ?? 0),
+          cancelado: Number(imp.monto_imputado ?? 0),
+        })),
+        metodos,
+        retenciones: (pago.retenciones || []).map((r: any) => ({
+          tipo: r.tipo, fecha: r.fecha, numero: r.numero_comprobante, monto: Number(r.monto),
+        })),
+        totales: { recibido: totalMetodos, retenciones: totalRetenciones, neto: netoCobrado },
+      }
+
+      const element = React.createElement(ReciboPDF, { data: dataPdf }) as unknown as ReactElement<DocumentProps, JSXElementConstructor<DocumentProps>>
+      const buffer = await renderToBuffer(element)
+      return new NextResponse(new Uint8Array(buffer), {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="Recibo_${numeroRecibo}.pdf"`,
+        },
+      })
+    }
 
     const html = `<!DOCTYPE html>
 <html lang="es">
