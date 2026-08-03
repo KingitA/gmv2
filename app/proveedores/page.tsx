@@ -8,7 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Plus, Pencil, Trash2, ArrowLeft, Upload, Download, ShoppingCart, FileText, Search, History } from "lucide-react"
+import { Plus, Pencil, Trash2, ArrowLeft, Upload, Download, ShoppingCart, FileText, Search, History, ShieldCheck } from "lucide-react"
+import { FichaFiscalDialog } from "@/components/proveedores/ficha-fiscal-dialog"
 import { ImportProveedoresDialog, proveedoresFieldLabel } from "@/components/proveedores/ImportProveedoresDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import Link from "next/link"
@@ -25,6 +26,7 @@ export default function ProveedoresPage() {
   const [importing, setImporting] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isHistorialOpen, setIsHistorialOpen] = useState(false)
+  const [fichaFiscal, setFichaFiscal] = useState<{ id: string; nombre: string } | null>(null)
   const [formData, setFormData] = useState({
     nombre: "",
     sigla: "",
@@ -842,6 +844,15 @@ export default function ProveedoresPage() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              onClick={() => setFichaFiscal({ id: proveedor.id, nombre: proveedor.nombre })}
+                              className="hover:bg-indigo-50 hover:text-indigo-600"
+                              title="Ficha fiscal (RG 830, exclusiones, legajo)"
+                            >
+                              <ShieldCheck className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => openEditDialog(proveedor)}
                               className="hover:bg-blue-50 hover:text-blue-600"
                             >
@@ -866,6 +877,13 @@ export default function ProveedoresPage() {
           </CardContent>
         </Card>
       </main>
+
+      <FichaFiscalDialog
+        proveedorId={fichaFiscal?.id ?? null}
+        proveedorNombre={fichaFiscal?.nombre ?? ""}
+        open={!!fichaFiscal}
+        onOpenChange={(o) => { if (!o) setFichaFiscal(null) }}
+      />
     </div>
   )
 }
