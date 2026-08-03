@@ -132,16 +132,22 @@ type PedidoDetalle = {
 }
 
 /**
- * Descuento efectivo (%) aplicado a una línea del pedido, combinando la bonificación
- * general y la de viajante (que se aplican en cascada, no se suman). Estos % ya quedan
- * congelados en pedidos_detalle al crear el pedido — la misma fuente que usa la factura.
+ * Resumen de las bonificaciones del cliente para mostrar en la cabecera del pedido
+ * (modal y nota impresa). Devuelve strings tipo "−10% viajante" / "−5% mercadería".
  */
-function descuentoLineaPct(d: any): number {
-  const v = Number(d?.bonif_viajante_pct) || 0
-  const g = Number(d?.bonif_general_pct) || 0
-  if (v <= 0 && g <= 0) return 0
-  const eff = (1 - (1 - g / 100) * (1 - v / 100)) * 100
-  return Math.round(eff * 10) / 10
+function resumenBonificaciones(bonifs: { tipo?: string; porcentaje?: number }[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const b of bonifs || []) {
+    const pct = Number(b?.porcentaje) || 0
+    if (pct <= 0) continue
+    const key = `${b.tipo}-${pct}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const nombre = b.tipo === "general" ? "general" : b.tipo === "mercaderia" ? "mercadería" : "viajante"
+    out.push(`−${pct}% ${nombre}`)
+  }
+  return out
 }
 
 type Viaje = {
@@ -194,6 +200,7 @@ export default function ClientesPedidosPage() {
   const [filtroEstado, setFiltroEstado] = useState<string>("todos")
   const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Pedido | null>(null)
   const [detallesPedido, setDetallesPedido] = useState<PedidoDetalle[]>([])
+  const [bonifCliente, setBonifCliente] = useState<{ tipo?: string; porcentaje?: number; segmento?: string | null }[]>([])
   const [viajeAsignado, setViajeAsignado] = useState<string>("")
   const [cargando, setCargando] = useState(true)
   const [sortColumn, setSortColumn] = useState<string>("numero_pedido")
@@ -233,6 +240,19 @@ export default function ClientesPedidosPage() {
       setBusqueda(pedidoParam)
     }
   }, [searchParams])
+
+  // Bonificaciones del cliente del pedido abierto (para mostrar el descuento en la cabecera)
+  useEffect(() => {
+    const cid = pedidoSeleccionado?.cliente_id
+    if (!cid) { setBonifCliente([]); return }
+    supabase
+      .from("bonificaciones")
+      .select("tipo, porcentaje, segmento")
+      .eq("cliente_id", cid)
+      .eq("activo", true)
+      .in("tipo", ["general", "mercaderia", "viajante"])
+      .then(({ data }) => setBonifCliente(data || []))
+  }, [pedidoSeleccionado?.cliente_id])
 
   useEffect(() => {
     supabase.from("listas_precio").select("id, nombre, recargo_limpieza_bazar, recargo_perfumeria_negro, recargo_perfumeria_blanco").eq("activo", true).then(({ data }) => setListasPrecio(data || []))
@@ -661,7 +681,6 @@ export default function ClientesPedidosPage() {
                       return `
                         <div class="label">${s.label}</div>
                         <div class="value" style="margin-bottom: 2px;">${s.metodo || c?.metodo_facturacion || "—"} — ${listaNombre}</div>
-                        ${bonifLines(s.segKey)}
                       `
                     }).join('')
                   } else {
@@ -671,9 +690,14 @@ export default function ClientesPedidosPage() {
                       <div class="value">${listaNombre}</div>
                       <div class="label" style="margin-top: 8px;">Forma de Facturación</div>
                       <div class="value">${pedido.metodo_facturacion_pedido || pedido.clientes?.metodo_facturacion || "—"}</div>
-                      ${bonifLines(null)}
                     `
                   }
+                })()}
+                ${(() => {
+                  const desc = resumenBonificaciones(bonifs || [])
+                  return desc.length
+                    ? `<div class="label" style="margin-top: 8px;">Descuento</div><div class="value" style="color:#c2410c;font-weight:bold;">${desc.join(" · ")}</div>`
+                    : ""
                 })()}
                 <div class="label" style="margin-top: 8px;">Vendedor</div>
                 <div class="value">${pedido.vendedores?.nombre || "Sin asignar"}</div>
@@ -686,7 +710,6 @@ export default function ClientesPedidosPage() {
                   <th width="120">Código</th>
                   <th>Descripción</th>
                   <th>Marca</th>
-                  <th width="70" class="text-right">Desc.</th>
                   <th width="80" class="text-right">Cant.</th>
                 </tr>
               </thead>
@@ -696,7 +719,6 @@ export default function ClientesPedidosPage() {
             const esPresupuesto = d.articulos?.iva_ventas?.toLowerCase() === "presupuesto"
             const bgCode = esPresupuesto ? "#000" : "transparent"
             const textCode = esPresupuesto ? "#fff" : "inherit"
-            const descPct = descuentoLineaPct(d)
 
             return `
                   <tr>
@@ -705,7 +727,6 @@ export default function ClientesPedidosPage() {
                     <td style="color: #666; font-size: 11px;">
                       ${(d.articulos as any)?.marcas?.descripcion || "—"}
                     </td>
-                    <td class="text-right" style="${descPct > 0 ? "color:#c2410c;font-weight:bold;" : "color:#bbb;"}">${descPct > 0 ? descPct + "%" : "—"}</td>
                     <td class="text-right"><strong>${d.cantidad}</strong></td>
                   </tr>
                 `
@@ -1324,6 +1345,9 @@ export default function ClientesPedidosPage() {
                   <p className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-2">Facturación y Precios</p>
                   <p className="font-bold text-slate-800 text-sm">{getMetodoDisplay(pedidoSeleccionado)}</p>
                   <p className="text-xs text-slate-700 mt-1.5 font-semibold">{getListaDisplay(pedidoSeleccionado)}</p>
+                  {resumenBonificaciones(bonifCliente).map((txt, i) => (
+                    <p key={i} className="text-xs text-orange-700 mt-1 font-bold">{txt}</p>
+                  ))}
                 </div>
               </div>
 
@@ -1437,14 +1461,7 @@ export default function ClientesPedidosPage() {
                           }`} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-slate-700 truncate">{d.articulos?.descripcion}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">
-                              {d.articulos?.sku} · {d.articulos?.proveedores?.nombre || "—"}
-                              {descuentoLineaPct(d) > 0 && (
-                                <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-sans font-bold">
-                                  Desc. {descuentoLineaPct(d)}%
-                                </span>
-                              )}
-                            </p>
+                            <p className="text-[10px] text-slate-400 font-mono">{d.articulos?.sku} · {d.articulos?.proveedores?.nombre || "—"}</p>
                           </div>
                           <div className="text-right shrink-0">
                             <span className="text-sm font-bold text-slate-700">{d.cantidad} u.</span>

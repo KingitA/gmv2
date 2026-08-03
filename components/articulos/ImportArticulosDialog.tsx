@@ -59,8 +59,8 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
   { id: "unidades_por_bulto",    label: "Unidades por bulto",      aliases: ["bulto", "unidadesbulto", "unidadesxbulto", "xbulto", "porb", "cant"] },
   { id: "cantidad_fraccion",     label: "Unidades por fracción",   aliases: ["unidadesfraccion", "unidadesporfraccion", "cantidadfraccion", "porfraccion", "fraccion", "fracción"] },
   { id: "precio_compra",         label: "Precio de compra / costo", aliases: ["compra", "costo", "cost", "preciocompra", "preciocosto"] },
-  { id: "iva_compras",           label: "IVA Compras",             hint: "factura / adquisicion_stock / mixto", aliases: ["ivacompras", "ivacompra", "ivac"] },
-  { id: "iva_ventas",            label: "IVA Ventas",              hint: "factura / presupuesto", aliases: ["ivaventas", "ivaventa", "ivav"] },
+  { id: "iva_compras",           label: "IVA Compras",             hint: "0=adq.stock · +=factura · ½=mixto", aliases: ["ivacompras", "ivacompra", "ivac"] },
+  { id: "iva_ventas",            label: "IVA Ventas",              hint: "0=presupuesto · +=factura", aliases: ["ivaventas", "ivaventa", "ivav"] },
   { id: "descuento_comercial",   label: "Descuento comercial",     aliases: ["dcomer", "desccomercial", "descuento", "desc", "dto", "d1"] },
   { id: "descuento_financiero",  label: "Descuento financiero",    aliases: ["dfinan", "descfinanciero", "financiero", "d2"] },
   { id: "descuento_promocional", label: "Descuento promocional",   aliases: ["dpromo", "descpromocional", "promocional", "promo", "d3"] },
@@ -72,6 +72,22 @@ const DB_FIELD_DEFS: DbFieldDef[] = [
 const SKIP_ID = "__skip__"
 
 export const articulosFieldLabel = (id: string) => DB_FIELD_DEFS.find(d => d.id === id)?.label ?? id
+
+/** Deduce iva_compras desde el símbolo del Excel: 0=adq.stock, +=factura, 1/2=mixto. */
+function mapIvaCompras(raw: string): string | undefined {
+  const s = raw.trim().toLowerCase()
+  if (s === "+" || s === "factura") return "factura"
+  if (s === "0" || s === "adquisicion_stock" || s === "adq" || s === "adqstock" || s === "stock") return "adquisicion_stock"
+  if (s === "1/2" || s === "½" || s === "0.5" || s === ".5" || s === "medio" || s === "mixto") return "mixto"
+  return undefined
+}
+/** Deduce iva_ventas desde el símbolo del Excel: 0=presupuesto, +=factura. */
+function mapIvaVentas(raw: string): string | undefined {
+  const s = raw.trim().toLowerCase()
+  if (s === "+" || s === "factura") return "factura"
+  if (s === "0" || s === "presupuesto") return "presupuesto"
+  return undefined
+}
 
 function suggestField(colName: string): string {
   const norm = colName.toLowerCase().replace(/[^a-z0-9]/g, "")
@@ -269,8 +285,9 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             }
 
           } else if (field === "iva_compras" || field === "iva_ventas") {
-            // Valores de catálogo → siempre en minúscula (factura / presupuesto / adquisicion_stock / mixto)
-            obj[field] = str.toLowerCase()
+            // Deducción por símbolo del Excel (0 / + / ½). Si no se reconoce, no se importa ese campo.
+            const mapped = field === "iva_compras" ? mapIvaCompras(str) : mapIvaVentas(str)
+            if (mapped) obj[field] = mapped
 
           } else {
             obj[field] = str
