@@ -60,11 +60,15 @@ function NuevaOrdenPagoContent() {
     const [fecha, setFecha] = useState(new Date().toISOString().split("T")[0])
     const [observaciones, setObservaciones] = useState("")
 
-    // Retenciones
+    // Retención de Ganancias RG 830 — calculada por el sistema; el ajuste
+    // manual requiere motivo y queda auditado. IIBB/IVA/SUSS fuera de alcance
+    // (no somos agentes) — las columnas quedan en 0.
     const [retGanancias, setRetGanancias] = useState(0)
-    const [retIibb, setRetIibb] = useState(0)
-    const [retIva, setRetIva] = useState(0)
-    const [retSuss, setRetSuss] = useState(0)
+    const [calcGanancias, setCalcGanancias] = useState<any>(null)
+    const [calcLoading, setCalcLoading] = useState(false)
+    const [gananciasManual, setGananciasManual] = useState(false)
+    const [gananciasMotivo, setGananciasMotivo] = useState("")
+    const retIibb = 0, retIva = 0, retSuss = 0
 
     // Medios de pago
     const [medios, setMedios] = useState<MedioPago[]>([])
@@ -81,6 +85,38 @@ function NuevaOrdenPagoContent() {
         loadProveedores()
         loadCheques()
     }, [])
+
+    // Recalcular la retención de Ganancias cuando cambian proveedor/imputaciones/fecha
+    useEffect(() => {
+        if (!proveedorId) { setCalcGanancias(null); if (!gananciasManual) setRetGanancias(0); return }
+        let cancel = false
+        setCalcLoading(true)
+        fetch("/api/ordenes-pago/preview-retencion", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                proveedor_id: proveedorId,
+                fecha,
+                imputaciones: imputaciones.map(i => ({
+                    movimiento_cc_id: i.movimiento_cc_id || null,
+                    vencimiento_id: i.vencimiento_id || null,
+                    comprobante_compra_id: i.comprobante_compra_id || null,
+                    monto_imputado: i.monto_imputado,
+                })),
+            }),
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (cancel) return
+                if (d.error) { setCalcGanancias({ error: d.error }); return }
+                setCalcGanancias(d)
+                if (!gananciasManual) setRetGanancias(Number(d.retencion ?? 0))
+            })
+            .catch(() => { if (!cancel) setCalcGanancias(null) })
+            .finally(() => { if (!cancel) setCalcLoading(false) })
+        return () => { cancel = true }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [proveedorId, fecha, JSON.stringify(imputaciones), gananciasManual])
 
     useEffect(() => {
         if (proveedorId) {
@@ -212,10 +248,19 @@ function NuevaOrdenPagoContent() {
     const totalRetenciones = retGanancias + retIibb + retIva + retSuss
     const totalImputado = imputaciones.reduce((sum, i) => sum + Number(i.monto_imputado || 0), 0)
 
+    // Con imputaciones: los medios deben cubrir el neto (imputado − retenciones)
+    const netoObjetivo = totalImputado > 0 ? Math.round((totalImputado - totalRetenciones) * 100) / 100 : null
+    const cuadra = netoObjetivo === null || Math.abs(totalMedios - netoObjetivo) <= 0.01
+
     async function handleSubmit() {
         if (!proveedorId) { alert("Seleccioná un proveedor"); return }
         if (medios.length === 0) { alert("Agregá al menos un medio de pago"); return }
         if (totalMedios <= 0) { alert("El total de medios de pago debe ser mayor a 0"); return }
+        if (gananciasManual && !gananciasMotivo.trim()) { alert("Indicá el motivo del ajuste manual de la retención"); return }
+        if (!cuadra) {
+            alert(`No cuadra: imputado ${formatCurrency(totalImputado)} − retenciones ${formatCurrency(totalRetenciones)} = ${formatCurrency(netoObjetivo!)}, pero los medios suman ${formatCurrency(totalMedios)}`)
+            return
+        }
 
         setSubmitting(true)
         try {
@@ -227,6 +272,8 @@ function NuevaOrdenPagoContent() {
                     fecha,
                     observaciones,
                     retencion_ganancias: retGanancias,
+                    ganancias_manual: gananciasManual,
+                    ganancias_motivo: gananciasManual ? gananciasMotivo.trim() : null,
                     retencion_iibb: retIibb,
                     retencion_iva: retIva,
                     retencion_suss: retSuss,
@@ -477,39 +524,72 @@ function NuevaOrdenPagoContent() {
                     </CardContent>
                 </Card>
 
-                {/* Retenciones */}
+                {/* Retención de Ganancias RG 830 — calculada */}
                 <Card>
                     <CardHeader>
-                        <CardTitle className="text-lg">Retenciones (opcional)</CardTitle>
+                        <CardTitle className="text-lg">
+                            Retención de Ganancias (RG 830) {calcLoading && <span className="text-xs text-muted-foreground font-normal">calculando…</span>}
+                        </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div>
-                                <Label>Ret. Ganancias</Label>
-                                <Input type="number" step="0.01" value={retGanancias}
-                                    onChange={e => setRetGanancias(parseFloat(e.target.value) || 0)} />
-                            </div>
-                            <div>
-                                <Label>Ret. IIBB</Label>
-                                <Input type="number" step="0.01" value={retIibb}
-                                    onChange={e => setRetIibb(parseFloat(e.target.value) || 0)} />
-                            </div>
-                            <div>
-                                <Label>Ret. IVA</Label>
-                                <Input type="number" step="0.01" value={retIva}
-                                    onChange={e => setRetIva(parseFloat(e.target.value) || 0)} />
-                            </div>
-                            <div>
-                                <Label>Ret. SUSS</Label>
-                                <Input type="number" step="0.01" value={retSuss}
-                                    onChange={e => setRetSuss(parseFloat(e.target.value) || 0)} />
-                            </div>
-                        </div>
-                        {totalRetenciones > 0 && (
-                            <div className="pt-3 mt-3 border-t text-right">
-                                <span className="text-sm font-medium">Total retenciones: </span>
-                                <span className="text-sm font-bold">{formatCurrency(totalRetenciones)}</span>
-                            </div>
+                    <CardContent className="space-y-3">
+                        {!proveedorId ? (
+                            <p className="text-sm text-muted-foreground">Elegí el proveedor para calcular.</p>
+                        ) : calcGanancias?.error ? (
+                            <p className="text-sm text-red-600">{calcGanancias.error}</p>
+                        ) : !calcGanancias ? (
+                            <p className="text-sm text-muted-foreground">Sin datos todavía.</p>
+                        ) : (
+                            <>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Régimen · condición</p>
+                                        <p className="font-medium capitalize">{calcGanancias.regimen} · {String(calcGanancias.condicion).replace("_", " ")} ({Number(calcGanancias.alicuota)}%)</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Base de este pago (neto)</p>
+                                        <p className="font-medium tabular-nums">{formatCurrency(Number(calcGanancias.base ?? 0))}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Acumulado del mes (c/este pago)</p>
+                                        <p className="font-medium tabular-nums">{formatCurrency(Number(calcGanancias.acumulado_total_mes ?? 0))} <span className="text-xs text-muted-foreground">/ mín. {formatCurrency(Number(calcGanancias.minimo_no_sujeto ?? 0))}</span></p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Retenido antes en el mes</p>
+                                        <p className="font-medium tabular-nums">{formatCurrency(Number(calcGanancias.retenido_previo_mes ?? 0))}</p>
+                                    </div>
+                                </div>
+                                {(calcGanancias.bases_detalle ?? []).some((b: any) => b.tipo === "estimada") && (
+                                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">
+                                        Alguna imputación no tiene factura validada: su base se estimó como monto ÷ 1,21.
+                                    </p>
+                                )}
+                                {calcGanancias.motivo_sin_retencion && Number(retGanancias) === 0 && !gananciasManual && (
+                                    <p className="text-xs text-muted-foreground">No se retiene: {calcGanancias.motivo_sin_retencion}.</p>
+                                )}
+                                <div className="flex items-center gap-3 pt-2 border-t flex-wrap">
+                                    <div className="text-right">
+                                        <p className="text-xs text-muted-foreground">Retención a practicar</p>
+                                        {gananciasManual ? (
+                                            <Input type="number" step="0.01" className="w-36 text-right font-bold" value={retGanancias}
+                                                onChange={e => setRetGanancias(parseFloat(e.target.value) || 0)} />
+                                        ) : (
+                                            <p className="text-xl font-bold text-orange-600 tabular-nums">{formatCurrency(retGanancias)}</p>
+                                        )}
+                                    </div>
+                                    <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer ml-auto">
+                                        <input type="checkbox" className="h-3.5 w-3.5" checked={gananciasManual}
+                                            onChange={e => {
+                                                setGananciasManual(e.target.checked)
+                                                if (!e.target.checked) setRetGanancias(Number(calcGanancias?.retencion ?? 0))
+                                            }} />
+                                        Ajustar manualmente (queda auditado)
+                                    </label>
+                                    {gananciasManual && (
+                                        <Input className="w-full" placeholder="Motivo del ajuste (obligatorio)"
+                                            value={gananciasMotivo} onChange={e => setGananciasMotivo(e.target.value)} />
+                                    )}
+                                </div>
+                            </>
                         )}
                     </CardContent>
                 </Card>
@@ -517,18 +597,27 @@ function NuevaOrdenPagoContent() {
                 {/* Resumen y confirmar */}
                 <Card className="border-2 border-primary/20">
                     <CardContent className="p-6">
-                        <div className="grid grid-cols-3 gap-6 text-center">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
                             <div>
-                                <p className="text-sm text-muted-foreground">Total Bruto</p>
-                                <p className="text-xl font-bold">{formatCurrency(totalMedios + totalRetenciones)}</p>
+                                <p className="text-sm text-muted-foreground">Total Bruto {totalImputado > 0 ? "(imputado)" : ""}</p>
+                                <p className="text-xl font-bold">{formatCurrency(totalImputado > 0 ? totalImputado : totalMedios + totalRetenciones)}</p>
                             </div>
                             <div>
-                                <p className="text-sm text-muted-foreground">Retenciones</p>
+                                <p className="text-sm text-muted-foreground">Retención Ganancias</p>
                                 <p className="text-xl font-bold text-orange-600">{formatCurrency(totalRetenciones)}</p>
                             </div>
                             <div>
                                 <p className="text-sm text-muted-foreground">Neto a Pagar</p>
-                                <p className="text-2xl font-bold text-green-600">{formatCurrency(totalMedios)}</p>
+                                <p className="text-2xl font-bold text-green-600">{formatCurrency(netoObjetivo ?? totalMedios)}</p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-muted-foreground">Medios cargados</p>
+                                <p className={`text-xl font-bold ${cuadra ? "text-green-600" : "text-red-600"}`}>{formatCurrency(totalMedios)}</p>
+                                {!cuadra && netoObjetivo !== null && (
+                                    <p className="text-xs text-red-600 font-semibold">
+                                        {totalMedios > netoObjetivo ? "sobran" : "faltan"} {formatCurrency(Math.abs(totalMedios - netoObjetivo))}
+                                    </p>
+                                )}
                             </div>
                         </div>
                         <div className="flex gap-3 mt-6 justify-end">

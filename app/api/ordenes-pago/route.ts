@@ -58,6 +58,7 @@ export async function POST(request: Request) {
     const {
         proveedor_id, fecha, observaciones,
         retencion_ganancias, retencion_iibb, retencion_iva, retencion_suss,
+        ganancias_manual, ganancias_motivo,   // ajuste manual del cálculo automático
         medios_pago, // Array: [{ medio, monto, cheque_id, cheque_banco, ... }]
         imputaciones  // Array: [{ movimiento_cc_id?, vencimiento_id?, comprobante_compra_id?, monto_imputado }]
     } = body
@@ -70,11 +71,44 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Debe agregar al menos un medio de pago' }, { status: 400 })
     }
 
-    // Calcular totales
-    const montoTotal = medios_pago.reduce((sum: number, m: any) => sum + Number(m.monto || 0), 0)
-    const totalRetenciones = Number(retencion_ganancias || 0) + Number(retencion_iibb || 0) +
+    // ── Retención de Ganancias RG 830: SIEMPRE se calcula server-side ──
+    // (el valor del cliente solo se acepta como ajuste manual con motivo)
+    const { data: calc, error: calcErr } = await supabase.rpc('op_ganancias_preview', {
+        p_proveedor_id: proveedor_id,
+        p_imputaciones: imputaciones ?? [],
+        p_fecha: fecha ?? null,
+    })
+    if (calcErr) {
+        return NextResponse.json({ error: `Cálculo de retención: ${calcErr.message}` }, { status: 400 })
+    }
+    const retCalculada = Number(calc?.retencion ?? 0)
+    const baseGanancias = Number(calc?.base ?? 0)
+
+    let retGanancias = retCalculada
+    if (ganancias_manual) {
+        if (!ganancias_motivo || !String(ganancias_motivo).trim()) {
+            return NextResponse.json({ error: 'El ajuste manual de la retención requiere un motivo' }, { status: 400 })
+        }
+        retGanancias = Number(retencion_ganancias || 0)
+    }
+
+    const totalMedios = medios_pago.reduce((sum: number, m: any) => sum + Number(m.monto || 0), 0)
+    const totalRetenciones = retGanancias + Number(retencion_iibb || 0) +
         Number(retencion_iva || 0) + Number(retencion_suss || 0)
-    const netoAPagar = montoTotal
+    const totalImputado = (imputaciones ?? []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0)
+
+    // Cuadre: con imputaciones, los medios deben cubrir el neto (bruto − retenciones)
+    if (totalImputado > 0) {
+        const netoEsperado = Math.round((totalImputado - totalRetenciones) * 100) / 100
+        if (Math.abs(totalMedios - netoEsperado) > 0.01) {
+            return NextResponse.json({
+                error: `No cuadra: imputado $${totalImputado.toFixed(2)} − retenciones $${totalRetenciones.toFixed(2)} = neto $${netoEsperado.toFixed(2)}, pero los medios suman $${totalMedios.toFixed(2)}`,
+            }, { status: 400 })
+        }
+    }
+
+    const montoTotal = totalImputado > 0 ? totalImputado : totalMedios + totalRetenciones
+    const netoAPagar = totalMedios
 
     // Número de OP atómico (RPC con FOR UPDATE sobre numeracion_comprobantes;
     // formato 0001-XXXXXXXX, compatible con el Nº de comprobante del TXT SICORE)
@@ -93,12 +127,15 @@ export async function POST(request: Request) {
             monto_total: montoTotal + totalRetenciones,
             estado: 'pendiente',
             observaciones: observaciones || null,
-            retencion_ganancias: retencion_ganancias || 0,
+            retencion_ganancias: retGanancias,
             retencion_iibb: retencion_iibb || 0,
             retencion_iva: retencion_iva || 0,
             retencion_suss: retencion_suss || 0,
             total_retenciones: totalRetenciones,
             neto_a_pagar: netoAPagar,
+            base_ganancias: baseGanancias,
+            ganancias_ajuste_manual: Boolean(ganancias_manual),
+            ganancias_motivo: ganancias_manual ? String(ganancias_motivo).trim() : null,
             usuario_creador: auth.user.email || 'admin'
         })
         .select()
