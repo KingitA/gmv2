@@ -113,6 +113,9 @@ type PedidoDetalle = {
   precio_final: number
   subtotal: number
   descuento_articulo: number
+  precio_lista?: number | null
+  bonif_general_pct?: number | null
+  bonif_viajante_pct?: number | null
   flete: number
   comision: number
   impuestos: number
@@ -126,6 +129,19 @@ type PedidoDetalle = {
       nombre: string
     }
   }
+}
+
+/**
+ * Descuento efectivo (%) aplicado a una línea del pedido, combinando la bonificación
+ * general y la de viajante (que se aplican en cascada, no se suman). Estos % ya quedan
+ * congelados en pedidos_detalle al crear el pedido — la misma fuente que usa la factura.
+ */
+function descuentoLineaPct(d: any): number {
+  const v = Number(d?.bonif_viajante_pct) || 0
+  const g = Number(d?.bonif_general_pct) || 0
+  if (v <= 0 && g <= 0) return 0
+  const eff = (1 - (1 - g / 100) * (1 - v / 100)) * 100
+  return Math.round(eff * 10) / 10
 }
 
 type Viaje = {
@@ -670,6 +686,7 @@ export default function ClientesPedidosPage() {
                   <th width="120">Código</th>
                   <th>Descripción</th>
                   <th>Marca</th>
+                  <th width="70" class="text-right">Desc.</th>
                   <th width="80" class="text-right">Cant.</th>
                 </tr>
               </thead>
@@ -679,6 +696,7 @@ export default function ClientesPedidosPage() {
             const esPresupuesto = d.articulos?.iva_ventas?.toLowerCase() === "presupuesto"
             const bgCode = esPresupuesto ? "#000" : "transparent"
             const textCode = esPresupuesto ? "#fff" : "inherit"
+            const descPct = descuentoLineaPct(d)
 
             return `
                   <tr>
@@ -687,6 +705,7 @@ export default function ClientesPedidosPage() {
                     <td style="color: #666; font-size: 11px;">
                       ${(d.articulos as any)?.marcas?.descripcion || "—"}
                     </td>
+                    <td class="text-right" style="${descPct > 0 ? "color:#c2410c;font-weight:bold;" : "color:#bbb;"}">${descPct > 0 ? descPct + "%" : "—"}</td>
                     <td class="text-right"><strong>${d.cantidad}</strong></td>
                   </tr>
                 `
@@ -1418,7 +1437,14 @@ export default function ClientesPedidosPage() {
                           }`} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-slate-700 truncate">{d.articulos?.descripcion}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">{d.articulos?.sku} · {d.articulos?.proveedores?.nombre || "—"}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">
+                              {d.articulos?.sku} · {d.articulos?.proveedores?.nombre || "—"}
+                              {descuentoLineaPct(d) > 0 && (
+                                <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-sans font-bold">
+                                  Desc. {descuentoLineaPct(d)}%
+                                </span>
+                              )}
+                            </p>
                           </div>
                           <div className="text-right shrink-0">
                             <span className="text-sm font-bold text-slate-700">{d.cantidad} u.</span>
