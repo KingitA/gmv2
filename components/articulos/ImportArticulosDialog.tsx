@@ -39,29 +39,34 @@ import { ImportReportView } from "@/components/import/ImportReportView"
 interface DbFieldDef {
   id: string
   label: string
+  /** Aclaración chica y muteada (para no ensuciar el nombre del campo) */
+  hint?: string
   /** Keywords para auto-sugerencia (todo en minúsculas sin espacios) */
   aliases: string[]
 }
 
 const DB_FIELD_DEFS: DbFieldDef[] = [
-  // ── Los 5 más usados van primero ──
-  { id: "sku",                   label: "SKU",                              aliases: ["sku", "codigo", "cod", "code"] },
-  { id: "descripcion",           label: "Descripción (quita '(15%)' del texto si tiene)",       aliases: ["descripcion", "descripción", "nombre", "detalle", "articulo", "artículo", "name", "item"] },
-  { id: "descuento_propio",      label: "Oferta (lee '(15%)' del texto)",                        aliases: ["descuentopropio", "pctoferta", "dtopio", "oferta"] },
-  { id: "precio_base_contado",   label: "Base contado",                     aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
-  { id: "precio_base",           label: "Base cuenta corriente",            aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
-  { id: "precio_lista_especial", label: "Precio lista especial (neto)",     aliases: ["especial", "listaespecial", "precioespecial", "preciolistaespecial", "pespecial"] },
-  { id: "oferta_lista_especial", label: "Oferta lista especial %",          aliases: ["ofertaespecial", "ofertalistaespecial", "dtoespecial", "descespecial"] },
+  // ── Los más usados van primero ──
+  { id: "sku",                   label: "SKU",                     aliases: ["sku", "codigo", "cod", "code"] },
+  { id: "descripcion",           label: "Descripción",             hint: "quita (15%)", aliases: ["descripcion", "descripción", "nombre", "detalle", "articulo", "artículo", "name", "item"] },
+  { id: "descuento_propio",      label: "Oferta",                  hint: "lee (15%)",   aliases: ["descuentopropio", "pctoferta", "dtopio", "oferta"] },
+  { id: "precio_base_contado",   label: "Base contado",            aliases: ["basecontado", "pbasecontado", "pcontado", "contado"] },
+  { id: "precio_base",           label: "Base cuenta corriente",   aliases: ["cuentacorriente", "ctacte", "preciobase", "pbase", "base", "precio"] },
+  { id: "precio_lista_especial", label: "Precio lista especial",   hint: "neto",        aliases: ["especial", "listaespecial", "precioespecial", "preciolistaespecial", "pespecial"] },
+  { id: "oferta_lista_especial", label: "Oferta lista especial",   hint: "%",           aliases: ["ofertaespecial", "ofertalistaespecial", "dtoespecial", "descespecial"] },
   // ── Resto ──
-  { id: "ean13",                 label: "EAN / Código de barras",           aliases: ["ean", "ean13", "barcode", "barra", "codbar"] },
-  { id: "unidades_por_bulto",    label: "Unidades por bulto",               aliases: ["bulto", "unidadesbulto", "unidadesxbulto", "xbulto", "porb", "cant"] },
-  { id: "precio_compra",         label: "Precio de compra / costo",         aliases: ["compra", "costo", "cost", "preciocompra", "preciocosto"] },
-  { id: "descuento_comercial",   label: "Descuento comercial",              aliases: ["dcomer", "desccomercial", "descuento", "desc", "dto", "d1"] },
-  { id: "descuento_financiero",  label: "Descuento financiero",             aliases: ["dfinan", "descfinanciero", "financiero", "d2"] },
-  { id: "descuento_promocional", label: "Descuento promocional",            aliases: ["dpromo", "descpromocional", "promocional", "promo", "d3"] },
-  { id: "porcentaje_ganancia",   label: "% Ganancia / Margen",              aliases: ["ganancia", "margen", "margin", "margin%", "pctgan", "utilidad"] },
-  { id: "marca_codigo",          label: "Marca (código)",                   aliases: ["marca", "brand", "codigomarca", "marcacod"] },
-  { id: "__skip__",              label: "— No importar —",                  aliases: [] },
+  { id: "ean13",                 label: "EAN / Código de barras",  aliases: ["ean", "ean13", "barcode", "barra", "codbar"] },
+  { id: "unidades_por_bulto",    label: "Unidades por bulto",      aliases: ["bulto", "unidadesbulto", "unidadesxbulto", "xbulto", "porb", "cant"] },
+  { id: "cantidad_fraccion",     label: "Unidades por fracción",   aliases: ["unidadesfraccion", "unidadesporfraccion", "cantidadfraccion", "porfraccion", "fraccion", "fracción"] },
+  { id: "precio_compra",         label: "Precio de compra / costo", aliases: ["compra", "costo", "cost", "preciocompra", "preciocosto"] },
+  { id: "iva_compras",           label: "IVA Compras",             hint: "factura / adquisicion_stock / mixto", aliases: ["ivacompras", "ivacompra", "ivac"] },
+  { id: "iva_ventas",            label: "IVA Ventas",              hint: "factura / presupuesto", aliases: ["ivaventas", "ivaventa", "ivav"] },
+  { id: "descuento_comercial",   label: "Descuento comercial",     aliases: ["dcomer", "desccomercial", "descuento", "desc", "dto", "d1"] },
+  { id: "descuento_financiero",  label: "Descuento financiero",    aliases: ["dfinan", "descfinanciero", "financiero", "d2"] },
+  { id: "descuento_promocional", label: "Descuento promocional",   aliases: ["dpromo", "descpromocional", "promocional", "promo", "d3"] },
+  { id: "porcentaje_ganancia",   label: "% Ganancia / Margen",     aliases: ["ganancia", "margen", "margin", "margin%", "pctgan", "utilidad"] },
+  { id: "marca_codigo",          label: "Marca (código)",          aliases: ["marca", "brand", "codigomarca", "marcacod"] },
+  { id: "__skip__",              label: "— No importar —",         aliases: [] },
 ]
 
 const SKIP_ID = "__skip__"
@@ -225,7 +230,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
       colIndexMap[mapping.dbField] = headerColIndices[i]
     })
 
-    const NUMERIC_GT0 = ["unidades_por_bulto","precio_compra","porcentaje_ganancia","precio_base","precio_base_contado","precio_lista_especial"]
+    const NUMERIC_GT0 = ["unidades_por_bulto","cantidad_fraccion","precio_compra","porcentaje_ganancia","precio_base","precio_base_contado","precio_lista_especial"]
 
     return excelRows
       .filter(row => {
@@ -262,6 +267,10 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
               const n = parseFloat(str.replace(",", "."))
               if (!isNaN(n) && n >= 0 && n <= 100) obj[field] = n
             }
+
+          } else if (field === "iva_compras" || field === "iva_ventas") {
+            // Valores de catálogo → siempre en minúscula (factura / presupuesto / adquisicion_stock / mixto)
+            obj[field] = str.toLowerCase()
 
           } else {
             obj[field] = str
@@ -434,7 +443,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
                           <SelectContent>
                             {DB_FIELD_DEFS.map(def => (
                               <SelectItem key={def.id} value={def.id} className="text-xs">
-                                {def.label}
+                                <span className="font-semibold">{def.label}</span>
+                                {def.hint && <span className="text-muted-foreground font-normal"> · {def.hint}</span>}
                               </SelectItem>
                             ))}
                           </SelectContent>

@@ -342,10 +342,10 @@ export default function ArticulosPage() {
   }
 
   // Ficha (unificado crear + editar)
-  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",rubro_id:null as string|null,precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,precio_lista_especial:null as number|null,oferta_lista_especial:null as number|null,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
+  const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",rubro_id:null as string|null,precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,precio_lista_especial:null as number|null,oferta_lista_especial:null as number|null,descuento_propio:0,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
   const normIvaC=(v:any)=>v==="adquisicion_stock"?"adquisicion_stock":v==="mixto"?"mixto":v==="0"?"adquisicion_stock":"factura"
   const normIvaV=(v:any)=>v==="presupuesto"?"presupuesto":v==="0"?"presupuesto":"factura"
-  const ofa=(a:any)=>{ setFa(a); setRubroQ(""); setCatQ(""); setSubcatQ(""); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",rubro_id:a.rubro_id||null,precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,precio_lista_especial:a.precio_lista_especial??null,oferta_lista_especial:a.oferta_lista_especial??null,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null,segmento_precio:a.segmento_precio??null}) }
+  const ofa=(a:any)=>{ setFa(a); setRubroQ(""); setCatQ(""); setSubcatQ(""); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",rubro_id:a.rubro_id||null,precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,precio_lista_especial:a.precio_lista_especial??null,oferta_lista_especial:a.oferta_lista_especial??null,descuento_propio:a.descuento_propio??0,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null,segmento_precio:a.segmento_precio??null}) }
   const openNew=()=>{ setFa({id:"__new__"}); setFf({...BLANK_FF}) }
   const sfa=async()=>{
     if(!fa) return; setFs(true)
@@ -1192,9 +1192,10 @@ export default function ArticulosPage() {
             </div>
 
             {/* Precios */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">P. Compra (lista)</Label><Input type="number" step="0.01" className="h-8 text-xs" value={ff.precio_compra||""} onChange={e=>setFf(p=>({...p,precio_compra:parseFloat(e.target.value)||0}))}/></div>
               <div><Label className="text-xs">Margen %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.porcentaje_ganancia||""} onChange={e=>setFf(p=>({...p,porcentaje_ganancia:parseFloat(e.target.value)||0}))}/></div>
+              <div><Label className="text-xs text-orange-700">Oferta %</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="0" value={ff.descuento_propio||""} onChange={e=>setFf(p=>({...p,descuento_propio:parseFloat(e.target.value)||0}))}/></div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">B/R %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.bonif_recargo||""} onChange={e=>setFf(p=>({...p,bonif_recargo:parseFloat(e.target.value)||0}))}/></div>

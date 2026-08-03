@@ -33,6 +33,9 @@ export interface ArticleUpdateRow {
   precio_lista_especial?: number // neto fijo para lista especial (Colgate/Kenvue/Haleon)
   oferta_lista_especial?: number // % oferta sobre el neto especial
   descuento_propio?: number      // % ya incluido en el precio base, sólo para mostrar en comprobantes
+  iva_compras?: string           // factura | adquisicion_stock | mixto
+  iva_ventas?: string            // factura | presupuesto
+  cantidad_fraccion?: number     // unidades por fracción
   marca_codigo?: string          // se resuelve a marca_id antes de guardar
 }
 
@@ -58,6 +61,9 @@ const CAMPOS_DIRECTOS = [
   "precio_lista_especial",
   "oferta_lista_especial",
   "descuento_propio",
+  "iva_compras",
+  "iva_ventas",
+  "cantidad_fraccion",
 ] as const
 
 type CampoDirecto = typeof CAMPOS_DIRECTOS[number]
@@ -127,7 +133,7 @@ export async function POST(request: NextRequest) {
           id, sku, descripcion, ean13, unidades_por_bulto,
           precio_compra, porcentaje_ganancia, precio_base, precio_base_contado,
           precio_lista_especial, oferta_lista_especial,
-          descuento_propio, marca_id
+          descuento_propio, iva_compras, iva_ventas, cantidad_fraccion, marca_id
         `)
         .in("sku", chunk)
         .eq("activo", true)
