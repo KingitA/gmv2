@@ -124,6 +124,7 @@ function CargarComprobanteForm({
           <Label>Total de la Factura (según papel) *</Label>
           <Input
             type="number"
+                                        onWheel={(e) => (e.target as HTMLElement).blur()}
             step="0.01"
             placeholder="0.00"
             value={totalFacturaDeclarado || ""}
@@ -135,6 +136,7 @@ function CargarComprobanteForm({
           <Label>Descuento Fuera de Factura (%)</Label>
           <Input
             type="number"
+                                        onWheel={(e) => (e.target as HTMLElement).blur()}
             step="0.01"
             placeholder="0.00"
             value={descuentoFueraFactura || ""}
@@ -911,6 +913,7 @@ export default function OrdenesCompraPage() {
                                     <TableCell className="w-36">
                                       <Input
                                         type="number"
+                                        onWheel={(e) => (e.target as HTMLElement).blur()}
                                         min="0"
                                         step="1"
                                         value={item.cantidad_pedida || ""}
@@ -932,6 +935,7 @@ export default function OrdenesCompraPage() {
                                     <TableCell className="w-28">
                                       <Input
                                         type="number"
+                                        onWheel={(e) => (e.target as HTMLElement).blur()}
                                         step="0.01"
                                         min="0"
                                         value={item.precio_unitario || ""}
@@ -948,6 +952,7 @@ export default function OrdenesCompraPage() {
                                     <TableCell className="w-24">
                                       <Input
                                         type="number"
+                                        onWheel={(e) => (e.target as HTMLElement).blur()}
                                         step="0.01"
                                         min="0"
                                         max="100"
@@ -961,6 +966,7 @@ export default function OrdenesCompraPage() {
                                     <TableCell className="w-24">
                                       <Input
                                         type="number"
+                                        onWheel={(e) => (e.target as HTMLElement).blur()}
                                         step="0.01"
                                         min="0"
                                         max="100"
@@ -974,6 +980,7 @@ export default function OrdenesCompraPage() {
                                     <TableCell className="w-24">
                                       <Input
                                         type="number"
+                                        onWheel={(e) => (e.target as HTMLElement).blur()}
                                         step="0.01"
                                         min="0"
                                         max="100"
@@ -987,6 +994,7 @@ export default function OrdenesCompraPage() {
                                     <TableCell className="w-24">
                                       <Input
                                         type="number"
+                                        onWheel={(e) => (e.target as HTMLElement).blur()}
                                         step="0.01"
                                         min="0"
                                         max="100"

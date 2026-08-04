@@ -36,7 +36,6 @@ export function ComprobantesSection({
     const supabase = createClient()
     const [comprobantes, setComprobantes] = useState<any[]>([])
     const [uploads, setUploads] = useState<UploadJob[]>([])
-    const [tipoDocumento, setTipoDocumento] = useState("factura")
     const fileRef = useRef<HTMLInputElement>(null)
     const jobSeq = useRef(0)
 
@@ -66,7 +65,6 @@ export function ComprobantesSection({
             setUploads(prev => [...prev, { id: jobId, nombre: file.name, estado: "procesando" }])
             const fd = new FormData()
             fd.append("file", file)
-            fd.append("tipo_documento", tipoDocumento)
             fetch(`/api/ordenes-compra/${ordenId}/documentos`, { method: "POST", body: fd })
                 .then(async res => {
                     const data = await res.json()
@@ -133,16 +131,6 @@ export function ComprobantesSection({
                     <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
                         <FileText className="h-4 w-4" /> Comprobantes vinculados ({comprobantes.length})
                         <div className="flex items-center gap-2 ml-auto">
-                            <Select value={tipoDocumento} onValueChange={setTipoDocumento}>
-                                <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="factura">Factura</SelectItem>
-                                    <SelectItem value="remito">Remito</SelectItem>
-                                    <SelectItem value="adquisicion">Adquisición</SelectItem>
-                                    <SelectItem value="nota_credito">Nota de Crédito</SelectItem>
-                                    <SelectItem value="otro">Otro</SelectItem>
-                                </SelectContent>
-                            </Select>
                             <input ref={fileRef} type="file" multiple accept="image/*,application/pdf,.xlsx,.xls"
                                 className="hidden"
                                 onChange={e => { subirArchivos(Array.from(e.target.files || [])); e.target.value = "" }} />

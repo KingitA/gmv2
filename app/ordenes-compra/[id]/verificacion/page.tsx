@@ -294,6 +294,41 @@ export default function VerificacionOCPage() {
         alert("Precio actualizado")
     }
 
+    // "No era ese artículo, era este" — re-vincula líneas y aprende equivalencia
+    const [vincularDestino, setVincularDestino] = useState("")
+    const [vincularEan, setVincularEan] = useState("")
+    const [vincularDesc, setVincularDesc] = useState("")
+    const [vincularBulto, setVincularBulto] = useState("")
+    const [vincularAprender, setVincularAprender] = useState(true)
+    const [vinculando, setVinculando] = useState(false)
+
+    async function confirmarVinculacion() {
+        if (!resolviendoRow || !vincularDestino) return
+        setVinculando(true)
+        try {
+            const res = await fetch(`/api/ordenes-compra/${ordenId}/vincular-articulo`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    articulo_origen_id: resolviendoRow.articulo_id,
+                    articulo_destino_id: vincularDestino,
+                    aprender: vincularAprender,
+                    nuevo_ean: vincularEan || null,
+                    nueva_descripcion: vincularDesc || null,
+                    unidades_por_bulto: vincularBulto ? parseInt(vincularBulto) : null,
+                }),
+            })
+            const data = await res.json()
+            if (!res.ok) { alert(data.error || 'Error al vincular'); return }
+            alert(`Vinculado: ${data.lineas_comprobante} línea(s) de comprobante y ${data.items_recepcion} ítem(s) de recepción re-vinculados${data.equivalencia_aprendida ? ' · equivalencia aprendida para futuros comprobantes' : ''}${data.atributos_actualizados?.length ? ` · artículo actualizado (${data.atributos_actualizados.join(', ')})` : ''}`)
+            setResolviendoRow(null)
+            setVincularDestino(""); setVincularEan(""); setVincularDesc(""); setVincularBulto("")
+            loadAll()
+        } finally {
+            setVinculando(false)
+        }
+    }
+
     function abrirResolucion(row: VerRow) {
         setResolviendoRow(row)
         setResolucionTipo('mercaderia')
@@ -521,7 +556,52 @@ export default function VerificacionOCPage() {
                             Resolver diferencia
                         </DialogTitle>
                     </DialogHeader>
-                    {resolviendoRow && (
+                    {resolviendoRow && resolviendoRow.no_pedido && (
+                        <div className="space-y-4 py-2">
+                            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-sm">
+                                <p className="font-semibold truncate">{resolviendoRow.descripcion}</p>
+                                <p className="text-muted-foreground font-mono text-xs mt-1">{resolviendoRow.sku}</p>
+                                <p className="text-xs text-purple-800 mt-1.5">
+                                    Este artículo llegó/se facturó pero NO estaba en la OC. Si en realidad es OTRO artículo
+                                    (duplicado en la base, o el proveedor cambió código/EAN/descripción), vinculalo acá:
+                                    las líneas se corrigen, la equivalencia se aprende para el futuro, y podés actualizar
+                                    los datos del artículo correcto.
+                                </p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Era este artículo de la OC:</Label>
+                                <Select value={vincularDestino} onValueChange={setVincularDestino}>
+                                    <SelectTrigger><SelectValue placeholder="Elegir el artículo correcto…" /></SelectTrigger>
+                                    <SelectContent>
+                                        {rows.filter(r => !r.no_pedido && r.articulo_id !== resolviendoRow.articulo_id).map(r => (
+                                            <SelectItem key={r.articulo_id} value={r.articulo_id}>
+                                                {r.sku} — {r.descripcion} (OC: {r.cant_oc})
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <Label className="text-xs">Actualizar EAN13 (opcional)</Label>
+                                    <Input value={vincularEan} onChange={e => setVincularEan(e.target.value)} placeholder="nuevo código de barras" />
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Unidades por bulto (opcional)</Label>
+                                    <Input inputMode="numeric" value={vincularBulto} onChange={e => setVincularBulto(e.target.value.replace(/[^0-9]/g, ""))} placeholder="ej. 12" />
+                                </div>
+                                <div className="col-span-2">
+                                    <Label className="text-xs">Actualizar descripción del artículo (opcional)</Label>
+                                    <Input value={vincularDesc} onChange={e => setVincularDesc(e.target.value)} placeholder="dejar vacío para no tocarla" />
+                                </div>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                <input type="checkbox" className="h-4 w-4" checked={vincularAprender} onChange={e => setVincularAprender(e.target.checked)} />
+                                Aprender la equivalencia (los próximos comprobantes del proveedor matchean solos)
+                            </label>
+                        </div>
+                    )}
+                    {resolviendoRow && !resolviendoRow.no_pedido && (
                         <div className="space-y-4 py-2">
                             <div className="p-3 bg-muted rounded-lg text-sm">
                                 <p className="font-semibold truncate">{resolviendoRow.descripcion}</p>
@@ -592,10 +672,16 @@ export default function VerificacionOCPage() {
                     )}
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setResolviendoRow(null)}>Cancelar</Button>
-                        <Button onClick={confirmarResolucion}
-                            disabled={resolucionAccion === 'B' && !resolucionTransporte}>
-                            Confirmar resolución
-                        </Button>
+                        {resolviendoRow?.no_pedido ? (
+                            <Button onClick={confirmarVinculacion} disabled={!vincularDestino || vinculando}>
+                                {vinculando ? 'Vinculando…' : 'Vincular artículo'}
+                            </Button>
+                        ) : (
+                            <Button onClick={confirmarResolucion}
+                                disabled={resolucionAccion === 'B' && !resolucionTransporte}>
+                                Confirmar resolución
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
