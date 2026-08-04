@@ -41,7 +41,7 @@ interface VerRow {
     pendiente_oc: number         // lo que el proveedor no envió vs OC (ni recibido ni facturado)
     no_pedido: boolean           // recibido/facturado sin estar en la OC
     resuelto: string | null      // diferencia ya imputada (empresa/transporte/proveedor/nc)
-    status: "ok" | "diferencia_cantidad" | "diferencia_precio" | "faltante" | "ambas" | "no_pedido"
+    status: "ok" | "diferencia_cantidad" | "diferencia_precio" | "faltante" | "ambas" | "no_pedido" | "sin_documentar"
 }
 
 export default function VerificacionOCPage() {
@@ -206,6 +206,9 @@ export default function VerificacionOCPage() {
             let status: VerRow["status"] = "ok"
             if (noPedido) status = "no_pedido"
             else if (cantRecibida === 0 && cantOC > 0) status = "faltante"
+            // Recibido pero NINGUN comprobante lo documenta (el OCR perdio la
+            // linea o quedo sin matchear): jamas debe figurar OK.
+            else if (!hasOCRData && cantRecibida > 0 && compIds.length > 0) status = "sin_documentar"
             else if (Math.abs(diffCant) > 0.01 && difPrecio) status = "ambas"
             else if (Math.abs(diffCant) > 0.01) status = "diferencia_cantidad"
             else if (difPrecio) status = "diferencia_precio"
@@ -728,6 +731,7 @@ export default function VerificacionOCPage() {
                                     <TableRow key={row.articulo_id} className={row.no_pedido ? "bg-purple-50/50" : hasDiff ? "bg-orange-50/50" : ""}>
                                         <TableCell>
                                             {row.status === "ok" ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                                : row.status === "sin_documentar" ? <FileText className="h-4 w-4 text-amber-600" />
                                                 : row.status === "faltante" ? <XCircle className="h-4 w-4 text-red-500" />
                                                     : row.no_pedido ? <AlertTriangle className="h-4 w-4 text-purple-500" />
                                                         : <AlertTriangle className="h-4 w-4 text-orange-500" />}
@@ -767,8 +771,10 @@ export default function VerificacionOCPage() {
                                         <TableCell className="text-center">
                                             <div className="flex flex-col items-center gap-1">
                                                 <Badge className={`text-xs ${row.status === "ok" ? "bg-green-500"
-                                                    : row.status === "no_pedido" ? "bg-purple-500" : "bg-orange-500"}`}>
+                                                    : row.status === "no_pedido" ? "bg-purple-500"
+                                                    : row.status === "sin_documentar" ? "bg-amber-500" : "bg-orange-500"}`}>
                                                     {row.status === "ok" ? "OK"
+                                                        : row.status === "sin_documentar" ? "SIN DOCUMENTAR"
                                                         : row.status === "faltante" ? "Faltante"
                                                             : row.status === "no_pedido" ? "NO PEDIDO"
                                                                 : row.status === "diferencia_precio" ? "Δ Precio"

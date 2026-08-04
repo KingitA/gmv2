@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Upload, Loader2, CheckCircle2, XCircle, Edit, Trash2, FileText } from "lucide-react"
+import { Upload, Loader2, CheckCircle2, XCircle, Edit, Trash2, FileText, Plus } from "lucide-react"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { RevisarMatches } from "../comprobantes/revisar-matches"
 
@@ -77,6 +77,43 @@ export function ComprobantesSection({
                 .catch(e => {
                     setUploads(prev => prev.map(u => u.id === jobId ? { ...u, estado: "error", mensaje: e.message } : u))
                 })
+        }
+    }
+
+    // Agregar a mano una linea que el OCR no extrajo (ej. primera fila cortada)
+    const [lineaComp, setLineaComp] = useState<any>(null)
+    const [ocArts, setOcArts] = useState<any[]>([])
+    const [lineaArt, setLineaArt] = useState("")
+    const [lineaCant, setLineaCant] = useState("")
+    const [lineaPrecio, setLineaPrecio] = useState("")
+    const [lineaGuardando, setLineaGuardando] = useState(false)
+
+    const abrirAgregarLinea = async (comp: any) => {
+        setLineaComp(comp); setLineaArt(""); setLineaCant(""); setLineaPrecio("")
+        const { data } = await supabase
+            .from("ordenes_compra_detalle")
+            .select("articulo_id, cantidad_pedida, precio_unitario, articulos:articulo_id(sku, descripcion)")
+            .eq("orden_compra_id", ordenId)
+        setOcArts(data || [])
+    }
+
+    const guardarLinea = async () => {
+        const cant = Number(String(lineaCant).replace(",", "."))
+        const precio = Number(String(lineaPrecio).replace(",", "."))
+        if (!lineaArt || !cant || cant <= 0) { alert("Elegí el artículo y la cantidad"); return }
+        setLineaGuardando(true)
+        try {
+            const res = await fetch(`/api/comprobantes-compra/${lineaComp.id}/lineas`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ articulo_id: lineaArt, cantidad: cant, precio_unitario: precio || 0 }),
+            })
+            const data = await res.json()
+            if (!res.ok) { alert(data.error || "Error al agregar la línea"); return }
+            setLineaComp(null)
+            refrescar()
+        } finally {
+            setLineaGuardando(false)
         }
     }
 
@@ -210,6 +247,10 @@ export function ComprobantesSection({
                                                             onClick={() => validar(comp)}>
                                                             <CheckCircle2 className="h-4 w-4 text-green-600" />
                                                         </Button>
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Agregar línea que el OCR no leyó"
+                                                            onClick={() => abrirAgregarLinea(comp)}>
+                                                            <Plus className="h-4 w-4 text-blue-600" />
+                                                        </Button>
                                                         <Button variant="ghost" size="icon" className="h-7 w-7" title="Editar a mano"
                                                             onClick={() => setEditando({ ...comp })}>
                                                             <Edit className="h-4 w-4" />
@@ -305,6 +346,48 @@ export function ComprobantesSection({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {lineaComp && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setLineaComp(null)}>
+                    <div className="bg-white rounded-xl p-5 w-[440px] shadow-xl space-y-3" onClick={e => e.stopPropagation()}>
+                        <h3 className="font-bold text-sm">Agregar línea — {lineaComp.tipo_comprobante} {lineaComp.numero_comprobante}</h3>
+                        <p className="text-xs text-muted-foreground">Para líneas que el OCR no extrajo del documento. Suma también la cantidad documentada en la recepción.</p>
+                        <div>
+                            <label className="text-xs font-medium">Artículo (de la OC)</label>
+                            <select className="w-full rounded-md border px-2 py-1.5 text-sm" value={lineaArt}
+                                onChange={e => {
+                                    setLineaArt(e.target.value)
+                                    const it = ocArts.find((a: any) => a.articulo_id === e.target.value)
+                                    if (it && !lineaPrecio) setLineaPrecio(String(it.precio_unitario ?? ""))
+                                    if (it && !lineaCant) setLineaCant(String(it.cantidad_pedida ?? ""))
+                                }}>
+                                <option value="">Elegir artículo…</option>
+                                {ocArts.map((a: any) => (
+                                    <option key={a.articulo_id} value={a.articulo_id}>
+                                        {a.articulos?.sku} — {a.articulos?.descripcion} (OC: {a.cantidad_pedida})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label className="text-xs font-medium">Cantidad</label>
+                                <input inputMode="decimal" className="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={lineaCant}
+                                    onChange={e => setLineaCant(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-medium">Precio unitario (punto = centavos)</label>
+                                <input inputMode="decimal" className="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={lineaPrecio}
+                                    onChange={e => setLineaPrecio(e.target.value)} />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2 pt-1">
+                            <Button variant="outline" size="sm" onClick={() => setLineaComp(null)}>Cancelar</Button>
+                            <Button size="sm" disabled={lineaGuardando} onClick={guardarLinea}>{lineaGuardando ? "Guardando…" : "Agregar línea"}</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
