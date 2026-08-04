@@ -19,6 +19,7 @@ export interface VencimientoEditable {
   modalidad?: string | null
   descuentos_aplicados?: boolean | null
   es_estimado?: boolean | null
+  proveedor_id?: string | null
   proveedores?: { nombre?: string | null } | null
 }
 
@@ -189,6 +190,7 @@ export function VencimientoEditDialog({
                 <SelectContent>
                   <SelectItem value="deposito">Lo deposito yo</SelectItem>
                   <SelectItem value="entrega">Lo retiran por caja</SelectItem>
+                  <SelectItem value="grimar">Se envía por Grimar</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -209,9 +211,19 @@ export function VencimientoEditDialog({
             <Button type="button" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 mr-auto" disabled={saving} onClick={eliminar}>
               Eliminar
             </Button>
-            <Button type="button" variant="outline" className="text-green-700 border-green-300 hover:bg-green-50" disabled={saving} onClick={marcarPagado}>
-              ✓ Marcar pagado
-            </Button>
+            {venc.proveedor_id ? (
+              // Circuito único: los pagos a proveedores van por Orden de Pago
+              // (CC + kardex + retención + certificado, siempre)
+              <a href={`/ordenes-pago/nueva?proveedor_id=${venc.proveedor_id}&vencimiento_id=${venc.id}`}>
+                <Button type="button" variant="outline" className="text-green-700 border-green-300 hover:bg-green-50">
+                  Generar OP →
+                </Button>
+              </a>
+            ) : (
+              <Button type="button" variant="outline" className="text-green-700 border-green-300 hover:bg-green-50" disabled={saving} onClick={marcarPagado}>
+                ✓ Marcar pagado
+              </Button>
+            )}
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
             <Button type="button" disabled={saving} onClick={guardar}>
               {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} Guardar cambios

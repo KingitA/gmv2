@@ -139,19 +139,54 @@ export async function POST(
         // Referenciado por movimiento de CC (referencia_tipo='cuenta_corriente'),
         // que es como op_confirmar los marca pagados.
         if (!esCredito) {
+            // ── Vencimiento automático según el acuerdo de pago del CANAL ──
+            // (Ficha Fiscal del proveedor, fase S3). Adquisición = canal negro.
+            const canal = comprobante.tipo_comprobante === 'Adquisicion' ? 'negro' : 'blanco';
             let fechaVencimiento = comprobante.fecha_vencimiento;
-            let formaPagoProv: string | null = null;
+            let formaPago: string | null = null;
+            let modalidad: string | null = null;
+            let fechaValidez: string | null = null;
+
             if (proveedorId) {
                 const { data: prov } = await supabase
                     .from('proveedores')
-                    .select('dias_vencimiento, forma_pago_default')
+                    .select('dias_vencimiento, pago_blanco_medio, pago_blanco_plazo_cheque, pago_blanco_entrega, pago_blanco_dias, pago_blanco_desde, pago_negro_medio, pago_negro_plazo_cheque, pago_negro_entrega, pago_negro_dias, pago_negro_desde')
                     .eq('id', proveedorId)
                     .maybeSingle();
-                formaPagoProv = (prov as any)?.forma_pago_default || null;
-                if (!fechaVencimiento && comprobante.fecha_comprobante) {
-                    const dias = Number(prov?.dias_vencimiento || 0);
-                    if (dias > 0) {
-                        const base = new Date(comprobante.fecha_comprobante + 'T00:00:00');
+                const p: any = prov || {};
+                // Canal negro sin configurar → hereda el acuerdo blanco
+                const cfg = canal === 'negro' && (p.pago_negro_medio || p.pago_negro_dias != null || p.pago_negro_entrega)
+                    ? { medio: p.pago_negro_medio, plazoCheque: p.pago_negro_plazo_cheque, entrega: p.pago_negro_entrega, dias: p.pago_negro_dias, desde: p.pago_negro_desde }
+                    : { medio: p.pago_blanco_medio, plazoCheque: p.pago_blanco_plazo_cheque, entrega: p.pago_blanco_entrega, dias: p.pago_blanco_dias, desde: p.pago_blanco_desde };
+
+                // Medio → forma_pago del vencimiento (cheques y mixto = 'cheque')
+                formaPago = cfg.medio === 'transferencia' ? 'transferencia'
+                    : cfg.medio === 'efectivo' ? 'efectivo'
+                    : (cfg.medio === 'cheques' || cfg.medio === 'cheques_y_efectivo') ? 'cheque'
+                    : null;
+                // Entrega → modalidad
+                modalidad = cfg.entrega === 'deposito_bancario' ? 'deposito'
+                    : cfg.entrega === 'retira_oficina' ? 'entrega'
+                    : cfg.entrega === 'envio_grimar' ? 'grimar'
+                    : null;
+
+                if (!fechaVencimiento) {
+                    // Base del plazo: fecha de factura o de recepción según el acuerdo
+                    let fechaBase: string | null = comprobante.fecha_comprobante || null;
+                    if (cfg.desde === 'recepcion' && ocId) {
+                        const { data: rec } = await supabase
+                            .from('recepciones')
+                            .select('fecha_fin, fecha_inicio, created_at')
+                            .eq('orden_compra_id', ocId)
+                            .order('created_at', { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+                        const f = (rec as any)?.fecha_fin || (rec as any)?.fecha_inicio || (rec as any)?.created_at;
+                        if (f) fechaBase = String(f).slice(0, 10);
+                    }
+                    const dias = Number(cfg.dias ?? p.dias_vencimiento ?? 0);
+                    if (fechaBase && dias > 0) {
+                        const base = new Date(fechaBase + 'T00:00:00');
                         base.setDate(base.getDate() + dias);
                         fechaVencimiento = base.toISOString().slice(0, 10);
                         await supabase.from('comprobantes_compra')
@@ -159,18 +194,26 @@ export async function POST(
                             .eq('id', comprobante_id);
                     }
                 }
+                // Cheques con plazo: validez = vencimiento + plazo del cheque
+                if (fechaVencimiento && formaPago === 'cheque' && Number(cfg.plazoCheque ?? 0) > 0) {
+                    const v = new Date(fechaVencimiento + 'T00:00:00');
+                    v.setDate(v.getDate() + Number(cfg.plazoCheque));
+                    fechaValidez = v.toISOString().slice(0, 10);
+                }
             }
+
             if (fechaVencimiento && total > 0) {
                 const { error: vencErr } = await supabase.from('vencimientos').insert({
                     proveedor_id: proveedorId,
                     tipo: 'factura',
+                    canal,
                     concepto: `${comprobante.tipo_comprobante} ${comprobante.numero_comprobante} — OC ${(comprobante.orden_compra as any)?.numero_orden || ''}`,
                     monto: total,
                     fecha_vencimiento: fechaVencimiento,
                     estado: 'pendiente',
-                    // Forma de pago acordada con el proveedor (Ficha Fiscal);
-                    // editable después desde el panel/calendario.
-                    forma_pago: formaPagoProv,
+                    forma_pago: formaPago,
+                    modalidad,
+                    fecha_validez: fechaValidez,
                     referencia_id: ccMovId || comprobante_id,
                     referencia_tipo: ccMovId ? 'cuenta_corriente' : 'comprobante_compra',
                 });

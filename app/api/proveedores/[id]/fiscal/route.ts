@@ -22,7 +22,7 @@ export async function GET(
   try {
     const supabase = createAdminClient()
     const [{ data: prov }, { data: excl }, { data: regs }] = await Promise.all([
-      supabase.from('proveedores').select('id, nombre, cuit, regimen_ganancias, condicion_ganancias, forma_pago_default').eq('id', id).single(),
+      supabase.from('proveedores').select('id, nombre, cuit, regimen_ganancias, condicion_ganancias, pago_blanco_medio, pago_blanco_plazo_cheque, pago_blanco_entrega, pago_blanco_dias, pago_blanco_desde, pago_negro_medio, pago_negro_plazo_cheque, pago_negro_entrega, pago_negro_dias, pago_negro_desde').eq('id', id).single(),
       supabase.from('excenciones_impositivas').select('*').eq('proveedor_id', id).order('fecha_desde', { ascending: false }),
       supabase.from('retencion_regimenes').select('clave, descripcion, alicuota_inscripto, minimo_no_sujeto')
         .is('vigencia_hasta', null).order('clave'),
@@ -48,7 +48,12 @@ export async function PUT(
     const updates: Record<string, any> = {}
     if (body.regimen_ganancias) updates.regimen_ganancias = body.regimen_ganancias
     if (body.condicion_ganancias) updates.condicion_ganancias = body.condicion_ganancias
-    if ('forma_pago_default' in body) updates.forma_pago_default = body.forma_pago_default || null
+    for (const campo of [
+      'pago_blanco_medio', 'pago_blanco_plazo_cheque', 'pago_blanco_entrega', 'pago_blanco_dias', 'pago_blanco_desde',
+      'pago_negro_medio', 'pago_negro_plazo_cheque', 'pago_negro_entrega', 'pago_negro_dias', 'pago_negro_desde',
+    ]) {
+      if (campo in body) updates[campo] = body[campo] ?? null
+    }
     if (Object.keys(updates).length) {
       const { error } = await supabase.from('proveedores').update(updates).eq('id', id)
       if (error) throw error

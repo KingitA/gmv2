@@ -96,6 +96,7 @@ export async function POST(request: Request) {
     const totalRetenciones = retGanancias + Number(retencion_iibb || 0) +
         Number(retencion_iva || 0) + Number(retencion_suss || 0)
     const totalImputado = (imputaciones ?? []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0)
+    const totalCreditos = (imputaciones ?? []).reduce((s: number, i: any) => s + Math.max(0, -Number(i.monto_imputado || 0)), 0)
 
     // Cuadre: con imputaciones, los medios deben cubrir el neto (bruto − retenciones)
     if (totalImputado > 0) {
@@ -134,6 +135,7 @@ export async function POST(request: Request) {
             total_retenciones: totalRetenciones,
             neto_a_pagar: netoAPagar,
             base_ganancias: baseGanancias,
+            total_creditos: totalCreditos,
             ganancias_ajuste_manual: Boolean(ganancias_manual),
             ganancias_motivo: ganancias_manual ? String(ganancias_motivo).trim() : null,
             usuario_creador: auth.user.email || 'admin'

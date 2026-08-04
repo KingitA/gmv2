@@ -18,11 +18,12 @@ export interface OrdenPagoPDFData {
   empresa: { razon_social: string; cuit: string; direccion?: string | null; logo_url?: string | null; condicion_iva?: string | null }
   op: {
     numero_op: string; fecha: string; estado: string; observaciones?: string | null
-    monto_total: number; retencion_ganancias: number; total_retenciones: number; neto_a_pagar: number
+    monto_total: number; retencion_ganancias: number; total_retenciones: number; neto_a_pagar: number; total_creditos: number
     numero_certificado?: string | null
   }
   proveedor: { nombre: string; cuit?: string | null; direccion?: string | null; localidad?: string | null }
   imputaciones: Array<{ etiqueta: string; fecha?: string | null; monto: number }>
+  creditos: Array<{ etiqueta: string; monto: number }>
   medios: Array<{ medio: string; monto: number; detalle: string }>
 }
 
@@ -76,7 +77,7 @@ const MEDIO_LABEL: Record<string, string> = {
 }
 
 export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
-  const { empresa, op, proveedor, imputaciones, medios } = data
+  const { empresa, op, proveedor, imputaciones, creditos, medios } = data
   return (
     <Document>
       <Page size="A4" style={s.page}>
@@ -121,6 +122,19 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
           </View>
         ))}
 
+        {creditos.length > 0 && (
+          <>
+            <Text style={s.secTit}>Notas de crédito / Reversas descontadas</Text>
+            {creditos.map((c, x) => (
+              <View key={x} style={s.tr}>
+                <Text style={[s.td, s.cFecha]}></Text>
+                <Text style={[s.td, s.cDesc]}>{c.etiqueta}</Text>
+                <Text style={[s.td, s.cMonto]}>− $ {fmt(Math.abs(c.monto))}</Text>
+              </View>
+            ))}
+          </>
+        )}
+
         <Text style={s.secTit}>Cómo se paga</Text>
         <View style={s.th}>
           <Text style={[s.thT, { width: 90 }]}>MEDIO</Text>
@@ -146,7 +160,10 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
             {op.observaciones ? <Text style={[s.obsTxt, { marginTop: 4 }]}>{op.observaciones}</Text> : null}
           </View>
           <View style={s.tots}>
-            <View style={s.totRow}><Text style={s.totLbl}>Total bruto</Text><Text style={s.totVal}>$ {fmt(op.monto_total)}</Text></View>
+            <View style={s.totRow}><Text style={s.totLbl}>Total bruto</Text><Text style={s.totVal}>$ {fmt(op.monto_total + op.total_creditos)}</Text></View>
+            {op.total_creditos > 0.009 && (
+              <View style={s.totRow}><Text style={s.totLbl}>Notas de crédito / Reversas</Text><Text style={s.totVal}>− $ {fmt(op.total_creditos)}</Text></View>
+            )}
             <View style={s.totRow}><Text style={s.totLbl}>Retención Ganancias</Text><Text style={s.totVal}>− $ {fmt(op.retencion_ganancias)}</Text></View>
             {op.total_retenciones - op.retencion_ganancias > 0.009 && (
               <View style={s.totRow}><Text style={s.totLbl}>Otras retenciones</Text><Text style={s.totVal}>− $ {fmt(op.total_retenciones - op.retencion_ganancias)}</Text></View>

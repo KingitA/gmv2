@@ -253,6 +253,20 @@ export function CalendarioPagos({
 
     async function marcarPagados(ids: string[], vencCheque?: Vencimiento) {
         if (!ids.length) return
+        // Circuito único (S5): los pagos a PROVEEDORES van por Orden de Pago
+        // (CC + kardex + retención + certificado). El atajo queda solo para
+        // gastos sin proveedor (VEP, servicios, etc.).
+        const deProveedor = vencimientos.filter((v) => ids.includes(v.id) && v.proveedor_id)
+        if (deProveedor.length === 1 && ids.length === 1) {
+            if (confirm(`"${deProveedor[0].concepto || 'Este pago'}" es de un proveedor: se paga por Orden de Pago (queda cuenta corriente, kardex y retención). ¿Ir a generar la OP?`)) {
+                window.location.href = `/ordenes-pago/nueva?proveedor_id=${deProveedor[0].proveedor_id}&vencimiento_id=${deProveedor[0].id}`
+            }
+            return
+        }
+        if (deProveedor.length > 0) {
+            toast.error(`${deProveedor.length} de los seleccionados son pagos a proveedores — esos se pagan por Orden de Pago (uno por vez desde el ✓ del chip). Destildalos para marcar el resto.`)
+            return
+        }
         if (!confirm(`¿Marcar ${ids.length === 1 ? "este pago" : `estos ${ids.length} pagos`} como pagado${ids.length > 1 ? "s" : ""}?`)) return
         setSaving(true)
         try {

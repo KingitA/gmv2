@@ -79,6 +79,7 @@ export async function GET(
         retencion_ganancias: Number(op.retencion_ganancias ?? 0),
         total_retenciones: Number(op.total_retenciones ?? 0),
         neto_a_pagar: Number(op.neto_a_pagar ?? 0),
+        total_creditos: Number(op.total_creditos ?? 0),
         numero_certificado: cert?.numero_certificado ?? null,
       },
       proveedor: {
@@ -87,11 +88,19 @@ export async function GET(
         direccion: op.proveedores?.direccion,
         localidad: op.proveedores?.localidad,
       },
-      imputaciones: ((bases as any)?.detalle ?? []).map((b: any) => ({
-        etiqueta: b.etiqueta,
-        fecha: op.fecha,
-        monto: Number(b.monto_imputado ?? 0),
-      })),
+      imputaciones: ((bases as any)?.detalle ?? [])
+        .filter((b: any) => Number(b.monto_imputado ?? 0) >= 0)
+        .map((b: any) => ({
+          etiqueta: b.etiqueta,
+          fecha: op.fecha,
+          monto: Number(b.monto_imputado ?? 0),
+        })),
+      creditos: ((bases as any)?.detalle ?? [])
+        .filter((b: any) => Number(b.monto_imputado ?? 0) < 0)
+        .map((b: any) => ({
+          etiqueta: b.etiqueta,
+          monto: Number(b.monto_imputado ?? 0),
+        })),
       medios: (op.ordenes_pago_detalle ?? []).map((m: any) => ({
         medio: m.medio,
         monto: Number(m.monto ?? 0),

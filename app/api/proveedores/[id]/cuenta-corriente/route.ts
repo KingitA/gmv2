@@ -71,7 +71,12 @@ export async function GET(
                 return sum;
             }, 0) || 0;
 
-            const saldo_item = Math.abs(amount) - imputado;
+            // FIX S4: los créditos (NC/pagos, monto negativo) mantienen su signo —
+            // antes Math.abs() los mostraba como deuda positiva y la Nueva OP
+            // los sumaba al pago en lugar de restarlos.
+            const saldo_item = amount < 0
+                ? Math.min(0, amount + imputado)      // crédito: consume hacia 0
+                : amount - imputado;                  // débito: baja hacia 0
 
             if (['pago', 'nota_credito'].includes(tipo)) {
                 totalPagado += Math.abs(amount);

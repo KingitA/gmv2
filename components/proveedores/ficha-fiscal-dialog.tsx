@@ -30,7 +30,10 @@ export function FichaFiscalDialog({
   const [data, setData] = useState<any>(null)
   const [regimen, setRegimen] = useState("bienes")
   const [condicion, setCondicion] = useState("inscripto")
-  const [formaPago, setFormaPago] = useState("ninguna")
+  const vacio = { medio: "", plazo_cheque: "", entrega: "", dias: "", desde: "factura" }
+  const [blanco, setBlanco] = useState({ ...vacio })
+  const [negro, setNegro] = useState({ ...vacio })
+  const [negroIgual, setNegroIgual] = useState(true)
   const [nuevaExclusion, setNuevaExclusion] = useState<{ desde: string; hasta: string; pct: string; nro: string } | null>(null)
   const [desactivar, setDesactivar] = useState<Set<string>>(new Set())
   const [propuesta, setPropuesta] = useState<any>(null)
@@ -50,7 +53,23 @@ export function FichaFiscalDialog({
         setData(d)
         setRegimen(d.proveedor.regimen_ganancias || "bienes")
         setCondicion(d.proveedor.condicion_ganancias || "inscripto")
-        setFormaPago(d.proveedor.forma_pago_default || "ninguna")
+        const pv = d.proveedor
+        setBlanco({
+          medio: pv.pago_blanco_medio || "",
+          plazo_cheque: pv.pago_blanco_plazo_cheque != null ? String(pv.pago_blanco_plazo_cheque) : "",
+          entrega: pv.pago_blanco_entrega || "",
+          dias: pv.pago_blanco_dias != null ? String(pv.pago_blanco_dias) : "",
+          desde: pv.pago_blanco_desde || "factura",
+        })
+        const hayNegro = pv.pago_negro_medio || pv.pago_negro_dias != null || pv.pago_negro_entrega
+        setNegroIgual(!hayNegro)
+        setNegro({
+          medio: pv.pago_negro_medio || "",
+          plazo_cheque: pv.pago_negro_plazo_cheque != null ? String(pv.pago_negro_plazo_cheque) : "",
+          entrega: pv.pago_negro_entrega || "",
+          dias: pv.pago_negro_dias != null ? String(pv.pago_negro_dias) : "",
+          desde: pv.pago_negro_desde || "factura",
+        })
       })
       .catch(e => toast.error(e.message))
   }, [open, proveedorId])
@@ -98,7 +117,16 @@ export function FichaFiscalDialog({
       const body: any = {
         regimen_ganancias: regimen,
         condicion_ganancias: condicion,
-        forma_pago_default: formaPago === "ninguna" ? null : formaPago,
+        pago_blanco_medio: blanco.medio || null,
+        pago_blanco_plazo_cheque: blanco.plazo_cheque !== "" ? parseInt(blanco.plazo_cheque) : null,
+        pago_blanco_entrega: blanco.entrega || null,
+        pago_blanco_dias: blanco.dias !== "" ? parseInt(blanco.dias) : null,
+        pago_blanco_desde: blanco.desde || "factura",
+        pago_negro_medio: negroIgual ? null : (negro.medio || null),
+        pago_negro_plazo_cheque: negroIgual ? null : (negro.plazo_cheque !== "" ? parseInt(negro.plazo_cheque) : null),
+        pago_negro_entrega: negroIgual ? null : (negro.entrega || null),
+        pago_negro_dias: negroIgual ? null : (negro.dias !== "" ? parseInt(negro.dias) : null),
+        pago_negro_desde: negroIgual ? null : (negro.desde || "factura"),
         desactivar_exclusiones: [...desactivar],
       }
       if (nuevaExclusion && nuevaExclusion.desde && Number(nuevaExclusion.pct) > 0) {
@@ -167,17 +195,74 @@ export function FichaFiscalDialog({
               </div>
             </div>
 
-            <div>
-              <Label>Forma de pago habitual (el vencimiento de cada factura la hereda)</Label>
-              <Select value={formaPago} onValueChange={setFormaPago}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ninguna">Sin definir (se elige en cada pago)</SelectItem>
-                  <SelectItem value="transferencia">Transferencia</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="efectivo">Efectivo</SelectItem>
-                </SelectContent>
-              </Select>
+            {/* Acuerdo de pago por canal — el vencimiento de cada comprobante lo hereda */}
+            <div className="rounded-xl border p-3 space-y-3">
+              <Label className="font-semibold">Acuerdo de pago por canal</Label>
+              {([["BLANCO (facturas)", blanco, setBlanco, false], ["NEGRO (adquisiciones)", negro, setNegro, true]] as const).map(([titulo, val, setVal, esNegro]) => (
+                <div key={titulo} className={esNegro && negroIgual ? "opacity-40" : ""}>
+                  <div className="flex items-center gap-3 mb-1.5">
+                    <p className="text-xs font-bold tracking-wide text-slate-600">{titulo}</p>
+                    {esNegro && (
+                      <label className="flex items-center gap-1.5 text-xs cursor-pointer text-muted-foreground">
+                        <input type="checkbox" className="h-3.5 w-3.5" checked={negroIgual} onChange={e => setNegroIgual(e.target.checked)} />
+                        igual que blanco
+                      </label>
+                    )}
+                  </div>
+                  {(!esNegro || !negroIgual) && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">Medio</Label>
+                        <Select value={val.medio || "sin"} onValueChange={v => setVal(p => ({ ...p, medio: v === "sin" ? "" : v }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="sin">Sin definir</SelectItem>
+                            <SelectItem value="transferencia">Transferencia</SelectItem>
+                            <SelectItem value="cheques">Cheques</SelectItem>
+                            <SelectItem value="cheques_y_efectivo">Cheques + completar efectivo</SelectItem>
+                            <SelectItem value="efectivo">Efectivo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Entrega</Label>
+                        <Select value={val.entrega || "sin"} onValueChange={v => setVal(p => ({ ...p, entrega: v === "sin" ? "" : v }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="sin">Sin definir</SelectItem>
+                            <SelectItem value="transferencia">Transferencia bancaria</SelectItem>
+                            <SelectItem value="deposito_bancario">Depósito en su cuenta</SelectItem>
+                            <SelectItem value="retira_oficina">Retira por oficina</SelectItem>
+                            <SelectItem value="envio_grimar">Envío por Grimar (Bs.As.)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {(val.medio === "cheques" || val.medio === "cheques_y_efectivo") && (
+                        <div>
+                          <Label className="text-xs">Plazo cheques (días)</Label>
+                          <Input inputMode="numeric" placeholder="0 = al día" value={val.plazo_cheque}
+                            onChange={e => setVal(p => ({ ...p, plazo_cheque: e.target.value.replace(/[^0-9]/g, "") }))} />
+                        </div>
+                      )}
+                      <div>
+                        <Label className="text-xs">Plazo de pago (días)</Label>
+                        <Input inputMode="numeric" placeholder="ej. 30" value={val.dias}
+                          onChange={e => setVal(p => ({ ...p, dias: e.target.value.replace(/[^0-9]/g, "") }))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Contado desde</Label>
+                        <Select value={val.desde} onValueChange={v => setVal(p => ({ ...p, desde: v }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="factura">Fecha de factura</SelectItem>
+                            <SelectItem value="recepcion">Fecha de recepción</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Exclusiones vigentes */}

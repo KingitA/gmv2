@@ -76,6 +76,7 @@ function NuevaOrdenPagoContent() {
     // Imputaciones (comprobantes/vencimientos a cubrir)
     const [imputaciones, setImputaciones] = useState<Imputacion[]>([])
     const [comprobantesCC, setComprobantesCC] = useState<any[]>([])
+    const [creditos, setCreditos] = useState<any[]>([])
     const [vencimientosProv, setVencimientosProv] = useState<any[]>([])
 
     const [cheques, setCheques] = useState<any[]>([])
@@ -122,6 +123,7 @@ function NuevaOrdenPagoContent() {
         if (proveedorId) {
             loadComprobantesCC()
             loadVencimientos()
+            loadCreditos()
         }
     }, [proveedorId])
 
@@ -192,6 +194,16 @@ function NuevaOrdenPagoContent() {
         }
     }
 
+    async function loadCreditos() {
+        try {
+            const res = await fetch(`/api/proveedores/${proveedorId}/creditos`)
+            const data = await res.json()
+            setCreditos(data.creditos || [])
+        } catch (e) {
+            console.error(e)
+        }
+    }
+
     async function loadVencimientos() {
         try {
             const res = await fetch(`/api/vencimientos?proveedor_id=${proveedorId}&estado=pendiente`)
@@ -231,6 +243,19 @@ function NuevaOrdenPagoContent() {
         }
     }
 
+    function toggleCredito(cred: any) {
+        const exists = imputaciones.find(i => i.comprobante_compra_id === cred.id)
+        if (exists) {
+            setImputaciones(imputaciones.filter(i => i.comprobante_compra_id !== cred.id))
+        } else {
+            setImputaciones([...imputaciones, {
+                comprobante_compra_id: cred.id,
+                monto_imputado: -Math.abs(cred.disponible),
+                descripcion: `${cred.tipo_comprobante} ${cred.numero_comprobante || ""}`
+            }])
+        }
+    }
+
     function toggleImputacionVenc(venc: any) {
         const exists = imputaciones.find(i => i.vencimiento_id === venc.id)
         if (exists) {
@@ -247,6 +272,8 @@ function NuevaOrdenPagoContent() {
     const totalMedios = medios.reduce((sum, m) => sum + Number(m.monto || 0), 0)
     const totalRetenciones = retGanancias + retIibb + retIva + retSuss
     const totalImputado = imputaciones.reduce((sum, i) => sum + Number(i.monto_imputado || 0), 0)
+    const totalBruto = imputaciones.reduce((sum, i) => sum + Math.max(0, Number(i.monto_imputado || 0)), 0)
+    const totalCreditos = imputaciones.reduce((sum, i) => sum + Math.max(0, -Number(i.monto_imputado || 0)), 0)
 
     // Con imputaciones: los medios deben cubrir el neto (imputado − retenciones)
     const netoObjetivo = totalImputado > 0 ? Math.round((totalImputado - totalRetenciones) * 100) / 100 : null
@@ -393,10 +420,32 @@ function NuevaOrdenPagoContent() {
                                     </div>
                                 </div>
                             )}
+                            {creditos.length > 0 && (
+                                <div>
+                                    <h4 className="font-medium text-sm mb-2 text-emerald-700">Créditos disponibles (NC / Reversas) — restan del pago</h4>
+                                    <div className="space-y-2">
+                                        {creditos.map((c: any) => (
+                                            <div key={c.id} className="flex items-center gap-3 p-2 rounded-lg border border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 cursor-pointer"
+                                                onClick={() => toggleCredito(c)}>
+                                                <Checkbox checked={!!imputaciones.find(i => i.comprobante_compra_id === c.id)} />
+                                                <div className="flex-1">
+                                                    <span className="text-sm font-medium">{c.tipo_comprobante}</span>
+                                                    <span className="text-sm text-muted-foreground ml-2">{c.numero_comprobante}</span>
+                                                    {!c.es_fiscal && (
+                                                        <span className="text-[10px] font-bold text-slate-500 ml-2 uppercase">reversa — no afecta retención</span>
+                                                    )}
+                                                </div>
+                                                <span className="text-sm font-medium text-emerald-700">− {formatCurrency(c.disponible)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                             {imputaciones.length > 0 && (
-                                <div className="pt-2 border-t">
-                                    <span className="text-sm font-medium">Total imputado: </span>
-                                    <span className="text-sm font-bold">{formatCurrency(totalImputado)}</span>
+                                <div className="pt-2 border-t text-sm space-x-4">
+                                    <span>Bruto: <b>{formatCurrency(totalBruto)}</b></span>
+                                    {totalCreditos > 0 && <span className="text-emerald-700">Créditos: <b>− {formatCurrency(totalCreditos)}</b></span>}
+                                    <span>Imputado neto de NC: <b>{formatCurrency(totalImputado)}</b></span>
                                 </div>
                             )}
                             {comprobantesCC.length === 0 && (
@@ -599,8 +648,11 @@ function NuevaOrdenPagoContent() {
                     <CardContent className="p-6">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
                             <div>
-                                <p className="text-sm text-muted-foreground">Total Bruto {totalImputado > 0 ? "(imputado)" : ""}</p>
-                                <p className="text-xl font-bold">{formatCurrency(totalImputado > 0 ? totalImputado : totalMedios + totalRetenciones)}</p>
+                                <p className="text-sm text-muted-foreground">Total Bruto {totalBruto > 0 ? "(imputado)" : ""}</p>
+                                <p className="text-xl font-bold">{formatCurrency(totalBruto > 0 ? totalBruto : totalMedios + totalRetenciones)}</p>
+                                {totalCreditos > 0 && (
+                                    <p className="text-xs font-semibold text-emerald-700">− NC/Reversas {formatCurrency(totalCreditos)}</p>
+                                )}
                             </div>
                             <div>
                                 <p className="text-sm text-muted-foreground">Retención Ganancias</p>

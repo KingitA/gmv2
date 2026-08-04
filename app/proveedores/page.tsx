@@ -693,23 +693,10 @@ export default function ProveedoresPage() {
                           <h4 className="font-medium text-sm text-muted-foreground">
                             Retenciones y Percepciones (solo aplican a comprobantes con IVA)
                           </h4>
+                          <p className="text-xs text-muted-foreground -mt-1 mb-2">
+                            La retención de Ganancias NO se configura acá: sale del régimen de la Ficha Fiscal (botón 🛡 en el listado).
+                          </p>
                           <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <Label htmlFor="retencion_ganancias">% Retención Ganancias</Label>
-                              <Input
-                                id="retencion_ganancias"
-                                type="number"
-                                step="0.01"
-                                value={formData.retencion_ganancias}
-                                onChange={(e) =>
-                                  setFormData({
-                                    ...formData,
-                                    retencion_ganancias: Number.parseFloat(e.target.value) || 0,
-                                  })
-                                }
-                                placeholder="0.00"
-                              />
-                            </div>
                             <div>
                               <Label htmlFor="percepcion_iva">% Percepción IVA</Label>
                               <Input

@@ -23,6 +23,43 @@ export default function CuentaCorrienteProveedorPage() {
     const [selectedMovs, setSelectedMovs] = useState<Set<string>>(new Set())
     const [showPagados, setShowPagados] = useState(false)
     const [provNombre, setProvNombre] = useState("")
+    const [ncOpen, setNcOpen] = useState(false)
+    const [nc, setNc] = useState({ tipo: "NC", numero: "", fecha: "", total: "", total_neto: "" })
+    const [ncSaving, setNcSaving] = useState(false)
+
+    const parseMonto = (v: string) => {
+        const t = v.trim().replace(",", ".")
+        if (!t || !/^\d+(\.\d{0,2})?$/.test(t)) return null
+        return Number(t)
+    }
+
+    async function guardarNC() {
+        const total = parseMonto(nc.total)
+        if (total === null || total <= 0) { toast({ variant: "destructive", title: "Total inválido (punto = centavos)" }); return }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(nc.fecha)) { toast({ variant: "destructive", title: "Fecha inválida (usar el selector)" }); return }
+        setNcSaving(true)
+        try {
+            const res = await fetch(`/api/proveedores/${id}/nc`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    tipo: nc.tipo,
+                    numero: nc.numero || null,
+                    fecha: nc.fecha,
+                    total,
+                    total_neto: nc.total_neto ? parseMonto(nc.total_neto) : null,
+                }),
+            })
+            const d = await res.json()
+            if (!res.ok) throw new Error(d.error)
+            toast({ title: `${nc.tipo} registrada — ya figura como crédito y se puede descontar en la próxima OP` })
+            setNcOpen(false)
+            setNc({ tipo: "NC", numero: "", fecha: "", total: "", total_neto: "" })
+            loadCuentaCorriente()
+        } catch (e: any) {
+            toast({ variant: "destructive", title: "Error", description: e.message })
+        } finally { setNcSaving(false) }
+    }
 
     useEffect(() => {
         if (id) { loadCuentaCorriente(); loadProveedorNombre() }
@@ -125,7 +162,59 @@ export default function CuentaCorrienteProveedorPage() {
                     <h1 className="text-2xl font-bold">Cuenta Corriente {provNombre && `— ${provNombre}`}</h1>
                     <p className="text-muted-foreground">Historial de movimientos y gestión de pagos</p>
                 </div>
+                <Button variant="outline" className="ml-auto" onClick={() => setNcOpen(true)}>
+                    + Nota de crédito
+                </Button>
             </div>
+
+            {ncOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setNcOpen(false)}>
+                    <div className="bg-white rounded-xl p-5 w-[420px] shadow-xl space-y-3" onClick={e => e.stopPropagation()}>
+                        <h3 className="font-bold">Nueva nota de crédito — {provNombre}</h3>
+                        <p className="text-xs text-muted-foreground">
+                            Para NC comerciales sin OC (ej. 3% del trimestre). NC/NCA/NCB = fiscal (resta base de retención) · Reversa = canal negro (no afecta retención).
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label className="text-xs font-medium">Tipo</label>
+                                <select className="w-full rounded-md border px-2 py-1.5 text-sm" value={nc.tipo}
+                                    onChange={e => setNc(p => ({ ...p, tipo: e.target.value }))}>
+                                    <option value="NC">NC</option>
+                                    <option value="NCA">NCA</option>
+                                    <option value="NCB">NCB</option>
+                                    <option value="Reversa">Reversa (negro)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-xs font-medium">N° comprobante</label>
+                                <input className="w-full rounded-md border px-2 py-1.5 text-sm" value={nc.numero}
+                                    onChange={e => setNc(p => ({ ...p, numero: e.target.value }))} placeholder="0001-00001234" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-medium">Fecha</label>
+                                <input type="date" className="w-full rounded-md border px-2 py-1.5 text-sm" value={nc.fecha}
+                                    onChange={e => setNc(p => ({ ...p, fecha: e.target.value }))} />
+                            </div>
+                            <div>
+                                <label className="text-xs font-medium">Total</label>
+                                <input inputMode="decimal" className="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={nc.total}
+                                    onChange={e => setNc(p => ({ ...p, total: e.target.value }))} placeholder="punto = centavos" />
+                            </div>
+                            {nc.tipo !== "Reversa" && (
+                                <div className="col-span-2">
+                                    <label className="text-xs font-medium">Neto gravado (opcional — si no, total ÷ 1,21)</label>
+                                    <input inputMode="decimal" className="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={nc.total_neto}
+                                        onChange={e => setNc(p => ({ ...p, total_neto: e.target.value }))} />
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-2 pt-1">
+                            <Button variant="outline" size="sm" onClick={() => setNcOpen(false)}>Cancelar</Button>
+                            <Button size="sm" disabled={ncSaving} onClick={guardarNC}>{ncSaving ? "Guardando…" : "Registrar NC"}</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
                 <Card className="border-l-4 border-l-red-500">
