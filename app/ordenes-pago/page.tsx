@@ -15,6 +15,7 @@ export default function OrdenesPagoPage() {
     const [loading, setLoading] = useState(true)
     const [filtroEstado, setFiltroEstado] = useState("todos")
     const [mesExport, setMesExport] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 7))
+    const [eligeCuenta, setEligeCuenta] = useState<{ opId: string; bancos: any[] } | null>(null)
 
     const finDeMes = (ym: string) => {
         const [y, m] = ym.split("-").map(Number)
@@ -36,14 +37,29 @@ export default function OrdenesPagoPage() {
         }
     }
 
-    async function confirmarOP(id: string) {
-        if (!confirm("¿Confirmar esta orden de pago? Se generarán los movimientos en cuenta corriente.")) return
+    async function confirmarOP(id: string, cuentaBancariaId?: string) {
+        if (!cuentaBancariaId && !confirm("¿Confirmar esta orden de pago? Se generarán los movimientos en cuenta corriente, kardex y saldos.")) return
         try {
-            const res = await fetch(`/api/ordenes-pago/${id}/confirmar`, { method: "POST" })
+            const res = await fetch(`/api/ordenes-pago/${id}/confirmar`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(cuentaBancariaId ? { cuenta_bancaria_id: cuentaBancariaId } : {}),
+            })
+            const d = await res.json()
             if (!res.ok) {
-                const err = await res.json()
-                alert(err.error || "Error al confirmar")
+                // La OP incluye transferencias: pedir la cuenta de origen y reintentar
+                if (String(d.error || "").includes("cuenta bancaria")) {
+                    const r = await fetch("/api/finanzas/cajas")
+                    const cj = await r.json()
+                    const bancos = (cj.cuentas || []).filter((c: any) => c.cuenta_tipo === "BANCO")
+                    setEligeCuenta({ opId: id, bancos })
+                    return
+                }
+                alert(d.error || "Error al confirmar")
                 return
+            }
+            if (d.numero_certificado) {
+                alert(`OP confirmada. Se emitió el certificado de retención N° ${d.numero_certificado} — podés bajarlo con el botón naranja.`)
             }
             loadOrdenes()
         } catch (e) {
@@ -268,6 +284,31 @@ export default function OrdenesPagoPage() {
                     </CardContent>
                 </Card>
             </main>
+
+            {/* Selección de cuenta bancaria de origen para OP con transferencias */}
+            {eligeCuenta && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setEligeCuenta(null)}>
+                    <div className="bg-white rounded-xl p-5 w-96 shadow-xl" onClick={e => e.stopPropagation()}>
+                        <h3 className="font-bold mb-1">¿Desde qué cuenta salen las transferencias?</h3>
+                        <p className="text-xs text-muted-foreground mb-3">La OP incluye transferencias — elegí la cuenta de origen para asentar el kardex y bajar el saldo.</p>
+                        <div className="space-y-2">
+                            {eligeCuenta.bancos.map((b: any) => (
+                                <button key={b.cuenta_id}
+                                    className="w-full text-left rounded-lg border px-3 py-2 text-sm hover:border-indigo-400 hover:bg-indigo-50 transition-colors"
+                                    onClick={() => { const opId = eligeCuenta.opId; setEligeCuenta(null); confirmarOP(opId, b.cuenta_id) }}>
+                                    <span className="font-medium">{b.nombre}</span>
+                                    <span className="text-xs text-muted-foreground ml-2">
+                                        saldo {Number(b.saldos?.BLANCO ?? 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 })}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="text-right mt-3">
+                            <Button variant="outline" size="sm" onClick={() => setEligeCuenta(null)}>Cancelar</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
