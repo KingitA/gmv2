@@ -140,20 +140,24 @@ export async function POST(
         // que es como op_confirmar los marca pagados.
         if (!esCredito) {
             let fechaVencimiento = comprobante.fecha_vencimiento;
-            if (!fechaVencimiento && proveedorId && comprobante.fecha_comprobante) {
+            let formaPagoProv: string | null = null;
+            if (proveedorId) {
                 const { data: prov } = await supabase
                     .from('proveedores')
-                    .select('dias_vencimiento')
+                    .select('dias_vencimiento, forma_pago_default')
                     .eq('id', proveedorId)
                     .maybeSingle();
-                const dias = Number(prov?.dias_vencimiento || 0);
-                if (dias > 0) {
-                    const base = new Date(comprobante.fecha_comprobante + 'T00:00:00');
-                    base.setDate(base.getDate() + dias);
-                    fechaVencimiento = base.toISOString().slice(0, 10);
-                    await supabase.from('comprobantes_compra')
-                        .update({ fecha_vencimiento: fechaVencimiento })
-                        .eq('id', comprobante_id);
+                formaPagoProv = (prov as any)?.forma_pago_default || null;
+                if (!fechaVencimiento && comprobante.fecha_comprobante) {
+                    const dias = Number(prov?.dias_vencimiento || 0);
+                    if (dias > 0) {
+                        const base = new Date(comprobante.fecha_comprobante + 'T00:00:00');
+                        base.setDate(base.getDate() + dias);
+                        fechaVencimiento = base.toISOString().slice(0, 10);
+                        await supabase.from('comprobantes_compra')
+                            .update({ fecha_vencimiento: fechaVencimiento })
+                            .eq('id', comprobante_id);
+                    }
                 }
             }
             if (fechaVencimiento && total > 0) {
@@ -164,6 +168,9 @@ export async function POST(
                     monto: total,
                     fecha_vencimiento: fechaVencimiento,
                     estado: 'pendiente',
+                    // Forma de pago acordada con el proveedor (Ficha Fiscal);
+                    // editable después desde el panel/calendario.
+                    forma_pago: formaPagoProv,
                     referencia_id: ccMovId || comprobante_id,
                     referencia_tipo: ccMovId ? 'cuenta_corriente' : 'comprobante_compra',
                 });

@@ -30,6 +30,7 @@ export function FichaFiscalDialog({
   const [data, setData] = useState<any>(null)
   const [regimen, setRegimen] = useState("bienes")
   const [condicion, setCondicion] = useState("inscripto")
+  const [formaPago, setFormaPago] = useState("ninguna")
   const [nuevaExclusion, setNuevaExclusion] = useState<{ desde: string; hasta: string; pct: string; nro: string } | null>(null)
   const [desactivar, setDesactivar] = useState<Set<string>>(new Set())
   const [propuesta, setPropuesta] = useState<any>(null)
@@ -49,6 +50,7 @@ export function FichaFiscalDialog({
         setData(d)
         setRegimen(d.proveedor.regimen_ganancias || "bienes")
         setCondicion(d.proveedor.condicion_ganancias || "inscripto")
+        setFormaPago(d.proveedor.forma_pago_default || "ninguna")
       })
       .catch(e => toast.error(e.message))
   }, [open, proveedorId])
@@ -96,6 +98,7 @@ export function FichaFiscalDialog({
       const body: any = {
         regimen_ganancias: regimen,
         condicion_ganancias: condicion,
+        forma_pago_default: formaPago === "ninguna" ? null : formaPago,
         desactivar_exclusiones: [...desactivar],
       }
       if (nuevaExclusion && nuevaExclusion.desde && Number(nuevaExclusion.pct) > 0) {
@@ -162,6 +165,19 @@ export function FichaFiscalDialog({
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div>
+              <Label>Forma de pago habitual (el vencimiento de cada factura la hereda)</Label>
+              <Select value={formaPago} onValueChange={setFormaPago}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ninguna">Sin definir (se elige en cada pago)</SelectItem>
+                  <SelectItem value="transferencia">Transferencia</SelectItem>
+                  <SelectItem value="cheque">Cheque</SelectItem>
+                  <SelectItem value="efectivo">Efectivo</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Exclusiones vigentes */}
