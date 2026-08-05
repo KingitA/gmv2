@@ -32,16 +32,41 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const totalRetiro = comisiones.reduce((s, c) => s + Number(c.monto), 0)
 
     // Registrar movimiento de retiro en billetera (monto negativo = egreso)
-    const { error: movError } = await supabase.from("billetera_movimientos").insert({
-      viajante_id: id,
-      tipo: "retiro_comision",
-      monto: -Math.abs(totalRetiro),
-      concepto: concepto ?? `Retiro de ${comisiones.length} comisiones`,
-      referencia_tipo: "retiro",
-      fecha: nowArgentina(),
-      creado_por: auth.user.id,
-    })
+    const { data: movimiento, error: movError } = await supabase
+      .from("billetera_movimientos")
+      .insert({
+        viajante_id: id,
+        tipo: "retiro_comision",
+        monto: -Math.abs(totalRetiro),
+        concepto: concepto ?? `Retiro de ${comisiones.length} comisiones`,
+        referencia_tipo: "retiro",
+        fecha: nowArgentina(),
+        creado_por: auth.user.id,
+      })
+      .select("id")
+      .single()
     if (movError) throw movError
+
+    // Dual-write al libro de caja (Caja del Día E4): el retiro es plata que
+    // sale del circuito y hasta ahora no dejaba rastro en kardex_contable.
+    // RETIRO_BILLETERA estaba declarado en el dominio B1 sin uso — este es su
+    // uso previsto. Sin doble saldo: kardex_registrar v3 no toca saldos
+    // BILLETERA (los maneja el trigger de billetera_movimientos, arriba).
+    // Best-effort: si falla no revierte el retiro, solo se loguea.
+    const { error: kardexError } = await supabase.rpc("kardex_registrar", {
+      p_tipo_movimiento: "RETIRO_BILLETERA",
+      p_concepto: concepto ?? `Retiro comisión (${comisiones.length} comisiones)`,
+      p_monto: Math.abs(totalRetiro),
+      p_color: "BLANCO",
+      p_origen_tipo: "BILLETERA",
+      p_origen_id: id,
+      p_destino_tipo: "EXTERNO",
+      p_metodo: "EFECTIVO",
+      p_referencia_tipo: "billetera_movimiento",
+      p_referencia_id: movimiento?.id ?? null,
+      p_usuario_id: auth.user.id,
+    })
+    if (kardexError) console.error("[viajantes/retiro] kardex_registrar falló:", kardexError)
 
     // Marcar comisiones como pagadas
     const { error: updateError } = await supabase

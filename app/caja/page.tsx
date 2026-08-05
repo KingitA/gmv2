@@ -17,6 +17,8 @@ import { FechaInput } from "@/components/finanzas/fecha-input"
 import { RegistrarCobro, type CuentaFondos } from "@/components/caja/registrar-cobro"
 import { MoverPlata } from "@/components/caja/mover-plata"
 import { ConfirmarDialog, type PagoAConfirmar } from "@/components/caja/confirmar-dialog"
+import { ControlarRendicion } from "@/components/caja/controlar-rendicion"
+import { CerrarDia, type CobroEnCaja } from "@/components/caja/cerrar-dia"
 import { todayArgentina } from "@/lib/utils"
 
 type Estado = { tipo: "ok" | "info" | "accion" | "esperando" | "error"; texto: string }
@@ -33,6 +35,7 @@ interface FilaCaja {
   salida: number | null
   neutro: number | null
   estado: Estado
+  cliente_id?: string | null
   pago_id?: string | null
   rendicion_id?: string | null
   confirmable?: boolean
@@ -118,16 +121,29 @@ function EstadoChip({ estado, fila, onAccion }: { estado: Estado; fila: FilaCaja
       </button>
     )
   }
-  // Rendiciones: el control físico llega en la Etapa 3; por ahora navega.
-  const destino = estado.tipo === "esperando" ? "/finanzas/pendiente-rendir" : null
-  const chip = (
+  // Rendiciones esperando la plata: Controlar abre el checklist físico acá mismo.
+  if (estado.tipo === "esperando" && fila.rendicion_id && onAccion) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className={`rounded-full px-3 py-0.5 text-[11px] font-semibold whitespace-nowrap ${estilos.esperando}`}>
+          {estado.texto}
+        </span>
+        <button
+          onClick={() => onAccion(fila)}
+          className="rounded-full bg-blue-600 px-3.5 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-blue-700 whitespace-nowrap"
+        >
+          Controlar
+        </button>
+      </span>
+    )
+  }
+  return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-[11px] font-semibold whitespace-nowrap ${estilos[estado.tipo]} ${destino ? "hover:brightness-95" : ""}`}
+      className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-[11px] font-semibold whitespace-nowrap ${estilos[estado.tipo]}`}
     >
       {estado.texto}
     </span>
   )
-  return destino ? <Link href={destino}>{chip}</Link> : chip
 }
 
 function Fila({ f, onAccion }: { f: FilaCaja; onAccion?: (f: FilaCaja) => void }) {
@@ -177,6 +193,8 @@ export default function CajaDelDiaPage() {
   const [cuentas, setCuentas] = useState<CuentaFondos[]>([])
   const [usuarioId, setUsuarioId] = useState("")
   const [pagoAConfirmar, setPagoAConfirmar] = useState<PagoAConfirmar | null>(null)
+  const [rendicionAControlar, setRendicionAControlar] = useState<string | null>(null)
+  const [cerrandoDia, setCerrandoDia] = useState(false)
 
   const cargar = useCallback(async (f: string) => {
     setCargando(true)
@@ -211,6 +229,10 @@ export default function CajaDelDiaPage() {
   }, [])
 
   const abrirConfirmacion = useCallback((f: FilaCaja) => {
+    if (f.fuente === "rendicion" && f.rendicion_id) {
+      setRendicionAControlar(f.rendicion_id)
+      return
+    }
     if (!f.pago_id) return
     setPagoAConfirmar({
       pago_id: f.pago_id,
@@ -244,6 +266,20 @@ export default function CajaDelDiaPage() {
   )
 
   const esHoy = fecha === todayArgentina()
+
+  // Cobros de oficina "en caja" del día: los que el cierre imputa en lote
+  const cobrosEnCaja: CobroEnCaja[] = useMemo(
+    () =>
+      (feed?.filas ?? [])
+        .filter((f) => f.fuente === "pago" && f.estado.texto === "En caja · se imputa al cierre")
+        .map((f) => ({
+          pago_id: f.pago_id!,
+          cliente_id: f.cliente_id ?? null,
+          quien: f.quien,
+          monto: f.entrada ?? 0,
+        })),
+    [feed]
+  )
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -400,18 +436,34 @@ export default function CajaDelDiaPage() {
                   $ {fmt(feed?.arqueo.efectivo_esperado ?? 0)}
                 </span>
               </div>
-              <div className="mt-1 flex items-center justify-between text-sm">
-                <span className="text-slate-500">Contado</span>
-                <span className="text-slate-400">—</span>
-              </div>
-              <div className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-400">
-                El conteo y el cierre que imputa llegan en la próxima etapa. Por ahora el cierre se
-                hace en{" "}
-                <Link href="/finanzas/cierres" className="font-semibold text-blue-600 hover:underline">
-                  Cierre de caja
-                </Link>
-                .
-              </div>
+              {cobrosEnCaja.length > 0 && (
+                <div className="mt-1 flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Cobros en caja</span>
+                  <span className="font-bold" style={NUM}>{cobrosEnCaja.length}</span>
+                </div>
+              )}
+              {esHoy && feed?.arqueo.caja_chica_id ? (
+                <>
+                  <button
+                    onClick={() => setCerrandoDia(true)}
+                    className="mt-3 w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+                  >
+                    Cerrar el día
+                  </button>
+                  <div className="mt-2 text-[11px] text-slate-400">
+                    Al cerrar: contás el efectivo y se imputan los cobros del día a las cuentas
+                    corrientes. Conteo billete por billete en{" "}
+                    <Link href="/finanzas/cierres" className="font-semibold text-blue-600 hover:underline">
+                      Cierre de caja
+                    </Link>
+                    .
+                  </div>
+                </>
+              ) : (
+                <div className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-400">
+                  El cierre se hace parado en el día de hoy.
+                </div>
+              )}
             </div>
 
             <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
@@ -468,6 +520,33 @@ export default function CajaDelDiaPage() {
           onCerrar={() => setPagoAConfirmar(null)}
           onListo={() => {
             setPagoAConfirmar(null)
+            cargar(fecha)
+          }}
+        />
+      )}
+
+      {rendicionAControlar && (
+        <ControlarRendicion
+          rendicionId={rendicionAControlar}
+          cuentas={cuentas}
+          onCerrar={() => setRendicionAControlar(null)}
+          onListo={() => {
+            setRendicionAControlar(null)
+            cargar(fecha)
+          }}
+        />
+      )}
+
+      {cerrandoDia && feed?.arqueo.caja_chica_id && (
+        <CerrarDia
+          fecha={fecha}
+          cajaChicaId={feed.arqueo.caja_chica_id}
+          cajaChicaNombre={feed.arqueo.caja_chica_nombre ?? "Caja chica"}
+          cobros={cobrosEnCaja}
+          usuarioId={usuarioId}
+          onCerrar={() => setCerrandoDia(false)}
+          onListo={() => {
+            setCerrandoDia(false)
             cargar(fecha)
           }}
         />
