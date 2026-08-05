@@ -185,7 +185,8 @@ export async function POST(
                         if (f) fechaBase = String(f).slice(0, 10);
                     }
                     const dias = Number(cfg.dias ?? p.dias_vencimiento ?? 0);
-                    if (fechaBase && dias > 0) {
+                    // cfg.dias explícito admite 0 (contado); sin config, exige > 0
+                    if (fechaBase && (cfg.dias != null || dias > 0)) {
                         const base = new Date(fechaBase + 'T00:00:00');
                         base.setDate(base.getDate() + dias);
                         fechaVencimiento = base.toISOString().slice(0, 10);

@@ -132,6 +132,28 @@ export function VencimientoEditDialog({
     }
   }
 
+  const recalcular = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/vencimientos/${venc.id}/recalcular`, { method: "POST" })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error)
+      const partes = [
+        d.forma_pago ? `forma: ${d.forma_pago}` : null,
+        d.modalidad ? `modalidad: ${d.modalidad}` : null,
+        d.fecha_vencimiento ? `vence: ${d.fecha_vencimiento.split("-").reverse().join("/")}` : null,
+        d.fecha_validez ? `validez cheques: ${d.fecha_validez.split("-").reverse().join("/")}` : null,
+      ].filter(Boolean)
+      toast.success(`Recalculado desde la ficha — ${partes.join(" · ")}`)
+      onOpenChange(false)
+      onSaved?.()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const eliminar = async () => {
     if (!confirm(`¿Eliminar el pago "${titulo}" por ${monto}? Queda cancelado (no se borra el registro).`)) return
     setSaving(true)
@@ -211,6 +233,13 @@ export function VencimientoEditDialog({
             <Button type="button" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 mr-auto" disabled={saving} onClick={eliminar}>
               Eliminar
             </Button>
+            {venc.proveedor_id && (
+              <Button type="button" variant="outline" className="text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                disabled={saving} onClick={recalcular}
+                title="Vuelve a aplicar el acuerdo de pago de la ficha del proveedor (forma, modalidad, plazo y validez de cheques)">
+                ↻ Recalcular desde ficha
+              </Button>
+            )}
             {venc.proveedor_id ? (
               // Circuito único: los pagos a proveedores van por Orden de Pago
               // (CC + kardex + retención + certificado, siempre)
