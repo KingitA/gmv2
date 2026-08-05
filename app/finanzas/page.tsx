@@ -401,6 +401,7 @@ export default function FinanzasPage() {
           <h1 className="text-lg font-bold text-slate-800 tracking-wide" style={{ fontFamily: "Bahnschrift, 'Segoe UI', sans-serif" }}>FINANZAS</h1>
           <div className="flex items-center gap-2 flex-wrap">
             {[
+              { href: "/caja", label: "Caja del día" },
               { href: "/finanzas/tablero", label: "Tablero" },
               { href: "/finanzas/cierres", label: "Cierre de caja" },
               { href: "/finanzas/cajas", label: "Operar cajas" },

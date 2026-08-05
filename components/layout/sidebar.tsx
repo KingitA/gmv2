@@ -57,6 +57,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Finanzas',
     items: [
+      { label: 'Caja del Día', href: '/caja', icon: '📒' },
       { label: 'Panel Finanzas', href: '/finanzas', icon: '💵', roleRequired: ['admin'] },
     ],
   },
