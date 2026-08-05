@@ -1,17 +1,22 @@
 "use client"
 
-// ─── La Caja del Día — Etapa 1 (lectura) ────────────────────────────────────
-// Libro diario unificado de la plata, a ancho completo. Reemplaza la consulta
-// de la hoja de caja de Drive: cobros, transferencias, echeqs, pagos a
-// proveedores y rendiciones en una sola lista, con el arqueo de caja chica
-// siempre a la vista. Las acciones (Confirmar / Aceptar / Controlar / cierre)
-// llegan en las etapas 2-4; por ahora los estados-botón navegan a la pantalla
-// que hoy resuelve cada caso.
+// ─── La Caja del Día ────────────────────────────────────────────────────────
+// Libro diario unificado de la plata, a ancho completo. Reemplaza la hoja de
+// caja de Drive: cobros, transferencias, echeqs, proveedores y rendiciones en
+// una sola lista, con el arqueo de caja chica siempre a la vista.
+// E1: lectura. E2: barra de registro rápido (cobros pendientes vía
+// /api/cobranzas confirmar:false), Mover plata (transferencias/egresos) y
+// confirmación/rechazo inline (PATCH /api/pagos/[id]/confirmar). Pendientes:
+// control físico de rendiciones (E3) y cierre que imputa (E4).
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react"
+import { createBrowserClient } from "@supabase/ssr"
 import { FechaInput } from "@/components/finanzas/fecha-input"
+import { RegistrarCobro, type CuentaFondos } from "@/components/caja/registrar-cobro"
+import { MoverPlata } from "@/components/caja/mover-plata"
+import { ConfirmarDialog, type PagoAConfirmar } from "@/components/caja/confirmar-dialog"
 import { todayArgentina } from "@/lib/utils"
 
 type Estado = { tipo: "ok" | "info" | "accion" | "esperando" | "error"; texto: string }
@@ -30,6 +35,9 @@ interface FilaCaja {
   estado: Estado
   pago_id?: string | null
   rendicion_id?: string | null
+  confirmable?: boolean
+  detalles_resumen?: { tipo: string; monto: number; descripcion: string }[]
+  requiere_color?: boolean
 }
 
 interface FeedCaja {
@@ -91,7 +99,7 @@ function sumarDias(iso: string, dias: number) {
   return d.toISOString().slice(0, 10)
 }
 
-function EstadoChip({ estado, fila }: { estado: Estado; fila: FilaCaja }) {
+function EstadoChip({ estado, fila, onAccion }: { estado: Estado; fila: FilaCaja; onAccion?: (f: FilaCaja) => void }) {
   const estilos: Record<Estado["tipo"], string> = {
     ok: "bg-green-100 text-green-700",
     info: "bg-slate-100 text-slate-600",
@@ -99,13 +107,19 @@ function EstadoChip({ estado, fila }: { estado: Estado; fila: FilaCaja }) {
     esperando: "bg-purple-100 text-purple-700",
     error: "bg-red-100 text-red-700",
   }
-  // Etapa 1: los estados-acción todavía navegan a la pantalla que resuelve el caso.
-  const destino =
-    estado.tipo === "accion" && fila.pago_id
-      ? "/revision-pagos"
-      : estado.tipo === "esperando"
-        ? "/finanzas/pendiente-rendir"
-        : null
+  // El estado ES el botón: los pagos confirmables abren el modal acá mismo.
+  if (estado.tipo === "accion" && fila.confirmable && fila.pago_id && onAccion) {
+    return (
+      <button
+        onClick={() => onAccion(fila)}
+        className="inline-flex items-center gap-1 rounded-full bg-green-600 px-3.5 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-green-700 whitespace-nowrap"
+      >
+        {estado.texto}
+      </button>
+    )
+  }
+  // Rendiciones: el control físico llega en la Etapa 3; por ahora navega.
+  const destino = estado.tipo === "esperando" ? "/finanzas/pendiente-rendir" : null
   const chip = (
     <span
       className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-[11px] font-semibold whitespace-nowrap ${estilos[estado.tipo]} ${destino ? "hover:brightness-95" : ""}`}
@@ -116,7 +130,7 @@ function EstadoChip({ estado, fila }: { estado: Estado; fila: FilaCaja }) {
   return destino ? <Link href={destino}>{chip}</Link> : chip
 }
 
-function Fila({ f }: { f: FilaCaja }) {
+function Fila({ f, onAccion }: { f: FilaCaja; onAccion?: (f: FilaCaja) => void }) {
   const fondo =
     f.estado.tipo === "accion"
       ? "bg-amber-50/60 border-amber-200"
@@ -147,7 +161,7 @@ function Fila({ f }: { f: FilaCaja }) {
       <span className="flex-1 min-w-0 truncate text-[12.5px] text-slate-600">{f.medio}</span>
       <span className="w-[130px] flex-none text-right text-[13.5px] font-bold">{monto}</span>
       <span className="w-[220px] flex-none text-right">
-        <EstadoChip estado={f.estado} fila={f} />
+        <EstadoChip estado={f.estado} fila={f} onAccion={onAccion} />
       </span>
     </div>
   )
@@ -160,6 +174,9 @@ export default function CajaDelDiaPage() {
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("todo")
   const [busqueda, setBusqueda] = useState("")
+  const [cuentas, setCuentas] = useState<CuentaFondos[]>([])
+  const [usuarioId, setUsuarioId] = useState("")
+  const [pagoAConfirmar, setPagoAConfirmar] = useState<PagoAConfirmar | null>(null)
 
   const cargar = useCallback(async (f: string) => {
     setCargando(true)
@@ -179,6 +196,31 @@ export default function CajaDelDiaPage() {
   useEffect(() => {
     cargar(fecha)
   }, [fecha, cargar])
+
+  // Cuentas para la barra de registro y Mover plata + usuario para confirmar
+  useEffect(() => {
+    fetch("/api/finanzas/cajas")
+      .then((r) => r.json())
+      .then((d) => setCuentas(d.cuentas || []))
+      .catch(() => {})
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    supabase.auth.getUser().then(({ data }) => setUsuarioId(data.user?.id ?? ""))
+  }, [])
+
+  const abrirConfirmacion = useCallback((f: FilaCaja) => {
+    if (!f.pago_id) return
+    setPagoAConfirmar({
+      pago_id: f.pago_id,
+      quien: f.quien,
+      monto: f.entrada ?? f.neutro ?? 0,
+      detalles: f.detalles_resumen ?? [],
+      requiere_color: f.requiere_color ?? false,
+      accion_texto: f.estado.texto,
+    })
+  }, [])
 
   const filtrar = useCallback(
     (filas: FilaCaja[]) => {
@@ -286,6 +328,15 @@ export default function CajaDelDiaPage() {
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
           {/* ── Lista de movimientos ── */}
           <div className="min-w-0 flex-1">
+            {/* Barra de registro rápido + Mover plata (solo sobre el día de hoy) */}
+            {esHoy && (
+              <>
+                <RegistrarCobro cuentas={cuentas} onRegistrado={() => cargar(fecha)} />
+                <div className="mb-4 -mt-2">
+                  <MoverPlata cuentas={cuentas} onMovido={() => cargar(fecha)} />
+                </div>
+              </>
+            )}
             {/* Rendiciones esperando la plata (siempre arriba: son lo próximo que llega) */}
             {filasRend.length > 0 && (
               <div className="mb-4">
@@ -294,7 +345,7 @@ export default function CajaDelDiaPage() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {filasRend.map((f) => (
-                    <Fila key={f.id} f={f} />
+                    <Fila key={f.id} f={f} onAccion={abrirConfirmacion} />
                   ))}
                 </div>
               </div>
@@ -308,7 +359,7 @@ export default function CajaDelDiaPage() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {filasAnteriores.map((f) => (
-                    <Fila key={f.id} f={f} />
+                    <Fila key={f.id} f={f} onAccion={abrirConfirmacion} />
                   ))}
                 </div>
               </div>
@@ -333,7 +384,7 @@ export default function CajaDelDiaPage() {
             ) : (
               <div className="flex flex-col gap-1.5">
                 {filasDia.map((f) => (
-                  <Fila key={f.id} f={f} />
+                  <Fila key={f.id} f={f} onAccion={abrirConfirmacion} />
                 ))}
               </div>
             )}
@@ -409,6 +460,18 @@ export default function CajaDelDiaPage() {
           </div>
         </div>
       </div>
+
+      {pagoAConfirmar && (
+        <ConfirmarDialog
+          pago={pagoAConfirmar}
+          usuarioId={usuarioId}
+          onCerrar={() => setPagoAConfirmar(null)}
+          onListo={() => {
+            setPagoAConfirmar(null)
+            cargar(fecha)
+          }}
+        />
+      )}
     </div>
   )
 }

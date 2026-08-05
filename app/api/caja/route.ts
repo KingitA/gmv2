@@ -35,6 +35,13 @@ interface FilaCaja {
   pago_id?: string | null
   rendicion_id?: string | null
   orden_pago_id?: string | null
+  /** Filas fuente:"pago": el pago se puede confirmar entero desde /caja (todos
+   *  sus métodos son digitales, o es un cobro de oficina). Un pago mixto de la
+   *  calle espera su rendición. */
+  confirmable?: boolean
+  detalles_resumen?: { tipo: string; monto: number; descripcion: string }[]
+  /** Cheques a cuenta sin color: la confirmación exige elegir BLANCO/NEGRO. */
+  requiere_color?: boolean
 }
 
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
@@ -389,6 +396,25 @@ export async function GET(request: NextRequest) {
         p.cobrador_tipo && p.cobrador_tipo !== "oficina"
           ? `cargó ${p.cobrador_tipo}`
           : "Cobro en oficina"
+
+      // Confirmable entero desde /caja: pago de oficina, o pago de la calle
+      // cuyos métodos son TODOS digitales. Mixto → espera su rendición.
+      const esDigital = (d: any) => d.tipo_pago === "transferencia" || d.tipo_pago === "deposito" || esEcheq(d)
+      const confirmable = p.estado === "pendiente" || detalles.every(esDigital)
+      // Cheque físico a cuenta sin color asignado → la confirmación pide BLANCO/NEGRO
+      const requiereColor = detalles.some(
+        (d) => d.tipo_pago === "cheque" && !esEcheq(d) && (!d.color_cheque || d.color_cheque === "PENDIENTE")
+      )
+      const detallesResumen = relevantes.map((d) => ({
+        tipo: esEcheq(d) ? "echeq" : d.tipo_pago,
+        monto: num(d.monto),
+        descripcion:
+          d.tipo_pago === "cheque"
+            ? `${d.banco ?? ""} ${d.numero_cheque ?? ""}`.trim()
+            : d.tipo_pago === "transferencia"
+              ? `${d.banco ?? ""}${d.numero_comprobante_pago || d.referencia ? ` · op. ${d.numero_comprobante_pago || d.referencia}` : ""}`.trim()
+              : "",
+      }))
       const fila: FilaCaja = {
         id: `p-${p.id}`,
         fuente: "pago",
@@ -400,12 +426,19 @@ export async function GET(request: NextRequest) {
         entrada: montoRelevante,
         salida: null,
         neutro: null,
-        estado: {
-          tipo: "accion",
-          texto: tieneEcheq ? "Aceptar echeq" : tieneTransf ? "Confirmar" : tieneCheque ? "Confirmar cheque" : "En caja · se imputa al cierre",
-        },
+        estado: !confirmable
+          ? { tipo: "info" as const, texto: "Llega con la rendición" }
+          : tieneEcheq || tieneTransf || tieneCheque
+            ? {
+                tipo: "accion" as const,
+                texto: tieneEcheq ? "Aceptar echeq" : tieneTransf ? "Confirmar" : "Confirmar cheque",
+              }
+            : { tipo: "info" as const, texto: "En caja · se imputa al cierre" },
         cliente_id: p.cliente_id,
         pago_id: p.id,
+        confirmable,
+        detalles_resumen: detallesResumen,
+        requiere_color: requiereColor,
       }
       if (p.fecha_pago === fecha) filasPend.push(fila)
       else if (p.fecha_pago < fecha) filasPendAnteriores.push(fila)
