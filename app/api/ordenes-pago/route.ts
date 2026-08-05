@@ -150,7 +150,9 @@ export async function POST(request: Request) {
     // 2. Crear detalle de medios de pago
     const detalleInserts = medios_pago.map((m: any) => ({
         orden_pago_id: op.id,
-        medio: m.medio,
+        // op_confirmar identifica el cheque propio como medio='cheque' sin
+        // cheque_id — normalizar para que registre kardex y cree el cheque
+        medio: m.medio === 'cheque_propio' ? 'cheque' : m.medio,
         monto: m.monto,
         cheque_id: m.cheque_id || null,
         cheque_banco: m.cheque_banco || null,
