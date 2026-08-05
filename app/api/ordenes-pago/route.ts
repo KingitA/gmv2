@@ -161,7 +161,9 @@ export async function POST(request: Request) {
         cbu: m.cbu || null,
         numero_transferencia: m.numero_transferencia || null,
         fecha_transferencia: m.fecha_transferencia || null,
-        observaciones: m.observaciones || null
+        observaciones: m.observaciones || null,
+        cuenta_origen_tipo: m.cuenta_origen_tipo || null,
+        cuenta_origen_id: m.cuenta_origen_id || null
     }))
 
     const { error: detError } = await supabase

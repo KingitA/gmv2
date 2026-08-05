@@ -25,11 +25,24 @@ export async function POST(
         const body = await request.json().catch(() => ({}))
         const supabase = createAdminClient()
 
+        // Si la OP guardó el origen de fondos al crearse (cuenta_origen_* en el
+        // detalle), usarlo sin volver a preguntar. El body explícito gana.
+        let cajaId = body.caja_id ?? null
+        let cuentaBancoId = body.cuenta_bancaria_id ?? null
+        if (!cajaId || !cuentaBancoId) {
+            const { data: det } = await supabase
+                .from('ordenes_pago_detalle')
+                .select('cuenta_origen_tipo, cuenta_origen_id')
+                .eq('orden_pago_id', opId)
+            if (!cajaId) cajaId = det?.find(d => d.cuenta_origen_tipo === 'CAJA' && d.cuenta_origen_id)?.cuenta_origen_id ?? null
+            if (!cuentaBancoId) cuentaBancoId = det?.find(d => d.cuenta_origen_tipo === 'BANCO' && d.cuenta_origen_id)?.cuenta_origen_id ?? null
+        }
+
         const { data, error } = await supabase.rpc('op_confirmar', {
             p_op_id: opId,
             p_usuario_id: auth.user?.id ?? null,
-            p_caja_id: body.caja_id ?? null,
-            p_cuenta_banco_id: body.cuenta_bancaria_id ?? null,
+            p_caja_id: cajaId,
+            p_cuenta_banco_id: cuentaBancoId,
         })
         if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
