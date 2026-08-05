@@ -135,7 +135,7 @@ export default function FinanzasPage() {
   const [vencEdit, setVencEdit] = useState<VencimientoEditable | null>(null)
 
   // Secciones plegables / diálogos
-  const [showCalendario, setShowCalendario] = useState(false)
+  const [vistaPagos, setVistaPagos] = useState<"lista" | "calendario">("lista")
   const [nuevoGastoOpen, setNuevoGastoOpen] = useState(false)
   const [showEvolucion, setShowEvolucion] = useState(false)
   const [cuentaEdit, setCuentaEdit] = useState<CuentaAjustable | null>(null)
@@ -621,23 +621,36 @@ export default function FinanzasPage() {
             >
               + Nuevo gasto
             </button>
-            {([30, 60, 90] as const).map(h => (
-              <button key={h} onClick={() => setHorizonte(h)}
-                className={`rounded-full px-3.5 py-1 text-xs font-semibold border transition-colors ${
-                  horizonte === h ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
-                }`}>{h} días</button>
-            ))}
-            <button onClick={() => setHorizonte(0)}
-              className={`rounded-full px-3.5 py-1 text-xs font-semibold border transition-colors ${
-                horizonte === 0 ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
-              }`}>Todo</button>
-            <button onClick={() => setShowCalendario(s => !s)} className="ml-auto text-[13px] font-semibold text-indigo-600 hover:text-indigo-800">
-              {showCalendario ? "Cerrar calendario" : "Abrir calendario completo →"}
-            </button>
+            {vistaPagos === "lista" && (
+              <>
+                {([30, 60, 90] as const).map(h => (
+                  <button key={h} onClick={() => setHorizonte(h)}
+                    className={`rounded-full px-3.5 py-1 text-xs font-semibold border transition-colors ${
+                      horizonte === h ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
+                    }`}>{h} días</button>
+                ))}
+                <button onClick={() => setHorizonte(0)}
+                  className={`rounded-full px-3.5 py-1 text-xs font-semibold border transition-colors ${
+                    horizonte === 0 ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
+                  }`}>Todo</button>
+              </>
+            )}
+            <div className="ml-auto flex rounded-full border border-slate-200 bg-slate-100 p-0.5">
+              {(["lista", "calendario"] as const).map(v => (
+                <button key={v} onClick={() => setVistaPagos(v)}
+                  className={`rounded-full px-4 py-1 text-xs font-semibold capitalize transition-colors ${
+                    vistaPagos === v ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}>{v}</button>
+              ))}
+            </div>
           </div>
           <p className="text-xs text-slate-400 mb-2">Tocá un pago para editarlo (monto, fecha, forma de pago, eliminar).</p>
 
-          {loading ? (
+          {vistaPagos === "calendario" ? (
+            <div className="mt-2">
+              <CalendarioPagos key={calKey} showCheques onDataChanged={load} />
+            </div>
+          ) : loading ? (
             <div className="py-10 text-center text-slate-400 text-sm">Cargando…</div>
           ) : !items.length ? (
             <div className="py-10 text-center text-slate-400 text-sm">No hay pagos pendientes en este horizonte. 🎉</div>
@@ -676,13 +689,6 @@ export default function FinanzasPage() {
             </>
           )}
         </div>
-
-        {/* ── Calendario completo (plegado) ── */}
-        {showCalendario && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <CalendarioPagos key={calKey} showCheques onDataChanged={load} />
-          </div>
-        )}
 
         {/* ── Evolución (kardex, plegada) ── */}
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
