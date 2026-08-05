@@ -763,9 +763,9 @@ function NuevaOrdenPagoContent() {
                             <Button variant="ghost" size="sm" onClick={() => agregarMedio("cheque_propio")} className="text-muted-foreground gap-1.5">
                                 <Plus className="h-4 w-4" /> Cheque propio
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => agregarMedio("deposito")} className="text-muted-foreground gap-1.5">
-                                <Plus className="h-4 w-4" /> Depósito
-                            </Button>
+                            <span className="text-[11px] text-muted-foreground">
+                                Si al proveedor se le deposita, la entrega ya lo dice la ficha — el pago se arma igual con cheques/efectivo.
+                            </span>
                         </div>
 
                         {/* Pago armado */}
