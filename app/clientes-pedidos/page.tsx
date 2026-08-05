@@ -450,7 +450,11 @@ export default function ClientesPedidosPage() {
     }
   }
 
+  const detallesReqRef = useRef(0)
   const cargarDetallesPedido = async (pedidoId: string) => {
+    // Token de orden: si mientras esta consulta viaja se pidió cargar otro
+    // pedido, descartamos esta respuesta para no mostrar ítems ajenos.
+    const reqId = ++detallesReqRef.current
     try {
       const { data, error } = await supabase
         .from("pedidos_detalle")
@@ -471,6 +475,7 @@ export default function ClientesPedidosPage() {
         .eq("pedido_id", pedidoId)
 
       if (error) throw error
+      if (reqId !== detallesReqRef.current) return
       setDetallesPedido(data || [])
     } catch (error) {
       console.error("Error cargando detalles del pedido:", error)
@@ -596,12 +601,12 @@ export default function ClientesPedidosPage() {
           "</div>"
       }
 
-      // Si no tenemos los detalles, los cargamos
-      let detalles = detallesPedido
-      if (!pedidoSeleccionado || pedidoSeleccionado.id !== pedido.id) {
-        const { data, error } = await supabase
-          .from("pedidos_detalle")
-          .select(`
+      // Siempre cargar los detalles frescos de la DB por pedido.id: el estado
+      // detallesPedido puede ser del pedido anterior si su carga async todavía
+      // no terminó (imprimía la cabecera de un cliente con los ítems de otro).
+      const { data, error } = await supabase
+        .from("pedidos_detalle")
+        .select(`
           *,
           articulos (
             sku,
@@ -613,11 +618,10 @@ export default function ClientesPedidosPage() {
             marcas:marca_id (descripcion)
           )
         `)
-          .eq("pedido_id", pedido.id)
+        .eq("pedido_id", pedido.id)
 
-        if (error) throw error
-        detalles = data || []
-      }
+      if (error) throw error
+      const detalles = data || []
 
       // Ordenar por orden_deposito (los null van al final), luego por proveedor y descripción
       const detallesOrdenados = [...detalles].sort((a, b) => {
@@ -1167,6 +1171,7 @@ export default function ClientesPedidosPage() {
                         onDragEnd={() => setDragPedidoId(null)}
                         onClick={() => {
                           setPedidoSeleccionado(pedido)
+                          setDetallesPedido([]) // limpiar ítems del pedido anterior mientras cargan los nuevos
                           cargarDetallesPedido(pedido.id)
                           setModalDetalleAbierto(true)
                         }}
