@@ -16,6 +16,7 @@ export async function GET() {
       .from("articulos")
       .select("proveedor_id")
       .eq("activo", true)
+      .gt("precio_base", 0) // sin precio no se vende: fuera del catálogo del vendedor
       .not("proveedor_id", "is", null)
 
     const cantidadPorProv = new Map<string, number>()

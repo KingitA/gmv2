@@ -888,6 +888,8 @@ function NuevoPedidoInner() {
   const ArticuloCard = ({ a }: { a: Articulo }) => {
     const enCarrito = cart.find((i) => i.articulo.id === a.id)
     const p = precios[a.id]
+    // Artículo sin precio (en prueba/carga): no se muestra ni se vende
+    if (p && p.precio <= 0) return null
     return (
       <button
         onClick={() => abrirArticulo(a)}

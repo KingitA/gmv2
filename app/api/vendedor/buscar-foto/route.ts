@@ -35,7 +35,7 @@ async function buscarPorEan(supabase: any, ean: string) {
     .from("articulos")
     .select(ARTICULO_SELECT)
     .eq("ean13", limpio)
-    .eq("activo", true)
+    .eq("activo", true).gt("precio_base", 0)
     .limit(5)
   return (data || []).map((a: any) => mapArticuloVendedor(a))
 }
@@ -47,7 +47,7 @@ async function buscarHibrido(supabase: any, q: string, limit = 10) {
     .from("articulos")
     .select(ARTICULO_SELECT)
     .in("id", ids)
-    .eq("activo", true)
+    .eq("activo", true).gt("precio_base", 0)
   const porId = new Map((data || []).map((a: any) => [a.id, a]))
   return ids
     .map((id) => porId.get(id))
@@ -203,7 +203,7 @@ Los términos de búsqueda deben parecerse a descripciones de catálogo mayorist
           .from("articulos")
           .select(ARTICULO_SELECT)
           .eq("marca_id", marcaRow.id)
-          .eq("activo", true)
+          .eq("activo", true).gt("precio_base", 0)
           .limit(25)
         sumar((deMarca || []).map((a: any) => mapArticuloVendedor(a)))
       }

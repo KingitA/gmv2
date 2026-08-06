@@ -35,6 +35,7 @@ export async function GET() {
         .from("articulos")
         .select("categoria_id, subcategoria_id")
         .eq("activo", true)
+        .gt("precio_base", 0) // sin precio no se vende: fuera del catálogo del vendedor
         .range(from, from + pageSize - 1)
       if (error) throw error
       for (const a of page || []) {

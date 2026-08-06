@@ -70,7 +70,7 @@ export async function GET(request: Request) {
         .from("articulos")
         .select(SELECT)
         .in("id", topIds)
-        .eq("activo", true)
+        .eq("activo", true).gt("precio_base", 0)
 
       const porId = new Map((articulos || []).map((a: any) => [a.id, a]))
       const resultado = topIds
@@ -89,7 +89,7 @@ export async function GET(request: Request) {
       let query = supabase
         .from("articulos")
         .select(SELECT)
-        .eq("activo", true)
+        .eq("activo", true).gt("precio_base", 0)
         .gt("descuento_propio", 0)
       if (categoriaId) query = query.eq("categoria_id", categoriaId)
       if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
@@ -101,7 +101,7 @@ export async function GET(request: Request) {
       let query = supabase
         .from("articulos")
         .select(SELECT)
-        .eq("activo", true)
+        .eq("activo", true).gt("precio_base", 0)
       if (categoriaId) query = query.eq("categoria_id", categoriaId)
       if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
       const { data: articulos } = await query.order("created_at", { ascending: false }).limit(80)
@@ -114,7 +114,7 @@ export async function GET(request: Request) {
       let query = supabase
         .from("articulos")
         .select(SELECT)
-        .eq("activo", true)
+        .eq("activo", true).gt("precio_base", 0)
         .eq("proveedor_id", proveedorId)
       if (categoriaId) query = query.eq("categoria_id", categoriaId)
       if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
@@ -128,7 +128,7 @@ export async function GET(request: Request) {
         let query = supabase
           .from("articulos")
           .select(SELECT)
-          .eq("activo", true)
+          .eq("activo", true).gt("precio_base", 0)
           .eq("categoria_id", categoriaId)
         if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
         return query.order("descripcion")
@@ -145,7 +145,7 @@ export async function GET(request: Request) {
       .from("articulos")
       .select(SELECT)
       .in("id", ids)
-      .eq("activo", true)
+      .eq("activo", true).gt("precio_base", 0)
 
     const porId = new Map((articulos || []).map((a: any) => [a.id, a]))
     const resultado = ids
