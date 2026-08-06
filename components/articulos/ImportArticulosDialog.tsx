@@ -305,10 +305,11 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
           }
         }
 
-        // Import de lista ESPECIAL: la oferta se extrae del "(X%)" buscándolo
-        // en TODA la fila del Excel (funcione o no el mapeo de Descripción).
-        // Sin % en la fila → se LIMPIA (null), así no quedan ofertas viejas.
-        if (esImportEspecial && colIndexMap["oferta_lista_especial"] === undefined
+        // Import de lista ESPECIAL: si la fila todavía no tiene oferta (ni por
+        // columna explícita ni por descripción), el "(X%)" se busca en TODA la
+        // fila del Excel. Sin % en la fila → se LIMPIA (null), así no quedan
+        // ofertas viejas.
+        if (esImportEspecial
             && obj["oferta_lista_especial"] === undefined && obj["precio_lista_especial"] !== undefined) {
           let pct: number | null = null
           for (const cell of row) {
