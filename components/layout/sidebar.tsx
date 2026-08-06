@@ -78,6 +78,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Apps',
     items: [
       { label: 'App Depósito', href: '/deposito', icon: '🏭', roleRequired: ['admin', 'deposito'] },
+      { label: 'App Vendedores', href: '/vendedor', icon: '🧳', roleRequired: ['admin', 'vendedor'] },
     ],
   },
 ]
