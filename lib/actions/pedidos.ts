@@ -452,7 +452,7 @@ export async function previewPrecioArticulo(
     // Condiciones por marca (este pedido) — ganan sobre proveedor
     condiciones_marca?: CondicionMarca[]
   } = {},
-): Promise<{ precio: number; precioNeto: number; contado: number; descripcion: string; sku: string; unidades_por_bulto: number }> {
+): Promise<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null; descripcion: string; sku: string; unidades_por_bulto: number }> {
   const supabase = await createClient()
 
   const [clienteRes, articuloRes] = await Promise.all([
@@ -506,8 +506,12 @@ export async function previewPrecioArticulo(
   return {
     precio: precio.precioAlCliente,
     precioNeto: precio.precioNeto,
-    // Contado = 10% menos (regla de la NC de pago contado)
-    contado: round2(precio.precioAlCliente * 0.9),
+    // Contado = 10% menos (regla de la NC de pago contado).
+    // Lista Especial NO tiene precio contado: es neto fijo + IVA.
+    contado: precio.esListaEspecial ? precio.precioAlCliente : round2(precio.precioAlCliente * 0.9),
+    especial: precio.esListaEspecial
+      ? { bruto: precio.precioBrutoEspecial, oferta_pct: precio.ofertaEspecialPct }
+      : null,
     descripcion: artMeta?.descripcion || "",
     sku: artMeta?.sku || "",
     unidades_por_bulto: artMeta?.unidades_por_bulto || 1,
@@ -527,7 +531,7 @@ export async function previewPreciosArticulos(
     lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
   } = {},
-): Promise<Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean }>> {
+): Promise<Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null }>> {
   if (!articuloIds?.length) return []
   const ids = [...new Set(articuloIds)].slice(0, 600)
   const supabase = await createClient()
@@ -568,7 +572,7 @@ export async function previewPreciosArticulos(
   const condicionesMarca = await fetchCondicionesMarca(supabase, clienteId)
   const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId)
 
-  const out: Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean }> = []
+  const out: Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null }> = []
   for (const art of articulos || []) {
     try {
       const articulo = { ...art, descuentos: descPorArt.get(art.id) || [] }
@@ -592,10 +596,14 @@ export async function previewPreciosArticulos(
         articulo_id: art.id,
         precio: precio.precioAlCliente,
         precioNeto: precio.precioNeto,
-        // Contado = 10% menos (misma regla que la NC de pago contado / precio_base_contado)
-        contado: round2(precio.precioAlCliente * 0.9),
+        // Contado = 10% menos (misma regla que la NC de pago contado / precio_base_contado).
+        // Lista Especial NO tiene precio contado: es neto fijo + IVA.
+        contado: precio.esListaEspecial ? precio.precioAlCliente : round2(precio.precioAlCliente * 0.9),
         // precio > neto → el precio mostrado lleva IVA incluido; iguales → sin IVA (presupuesto)
         ivaIncluido: Math.abs(precio.precioAlCliente - precio.precioNeto) > 0.01,
+        especial: precio.esListaEspecial
+          ? { bruto: precio.precioBrutoEspecial, oferta_pct: precio.ofertaEspecialPct }
+          : null,
       })
     } catch {
       // artículo sin precio calculable: se omite de la respuesta

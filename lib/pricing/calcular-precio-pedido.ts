@@ -47,6 +47,10 @@ export interface PrecioCalculado {
   bonifGeneralPct: number   // bonificación general del cliente aplicada al neto
   bonifViajantePct: number  // bonificación viajante del cliente aplicada al neto
   precioConDescuento: number // precioLista * (1-general/100)*(1-viajante/100), pre-IVA adj
+  // Lista Especial: neto fijo + IVA, SIN precio contado (-10%).
+  esListaEspecial: boolean
+  ofertaEspecialPct: number         // % de oferta especial (0 si no tiene)
+  precioBrutoEspecial: number       // neto ANTES de la oferta especial (para mostrar tachado)
 }
 
 function round2(n: number) { return Math.round(n * 100) / 100 }
@@ -59,6 +63,15 @@ export function calcularPrecioPedido(
 ): PrecioCalculado {
   const datosArticulo = articuloToDatosArticulo(articulo as any, articulo.descuentos)
   const resultado = calcularPrecioFinal(datosArticulo, listaDatos, metodoFacturacion, bonif)
+
+  // ¿Se aplicó el precio fijo de la Lista Especial? (misma condición que el calculador)
+  const esListaEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
+    && (articulo.precio_lista_especial || 0) > 0
+  const ofertaEspecialPct = esListaEspecial ? (articulo.oferta_lista_especial || 0) : 0
+  const netoEspecial = esListaEspecial ? round2(articulo.precio_lista_especial || 0) : 0
+  const precioBrutoEspecial = esListaEspecial && ofertaEspecialPct > 0 && ofertaEspecialPct < 100
+    ? round2(netoEspecial / (1 - ofertaEspecialPct / 100))
+    : netoEspecial
 
   // precioAlCliente = lo que el cliente realmente paga
   // Para presupuesto: precioUnitarioFinal ya tiene IVA incluido
@@ -77,5 +90,8 @@ export function calcularPrecioPedido(
     bonifGeneralPct: resultado.bonifGeneralPct,
     bonifViajantePct: resultado.bonifViajantePct,
     precioConDescuento: resultado.precioConDescuento,
+    esListaEspecial,
+    ofertaEspecialPct,
+    precioBrutoEspecial,
   }
 }

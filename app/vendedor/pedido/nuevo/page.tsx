@@ -211,13 +211,13 @@ function NuevoPedidoInner() {
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Precios por artículo para las listas del catálogo (batch, por cliente+método)
-  const [precios, setPrecios] = useState<Record<string, { precio: number; precioNeto: number; contado: number; ivaIncluido: boolean }>>({})
+  const [precios, setPrecios] = useState<Record<string, { precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null }>>({})
   const preciosPedidos = useRef<Set<string>>(new Set())
 
   const [sel, setSel] = useState<Articulo | null>(null)
   const [zoomFoto, setZoomFoto] = useState<string | null>(null)
   const [buscarFoto, setBuscarFoto] = useState(false)
-  const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number; contado: number } | null>(null)
+  const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null } | null>(null)
   // Cantidad en el modo elegido; arranca vacía (sin el "1" fantasma)
   const [selCantidad, setSelCantidad] = useState<number | "">("")
   const [selModo, setSelModo] = useState<"unidad" | "fraccion" | "bulto">("unidad")
@@ -370,7 +370,7 @@ function NuevoPedidoInner() {
         setPrecios((prev) => {
           const next = { ...prev }
           for (const p of res)
-            next[p.articulo_id] = { precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, ivaIncluido: p.ivaIncluido }
+            next[p.articulo_id] = { precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, ivaIncluido: p.ivaIncluido, especial: p.especial ?? null }
           return next
         })
       } catch (e) {
@@ -460,7 +460,16 @@ function NuevoPedidoInner() {
   }
 
   const abrirProveedor = (p: ProveedorCatalogo) => {
-    setNav({ s: "cats", ctx: { tipo: "proveedor", proveedorId: p.id, proveedorNombre: p.nombre } })
+    // Directo al listado completo del proveedor; las categorías filtran
+    // desde chips en la cabecera (catId null = todas)
+    setSubSel(null)
+    setNav({
+      s: "arts",
+      ctx: { tipo: "proveedor", proveedorId: p.id, proveedorNombre: p.nombre },
+      catId: null,
+      catNombre: p.nombre,
+      rubroNombre: null,
+    })
     const cacheado = provCache.current.get(p.id)
     if (cacheado) {
       setArtsProveedor(cacheado)
@@ -494,7 +503,7 @@ function NuevoPedidoInner() {
       setResultados([])
       return
     }
-    if (nav.s === "arts") setNav({ s: "cats", ctx: nav.ctx })
+    if (nav.s === "arts") setNav(nav.ctx.tipo === "proveedor" ? { s: "provs" } : { s: "cats", ctx: nav.ctx })
     else if (nav.s === "cats") setNav(nav.ctx.tipo === "proveedor" ? { s: "provs" } : { s: "home" })
     else if (nav.s === "provs") setNav({ s: "home" })
     else router.back()
@@ -538,7 +547,7 @@ function NuevoPedidoInner() {
         a.id,
         metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}
       )
-      setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto, contado: p.contado })
+      setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, especial: p.especial ?? null })
     } catch {
       setSelPrecio(null)
     } finally {
@@ -753,7 +762,8 @@ function NuevoPedidoInner() {
   // Tarjetas de categoría según contexto: por rubro sale de la taxonomía;
   // por filtro se agrupa la lista ya cargada (solo categorías con artículos en el filtro).
   const categoriasCtx = useMemo(() => {
-    if (nav.s !== "cats") return []
+    // En proveedor las categorías también se usan como chips dentro del listado
+    if (nav.s !== "cats" && !(nav.s === "arts" && nav.ctx.tipo === "proveedor")) return []
     if (nav.ctx.tipo === "rubro") {
       const rubroId = nav.ctx.rubroId
       const rubro = catalogo.find((r) => r.id === rubroId)
@@ -787,6 +797,7 @@ function NuevoPedidoInner() {
     if (nav.s !== "arts") return []
     let base: Articulo[]
     if (nav.ctx.tipo === "rubro") base = artsCategoria
+    else if (nav.ctx.tipo === "proveedor" && nav.catId === null) base = listaDeCtx(nav.ctx) // todas
     else base = listaDeCtx(nav.ctx).filter((a) => claveCategoria(a) === (nav.catId || "otros"))
     if (subSel) base = base.filter((a) => claveSubcategoria(a) === subSel)
     return base
@@ -796,6 +807,8 @@ function NuevoPedidoInner() {
   // Chips de subcategoría derivados de los artículos presentes
   const subchips = useMemo(() => {
     if (nav.s !== "arts") return []
+    // Con "todas" las categorías de un proveedor no hay chips de subcategoría
+    if (nav.ctx.tipo === "proveedor" && nav.catId === null) return []
     const base =
       nav.ctx.tipo === "rubro"
         ? artsCategoria
@@ -924,23 +937,39 @@ function NuevoPedidoInner() {
           </div>
           <div className="text-right shrink-0">
             {p ? (
-              <>
-                <p className="font-bold text-gray-900 leading-tight">
-                  <span className="text-[10px] text-gray-400 font-medium">CC </span>
-                  {formatCurrency(p.precio)}
-                </p>
-                <p className="font-bold text-emerald-700 text-sm leading-tight">
-                  <span className="text-[10px] text-emerald-500 font-medium">Ctdo </span>
-                  {formatCurrency(p.contado)}
-                </p>
-                <p className={`text-[10px] font-bold ${p.ivaIncluido ? "text-gray-400" : "text-orange-500"}`}>
-                  {p.ivaIncluido ? "IVA incluido" : "sin IVA"}
-                </p>
-              </>
+              p.especial ? (
+                <>
+                  {p.especial.oferta_pct > 0 && (
+                    <p className="text-xs text-gray-400 leading-tight">
+                      <span className="line-through">{formatCurrency(p.especial.bruto)}</span>{" "}
+                      <span className="text-red-600 font-bold no-underline">-{p.especial.oferta_pct}%</span>
+                    </p>
+                  )}
+                  <p className="font-bold text-gray-900 leading-tight">{formatCurrency(p.precioNeto)}</p>
+                  <p className="text-[10px] font-bold text-orange-500">+ 21% IVA</p>
+                  <span className="inline-block bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1">
+                    ESPECIAL
+                  </span>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold text-gray-900 leading-tight">
+                    <span className="text-[10px] text-gray-400 font-medium">CC </span>
+                    {formatCurrency(p.precio)}
+                  </p>
+                  <p className="font-bold text-emerald-700 text-sm leading-tight">
+                    <span className="text-[10px] text-emerald-500 font-medium">Ctdo </span>
+                    {formatCurrency(p.contado)}
+                  </p>
+                  <p className={`text-[10px] font-bold ${p.ivaIncluido ? "text-gray-400" : "text-orange-500"}`}>
+                    {p.ivaIncluido ? "IVA incluido" : "sin IVA"}
+                  </p>
+                </>
+              )
             ) : (
               <p className="text-gray-300 text-xs">$ …</p>
             )}
-            {a.descuento_propio > 0 && (
+            {!p?.especial && a.descuento_propio > 0 && (
               <span className="inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold mt-1">
                 -{a.descuento_propio}%
               </span>
@@ -1307,6 +1336,41 @@ function NuevoPedidoInner() {
         ) : (
           /* ── Lista de artículos de la categoría ── */
           <div className="space-y-3">
+            {/* Chips de categoría (navegación por proveedor: se entra al
+                listado completo y las categorías filtran desde acá) */}
+            {nav.ctx.tipo === "proveedor" && categoriasCtx.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                <button
+                  onClick={() => {
+                    setSubSel(null)
+                    setNav({ ...nav, catId: null, catNombre: ctxLabel(nav.ctx) })
+                  }}
+                  className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border ${
+                    nav.catId === null
+                      ? "text-white"
+                      : "bg-white text-gray-600 border-gray-300"
+                  }`}
+                  style={nav.catId === null ? { background: TINTE_PROVEEDORES.ink, borderColor: TINTE_PROVEEDORES.ink } : undefined}
+                >
+                  Todas
+                </button>
+                {categoriasCtx.map((c) => (
+                  <button
+                    key={c.id || "otros"}
+                    onClick={() => {
+                      setSubSel(null)
+                      setNav({ ...nav, catId: c.id, catNombre: c.nombre })
+                    }}
+                    className={`shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold border ${
+                      nav.catId === c.id ? "text-white" : "bg-white text-gray-600 border-gray-300"
+                    }`}
+                    style={nav.catId === c.id ? { background: TINTE_PROVEEDORES.ink, borderColor: TINTE_PROVEEDORES.ink } : undefined}
+                  >
+                    {c.nombre} · {c.cantidad}
+                  </button>
+                ))}
+              </div>
+            )}
             {subchips.length > 1 && (
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                 <button
@@ -1330,13 +1394,15 @@ function NuevoPedidoInner() {
                 ))}
               </div>
             )}
-            {cargandoArts && nav.ctx.tipo === "rubro" ? (
+            {(cargandoArts && nav.ctx.tipo === "rubro") || (cargandoArtsProv && nav.ctx.tipo === "proveedor") ? (
               <div className="text-center py-10">
                 <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
               </div>
             ) : articulosVisibles.length === 0 ? (
               <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
-                No hay artículos en esta categoría.
+                {nav.ctx.tipo === "proveedor" && nav.catId === null
+                  ? "Este proveedor no tiene artículos activos con precio."
+                  : "No hay artículos en esta categoría."}
               </div>
             ) : (
               <div className="space-y-2">
@@ -1488,6 +1554,26 @@ function NuevoPedidoInner() {
               {cargandoPrecio ? (
                 <div className="w-6 h-6 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
               ) : selPrecio ? (
+                selPrecio.especial ? (
+                  <>
+                    <span className="inline-block bg-violet-100 text-violet-700 px-2.5 py-0.5 rounded-full text-xs font-bold mb-1">
+                      LISTA ESPECIAL
+                    </span>
+                    {selPrecio.especial.oferta_pct > 0 && (
+                      <p className="text-gray-400 text-sm">
+                        <span className="line-through">{formatCurrency(selPrecio.especial.bruto)}</span>{" "}
+                        <span className="text-red-600 font-bold">-{selPrecio.especial.oferta_pct}%</span>
+                      </p>
+                    )}
+                    <p className="text-3xl font-bold text-gray-900">
+                      {formatCurrency(selPrecio.precioNeto)}
+                      <span className="text-sm text-gray-400 font-medium"> neto</span>
+                    </p>
+                    <p className="text-gray-500 text-sm mt-1">
+                      + 21% IVA = {formatCurrency(selPrecio.precio)} · sin precio contado
+                    </p>
+                  </>
+                ) : (
                 <>
                   <p className="text-3xl font-bold text-gray-900">
                     {formatCurrency(selPrecio.precio)}
@@ -1505,6 +1591,7 @@ function NuevoPedidoInner() {
                     <p className="text-gray-500 text-sm mt-1">Sin IVA incluido</p>
                   )}
                 </>
+                )
               ) : (
                 <p className="text-red-500">No se pudo calcular el precio</p>
               )}
