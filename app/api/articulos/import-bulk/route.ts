@@ -186,8 +186,17 @@ export async function POST(request: NextRequest) {
         const valorNuevo = row[campo as keyof ArticleUpdateRow] as any
         const valorActual = existente ? existente[campo as CampoDirecto] : null
 
-        // Comparar: solo agregar al diff si cambió
-        const cambiado = String(valorActual ?? "") !== String(valorNuevo ?? "")
+        // Comparar: solo agregar al diff si cambió. Los numéricos se comparan
+        // como número con tolerancia — el Excel arrastra ruido de decimales
+        // (1309.4467 vs 1309.446690552) que NO es un cambio real.
+        const na = valorActual === null || valorActual === undefined ? NaN : parseFloat(String(valorActual))
+        const nb = valorNuevo === null || valorNuevo === undefined ? NaN : parseFloat(String(valorNuevo))
+        const ambosNumericos = !isNaN(na) && !isNaN(nb)
+          && /^-?\d+(\.\d+)?$/.test(String(valorActual).trim())
+          && /^-?\d+(\.\d+)?$/.test(String(valorNuevo).trim())
+        const cambiado = ambosNumericos
+          ? Math.abs(na - nb) > 0.00005
+          : String(valorActual ?? "") !== String(valorNuevo ?? "")
         if (cambiado) {
           diffs.push({
             sku: row.sku,
@@ -278,11 +287,14 @@ export async function POST(request: NextRequest) {
 
     // ── 1. Bulk update de campos directos (upsert por id en batches de 200) ──
     // Agrupa por sku→id y envía updates en batches paralelos
+    // Solo se escriben los campos que el diff marcó como cambio real
+    // (evita updates fantasma por ruido de decimales del Excel)
+    const cambiosReales = new Set(diffs.map(d => `${d.sku}|${d.campo}`))
     const updateBatch: Array<{ id: string; sku: string; campos: Record<string,any> }> = []
     for (const { row, articulo } of paraActualizar) {
       const camposUpdate: Record<string, any> = {}
       for (const campo of CAMPOS_DIRECTOS) {
-        if (row[campo as keyof ArticleUpdateRow] !== undefined) {
+        if (row[campo as keyof ArticleUpdateRow] !== undefined && cambiosReales.has(`${row.sku}|${campo}`)) {
           camposUpdate[campo] = row[campo as keyof ArticleUpdateRow]
         }
       }
