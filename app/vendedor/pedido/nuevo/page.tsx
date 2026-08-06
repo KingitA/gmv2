@@ -107,12 +107,26 @@ const claveCategoria = (a: Articulo) => a.categoria_id || (a.categoria_nombre ? 
 const claveSubcategoria = (a: Articulo) =>
   a.subcategoria_id || (a.subcategoria_nombre ? `n:${a.subcategoria_nombre}` : null)
 
-type Ctx = { tipo: Filtro } | { tipo: "rubro"; rubroId: string; rubroNombre: string }
+type Ctx =
+  | { tipo: Filtro }
+  | { tipo: "rubro"; rubroId: string; rubroNombre: string }
+  | { tipo: "proveedor"; proveedorId: string; proveedorNombre: string }
 
 type Nav =
   | { s: "home" }
+  | { s: "provs" } // selector de proveedor
   | { s: "cats"; ctx: Ctx }
   | { s: "arts"; ctx: Ctx; catId: string | null; catNombre: string; rubroNombre: string | null }
+
+interface ProveedorCatalogo {
+  id: string
+  nombre: string
+  sigla: string | null
+  cantidad: number
+}
+
+// Tinte del modo "por proveedor" (gris azulado, distinto de los rubros)
+const TINTE_PROVEEDORES: Tinte = { bg: "#E8EDF4", bgSoft: "#F4F7FA", ink: "#33475E", accent: "#5B7A9D", border: "#D4DEE9" }
 
 const FILTROS: Record<Filtro, { label: string; sub: string; tinte: Tinte; icono: React.ReactNode }> = {
   novedades: {
@@ -181,6 +195,14 @@ function NuevoPedidoInner() {
   const [artsCategoria, setArtsCategoria] = useState<Articulo[]>([])
   const [cargandoArts, setCargandoArts] = useState(false)
   const [subSel, setSubSel] = useState<string | null>(null)
+
+  // ── Navegación por proveedor ────────────────────────────────────────
+  const [proveedores, setProveedores] = useState<ProveedorCatalogo[]>([])
+  const [cargandoProvs, setCargandoProvs] = useState(false)
+  const [qProv, setQProv] = useState("")
+  const [artsProveedor, setArtsProveedor] = useState<Articulo[]>([])
+  const [cargandoArtsProv, setCargandoArtsProv] = useState(false)
+  const provCache = useRef<Map<string, Articulo[]>>(new Map())
 
   // ── Búsqueda ────────────────────────────────────────────────────────
   const [q, setQ] = useState("")
@@ -426,6 +448,39 @@ function NuevoPedidoInner() {
     setNav({ s: "cats", ctx: { tipo: "rubro", rubroId: r.id, rubroNombre: r.nombre } })
   }
 
+  const abrirProveedores = () => {
+    setNav({ s: "provs" })
+    if (proveedores.length) return
+    setCargandoProvs(true)
+    fetch("/api/vendedor/proveedores")
+      .then((r) => r.json())
+      .then((d) => setProveedores(d.proveedores || []))
+      .catch(() => setProveedores([]))
+      .finally(() => setCargandoProvs(false))
+  }
+
+  const abrirProveedor = (p: ProveedorCatalogo) => {
+    setNav({ s: "cats", ctx: { tipo: "proveedor", proveedorId: p.id, proveedorNombre: p.nombre } })
+    const cacheado = provCache.current.get(p.id)
+    if (cacheado) {
+      setArtsProveedor(cacheado)
+      return
+    }
+    setArtsProveedor([])
+    setCargandoArtsProv(true)
+    const params = new URLSearchParams({ vista: "proveedor", cliente: cliente!.id, proveedor: p.id })
+    fetch(`/api/vendedor/articulos?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const arts = d.articulos || []
+        provCache.current.set(p.id, arts)
+        setArtsProveedor(arts)
+        cargarPrecios(arts)
+      })
+      .catch(() => setArtsProveedor([]))
+      .finally(() => setCargandoArtsProv(false))
+  }
+
   const abrirCategoria = (ctx: Ctx, catId: string | null, catNombre: string, rubroNombre: string | null) => {
     setSubSel(null)
     setNav({ s: "arts", ctx, catId, catNombre, rubroNombre })
@@ -440,7 +495,8 @@ function NuevoPedidoInner() {
       return
     }
     if (nav.s === "arts") setNav({ s: "cats", ctx: nav.ctx })
-    else if (nav.s === "cats") setNav({ s: "home" })
+    else if (nav.s === "cats") setNav(nav.ctx.tipo === "proveedor" ? { s: "provs" } : { s: "home" })
+    else if (nav.s === "provs") setNav({ s: "home" })
     else router.back()
   }
 
@@ -684,9 +740,15 @@ function NuevoPedidoInner() {
   }
 
   // ── Derivados de navegación ─────────────────────────────────────────
-  const ctxLabel = (ctx: Ctx) => (ctx.tipo === "rubro" ? ctx.rubroNombre : FILTROS[ctx.tipo].label)
+  const ctxLabel = (ctx: Ctx) =>
+    ctx.tipo === "rubro" ? ctx.rubroNombre : ctx.tipo === "proveedor" ? ctx.proveedorNombre : FILTROS[ctx.tipo].label
 
-  const ctxTinte = (ctx: Ctx): Tinte => (ctx.tipo === "rubro" ? tinteRubro(ctx.rubroNombre) : FILTROS[ctx.tipo].tinte)
+  const ctxTinte = (ctx: Ctx): Tinte =>
+    ctx.tipo === "rubro" ? tinteRubro(ctx.rubroNombre) : ctx.tipo === "proveedor" ? TINTE_PROVEEDORES : FILTROS[ctx.tipo].tinte
+
+  // Lista base del contexto cuando se agrupa client-side (filtros y proveedor)
+  const listaDeCtx = (ctx: Ctx): Articulo[] =>
+    ctx.tipo === "rubro" ? [] : ctx.tipo === "proveedor" ? artsProveedor : listas[ctx.tipo] || []
 
   // Tarjetas de categoría según contexto: por rubro sale de la taxonomía;
   // por filtro se agrupa la lista ya cargada (solo categorías con artículos en el filtro).
@@ -702,7 +764,7 @@ function NuevoPedidoInner() {
         rubroNombre: rubro?.nombre || null,
       }))
     }
-    const lista = listas[nav.ctx.tipo] || []
+    const lista = listaDeCtx(nav.ctx)
     const grupos = new Map<string, { id: string | null; nombre: string; cantidad: number; rubroNombre: string | null }>()
     for (const a of lista) {
       const key = claveCategoria(a)
@@ -717,17 +779,19 @@ function NuevoPedidoInner() {
         })
     }
     return [...grupos.values()].sort((a, b) => b.cantidad - a.cantidad)
-  }, [nav, catalogo, listas])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav, catalogo, listas, artsProveedor])
 
   // Artículos visibles en la pantalla de lista
   const articulosVisibles = useMemo(() => {
     if (nav.s !== "arts") return []
     let base: Articulo[]
     if (nav.ctx.tipo === "rubro") base = artsCategoria
-    else base = (listas[nav.ctx.tipo] || []).filter((a) => claveCategoria(a) === (nav.catId || "otros"))
+    else base = listaDeCtx(nav.ctx).filter((a) => claveCategoria(a) === (nav.catId || "otros"))
     if (subSel) base = base.filter((a) => claveSubcategoria(a) === subSel)
     return base
-  }, [nav, artsCategoria, listas, subSel])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav, artsCategoria, listas, artsProveedor, subSel])
 
   // Chips de subcategoría derivados de los artículos presentes
   const subchips = useMemo(() => {
@@ -735,7 +799,7 @@ function NuevoPedidoInner() {
     const base =
       nav.ctx.tipo === "rubro"
         ? artsCategoria
-        : (listas[nav.ctx.tipo] || []).filter((a) => claveCategoria(a) === (nav.catId || "otros"))
+        : listaDeCtx(nav.ctx).filter((a) => claveCategoria(a) === (nav.catId || "otros"))
     const m = new Map<string, { id: string; nombre: string; cantidad: number }>()
     for (const a of base) {
       const key = claveSubcategoria(a)
@@ -745,7 +809,8 @@ function NuevoPedidoInner() {
       else m.set(key, { id: key, nombre: a.subcategoria_nombre || "—", cantidad: 1 })
     }
     return [...m.values()].sort((a, b) => b.cantidad - a.cantidad)
-  }, [nav, artsCategoria, listas])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav, artsCategoria, listas, artsProveedor])
 
   // ── Pantalla éxito ──────────────────────────────────────────────────
   if (pedidoOk) {
@@ -889,9 +954,11 @@ function NuevoPedidoInner() {
       ? "Buscar artículos"
       : nav.s === "home"
         ? cliente.nombre
-        : nav.s === "cats"
-          ? ctxLabel(nav.ctx)
-          : nav.catNombre
+        : nav.s === "provs"
+          ? "Por proveedor"
+          : nav.s === "cats"
+            ? ctxLabel(nav.ctx)
+            : nav.catNombre
 
   const subtituloHeader =
     q
@@ -902,7 +969,7 @@ function NuevoPedidoInner() {
           : cliente.metodo_facturacion
             ? `Facturación: ${cliente.metodo_facturacion}`
             : "Nuevo pedido"
-        : nav.s === "cats"
+        : nav.s === "provs" || nav.s === "cats"
           ? cliente.nombre
           : `${ctxLabel(nav.ctx)} · ${cliente.nombre}`
 
@@ -999,7 +1066,7 @@ function NuevoPedidoInner() {
         ) : nav.s === "home" ? (
           /* ── Home del catálogo: banners + rubros ── */
           <div className="space-y-5">
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-4 gap-2.5">
               {(Object.keys(FILTROS) as Filtro[]).map((tipo) => {
                 const f = FILTROS[tipo]
                 return (
@@ -1020,6 +1087,27 @@ function NuevoPedidoInner() {
                   </button>
                 )
               })}
+              <button
+                onClick={abrirProveedores}
+                className="rounded-2xl border p-3 text-left active:scale-[0.97] transition-transform"
+                style={{ background: TINTE_PROVEEDORES.bg, borderColor: TINTE_PROVEEDORES.border, color: TINTE_PROVEEDORES.ink }}
+              >
+                <div
+                  className="w-9 h-9 rounded-full flex items-center justify-center mb-2 bg-white/70"
+                  style={{ color: TINTE_PROVEEDORES.accent }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden>
+                    <path
+                      d="M3.5 8.5 12 4l8.5 4.5M3.5 8.5V17L12 21.5m-8.5-13L12 13m0 8.5V13m8.5-4.5V17L12 21.5m8.5-13L12 13"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+                <p className="font-bold text-sm leading-tight">Proveedores</p>
+                <p className="text-[11px] mt-0.5 opacity-70">Catálogo completo</p>
+              </button>
             </div>
 
             <div>
@@ -1126,9 +1214,53 @@ function NuevoPedidoInner() {
               </div>
             </div>
           </div>
+        ) : nav.s === "provs" ? (
+          /* ── Selector de proveedor ── */
+          <div className="space-y-3">
+            <input
+              type="search"
+              value={qProv}
+              onChange={(e) => setQProv(e.target.value)}
+              placeholder="Buscar proveedor..."
+              className="w-full rounded-xl border border-gray-300 px-4 py-3 text-lg bg-white outline-none"
+            />
+            {cargandoProvs ? (
+              <div className="text-center py-10">
+                <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2.5">
+                {proveedores
+                  .filter(
+                    (p) =>
+                      !qProv.trim() ||
+                      p.nombre.toLowerCase().includes(qProv.toLowerCase()) ||
+                      (p.sigla || "").toLowerCase().includes(qProv.toLowerCase())
+                  )
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => abrirProveedor(p)}
+                      className="rounded-2xl border p-3.5 text-left active:scale-[0.97] transition-transform"
+                      style={{ background: TINTE_PROVEEDORES.bgSoft, borderColor: TINTE_PROVEEDORES.border }}
+                    >
+                      <p className="font-bold text-gray-900 text-[13px] leading-snug">{p.nombre}</p>
+                      <p className="text-xs mt-1" style={{ color: TINTE_PROVEEDORES.accent }}>
+                        {p.cantidad} {p.cantidad === 1 ? "artículo" : "artículos"}
+                      </p>
+                    </button>
+                  ))}
+                {proveedores.length === 0 && (
+                  <div className="col-span-2 bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
+                    No hay proveedores con artículos activos.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         ) : nav.s === "cats" ? (
           /* ── Tarjetas de categorías del contexto ── */
-          cargandoLista && nav.ctx.tipo !== "rubro" && !listas[nav.ctx.tipo] ? (
+          (nav.ctx.tipo === "proveedor" ? cargandoArtsProv : cargandoLista && nav.ctx.tipo !== "rubro" && !listas[nav.ctx.tipo]) ? (
             <div className="text-center py-10">
               <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
             </div>
@@ -1140,7 +1272,9 @@ function NuevoPedidoInner() {
                   ? "No hay artículos en oferta en este momento."
                   : nav.ctx.tipo === "novedades"
                     ? "No hay ingresos recientes en el catálogo."
-                    : "Este rubro no tiene categorías con artículos."}
+                    : nav.ctx.tipo === "proveedor"
+                      ? "Este proveedor no tiene artículos activos."
+                      : "Este rubro no tiene categorías con artículos."}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
