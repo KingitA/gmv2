@@ -1,20 +1,26 @@
 "use client"
 
 // Imputación posterior de un cobro ya confirmado, desde la Caja del Día.
-// Se abre clickeando el chip "Imputar" de la fila: muestra la cuenta corriente
-// del cliente (comprobantes con saldo) y aplica la plata disponible del pago.
+// Misma experiencia que choferes/vendedores: ComprobantesSelector con pedidos
+// completos, comprobantes dentro del pedido y chip "Dto. ctdo", más la opción
+// de aplicar el 10% por pago contado (genera NC/REV vía generar-bonificacion).
 // Backend: PATCH /api/pagos/[id]/confirmar — cobranza_confirmar es idempotente
-// sobre pagos confirmados (guards de libro mayor/recibo/kardex) y aplica las
-// imputaciones nuevas en estado 'pendiente'. Lo que no se impute queda a
-// cuenta del cliente (su saldo ya bajó al confirmarse el cobro).
+// sobre confirmados y aplica solo las imputaciones nuevas. Lo que no se impute
+// queda a cuenta del cliente (su saldo ya bajó al confirmarse el cobro).
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import {
+  ComprobantesSelector,
+  PEDIDO_PREFIX,
+  type Comprobante,
+} from "@/components/pagos/ComprobantesSelector"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
 const fmt = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 2 })
+const round2 = (n: number) => Math.round(n * 100) / 100
 
 export interface PagoAImputar {
   pago_id: string
@@ -35,59 +41,54 @@ export function ImputarPago({
   onListo: () => void
 }) {
   const { toast } = useToast()
-  const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [saldoCliente, setSaldoCliente] = useState<number | null>(null)
-  const [comprobantes, setComprobantes] = useState<any[]>([])
-  const [montos, setMontos] = useState<Record<string, number>>({})
+  const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
+  const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
+  const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
+  const [aplicarContado, setAplicarContado] = useState(false)
 
   useEffect(() => {
-    const cargar = async () => {
-      try {
-        const supabase = createClient()
-        const [compRes, saldoRes] = await Promise.all([
-          supabase
-            .from("comprobantes_venta")
-            .select("id, numero_comprobante, tipo_comprobante, fecha, saldo_pendiente")
-            .eq("cliente_id", pago.cliente_id)
-            .in("estado_pago", ["pendiente", "parcial"])
-            .gt("saldo_pendiente", 0)
-            .order("fecha", { ascending: true })
-            .limit(50),
-          supabase
-            .from("v_saldo_clientes")
-            .select("saldo_actual")
-            .eq("cliente_id", pago.cliente_id)
-            .single(),
-        ])
-        setComprobantes(compRes.data || [])
-        setSaldoCliente(saldoRes.data ? Number(saldoRes.data.saldo_actual) : null)
-      } finally {
-        setCargando(false)
-      }
-    }
-    cargar()
+    createClient()
+      .from("v_saldo_clientes")
+      .select("saldo_actual")
+      .eq("cliente_id", pago.cliente_id)
+      .single()
+      .then(({ data }) => setSaldoCliente(data ? Number(data.saldo_actual) : null))
   }, [pago.cliente_id])
 
-  const totalImputado = Object.values(montos).reduce((s, v) => s + (Number(v) || 0), 0)
+  const imputaciones = useMemo(
+    () =>
+      Object.entries(seleccionados)
+        .filter(([k, v]) => !k.startsWith(PEDIDO_PREFIX) && Number(v) > 0)
+        .map(([comprobante_id, v]) => ({ comprobante_id, monto_imputado: Number(v) })),
+    [seleccionados]
+  )
+  const anticiposElegidos = useMemo(
+    () => Object.keys(seleccionados).filter((k) => k.startsWith(PEDIDO_PREFIX)),
+    [seleccionados]
+  )
+  const totalImputado = imputaciones.reduce((s, i) => s + i.monto_imputado, 0)
   const restante = pago.disponible - totalImputado
 
-  const toggle = (c: any, on: boolean) => {
-    setMontos((prev) => {
-      const next = { ...prev }
-      if (on) {
-        const libre = pago.disponible - Object.values(prev).reduce((s, v) => s + (Number(v) || 0), 0)
-        next[c.id] = Math.max(0, Math.min(Number(c.saldo_pendiente), libre))
-      } else delete next[c.id]
-      return next
-    })
-  }
+  const bonificacionEstimada = useMemo(() => {
+    if (!aplicarContado) return 0
+    let total = 0
+    for (const i of imputaciones) {
+      if (dtosHechos.has(i.comprobante_id)) continue
+      const comp = comprobantes.find((c) => c.id === i.comprobante_id)
+      if (!comp) continue
+      if (comp.tipo_comprobante === "PRES") total += Math.abs(Number(comp.total_factura)) * 0.1
+      else {
+        const neto10 = Number(comp.total_neto) * 0.1
+        total += neto10 + neto10 * 0.21
+      }
+    }
+    return round2(total)
+  }, [aplicarContado, imputaciones, dtosHechos, comprobantes])
 
   const imputar = async () => {
-    const lista = Object.entries(montos)
-      .filter(([, v]) => Number(v) > 0)
-      .map(([comprobante_id, v]) => ({ comprobante_id, monto_imputado: Number(v) }))
-    if (!lista.length) {
+    if (!imputaciones.length) {
       toast({ variant: "destructive", title: "Nada para imputar", description: "Tildá al menos un comprobante" })
       return
     }
@@ -99,32 +100,42 @@ export function ImputarPago({
       })
       return
     }
-    for (const [id, v] of Object.entries(montos)) {
-      const comp = comprobantes.find((c) => c.id === id)
-      if (comp && Number(v) > Number(comp.saldo_pendiente) + 0.01) {
-        toast({
-          variant: "destructive",
-          title: "Monto mayor al saldo",
-          description: `${comp.tipo_comprobante} ${comp.numero_comprobante} tiene saldo $ ${fmt(Number(comp.saldo_pendiente))}.`,
-        })
-        return
-      }
-    }
     setGuardando(true)
     try {
       const res = await fetch(`/api/pagos/${pago.pago_id}/confirmar`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usuario_confirmador: usuarioId, accion: "confirmar", imputaciones: lista }),
+        body: JSON.stringify({ usuario_confirmador: usuarioId, accion: "confirmar", imputaciones }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Error imputando el pago")
+
+      // Bonificación 10% contado sobre lo recién imputado (excluye los que ya la tienen)
+      let bonifMsg = ""
+      if (aplicarContado) {
+        const ids = imputaciones.map((i) => i.comprobante_id).filter((id) => !dtosHechos.has(id))
+        if (ids.length) {
+          try {
+            const bonifRes = await fetch("/api/pagos/generar-bonificacion", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ cliente_id: pago.cliente_id, comprobante_ids: ids, pago_id: pago.pago_id }),
+            })
+            const bonifData = await bonifRes.json()
+            if (bonifRes.ok) bonifMsg = ` NC por bonificación contado: $ ${fmt(Number(bonifData.total_bonificacion) || 0)}.`
+            else bonifMsg = ` ⚠ La bonificación falló: ${bonifData.error || "revisala a mano"}.`
+          } catch {
+            bonifMsg = " ⚠ La bonificación no se pudo generar — revisala a mano."
+          }
+        }
+      }
+
       toast({
         title: "Pago imputado",
         description:
-          restante > 0.01
+          (restante > 0.01
             ? `Aplicado $ ${fmt(totalImputado)}; quedan $ ${fmt(restante)} a cuenta del cliente.`
-            : `Aplicado $ ${fmt(totalImputado)} a los comprobantes elegidos.`,
+            : `Aplicado $ ${fmt(totalImputado)} a los comprobantes elegidos.`) + bonifMsg,
       })
       onListo()
     } catch (e: any) {
@@ -137,7 +148,7 @@ export function ImputarPago({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCerrar}>
       <div
-        className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl bg-white p-5 shadow-2xl"
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-base font-bold text-slate-900">Imputar cobro — {pago.quien}</h3>
@@ -153,79 +164,57 @@ export function ImputarPago({
           )}
         </p>
 
-        {cargando ? (
-          <div className="py-8 text-center text-sm text-slate-400">Cargando cuenta corriente…</div>
-        ) : comprobantes.length === 0 ? (
-          <div className="mt-4 rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-            El cliente no tiene comprobantes con saldo — la plata queda a su favor, a cuenta.
-          </div>
-        ) : (
-          <div className="mt-3 flex flex-col gap-1.5">
-            {comprobantes.map((c) => (
-              <label
-                key={c.id}
-                className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
-                  montos[c.id] != null ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={montos[c.id] != null}
-                  onChange={(e) => toggle(c, e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <span className="flex-1 min-w-0 truncate">
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-600">
-                    {c.tipo_comprobante}
-                  </span>{" "}
-                  {c.numero_comprobante}
-                  <span className="ml-1 text-[11px] text-slate-400">
-                    {c.fecha ? c.fecha.split("-").reverse().join("/") : ""}
-                  </span>
-                </span>
-                <span className="text-xs text-orange-600" style={NUM}>
-                  saldo $ {fmt(Number(c.saldo_pendiente))}
-                </span>
-                {montos[c.id] != null && (
-                  <input
-                    value={montos[c.id]}
-                    onChange={(e) =>
-                      setMontos((prev) => ({ ...prev, [c.id]: Number(e.target.value.replace(",", ".")) || 0 }))
-                    }
-                    inputMode="decimal"
-                    className="w-28 rounded-lg border border-slate-300 bg-white px-2 py-1 text-right text-sm outline-none focus:border-blue-500"
-                    style={NUM}
-                  />
-                )}
-              </label>
-            ))}
-          </div>
+        <div className="mt-3">
+          <ComprobantesSelector
+            clienteId={pago.cliente_id}
+            seleccionados={seleccionados}
+            onChange={setSeleccionados}
+            onComprobantesLoaded={setComprobantes}
+            onDtosHechosLoaded={setDtosHechos}
+          />
+        </div>
+
+        {anticiposElegidos.length > 0 && (
+          <p className="mt-2 text-xs font-semibold text-amber-700">
+            ⚠ Los anticipos a pedidos sin facturar se marcan al registrar el cobro, no después — acá
+            se ignoran (imputá solo comprobantes).
+          </p>
         )}
 
-        <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-          <span className="text-slate-500">Imputado</span>
-          <span className="font-bold" style={NUM}>
-            $ {fmt(totalImputado)}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+            <input
+              type="checkbox"
+              checked={aplicarContado}
+              onChange={(e) => setAplicarContado(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            10% descuento pago contado
+            {bonificacionEstimada > 0 && <span style={NUM}>· NC estimada $ {fmt(bonificacionEstimada)}</span>}
+          </label>
+          <span>
+            Imputado: <b style={NUM}>$ {fmt(totalImputado)}</b>
           </span>
         </div>
-        {restante > 0.01 && (
+        {restante > 0.01 && totalImputado > 0 && (
           <p className="mt-1 text-xs text-slate-400">
             Los $ {fmt(restante)} sin imputar quedan a cuenta del cliente (podés volver a imputar después).
           </p>
         )}
         {restante < -0.01 && (
           <p className="mt-1 text-xs font-semibold text-red-600">
-            Estás imputando $ {fmt(-restante)} de más — bajá algún monto.
+            Estás imputando $ {fmt(-restante)} más que lo disponible del cobro — bajá algún monto.
           </p>
         )}
 
         <div className="mt-4 flex items-center gap-2">
           <button
             onClick={imputar}
-            disabled={guardando || cargando || comprobantes.length === 0}
+            disabled={guardando || !imputaciones.length}
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {guardando && <Loader2 className="h-4 w-4 animate-spin" />}✓ Imputar
+            {aplicarContado && bonificacionEstimada > 0 ? " + Bonif. contado" : ""}
           </button>
           <button
             onClick={onCerrar}
