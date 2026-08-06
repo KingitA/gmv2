@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/layout/sidebar"
 import { MainContent } from "@/components/layout/main-content"
 import { NavbarWrapper } from "@/components/auth/navbar-wrapper"
 import { Toaster } from "@/components/ui/sonner"
+import { DocumentTitle } from "@/components/layout/document-title"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
@@ -38,6 +39,7 @@ export default async function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body className={`${geist.variable} ${geistMono.variable} font-sans antialiased`}>
+        <DocumentTitle />
         <Sidebar roles={roles} />
         <MainContent>{children}</MainContent>
         <NavbarWrapper />
