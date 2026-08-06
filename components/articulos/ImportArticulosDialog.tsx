@@ -273,11 +273,19 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             else warnings.push({ sku: skuRow, campo: fieldLabel(field), valor: str })
 
           } else if (field === "descripcion") {
-            // Guarda descripción limpia; si tenía "(15%)" también setea descuento_propio
+            // Guarda descripción limpia; el "(15%)" del final es la oferta:
+            // · import de lista ESPECIAL (columna precio_lista_especial mapeada)
+            //   → va a oferta_lista_especial; sin % la LIMPIA (no quedan ofertas viejas)
+            // · import estándar → va a descuento_propio (comportamiento de siempre)
             const m = str.match(OFERTA_RE)
             const desc = m ? m[1].trim() : str
             if (desc) obj["descripcion"] = desc
-            if (m) obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
+            const esImportEspecial = colIndexMap["precio_lista_especial"] !== undefined
+            if (esImportEspecial && colIndexMap["oferta_lista_especial"] === undefined) {
+              obj["oferta_lista_especial"] = m ? parseFloat(m[2].replace(",", ".")) : null
+            } else if (m) {
+              obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
+            }
 
           } else if (field === "descuento_propio" || field === "oferta_lista_especial") {
             // Busca (15%) en CUALQUIER posición del texto (no solo al final)

@@ -1547,7 +1547,7 @@ function NuevoPedidoInner() {
               <span className={sel.stock_disponible > 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
                 Stock: {sel.stock_disponible}
               </span>
-              {sel.descuento_propio > 0 && (
+              {sel.descuento_propio > 0 && !selPrecio?.especial && (
                 <span className="text-red-600 font-bold">Oferta -{sel.descuento_propio}%</span>
               )}
             </div>
