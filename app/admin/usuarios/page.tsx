@@ -175,7 +175,8 @@ export default function UsuariosPage() {
     if (newPassword.length < 6) { setErrorReset("La contraseña debe tener al menos 6 caracteres"); return }
     setSavingReset(true)
     try {
-      await resetPasswordAdmin(resetTarget.id, newPassword)
+      const res = await resetPasswordAdmin(resetTarget.id, newPassword)
+      if (res?.error) { setErrorReset(res.error); return }
       setOkReset(true)
       await fetchUsuarios()
       setTimeout(() => setResetTarget(null), 1500)
