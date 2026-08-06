@@ -989,7 +989,9 @@ function NuevoPedidoInner() {
           ? "Por proveedor"
           : nav.s === "cats"
             ? ctxLabel(nav.ctx)
-            : nav.catNombre
+            : nav.ctx.tipo === "proveedor"
+              ? ctxLabel(nav.ctx)
+              : nav.catNombre
 
   const subtituloHeader =
     q
