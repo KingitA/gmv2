@@ -1,16 +1,19 @@
 "use client"
 
 // Barra de registro rápido de la Caja del Día: cliente + método + monto y listo.
-// Crea el cobro PENDIENTE vía POST /api/cobranzas (confirmar:false): el efectivo
-// queda "en caja" hasta el cierre; transferencias/echeqs/cheques quedan con su
-// botón Confirmar en la misma lista.
+// El EFECTIVO se confirma en el acto (impacta la caja elegida y el saldo del
+// cliente vía POST /api/cobranzas confirmar:true) y queda "pendiente de
+// imputación" — se aplica a comprobantes al registrar (sección opcional) o
+// después con el chip Imputar de la fila. Transferencias/echeqs/cheques quedan
+// pendientes hasta su Confirmar/Aceptar.
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
-import { Loader2, Plus } from "lucide-react"
+import { ChevronDown, ChevronUp, Loader2, Plus } from "lucide-react"
 
 export interface CuentaFondos {
   cuenta_tipo: string
@@ -50,6 +53,29 @@ export function RegistrarCobro({
   const [banco, setBanco] = useState("")
   const [numeroCheque, setNumeroCheque] = useState("")
   const [fechaCheque, setFechaCheque] = useState("")
+  // Imputación opcional en el momento del registro
+  const [imputarAbierto, setImputarAbierto] = useState(false)
+  const [comprobantes, setComprobantes] = useState<any[]>([])
+  const [imputaciones, setImputaciones] = useState<Record<string, number>>({})
+
+  // Comprobantes con saldo del cliente elegido (para imputar al registrar)
+  useEffect(() => {
+    setComprobantes([])
+    setImputaciones({})
+    if (!cliente?.id) {
+      setImputarAbierto(false)
+      return
+    }
+    createClient()
+      .from("comprobantes_venta")
+      .select("id, numero_comprobante, tipo_comprobante, saldo_pendiente")
+      .eq("cliente_id", cliente.id)
+      .in("estado_pago", ["pendiente", "parcial"])
+      .gt("saldo_pendiente", 0)
+      .order("fecha", { ascending: true })
+      .limit(30)
+      .then(({ data }) => setComprobantes(data || []))
+  }, [cliente?.id])
 
   const cajas = useMemo(() => cuentas.filter((c) => c.grupo === "EFECTIVO"), [cuentas])
   const bancos = useMemo(() => cuentas.filter((c) => c.grupo === "BANCOS"), [cuentas])
@@ -65,7 +91,11 @@ export function RegistrarCobro({
     setBanco("")
     setNumeroCheque("")
     setFechaCheque("")
+    setImputarAbierto(false)
+    setImputaciones({})
   }
+
+  const totalImputado = Object.values(imputaciones).reduce((s, v) => s + (Number(v) || 0), 0)
 
   const registrar = async () => {
     const montoNum = Number(monto.replace(",", "."))
@@ -99,6 +129,19 @@ export function RegistrarCobro({
       if (metodo === "echeq") metodoPayload.color_cheque = "ECHEQ"
     }
 
+    if (totalImputado > montoNum + 0.01) {
+      toast({
+        variant: "destructive",
+        title: "Imputación excedida",
+        description: "Lo imputado a comprobantes supera el monto del cobro.",
+      })
+      return
+    }
+
+    const listaImputaciones = Object.entries(imputaciones)
+      .filter(([, v]) => Number(v) > 0)
+      .map(([comprobante_id, v]) => ({ comprobante_id, monto_imputado: Number(v) }))
+
     setGuardando(true)
     try {
       const res = await fetch("/api/cobranzas", {
@@ -106,17 +149,24 @@ export function RegistrarCobro({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           origen: "CAJA_DIA",
-          confirmar: false,
-          asignaciones: [{ cliente_id: cliente.id, metodos: [metodoPayload] }],
+          // El efectivo entra a la caja en el acto; los valores esperan su Confirmar.
+          confirmar: metodo === "efectivo",
+          asignaciones: [
+            {
+              cliente_id: cliente.id,
+              metodos: [metodoPayload],
+              imputaciones: listaImputaciones.length ? listaImputaciones : undefined,
+            },
+          ],
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Error registrando el cobro")
       toast({
-        title: "Cobro registrado",
+        title: metodo === "efectivo" ? "Cobro en caja" : "Cobro registrado",
         description:
           metodo === "efectivo"
-            ? `${cliente.razon_social || cliente.nombre}: queda en caja, se imputa al cierre.`
+            ? `${cliente.razon_social || cliente.nombre}: entró a la caja${listaImputaciones.length ? " e imputado" : ", pendiente de imputación (chip Imputar en la fila)"}.`
             : `${cliente.razon_social || cliente.nombre}: queda pendiente de confirmación en la lista.`,
       })
       limpiar()
@@ -221,6 +271,66 @@ export function RegistrarCobro({
           Registrar
         </button>
       </div>
+
+      {/* Imputación opcional al registrar (mismo criterio que choferes/viajantes) */}
+      {cliente && comprobantes.length > 0 && (
+        <div className="mt-2 border-t border-slate-100 pt-2">
+          <button
+            onClick={() => setImputarAbierto((v) => !v)}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
+          >
+            {imputarAbierto ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            Imputar a comprobantes ahora (opcional — si no, queda pendiente de imputación)
+          </button>
+          {imputarAbierto && (
+            <div className="mt-2 flex flex-col gap-1">
+              {comprobantes.map((c) => (
+                <label key={c.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={imputaciones[c.id] != null}
+                    onChange={(e) =>
+                      setImputaciones((prev) => {
+                        const next = { ...prev }
+                        if (e.target.checked) {
+                          const restante = (Number(monto.replace(",", ".")) || 0) - totalImputado
+                          next[c.id] = Math.max(
+                            0,
+                            Math.min(Number(c.saldo_pendiente), restante > 0 ? restante : Number(c.saldo_pendiente))
+                          )
+                        } else delete next[c.id]
+                        return next
+                      })
+                    }
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="flex-1 truncate">
+                    {c.tipo_comprobante} {c.numero_comprobante} —{" "}
+                    <span className="text-orange-600" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      saldo $ {Number(c.saldo_pendiente).toLocaleString("es-AR")}
+                    </span>
+                  </span>
+                  {imputaciones[c.id] != null && (
+                    <input
+                      value={imputaciones[c.id]}
+                      onChange={(e) =>
+                        setImputaciones((prev) => ({ ...prev, [c.id]: Number(e.target.value.replace(",", ".")) || 0 }))
+                      }
+                      inputMode="decimal"
+                      className="w-28 rounded border border-slate-300 bg-white px-2 py-0.5 text-right text-xs outline-none focus:border-blue-500"
+                      style={{ fontVariantNumeric: "tabular-nums" }}
+                    />
+                  )}
+                </label>
+              ))}
+              <div className="text-right text-xs text-slate-500">
+                Imputado: <b style={{ fontVariantNumeric: "tabular-nums" }}>$ {totalImputado.toLocaleString("es-AR")}</b>
+                {" · "}lo que sobre queda a cuenta del cliente
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

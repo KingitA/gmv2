@@ -18,7 +18,8 @@ import { RegistrarCobro, type CuentaFondos } from "@/components/caja/registrar-c
 import { MoverPlata } from "@/components/caja/mover-plata"
 import { ConfirmarDialog, type PagoAConfirmar } from "@/components/caja/confirmar-dialog"
 import { ControlarRendicion } from "@/components/caja/controlar-rendicion"
-import { CerrarDia, type CobroEnCaja } from "@/components/caja/cerrar-dia"
+import { CerrarDia } from "@/components/caja/cerrar-dia"
+import { ImputarPago, type PagoAImputar } from "@/components/caja/imputar-pago"
 import { todayArgentina } from "@/lib/utils"
 
 type Estado = { tipo: "ok" | "info" | "accion" | "esperando" | "error"; texto: string }
@@ -41,6 +42,8 @@ interface FilaCaja {
   confirmable?: boolean
   detalles_resumen?: { tipo: string; monto: number; descripcion: string }[]
   requiere_color?: boolean
+  imputable?: boolean
+  imputacion_disponible?: number
 }
 
 interface FeedCaja {
@@ -110,7 +113,18 @@ function EstadoChip({ estado, fila, onAccion }: { estado: Estado; fila: FilaCaja
     esperando: "bg-purple-100 text-purple-700",
     error: "bg-red-100 text-red-700",
   }
-  // El estado ES el botón: los pagos confirmables abren el modal acá mismo.
+  // El estado ES el botón: chip Imputar → cuenta corriente del cliente.
+  if (estado.tipo === "accion" && fila.imputable && fila.pago_id && onAccion) {
+    return (
+      <button
+        onClick={() => onAccion(fila)}
+        className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-3.5 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-blue-700 whitespace-nowrap"
+      >
+        Imputar
+      </button>
+    )
+  }
+  // Pagos confirmables abren el modal de confirmación acá mismo.
   if (estado.tipo === "accion" && fila.confirmable && fila.pago_id && onAccion) {
     return (
       <button
@@ -194,6 +208,7 @@ export default function CajaDelDiaPage() {
   const [usuarioId, setUsuarioId] = useState("")
   const [pagoAConfirmar, setPagoAConfirmar] = useState<PagoAConfirmar | null>(null)
   const [rendicionAControlar, setRendicionAControlar] = useState<string | null>(null)
+  const [pagoAImputar, setPagoAImputar] = useState<PagoAImputar | null>(null)
   const [cerrandoDia, setCerrandoDia] = useState(false)
 
   const cargar = useCallback(async (f: string) => {
@@ -233,6 +248,15 @@ export default function CajaDelDiaPage() {
       setRendicionAControlar(f.rendicion_id)
       return
     }
+    if (f.imputable && f.pago_id && f.cliente_id) {
+      setPagoAImputar({
+        pago_id: f.pago_id,
+        cliente_id: f.cliente_id,
+        quien: f.quien,
+        disponible: f.imputacion_disponible ?? 0,
+      })
+      return
+    }
     if (!f.pago_id) return
     setPagoAConfirmar({
       pago_id: f.pago_id,
@@ -267,17 +291,9 @@ export default function CajaDelDiaPage() {
 
   const esHoy = fecha === todayArgentina()
 
-  // Cobros de oficina "en caja" del día: los que el cierre imputa en lote
-  const cobrosEnCaja: CobroEnCaja[] = useMemo(
-    () =>
-      (feed?.filas ?? [])
-        .filter((f) => f.fuente === "pago" && f.estado.texto === "En caja · se imputa al cierre")
-        .map((f) => ({
-          pago_id: f.pago_id!,
-          cliente_id: f.cliente_id ?? null,
-          quien: f.quien,
-          monto: f.entrada ?? 0,
-        })),
+  // Cobros del día con plata sin aplicar a comprobantes (chip Imputar)
+  const sinImputar = useMemo(
+    () => (feed?.filas ?? []).filter((f) => f.imputable).length,
     [feed]
   )
 
@@ -436,10 +452,10 @@ export default function CajaDelDiaPage() {
                   $ {fmt(feed?.arqueo.efectivo_esperado ?? 0)}
                 </span>
               </div>
-              {cobrosEnCaja.length > 0 && (
+              {sinImputar > 0 && (
                 <div className="mt-1 flex items-center justify-between text-sm">
-                  <span className="text-slate-500">Cobros en caja</span>
-                  <span className="font-bold" style={NUM}>{cobrosEnCaja.length}</span>
+                  <span className="text-slate-500">Cobros sin imputar</span>
+                  <span className="font-bold" style={NUM}>{sinImputar}</span>
                 </div>
               )}
               {esHoy && feed?.arqueo.caja_chica_id ? (
@@ -451,8 +467,8 @@ export default function CajaDelDiaPage() {
                     Cerrar el día
                   </button>
                   <div className="mt-2 text-[11px] text-slate-400">
-                    Al cerrar: contás el efectivo y se imputan los cobros del día a las cuentas
-                    corrientes. Conteo billete por billete en{" "}
+                    Al cerrar: contás el efectivo, se verifican los cobros del día y la diferencia
+                    queda auditada. Conteo billete por billete en{" "}
                     <Link href="/finanzas/cierres" className="font-semibold text-blue-600 hover:underline">
                       Cierre de caja
                     </Link>
@@ -537,13 +553,23 @@ export default function CajaDelDiaPage() {
         />
       )}
 
+      {pagoAImputar && (
+        <ImputarPago
+          pago={pagoAImputar}
+          usuarioId={usuarioId}
+          onCerrar={() => setPagoAImputar(null)}
+          onListo={() => {
+            setPagoAImputar(null)
+            cargar(fecha)
+          }}
+        />
+      )}
+
       {cerrandoDia && feed?.arqueo.caja_chica_id && (
         <CerrarDia
           fecha={fecha}
           cajaChicaId={feed.arqueo.caja_chica_id}
           cajaChicaNombre={feed.arqueo.caja_chica_nombre ?? "Caja chica"}
-          cobros={cobrosEnCaja}
-          usuarioId={usuarioId}
           onCerrar={() => setCerrandoDia(false)}
           onListo={() => {
             setCerrandoDia(false)

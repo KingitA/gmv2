@@ -42,6 +42,10 @@ interface FilaCaja {
   detalles_resumen?: { tipo: string; monto: number; descripcion: string }[]
   /** Cheques a cuenta sin color: la confirmación exige elegir BLANCO/NEGRO. */
   requiere_color?: boolean
+  /** Cobro confirmado con plata sin aplicar a comprobantes: abre el modal de
+   *  imputación (los de choferes/viajantes suelen venir ya imputados). */
+  imputable?: boolean
+  imputacion_disponible?: number
 }
 
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
@@ -189,6 +193,41 @@ export async function GET(request: NextRequest) {
           : [],
       ])
 
+    // Imputación disponible por pago confirmado (para el chip "Imputar"):
+    // disponible = monto del pago − Σ imputaciones vivas. El saldo del cliente
+    // ya bajó por libro mayor; esto es solo la aplicación a comprobantes.
+    const pagoIdsKardex = [
+      ...new Set(
+        kardex
+          .filter((k) => k.tipo_movimiento === "COBRO_CLIENTE" && k.pago_id)
+          .map((k) => k.pago_id as string)
+      ),
+    ]
+    const [pagosKardexArr, imputacionesArr] = await Promise.all([
+      pagoIdsKardex.length
+        ? fetchByIds<any>(
+            (c) => supabase.from("pagos_clientes").select("id, monto, cliente_id").in("id", c),
+            pagoIdsKardex
+          )
+        : [],
+      pagoIdsKardex.length
+        ? fetchByIds<any>(
+            (c) =>
+              supabase
+                .from("imputaciones")
+                .select("pago_id, monto_imputado, estado")
+                .in("pago_id", c)
+                .in("estado", ["pendiente", "confirmado"]),
+            pagoIdsKardex
+          )
+        : [],
+    ])
+    const pagoKardexDe = new Map(pagosKardexArr.map((p) => [p.id, p]))
+    const imputadoPorPago = new Map<string, number>()
+    for (const i of imputacionesArr) {
+      imputadoPorPago.set(i.pago_id, (imputadoPorPago.get(i.pago_id) ?? 0) + num(i.monto_imputado))
+    }
+
     const clienteNombre = new Map(clientesArr.map((c) => [c.id, c.nombre]))
     const proveedorNombre = new Map(proveedoresArr.map((p) => [p.id, p.nombre]))
     const chequeDe = new Map(chequesArr.map((c) => [c.id, c]))
@@ -246,9 +285,21 @@ export async function GET(request: NextRequest) {
               ? (chequeTxt ?? "📄 Cheque")
               : `💵 Efectivo → ${cuenta(k.destino_tipo, k.destino_id)}`
           base.entrada = monto
-          base.estado = k.verificado
-            ? { tipo: "ok", texto: "✓ Asentado" }
-            : { tipo: "info", texto: "En caja · se imputa al cierre" }
+          // ¿Quedó plata del pago sin aplicar a comprobantes? → chip "Imputar".
+          const pagoK = k.pago_id ? pagoKardexDe.get(k.pago_id) : null
+          const disponible = pagoK
+            ? Math.max(0, num(pagoK.monto) - (imputadoPorPago.get(k.pago_id) ?? 0))
+            : 0
+          if (pagoK && disponible > 0.01 && (k.cliente_id || pagoK.cliente_id)) {
+            base.imputable = true
+            base.imputacion_disponible = disponible
+            base.cliente_id = k.cliente_id || pagoK.cliente_id
+            base.estado = { tipo: "accion", texto: "Imputar" }
+          } else {
+            base.estado = k.verificado
+              ? { tipo: "ok", texto: "✓ Asentado" }
+              : { tipo: "ok", texto: "✓ Imputado" }
+          }
           break
         }
         case "RENDICION_VIAJE": {
@@ -428,12 +479,16 @@ export async function GET(request: NextRequest) {
         neutro: null,
         estado: !confirmable
           ? { tipo: "info" as const, texto: "Llega con la rendición" }
-          : tieneEcheq || tieneTransf || tieneCheque
-            ? {
-                tipo: "accion" as const,
-                texto: tieneEcheq ? "Aceptar echeq" : tieneTransf ? "Confirmar" : "Confirmar cheque",
-              }
-            : { tipo: "info" as const, texto: "En caja · se imputa al cierre" },
+          : {
+              tipo: "accion" as const,
+              texto: tieneEcheq
+                ? "Aceptar echeq"
+                : tieneTransf
+                  ? "Confirmar"
+                  : tieneCheque
+                    ? "Confirmar cheque"
+                    : "Confirmar efectivo",
+            },
         cliente_id: p.cliente_id,
         pago_id: p.id,
         confirmable,
