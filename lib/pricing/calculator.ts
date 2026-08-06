@@ -231,7 +231,10 @@ export function calcularPrecioFinal(
   // Precio neto fijo del artículo (precio_lista_especial) con su oferta especial
   // (oferta_lista_especial). NO aplica general/viajante/mercadería: el precio
   // especial es final, solo lleva su oferta. Siempre factura (neto + IVA 21%).
-  if ((lista.lista_codigo || "").toLowerCase() === "especial") {
+  // Un artículo SIN precio especial cargado cae al cálculo estándar (antes
+  // devolvía $0 y el catálogo quedaba sin precio).
+  if ((lista.lista_codigo || "").toLowerCase() === "especial"
+      && (art.precio_lista_especial || 0) > 0) {
     const oferta   = art.oferta_lista_especial || 0
     const netoEsp  = round2(art.precio_lista_especial || 0)  // neto final (ya con su oferta)
     const brutoEsp = oferta > 0 && oferta < 100 ? round2(netoEsp / (1 - oferta / 100)) : netoEsp
