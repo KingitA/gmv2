@@ -260,6 +260,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
       .map(row => {
         const obj: Record<string, any> = {}
         const skuRow = String(row[skuIdxG] ?? "").trim()
+        const esImportEspecial = colIndexMap["precio_lista_especial"] !== undefined
 
         for (const [field, idx] of Object.entries(colIndexMap)) {
           const val = row[idx]
@@ -273,19 +274,14 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             else warnings.push({ sku: skuRow, campo: fieldLabel(field), valor: str })
 
           } else if (field === "descripcion") {
-            // Guarda descripción limpia; el "(15%)" del final es la oferta:
-            // · import de lista ESPECIAL (columna precio_lista_especial mapeada)
-            //   → va a oferta_lista_especial; sin % la LIMPIA (no quedan ofertas viejas)
-            // · import estándar → va a descuento_propio (comportamiento de siempre)
+            // Import estándar: guarda descripción limpia y el "(15%)" del final
+            // va a descuento_propio (comportamiento de siempre).
+            // Import de lista ESPECIAL: la descripción del proveedor NO pisa el
+            // catálogo — se usa solo para extraer la oferta (barrido de abajo).
             const m = str.match(OFERTA_RE)
             const desc = m ? m[1].trim() : str
-            if (desc) obj["descripcion"] = desc
-            const esImportEspecial = colIndexMap["precio_lista_especial"] !== undefined
-            if (esImportEspecial && colIndexMap["oferta_lista_especial"] === undefined) {
-              obj["oferta_lista_especial"] = m ? parseFloat(m[2].replace(",", ".")) : null
-            } else if (m) {
-              obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
-            }
+            if (desc && !esImportEspecial) obj["descripcion"] = desc
+            if (m && !esImportEspecial) obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
 
           } else if (field === "descuento_propio" || field === "oferta_lista_especial") {
             // Busca (15%) en CUALQUIER posición del texto (no solo al final)
@@ -307,6 +303,19 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
           } else {
             obj[field] = str
           }
+        }
+
+        // Import de lista ESPECIAL: la oferta se extrae del "(X%)" buscándolo
+        // en TODA la fila del Excel (funcione o no el mapeo de Descripción).
+        // Sin % en la fila → se LIMPIA (null), así no quedan ofertas viejas.
+        if (esImportEspecial && colIndexMap["oferta_lista_especial"] === undefined
+            && obj["oferta_lista_especial"] === undefined && obj["precio_lista_especial"] !== undefined) {
+          let pct: number | null = null
+          for (const cell of row) {
+            const mm = String(cell ?? "").match(/\(\s*(\d+(?:[.,]\d+)?)\s*%\s*\)/)
+            if (mm) { pct = parseFloat(mm[1].replace(",", ".")); break }
+          }
+          obj["oferta_lista_especial"] = pct
         }
 
         return obj
