@@ -313,18 +313,35 @@ export async function GET(request: NextRequest) {
         }
         case "PAGO_PROVEEDOR": {
           const op = k.referencia_tipo === "orden_pago" ? opDe.get(k.referencia_id) : null
-          const provId = k.destino_tipo === "PROVEEDOR" ? k.destino_id : op?.proveedor_id
+          // Reversa de anulación: la dirección viene invertida (origen = PROVEEDOR)
+          // — la plata VUELVE, es entrada, no otra salida.
+          const esAnulacion = k.referencia_tipo === "orden_pago_anulacion" || k.origen_tipo === "PROVEEDOR"
+          const provId = esAnulacion
+            ? (k.origen_tipo === "PROVEEDOR" ? k.origen_id : op?.proveedor_id)
+            : (k.destino_tipo === "PROVEEDOR" ? k.destino_id : op?.proveedor_id)
           base.categoria = "proveedor"
           base.quien = (provId && proveedorNombre.get(provId)) || k.concepto || "Pago a proveedor"
-          base.sub = op ? `Orden de pago ${op.numero_op}` : "Pago a proveedor"
-          base.medio =
-            k.metodo === "TRANSFERENCIA"
-              ? `🏦 Transferencia desde ${cuenta(k.origen_tipo, k.origen_id)}`
-              : k.metodo === "EFECTIVO"
-                ? `💵 Efectivo de ${cuenta(k.origen_tipo, k.origen_id)}`
-                : (chequeTxt ?? cap((k.metodo || "").replaceAll("_", " ").toLowerCase()))
-          base.salida = monto
-          base.estado = { tipo: "ok", texto: "OP confirmada" }
+          if (esAnulacion) {
+            base.sub = "Anulación de orden de pago"
+            base.medio =
+              k.metodo === "TRANSFERENCIA"
+                ? `🏦 Vuelve a ${cuenta(k.destino_tipo, k.destino_id)}`
+                : k.metodo === "EFECTIVO"
+                  ? `💵 Vuelve a ${cuenta(k.destino_tipo, k.destino_id)}`
+                  : (chequeTxt ? `${chequeTxt} · vuelve a cartera` : `Vuelve a ${cuenta(k.destino_tipo, k.destino_id)}`)
+            base.entrada = monto
+            base.estado = { tipo: "ok", texto: "OP anulada" }
+          } else {
+            base.sub = op ? `Orden de pago ${op.numero_op}` : "Pago a proveedor"
+            base.medio =
+              k.metodo === "TRANSFERENCIA"
+                ? `🏦 Transferencia desde ${cuenta(k.origen_tipo, k.origen_id)}`
+                : k.metodo === "EFECTIVO"
+                  ? `💵 Efectivo de ${cuenta(k.origen_tipo, k.origen_id)}`
+                  : (chequeTxt ?? cap((k.metodo || "").replaceAll("_", " ").toLowerCase()))
+            base.salida = monto
+            base.estado = { tipo: "ok", texto: "OP confirmada" }
+          }
           base.orden_pago_id = op?.id ?? null
           break
         }
