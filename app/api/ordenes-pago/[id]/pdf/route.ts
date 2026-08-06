@@ -5,6 +5,17 @@ import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { OrdenPagoPDF, type OrdenPagoPDFData } from '@/lib/pdf/orden-pago-template'
 
+// Nombre completo del tipo de comprobante para el PDF (nada de siglas crudas)
+function etiquetaTipoComp(tc?: string | null): string | null {
+  if (!tc) return null
+  if (tc === 'Adquisicion') return 'ADQUISICIÓN'
+  if (tc === 'Reversa') return 'REVERSA'
+  if (tc.startsWith('NC')) return `NOTA CRÉDITO ${tc.slice(2)}`.trim()
+  if (tc.startsWith('ND')) return `NOTA DÉBITO ${tc.slice(2)}`.trim()
+  if (tc.startsWith('F')) return `FACTURA ${tc.slice(1)}`.trim()
+  return tc.toUpperCase()
+}
+
 /**
  * GET /api/ordenes-pago/[id]/pdf — PDF de la orden de pago con el detalle
  * completo: qué se paga (imputaciones), cómo (medios con cheques/transferencia/
@@ -91,14 +102,17 @@ export async function GET(
       imputaciones: ((bases as any)?.detalle ?? [])
         .filter((b: any) => Number(b.monto_imputado ?? 0) >= 0)
         .map((b: any) => ({
-          etiqueta: b.etiqueta,
-          fecha: op.fecha,
+          etiqueta: b.numero ?? b.etiqueta,
+          tipo: etiquetaTipoComp(b.tipo_comprobante),
+          fecha: b.fecha_comprobante ?? op.fecha,
           monto: Number(b.monto_imputado ?? 0),
         })),
       creditos: ((bases as any)?.detalle ?? [])
         .filter((b: any) => Number(b.monto_imputado ?? 0) < 0)
         .map((b: any) => ({
-          etiqueta: b.etiqueta,
+          etiqueta: b.numero ?? b.etiqueta,
+          tipo: etiquetaTipoComp(b.tipo_comprobante),
+          fecha: b.fecha_comprobante ?? null,
           monto: Number(b.monto_imputado ?? 0),
         })),
       medios: (op.ordenes_pago_detalle ?? []).map((m: any) => ({

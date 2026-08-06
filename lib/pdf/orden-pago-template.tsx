@@ -22,8 +22,8 @@ export interface OrdenPagoPDFData {
     numero_certificado?: string | null
   }
   proveedor: { nombre: string; cuit?: string | null; direccion?: string | null; localidad?: string | null }
-  imputaciones: Array<{ etiqueta: string; fecha?: string | null; monto: number }>
-  creditos: Array<{ etiqueta: string; monto: number }>
+  imputaciones: Array<{ etiqueta: string; tipo?: string | null; fecha?: string | null; monto: number }>
+  creditos: Array<{ etiqueta: string; tipo?: string | null; fecha?: string | null; monto: number }>
   medios: Array<{ medio: string; monto: number; detalle: string }>
 }
 
@@ -51,6 +51,7 @@ const s = StyleSheet.create({
   tr:       { flexDirection: 'row', borderBottom: '0.5 solid #ddd', padding: '3.5 6' },
   td:       { fontSize: 8.5, color: '#333' },
   cFecha:   { width: 64 },
+  cTipo:    { width: 118 },
   cDesc:    { flex: 1 },
   cMonto:   { width: 90, textAlign: 'right' },
 
@@ -109,7 +110,8 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
         <Text style={s.secTit}>Qué se paga</Text>
         <View style={s.th}>
           <Text style={[s.thT, s.cFecha]}>FECHA</Text>
-          <Text style={[s.thT, s.cDesc]}>COMPROBANTE / CONCEPTO</Text>
+          <Text style={[s.thT, s.cTipo]}>TIPO</Text>
+          <Text style={[s.thT, s.cDesc]}>NÚMERO / CONCEPTO</Text>
           <Text style={[s.thT, s.cMonto]}>IMPORTE</Text>
         </View>
         {imputaciones.length === 0 ? (
@@ -117,6 +119,7 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
         ) : imputaciones.map((i, x) => (
           <View key={x} style={s.tr}>
             <Text style={[s.td, s.cFecha]}>{fmtFecha(i.fecha)}</Text>
+            <Text style={[s.td, s.cTipo, { fontFamily: 'Helvetica-Bold' }]}>{i.tipo ?? '—'}</Text>
             <Text style={[s.td, s.cDesc]}>{i.etiqueta}</Text>
             <Text style={[s.td, s.cMonto]}>$ {fmt(i.monto)}</Text>
           </View>
@@ -127,7 +130,8 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
             <Text style={s.secTit}>Notas de crédito / Reversas descontadas</Text>
             {creditos.map((c, x) => (
               <View key={x} style={s.tr}>
-                <Text style={[s.td, s.cFecha]}></Text>
+                <Text style={[s.td, s.cFecha]}>{fmtFecha(c.fecha)}</Text>
+                <Text style={[s.td, s.cTipo, { fontFamily: 'Helvetica-Bold' }]}>{c.tipo ?? '—'}</Text>
                 <Text style={[s.td, s.cDesc]}>{c.etiqueta}</Text>
                 <Text style={[s.td, s.cMonto]}>− $ {fmt(Math.abs(c.monto))}</Text>
               </View>

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Plus, DollarSign, CheckCircle2, XCircle, Eye, FileText, Receipt } from "lucide-react"
+import { ArrowLeft, Plus, DollarSign, CheckCircle2, XCircle, Eye, FileText, Receipt, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 
@@ -67,10 +67,20 @@ export default function OrdenesPagoPage() {
         }
     }
 
-    async function cancelarOP(id: string) {
-        if (!confirm("¿Cancelar esta orden de pago?")) return
+    async function eliminarOP(op: any) {
+        const msg = op.estado === "pagada"
+            ? `¿ELIMINAR la OP ${op.numero_op} como si nunca hubiera existido?\n\nSe revierte TODO: saldos de cajas/bancos (contraasiento en kardex), cheques vuelven a cartera, cuenta corriente del proveedor queda como estaba, vencimientos vuelven a pendiente, el certificado de retención se elimina (no sale en el TXT de SICORE) y los números de OP y certificado se liberan si eran los últimos.`
+            : `¿Eliminar la OP ${op.numero_op}? Se borra por completo y el número se libera si era el último.`
+        if (!confirm(msg)) return
         try {
-            await fetch(`/api/ordenes-pago/${id}`, { method: "DELETE" })
+            const res = await fetch(`/api/ordenes-pago/${op.id}/eliminar`, { method: "POST" })
+            const d = await res.json()
+            if (!res.ok) { alert(d.error || "Error al eliminar"); return }
+            const libs = [
+                d.numero_op_liberado ? `N° de OP ${op.numero_op} liberado` : null,
+                d.certificado_liberado ? `N° de certificado liberado` : null,
+            ].filter(Boolean)
+            alert(`OP eliminada.${libs.length ? " " + libs.join(" · ") + "." : ""}`)
             loadOrdenes()
         } catch (e) {
             console.error(e)
@@ -259,20 +269,20 @@ export default function OrdenesPagoPage() {
                                                         </a>
                                                     )}
                                                     {op.estado === "pendiente" && (
-                                                        <>
-                                                            <Button variant="ghost" size="sm"
-                                                                className="text-green-600 hover:bg-green-50"
-                                                                onClick={() => confirmarOP(op.id)}
-                                                                title="Confirmar pago">
-                                                                <CheckCircle2 className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button variant="ghost" size="sm"
-                                                                className="text-red-600 hover:bg-red-50"
-                                                                onClick={() => cancelarOP(op.id)}
-                                                                title="Cancelar">
-                                                                <XCircle className="h-4 w-4" />
-                                                            </Button>
-                                                        </>
+                                                        <Button variant="ghost" size="sm"
+                                                            className="text-green-600 hover:bg-green-50"
+                                                            onClick={() => confirmarOP(op.id)}
+                                                            title="Confirmar pago">
+                                                            <CheckCircle2 className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                    {(op.estado === "pendiente" || op.estado === "pagada") && (
+                                                        <Button variant="ghost" size="sm"
+                                                            className="text-red-600 hover:bg-red-50"
+                                                            onClick={() => eliminarOP(op)}
+                                                            title="Eliminar (revierte todo, como si nunca hubiera existido)">
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
                                                     )}
                                                 </div>
                                             </TableCell>

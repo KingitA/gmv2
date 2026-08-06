@@ -125,6 +125,9 @@ function NuevaOrdenPagoContent() {
     const [fichaPago, setFichaPago] = useState<any>(null)
     const [chequeColorFiltro, setChequeColorFiltro] = useState<string>("todos")
     const [chequeVerTodos, setChequeVerTodos] = useState(false)
+    // Ventana de fechas editable alrededor del objetivo (default ±5 días)
+    const [diasAntes, setDiasAntes] = useState("5")
+    const [diasDespues, setDiasDespues] = useState("5")
     const [bancoOrigenSel, setBancoOrigenSel] = useState("")
     const [montoTransfer, setMontoTransfer] = useState("")
     const [cajaOrigenSel, setCajaOrigenSel] = useState("")
@@ -353,17 +356,39 @@ function NuevaOrdenPagoContent() {
     const plazoCheque = Number(cfgPago.plazoCheque ?? 0)
     const fichaUsaCheques = cfgPago.medio === "cheques" || cfgPago.medio === "cheques_y_efectivo"
 
-    // ── Cheques de cartera: ventana por fecha + filtro por color ──
-    // Al día (plazo 0): solo cheques ya exigibles. A X días: objetivo = fecha
-    // OP + X, con umbral de ±5 días.
+    // ── Cheques de cartera: ventana por fecha (editable) + filtro por color ──
+    // Al día (plazo 0): default = solo cheques ya exigibles (365 antes / 0 después).
+    // A X días: objetivo = fecha OP + X, default ±5 días. Ambos ajustables.
     const fechaObjetivoCheque = plazoCheque > 0 ? addDiasISO(fecha, plazoCheque) : fecha
-    const enVentana = (ch: any) => {
-        if (plazoCheque > 0) {
-            return ch.fecha_vencimiento >= addDiasISO(fechaObjetivoCheque, -5)
-                && ch.fecha_vencimiento <= addDiasISO(fechaObjetivoCheque, 5)
-        }
-        return ch.fecha_vencimiento <= fecha
+    useEffect(() => {
+        if (!fichaPago) return
+        if (plazoCheque > 0) { setDiasAntes("5"); setDiasDespues("5") }
+        else { setDiasAntes("365"); setDiasDespues("0") }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fichaPago, plazoCheque])
+    const vAntes = Math.max(0, parseInt(diasAntes) || 0)
+    const vDespues = Math.max(0, parseInt(diasDespues) || 0)
+    const enVentana = (ch: any) =>
+        ch.fecha_vencimiento >= addDiasISO(fechaObjetivoCheque, -vAntes)
+        && ch.fecha_vencimiento <= addDiasISO(fechaObjetivoCheque, vDespues)
+
+    // ── Color del dinero por canal: adquisición/reversa → NEGRO; fiscal → BLANCO/ECHEQ ──
+    const tipoDeImp = (i: Imputacion): string | null =>
+        comprobantesCC.find((x: any) => x.id === i.movimiento_cc_id)?.tipo_comprobante
+        ?? creditos.find((x: any) => x.id === i.comprobante_compra_id)?.tipo_comprobante
+        ?? null
+    const netoNegro = Math.max(0, Math.round(imputaciones.reduce((s, i) => {
+        const tc = tipoDeImp(i)
+        return (tc === "Adquisicion" || tc === "Reversa") ? s + Number(i.monto_imputado || 0) : s
+    }, 0) * 100) / 100)
+    const colorDeMedio = (m: MedioPago): string | null => {
+        if (m.medio !== "cheque" || !m.cheque_id) return null
+        const ch = cheques.find((c: any) => c.id === m.cheque_id)
+        return ch ? colorDeCheque(ch) : null
     }
+    const cubiertoNegro = medios.filter(m => colorDeMedio(m) === "NEGRO").reduce((s, m) => s + Number(m.monto || 0), 0)
+    const faltaNegro = Math.max(0, Math.round((netoNegro - cubiertoNegro) * 100) / 100)
+    const faltaBlanco = Math.max(0, Math.round(((restante ?? 0) - faltaNegro) * 100) / 100)
     const chequesFiltrados = cheques
         .filter((ch: any) => chequeColorFiltro === "todos" || colorDeCheque(ch) === chequeColorFiltro)
         .filter((ch: any) => chequeVerTodos || enVentana(ch))
@@ -385,20 +410,34 @@ function NuevaOrdenPagoContent() {
             ? prev.filter(m => m.cheque_id !== ch.id)
             : [...prev, chequeAMedio(ch)])
     }
-    // Sugerencia: greedy de mayor a menor sin pasarse del restante
+    // Sugerencia: respeta el COLOR del canal (adquisición/reversa → cheques
+    // NEGROS; comprobante fiscal → BLANCOS o ECHEQ) y la ventana de fechas.
+    // Greedy de mayor a menor sin pasarse, por cada bolsa de color.
     const sugerirCheques = () => {
         const objetivo = restante ?? 0
         if (objetivo <= 0) return
-        const candidatos = chequesFiltrados
-            .filter((ch: any) => !medios.some(m => m.cheque_id === ch.id))
-            .sort((a: any, b: any) => Number(b.monto) - Number(a.monto))
-        let rem = objetivo + 0.009
-        const picks: any[] = []
-        for (const ch of candidatos) {
-            if (Number(ch.monto) <= rem) { picks.push(ch); rem -= Number(ch.monto) }
+        const candidatos = cheques
+            .filter((ch: any) => enVentana(ch) && !medios.some(m => m.cheque_id === ch.id))
+        const greedy = (pool: any[], objetivoBolsa: number) => {
+            let rem = objetivoBolsa + 0.009
+            const picks: any[] = []
+            for (const ch of pool.sort((a: any, b: any) => Number(b.monto) - Number(a.monto))) {
+                if (Number(ch.monto) <= rem) { picks.push(ch); rem -= Number(ch.monto) }
+            }
+            return picks
         }
-        if (picks.length === 0) { alert("No hay cheques en la ventana que entren en el monto restante"); return }
+        const picksNegro = greedy(candidatos.filter((ch: any) => colorDeCheque(ch) === "NEGRO"), faltaNegro)
+        const picksBlanco = greedy(candidatos.filter((ch: any) => colorDeCheque(ch) !== "NEGRO"), faltaBlanco)
+        const picks = [...picksNegro, ...picksBlanco]
+        if (picks.length === 0) { alert("No hay cheques del color y la ventana necesarios que entren en el monto restante"); return }
         setMedios(prev => [...prev, ...picks.map(chequeAMedio)])
+        const sumaN = picksNegro.reduce((s, c) => s + Number(c.monto), 0)
+        const sumaB = picksBlanco.reduce((s, c) => s + Number(c.monto), 0)
+        const partes = [
+            picksNegro.length ? `${picksNegro.length} negro(s) por ${formatCurrency(sumaN)}${sumaN < faltaNegro - 0.01 ? ` (faltan ${formatCurrency(faltaNegro - sumaN)} del canal negro)` : ""}` : (faltaNegro > 0.01 ? `sin cheques NEGROS para cubrir ${formatCurrency(faltaNegro)}` : null),
+            picksBlanco.length ? `${picksBlanco.length} blanco/echeq por ${formatCurrency(sumaB)}${sumaB < faltaBlanco - 0.01 ? ` (faltan ${formatCurrency(faltaBlanco - sumaB)} del canal blanco)` : ""}` : (faltaBlanco > 0.01 ? `sin cheques BLANCOS/ECHEQ para cubrir ${formatCurrency(faltaBlanco)}` : null),
+        ].filter(Boolean)
+        alert(`Sugerencia aplicada: ${partes.join(" · ")}. Lo que falte se completa con efectivo o transferencia.`)
     }
 
     // ── Bancos y cajas con saldo vivo ──
@@ -659,14 +698,26 @@ function NuevaOrdenPagoContent() {
                                         <h4 className="text-sm font-bold text-slate-700">CHEQUES DE CARTERA</h4>
                                         {fichaUsaCheques && <Badge className="bg-indigo-600">según ficha</Badge>}
                                         <span className="text-xs text-muted-foreground">
-                                            {plazoCheque > 0
-                                                ? `objetivo ${fmtFechaCorta(fechaObjetivoCheque)} (±5 días)`
-                                                : `al día — vencidos hasta ${fmtFechaCorta(fecha)}`}
+                                            objetivo {fmtFechaCorta(fechaObjetivoCheque)}{plazoCheque === 0 ? " (al día)" : ` (a ${plazoCheque} días)`}
                                         </span>
                                         <Button size="sm" variant="outline" className="ml-auto h-7 text-xs border-indigo-300 text-indigo-700 hover:bg-indigo-50"
                                             disabled={restante === null || restante <= 0} onClick={sugerirCheques}>
                                             ⚡ Sugerir cheques por {restante !== null && restante > 0 ? formatCurrency(restante) : "—"}
                                         </Button>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-wrap mb-2 text-xs text-muted-foreground">
+                                        <span>Ventana:</span>
+                                        <Input inputMode="numeric" className="h-7 w-14 text-center text-xs" value={diasAntes}
+                                            onChange={e => setDiasAntes(e.target.value.replace(/[^0-9]/g, ""))} />
+                                        <span>días antes ·</span>
+                                        <Input inputMode="numeric" className="h-7 w-14 text-center text-xs" value={diasDespues}
+                                            onChange={e => setDiasDespues(e.target.value.replace(/[^0-9]/g, ""))} />
+                                        <span>días después del objetivo</span>
+                                        {(faltaNegro > 0.01 || netoNegro > 0.01) && (
+                                            <span className="ml-auto font-semibold text-slate-600">
+                                                a cubrir: <span className="text-slate-900">⬛ negro {formatCurrency(faltaNegro)}</span> · ⬜ blanco/echeq {formatCurrency(faltaBlanco)}
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-1.5 flex-wrap mb-2">
                                         {["todos", "BLANCO", "NEGRO", "ECHEQ"].map(k => (

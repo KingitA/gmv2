@@ -5,6 +5,14 @@ import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { RetencionPDF, type RetencionPDFData } from '@/lib/pdf/retencion-template'
 
+function etiquetaTipoComp(tc?: string | null): string | null {
+  if (!tc) return null
+  if (tc.startsWith('NC')) return `NOTA CRÉDITO ${tc.slice(2)}`.trim()
+  if (tc.startsWith('ND')) return `NOTA DÉBITO ${tc.slice(2)}`.trim()
+  if (tc.startsWith('F')) return `FACTURA ${tc.slice(1)}`.trim()
+  return tc.toUpperCase()
+}
+
 /**
  * GET /api/ordenes-pago/[id]/certificado — PDF del certificado de retención
  * de Ganancias RG 830 emitido al confirmar la OP (retenciones_emitidas).
@@ -67,11 +75,16 @@ export async function GET(
         direccion: cert.proveedores?.direccion,
         localidad: cert.proveedores?.localidad,
       },
-      comprobantes: ((bases as any)?.detalle ?? []).map((b: any) => ({
-        etiqueta: b.etiqueta,
-        fecha: cert.ordenes_pago?.fecha,
-        monto: Number(b.monto_imputado ?? 0),
-      })),
+      // SOLO comprobantes FISCALES (facturas/ND que integran la base y NC que
+      // la restan). Adquisiciones, reversas y pagos a cuenta JAMÁS figuran en
+      // el certificado.
+      comprobantes: ((bases as any)?.detalle ?? [])
+        .filter((b: any) => b.tipo === 'factura' || b.tipo === 'nota_credito')
+        .map((b: any) => ({
+          etiqueta: [etiquetaTipoComp(b.tipo_comprobante), b.numero ?? b.etiqueta].filter(Boolean).join(' '),
+          fecha: b.fecha_comprobante ?? cert.ordenes_pago?.fecha,
+          monto: Number(b.monto_imputado ?? 0),
+        })),
     }
 
     const element = React.createElement(RetencionPDF, { data }) as unknown as ReactElement<DocumentProps, JSXElementConstructor<DocumentProps>>
