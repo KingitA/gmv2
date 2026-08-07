@@ -73,6 +73,9 @@ export function RegistrarCobro({
   const [metodosAgregados, setMetodosAgregados] = useState<
     { payload: any; label: string; monto: number }[]
   >([])
+  // Monto "confirmado" del método en edición: se fija al salir del campo (blur),
+  // no en cada tecla — para que "Resta saldar" no baile mientras tipeás.
+  const [montoConfirmado, setMontoConfirmado] = useState(0)
   // Imputación (selector de pedidos/comprobantes, igual que choferes/vendedores)
   const [imputarAbierto, setImputarAbierto] = useState(false)
   const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
@@ -156,7 +159,7 @@ export function RegistrarCobro({
           if (r.banco_emisor) setBanco(r.banco_emisor)
           if (r.numero_cheque) setNumeroCheque(String(r.numero_cheque))
           if (r.fecha_cheque) setFechaCheque(r.fecha_cheque)
-          if (r.monto) setMonto(String(r.monto))
+          if (r.monto) { setMonto(String(r.monto)); setMontoConfirmado(Number(r.monto) || 0) }
           if (r.cuit_emisor) setCuitEmisor(String(r.cuit_emisor))
           const titulares: string[] = Array.isArray(r.cuits_titulares) ? r.cuits_titulares : []
           setCuitsTitulares(titulares)
@@ -172,7 +175,7 @@ export function RegistrarCobro({
           setMetodo("transferencia")
           if (r.cuenta_bancaria_id) setCuentaBancariaId(r.cuenta_bancaria_id)
           if (r.numero_comprobante) setNumeroOperacion(String(r.numero_comprobante))
-          if (r.monto) setMonto(String(r.monto))
+          if (r.monto) { setMonto(String(r.monto)); setMontoConfirmado(Number(r.monto) || 0) }
           setOcrExtra({ fecha_transferencia: r.fecha_transferencia || undefined })
           toast({
             title: "🏦 Transferencia detectada",
@@ -218,6 +221,7 @@ export function RegistrarCobro({
 
   const limpiarMetodoActual = () => {
     setMonto("")
+    setMontoConfirmado(0)
     setNumeroOperacion("")
     setBanco("")
     setNumeroCheque("")
@@ -283,6 +287,13 @@ export function RegistrarCobro({
 
   const totalCobro =
     metodosAgregados.reduce((s, m) => s + m.monto, 0) + (Number(monto.replace(",", ".")) || 0)
+
+  // ── Resumen del cobro (se actualiza al confirmar el monto, no por tecla) ──
+  // Neto a cobrar = lo seleccionado − la NC del 10% (si está tildado).
+  const totalCobroConfirmado = metodosAgregados.reduce((s, m) => s + m.monto, 0) + montoConfirmado
+  const netoACobrar = round2(totalSeleccionado - (aplicarContado ? bonificacionEstimada : 0))
+  const restaSaldar = round2(netoACobrar - totalCobroConfirmado)
+  const mostrarResumen = totalSeleccionado > 0 && (totalCobroConfirmado > 0 || aplicarContado)
 
   const registrar = async () => {
     if (!cliente) {
@@ -466,7 +477,13 @@ export function RegistrarCobro({
         <input
           value={monto}
           onChange={(e) => setMonto(e.target.value.replace(/[^\d.,]/g, ""))}
-          onKeyDown={(e) => e.key === "Enter" && registrar()}
+          onBlur={() => setMontoConfirmado(Number(monto.replace(",", ".")) || 0)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              setMontoConfirmado(Number(monto.replace(",", ".")) || 0)
+              registrar()
+            }
+          }}
           placeholder="$ monto"
           inputMode="decimal"
           className={`${inputCls} w-32 text-right font-semibold`}
@@ -509,9 +526,34 @@ export function RegistrarCobro({
               </button>
             </span>
           ))}
-          <span className="ml-auto text-sm font-bold text-slate-800" style={NUM}>
-            Total del cobro: $ {fmt(totalCobro)}
+        </div>
+      )}
+
+      {/* ── Resumen del cobro: total, neto con 10% y cuánto resta saldar ── */}
+      {(metodosAgregados.length > 0 || mostrarResumen) && (
+        <div className="mt-2 flex flex-wrap items-center justify-end gap-x-5 gap-y-1 border-t border-slate-100 pt-2 text-sm">
+          <span className="font-bold text-slate-800" style={NUM}>
+            Total del cobro: $ {fmt(totalCobroConfirmado)}
           </span>
+          {aplicarContado && bonificacionEstimada > 0 && (
+            <span className="text-amber-700" style={NUM}>
+              Neto a cobrar (con 10%): <b>$ {fmt(netoACobrar)}</b>
+            </span>
+          )}
+          {mostrarResumen &&
+            (Math.abs(restaSaldar) < 0.01 ? (
+              <span className="rounded-full bg-green-100 px-3 py-0.5 text-xs font-bold text-green-700">
+                ✓ Cuadra
+              </span>
+            ) : restaSaldar > 0 ? (
+              <span className="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-800" style={NUM}>
+                Resta saldar: $ {fmt(restaSaldar)}
+              </span>
+            ) : (
+              <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-bold text-blue-700" style={NUM}>
+                Sobran $ {fmt(-restaSaldar)} → quedan a cuenta
+              </span>
+            ))}
         </div>
       )}
 
