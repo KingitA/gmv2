@@ -18,6 +18,7 @@ import {
   PEDIDO_PREFIX,
   type Comprobante,
 } from "@/components/pagos/ComprobantesSelector"
+import { BcraDeudorChip } from "@/components/pagos/BcraDeudorChip"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
 import { Camera, ChevronDown, ChevronUp, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
@@ -64,6 +65,8 @@ export function RegistrarCobro({
   const [banco, setBanco] = useState("")
   const [numeroCheque, setNumeroCheque] = useState("")
   const [fechaCheque, setFechaCheque] = useState("")
+  // CUIT del emisor del cheque → consulta Central de Deudores BCRA (chip)
+  const [cuitEmisor, setCuitEmisor] = useState("")
   // Imputación (selector de pedidos/comprobantes, igual que choferes/vendedores)
   const [imputarAbierto, setImputarAbierto] = useState(false)
   const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
@@ -152,8 +155,8 @@ export function RegistrarCobro({
           if (r.numero_cheque) setNumeroCheque(String(r.numero_cheque))
           if (r.fecha_cheque) setFechaCheque(r.fecha_cheque)
           if (r.monto) setMonto(String(r.monto))
+          if (r.cuit_emisor) setCuitEmisor(String(r.cuit_emisor))
           setOcrExtra({
-            cuit_emisor: r.cuit_emisor || undefined,
             fecha_emision: r.fecha_emision || undefined,
             localidad: r.localidad || undefined,
           })
@@ -216,6 +219,7 @@ export function RegistrarCobro({
     setBanco("")
     setNumeroCheque("")
     setFechaCheque("")
+    setCuitEmisor("")
     setImputarAbierto(false)
     setSeleccionados({})
     setAplicarContado(false)
@@ -257,7 +261,7 @@ export function RegistrarCobro({
       metodoPayload.banco_emisor = banco || undefined
       metodoPayload.numero_cheque = numeroCheque
       metodoPayload.fecha_cheque = fechaCheque || todayArgentina()
-      if (ocrExtra.cuit_emisor) metodoPayload.cuit_emisor = ocrExtra.cuit_emisor
+      if (cuitEmisor) metodoPayload.cuit_emisor = cuitEmisor
       if (ocrExtra.fecha_emision) metodoPayload.fecha_emision = ocrExtra.fecha_emision
       if (ocrExtra.localidad) metodoPayload.localidad = ocrExtra.localidad
       if (metodo === "echeq") metodoPayload.color_cheque = "ECHEQ"
@@ -403,6 +407,14 @@ export function RegistrarCobro({
               className={`${inputCls} w-28`}
             />
             <FechaInput value={fechaCheque} onChange={setFechaCheque} placeholder="Vencimiento" containerClassName="w-[120px]" />
+            <input
+              value={cuitEmisor}
+              onChange={(e) => setCuitEmisor(e.target.value.replace(/[^\d-]/g, ""))}
+              placeholder="CUIT emisor"
+              inputMode="numeric"
+              className={`${inputCls} w-32`}
+              title="Se consulta en la Central de Deudores del BCRA"
+            />
           </>
         )}
 
@@ -424,6 +436,13 @@ export function RegistrarCobro({
           Registrar
         </button>
       </div>
+
+      {/* ── Semáforo BCRA del emisor del cheque (Central de Deudores) ── */}
+      {(metodo === "cheque" || metodo === "echeq") && cuitEmisor.replace(/\D/g, "").length >= 10 && (
+        <div className="mt-2">
+          <BcraDeudorChip cuit={cuitEmisor} />
+        </div>
+      )}
 
       {/* ── Fotos: subir / cámara / pegar (para transferencias, cheques, echeqs) ── */}
       <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
