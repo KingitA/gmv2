@@ -403,7 +403,31 @@ export default function ArticulosPage() {
   const handleExport=async()=>{
     setExporting(true)
     try{
-      const{data}=await sb.from("articulos").select("*,proveedor:proveedores(nombre)").eq("activo",true).order("descripcion")
+      // Respeta el filtro que se ve en pantalla (búsqueda de texto + proveedor) y trae TODO.
+      let data:any[]=[]
+      if(sd.trim()){
+        // Búsqueda de texto activa → exporta lo mismo que muestra el buscador
+        const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}`)
+        let results=res.ok?await res.json():[]
+        if(pf!=="todos") results=results.filter((x:any)=>x.proveedor_id===pf)
+        data=results
+      } else {
+        // Sin búsqueda → todos los activos (respetando proveedor), en tandas de 1000 para
+        // saltar el tope de 1000 filas por request de Supabase.
+        let countQ=sb.from("articulos").select("*",{count:"exact",head:true}).eq("activo",true)
+        if(pf!=="todos") countQ=countQ.eq("proveedor_id",pf)
+        const{count:totalCount}=await countQ
+        const batchSize=1000
+        const numBatches=Math.max(1,Math.ceil((totalCount||0)/batchSize))
+        const batches=await Promise.all(
+          Array.from({length:numBatches},(_,i)=>{
+            let q=sb.from("articulos").select("*,proveedor:proveedores(nombre),marca:marca_id(descripcion)").eq("activo",true).order("descripcion").range(i*batchSize,(i+1)*batchSize-1)
+            if(pf!=="todos") q=q.eq("proveedor_id",pf)
+            return q
+          })
+        )
+        data=batches.flatMap(b=>b.data||[])
+      }
       const fieldMap:Record<string,(a:any)=>any>={
         "SKU":a=>a.sku,"EAN13":a=>a.ean13?.join(', ')||"","Descripción":a=>a.descripcion,"Unid/Bulto":a=>a.unidades_por_bulto||"",
         "Proveedor":a=>a.proveedor?.nombre||"","Marca":a=>a.marca?.descripcion||"","Categoría":a=>a.categoria||"","Subcategoría":a=>a.subcategoria||"",
@@ -411,7 +435,8 @@ export default function ArticulosPage() {
         "IVA Compras":a=>a.iva_compras||"","IVA Ventas":a=>a.iva_ventas||"","P. Base":a=>a.precio_base||"","P. Contado":a=>a.precio_base_contado||"",
       }
       const cols=expCols.size>0?[...expCols]:ALL_EXPORT_FIELDS
-      const rows=(data||[]).map((a:any)=>Object.fromEntries(cols.map(c=>[c,fieldMap[c]?.(a)??""]) ))
+      if(data.length===0){ alert("No hay artículos para exportar con el filtro actual."); setExporting(false); return }
+      const rows=data.map((a:any)=>Object.fromEntries(cols.map(c=>[c,fieldMap[c]?.(a)??""]) ))
       const ws=XLSX.utils.json_to_sheet(rows); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Artículos")
       const wo=XLSX.write(wb,{bookType:"xlsx",type:"array"}); const bl=new Blob([wo],{type:"application/octet-stream"})
       const u=URL.createObjectURL(bl); const lk=document.createElement("a"); lk.href=u; lk.download="articulos.xlsx"; lk.click(); URL.revokeObjectURL(u)
