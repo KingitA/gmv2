@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react"
+import { Ban, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react"
 import { createBrowserClient } from "@supabase/ssr"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { RegistrarCobro, type CuentaFondos } from "@/components/caja/registrar-cobro"
@@ -20,6 +20,7 @@ import { ConfirmarDialog, type PagoAConfirmar } from "@/components/caja/confirma
 import { ControlarRendicion } from "@/components/caja/controlar-rendicion"
 import { CerrarDia } from "@/components/caja/cerrar-dia"
 import { ImputarPago, type PagoAImputar } from "@/components/caja/imputar-pago"
+import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
 
 type Estado = { tipo: "ok" | "info" | "accion" | "esperando" | "error"; texto: string }
@@ -160,7 +161,15 @@ function EstadoChip({ estado, fila, onAccion }: { estado: Estado; fila: FilaCaja
   )
 }
 
-function Fila({ f, onAccion }: { f: FilaCaja; onAccion?: (f: FilaCaja) => void }) {
+function Fila({
+  f,
+  onAccion,
+  onAnular,
+}: {
+  f: FilaCaja
+  onAccion?: (f: FilaCaja) => void
+  onAnular?: (f: FilaCaja) => void
+}) {
   const fondo =
     f.estado.tipo === "accion"
       ? "bg-amber-50/60 border-amber-200"
@@ -193,6 +202,18 @@ function Fila({ f, onAccion }: { f: FilaCaja; onAccion?: (f: FilaCaja) => void }
       <span className="w-[220px] flex-none text-right">
         <EstadoChip estado={f.estado} fila={f} onAccion={onAccion} />
       </span>
+      {/* Anular recibo: cobros asentados en el libro (kardex) con pago asociado */}
+      {onAnular && f.fuente === "kardex" && f.pago_id && ["cobro", "transferencia", "echeq"].includes(f.categoria) && f.estado.tipo !== "error" ? (
+        <button
+          onClick={() => onAnular(f)}
+          title="Anular recibo (revierte imputaciones, caja y cheques)"
+          className="w-6 flex-none rounded-md p-1 text-slate-300 transition hover:bg-red-50 hover:text-red-600"
+        >
+          <Ban className="h-3.5 w-3.5" />
+        </button>
+      ) : (
+        <span className="w-6 flex-none" />
+      )}
     </div>
   )
 }
@@ -210,6 +231,10 @@ export default function CajaDelDiaPage() {
   const [rendicionAControlar, setRendicionAControlar] = useState<string | null>(null)
   const [pagoAImputar, setPagoAImputar] = useState<PagoAImputar | null>(null)
   const [cerrandoDia, setCerrandoDia] = useState(false)
+  const [pagoAAnular, setPagoAAnular] = useState<{ pago_id: string; quien: string } | null>(null)
+  const [motivoAnulacion, setMotivoAnulacion] = useState("")
+  const [anulando, setAnulando] = useState(false)
+  const { toast } = useToast()
 
   const cargar = useCallback(async (f: string) => {
     setCargando(true)
@@ -290,6 +315,31 @@ export default function CajaDelDiaPage() {
   )
 
   const esHoy = fecha === todayArgentina()
+
+  const anularRecibo = async () => {
+    if (!pagoAAnular) return
+    setAnulando(true)
+    try {
+      const res = await fetch(`/api/pagos-clientes/${pagoAAnular.pago_id}/anular`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: motivoAnulacion || undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Error anulando el recibo")
+      toast({
+        title: "Recibo anulado",
+        description: `${pagoAAnular.quien}: imputaciones revertidas, la plata salió de la caja y los comprobantes volvieron a quedar pendientes.`,
+      })
+      setPagoAAnular(null)
+      setMotivoAnulacion("")
+      cargar(fecha)
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: e.message })
+    } finally {
+      setAnulando(false)
+    }
+  }
 
   // Cobros del día con plata sin aplicar a comprobantes (chip Imputar)
   const sinImputar = useMemo(
@@ -397,7 +447,7 @@ export default function CajaDelDiaPage() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {filasRend.map((f) => (
-                    <Fila key={f.id} f={f} onAccion={abrirConfirmacion} />
+                    <Fila key={f.id} f={f} onAccion={abrirConfirmacion} onAnular={(x) => x.pago_id && setPagoAAnular({ pago_id: x.pago_id, quien: x.quien })} />
                   ))}
                 </div>
               </div>
@@ -411,7 +461,7 @@ export default function CajaDelDiaPage() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {filasAnteriores.map((f) => (
-                    <Fila key={f.id} f={f} onAccion={abrirConfirmacion} />
+                    <Fila key={f.id} f={f} onAccion={abrirConfirmacion} onAnular={(x) => x.pago_id && setPagoAAnular({ pago_id: x.pago_id, quien: x.quien })} />
                   ))}
                 </div>
               </div>
@@ -436,7 +486,7 @@ export default function CajaDelDiaPage() {
             ) : (
               <div className="flex flex-col gap-1.5">
                 {filasDia.map((f) => (
-                  <Fila key={f.id} f={f} onAccion={abrirConfirmacion} />
+                  <Fila key={f.id} f={f} onAccion={abrirConfirmacion} onAnular={(x) => x.pago_id && setPagoAAnular({ pago_id: x.pago_id, quien: x.quien })} />
                 ))}
               </div>
             )}
@@ -563,6 +613,42 @@ export default function CajaDelDiaPage() {
             cargar(fecha)
           }}
         />
+      )}
+
+      {pagoAAnular && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPagoAAnular(null)}>
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-slate-900">Anular recibo — {pagoAAnular.quien}</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Se revierten las imputaciones (los comprobantes vuelven a quedar con saldo), la plata
+              sale de la caja/banco en el libro, y si había cheques quedan anulados. El recibo queda
+              registrado como anulado en el historial.
+            </p>
+            <textarea
+              value={motivoAnulacion}
+              onChange={(e) => setMotivoAnulacion(e.target.value)}
+              placeholder="Motivo (opcional) — ej. error en el monto, cheque rechazado"
+              rows={2}
+              className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            />
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                onClick={anularRecibo}
+                disabled={anulando}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {anulando && <Loader2 className="h-4 w-4 animate-spin" />}
+                Anular recibo
+              </button>
+              <button
+                onClick={() => setPagoAAnular(null)}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {cerrandoDia && feed?.arqueo.caja_chica_id && (
