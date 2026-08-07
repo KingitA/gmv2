@@ -50,6 +50,8 @@ export default function RevisionPagosPage() {
       .select("*")
       .eq("cliente_id", clienteId)
       .in("estado_pago", ["pendiente", "parcial"])
+      // Un comprobante anulado no se cobra (su NC inversa lo cancela)
+      .is("anulado_en", null)
       .order("fecha", { ascending: true })
 
     setComprobantes(data || [])

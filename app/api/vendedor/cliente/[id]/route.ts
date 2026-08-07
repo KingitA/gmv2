@@ -60,6 +60,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .eq("cliente_id", id)
       .gt("saldo_pendiente", 0)
       .in("estado_pago", ["pendiente", "parcial"])
+      // Un comprobante anulado no se cobra (su NC inversa lo cancela)
+      .is("anulado_en", null)
       .order("fecha", { ascending: true })
 
     // Pedidos cobrables sin facturar (anticipo, mismo criterio que el ERP):
