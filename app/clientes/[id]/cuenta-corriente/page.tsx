@@ -240,19 +240,15 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         );
     };
 
-    /** Calcula el total de bonificación contado 10% sobre los comprobantes seleccionados */
+    /** Bonificación contado 10%: la NC es proporcional a TODOS los componentes
+     *  (neto + IVA + percepciones) → exactamente 10% del total facturado. */
     const calcularBonificacionContado = (): number => {
         if (!data) return 0;
         return selectedDocumentos.reduce((sum, id) => {
             const comp = data.comprobantes.find(c => c.id === id);
             if (!comp) return sum;
-            if (comp.tipo_comprobante === "PRES") {
+            if (["PRES", "FA", "FB", "FC"].includes(comp.tipo_comprobante)) {
                 return sum + Math.abs(comp.total_factura) * 0.1;
-            } else if (["FA", "FB", "FC"].includes(comp.tipo_comprobante)) {
-                const neto = Math.abs(comp.total_neto || 0);
-                const bonifNeto = neto * 0.1;
-                const bonifIva = bonifNeto * 0.21;
-                return sum + bonifNeto + bonifIva;
             }
             return sum;
         }, 0);

@@ -71,18 +71,15 @@ export function ImputarPago({
   const totalImputado = imputaciones.reduce((s, i) => s + i.monto_imputado, 0)
   const restante = pago.disponible - totalImputado
 
+  // La NC del 10% es proporcional a TODOS los componentes (neto+IVA+percepciones)
+  // → exactamente 10% del total de cada comprobante.
   const bonificacionEstimada = useMemo(() => {
     if (!aplicarContado) return 0
     let total = 0
     for (const i of imputaciones) {
       if (dtosHechos.has(i.comprobante_id)) continue
       const comp = comprobantes.find((c) => c.id === i.comprobante_id)
-      if (!comp) continue
-      if (comp.tipo_comprobante === "PRES") total += Math.abs(Number(comp.total_factura)) * 0.1
-      else {
-        const neto10 = Number(comp.total_neto) * 0.1
-        total += neto10 + neto10 * 0.21
-      }
+      if (comp) total += Math.abs(Number(comp.total_factura)) * 0.1
     }
     return round2(total)
   }, [aplicarContado, imputaciones, dtosHechos, comprobantes])

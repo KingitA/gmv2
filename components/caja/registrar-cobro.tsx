@@ -69,6 +69,10 @@ export function RegistrarCobro({
   // Cuentas conjuntas: el OCR puede detectar 2+ CUITs; se consultan TODOS.
   const [cuitEmisor, setCuitEmisor] = useState("")
   const [cuitsTitulares, setCuitsTitulares] = useState<string[]>([])
+  // Cobros mixtos (ej: transferencia + efectivo): métodos ya cargados del cobro
+  const [metodosAgregados, setMetodosAgregados] = useState<
+    { payload: any; label: string; monto: number }[]
+  >([])
   // Imputación (selector de pedidos/comprobantes, igual que choferes/vendedores)
   const [imputarAbierto, setImputarAbierto] = useState(false)
   const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
@@ -108,19 +112,15 @@ export function RegistrarCobro({
     [seleccionados]
   )
 
-  // Preview del 10% contado (misma fórmula que Pagos Clientes)
+  // Preview del 10% contado: la NC devuelve el 10% de TODOS los componentes
+  // (neto + IVA + percepciones) → exactamente 10% del total de cada comprobante.
   const bonificacionEstimada = useMemo(() => {
     if (!aplicarContado) return 0
     let total = 0
     for (const [key] of Object.entries(seleccionados)) {
       if (key.startsWith(PEDIDO_PREFIX) || dtosHechos.has(key)) continue
       const comp = comprobantes.find((c) => c.id === key)
-      if (!comp) continue
-      if (comp.tipo_comprobante === "PRES") total += Math.abs(Number(comp.total_factura)) * 0.1
-      else {
-        const neto10 = Number(comp.total_neto) * 0.1
-        total += neto10 + neto10 * 0.21
-      }
+      if (comp) total += Math.abs(Number(comp.total_factura)) * 0.1
     }
     return round2(total)
   }, [aplicarContado, seleccionados, dtosHechos, comprobantes])
@@ -216,8 +216,7 @@ export function RegistrarCobro({
     [subirArchivos]
   )
 
-  const limpiar = () => {
-    setCliente(null)
+  const limpiarMetodoActual = () => {
     setMonto("")
     setNumeroOperacion("")
     setBanco("")
@@ -225,51 +224,90 @@ export function RegistrarCobro({
     setFechaCheque("")
     setCuitEmisor("")
     setCuitsTitulares([])
+    setOcrExtra({})
+  }
+
+  const limpiar = () => {
+    setCliente(null)
+    limpiarMetodoActual()
+    setMetodosAgregados([])
     setImputarAbierto(false)
     setSeleccionados({})
     setAplicarContado(false)
     setArchivos([])
-    setOcrExtra({})
   }
 
-  const registrar = async () => {
+  // Arma el payload del método que se está editando en la barra (null si incompleto)
+  const construirMetodoActual = (): { payload: any; label: string; monto: number } | null => {
     const montoNum = Number(monto.replace(",", "."))
+    if (!montoNum || montoNum <= 0) return null
+    if ((metodo === "cheque" || metodo === "echeq") && !numeroCheque) return null
+    const payload: any = { tipo: metodo === "echeq" ? "cheque" : metodo, monto: montoNum }
+    let label = ""
+    if (metodo === "efectivo") {
+      payload.caja_id = cajaId || cajaChicaDefault || undefined
+      label = `💵 Efectivo`
+    } else if (metodo === "transferencia") {
+      if (cuentaBancariaId) payload.cuenta_bancaria_id = cuentaBancariaId
+      payload.fecha_transferencia = ocrExtra.fecha_transferencia || todayArgentina()
+      if (numeroOperacion) payload.numero_comprobante = numeroOperacion
+      const b = bancos.find((x) => x.cuenta_id === cuentaBancariaId)
+      label = `🏦 Transf.${b ? ` → ${b.nombre}` : ""}`
+    } else {
+      payload.banco_emisor = banco || undefined
+      payload.numero_cheque = numeroCheque
+      payload.fecha_cheque = fechaCheque || todayArgentina()
+      if (cuitEmisor) payload.cuit_emisor = cuitEmisor
+      if (ocrExtra.fecha_emision) payload.fecha_emision = ocrExtra.fecha_emision
+      if (ocrExtra.localidad) payload.localidad = ocrExtra.localidad
+      if (metodo === "echeq") payload.color_cheque = "ECHEQ"
+      label = `${metodo === "echeq" ? "⚡ Echeq" : "📄 Cheque"} ${numeroCheque}`
+    }
+    return { payload, label, monto: montoNum }
+  }
+
+  const agregarOtroMetodo = () => {
+    const actual = construirMetodoActual()
+    if (!actual) {
+      toast({
+        variant: "destructive",
+        title: "Completá el método actual",
+        description: "Cargá el monto (y el número si es cheque/echeq) antes de agregar otro.",
+      })
+      return
+    }
+    setMetodosAgregados((prev) => [...prev, actual])
+    limpiarMetodoActual()
+    setMetodo("efectivo")
+  }
+
+  const totalCobro =
+    metodosAgregados.reduce((s, m) => s + m.monto, 0) + (Number(monto.replace(",", ".")) || 0)
+
+  const registrar = async () => {
     if (!cliente) {
       toast({ variant: "destructive", title: "Falta el cliente", description: "Buscalo por nombre o CUIT" })
       return
     }
-    if (!montoNum || montoNum <= 0) {
+    // Métodos del cobro: los ya agregados + el que está en la barra (si tiene monto)
+    const actual = construirMetodoActual()
+    const metodosCobro = [...metodosAgregados, ...(actual ? [actual] : [])]
+    if (!metodosCobro.length) {
       toast({ variant: "destructive", title: "Monto inválido", description: "Ingresá un monto mayor a 0" })
       return
     }
-    if ((metodo === "cheque" || metodo === "echeq") && !numeroCheque) {
+    if (!actual && Number(monto.replace(",", ".")) > 0) {
       toast({ variant: "destructive", title: "Falta el número", description: "Cargá el número del cheque/echeq" })
       return
     }
-    if (totalSeleccionado > montoNum + 0.01) {
+    const totalMetodos = metodosCobro.reduce((s, m) => s + m.monto, 0)
+    if (totalSeleccionado > totalMetodos + 0.01) {
       toast({
         variant: "destructive",
         title: "Imputación excedida",
-        description: `Seleccionaste $ ${fmt(totalSeleccionado)} y el cobro es de $ ${fmt(montoNum)}.`,
+        description: `Seleccionaste $ ${fmt(totalSeleccionado)} y el cobro es de $ ${fmt(totalMetodos)}.`,
       })
       return
-    }
-
-    const metodoPayload: any = { tipo: metodo === "echeq" ? "cheque" : metodo, monto: montoNum }
-    if (metodo === "efectivo") {
-      metodoPayload.caja_id = cajaId || cajaChicaDefault || undefined
-    } else if (metodo === "transferencia") {
-      if (cuentaBancariaId) metodoPayload.cuenta_bancaria_id = cuentaBancariaId
-      metodoPayload.fecha_transferencia = ocrExtra.fecha_transferencia || todayArgentina()
-      if (numeroOperacion) metodoPayload.numero_comprobante = numeroOperacion
-    } else {
-      metodoPayload.banco_emisor = banco || undefined
-      metodoPayload.numero_cheque = numeroCheque
-      metodoPayload.fecha_cheque = fechaCheque || todayArgentina()
-      if (cuitEmisor) metodoPayload.cuit_emisor = cuitEmisor
-      if (ocrExtra.fecha_emision) metodoPayload.fecha_emision = ocrExtra.fecha_emision
-      if (ocrExtra.localidad) metodoPayload.localidad = ocrExtra.localidad
-      if (metodo === "echeq") metodoPayload.color_cheque = "ECHEQ"
     }
 
     // Igual que Pagos Clientes: los "pedido:<id>" son anticipos (no se imputan)
@@ -281,7 +319,9 @@ export function RegistrarCobro({
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace(PEDIDO_PREFIX, "")).join(", ")}`
       : undefined
 
-    const esEfectivo = metodo === "efectivo"
+    // Solo-efectivo confirma en el acto; si hay algún valor (transf/cheque/echeq)
+    // el cobro completo queda pendiente hasta su Confirmar (regla de Pagos Clientes).
+    const esEfectivo = metodosCobro.every((m) => m.payload.tipo === "efectivo")
     setGuardando(true)
     try {
       const res = await fetch("/api/pagos-clientes", {
@@ -289,12 +329,12 @@ export function RegistrarCobro({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cliente_id: cliente.id,
-          metodos: [metodoPayload],
+          metodos: metodosCobro.map((m) => m.payload),
           imputaciones,
           observaciones: obsAnticipo,
           pedidos_contado: [...contadoPedidos],
           comprobante_urls: archivos,
-          confirmar: esEfectivo, // el efectivo entra a la caja en el acto
+          confirmar: esEfectivo,
         }),
       })
       const data = await res.json()
@@ -433,6 +473,14 @@ export function RegistrarCobro({
           style={NUM}
         />
         <button
+          onClick={agregarOtroMetodo}
+          disabled={guardando}
+          title="Cobro con varios métodos (ej: transferencia + efectivo)"
+          className="inline-flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-sm font-semibold text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+        >
+          <Plus className="h-4 w-4" /> Otro método
+        </button>
+        <button
           onClick={registrar}
           disabled={guardando}
           className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
@@ -441,6 +489,31 @@ export function RegistrarCobro({
           Registrar
         </button>
       </div>
+
+      {/* ── Métodos ya agregados al cobro (cobro mixto) ── */}
+      {metodosAgregados.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+          <span className="text-[11px] font-bold uppercase text-slate-400">Métodos del cobro:</span>
+          {metodosAgregados.map((m, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700"
+            >
+              {m.label} · <span style={NUM}>$ {fmt(m.monto)}</span>
+              <button
+                onClick={() => setMetodosAgregados((prev) => prev.filter((_, j) => j !== i))}
+                className="text-slate-400 hover:text-red-600"
+                title="Quitar"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+          <span className="ml-auto text-sm font-bold text-slate-800" style={NUM}>
+            Total del cobro: $ {fmt(totalCobro)}
+          </span>
+        </div>
+      )}
 
       {/* ── Semáforo BCRA (Central de Deudores) — todos los titulares del cheque ── */}
       {(metodo === "cheque" || metodo === "echeq") && (

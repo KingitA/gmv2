@@ -9,8 +9,12 @@
  * - Las FACTURAS (FA→NCA, FB→NCB) generan UNA NOTA DE CRÉDITO FISCAL por tipo IVA:
  *   PV fiscal (configuracion_empresa.arca_punto_venta), CAE de ARCA,
  *   CbtesAsoc = las facturas bonificadas (RG 4540), CondicionIVAReceptorId (RG 5616),
- *   PDF con QR (RG 4892). Neto = 10% del total_neto de cada factura, IVA = 21% del neto.
- *   SIN percepciones (es un descuento financiero → impTrib = 0).
+ *   PDF con QR (RG 4892). La NC es proporcional a TODOS los componentes de la
+ *   factura: 10% del neto + 10% del IVA + 10% de cada percepción (IVA/IIBB),
+ *   de modo que la NC = exactamente 10% del total_factura (definición del
+ *   negocio 05/08/2026: "si se vendió a x+21%+percepciones, la NC devuelve
+ *   x+21%+percepciones proporcionales"). impTrib y Tributos van a ARCA igual
+ *   que en la factura original.
  *   Orden estricto: CAE → insert (si ARCA rechaza, no se crea nada en DB).
  *
  * Si se provee un pago_id, las NC/REV generadas se imputarán automáticamente a ese pago.
@@ -20,7 +24,7 @@ import { SupabaseClient } from "@supabase/supabase-js"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { actualizarDescuentoFinancieroKardex } from "@/lib/kardex/insertar-kardex"
-import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
+import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
@@ -41,6 +45,8 @@ interface ComprobanteInput {
   total_neto: number
   total_iva: number
   total_factura: number
+  percepcion_iva?: number | null
+  percepcion_iibb?: number | null
 }
 
 interface ComprobanteGenerado {
@@ -106,6 +112,8 @@ async function crearComprobante(
     total_neto: number
     total_iva: number
     total_factura: number
+    percepcion_iva?: number
+    percepcion_iibb?: number
     observaciones?: string
     cae?: string | null
     vencimiento_cae?: string | null
@@ -121,6 +129,8 @@ async function crearComprobante(
       cliente_id: params.cliente_id,
       total_neto: -Math.abs(params.total_neto),
       total_iva: -Math.abs(params.total_iva),
+      percepcion_iva: -Math.abs(params.percepcion_iva ?? 0),
+      percepcion_iibb: -Math.abs(params.percepcion_iibb ?? 0),
       total_factura: -Math.abs(params.total_factura),
       saldo_pendiente: -Math.abs(params.total_factura),
       estado_pago: "pendiente",
@@ -206,6 +216,8 @@ async function generarPDFNC(
     cliente: any
     total_neto: number
     total_iva: number
+    percepcion_iva?: number
+    percepcion_iibb?: number
     total_factura: number
     cae: string
     vencimiento_cae: string | null
@@ -246,8 +258,8 @@ async function generarPDFNC(
         fecha:              todayArgentina(),
         total_neto:         -Math.abs(params.total_neto),
         total_iva:          -Math.abs(params.total_iva),
-        percepcion_iva:     0,
-        percepcion_iibb:    0,
+        percepcion_iva:     -Math.abs(params.percepcion_iva ?? 0),
+        percepcion_iibb:    -Math.abs(params.percepcion_iibb ?? 0),
         total_factura:      -Math.abs(params.total_factura),
         cae:                params.cae,
         vencimiento_cae:    params.vencimiento_cae,
@@ -299,7 +311,7 @@ export async function generarBonificacionContado(
   // Cargar comprobantes
   const { data: comprobantes, error: compError } = await supabase
     .from("comprobantes_venta")
-    .select("id, tipo_comprobante, numero_comprobante, total_neto, total_iva, total_factura")
+    .select("id, tipo_comprobante, numero_comprobante, total_neto, total_iva, total_factura, percepcion_iva, percepcion_iibb")
     .in("id", comprobante_ids)
 
   if (compError || !comprobantes) {
@@ -410,14 +422,40 @@ export async function generarBonificacionContado(
     }
     const numero = `${puntoVentaFiscal}-${nuevoNumero.toString().padStart(8, "0")}`
 
-    // Totales: 10% del neto de cada factura + IVA 21%. Sin percepciones (descuento financiero).
+    // Totales: 10% de CADA componente de la factura (neto, IVA, percepciones)
+    // → la NC devuelve exactamente el 10% del total facturado.
     const lineas = facturas.map(c => ({
       descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
       precio_neto: r2(Math.abs(c.total_neto) * DESCUENTO_CONTADO_PCT / 100),
     }))
     const totalNeto = r2(lineas.reduce((s, l) => s + l.precio_neto, 0))
     const totalIva = r2(totalNeto * IVA_PCT)
-    const totalFactura = (Math.round(totalNeto * 100) + Math.round(totalIva * 100)) / 100
+    const percepIva = r2(facturas.reduce((s, c) => s + Math.abs(Number(c.percepcion_iva ?? 0)), 0) * DESCUENTO_CONTADO_PCT / 100)
+    const percepIibb = r2(facturas.reduce((s, c) => s + Math.abs(Number(c.percepcion_iibb ?? 0)), 0) * DESCUENTO_CONTADO_PCT / 100)
+    const totalTrib = r2(percepIva + percepIibb)
+    const totalFactura =
+      (Math.round(totalNeto * 100) + Math.round(totalIva * 100) + Math.round(percepIva * 100) + Math.round(percepIibb * 100)) / 100
+
+    // Tributos para ARCA — mismo formato que la factura original
+    const tributos = []
+    if (percepIva > 0) {
+      tributos.push({
+        id: TRIBUTO_ID.PERCEPCION_IVA,
+        desc: "Percepcion IVA RG 5329",
+        baseImp: totalNeto,
+        alic: r2((percepIva / totalNeto) * 100),
+        importe: percepIva,
+      })
+    }
+    if (percepIibb > 0) {
+      tributos.push({
+        id: TRIBUTO_ID.PERCEPCION_IIBB,
+        desc: "Percepcion IIBB",
+        baseImp: totalNeto,
+        alic: r2((percepIibb / totalNeto) * 100),
+        importe: percepIibb,
+      })
+    }
 
     // CbtesAsoc (RG 4540): las facturas que se bonifican
     const cbteAsoc = facturas.map(c => ({
@@ -445,8 +483,9 @@ export async function generarBonificacionContado(
       impNeto:    totalNeto,
       impOpEx:    0,
       impIva:     totalIva,
-      impTrib:    0,
+      impTrib:    totalTrib,
       iva: [{ id: IVA_ID.IVA_21, baseImp: totalNeto, importe: totalIva }],
+      tributos: tributos.length > 0 ? tributos : undefined,
       cbteAsoc,
       condicionIVAReceptorId: condIvaReceptor,
     })
@@ -467,6 +506,8 @@ export async function generarBonificacionContado(
           cliente_id,
           total_neto: -Math.abs(totalNeto),
           total_iva: -Math.abs(totalIva),
+          percepcion_iva: -Math.abs(percepIva),
+          percepcion_iibb: -Math.abs(percepIibb),
           total_factura: -Math.abs(totalFactura),
           saldo_pendiente: -Math.abs(totalFactura),
           estado_pago: "pendiente",
@@ -493,6 +534,8 @@ export async function generarBonificacionContado(
         cliente_id,
         total_neto: totalNeto,
         total_iva: totalIva,
+        percepcion_iva: percepIva,
+        percepcion_iibb: percepIibb,
         total_factura: totalFactura,
         observaciones,
         cae: respCAE.cae,
@@ -519,6 +562,8 @@ export async function generarBonificacionContado(
       cliente,
       total_neto: totalNeto,
       total_iva: totalIva,
+      percepcion_iva: percepIva,
+      percepcion_iibb: percepIibb,
       total_factura: totalFactura,
       cae: respCAE.cae,
       vencimiento_cae: respCAE.vencimientoCae,

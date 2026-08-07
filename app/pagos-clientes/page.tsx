@@ -602,18 +602,15 @@ function PagosClientesContent() {
     }
   }
 
+  // La NC del 10% es proporcional a TODOS los componentes de la factura
+  // (neto + IVA + percepciones) → exactamente 10% del total facturado.
   const calcBonificacion = (): number => {
     if (!aplicarContado) return 0
     return comprobantesData
       .filter(c => seleccionados[c.id] !== undefined && !dtosHechos.has(c.id))
       .reduce((sum, c) => {
-        if (c.tipo_comprobante === "PRES") {
+        if (["PRES", "FA", "FB", "FC"].includes(c.tipo_comprobante)) {
           return sum + Math.abs(Number(c.total_factura)) * 0.1
-        }
-        if (["FA", "FB", "FC"].includes(c.tipo_comprobante)) {
-          const neto = Math.abs(Number(c.total_neto) || 0)
-          const bonif = neto * 0.1
-          return sum + bonif + bonif * 0.21
         }
         return sum
       }, 0)
