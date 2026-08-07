@@ -18,7 +18,7 @@ import {
   PEDIDO_PREFIX,
   type Comprobante,
 } from "@/components/pagos/ComprobantesSelector"
-import { BcraDeudorChip } from "@/components/pagos/BcraDeudorChip"
+import { BcraDeudorMulti } from "@/components/pagos/BcraDeudorChip"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
 import { Camera, ChevronDown, ChevronUp, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
@@ -65,8 +65,10 @@ export function RegistrarCobro({
   const [banco, setBanco] = useState("")
   const [numeroCheque, setNumeroCheque] = useState("")
   const [fechaCheque, setFechaCheque] = useState("")
-  // CUIT del emisor del cheque → consulta Central de Deudores BCRA (chip)
+  // CUIT del emisor del cheque → consulta Central de Deudores BCRA (chip).
+  // Cuentas conjuntas: el OCR puede detectar 2+ CUITs; se consultan TODOS.
   const [cuitEmisor, setCuitEmisor] = useState("")
+  const [cuitsTitulares, setCuitsTitulares] = useState<string[]>([])
   // Imputación (selector de pedidos/comprobantes, igual que choferes/vendedores)
   const [imputarAbierto, setImputarAbierto] = useState(false)
   const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
@@ -156,13 +158,15 @@ export function RegistrarCobro({
           if (r.fecha_cheque) setFechaCheque(r.fecha_cheque)
           if (r.monto) setMonto(String(r.monto))
           if (r.cuit_emisor) setCuitEmisor(String(r.cuit_emisor))
+          const titulares: string[] = Array.isArray(r.cuits_titulares) ? r.cuits_titulares : []
+          setCuitsTitulares(titulares)
           setOcrExtra({
             fecha_emision: r.fecha_emision || undefined,
             localidad: r.localidad || undefined,
           })
           toast({
             title: esEcheq ? "⚡ Echeq detectado" : "📄 Cheque detectado",
-            description: `${r.banco_emisor ?? ""} ${r.numero_cheque ?? ""}${r.fecha_cheque ? ` · vence ${fmtFecha(r.fecha_cheque)}` : ""}${r.monto ? ` · $ ${Number(r.monto).toLocaleString("es-AR")}` : ""} — revisá y Registrar.`,
+            description: `${r.banco_emisor ?? ""} ${r.numero_cheque ?? ""}${r.fecha_cheque ? ` · vence ${fmtFecha(r.fecha_cheque)}` : ""}${r.monto ? ` · $ ${Number(r.monto).toLocaleString("es-AR")}` : ""}${titulares.length > 1 ? ` · cuenta conjunta (${titulares.length} titulares, se consultan todos en BCRA)` : ""} — revisá y Registrar.`,
           })
         } else if (r.tipo === "transferencia") {
           setMetodo("transferencia")
@@ -220,6 +224,7 @@ export function RegistrarCobro({
     setNumeroCheque("")
     setFechaCheque("")
     setCuitEmisor("")
+    setCuitsTitulares([])
     setImputarAbierto(false)
     setSeleccionados({})
     setAplicarContado(false)
@@ -437,10 +442,10 @@ export function RegistrarCobro({
         </button>
       </div>
 
-      {/* ── Semáforo BCRA del emisor del cheque (Central de Deudores) ── */}
-      {(metodo === "cheque" || metodo === "echeq") && cuitEmisor.replace(/\D/g, "").length >= 10 && (
+      {/* ── Semáforo BCRA (Central de Deudores) — todos los titulares del cheque ── */}
+      {(metodo === "cheque" || metodo === "echeq") && (
         <div className="mt-2">
-          <BcraDeudorChip cuit={cuitEmisor} />
+          <BcraDeudorMulti cuits={[cuitEmisor, ...cuitsTitulares]} bancoEmisor={banco} />
         </div>
       )}
 

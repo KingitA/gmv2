@@ -12,7 +12,28 @@ export interface BcraResultado {
   denominacion: string | null
   apto: boolean
   sin_antecedentes: boolean
+  /** Peor situación por entidad informante (para resaltar el banco del cheque). */
+  entidades?: { entidad: string; situacion: number }[]
   error?: string
+}
+
+// ¿La entidad del BCRA es el banco emisor del cheque? Comparación laxa por
+// tokens ("Macro" ⊂ "BANCO MACRO S.A.", "Nación" ⊂ "BANCO DE LA NACION ARGENTINA").
+const norm = (s: string) =>
+  s
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\b(BANCO|BCO|DE|DEL|LA|EL|LOS|Y|S\.?A\.?U?|S\.?R\.?L\.?|ARGENTINA|BUENOS AIRES)\b/g, " ")
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+export function esMismoBanco(entidadBcra: string, bancoEmisor: string): boolean {
+  const a = norm(entidadBcra)
+  const b = norm(bancoEmisor)
+  if (!a || !b) return false
+  return a.includes(b) || b.includes(a)
 }
 
 const SITUACION_LABEL: Record<number, string> = {
@@ -54,7 +75,15 @@ export function useBcraDeudor(cuit: string | null | undefined) {
   return { resultado, consultando }
 }
 
-export function BcraDeudorChip({ cuit }: { cuit: string | null | undefined }) {
+export function BcraDeudorChip({
+  cuit,
+  bancoEmisor,
+}: {
+  cuit: string | null | undefined
+  /** Banco que emitió el cheque: si la deuda está justo ahí, se resalta aparte
+   *  (es el banco que va a decidir si el cheque se paga). */
+  bancoEmisor?: string | null
+}) {
   const { resultado, consultando } = useBcraDeudor(cuit)
 
   if (consultando) {
@@ -84,13 +113,60 @@ export function BcraDeudorChip({ cuit }: { cuit: string | null | undefined }) {
     )
   }
 
+  // La deuda ¿está en el banco que emitió el cheque? Es el dato que más pesa.
+  const entidadDelCheque = bancoEmisor
+    ? (resultado.entidades || []).find((e) => e.situacion > 1 && esMismoBanco(e.entidad, bancoEmisor))
+    : null
+
   return (
     <div className="px-3 py-2 bg-red-50 rounded-xl border-2 border-red-400 text-sm">
       <p className="font-bold text-red-700">
         ⛔ BCRA: {SITUACION_LABEL[resultado.situacion_max] || `situación ${resultado.situacion_max}`}
       </p>
       {resultado.denominacion && <p className="text-red-600 truncate">{resultado.denominacion}</p>}
+      {entidadDelCheque ? (
+        <p className="text-red-700 text-xs mt-0.5 font-bold">
+          🚨 La deuda (situación {entidadDelCheque.situacion}) es en {entidadDelCheque.entidad} — el
+          MISMO banco que emitió este cheque.
+        </p>
+      ) : (
+        (resultado.entidades || [])
+          .filter((e) => e.situacion > 1)
+          .slice(0, 3)
+          .map((e) => (
+            <p key={e.entidad} className="text-red-500 text-xs mt-0.5">
+              · situación {e.situacion} en {e.entidad}
+            </p>
+          ))
+      )}
       <p className="text-red-500 text-xs mt-0.5">El emisor registra deuda en el sistema financiero — evaluá si aceptás el cheque.</p>
+    </div>
+  )
+}
+
+/**
+ * Cuentas conjuntas: un cheque puede tener 2+ CUITs impresos (cotitulares).
+ * Consulta a CADA titular contra el BCRA — con que uno esté complicado, alerta.
+ */
+export function BcraDeudorMulti({
+  cuits,
+  bancoEmisor,
+}: {
+  cuits: (string | null | undefined)[]
+  bancoEmisor?: string | null
+}) {
+  const unicos = [...new Set(cuits.map((c) => (c || "").replace(/\D/g, "")).filter((c) => c.length >= 10))]
+  if (!unicos.length) return null
+  return (
+    <div className="flex flex-col gap-1.5">
+      {unicos.length > 1 && (
+        <p className="text-xs font-semibold text-slate-500">
+          Cuenta conjunta — {unicos.length} titulares en el cheque, se consultan todos:
+        </p>
+      )}
+      {unicos.map((c) => (
+        <BcraDeudorChip key={c} cuit={c} bancoEmisor={bancoEmisor} />
+      ))}
     </div>
   )
 }

@@ -30,6 +30,7 @@ export async function GET(
         situacion_max: 1,
         sin_antecedentes: true,
         apto: true,
+        entidades: [],
       })
     }
 
@@ -41,10 +42,15 @@ export async function GET(
     const results = data.results
     let situacionMax = 1
 
+    // Peor situación por entidad (todas las informadas): permite al front
+    // resaltar si la deuda está justo en el banco emisor del cheque.
+    const porEntidad = new Map<string, number>()
     for (const periodo of results?.periodos || []) {
       for (const entidad of periodo.entidades || []) {
         const sit = Number(entidad.situacion)
         if (sit > situacionMax) situacionMax = sit
+        const nombre = String(entidad.entidad || "").trim()
+        if (nombre) porEntidad.set(nombre, Math.max(porEntidad.get(nombre) ?? 0, sit))
       }
     }
 
@@ -54,6 +60,9 @@ export async function GET(
       situacion_max: situacionMax,
       sin_antecedentes: false,
       apto: situacionMax === 1,
+      entidades: [...porEntidad.entries()]
+        .map(([entidad, situacion]) => ({ entidad, situacion }))
+        .sort((a, b) => b.situacion - a.situacion),
     })
   } catch (error: any) {
     console.error("[bcra]", error?.message)
