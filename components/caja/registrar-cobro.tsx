@@ -74,6 +74,13 @@ export function RegistrarCobro({
   // Fotos de comprobantes
   const [archivos, setArchivos] = useState<{ url: string; nombre: string }[]>([])
   const [subiendo, setSubiendo] = useState(false)
+  // Datos extra que el OCR detecta y la barra no muestra (van igual al pago)
+  const [ocrExtra, setOcrExtra] = useState<{
+    cuit_emisor?: string
+    fecha_emision?: string
+    localidad?: string
+    fecha_transferencia?: string
+  }>({})
   const fileRef = useRef<HTMLInputElement>(null)
   const camRef = useRef<HTMLInputElement>(null)
 
@@ -126,10 +133,56 @@ export function RegistrarCobro({
         if (!res.ok) throw new Error(data.error || "Error subiendo el archivo")
         const nuevos = (data.archivos || []).filter((a: any) => a?.url)
         setArchivos((prev) => [...prev, ...nuevos])
-        toast({
-          title: nuevos.length > 1 ? "Comprobantes adjuntados" : "Comprobante adjuntado",
-          description: "La foto queda pegada al cobro cuando lo registres.",
-        })
+
+        // ── Aplicar lo que el OCR detectó a los campos de la barra ──
+        const resultados: any[] = data.resultados || []
+        if (!resultados.length) {
+          toast({
+            title: "Foto adjuntada",
+            description: "No se detectaron datos en la imagen — completá los campos a mano (la foto queda pegada al cobro).",
+          })
+          return
+        }
+        const r = resultados[0]
+        const fmtFecha = (f?: string) => (f ? f.split("-").reverse().join("/") : "")
+        if (r.tipo === "cheque") {
+          const esEcheq = r.color_cheque === "ECHEQ"
+          setMetodo(esEcheq ? "echeq" : "cheque")
+          if (r.banco_emisor) setBanco(r.banco_emisor)
+          if (r.numero_cheque) setNumeroCheque(String(r.numero_cheque))
+          if (r.fecha_cheque) setFechaCheque(r.fecha_cheque)
+          if (r.monto) setMonto(String(r.monto))
+          setOcrExtra({
+            cuit_emisor: r.cuit_emisor || undefined,
+            fecha_emision: r.fecha_emision || undefined,
+            localidad: r.localidad || undefined,
+          })
+          toast({
+            title: esEcheq ? "⚡ Echeq detectado" : "📄 Cheque detectado",
+            description: `${r.banco_emisor ?? ""} ${r.numero_cheque ?? ""}${r.fecha_cheque ? ` · vence ${fmtFecha(r.fecha_cheque)}` : ""}${r.monto ? ` · $ ${Number(r.monto).toLocaleString("es-AR")}` : ""} — revisá y Registrar.`,
+          })
+        } else if (r.tipo === "transferencia") {
+          setMetodo("transferencia")
+          if (r.cuenta_bancaria_id) setCuentaBancariaId(r.cuenta_bancaria_id)
+          if (r.numero_comprobante) setNumeroOperacion(String(r.numero_comprobante))
+          if (r.monto) setMonto(String(r.monto))
+          setOcrExtra({ fecha_transferencia: r.fecha_transferencia || undefined })
+          toast({
+            title: "🏦 Transferencia detectada",
+            description: `${r.banco_nombre ? `→ ${r.banco_nombre}` : "Elegí el banco destino"}${r.numero_comprobante ? ` · op. ${r.numero_comprobante}` : ""}${r.monto ? ` · $ ${Number(r.monto).toLocaleString("es-AR")}` : ""} — revisá y Registrar.`,
+          })
+        } else {
+          toast({
+            title: "Depósito detectado",
+            description: "Los depósitos con varios ítems se cargan desde Pagos Clientes; la foto igual queda adjunta.",
+          })
+        }
+        if (resultados.length > 1) {
+          toast({
+            title: `${resultados.length} comprobantes en la imagen`,
+            description: "La barra carga de a uno: registrá este y volvé a subir la foto para el siguiente.",
+          })
+        }
       } catch (e: any) {
         toast({ variant: "destructive", title: "Error con la foto", description: e.message })
       } finally {
@@ -167,6 +220,7 @@ export function RegistrarCobro({
     setSeleccionados({})
     setAplicarContado(false)
     setArchivos([])
+    setOcrExtra({})
   }
 
   const registrar = async () => {
@@ -197,12 +251,15 @@ export function RegistrarCobro({
       metodoPayload.caja_id = cajaId || cajaChicaDefault || undefined
     } else if (metodo === "transferencia") {
       if (cuentaBancariaId) metodoPayload.cuenta_bancaria_id = cuentaBancariaId
-      metodoPayload.fecha_transferencia = todayArgentina()
+      metodoPayload.fecha_transferencia = ocrExtra.fecha_transferencia || todayArgentina()
       if (numeroOperacion) metodoPayload.numero_comprobante = numeroOperacion
     } else {
       metodoPayload.banco_emisor = banco || undefined
       metodoPayload.numero_cheque = numeroCheque
       metodoPayload.fecha_cheque = fechaCheque || todayArgentina()
+      if (ocrExtra.cuit_emisor) metodoPayload.cuit_emisor = ocrExtra.cuit_emisor
+      if (ocrExtra.fecha_emision) metodoPayload.fecha_emision = ocrExtra.fecha_emision
+      if (ocrExtra.localidad) metodoPayload.localidad = ocrExtra.localidad
       if (metodo === "echeq") metodoPayload.color_cheque = "ECHEQ"
     }
 
