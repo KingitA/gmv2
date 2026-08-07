@@ -63,6 +63,8 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
         .eq("cliente_id", clienteId)
         .in("estado_pago", ["pendiente", "parcial"])
         .in("tipo_comprobante", ["FA", "FB", "FC", "PRES"])
+        // Un comprobante anulado no se cobra (su NC inversa lo cancela)
+        .is("anulado_en", null)
         .order("fecha", { ascending: true }),
       supabase
         .from("comprobantes_venta")

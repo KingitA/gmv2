@@ -306,6 +306,23 @@ export async function POST(
       })
       .eq('id', original.id)
 
+    // ─── 9b. Cancelar saldos entre sí (NC inversa ↔ original) ───
+    // Sin esto, ambos quedaban "pendientes" con saldo y aparecían como
+    // cobrables en los selectores de pago. cc_imputar_credito los deja en 0 /
+    // pagado sin tocar el libro mayor (ya posteado). No-fatal: si falla, la
+    // anulación fiscal ya está hecha y el par se puede imputar a mano.
+    try {
+      const { error: impErr } = await supabase.rpc('cc_imputar_credito', {
+        p_credito_id: inverso.id,
+        p_debito_id: original.id,
+        p_monto: null,
+        p_usuario_id: auth.user.id,
+      })
+      if (impErr) console.error('[anular] cc_imputar_credito falló:', impErr.message)
+    } catch (e: any) {
+      console.error('[anular] cc_imputar_credito:', e?.message)
+    }
+
     // El remito del comprobante anulado también se anula. Su PDF no se toca
     // (inmutable): solo cambia el estado para que no acompañe más mercadería.
     await supabase
