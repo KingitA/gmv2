@@ -76,6 +76,8 @@ export function RegistrarCobro({
   // Monto "confirmado" del método en edición: se fija al salir del campo (blur),
   // no en cada tecla — para que "Resta saldar" no baile mientras tipeás.
   const [montoConfirmado, setMontoConfirmado] = useState(0)
+  // Cartel "Falta pagar $X": ajuste por redondeo vs dejar saldo pendiente
+  const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
   // Imputación (selector de pedidos/comprobantes, igual que choferes/vendedores)
   const [imputarAbierto, setImputarAbierto] = useState(false)
   const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
@@ -295,7 +297,8 @@ export function RegistrarCobro({
   const restaSaldar = round2(netoACobrar - totalCobroConfirmado)
   const mostrarResumen = totalSeleccionado > 0 && (totalCobroConfirmado > 0 || aplicarContado)
 
-  const registrar = async () => {
+  const registrar = async (modoDiferencia?: "saldo" | "ajuste") => {
+    setDialogoFalta(null)
     if (!cliente) {
       toast({ variant: "destructive", title: "Falta el cliente", description: "Buscalo por nombre o CUIT" })
       return
@@ -317,23 +320,21 @@ export function RegistrarCobro({
       .map(([comprobante_id, v]) => ({ comprobante_id, monto_imputado: Number(v) }))
     const anticipos = Object.keys(seleccionados).filter((k) => k.startsWith(PEDIDO_PREFIX))
 
-    // Lo que cubre el cobro = métodos + NC del 10% (si está tildado). Si lo
-    // seleccionado supera eso, NO se bloquea: se recorta la última imputación
-    // (pago parcial — el resto queda como saldo del comprobante).
+    // Lo que cubre el cobro = métodos + NC del 10% (si está tildado). Si falta
+    // plata para lo seleccionado, la decisión es del operador (cartel):
+    //  - "ajuste": se imputa completo y la diferencia se pasa como ajuste por
+    //    redondeo (crédito en cuenta corriente) → nadie cobra centavos.
+    //  - "saldo": se recorta la última imputación (pago parcial, queda saldo).
     const totalMetodos = metodosCobro.reduce((s, m) => s + m.monto, 0)
     const cubierto = round2(totalMetodos + (aplicarContado ? bonificacionEstimada : 0))
-    let excedente = round2(totalSeleccionado - cubierto)
+    const falta = round2(totalSeleccionado - cubierto)
+    const totalImputable = imputaciones.reduce((s, i) => s + i.monto_imputado, 0)
     let recorte = 0
-    if (excedente > 0.01) {
-      for (let i = imputaciones.length - 1; i >= 0 && excedente > 0.005; i--) {
-        const rebaja = Math.min(imputaciones[i].monto_imputado, excedente)
-        imputaciones[i].monto_imputado = round2(imputaciones[i].monto_imputado - rebaja)
-        excedente = round2(excedente - rebaja)
-        recorte = round2(recorte + rebaja)
-      }
-      imputaciones = imputaciones.filter((i) => i.monto_imputado > 0.009)
-      if (excedente > 0.01) {
-        // Ni recortando alcanza (ej: anticipos a pedidos mayores que la plata)
+
+    if (falta > 0.01) {
+      if (falta > totalImputable + 0.01) {
+        // Ni recortando todas las imputaciones alcanza (ej: anticipos a
+        // pedidos sin facturar mayores que la plata entregada)
         toast({
           variant: "destructive",
           title: "Falta plata para lo seleccionado",
@@ -341,6 +342,22 @@ export function RegistrarCobro({
         })
         return
       }
+      if (!modoDiferencia) {
+        setDialogoFalta(falta)
+        return
+      }
+      if (modoDiferencia === "saldo") {
+        let excedente = falta
+        for (let i = imputaciones.length - 1; i >= 0 && excedente > 0.005; i--) {
+          const rebaja = Math.min(imputaciones[i].monto_imputado, excedente)
+          imputaciones[i].monto_imputado = round2(imputaciones[i].monto_imputado - rebaja)
+          excedente = round2(excedente - rebaja)
+          recorte = round2(recorte + rebaja)
+        }
+        imputaciones = imputaciones.filter((i) => i.monto_imputado > 0.009)
+      }
+      // modoDiferencia === "ajuste": imputaciones completas; el ajuste crédito
+      // por `falta` se registra después de crear el pago.
     }
     const obsAnticipo = anticipos.length
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace(PEDIDO_PREFIX, "")).join(", ")}`
@@ -392,12 +409,32 @@ export function RegistrarCobro({
         bonifMsg = " El 10% contado se aplica cuando confirmes el valor."
       }
 
+      // Ajuste por redondeo: la diferencia se acredita en cuenta corriente
+      let ajusteMsg = ""
+      if (modoDiferencia === "ajuste" && falta > 0.01) {
+        try {
+          const ajRes = await fetch(`/api/clientes/${cliente.id}/ajustes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              monto: -falta,
+              motivo: `Ajuste por redondeo — cobro $ ${fmt(totalMetodos)} vs imputado $ ${fmt(totalSeleccionado)}`,
+            }),
+          })
+          const ajData = await ajRes.json()
+          if (!ajRes.ok) throw new Error(ajData.error)
+          ajusteMsg = ` Diferencia de $ ${fmt(falta)} pasada como ajuste por redondeo.`
+        } catch {
+          ajusteMsg = ` ⚠ El ajuste por redondeo de $ ${fmt(falta)} falló — hacelo a mano desde la cuenta corriente.`
+        }
+      }
+
       const recorteMsg = recorte > 0.01 ? ` Pago parcial: quedan $ ${fmt(recorte)} de saldo en el comprobante.` : ""
       toast({
         title: esEfectivo ? "Cobro en caja" : "Cobro registrado",
         description: esEfectivo
-          ? `${cliente.razon_social || cliente.nombre}: entró a la caja${imputaciones.length ? " e imputado" : ", pendiente de imputación"}.${recorteMsg}${bonifMsg}`
-          : `${cliente.razon_social || cliente.nombre}: pendiente de confirmación en la lista.${recorteMsg}${bonifMsg}`,
+          ? `${cliente.razon_social || cliente.nombre}: entró a la caja${imputaciones.length ? " e imputado" : ", pendiente de imputación"}.${recorteMsg}${ajusteMsg}${bonifMsg}`
+          : `${cliente.razon_social || cliente.nombre}: pendiente de confirmación en la lista.${recorteMsg}${ajusteMsg}${bonifMsg}`,
       })
       limpiar()
       onRegistrado()
@@ -688,6 +725,47 @@ export function RegistrarCobro({
                 Sobran $ {fmt(-restaSaldar)} → a cuenta
               </span>
             ))}
+        </div>
+      )}
+
+      {/* ── Cartel: falta plata para lo seleccionado — ¿redondeo o saldo? ── */}
+      {dialogoFalta != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDialogoFalta(null)}>
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-slate-900">
+              Falta pagar <span style={NUM}>$ {fmt(dialogoFalta)}</span>
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Lo entregado{aplicarContado ? " (más la NC del 10%)" : ""} no llega a cubrir lo
+              seleccionado. ¿Qué hacemos con la diferencia?
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                onClick={() => registrar("ajuste")}
+                className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700"
+              >
+                Pasar como ajuste por redondeo
+                <span className="block text-[11px] font-normal opacity-80">
+                  El comprobante queda saldado; los $ {fmt(dialogoFalta)} se acreditan como ajuste en la cuenta
+                </span>
+              </button>
+              <button
+                onClick={() => registrar("saldo")}
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Dejar saldo pendiente
+                <span className="block text-[11px] font-normal text-slate-400">
+                  El comprobante queda parcial, con $ {fmt(dialogoFalta)} por cobrar
+                </span>
+              </button>
+              <button
+                onClick={() => setDialogoFalta(null)}
+                className="w-full rounded-lg px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -154,7 +154,7 @@ export async function GET(
         // Extracto (libro mayor) para la UI
         const movimientos = await fetchAllRows(() => supabase
             .from("cuenta_corriente_clientes")
-            .select("fecha, tipo_movimiento, debe, haber, numero_comprobante, observaciones, referencia_tipo, referencia_id")
+            .select("id, fecha, tipo_movimiento, debe, haber, numero_comprobante, observaciones, referencia_tipo, referencia_id")
             .eq("cliente_id", cliente_id)
             .order("fecha", { ascending: false }));
 

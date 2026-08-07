@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 
@@ -63,5 +64,58 @@ export async function POST(
   } catch (error: any) {
     console.error("[clientes/ajustes] error:", error)
     return NextResponse.json({ error: error.message || "Error al ajustar saldo" }, { status: 500 })
+  }
+}
+
+/**
+ * DELETE — eliminar un ajuste manual del libro mayor.
+ * Solo borra filas tipo_movimiento='ajuste' + referencia_tipo='ajuste_manual'
+ * del cliente (los ajustes manuales no tocan comprobantes ni kardex, así que
+ * eliminarlos solo recalcula v_saldo_clientes — sin efectos colaterales).
+ * Body: { movimiento_id }
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireAuth()
+  if (auth.error) return auth.error
+  try {
+    const { id: cliente_id } = await params
+    const { movimiento_id } = await request.json()
+    if (!movimiento_id) {
+      return NextResponse.json({ error: "movimiento_id es requerido" }, { status: 400 })
+    }
+
+    const admin = createAdminClient()
+    const { data: mov } = await admin
+      .from("cuenta_corriente_clientes")
+      .select("id, cliente_id, tipo_movimiento, referencia_tipo, debe, haber, observaciones")
+      .eq("id", movimiento_id)
+      .single()
+
+    if (!mov || mov.cliente_id !== cliente_id) {
+      return NextResponse.json({ error: "Movimiento no encontrado para este cliente" }, { status: 404 })
+    }
+    if (mov.tipo_movimiento !== "ajuste" || mov.referencia_tipo !== "ajuste_manual") {
+      return NextResponse.json(
+        { error: "Solo se pueden eliminar ajustes manuales (este movimiento es del circuito de comprobantes/pagos)" },
+        { status: 400 }
+      )
+    }
+
+    const { error: delErr } = await admin
+      .from("cuenta_corriente_clientes")
+      .delete()
+      .eq("id", movimiento_id)
+    if (delErr) throw delErr
+
+    return NextResponse.json({
+      success: true,
+      mensaje: `Ajuste eliminado ($ ${Number(mov.debe || 0) - Number(mov.haber || 0) >= 0 ? mov.debe : mov.haber})`,
+    })
+  } catch (error: any) {
+    console.error("[clientes/ajustes] DELETE error:", error)
+    return NextResponse.json({ error: error.message || "Error eliminando el ajuste" }, { status: 500 })
   }
 }

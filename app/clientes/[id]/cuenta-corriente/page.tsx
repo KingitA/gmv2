@@ -58,6 +58,7 @@ interface Comprobante {
 }
 
 interface MovimientoCC {
+    id?: string;
     fecha: string;
     tipo_movimiento: string;
     debe: number;
@@ -389,6 +390,23 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         }
     };
 
+    const eliminarAjuste = async (movimientoId: string) => {
+        if (!window.confirm("¿Eliminar este ajuste manual? El saldo del cliente se recalcula al instante.")) return;
+        try {
+            const res = await fetch(`/api/clientes/${clienteId}/ajustes`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ movimiento_id: movimientoId }),
+            });
+            const d = await res.json();
+            if (!res.ok) throw new Error(d.error || "Error eliminando el ajuste");
+            toast({ title: "Ajuste eliminado", description: "El saldo se recalculó." });
+            fetchData();
+        } catch (e: any) {
+            toast({ variant: "destructive", title: "Error", description: e.message });
+        }
+    };
+
     const getEstadoBadge = (saldo: number, esDevolucion: boolean) => {
         if (esDevolucion) {
             return <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">Pendiente ERP</Badge>;
@@ -542,6 +560,15 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 </TableCell>
                                                 <TableCell className={`text-right font-bold tabular-nums ${m.saldo_acumulado > 0 ? "text-red-600" : "text-green-600"}`}>
                                                     ${m.saldo_acumulado.toLocaleString('es-AR')}
+                                                    {m.tipo_movimiento === "ajuste" && m.referencia_tipo === "ajuste_manual" && m.id && (
+                                                        <button
+                                                            onClick={() => eliminarAjuste(m.id!)}
+                                                            title="Eliminar este ajuste manual"
+                                                            className="ml-2 align-middle text-gray-300 hover:text-red-600"
+                                                        >
+                                                            🗑
+                                                        </button>
+                                                    )}
                                                 </TableCell>
                                             </TableRow>
                                         ))

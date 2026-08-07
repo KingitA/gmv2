@@ -47,6 +47,7 @@ export function ImputarPago({
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
   const [aplicarContado, setAplicarContado] = useState(false)
+  const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
 
   useEffect(() => {
     createClient()
@@ -84,28 +85,62 @@ export function ImputarPago({
     return round2(total)
   }, [aplicarContado, imputaciones, dtosHechos, comprobantes])
 
-  const imputar = async () => {
+  const imputar = async (modoDiferencia?: "saldo" | "ajuste") => {
+    setDialogoFalta(null)
     if (!imputaciones.length) {
       toast({ variant: "destructive", title: "Nada para imputar", description: "Tildá al menos un comprobante" })
       return
     }
-    if (totalImputado > pago.disponible + 0.01) {
-      toast({
-        variant: "destructive",
-        title: "Imputación excedida",
-        description: `Solo hay $ ${fmt(pago.disponible)} disponibles de este cobro.`,
-      })
-      return
+    // La NC del 10% también cubre parte de lo imputado
+    const disponibleTotal = round2(pago.disponible + (aplicarContado ? bonificacionEstimada : 0))
+    const falta = round2(totalImputado - disponibleTotal)
+    let lista = imputaciones.map((i) => ({ ...i }))
+    if (falta > 0.01) {
+      if (!modoDiferencia) {
+        setDialogoFalta(falta)
+        return
+      }
+      if (modoDiferencia === "saldo") {
+        // Pago parcial: se recorta lo imputado hasta lo disponible
+        let excedente = falta
+        for (let i = lista.length - 1; i >= 0 && excedente > 0.005; i--) {
+          const rebaja = Math.min(lista[i].monto_imputado, excedente)
+          lista[i].monto_imputado = round2(lista[i].monto_imputado - rebaja)
+          excedente = round2(excedente - rebaja)
+        }
+        lista = lista.filter((i) => i.monto_imputado > 0.009)
+      }
+      // "ajuste": se imputa completo y la diferencia se acredita como ajuste
     }
     setGuardando(true)
     try {
       const res = await fetch(`/api/pagos/${pago.pago_id}/confirmar`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usuario_confirmador: usuarioId, accion: "confirmar", imputaciones }),
+        body: JSON.stringify({ usuario_confirmador: usuarioId, accion: "confirmar", imputaciones: lista }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Error imputando el pago")
+
+      // Ajuste por redondeo: la diferencia se acredita en cuenta corriente
+      let ajusteMsg = ""
+      if (modoDiferencia === "ajuste" && falta > 0.01) {
+        try {
+          const ajRes = await fetch(`/api/clientes/${pago.cliente_id}/ajustes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              monto: -falta,
+              motivo: `Ajuste por redondeo — imputación de cobro (disponible $ ${fmt(pago.disponible)})`,
+            }),
+          })
+          const ajData = await ajRes.json()
+          if (!ajRes.ok) throw new Error(ajData.error)
+          ajusteMsg = ` Diferencia de $ ${fmt(falta)} pasada como ajuste por redondeo.`
+        } catch {
+          ajusteMsg = ` ⚠ El ajuste por redondeo de $ ${fmt(falta)} falló — hacelo a mano desde la cuenta corriente.`
+        }
+      }
 
       // Bonificación 10% contado sobre lo recién imputado (excluye los que ya la tienen)
       let bonifMsg = ""
@@ -132,7 +167,7 @@ export function ImputarPago({
         description:
           (restante > 0.01
             ? `Aplicado $ ${fmt(totalImputado)}; quedan $ ${fmt(restante)} a cuenta del cliente.`
-            : `Aplicado $ ${fmt(totalImputado)} a los comprobantes elegidos.`) + bonifMsg,
+            : `Aplicado $ ${fmt(totalImputado)} a los comprobantes elegidos.`) + ajusteMsg + bonifMsg,
       })
       onListo()
     } catch (e: any) {
@@ -206,7 +241,7 @@ export function ImputarPago({
 
         <div className="mt-4 flex items-center gap-2">
           <button
-            onClick={imputar}
+            onClick={() => imputar()}
             disabled={guardando || !imputaciones.length}
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
@@ -220,6 +255,47 @@ export function ImputarPago({
             Cancelar
           </button>
         </div>
+
+        {/* ── Cartel: lo imputado supera lo disponible — ¿redondeo o saldo? ── */}
+        {dialogoFalta != null && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setDialogoFalta(null)}>
+            <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-bold text-slate-900">
+                Falta pagar <span style={NUM}>$ {fmt(dialogoFalta)}</span>
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Lo disponible del cobro{aplicarContado ? " (más la NC del 10%)" : ""} no cubre lo
+                seleccionado. ¿Qué hacemos con la diferencia?
+              </p>
+              <div className="mt-4 flex flex-col gap-2">
+                <button
+                  onClick={() => imputar("ajuste")}
+                  className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700"
+                >
+                  Pasar como ajuste por redondeo
+                  <span className="block text-[11px] font-normal opacity-80">
+                    El comprobante queda saldado; los $ {fmt(dialogoFalta)} se acreditan como ajuste en la cuenta
+                  </span>
+                </button>
+                <button
+                  onClick={() => imputar("saldo")}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Dejar saldo pendiente
+                  <span className="block text-[11px] font-normal text-slate-400">
+                    El comprobante queda parcial, con $ {fmt(dialogoFalta)} por cobrar
+                  </span>
+                </button>
+                <button
+                  onClick={() => setDialogoFalta(null)}
+                  className="w-full rounded-lg px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
