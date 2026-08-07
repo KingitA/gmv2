@@ -29,6 +29,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
+import { FechaInput } from "@/components/finanzas/fecha-input";
 
 const ArrowLeftIcon = () => (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -153,6 +154,10 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     const { id: clienteId } = use(params);
     const [data, setData] = useState<CuentaCorrienteData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    // Vista: "saldos" (default — solo lo que tiene saldo) | "detallada" (desglose + filtro fechas)
+    const [vista, setVista] = useState<"saldos" | "detallada">("saldos");
+    const [fechaDesde, setFechaDesde] = useState("");
+    const [fechaHasta, setFechaHasta] = useState("");
 
     // Modal states
     const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -461,16 +466,35 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         credito: "Ajuste (crédito)",
         devolucion: "Devolución",
     };
+    // Filtro por fecha (vista detallada). El saldo acumulado se calcula sobre
+    // TODOS los movimientos (si no, arrancaría de cero en la fecha filtrada).
+    const enRango = (fecha: string) => {
+        const f = fecha?.slice(0, 10);
+        if (fechaDesde && f < fechaDesde) return false;
+        if (fechaHasta && f > fechaHasta) return false;
+        return true;
+    };
     const extracto = (() => {
         const movs = [...(data.movimientos ?? [])].sort(
             (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
         );
         let acumulado = 0;
-        return movs.map((m, i) => {
-            acumulado += Number(m.debe || 0) - Number(m.haber || 0);
-            return { ...m, saldo_acumulado: acumulado, key: i };
-        });
+        return movs
+            .map((m, i) => {
+                acumulado += Number(m.debe || 0) - Number(m.haber || 0);
+                return { ...m, saldo_acumulado: acumulado, key: i };
+            })
+            .filter((m) => enRango(m.fecha));
     })();
+
+    // Filas de la tabla según la vista: "saldos" = solo lo que tiene saldo
+    // (deuda o a favor); "detallada" = todo, con filtro de fechas.
+    const documentosVisibles = documentosUnificados.filter((doc) => {
+        if (vista === "saldos") {
+            return doc.tipo !== "PAGO" && doc.estado !== "anulado" && Math.abs(doc.saldo) > 0.009;
+        }
+        return enRango(doc.fecha);
+    });
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -501,8 +525,8 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             </header>
 
             <main className="container mx-auto px-6 py-8 space-y-6">
-                {/* Quick Actions */}
-                <div className="flex gap-3">
+                {/* Quick Actions + selector de vista */}
+                <div className="flex flex-wrap items-center gap-3">
                     <Link href={`/pagos-clientes?cliente_id=${clienteId}`}>
                         <Button>
                             Registrar Pago
@@ -511,9 +535,39 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                     <Button variant="outline" onClick={() => setShowAdjustmentModal(true)}>
                         Ajustar Saldo
                     </Button>
+                    <div className="ml-auto inline-flex rounded-lg bg-gray-200 p-0.5">
+                        {([["saldos", "Solo saldos"], ["detallada", "Cuenta detallada"]] as const).map(([key, label]) => (
+                            <button
+                                key={key}
+                                onClick={() => setVista(key)}
+                                className={`rounded-md px-4 py-1.5 text-sm font-semibold transition ${
+                                    vista === key ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                                }`}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                    {vista === "detallada" && (
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                            Desde
+                            <FechaInput value={fechaDesde} onChange={setFechaDesde} containerClassName="w-[125px]" />
+                            hasta
+                            <FechaInput value={fechaHasta} onChange={setFechaHasta} containerClassName="w-[125px]" />
+                            {(fechaDesde || fechaHasta) && (
+                                <button
+                                    onClick={() => { setFechaDesde(""); setFechaHasta(""); }}
+                                    className="text-xs font-semibold text-blue-600 hover:underline"
+                                >
+                                    Limpiar
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* ── Extracto: el libro mayor que justifica el Saldo Real ── */}
+                {vista === "detallada" && (
                 <Card>
                     <CardHeader>
                         <CardTitle>Extracto de cuenta</CardTitle>
@@ -586,12 +640,17 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         </div>
                     </CardContent>
                 </Card>
+                )}
 
                 {/* Unified Documents Table */}
                 <Card>
                     <CardHeader>
-                        <CardTitle>Comprobantes</CardTitle>
-                        <CardDescription>Estado de cada comprobante (saldos de imputación) — para seleccionar y pagar</CardDescription>
+                        <CardTitle>{vista === "saldos" ? "Saldos pendientes" : "Comprobantes"}</CardTitle>
+                        <CardDescription>
+                            {vista === "saldos"
+                                ? "Solo lo que tiene saldo: deuda del cliente o crédito a favor. Para el desglose completo, pasá a Cuenta detallada."
+                                : "Estado de cada comprobante (saldos de imputación) — para seleccionar y pagar"}
+                        </CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="overflow-x-auto">
@@ -610,14 +669,14 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {documentosUnificados.length === 0 ? (
+                                    {documentosVisibles.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={9} className="text-center text-gray-500 py-8">
-                                                No hay comprobantes registrados
+                                                {vista === "saldos" ? "Sin saldos pendientes — la cuenta está al día 🎉" : "No hay comprobantes registrados"}
                                             </TableCell>
                                         </TableRow>
                                     ) : (
-                                        documentosUnificados.map((doc) => (
+                                        documentosVisibles.map((doc) => (
                                             <TableRow key={doc.id} className={`hover:bg-gray-50 ${doc.estado === "anulado" && doc.tipo !== "PAGO" ? "opacity-50 line-through" : ""}`}>
                                                 <TableCell>
                                                     <Checkbox
