@@ -54,6 +54,18 @@ interface Comprobante {
     total_factura: number;
     saldo_pendiente: number;
     estado: string;
+    anulado?: boolean;
+}
+
+interface MovimientoCC {
+    fecha: string;
+    tipo_movimiento: string;
+    debe: number;
+    haber: number;
+    numero_comprobante?: string | null;
+    observaciones?: string | null;
+    referencia_tipo?: string | null;
+    referencia_id?: string | null;
 }
 
 interface PagoDetalle {
@@ -107,6 +119,7 @@ interface CuentaCorrienteData {
     comprobantes: Comprobante[];
     pagos: Pago[];
     devoluciones: Devolucion[];
+    movimientos?: MovimientoCC[];
 }
 
 interface PagoFormData {
@@ -179,18 +192,20 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         const documentos: DocumentoUnificado[] = [];
 
         // Add comprobantes (facturas, notas de crédito, etc.)
+        const TIPOS_CREDITO = ["NC", "NCA", "NCB", "NCC", "REV"];
         data.comprobantes.forEach((comp) => {
             documentos.push({
                 id: comp.id,
-                tipo: comp.tipo_comprobante, // "Factura A", "Nota de Crédito", etc.
+                tipo: comp.tipo_comprobante, // "FA", "NCA", "PRES", etc.
                 numero: comp.numero_comprobante,
                 fecha: comp.fecha,
                 pedido: comp.numero_pedido || "-",
                 total: comp.total_factura,
                 saldo: comp.saldo_pendiente,
-                estado: comp.estado,
+                estado: comp.anulado ? "anulado" : comp.estado,
                 es_devolucion: false,
-                es_credito: comp.tipo_comprobante.toLowerCase().includes("nota de crédito") ||
+                es_credito: TIPOS_CREDITO.includes(comp.tipo_comprobante) ||
+                    comp.tipo_comprobante.toLowerCase().includes("nota de crédito") ||
                     comp.tipo_comprobante.toLowerCase().includes("reversa"),
             });
         });
@@ -415,6 +430,30 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         return sum + (doc?.es_credito ? -doc.saldo : doc?.saldo || 0);
     }, 0);
 
+    // ── Extracto (libro mayor): cada fila que mueve el saldo, con acumulado ──
+    // Es la fuente de verdad del Saldo Real: la última fila cierra exacto ahí.
+    const ETIQUETA_MOV: Record<string, string> = {
+        venta: "Factura / Venta",
+        factura: "Factura",
+        pago: "Pago",
+        nota_credito: "Nota de crédito",
+        nota_debito: "Nota de débito",
+        ajuste: "Ajuste manual",
+        debito: "Ajuste (débito)",
+        credito: "Ajuste (crédito)",
+        devolucion: "Devolución",
+    };
+    const extracto = (() => {
+        const movs = [...(data.movimientos ?? [])].sort(
+            (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
+        );
+        let acumulado = 0;
+        return movs.map((m, i) => {
+            acumulado += Number(m.debe || 0) - Number(m.haber || 0);
+            return { ...m, saldo_acumulado: acumulado, key: i };
+        });
+    })();
+
     return (
         <div className="min-h-screen bg-gray-50">
             <header className="bg-white border-b sticky top-0 z-10 px-6 py-4">
@@ -456,11 +495,76 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                     </Button>
                 </div>
 
+                {/* ── Extracto: el libro mayor que justifica el Saldo Real ── */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Extracto de cuenta</CardTitle>
+                        <CardDescription>
+                            Todos los movimientos que componen el saldo — facturas, pagos, notas de crédito y ajustes — con el saldo acumulado. La última fila cierra en el Saldo Real.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Fecha</TableHead>
+                                        <TableHead>Movimiento</TableHead>
+                                        <TableHead>Detalle</TableHead>
+                                        <TableHead className="text-right">Debe (+)</TableHead>
+                                        <TableHead className="text-right">Haber (−)</TableHead>
+                                        <TableHead className="text-right">Saldo</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {extracto.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="text-center text-gray-500 py-8">
+                                                Sin movimientos registrados
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        extracto.map((m) => (
+                                            <TableRow key={m.key} className={m.tipo_movimiento?.includes("ajuste") || m.tipo_movimiento === "debito" || m.tipo_movimiento === "credito" ? "bg-amber-50/50" : ""}>
+                                                <TableCell className="whitespace-nowrap">{new Date(m.fecha).toLocaleDateString('es-AR')}</TableCell>
+                                                <TableCell className="font-medium whitespace-nowrap">
+                                                    {ETIQUETA_MOV[m.tipo_movimiento] ?? (m.tipo_movimiento || "Movimiento")}
+                                                    {m.numero_comprobante ? ` ${m.numero_comprobante}` : ""}
+                                                </TableCell>
+                                                <TableCell className="max-w-[340px] truncate text-gray-500" title={m.observaciones || ""}>
+                                                    {m.observaciones || "—"}
+                                                </TableCell>
+                                                <TableCell className="text-right tabular-nums">
+                                                    {Number(m.debe) > 0 ? `$${Number(m.debe).toLocaleString('es-AR')}` : ""}
+                                                </TableCell>
+                                                <TableCell className="text-right tabular-nums text-green-700">
+                                                    {Number(m.haber) > 0 ? `−$${Number(m.haber).toLocaleString('es-AR')}` : ""}
+                                                </TableCell>
+                                                <TableCell className={`text-right font-bold tabular-nums ${m.saldo_acumulado > 0 ? "text-red-600" : "text-green-600"}`}>
+                                                    ${m.saldo_acumulado.toLocaleString('es-AR')}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                    {extracto.length > 0 && (
+                                        <TableRow className="bg-gray-50 border-t-2">
+                                            <TableCell colSpan={5} className="font-bold">Saldo actual</TableCell>
+                                            <TableCell className={`text-right font-bold text-base tabular-nums ${data.cliente.saldo_total > 0 ? "text-red-600" : "text-green-600"}`}>
+                                                ${data.cliente.saldo_total.toLocaleString('es-AR')}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </CardContent>
+                </Card>
+
                 {/* Unified Documents Table */}
                 <Card>
                     <CardHeader>
                         <CardTitle>Comprobantes</CardTitle>
-                        <CardDescription>Listado de todas las facturas, notas de crédito y devoluciones</CardDescription>
+                        <CardDescription>Estado de cada comprobante (saldos de imputación) — para seleccionar y pagar</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="overflow-x-auto">
@@ -487,7 +591,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                         </TableRow>
                                     ) : (
                                         documentosUnificados.map((doc) => (
-                                            <TableRow key={doc.id} className="hover:bg-gray-50">
+                                            <TableRow key={doc.id} className={`hover:bg-gray-50 ${doc.estado === "anulado" && doc.tipo !== "PAGO" ? "opacity-50 line-through" : ""}`}>
                                                 <TableCell>
                                                     <Checkbox
                                                         checked={selectedDocumentos.includes(doc.id)}
@@ -515,7 +619,9 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 <TableCell>
                                                     {doc.tipo === "PAGO"
                                                         ? getPagoBadge((doc as any).estado)
-                                                        : getEstadoBadge(doc.saldo, doc.es_devolucion)}
+                                                        : doc.estado === "anulado"
+                                                            ? <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-200">Anulado</Badge>
+                                                            : getEstadoBadge(doc.saldo, doc.es_devolucion)}
                                                 </TableCell>
                                                 <TableCell>
                                                     {!doc.es_devolucion && doc.tipo !== "PAGO" && (

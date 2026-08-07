@@ -55,7 +55,8 @@ export async function GET(
         total_iva,
         total_factura,
         saldo_pendiente,
-        estado_pago
+        estado_pago,
+        anulado_en
       `)
             .eq("cliente_id", cliente_id)
             .order("fecha", { ascending: false }));
@@ -178,6 +179,7 @@ export async function GET(
                 total_factura: Number(comp.total_factura),
                 saldo_pendiente: Number(comp.saldo_pendiente),
                 estado: comp.estado_pago || "pendiente", // Map estado_pago to estado
+                anulado: !!comp.anulado_en,
             })),
             pagos: pagosConImputaciones,
             devoluciones: devoluciones || [],
