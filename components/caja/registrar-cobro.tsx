@@ -311,21 +311,37 @@ export function RegistrarCobro({
       toast({ variant: "destructive", title: "Falta el número", description: "Cargá el número del cheque/echeq" })
       return
     }
-    const totalMetodos = metodosCobro.reduce((s, m) => s + m.monto, 0)
-    if (totalSeleccionado > totalMetodos + 0.01) {
-      toast({
-        variant: "destructive",
-        title: "Imputación excedida",
-        description: `Seleccionaste $ ${fmt(totalSeleccionado)} y el cobro es de $ ${fmt(totalMetodos)}.`,
-      })
-      return
-    }
-
     // Igual que Pagos Clientes: los "pedido:<id>" son anticipos (no se imputan)
-    const imputaciones = Object.entries(seleccionados)
+    let imputaciones = Object.entries(seleccionados)
       .filter(([k, v]) => !k.startsWith(PEDIDO_PREFIX) && Number(v) > 0)
       .map(([comprobante_id, v]) => ({ comprobante_id, monto_imputado: Number(v) }))
     const anticipos = Object.keys(seleccionados).filter((k) => k.startsWith(PEDIDO_PREFIX))
+
+    // Lo que cubre el cobro = métodos + NC del 10% (si está tildado). Si lo
+    // seleccionado supera eso, NO se bloquea: se recorta la última imputación
+    // (pago parcial — el resto queda como saldo del comprobante).
+    const totalMetodos = metodosCobro.reduce((s, m) => s + m.monto, 0)
+    const cubierto = round2(totalMetodos + (aplicarContado ? bonificacionEstimada : 0))
+    let excedente = round2(totalSeleccionado - cubierto)
+    let recorte = 0
+    if (excedente > 0.01) {
+      for (let i = imputaciones.length - 1; i >= 0 && excedente > 0.005; i--) {
+        const rebaja = Math.min(imputaciones[i].monto_imputado, excedente)
+        imputaciones[i].monto_imputado = round2(imputaciones[i].monto_imputado - rebaja)
+        excedente = round2(excedente - rebaja)
+        recorte = round2(recorte + rebaja)
+      }
+      imputaciones = imputaciones.filter((i) => i.monto_imputado > 0.009)
+      if (excedente > 0.01) {
+        // Ni recortando alcanza (ej: anticipos a pedidos mayores que la plata)
+        toast({
+          variant: "destructive",
+          title: "Falta plata para lo seleccionado",
+          description: `Entre métodos${aplicarContado ? " + NC 10%" : ""} cubrís $ ${fmt(cubierto)} y seleccionaste $ ${fmt(totalSeleccionado)}. Bajá la selección o agregá un método.`,
+        })
+        return
+      }
+    }
     const obsAnticipo = anticipos.length
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace(PEDIDO_PREFIX, "")).join(", ")}`
       : undefined
@@ -376,11 +392,12 @@ export function RegistrarCobro({
         bonifMsg = " El 10% contado se aplica cuando confirmes el valor."
       }
 
+      const recorteMsg = recorte > 0.01 ? ` Pago parcial: quedan $ ${fmt(recorte)} de saldo en el comprobante.` : ""
       toast({
         title: esEfectivo ? "Cobro en caja" : "Cobro registrado",
         description: esEfectivo
-          ? `${cliente.razon_social || cliente.nombre}: entró a la caja${imputaciones.length ? " e imputado" : ", pendiente de imputación"}.${bonifMsg}`
-          : `${cliente.razon_social || cliente.nombre}: pendiente de confirmación en la lista.${bonifMsg}`,
+          ? `${cliente.razon_social || cliente.nombre}: entró a la caja${imputaciones.length ? " e imputado" : ", pendiente de imputación"}.${recorteMsg}${bonifMsg}`
+          : `${cliente.razon_social || cliente.nombre}: pendiente de confirmación en la lista.${recorteMsg}${bonifMsg}`,
       })
       limpiar()
       onRegistrado()
@@ -529,34 +546,6 @@ export function RegistrarCobro({
         </div>
       )}
 
-      {/* ── Resumen del cobro: total, neto con 10% y cuánto resta saldar ── */}
-      {(metodosAgregados.length > 0 || mostrarResumen) && (
-        <div className="mt-2 flex flex-wrap items-center justify-end gap-x-5 gap-y-1 border-t border-slate-100 pt-2 text-sm">
-          <span className="font-bold text-slate-800" style={NUM}>
-            Total del cobro: $ {fmt(totalCobroConfirmado)}
-          </span>
-          {aplicarContado && bonificacionEstimada > 0 && (
-            <span className="text-amber-700" style={NUM}>
-              Neto a cobrar (con 10%): <b>$ {fmt(netoACobrar)}</b>
-            </span>
-          )}
-          {mostrarResumen &&
-            (Math.abs(restaSaldar) < 0.01 ? (
-              <span className="rounded-full bg-green-100 px-3 py-0.5 text-xs font-bold text-green-700">
-                ✓ Cuadra
-              </span>
-            ) : restaSaldar > 0 ? (
-              <span className="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-800" style={NUM}>
-                Resta saldar: $ {fmt(restaSaldar)}
-              </span>
-            ) : (
-              <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-bold text-blue-700" style={NUM}>
-                Sobran $ {fmt(-restaSaldar)} → quedan a cuenta
-              </span>
-            ))}
-        </div>
-      )}
-
       {/* ── Semáforo BCRA (Central de Deudores) — todos los titulares del cheque ── */}
       {(metodo === "cheque" || metodo === "echeq") && (
         <div className="mt-2">
@@ -633,11 +622,6 @@ export function RegistrarCobro({
             >
               {imputarAbierto ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
               Imputar a pedidos / comprobantes (opcional — si no, queda pendiente de imputación)
-              {totalSeleccionado > 0 && (
-                <span className="ml-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700" style={NUM}>
-                  $ {fmt(totalSeleccionado)}
-                </span>
-              )}
             </button>
             {imputarAbierto && (
               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
@@ -648,9 +632,6 @@ export function RegistrarCobro({
                   className="h-3.5 w-3.5"
                 />
                 10% descuento pago contado
-                {bonificacionEstimada > 0 && (
-                  <span style={NUM}>· NC estimada $ {fmt(bonificacionEstimada)}</span>
-                )}
               </label>
             )}
           </div>
@@ -666,6 +647,47 @@ export function RegistrarCobro({
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── LA CUENTA, en una sola línea: todo lo que hay que mirar está acá ── */}
+      {(totalSeleccionado > 0 || totalCobroConfirmado > 0) && (
+        <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-sm border-t border-slate-100">
+          {totalSeleccionado > 0 ? (
+            <>
+              <span className="text-slate-500">
+                Seleccionado <b className="text-slate-800" style={NUM}>$ {fmt(totalSeleccionado)}</b>
+              </span>
+              {aplicarContado && bonificacionEstimada > 0 && (
+                <>
+                  <span className="text-slate-400">−</span>
+                  <span className="text-amber-700">
+                    NC 10% <b style={NUM}>$ {fmt(bonificacionEstimada)}</b>
+                  </span>
+                  <span className="text-slate-400">=</span>
+                  <span className="text-slate-500">
+                    a cobrar <b className="text-slate-800" style={NUM}>$ {fmt(netoACobrar)}</b>
+                  </span>
+                </>
+              )}
+              <span className="text-slate-300">|</span>
+            </>
+          ) : null}
+          <span className="text-slate-500">
+            Entregado <b className="text-slate-800" style={NUM}>$ {fmt(totalCobroConfirmado)}</b>
+          </span>
+          {mostrarResumen &&
+            (Math.abs(restaSaldar) < 0.01 ? (
+              <span className="rounded-full bg-green-100 px-3 py-0.5 text-xs font-bold text-green-700">✓ Cuadra</span>
+            ) : restaSaldar > 0 ? (
+              <span className="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-800" style={NUM}>
+                Resta saldar: $ {fmt(restaSaldar)}
+              </span>
+            ) : (
+              <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-bold text-blue-700" style={NUM}>
+                Sobran $ {fmt(-restaSaldar)} → a cuenta
+              </span>
+            ))}
         </div>
       )}
     </div>
