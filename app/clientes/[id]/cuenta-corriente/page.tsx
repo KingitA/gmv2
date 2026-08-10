@@ -247,6 +247,30 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                 es_devolucion: false,
                 es_credito: true, // Los pagos son créditos (reducen deuda)
             });
+
+            // Plata a cuenta: lo del pago que no se aplicó a ningún comprobante
+            // (entrega a cuenta o sobrante). Se muestra en "Solo saldos" con su
+            // fecha — es el crédito disponible del cliente.
+            if (pago.estado === "confirmado") {
+                const imputado = (pago.imputaciones || []).reduce(
+                    (s, i) => s + Math.abs(Number(i.monto_imputado) || 0), 0
+                );
+                const disponible = Math.round((Number(pago.monto) - imputado) * 100) / 100;
+                if (disponible > 0.009) {
+                    documentos.push({
+                        id: `acuenta-${pago.id}`,
+                        tipo: "A CUENTA",
+                        numero: metodoPago || "Pago",
+                        fecha: pago.fecha_pago,
+                        pedido: "-",
+                        total: -disponible,
+                        saldo: -disponible,
+                        estado: "a_cuenta",
+                        es_devolucion: false,
+                        es_credito: true,
+                    });
+                }
+            }
         });
 
         // Sort by date descending
@@ -491,9 +515,11 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     // (deuda o a favor); "detallada" = todo, con filtro de fechas.
     const documentosVisibles = documentosUnificados.filter((doc) => {
         if (vista === "saldos") {
+            // Comprobantes con saldo + plata a cuenta (con su fecha)
             return doc.tipo !== "PAGO" && doc.estado !== "anulado" && Math.abs(doc.saldo) > 0.009;
         }
-        return enRango(doc.fecha);
+        // En detallada los pagos completos ya se ven — las filas "A CUENTA" duplicarían
+        return doc.tipo !== "A CUENTA" && enRango(doc.fecha);
     });
 
     return (
@@ -601,7 +627,19 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 <TableCell className="whitespace-nowrap">{new Date(m.fecha).toLocaleDateString('es-AR')}</TableCell>
                                                 <TableCell className="font-medium whitespace-nowrap">
                                                     {ETIQUETA_MOV[m.tipo_movimiento] ?? (m.tipo_movimiento || "Movimiento")}
-                                                    {m.numero_comprobante ? ` ${m.numero_comprobante}` : ""}
+                                                    {m.numero_comprobante ? (
+                                                        m.referencia_tipo === "comprobante_venta" && m.referencia_id ? (
+                                                            <button
+                                                                onClick={() => window.open(`/api/comprobantes-venta/${m.referencia_id}/pdf`, '_blank')}
+                                                                className="ml-1 text-blue-600 hover:underline"
+                                                                title="Abrir PDF del comprobante"
+                                                            >
+                                                                {m.numero_comprobante}
+                                                            </button>
+                                                        ) : (
+                                                            ` ${m.numero_comprobante}`
+                                                        )
+                                                    ) : ""}
                                                 </TableCell>
                                                 <TableCell className="max-w-[340px] truncate text-gray-500" title={m.observaciones || ""}>
                                                     {m.observaciones || "—"}
@@ -679,13 +717,27 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                         documentosVisibles.map((doc) => (
                                             <TableRow key={doc.id} className={`hover:bg-gray-50 ${doc.estado === "anulado" && doc.tipo !== "PAGO" ? "opacity-50 line-through" : ""}`}>
                                                 <TableCell>
-                                                    <Checkbox
-                                                        checked={selectedDocumentos.includes(doc.id)}
-                                                        onCheckedChange={() => handleToggleDocumento(doc.id)}
-                                                    />
+                                                    {doc.tipo !== "A CUENTA" && (
+                                                        <Checkbox
+                                                            checked={selectedDocumentos.includes(doc.id)}
+                                                            onCheckedChange={() => handleToggleDocumento(doc.id)}
+                                                        />
+                                                    )}
                                                 </TableCell>
                                                 <TableCell className="font-medium">{doc.tipo}</TableCell>
-                                                <TableCell>{doc.numero}</TableCell>
+                                                <TableCell>
+                                                    {!doc.es_devolucion && doc.tipo !== "PAGO" && doc.tipo !== "A CUENTA" ? (
+                                                        <button
+                                                            onClick={() => window.open(`/api/comprobantes-venta/${doc.id}/pdf`, '_blank')}
+                                                            className="text-blue-600 hover:underline"
+                                                            title="Abrir PDF del comprobante"
+                                                        >
+                                                            {doc.numero}
+                                                        </button>
+                                                    ) : (
+                                                        doc.numero
+                                                    )}
+                                                </TableCell>
                                                 <TableCell>{new Date(doc.fecha).toLocaleDateString('es-AR')}</TableCell>
                                                 <TableCell>
                                                     {doc.pedido !== "-" ? (
@@ -705,12 +757,14 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 <TableCell>
                                                     {doc.tipo === "PAGO"
                                                         ? getPagoBadge((doc as any).estado)
-                                                        : doc.estado === "anulado"
-                                                            ? <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-200">Anulado</Badge>
-                                                            : getEstadoBadge(doc.saldo, doc.es_devolucion)}
+                                                        : doc.tipo === "A CUENTA"
+                                                            ? <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">A cuenta</Badge>
+                                                            : doc.estado === "anulado"
+                                                                ? <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-200">Anulado</Badge>
+                                                                : getEstadoBadge(doc.saldo, doc.es_devolucion)}
                                                 </TableCell>
                                                 <TableCell>
-                                                    {!doc.es_devolucion && doc.tipo !== "PAGO" && (
+                                                    {!doc.es_devolucion && doc.tipo !== "PAGO" && doc.tipo !== "A CUENTA" && (
                                                         <Button
                                                             variant="ghost"
                                                             size="sm"
