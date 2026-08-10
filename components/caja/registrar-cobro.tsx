@@ -428,6 +428,9 @@ export function RegistrarCobro({
             body: JSON.stringify({
               monto: -falta,
               motivo: `Ajuste por redondeo — cobro $ ${fmt(totalMetodos)} vs imputado $ ${fmt(totalSeleccionado)}`,
+              // La falta cae en el último comprobante imputado: se salda también ahí
+              comprobante_id: imputaciones[imputaciones.length - 1]?.comprobante_id,
+              aplicar_saldo: true,
             }),
           })
           const ajData = await ajRes.json()

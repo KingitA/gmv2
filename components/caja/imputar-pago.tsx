@@ -132,6 +132,9 @@ export function ImputarPago({
             body: JSON.stringify({
               monto: -falta,
               motivo: `Ajuste por redondeo — imputación de cobro (disponible $ ${fmt(pago.disponible)})`,
+              // La falta cae en el último comprobante imputado: se salda también ahí
+              comprobante_id: imputaciones[imputaciones.length - 1]?.comprobante_id,
+              aplicar_saldo: true,
             }),
           })
           const ajData = await ajRes.json()

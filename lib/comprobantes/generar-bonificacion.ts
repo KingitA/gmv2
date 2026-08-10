@@ -185,24 +185,48 @@ async function crearDetalle(
   if (error) throw new Error(`Error creando detalle: ${error.message}`)
 }
 
-async function crearImputacion(
+/**
+ * Aplica el crédito de la NC/REV recién emitida contra el saldo RESTANTE de
+ * los comprobantes bonificados, vía RPC cc_imputar_credito (NC↔débito, ya
+ * existente: actualiza ambos saldos + traza en imputaciones, sin tocar libro
+ * mayor). Reemplaza al modelo anterior ("imputar la NC al pago" como pozo):
+ * aquel dejaba el crédito flotando cuando el endpoint de pagos recortaba las
+ * imputaciones al monto del pago — el comprobante quedaba con el 10% de saldo
+ * y la NC consumida sin aplicar. Lo que la NC no alcance a cubrir (cliente
+ * que pagó de más) queda como crédito a favor, que es lo correcto.
+ */
+async function aplicarCreditoAComprobantes(
   supabase: SupabaseClient,
-  pago_id: string,
-  comprobante_id: string,
-  monto: number,
+  credito_id: string,
+  comprobante_ids: string[],
 ): Promise<void> {
-  await supabase.from("imputaciones").insert({
-    pago_id,
-    comprobante_id,
-    monto_imputado: Math.abs(monto),
-    tipo_comprobante: "venta",
-    estado: "confirmado",
-  })
-  // Marcar la NC/REV como pagada: saldo_pendiente=0, estado_pago='pagado'
-  await supabase
-    .from("comprobantes_venta")
-    .update({ saldo_pendiente: 0, estado_pago: "pagado" })
-    .eq("id", comprobante_id)
+  for (const compId of comprobante_ids) {
+    // Saldo disponible de la NC/REV (negativo → crédito)
+    const { data: nc } = await supabase
+      .from("comprobantes_venta")
+      .select("saldo_pendiente")
+      .eq("id", credito_id)
+      .single()
+    const disponible = Math.max(0, -Number(nc?.saldo_pendiente ?? 0))
+    if (disponible <= 0.005) break
+
+    const { data: comp } = await supabase
+      .from("comprobantes_venta")
+      .select("saldo_pendiente")
+      .eq("id", compId)
+      .single()
+    const saldo = Number(comp?.saldo_pendiente ?? 0)
+    if (saldo <= 0.005) continue
+
+    const monto = Math.min(disponible, saldo)
+    const { error } = await supabase.rpc("cc_imputar_credito", {
+      p_credito_id: credito_id,
+      p_debito_id: compId,
+      p_monto: monto,
+      p_usuario_id: null,
+    })
+    if (error) console.error("[bonificación] cc_imputar_credito", compId, error.message)
+  }
 }
 
 /** Genera el PDF con QR de la NC fiscal y lo sube al bucket (no bloqueante). */
@@ -303,7 +327,9 @@ export async function generarBonificacionContado(
   supabase: SupabaseClient,
   params: ParamsBonificacion,
 ): Promise<ResultadoBonificacion> {
-  const { cliente_id, comprobante_ids, pago_id } = params
+  // pago_id se mantiene en la firma por compatibilidad, pero desde el fix del
+  // "modelo pozo" la NC/REV se imputa directo a los comprobantes bonificados.
+  const { cliente_id, comprobante_ids } = params
 
   if (!comprobante_ids || comprobante_ids.length === 0) {
     return { total_bonificacion: 0, comprobantes_generados: [] }
@@ -355,7 +381,8 @@ export async function generarBonificacionContado(
     await crearDetalle(supabase, id, bonificacionId, lineas)
     await avanzarNumeracion(supabase, "REV", PUNTO_VENTA_INTERNO, nextNum)
 
-    if (pago_id) await crearImputacion(supabase, pago_id, id, totalNeto)
+    // El crédito de la REV cubre el 10% restante de los presupuestos
+    await aplicarCreditoAComprobantes(supabase, id, presupuestos.map(c => c.id))
 
     // PDF de la REV (documento interno: sin CAE ni QR). Antes solo las NC
     // fiscales generaban PDF y la REV quedaba "pendiente" sin poder verse.
@@ -575,7 +602,8 @@ export async function generarBonificacionContado(
     await crearDetalle(supabase, id, bonificacionId, lineas)
     await avanzarNumeracion(supabase, tipoNC, puntoVentaFiscal, nuevoNumero)
 
-    if (pago_id) await crearImputacion(supabase, pago_id, id, totalFactura)
+    // El crédito de la NC cubre el 10% restante de las facturas bonificadas
+    await aplicarCreditoAComprobantes(supabase, id, facturas.map(c => c.id))
 
     await generarPDFNC(supabase, {
       comprobante_id: id,

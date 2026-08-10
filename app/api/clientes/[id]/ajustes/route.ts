@@ -10,10 +10,15 @@ import { requireAuth } from "@/lib/auth"
  * (cc_postear) y NO toca comprobantes_venta.saldo_pendiente — la versión
  * anterior modificaba saldo_pendiente sin posteo y rompía v_saldo_clientes.
  *
- * Body: { monto, motivo, comprobante_id? }
+ * Body: { monto, motivo, comprobante_id?, aplicar_saldo? }
  *  - monto > 0 → débito (aumenta la deuda del cliente)
  *  - monto < 0 → crédito (reduce la deuda)
- *  - comprobante_id: opcional, solo referencia en el concepto
+ *  - comprobante_id: opcional, referencia en el concepto
+ *  - aplicar_saldo: con comprobante_id y monto negativo (crédito), además de
+ *    postear al libro reduce el saldo_pendiente del comprobante (ajuste por
+ *    redondeo: sin esto el comprobante quedaría con centavos pendientes
+ *    eternos, porque el libro mayor y los saldos de imputación son capas
+ *    separadas).
  */
 export async function POST(
   request: NextRequest,
@@ -25,7 +30,7 @@ export async function POST(
     const supabase = await createClient()
     const { id: cliente_id } = await params
     const body = await request.json()
-    const { comprobante_id, monto, motivo } = body
+    const { comprobante_id, monto, motivo, aplicar_saldo } = body
 
     if (!monto || !motivo) {
       return NextResponse.json({ error: "Faltan datos requeridos (monto, motivo)" }, { status: 400 })
@@ -55,6 +60,29 @@ export async function POST(
       p_usuario_id: auth.user.id,
     })
     if (error) throw new Error(error.message)
+
+    // Ajuste por redondeo: el crédito también baja el saldo del comprobante
+    if (aplicar_saldo && comprobante_id && Number(monto) < 0) {
+      const admin = createAdminClient()
+      const { data: comp } = await admin
+        .from("comprobantes_venta")
+        .select("saldo_pendiente")
+        .eq("id", comprobante_id)
+        .single()
+      if (comp) {
+        const nuevoSaldo = Math.max(
+          0,
+          Math.round((Number(comp.saldo_pendiente) - Math.abs(Number(monto))) * 100) / 100
+        )
+        await admin
+          .from("comprobantes_venta")
+          .update({
+            saldo_pendiente: nuevoSaldo,
+            estado_pago: nuevoSaldo <= 0.009 ? "pagado" : "parcial",
+          })
+          .eq("id", comprobante_id)
+      }
+    }
 
     return NextResponse.json({
       success: true,

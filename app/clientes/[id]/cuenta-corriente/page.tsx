@@ -68,6 +68,7 @@ interface MovimientoCC {
     observaciones?: string | null;
     referencia_tipo?: string | null;
     referencia_id?: string | null;
+    comprobante_tipo?: string | null;
 }
 
 interface PagoDetalle {
@@ -497,6 +498,27 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         credito: "Ajuste (crédito)",
         devolucion: "Devolución",
     };
+    // Con el tipo real del comprobante referenciado, la etiqueta es exacta
+    // (la REV interna no es lo mismo que una NC fiscal)
+    const ETIQUETA_TIPO: Record<string, string> = {
+        FA: "Factura A",
+        FB: "Factura B",
+        FC: "Factura C",
+        PRES: "Presupuesto",
+        REV: "Reversa",
+        NC: "Nota de crédito",
+        NCA: "Nota de crédito A",
+        NCB: "Nota de crédito B",
+        NCC: "Nota de crédito C",
+        NDA: "Nota de débito A",
+        NDB: "Nota de débito B",
+        NDC: "Nota de débito",
+        REM: "Remito",
+    };
+    const etiquetaMov = (m: MovimientoCC) =>
+        (m.comprobante_tipo && ETIQUETA_TIPO[m.comprobante_tipo]) ??
+        ETIQUETA_MOV[m.tipo_movimiento] ??
+        (m.tipo_movimiento || "Movimiento");
     // Filtro por fecha (vista detallada). El saldo acumulado se calcula sobre
     // TODOS los movimientos (si no, arrancaría de cero en la fecha filtrada).
     const enRango = (fecha: string) => {
@@ -633,7 +655,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                             <TableRow key={m.key} className={m.tipo_movimiento?.includes("ajuste") || m.tipo_movimiento === "debito" || m.tipo_movimiento === "credito" ? "bg-amber-50/50" : ""}>
                                                 <TableCell className="whitespace-nowrap">{new Date(m.fecha).toLocaleDateString('es-AR')}</TableCell>
                                                 <TableCell className="font-medium whitespace-nowrap">
-                                                    {ETIQUETA_MOV[m.tipo_movimiento] ?? (m.tipo_movimiento || "Movimiento")}
+                                                    {etiquetaMov(m)}
                                                     {m.numero_comprobante ? (
                                                         m.referencia_tipo === "comprobante_venta" && m.referencia_id ? (
                                                             <button
