@@ -219,7 +219,8 @@ async function generarPDFNC(
     percepcion_iva?: number
     percepcion_iibb?: number
     total_factura: number
-    cae: string
+    /** null = documento interno (REV): PDF sin CAE ni QR */
+    cae: string | null
     vencimiento_cae: string | null
     lineas: Array<{ descripcion: string; precio_neto: number }>
     observaciones: string
@@ -230,7 +231,7 @@ async function generarPDFNC(
 
     let qrDataUrl: string | undefined
     let qrUrl: string | undefined
-    if (params.cliente?.cuit) {
+    if (params.cae && params.cliente?.cuit) {
       try {
         const qrParams = {
           cuit:       empresaData?.cuit ?? "",
@@ -355,6 +356,28 @@ export async function generarBonificacionContado(
     await avanzarNumeracion(supabase, "REV", PUNTO_VENTA_INTERNO, nextNum)
 
     if (pago_id) await crearImputacion(supabase, pago_id, id, totalNeto)
+
+    // PDF de la REV (documento interno: sin CAE ni QR). Antes solo las NC
+    // fiscales generaban PDF y la REV quedaba "pendiente" sin poder verse.
+    const { data: clienteRev } = await supabase
+      .from("clientes")
+      .select("id, nombre_razon_social, nombre, cuit, condicion_iva, direccion, localidad_id, provincia")
+      .eq("id", cliente_id)
+      .single()
+    await generarPDFNC(supabase, {
+      comprobante_id: id,
+      tipo: "REV",
+      numero,
+      puntoVenta,
+      cliente: clienteRev,
+      total_neto: totalNeto,
+      total_iva: 0,
+      total_factura: totalNeto,
+      cae: null,
+      vencimiento_cae: null,
+      lineas,
+      observaciones: `Bonificación contado 10% — presupuestos ${presupuestos.map(c => c.numero_comprobante).join(", ")}`,
+    })
 
     comprobantesGenerados.push({ id, tipo: "REV", numero, total_neto: totalNeto, total_iva: 0, total_factura: totalNeto })
     totalBonificacion += totalNeto
