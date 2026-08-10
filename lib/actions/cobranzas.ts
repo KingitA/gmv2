@@ -69,7 +69,7 @@ export async function confirmarCobranza(
 export async function anularCobranza(
   supabase: SupabaseClient,
   { pagoId, usuarioId, motivo }: { pagoId: string; usuarioId: string; motivo?: string },
-): Promise<{ yaAnulado: boolean; estabaConfirmado: boolean }> {
+): Promise<{ yaAnulado: boolean; estabaConfirmado: boolean; bonificacionesFiscalesPendientes: string[] }> {
   const { data, error } = await supabase.rpc("cobranza_anular", {
     p_pago_id: pagoId,
     p_usuario_id: usuarioId,
@@ -79,5 +79,8 @@ export async function anularCobranza(
   return {
     yaAnulado: Boolean(data?.ya_anulado),
     estabaConfirmado: Boolean(data?.estaba_confirmado),
+    // NC fiscales de bonificación 10% que el RPC no puede anular (tienen CAE):
+    // la oficina debe emitir la ND correspondiente.
+    bonificacionesFiscalesPendientes: (data?.bonificaciones_fiscales_pendientes as string[] | null) ?? [],
   }
 }

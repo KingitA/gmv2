@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 
@@ -348,6 +349,8 @@ export async function POST(request: NextRequest) {
     // el kardex. Con confirmar:false el pago queda PENDIENTE de verificación y NO
     // impacta saldo real ni caja hasta confirmarlo (revisión de pagos / rendición).
     let numeroReciboFinal: string | null = null
+    let bonificacion: { total: number } | null = null
+    let bonificacion_error: string | null = null
     const estadoFinal = confirmar === false ? "pendiente" : "confirmado"
     if (confirmar !== false) {
       const result = await confirmarCobranza(supabase, admin, {
@@ -355,6 +358,17 @@ export async function POST(request: NextRequest) {
         usuarioId: auth.user.id,
       })
       numeroReciboFinal = result.numero_recibo
+
+      // Comisiones 'cobrada' + billetera + bonificación 10% diferida.
+      // Cubre el caso "pago con MARCA_CONTADO confirmado en el acto": antes la
+      // marca quedaba colgada en observaciones si la UI no llamaba a
+      // generar-bonificacion por separado (o si esa segunda llamada fallaba).
+      const post = await procesarPostConfirmacion(supabase, admin, {
+        pagoId: pago.id,
+        usuarioId: auth.user.id,
+      })
+      bonificacion = post.bonificacion
+      bonificacion_error = post.bonificacion_error
     }
 
     return NextResponse.json({
@@ -362,6 +376,8 @@ export async function POST(request: NextRequest) {
       pago,
       estado: estadoFinal,
       numero_recibo: numeroReciboFinal,
+      bonificacion,
+      bonificacion_error,
     })
   } catch (error: any) {
     console.error("[pagos-clientes] POST error:", error)

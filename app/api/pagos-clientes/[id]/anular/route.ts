@@ -31,7 +31,15 @@ export async function POST(
       return NextResponse.json({ error: "El pago ya está anulado" }, { status: 400 })
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({
+      success: true,
+      ...(result.bonificacionesFiscalesPendientes.length
+        ? {
+            advertencia: `El pago tenía bonificación 10% en NC fiscal (${result.bonificacionesFiscalesPendientes.join(", ")}). La NC no se anula sola: emití la Nota de Débito para recuperar el descuento.`,
+            bonificaciones_fiscales_pendientes: result.bonificacionesFiscalesPendientes,
+          }
+        : {}),
+    })
   } catch (error: any) {
     console.error("[pagos-clientes/anular] POST error:", error)
     const status = error.message?.includes("no encontrado") ? 404 : 500

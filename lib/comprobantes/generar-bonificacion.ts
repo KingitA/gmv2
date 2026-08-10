@@ -102,6 +102,79 @@ async function avanzarNumeracion(
     .eq("punto_venta", puntoVenta)
 }
 
+/**
+ * Reserva el próximo número de forma atómica (lock optimista): el UPDATE solo
+ * avanza si `ultimo_numero` sigue siendo el leído. Dos llamadas concurrentes
+ * jamás obtienen el mismo número (una de las dos reintenta con el siguiente).
+ */
+async function reservarNumero(
+  supabase: SupabaseClient,
+  tipo: string,
+  puntoVenta: string,
+): Promise<{ numero: string; puntoVenta: string; nextNum: number }> {
+  for (let intento = 0; intento < 5; intento++) {
+    const { numero, puntoVenta: pv, nextNum } = await getNextNumero(supabase, tipo, puntoVenta)
+    const { data: claimed } = await supabase
+      .from("numeracion_comprobantes")
+      .update({ ultimo_numero: nextNum })
+      .eq("tipo_comprobante", tipo)
+      .eq("punto_venta", puntoVenta)
+      .eq("ultimo_numero", nextNum - 1)
+      .select("ultimo_numero")
+    if (claimed?.length) return { numero, puntoVenta: pv, nextNum }
+  }
+  throw new Error(`No se pudo reservar numeración para ${tipo} ${puntoVenta} (concurrencia)`)
+}
+
+/**
+ * Filtra los comprobantes que YA tienen una bonificación 10% viva, para que
+ * llamar dos veces a la generación jamás emita dos NC/REV (con la NC fiscal
+ * el doble CAE es irreversible en ARCA).
+ *
+ * Un comprobante está bonificado si una NC/REV de bonificación NO anulada:
+ *  a) le está imputada como crédito (vínculo estructural, modelo actual), o
+ *  b) lo menciona por número en sus observaciones (legado del modelo pozo).
+ */
+async function filtrarYaBonificados(
+  supabase: SupabaseClient,
+  cliente_id: string,
+  comprobantes: ComprobanteInput[],
+): Promise<ComprobanteInput[]> {
+  if (!comprobantes.length) return []
+
+  const ids = comprobantes.map(c => c.id)
+  const [{ data: impsCredito }, { data: ncsBonif }] = await Promise.all([
+    supabase
+      .from("imputaciones")
+      .select("comprobante_id, credito:comprobantes_venta!imputaciones_credito_comprobante_id_fkey(observaciones, anulado_en)")
+      .in("comprobante_id", ids)
+      .not("credito_comprobante_id", "is", null)
+      .neq("estado", "anulado"),
+    supabase
+      .from("comprobantes_venta")
+      .select("observaciones")
+      .eq("cliente_id", cliente_id)
+      .in("tipo_comprobante", ["REV", "NCA", "NCB", "NCC"])
+      .is("anulado_en", null)
+      .neq("estado_pago", "anulado")
+      .ilike("observaciones", "%Bonificación contado%"),
+  ])
+
+  const bonificadosPorImputacion = new Set(
+    (impsCredito || [])
+      .filter((i: any) => {
+        const cred = i.credito
+        return cred && !cred.anulado_en && (cred.observaciones || "").includes("Bonificación contado")
+      })
+      .map((i: any) => i.comprobante_id),
+  )
+  const obsNcs = (ncsBonif || []).map((n: any) => n.observaciones || "")
+
+  return comprobantes.filter(
+    c => !bonificadosPorImputacion.has(c.id) && !obsNcs.some(o => o.includes(c.numero_comprobante)),
+  )
+}
+
 async function crearComprobante(
   supabase: SupabaseClient,
   params: {
@@ -336,13 +409,36 @@ export async function generarBonificacionContado(
   }
 
   // Cargar comprobantes
-  const { data: comprobantes, error: compError } = await supabase
+  const { data: comprobantesRaw, error: compError } = await supabase
     .from("comprobantes_venta")
-    .select("id, tipo_comprobante, numero_comprobante, total_neto, total_iva, total_factura, percepcion_iva, percepcion_iibb")
+    .select("id, cliente_id, tipo_comprobante, numero_comprobante, total_neto, total_iva, total_factura, percepcion_iva, percepcion_iibb, anulado_en")
     .in("id", comprobante_ids)
 
-  if (compError || !comprobantes) {
+  if (compError || !comprobantesRaw) {
     throw new Error(`Error cargando comprobantes: ${compError?.message}`)
+  }
+
+  // ── Validaciones duras ──
+  const ajeno = comprobantesRaw.find((c: any) => c.cliente_id !== cliente_id)
+  if (ajeno) {
+    throw new Error(
+      `El comprobante ${ajeno.numero_comprobante} no pertenece al cliente indicado — no se puede bonificar.`,
+    )
+  }
+  const TIPOS_BONIFICABLES = ["PRES", "FA", "FB", "FC"]
+  const tipoInvalido = comprobantesRaw.find((c: any) => !TIPOS_BONIFICABLES.includes(c.tipo_comprobante))
+  if (tipoInvalido) {
+    throw new Error(
+      `El comprobante ${tipoInvalido.numero_comprobante} (${tipoInvalido.tipo_comprobante}) no es bonificable.`,
+    )
+  }
+
+  // Anulados afuera; y guard de idempotencia: los que ya tienen su NC/REV de
+  // bonificación viva no se vuelven a bonificar (doble CAE = irreversible).
+  const noAnulados = comprobantesRaw.filter((c: any) => !c.anulado_en)
+  const comprobantes = await filtrarYaBonificados(supabase, cliente_id, noAnulados as ComprobanteInput[])
+  if (!comprobantes.length) {
+    return { total_bonificacion: 0, comprobantes_generados: [] }
   }
 
   const bonificacionId = await getBonificacionArticuloId(supabase)
@@ -358,7 +454,8 @@ export async function generarBonificacionContado(
 
   // ─── PRESUPUESTOS → REV (documento interno: PV 0001, sin CAE, sin QR) ──────
   if (presupuestos.length > 0) {
-    const { numero, puntoVenta, nextNum } = await getNextNumero(supabase, "REV", PUNTO_VENTA_INTERNO)
+    // Reserva atómica del número: dos REV concurrentes nunca comparten numeración.
+    const { numero, puntoVenta } = await reservarNumero(supabase, "REV", PUNTO_VENTA_INTERNO)
 
     const lineas = presupuestos.map(c => ({
       descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
@@ -379,7 +476,6 @@ export async function generarBonificacionContado(
     })
 
     await crearDetalle(supabase, id, bonificacionId, lineas)
-    await avanzarNumeracion(supabase, "REV", PUNTO_VENTA_INTERNO, nextNum)
 
     // El crédito de la REV cubre el 10% restante de los presupuestos
     await aplicarCreditoAComprobantes(supabase, id, presupuestos.map(c => c.id))
@@ -630,13 +726,14 @@ export async function generarBonificacionContado(
   await procesarFacturas(facturasB, "NCB")
   await procesarFacturas(facturasC, "NCC")
 
-  // Marcar descuento financiero en kardex de los comprobantes bonificados
-  await actualizarDescuentoFinancieroKardex(supabase, comprobante_ids)
+  // Marcar descuento financiero en kardex — solo de los efectivamente bonificados
+  const idsBonificados = comprobantes.map(c => c.id)
+  await actualizarDescuentoFinancieroKardex(supabase, idsBonificados)
 
   // Débito de comisión por financiero ya cobrado: si la comisión del comprobante ya
   // estaba "cobrada", el 10% financiero reduce la venta real → se debita el 10% de la
   // comisión al vendedor ("debía cobrar 90, cobró 100, nos debe 10").
-  await debitarComisionPorFinanciero(supabase, comprobante_ids)
+  await debitarComisionPorFinanciero(supabase, idsBonificados)
 
   return {
     total_bonificacion: r2(totalBonificacion),

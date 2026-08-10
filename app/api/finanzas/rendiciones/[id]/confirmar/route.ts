@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { colorOverride, resolverColorPendientes } from "@/lib/actions/color-cheque"
+import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 
 /**
  * POST /api/finanzas/rendiciones/[id]/confirmar — oficina confirma una
@@ -85,7 +86,34 @@ export async function POST(
       )
     }
 
-    return NextResponse.json({ success: true, ...data })
+    // Post-confirmación por pago confirmado: comisiones 'cobrada', billetera
+    // y bonificación 10% diferida (MARCA_CONTADO) — mismo módulo que Revisión
+    // de Pagos, para que la rendición no saltee el descuento.
+    const bonifErrores: string[] = []
+    let bonifTotal = 0
+    const pagoIds = (items || []).map((it) => it.pago_id)
+    if (pagoIds.length) {
+      const { data: pagosConfirmados } = await supabase
+        .from("pagos_clientes")
+        .select("id")
+        .in("id", pagoIds)
+        .eq("estado", "confirmado")
+      for (const p of pagosConfirmados || []) {
+        const post = await procesarPostConfirmacion(supabase, admin, {
+          pagoId: p.id,
+          usuarioId: auth.user.id,
+        })
+        if (post.bonificacion) bonifTotal += post.bonificacion.total
+        if (post.bonificacion_error) bonifErrores.push(post.bonificacion_error)
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      ...data,
+      bonificacion_total: bonifTotal || undefined,
+      bonificacion_errores: bonifErrores.length ? bonifErrores : undefined,
+    })
   } catch (error: any) {
     console.error("[finanzas/rendiciones/confirmar] error:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })

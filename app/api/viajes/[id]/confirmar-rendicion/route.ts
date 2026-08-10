@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { nowArgentina } from "@/lib/utils"
 import { colorOverride, resolverColorPendientes } from "@/lib/actions/color-cheque"
+import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 
 /**
  * POST /api/viajes/[id]/confirmar-rendicion
@@ -138,6 +139,26 @@ export async function POST(
       )
     }
 
+    // ── 2b. Post-confirmación por pago confirmado ──
+    // rendicion_confirmar confirma dentro de SQL (cobranza_confirmar), así que
+    // las comisiones 'cobrada', la billetera y la bonificación 10% diferida
+    // (MARCA_CONTADO) se procesan acá — mismo módulo que Revisión de Pagos.
+    const bonifErrores: string[] = []
+    let bonifTotal = 0
+    const { data: pagosConfirmados } = await supabase
+      .from("pagos_clientes")
+      .select("id")
+      .in("id", pagoIds)
+      .eq("estado", "confirmado")
+    for (const p of pagosConfirmados || []) {
+      const post = await procesarPostConfirmacion(supabase, admin, {
+        pagoId: p.id,
+        usuarioId: auth.user.id,
+      })
+      if (post.bonificacion) bonifTotal += post.bonificacion.total
+      if (post.bonificacion_error) bonifErrores.push(post.bonificacion_error)
+    }
+
     // ── 3. Confirmar devoluciones pendientes del viaje (stock) ──
     let devolucionesConfirmadas = 0
     const { data: devoluciones } = await supabase
@@ -174,6 +195,8 @@ export async function POST(
       efectivo_a_caja: confirmada.efectivo_a_caja,
       diferencia: confirmada.diferencia,
       devoluciones_confirmadas: devolucionesConfirmadas,
+      bonificacion_total: bonifTotal || undefined,
+      bonificacion_errores: bonifErrores.length ? bonifErrores : undefined,
       mensaje: `Rendición confirmada: ${confirmada.confirmados} pagos (${confirmada.a_conciliar} transferencias a conciliar), efectivo a caja $${Number(confirmada.efectivo_a_caja).toLocaleString("es-AR")}.`,
     })
   } catch (error: any) {
