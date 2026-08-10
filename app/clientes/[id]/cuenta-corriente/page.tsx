@@ -249,13 +249,20 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             });
 
             // Plata a cuenta: lo del pago que no se aplicó a ningún comprobante
-            // (entrega a cuenta o sobrante). Se muestra en "Solo saldos" con su
-            // fecha — es el crédito disponible del cliente.
+            // (entrega a cuenta o sobrante). El "pozo" del pago = plata entregada
+            // + créditos aplicados (NC/REV imputadas al pago SUMAN, no restan);
+            // lo consumido = imputaciones a facturas/presupuestos (débitos).
             if (pago.estado === "confirmado") {
-                const imputado = (pago.imputaciones || []).reduce(
-                    (s, i) => s + Math.abs(Number(i.monto_imputado) || 0), 0
-                );
-                const disponible = Math.round((Number(pago.monto) - imputado) * 100) / 100;
+                const TIPOS_CRED = ["NC", "NCA", "NCB", "NCC", "REV"];
+                const tipoDe = new Map(data.comprobantes.map((c) => [c.id, c.tipo_comprobante]));
+                let pozo = Number(pago.monto);
+                let consumido = 0;
+                for (const i of pago.imputaciones || []) {
+                    const monto = Math.abs(Number(i.monto_imputado) || 0);
+                    if (TIPOS_CRED.includes(tipoDe.get(i.comprobante_id) ?? "")) pozo += monto;
+                    else consumido += monto;
+                }
+                const disponible = Math.round((pozo - consumido) * 100) / 100;
                 if (disponible > 0.009) {
                     documentos.push({
                         id: `acuenta-${pago.id}`,
