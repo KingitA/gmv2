@@ -63,6 +63,8 @@ function PagosClientesContent() {
   const [comprobantesData, setComprobantesData] = useState<Comprobante[]>([])
   const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
   const [guardando, setGuardando] = useState(false)
+  // Clave de idempotencia: estable ante doble click/reintento, rota al éxito
+  const idemKeyRef = useRef<string>(crypto.randomUUID())
   const [ocrProcesando, setOcrProcesando] = useState(false)
   const [aplicarContado, setAplicarContado] = useState(false)
   const [activeTab, setActiveTab] = useState("nuevo")
@@ -267,10 +269,11 @@ function PagosClientesContent() {
       const res = await fetch("/api/cobranzas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origen: "ERP", confirmar, cheque_compartido, asignaciones }),
+        body: JSON.stringify({ origen: "ERP", confirmar, cheque_compartido, asignaciones, idempotency_key: idemKeyRef.current }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      idemKeyRef.current = crypto.randomUUID()
       toast.success(confirmar
         ? `Cobranza confirmada: ${data.clientes?.length || 0} cliente(s), recibos generados.`
         : "Cobranza registrada como PENDIENTE de verificación.")
@@ -297,12 +300,12 @@ function PagosClientesContent() {
     const obsAnticipo = anticipos.length
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace("pedido:", "")).join(", ")}`
       : null
-    // Cobro pendiente con 10% tildado: la intención viaja con el pago y el
-    // endpoint de confirmación emite la NC/REV al acreditarse el valor.
-    const obsFinal =
-      aplicarContado && confirmar === false
-        ? [obsAnticipo, MARCA_CONTADO].filter(Boolean).join(" ")
-        : obsAnticipo
+    // 10% tildado: la intención viaja SIEMPRE con el pago (MARCA_CONTADO) y la
+    // NC/REV la emite el servidor en la confirmación (en el acto o diferida).
+    // Un solo camino idempotente: no se saltea ni se duplica.
+    const obsFinal = aplicarContado
+      ? [obsAnticipo, MARCA_CONTADO].filter(Boolean).join(" ")
+      : obsAnticipo
 
     setGuardando(true)
     try {
@@ -341,11 +344,13 @@ function PagosClientesContent() {
             origen: r.origen,
           })),
           confirmar,
+          idempotency_key: idemKeyRef.current,
         }),
       })
 
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      idemKeyRef.current = crypto.randomUUID()
 
       const pagoId: string = data.pago.id
       const numeroRecibo: string = data.numero_recibo
@@ -360,18 +365,10 @@ function PagosClientesContent() {
         return
       }
 
-      // Bonificación pago contado 10%
-      if (aplicarContado && Object.keys(seleccionados).length > 0) {
-        try {
-          // Solo comprobantes reales (no anticipos a pedido) y sin dto previo
-          const comprobanteIds = Object.keys(seleccionados).filter(id => !id.startsWith("pedido:") && !dtosHechos.has(id))
-          if (comprobanteIds.length === 0) { /* todos ya tienen dto, no hacer nada */ }
-          else await fetch("/api/pagos/generar-bonificacion", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cliente_id: cliente!.id, comprobante_ids: comprobanteIds, pago_id: pagoId }),
-          })
-        } catch { /* no bloqueamos el flujo */ }
+      // Bonificación pago contado 10%: la resolvió el servidor en la
+      // confirmación (viajó como MARCA_CONTADO) — nada que hacer acá.
+      if (data.bonificacion_error) {
+        toast.error(`⚠ La bonificación 10% falló: ${data.bonificacion_error}`)
       }
 
       setReciboGenerado({ pagoId, numero: numeroRecibo })

@@ -4,6 +4,8 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 
 // POST /api/cobranzas
@@ -43,6 +45,7 @@ export async function POST(request: NextRequest) {
       confirmar,
       cheque_compartido,
       asignaciones,
+      idempotency_key, // uuid del front: reintentos no duplican el lote
     } = body
 
     if (!Array.isArray(asignaciones) || asignaciones.length === 0) {
@@ -109,64 +112,21 @@ export async function POST(request: NextRequest) {
 
     const resultados: any[] = []
 
-    // ── 3. Un pagos_clientes por cliente ──
-    for (const asig of asignaciones as any[]) {
+    // ── 3. Un pagos_clientes por cliente (alta transaccional vía RPC) ──
+    for (let asigIdx = 0; asigIdx < (asignaciones as any[]).length; asigIdx++) {
+      const asig = (asignaciones as any[])[asigIdx]
       if (!asig.cliente_id || !asig.metodos?.length) continue
       const montoCliente = montoMetodos(asig.metodos)
       const colorAsignacion =
         (await derivarColorCheque(supabase, asig.imputaciones)) || COLOR_PENDIENTE
 
-      const { data: pago, error: pagoErr } = await supabase
-        .from("pagos_clientes")
-        .insert({
-          cliente_id: asig.cliente_id,
-          vendedor_id: vendedor_id || null,
-          viaje_id: viaje_id || null,
-          cobranza_id: cobranza.id,
-          monto: montoCliente,
-          fecha_pago: todayArgentina(),
-          observaciones: observaciones || null,
-          estado: "pendiente",
-          creado_por: auth.user.id,
-        })
-        .select()
-        .single()
-      if (pagoErr) throw pagoErr
-
-      // Métodos / detalle del cliente
-      for (const m of asig.metodos as any[]) {
-        let cheque_id: string | null = null
+      const detalles: DetalleInput[] = (asig.metodos as any[]).map((m: any) => {
         // Compartido: hereda el color del cheque físico único; propio: override
         // manual > derivado de las imputaciones de este cliente > PENDIENTE.
         const colorMetodo = m.usa_cheque_compartido && sharedChequeId
           ? colorCompartido
           : colorOverride(m.color_cheque) || colorAsignacion
-        if (m.tipo === "cheque") {
-          if (m.usa_cheque_compartido && sharedChequeId) {
-            cheque_id = sharedChequeId
-          } else {
-            const { data: chq } = await admin
-              .from("cheques")
-              .insert({
-                tipo: "TERCERO",
-                estado: "EN_CARTERA",
-                banco: m.banco_emisor || "",
-                numero: m.numero_cheque || "",
-                fecha_emision: m.fecha_emision || null,
-                fecha_vencimiento: m.fecha_cheque || todayArgentina(),
-                monto: m.monto,
-                color: colorMetodo,
-                es_echeq: m.color_cheque === "ECHEQ" || Boolean(m.es_echeq),
-                cliente_origen_id: asig.cliente_id,
-              })
-              .select("id")
-              .single()
-            cheque_id = chq?.id || null
-          }
-        }
-
-        await supabase.from("pagos_detalle").insert({
-          pago_id: pago.id,
+        return {
           tipo_pago: m.tipo,
           monto: m.tipo === "deposito"
             ? (m.items || []).reduce((a: number, it: any) => a + Number(it.monto), 0)
@@ -181,30 +141,80 @@ export async function POST(request: NextRequest) {
           localidad: m.localidad || null,
           cuit_emisor: m.cuit_emisor || null,
           color_cheque: m.tipo === "cheque" || m.tipo === "deposito" ? colorMetodo : null,
-          cheque_id,
           fecha_deposito: m.fecha_deposito || null,
-        })
-      }
+          cheque_id: m.tipo === "cheque" && m.usa_cheque_compartido && sharedChequeId ? sharedChequeId : null,
+          cheque: m.tipo === "cheque" && !(m.usa_cheque_compartido && sharedChequeId)
+            ? {
+                banco: m.banco_emisor || "",
+                numero: m.numero_cheque || "",
+                fecha_emision: m.fecha_emision || null,
+                fecha_vencimiento: m.fecha_cheque || todayArgentina(),
+                monto: Number(m.monto),
+                color: colorMetodo,
+                es_echeq: m.color_cheque === "ECHEQ" || Boolean(m.es_echeq),
+              }
+            : null,
+          deposito_items: m.tipo === "deposito"
+            ? (m.items || []).map((item: any) => ({
+                tipo_item: item.tipo_item,
+                monto: Number(item.monto),
+                numero_cheque: item.numero_cheque || null,
+                banco_emisor: item.banco_emisor || null,
+                fecha_pago_cheque: item.fecha_pago_cheque || null,
+                numero_comprobante_deposito: item.numero_comprobante_deposito || null,
+                fecha_deposito_efectivo: item.fecha_deposito_efectivo || null,
+                nro_comprobante_deposito_ef: item.nro_comprobante_deposito_ef || null,
+                cheque: item.tipo_item === "cheque"
+                  ? {
+                      banco: item.banco_emisor || null,
+                      numero: item.numero_cheque || null,
+                      fecha_vencimiento: item.fecha_pago_cheque || null,
+                      monto: Number(item.monto),
+                      color: colorMetodo,
+                    }
+                  : null,
+              }))
+            : undefined,
+        }
+      })
 
-      // Imputaciones (pendientes; confirmarCobranza las aplica)
-      if (asig.imputaciones?.length) {
-        const imputData = (asig.imputaciones as any[]).map((imp) => ({
-          pago_id: pago.id,
-          comprobante_id: imp.comprobante_id,
-          tipo_comprobante: "venta",
-          monto_imputado: imp.monto_imputado,
-          estado: "pendiente",
-        }))
-        await supabase.from("imputaciones").insert(imputData)
-      }
+      const { pago_id, dedup } = await crearCobranza(supabase, {
+        // Clave derivada del submit por asignación (nibble de versión → 'e' +
+        // índice al final): reintentos no duplican ningún cliente del lote.
+        idempotency_key: idempotency_key
+          ? idempotency_key.slice(0, 14) + "e" + idempotency_key.slice(15, 34) + String(10 + asigIdx)
+          : null,
+        cliente_id: asig.cliente_id,
+        vendedor_id: vendedor_id || null,
+        viaje_id: viaje_id || null,
+        cobranza_id: cobranza.id,
+        monto: montoCliente,
+        fecha_pago: todayArgentina(),
+        observaciones: observaciones || null,
+        estado: "pendiente",
+        creado_por: auth.user.id,
+        detalles,
+        imputaciones: recortarImputaciones(
+          ((asig.imputaciones as any[]) || [])
+            .filter((i: any) => i?.comprobante_id)
+            .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto_imputado) })),
+          montoCliente,
+        ),
+      })
 
-      // Confirmación en el acto (por defecto)
+      // Confirmación en el acto (por defecto) + post-confirmación (comisiones,
+      // billetera, bonificación 10% diferida)
       let numero_recibo: string | null = null
       if (confirmar !== false) {
-        const r = await confirmarCobranza(supabase, admin, { pagoId: pago.id, usuarioId: auth.user.id })
+        const r = await confirmarCobranza(supabase, admin, { pagoId: pago_id, usuarioId: auth.user.id })
         numero_recibo = r.numero_recibo
+        await procesarPostConfirmacion(supabase, admin, {
+          pagoId: pago_id,
+          usuarioId: auth.user.id,
+          paidComprobanteIds: r.paidComprobanteIds,
+        })
       }
-      resultados.push({ cliente_id: asig.cliente_id, pago_id: pago.id, monto: montoCliente, numero_recibo })
+      resultados.push({ cliente_id: asig.cliente_id, pago_id, monto: montoCliente, numero_recibo, ...(dedup ? { dedup } : {}) })
     }
 
     // ── 4. Estado de la cobranza ──

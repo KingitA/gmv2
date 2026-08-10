@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { todayArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
+import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 
 /**
  * POST /api/viajante/cobro — cobro en la calle del viajante (Fase E).
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const body = await request.json()
-    const { clientes, metodos, comprobante_urls, observaciones } = body
+    const { clientes, metodos, comprobante_urls, observaciones, idempotency_key } = body
 
     if (!Array.isArray(clientes) || !clientes.length || !Array.isArray(metodos) || !metodos.length) {
       return NextResponse.json({ error: "clientes y metodos son requeridos" }, { status: 400 })
@@ -136,23 +137,86 @@ export async function POST(request: NextRequest) {
         : ""
       const obsPago = [observaciones, notaAnticipo].filter(Boolean).join(" · ") || null
 
-      // ── Pago ──
-      const { data: pago, error: pagoErr } = await supabase
-        .from("pagos_clientes")
-        .insert({
-          cliente_id: c.cliente_id,
-          vendedor_id: vendedorId,
-          monto: montoPago,
-          fecha_pago: todayArgentina(),
-          observaciones: obsPago,
-          estado: "pendiente_rendicion",
-          cobrador_tipo: "viajante",
-          creado_por: session.user.id,
-          ...(cobranzaId ? { cobranza_id: cobranzaId } : {}),
+      // ── Detalles por método (proporcional al monto del cliente) ──
+      // Color de cheques: derivado de las imputaciones de ESTE cliente
+      // (>50% a PRES ⇒ NEGRO, sino BLANCO); override manual del viajante si
+      // vino explícito; sin imputaciones ⇒ PENDIENTE (oficina asigna al rendir).
+      const colorCliente =
+        (await derivarColorCheque(supabase, c.imputaciones)) || COLOR_PENDIENTE
+
+      const proporcion = montoPago / totalMetodos
+      const detalles: DetalleInput[] = []
+      for (const m of metodos) {
+        const montoDetalle =
+          clientes.length === 1
+            ? Number(m.monto)
+            : Math.round(Number(m.monto) * proporcion * 100) / 100
+        if (montoDetalle <= 0) continue
+        detalles.push({
+          tipo_pago: m.tipo,
+          monto: montoDetalle,
+          banco: m.banco || null,
+          numero_cheque: m.numero_cheque || null,
+          fecha_cheque: m.fecha_cheque || null,
+          cuit_emisor: m.tipo === "cheque" ? m.cuit_emisor || null : null,
+          referencia: m.referencia_transferencia || null,
+          cuenta_bancaria_id: m.cuenta_bancaria_id || null,
+          color_cheque: m.tipo === "cheque" ? colorOverride(m.color) || colorCliente : null,
+          cheque: m.tipo === "cheque"
+            ? {
+                banco: m.banco || "S/D",
+                numero: m.numero_cheque || "S/N",
+                fecha_emision: todayArgentina(),
+                fecha_vencimiento: m.fecha_cheque || todayArgentina(),
+                monto: montoDetalle,
+                color: colorOverride(m.color) || colorCliente,
+                es_echeq: Boolean(m.es_echeq),
+              }
+            : null,
         })
-        .select("id")
-        .single()
-      if (pagoErr) throw pagoErr
+      }
+      // El prorrateo redondea por método: el último absorbe la diferencia para
+      // que Σ detalles == monto del pago AL CENTAVO (si no, caja y libro mayor
+      // quedan desalineados; la RPC lo rechaza).
+      const sumDetalles = detalles.reduce((s, d) => s + d.monto, 0)
+      const diffCentavos = Math.round((montoPago - sumDetalles) * 100) / 100
+      if (detalles.length && Math.abs(diffCentavos) > 0.001) {
+        const ultimo = detalles[detalles.length - 1]
+        ultimo.monto = Math.round((ultimo.monto + diffCentavos) * 100) / 100
+        if (ultimo.cheque) ultimo.cheque.monto = ultimo.monto
+      }
+
+      // ── Pago transaccional (pago + detalle + cheques + imputaciones) ──
+      // Clave derivada del submit por cliente (nibble de versión → 'e' + índice):
+      // reintentos del viajante con mala señal no duplican ningún pago del lote.
+      const { pago_id: pagoId, dedup } = await crearCobranza(supabase, {
+        idempotency_key: idempotency_key
+          ? (clientes.length === 1
+              ? idempotency_key
+              : idempotency_key.slice(0, 14) + "e" + idempotency_key.slice(15, 34) + String(10 + idx))
+          : null,
+        cliente_id: c.cliente_id,
+        vendedor_id: vendedorId,
+        cobranza_id: cobranzaId,
+        cobrador_tipo: "viajante",
+        monto: montoPago,
+        fecha_pago: todayArgentina(),
+        observaciones: obsPago,
+        estado: "pendiente_rendicion",
+        creado_por: session.user.id,
+        detalles,
+        imputaciones: recortarImputaciones(
+          (c.imputaciones || [])
+            .filter((i: any) => i?.comprobante_id)
+            .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto) })),
+          montoPago,
+        ),
+      })
+      const pago = { id: pagoId }
+      if (dedup) {
+        pagosCreados.push({ pago_id: pago.id, cliente_id: c.cliente_id, monto: montoPago, estado: "pendiente_rendicion", dedup: true })
+        continue
+      }
 
       // ── Pedidos anticipados: vincular al pago; contado marca el 10% ──
       for (const p of pedidosAnticipo) {
@@ -163,70 +227,6 @@ export async function POST(request: NextRequest) {
             ...(p.contado ? { pago_contado_10: true } : {}),
           })
           .eq("id", p.pedido_id)
-      }
-
-      // ── Detalles por método (proporcional al monto del cliente) ──
-      // Color de cheques: derivado de las imputaciones de ESTE cliente
-      // (>50% a PRES ⇒ NEGRO, sino BLANCO); override manual del viajante si
-      // vino explícito; sin imputaciones ⇒ PENDIENTE (oficina asigna al rendir).
-      const colorCliente =
-        (await derivarColorCheque(supabase, c.imputaciones)) || COLOR_PENDIENTE
-
-      const proporcion = montoPago / totalMetodos
-      for (const m of metodos) {
-        const montoDetalle =
-          clientes.length === 1
-            ? Number(m.monto)
-            : Math.round(Number(m.monto) * proporcion * 100) / 100
-        if (montoDetalle <= 0) continue
-
-        let chequeId: string | null = null
-        if (m.tipo === "cheque") {
-          const { data: cheque } = await supabase
-            .from("cheques")
-            .insert({
-              tipo: "TERCERO",
-              estado: "EN_CARTERA",
-              banco: m.banco || "S/D",
-              numero: m.numero_cheque || "S/N",
-              fecha_emision: todayArgentina(),
-              fecha_vencimiento: m.fecha_cheque || todayArgentina(),
-              monto: montoDetalle,
-              color: colorOverride(m.color) || colorCliente,
-              es_echeq: Boolean(m.es_echeq),
-              cliente_origen_id: c.cliente_id,
-            })
-            .select("id")
-            .single()
-          chequeId = cheque?.id ?? null
-        }
-
-        await supabase.from("pagos_detalle").insert({
-          pago_id: pago.id,
-          tipo_pago: m.tipo,
-          monto: montoDetalle,
-          banco: m.banco || null,
-          numero_cheque: m.numero_cheque || null,
-          fecha_cheque: m.fecha_cheque || null,
-          cuit_emisor: m.tipo === "cheque" ? m.cuit_emisor || null : null,
-          referencia: m.referencia_transferencia || null,
-          cuenta_bancaria_id: m.cuenta_bancaria_id || null,
-          color_cheque: m.tipo === "cheque" ? colorOverride(m.color) || colorCliente : null,
-          cheque_id: chequeId,
-        })
-      }
-
-      // ── Imputaciones pendientes ──
-      const imps = (c.imputaciones || []).map((i: any) => ({
-        pago_id: pago.id,
-        comprobante_id: i.comprobante_id,
-        tipo_comprobante: "venta",
-        monto_imputado: Number(i.monto),
-        estado: "pendiente",
-      }))
-      if (imps.length) {
-        const { error: impErr } = await supabase.from("imputaciones").insert(imps)
-        if (impErr) throw impErr
       }
 
       // ── Fotos de comprobantes ──

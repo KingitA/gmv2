@@ -157,9 +157,13 @@ export default function MostradorPage() {
   }
 
   // ── Cobrar pedido para retirar (efectivo) ──
+  const idemKeysRef = useRef<Record<string, string>>({})
+
   const cobrarPedido = async (pedido: any) => {
     setCobrando(pedido.id)
     try {
+      // Clave de idempotencia por pedido: el doble click no duplica el cobro
+      idemKeysRef.current[pedido.id] ||= crypto.randomUUID()
       const res = await fetch("/api/pagos-clientes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -171,10 +175,12 @@ export default function MostradorPage() {
             .map((c: any) => ({ comprobante_id: c.id, monto_imputado: c.saldo })),
           observaciones: `Retiro mostrador ${pedido.numero_pedido}`,
           confirmar: true,
+          idempotency_key: idemKeysRef.current[pedido.id],
         }),
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error)
+      delete idemKeysRef.current[pedido.id]
       // entregar el pedido
       const sb = createSupabase()
       await sb.from("pedidos").update({ estado: "entregado" }).eq("id", pedido.id)

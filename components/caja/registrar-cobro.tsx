@@ -98,6 +98,9 @@ export function RegistrarCobro({
   }>({})
   const fileRef = useRef<HTMLInputElement>(null)
   const camRef = useRef<HTMLInputElement>(null)
+  // Clave de idempotencia del cobro: estable ante doble click/reintento, se
+  // rota recién cuando el alta salió bien (el backend deduplica por esta clave)
+  const idemKeyRef = useRef<string>(crypto.randomUUID())
 
   const cajas = useMemo(() => cuentas.filter((c) => c.grupo === "EFECTIVO"), [cuentas])
   const bancos = useMemo(() => cuentas.filter((c) => c.grupo === "BANCOS"), [cuentas])
@@ -363,14 +366,13 @@ export function RegistrarCobro({
     const obsAnticipo = anticipos.length
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace(PEDIDO_PREFIX, "")).join(", ")}`
       : undefined
-    // Cobro pendiente con 10% tildado: la intención viaja con el pago
-    // (MARCA_CONTADO) y el endpoint de confirmación emite la NC/REV al
-    // acreditarse el valor. Así el descuento no se saltea nunca.
-    const esEfectivoPre = metodosCobro.every((m) => m.payload.tipo === "efectivo")
-    const obsFinal =
-      aplicarContado && !esEfectivoPre
-        ? [obsAnticipo, MARCA_CONTADO].filter(Boolean).join(" ")
-        : obsAnticipo
+    // 10% tildado: la intención viaja SIEMPRE con el pago (MARCA_CONTADO) y la
+    // NC/REV la emite el servidor en la confirmación — en el acto si es
+    // efectivo, o al acreditarse el valor si quedó pendiente. Un solo camino,
+    // idempotente: el descuento no se saltea ni se duplica nunca.
+    const obsFinal = aplicarContado
+      ? [obsAnticipo, MARCA_CONTADO].filter(Boolean).join(" ")
+      : obsAnticipo
 
     // Solo-efectivo confirma en el acto; si hay algún valor (transf/cheque/echeq)
     // el cobro completo queda pendiente hasta su Confirmar (regla de Pagos Clientes).
@@ -388,32 +390,19 @@ export function RegistrarCobro({
           pedidos_contado: [...contadoPedidos],
           comprobante_urls: archivos,
           confirmar: esEfectivo,
+          idempotency_key: idemKeyRef.current,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Error registrando el cobro")
+      idemKeyRef.current = crypto.randomUUID()
       const pagoId = data.pago?.id ?? data.id
 
-      // Bonificación 10% contado (solo cobros confirmados, igual que Pagos Clientes)
+      // Bonificación 10% contado: la resolvió el servidor en la confirmación
       let bonifMsg = ""
       if (aplicarContado && esEfectivo) {
-        const comprobanteIds = Object.keys(seleccionados).filter(
-          (k) => !k.startsWith(PEDIDO_PREFIX) && !dtosHechos.has(k)
-        )
-        if (comprobanteIds.length) {
-          try {
-            const bonifRes = await fetch("/api/pagos/generar-bonificacion", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ cliente_id: cliente.id, comprobante_ids: comprobanteIds, pago_id: pagoId }),
-            })
-            const bonifData = await bonifRes.json()
-            if (bonifRes.ok) bonifMsg = ` NC por bonificación contado: $ ${fmt(Number(bonifData.total_bonificacion) || 0)}.`
-            else bonifMsg = ` ⚠ La bonificación falló: ${bonifData.error || "revisala a mano"}.`
-          } catch {
-            bonifMsg = " ⚠ La bonificación no se pudo generar — revisala a mano."
-          }
-        }
+        if (data.bonificacion?.total) bonifMsg = ` NC por bonificación contado: $ ${fmt(Number(data.bonificacion.total) || 0)}.`
+        else if (data.bonificacion_error) bonifMsg = ` ⚠ La bonificación falló: ${data.bonificacion_error}.`
       } else if (aplicarContado && !esEfectivo) {
         bonifMsg = " El 10% quedó agendado: la NC/REV sale sola al confirmar el valor."
       }

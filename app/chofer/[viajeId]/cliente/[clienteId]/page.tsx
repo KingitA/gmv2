@@ -110,6 +110,8 @@ export default function ClienteEntregaPage() {
     { id: "1", tipo: "efectivo", monto: 0 },
   ])
   const [guardandoCobro, setGuardandoCobro] = useState(false)
+  // Clave de idempotencia: estable ante doble tap/reintento, rota al éxito
+  const idemKeyRef = useRef<string>(crypto.randomUUID())
   const [procesandoOCR, setProcesandoOCR] = useState(false)
   const [ocrMsg, setOcrMsg] = useState<string | null>(null)
   const [comprobanteArchivos, setComprobanteArchivos] = useState<{ url: string; nombre: string }[]>([])
@@ -329,10 +331,11 @@ export default function ClienteEntregaPage() {
           cobros_extra: cobrosExtra
             .filter((c) => c.monto > 0)
             .map((c) => ({ cliente_id: c.cliente.id, metodos: [{ tipo: "efectivo", monto: c.monto }], imputaciones: [] })),
+          idempotency_key: idemKeyRef.current,
         }),
       })
       const d = await res.json()
-      if (d.success) { setShowCobroSheet(false); setCobrosExtra([]); setComprobanteArchivos([]); setContadoPedidos(new Set()); setComprobantesSeleccionados({}); cargarDatos() }
+      if (d.success) { idemKeyRef.current = crypto.randomUUID(); setShowCobroSheet(false); setCobrosExtra([]); setComprobanteArchivos([]); setContadoPedidos(new Set()); setComprobantesSeleccionados({}); cargarDatos() }
       else alert(d.error || "Error al registrar cobro")
     } finally { setGuardandoCobro(false) }
   }

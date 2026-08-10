@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,6 +34,8 @@ export default function NuevaCobranzaPage() {
   const [cheque, setCheque] = useState({ banco: "", numero: "", fecha_cheque: "", color: "BLANCO" })
   const [transfer, setTransfer] = useState({ numero_comprobante: "", fecha_transferencia: "" })
   const [guardando, setGuardando] = useState(false)
+  // Clave de idempotencia: estable ante doble click/reintento, rota al éxito
+  const idemKeyRef = useRef<string>(crypto.randomUUID())
 
   const agregarCliente = async (cliente: any) => {
     if (!cliente) return
@@ -114,10 +116,11 @@ export default function NuevaCobranzaPage() {
       const res = await fetch("/api/cobranzas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origen: "ERP", confirmar, cheque_compartido, asignaciones: asignacionesBody }),
+        body: JSON.stringify({ origen: "ERP", confirmar, cheque_compartido, asignaciones: asignacionesBody, idempotency_key: idemKeyRef.current }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      idemKeyRef.current = crypto.randomUUID()
       toast.success(
         confirmar
           ? `Cobranza confirmada: ${data.clientes.length} cliente(s), recibos generados.`

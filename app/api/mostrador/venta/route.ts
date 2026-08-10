@@ -117,6 +117,7 @@ export async function POST(request: NextRequest) {
         imputaciones,
         observaciones: `Venta mostrador ${numeroPedido}`,
         confirmar: soloEfectivo, // efectivo = plata a la vista; cheque/transf → revisión
+        idempotency_key: body.idempotency_key || null, // dedup del submit del front
       }),
     })
     const pagoData = await pagoRes.json()

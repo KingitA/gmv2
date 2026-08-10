@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { BcraDeudorChip } from "@/components/pagos/BcraDeudorChip"
@@ -116,6 +116,8 @@ export default function VendedorCobrarPage() {
   const [subiendoFotos, setSubiendoFotos] = useState(false)
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
+  // Clave de idempotencia: estable ante doble tap/reintento, rota al éxito
+  const idemKeyRef = useRef<string>(crypto.randomUUID())
 
   useEffect(() => {
     fetch(`/api/vendedor/cliente/${id}`)
@@ -332,6 +334,8 @@ export default function VendedorCobrarPage() {
         metodos: metodosPayload,
         comprobante_urls: fotos,
         observaciones: obs || null,
+        // reintentos con mala señal no duplican el cobro (dedup en backend)
+        idempotency_key: idemKeyRef.current,
       }
 
       const res = await fetch("/api/viajante/cobro", {
@@ -345,6 +349,7 @@ export default function VendedorCobrarPage() {
         alert(d.error || "Error al registrar el cobro.")
         return
       }
+      idemKeyRef.current = crypto.randomUUID()
       alert(`✅ Cobro registrado por ${formatCurrency(totalMetodos)}. Queda pendiente de rendición.`)
       router.push(`/vendedor/clientes/${cliente.id}`)
     } catch {

@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
@@ -133,6 +134,8 @@ export async function POST(request: NextRequest) {
                        // false: queda PENDIENTE de verificación (no toca saldo ni caja).
       pedidos_contado, // string[] — pedidos sin facturar anticipados con 10% contado (se marcan)
       comprobante_urls, // [{url, nombre}] — fotos de comprobantes (cheque/transferencia)
+      idempotency_key,  // uuid generado por el front al armar el formulario:
+                        // reintentos/doble click devuelven el MISMO pago
     } = body
 
     if (!cliente_id || !metodos?.length) {
@@ -158,29 +161,117 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "El monto total debe ser mayor a 0" }, { status: 400 })
     }
 
-    // ── 1. Crear registro principal pagos_clientes ──
-    const { data: pago, error: pagoError } = await supabase
+    // ── 1. Armar detalles por método (colores, cheques, depósitos) ──
+    // Color de cheques: override manual del operador > derivado de la
+    // imputación (>50% a PRES ⇒ NEGRO, sino BLANCO) > PENDIENTE (a cuenta,
+    // la oficina lo asigna al confirmar). "ECHEQ" del OCR/selector no es un
+    // color: marca es_echeq y el color sale de la misma regla.
+    const colorDerivado = await derivarColorCheque(supabase, imputaciones)
+
+    const detalles: DetalleInput[] = (metodos as any[]).map((metodo: any) => {
+      const esEcheq = metodo.color_cheque === "ECHEQ" || Boolean(metodo.es_echeq)
+      const colorFinal =
+        colorOverride(metodo.color_cheque) || colorOverride(color) || colorDerivado || COLOR_PENDIENTE
+      const colorMetodo = metodo.tipo === "cheque" || metodo.tipo === "deposito" ? colorFinal : null
+      const montoMetodo = metodo.tipo === "deposito"
+        ? (metodo.items || []).reduce((s: number, it: any) => s + Number(it.monto), 0)
+        : Number(metodo.monto)
+
+      return {
+        tipo_pago: metodo.tipo,
+        monto: montoMetodo,
+        caja_id: metodo.caja_id || null,
+        cuenta_bancaria_id: metodo.cuenta_bancaria_id || null,
+        fecha_transferencia: metodo.fecha_transferencia || null,
+        numero_comprobante_pago: metodo.numero_comprobante || null,
+        banco: metodo.banco_emisor || null,
+        numero_cheque: metodo.numero_cheque || null,
+        fecha_cheque: metodo.fecha_cheque || null,
+        localidad: metodo.localidad || null,
+        cuit_emisor: metodo.cuit_emisor || null,
+        color_cheque: colorMetodo,
+        fecha_deposito: metodo.fecha_deposito || null,
+        cheque: metodo.tipo === "cheque"
+          ? {
+              banco: metodo.banco_emisor,
+              numero: metodo.numero_cheque,
+              fecha_emision: metodo.fecha_emision || null,
+              fecha_vencimiento: metodo.fecha_cheque || null,
+              monto: Number(metodo.monto),
+              color: colorFinal,
+              es_echeq: esEcheq,
+            }
+          : null,
+        deposito_items: metodo.tipo === "deposito"
+          ? (metodo.items || []).map((item: any) => ({
+              tipo_item: item.tipo_item,
+              monto: Number(item.monto),
+              numero_cheque: item.numero_cheque || null,
+              banco_emisor: item.banco_emisor || null,
+              fecha_pago_cheque: item.fecha_pago_cheque || null,
+              numero_comprobante_deposito: item.numero_comprobante_deposito || null,
+              fecha_deposito_efectivo: item.fecha_deposito_efectivo || null,
+              nro_comprobante_deposito_ef: item.nro_comprobante_deposito_ef || null,
+              cheque: item.tipo_item === "cheque"
+                ? {
+                    banco: item.banco_emisor || null,
+                    numero: item.numero_cheque || null,
+                    fecha_vencimiento: item.fecha_pago_cheque || null,
+                    monto: Number(item.monto),
+                    color: colorFinal,
+                  }
+                : null,
+            }))
+          : undefined,
+      }
+    })
+
+    // ── 2. Alta transaccional (pago + detalle + cheques + imputaciones) ──
+    // Si el total imputado supera el pago real, recortar (de primero a último);
+    // el excedente queda como saldo del comprobante (lo cubre NC o pago futuro).
+    const impsRecortadas = recortarImputaciones(
+      ((imputaciones as any[]) || [])
+        .filter((i: any) => i?.comprobante_id)
+        .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto_imputado) })),
+      montoTotal,
+    )
+
+    const { pago_id, dedup } = await crearCobranza(supabase, {
+      idempotency_key: idempotency_key || null,
+      cliente_id,
+      vendedor_id: vendedor_id || null,
+      viaje_id: viaje_id || null,
+      monto: montoTotal,
+      fecha_pago: fecha_pago || todayArgentina(),
+      observaciones: observaciones || null,
+      estado: "pendiente",
+      creado_por: auth.user.id,
+      detalles,
+      imputaciones: impsRecortadas,
+    })
+
+    const { data: pago } = await supabase
       .from("pagos_clientes")
-      .insert({
-        cliente_id,
-        vendedor_id: vendedor_id || null,
-        viaje_id: viaje_id || null,
-        monto: montoTotal,
-        fecha_pago: fecha_pago || todayArgentina(),
-        observaciones: observaciones || null,
-        estado: "pendiente",
-        creado_por: auth.user.id,
-      })
-      .select()
+      .select("*")
+      .eq("id", pago_id)
       .single()
 
-    if (pagoError) throw pagoError
+    if (dedup) {
+      // Reintento del mismo formulario: el pago ya existe — no repetir nada.
+      return NextResponse.json({
+        success: true,
+        pago,
+        estado: pago?.estado ?? "pendiente",
+        numero_recibo: null,
+        dedup: true,
+      })
+    }
 
-    // ── 1a. Guardar fotos de comprobantes (cheque/transferencia) ──
+    // ── 2a. Guardar fotos de comprobantes (cheque/transferencia) ──
     if (Array.isArray(comprobante_urls) && comprobante_urls.length) {
       const fotos = comprobante_urls
         .filter((c: any) => c?.url)
-        .map((c: any) => ({ pago_id: pago.id, url: c.url, nombre: c.nombre || null }))
+        .map((c: any) => ({ pago_id: pago_id, url: c.url, nombre: c.nombre || null }))
       if (fotos.length) {
         const { error: fErr } = await supabase.from("pago_comprobantes").insert(fotos)
         if (fErr) console.error("[pagos-clientes] guardar fotos:", fErr.message)
@@ -192,119 +283,15 @@ export async function POST(request: NextRequest) {
     if (Array.isArray(pedidos_contado) && pedidos_contado.length) {
       const { error: pedErr } = await supabase
         .from("pedidos")
-        .update({ pago_contado_10: true, anticipo_pago_id: pago.id })
+        .update({ pago_contado_10: true, anticipo_pago_id: pago_id })
         .in("id", pedidos_contado)
       if (pedErr) console.error("[pagos-clientes] marcar pedidos contado:", pedErr.message)
-    }
-
-    // ── 2. Crear detalles de métodos de pago ──
-    // Color de cheques: override manual del operador > derivado de la
-    // imputación (>50% a PRES ⇒ NEGRO, sino BLANCO) > PENDIENTE (a cuenta,
-    // la oficina lo asigna al confirmar). "ECHEQ" del OCR/selector no es un
-    // color: marca es_echeq y el color sale de la misma regla.
-    const colorDerivado = await derivarColorCheque(supabase, imputaciones)
-
-    for (const metodo of metodos as any[]) {
-      let cheque_id: string | null = null
-      const esEcheq = metodo.color_cheque === "ECHEQ" || Boolean(metodo.es_echeq)
-      const colorFinal =
-        colorOverride(metodo.color_cheque) || colorOverride(color) || colorDerivado || COLOR_PENDIENTE
-      const colorMetodo = metodo.tipo === "cheque" || metodo.tipo === "deposito" ? colorFinal : null
-
-      // Si es cheque de tercero: crear registro en tabla cheques
-      if (metodo.tipo === "cheque") {
-        const { data: cheque } = await admin
-          .from("cheques")
-          .insert({
-            tipo: "TERCERO",
-            estado: "EN_CARTERA",
-            banco: metodo.banco_emisor,
-            numero: metodo.numero_cheque,
-            fecha_emision: metodo.fecha_emision || null,
-            fecha_vencimiento: metodo.fecha_cheque,
-            monto: metodo.monto,
-            color: colorFinal,
-            es_echeq: esEcheq,
-            cliente_origen_id: cliente_id,
-          })
-          .select("id")
-          .single()
-        cheque_id = cheque?.id || null
-      }
-
-      const { data: detalle, error: detError } = await supabase
-        .from("pagos_detalle")
-        .insert({
-          pago_id: pago.id,
-          tipo_pago: metodo.tipo,
-          monto: metodo.tipo === "deposito"
-            ? (metodo.items || []).reduce((s: number, it: any) => s + Number(it.monto), 0)
-            : Number(metodo.monto),
-          // efectivo
-          caja_id: metodo.caja_id || null,
-          // transferencia
-          cuenta_bancaria_id: metodo.cuenta_bancaria_id || null,
-          fecha_transferencia: metodo.fecha_transferencia || null,
-          numero_comprobante_pago: metodo.numero_comprobante || null,
-          // cheque
-          banco: metodo.banco_emisor || null,
-          numero_cheque: metodo.numero_cheque || null,
-          fecha_cheque: metodo.fecha_cheque || null,
-          localidad: metodo.localidad || null,
-          cuit_emisor: metodo.cuit_emisor || null,
-          color_cheque: colorMetodo,
-          cheque_id,
-          // depósito
-          fecha_deposito: metodo.fecha_deposito || null,
-        })
-        .select("id")
-        .single()
-
-      if (detError) throw detError
-
-      // ── 2b. Si es depósito: crear ítems del depósito ──
-      if (metodo.tipo === "deposito" && metodo.items?.length) {
-        for (const item of metodo.items as any[]) {
-          let itemChequeId: string | null = null
-
-          if (item.tipo_item === "cheque") {
-            const { data: chq } = await admin
-              .from("cheques")
-              .insert({
-                tipo: "TERCERO",
-                estado: "EN_CARTERA",
-                banco: item.banco_emisor || null,
-                numero: item.numero_cheque || null,
-                fecha_vencimiento: item.fecha_pago_cheque || null,
-                monto: item.monto,
-                color: colorFinal,
-                cliente_origen_id: cliente_id,
-              })
-              .select("id")
-              .single()
-            itemChequeId = chq?.id || null
-          }
-
-          await supabase.from("pago_deposito_items").insert({
-            pago_detalle_id: detalle.id,
-            tipo_item: item.tipo_item,
-            monto: item.monto,
-            numero_cheque: item.numero_cheque || null,
-            banco_emisor: item.banco_emisor || null,
-            fecha_pago_cheque: item.fecha_pago_cheque || null,
-            numero_comprobante_deposito: item.numero_comprobante_deposito || null,
-            cheque_id: itemChequeId,
-            fecha_deposito_efectivo: item.fecha_deposito_efectivo || null,
-            nro_comprobante_deposito_ef: item.nro_comprobante_deposito_ef || null,
-          })
-        }
-      }
     }
 
     // ── 3. Crear retenciones ──
     if (retenciones?.length) {
       const retencionesData = (retenciones as any[]).map((r) => ({
-        pago_id: pago.id,
+        pago_id: pago_id,
         tipo: r.tipo,
         fecha: r.fecha,
         numero_comprobante: r.numero_comprobante || null,
@@ -317,33 +304,7 @@ export async function POST(request: NextRequest) {
       if (retErr) console.error("[pagos-clientes] Error guardando retenciones:", retErr)
     }
 
-    // ── 4. Imputar a comprobantes ──
-    if (imputaciones?.length) {
-      // Si el total imputado supera el pago real, ajustar proporcionalmente (de primero a último)
-      const totalImputado = (imputaciones as any[]).reduce((s: number, i: any) => s + Number(i.monto_imputado), 0)
-      if (totalImputado > montoTotal) {
-        let remaining = montoTotal
-        for (const imp of imputaciones as any[]) {
-          const apply = Math.min(Number(imp.monto_imputado), remaining)
-          imp.monto_imputado = apply
-          remaining = Math.max(0, remaining - apply)
-        }
-      }
-
-      // Imputaciones en estado 'pendiente': se aplican al saldo recién al
-      // confirmar la cobranza (gate de verificación), vía confirmarCobranza.
-      const imputData = (imputaciones as any[]).map((imp) => ({
-        pago_id: pago.id,
-        comprobante_id: imp.comprobante_id,
-        tipo_comprobante: "venta",
-        monto_imputado: imp.monto_imputado,
-        estado: "pendiente",
-      }))
-      const { error: impErr } = await supabase.from("imputaciones").insert(imputData)
-      if (impErr) throw impErr
-    }
-
-    // ── 4b. Gate de verificación ──
+    // ── 4. Gate de verificación ──
     // Por defecto (confirmar !== false) se confirma en el acto: confirmarCobranza
     // aplica las imputaciones, postea el haber al libro mayor, genera el recibo y
     // el kardex. Con confirmar:false el pago queda PENDIENTE de verificación y NO
@@ -354,7 +315,7 @@ export async function POST(request: NextRequest) {
     const estadoFinal = confirmar === false ? "pendiente" : "confirmado"
     if (confirmar !== false) {
       const result = await confirmarCobranza(supabase, admin, {
-        pagoId: pago.id,
+        pagoId: pago_id,
         usuarioId: auth.user.id,
       })
       numeroReciboFinal = result.numero_recibo
@@ -364,7 +325,7 @@ export async function POST(request: NextRequest) {
       // marca quedaba colgada en observaciones si la UI no llamaba a
       // generar-bonificacion por separado (o si esa segunda llamada fallaba).
       const post = await procesarPostConfirmacion(supabase, admin, {
-        pagoId: pago.id,
+        pagoId: pago_id,
         usuarioId: auth.user.id,
       })
       bonificacion = post.bonificacion
