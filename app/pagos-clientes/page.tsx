@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { ClienteSearchCombobox } from "@/components/pagos/ClienteSearchCombobox"
 import { ComprobantesSelector, type Comprobante } from "@/components/pagos/ComprobantesSelector"
+import { MARCA_CONTADO } from "@/lib/constants"
 import { MetodoPagoForm, type MetodoPago } from "@/components/pagos/MetodoPagoForm"
 import { RetencionForm, type Retencion } from "@/components/pagos/RetencionForm"
 import { ResumenPago } from "@/components/pagos/ResumenPago"
@@ -296,6 +297,12 @@ function PagosClientesContent() {
     const obsAnticipo = anticipos.length
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace("pedido:", "")).join(", ")}`
       : null
+    // Cobro pendiente con 10% tildado: la intención viaja con el pago y el
+    // endpoint de confirmación emite la NC/REV al acreditarse el valor.
+    const obsFinal =
+      aplicarContado && confirmar === false
+        ? [obsAnticipo, MARCA_CONTADO].filter(Boolean).join(" ")
+        : obsAnticipo
 
     setGuardando(true)
     try {
@@ -323,7 +330,7 @@ function PagosClientesContent() {
             items: m.items,
           })),
           imputaciones,
-          observaciones: obsAnticipo,
+          observaciones: obsFinal,
           pedidos_contado: [...contadoPedidos],
           comprobante_urls: comprobanteArchivos,
           retenciones: retenciones.map((r) => ({

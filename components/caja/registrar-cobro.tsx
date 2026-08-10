@@ -21,6 +21,7 @@ import {
 import { BcraDeudorMulti } from "@/components/pagos/BcraDeudorChip"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
+import { MARCA_CONTADO } from "@/lib/constants"
 import { Camera, ChevronDown, ChevronUp, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
 
 export interface CuentaFondos {
@@ -362,6 +363,14 @@ export function RegistrarCobro({
     const obsAnticipo = anticipos.length
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace(PEDIDO_PREFIX, "")).join(", ")}`
       : undefined
+    // Cobro pendiente con 10% tildado: la intención viaja con el pago
+    // (MARCA_CONTADO) y el endpoint de confirmación emite la NC/REV al
+    // acreditarse el valor. Así el descuento no se saltea nunca.
+    const esEfectivoPre = metodosCobro.every((m) => m.payload.tipo === "efectivo")
+    const obsFinal =
+      aplicarContado && !esEfectivoPre
+        ? [obsAnticipo, MARCA_CONTADO].filter(Boolean).join(" ")
+        : obsAnticipo
 
     // Solo-efectivo confirma en el acto; si hay algún valor (transf/cheque/echeq)
     // el cobro completo queda pendiente hasta su Confirmar (regla de Pagos Clientes).
@@ -375,7 +384,7 @@ export function RegistrarCobro({
           cliente_id: cliente.id,
           metodos: metodosCobro.map((m) => m.payload),
           imputaciones,
-          observaciones: obsAnticipo,
+          observaciones: obsFinal,
           pedidos_contado: [...contadoPedidos],
           comprobante_urls: archivos,
           confirmar: esEfectivo,
@@ -406,7 +415,7 @@ export function RegistrarCobro({
           }
         }
       } else if (aplicarContado && !esEfectivo) {
-        bonifMsg = " El 10% contado se aplica cuando confirmes el valor."
+        bonifMsg = " El 10% quedó agendado: la NC/REV sale sola al confirmar el valor."
       }
 
       // Ajuste por redondeo: la diferencia se acredita en cuenta corriente

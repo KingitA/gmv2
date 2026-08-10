@@ -63,13 +63,18 @@ export function ConfirmarDialog({
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Error procesando el pago")
+      const bonifMsg = data.bonificacion?.total
+        ? ` NC/REV por 10% contado: $ ${Number(data.bonificacion.total).toLocaleString("es-AR")}.`
+        : data.bonificacion_error
+          ? ` ⚠ El 10% contado falló: ${data.bonificacion_error}`
+          : ""
       toast({
         title: modo === "confirmar" ? "Pago confirmado" : "Pago rechazado",
         description:
           modo === "confirmar"
-            ? data.numero_recibo
-              ? `Recibo ${data.numero_recibo} generado; el pago quedó asentado.`
-              : "El pago quedó asentado."
+            ? (data.numero_recibo
+                ? `Recibo ${data.numero_recibo} generado; el pago quedó asentado.`
+                : "El pago quedó asentado.") + bonifMsg
             : "Quedó registrado como rechazado, sin tocar el saldo.",
       })
       onListo()

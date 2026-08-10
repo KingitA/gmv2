@@ -41,3 +41,10 @@ export const CONDICIONES_PAGO = [
   { nombre: "Contado", valor: "contado", codigo: "E" },
   { nombre: "Anticipado", valor: "anticipado", codigo: "A" },
 ] as const
+
+// Marca en pagos_clientes.observaciones: el operador tildó "10% descuento pago
+// contado" al registrar un cobro que quedó PENDIENTE (con valores). La NC/REV
+// no se emite hasta que el valor se acredita: el endpoint de confirmación
+// detecta la marca, genera la bonificación sobre los comprobantes imputados y
+// la retira (idempotencia). Así el 10% no se saltea en ningún camino.
+export const MARCA_CONTADO = "[10% CONTADO]"

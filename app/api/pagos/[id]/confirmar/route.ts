@@ -5,6 +5,8 @@ import { nowArgentina } from "@/lib/utils"
 import { requireAuth } from "@/lib/auth"
 import { getComisionPorcentaje, calcularComisionMonto } from "@/lib/comisiones/calcular"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
+import { MARCA_CONTADO } from "@/lib/constants"
 
 /**
  * Confirmación / rechazo de un pago pendiente (revisión de pagos).
@@ -77,9 +79,77 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }
       }
 
+      // ── 10% pago contado diferido ──
+      // Si el pago se registró con el tilde del 10% pero quedó pendiente (traía
+      // valores), la intención viajó como MARCA_CONTADO en observaciones.
+      // Acá — recién cuando el valor se acredita — se emite la NC/REV sobre los
+      // comprobantes imputados que aún no tienen la bonificación hecha, y se
+      // retira la marca (idempotente). Centralizado en el endpoint para que
+      // NINGÚN camino de confirmación (Caja del Día, Revisión de Pagos,
+      // Historial) pueda saltearse el descuento.
+      let bonificacion: { total: number } | null = null
+      let bonificacion_error: string | null = null
+      try {
+        const { data: pagoMarca } = await supabase
+          .from("pagos_clientes")
+          .select("id, cliente_id, observaciones")
+          .eq("id", id)
+          .single()
+        if (pagoMarca?.observaciones?.includes(MARCA_CONTADO)) {
+          const { data: imps } = await supabase
+            .from("imputaciones")
+            .select("comprobante_id")
+            .eq("pago_id", id)
+            .eq("estado", "confirmado")
+            .not("comprobante_id", "is", null)
+          const compIds = [...new Set((imps || []).map((i: any) => i.comprobante_id))]
+
+          let bonificables: string[] = []
+          if (compIds.length) {
+            const [{ data: comps }, { data: ncsBonif }] = await Promise.all([
+              supabase
+                .from("comprobantes_venta")
+                .select("id, numero_comprobante, tipo_comprobante")
+                .in("id", compIds)
+                .in("tipo_comprobante", ["FA", "FB", "FC", "PRES"])
+                .is("anulado_en", null),
+              supabase
+                .from("comprobantes_venta")
+                .select("observaciones")
+                .eq("cliente_id", pagoMarca.cliente_id)
+                .in("tipo_comprobante", ["REV", "NCA", "NCB", "NCC"])
+                .ilike("observaciones", "%Bonificación contado%"),
+            ])
+            const obsNcs = (ncsBonif || []).map((n: any) => n.observaciones || "")
+            bonificables = (comps || [])
+              .filter((c: any) => !obsNcs.some((o: string) => o.includes(c.numero_comprobante)))
+              .map((c: any) => c.id)
+          }
+
+          if (bonificables.length) {
+            const r = await generarBonificacionContado(admin, {
+              cliente_id: pagoMarca.cliente_id,
+              comprobante_ids: bonificables,
+              pago_id: id,
+            })
+            bonificacion = { total: r.total_bonificacion }
+          }
+          // Retirar la marca (aunque no hubiera nada para bonificar): idempotencia
+          await supabase
+            .from("pagos_clientes")
+            .update({ observaciones: pagoMarca.observaciones.replace(MARCA_CONTADO, "").trim() || null })
+            .eq("id", id)
+        }
+      } catch (bonifErr: any) {
+        console.error("[pagos/confirmar] bonificación 10% diferida falló:", bonifErr?.message)
+        bonificacion_error = bonifErr?.message || "La bonificación del 10% falló — generala a mano"
+      }
+
       return NextResponse.json({
         success: true,
         numero_recibo: result.numero_recibo,
+        bonificacion,
+        bonificacion_error,
         mensaje: "Pago confirmado e imputado exitosamente",
       })
     } else if (accion === "rechazar") {
