@@ -217,16 +217,18 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             });
         });
 
-        // Add devoluciones pendientes
+        // Devoluciones EN PROCESO: estimativo informativo para facilitar la
+        // cobranza — NO son crédito real (el crédito nace con la NC/REV, que ya
+        // aparece como comprobante). saldo=0 para que ninguna suma las cuente.
         data.devoluciones.forEach((dev) => {
             documentos.push({
                 id: dev.id,
-                tipo: "Devolución Pendiente",
+                tipo: "Devolución en proceso",
                 numero: dev.numero_devolucion,
                 fecha: dev.created_at,
                 pedido: "-",
-                total: dev.monto_total,
-                saldo: dev.monto_total, // Toda la devolución es un crédito pendiente
+                total: -Math.abs(dev.monto_total), // estimado a descontar
+                saldo: 0,
                 estado: dev.estado,
                 es_devolucion: true,
                 es_credito: true,
@@ -544,7 +546,9 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     // (deuda o a favor); "detallada" = todo, con filtro de fechas.
     const documentosVisibles = documentosUnificados.filter((doc) => {
         if (vista === "saldos") {
-            // Comprobantes con saldo + plata a cuenta (con su fecha)
+            // Comprobantes con saldo + plata a cuenta (con su fecha) + devoluciones
+            // en proceso (estimativo visible aunque su saldo real sea 0)
+            if (doc.es_devolucion) return doc.estado !== "anulado";
             return doc.tipo !== "PAGO" && doc.estado !== "anulado" && Math.abs(doc.saldo) > 0.009;
         }
         // En detallada los pagos completos ya se ven — las filas "A CUENTA" duplicarían

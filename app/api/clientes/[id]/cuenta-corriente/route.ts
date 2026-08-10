@@ -128,7 +128,9 @@ export async function GET(
             })
         );
 
-        // 4. Fetch devoluciones (returns)
+        // 4. Devoluciones EN PROCESO (estimativo informativo, no crédito real).
+        // El crédito real nace con la NC/REV (estado 'facturado' → ya está entre
+        // los comprobantes); las rechazadas no interesan.
         const devoluciones = await fetchAllRows(() => supabase
             .from("devoluciones")
             .select(`
@@ -140,6 +142,7 @@ export async function GET(
         observaciones
       `)
             .eq("cliente_id", cliente_id)
+            .in("estado", ["pendiente", "confirmado"])
             .order("created_at", { ascending: false }));
 
         // Comprobantes reales del cliente (la tabla 'cuenta_corriente' singular no

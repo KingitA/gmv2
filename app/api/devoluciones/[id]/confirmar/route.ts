@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase/server"
-import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
@@ -52,42 +51,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }
       }
 
-      // NC administrativa al libro mayor del cliente: la devolución confirmada
-      // acredita su monto en la CC (guard: una sola vez por devolución).
-      let ncPosteada = false
-      if (devolucion?.cliente_id && Number(devolucion.monto_total) > 0) {
-        const admin = createAdminClient()
-        const { data: yaExiste } = await admin
-          .from("cuenta_corriente_clientes")
-          .select("id")
-          .eq("referencia_tipo", "devolucion")
-          .eq("referencia_id", id)
-          .limit(1)
-        if (!yaExiste?.length) {
-          const { error: ccError } = await admin.rpc("cc_postear", {
-            p_cliente_id: devolucion.cliente_id,
-            p_tipo_movimiento: "devolucion",
-            p_debe: 0,
-            p_haber: Number(devolucion.monto_total),
-            p_referencia_tipo: "devolucion",
-            p_referencia_id: id,
-            p_numero_comprobante: devolucion.numero_devolucion ?? null,
-            p_observaciones: `Devolución confirmada${devolucion.numero_devolucion ? ` ${devolucion.numero_devolucion}` : ""}`,
-            p_usuario_id: auth.user?.id ?? null,
-          })
-          if (ccError) {
-            console.error("[devoluciones/confirmar] error posteando CC:", ccError)
-          } else {
-            ncPosteada = true
-          }
-        }
-      }
-
+      // El crédito en cuenta corriente NO se postea acá: nace con el documento
+      // (NC/REV vía generar-nc-reversa, que postea al libro y se imputa a la
+      // factura de origen). Postearlo también al confirmar duplicaba el crédito
+      // del cliente. Mientras la NC no exista, la devolución se muestra como
+      // "estimado a descontar" (informativo) en cta cte / vendedor / chofer.
       return NextResponse.json({
         success: true,
         devolucion,
-        cc_acreditada: ncPosteada,
-        mensaje: `Devolución confirmada y stock actualizado${ncPosteada ? " · crédito acreditado en cuenta corriente" : ""}`,
+        mensaje: "Devolución confirmada y stock actualizado. Generá la NC/Reversa para acreditar el crédito en la cuenta corriente.",
       })
     } else if (accion === "rechazar") {
       const { motivo_rechazo } = body
