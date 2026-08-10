@@ -60,6 +60,27 @@ export async function POST(
       }, { status: 422 })
     }
 
+    // ─── 2b. No se anula el espejo de una anulación ───
+    // Anular la reversa/NC que anuló a otro comprobante resucitaría la deuda
+    // con un nuevo espejo (whack-a-mole infinito: PRES→REV→PRES→...). Si la
+    // anulación fue un error, el camino es generar un comprobante nuevo.
+    const { data: padreAnulado } = await supabase
+      .from('comprobantes_venta')
+      .select('tipo_comprobante, numero_comprobante')
+      .contains('comprobantes_relacionados_ids', [id])
+      .not('anulado_en', 'is', null)
+      .limit(1)
+      .maybeSingle()
+    if (padreAnulado) {
+      return NextResponse.json({
+        error:
+          `Este comprobante es el espejo que anuló al ${padreAnulado.tipo_comprobante} ` +
+          `${padreAnulado.numero_comprobante} — no se puede anular una anulación. ` +
+          `Si necesitás rehabilitar esa deuda, generá un comprobante nuevo.`,
+        error_code: 'ES_ESPEJO_DE_ANULACION',
+      }, { status: 422 })
+    }
+
     if (!original.cliente?.cuit) {
       return NextResponse.json({
         error: 'El cliente no tiene CUIT registrado. No se puede generar el comprobante inverso.',

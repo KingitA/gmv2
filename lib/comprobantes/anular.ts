@@ -35,8 +35,13 @@ export const CC_MOVIMIENTO: Record<string, 'haber' | 'debe' | null> = {
   NCB:  'haber',
   NDA:  'debe',    // débito para el cliente (aumenta deuda)
   NDB:  'debe',
-  REV:  null,      // reversa de presupuesto — sin CC
-  PRES: null,      // presupuesto — sin CC
+  // PRES/REV SÍ postean: los presupuestos van al libro mayor desde el backfill
+  // 20260617 — su anulación debe contra-asentar igual que las NC fiscales.
+  // (Con null, anular un PRES impago dejaba la deuda fantasma en el saldo real
+  // para siempre.) La dirección real la decide el signo de total_factura en el
+  // route; este mapa solo habilita el posteo.
+  REV:  'haber',   // espejo de PRES: reduce deuda
+  PRES: 'debe',    // espejo de REV: aumenta deuda
 }
 
 export function formatearNumeroComprobante(puntoVenta: string, numero: number): string {
