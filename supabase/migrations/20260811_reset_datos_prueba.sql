@@ -47,6 +47,11 @@ CREATE TEMP TABLE _cheques_de_pagos AS
   SELECT cheque_id FROM pago_deposito_items WHERE cheque_id IS NOT NULL;
 
 -- ── 1. Circuito de pagos (todo es prueba) ──
+-- Rendiciones primero: referencian pagos por FK. (Tienen RLS: el usuario
+-- readonly de la auditoría las veía vacías, pero acá corre como admin.)
+DELETE FROM rendicion_items;
+DELETE FROM rendiciones;
+
 DELETE FROM imputaciones
 WHERE pago_id IS NOT NULL
    OR comprobante_id IN (SELECT id FROM _prueba_comprobantes)
