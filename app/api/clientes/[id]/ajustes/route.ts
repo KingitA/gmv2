@@ -166,6 +166,33 @@ export async function DELETE(
     })
     if (revErr) throw new Error(revErr.message)
 
+    // Si el ajuste había SALDADO un comprobante (aplicar_saldo, marca
+    // [saldo:<id>]), restaurar ese saldo — igual que hace cobranza_anular v4.
+    // Sin esto, eliminar el ajuste dejaba el comprobante saldado de más
+    // (descuadre libro vs documentos del tamaño del ajuste).
+    const saldoMatch = (mov.observaciones || "").match(/\[saldo:([0-9a-fA-F-]{36})\]/)
+    if (saldoMatch && monto < 0) {
+      const { data: comp } = await admin
+        .from("comprobantes_venta")
+        .select("id, saldo_pendiente, total_factura")
+        .eq("id", saldoMatch[1])
+        .single()
+      if (comp) {
+        const totalAbs = Math.abs(Number(comp.total_factura || 0))
+        const nuevoSaldo = Math.min(
+          totalAbs,
+          Math.round((Number(comp.saldo_pendiente || 0) + Math.abs(monto)) * 100) / 100
+        )
+        await admin
+          .from("comprobantes_venta")
+          .update({
+            saldo_pendiente: nuevoSaldo,
+            estado_pago: nuevoSaldo <= 0 ? "pagado" : nuevoSaldo >= totalAbs ? "pendiente" : "parcial",
+          })
+          .eq("id", comp.id)
+      }
+    }
+
     return NextResponse.json({
       success: true,
       mensaje: `Ajuste revertido con contra-asiento ($ ${Math.abs(monto)})`,

@@ -66,11 +66,17 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
         // Un comprobante anulado no se cobra (su NC inversa lo cancela)
         .is("anulado_en", null)
         .order("fecha", { ascending: true }),
+      // Solo bonificaciones VIVAS: una REV/NC anulada (ej. por anulación del
+      // pago) no cuenta como "descuento ya hecho" — mismo criterio que el guard
+      // del servidor (filtrarYaBonificados). Sin este filtro, después de anular
+      // un cobro con 10% el selector estimaba $0 de bonificación.
       supabase
         .from("comprobantes_venta")
         .select("observaciones")
         .eq("cliente_id", clienteId)
         .in("tipo_comprobante", ["REV", "NCA", "NCB", "NCC"])
+        .is("anulado_en", null)
+        .neq("estado_pago", "anulado")
         .ilike("observaciones", "%Bonificación contado%"),
       supabase
         .from("pedidos")
