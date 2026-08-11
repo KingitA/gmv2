@@ -30,7 +30,7 @@ export async function POST(
     const supabase = await createClient()
     const { id: cliente_id } = await params
     const body = await request.json()
-    const { comprobante_id, monto, motivo, aplicar_saldo } = body
+    const { comprobante_id, monto, motivo, aplicar_saldo, pago_id } = body
 
     if (!monto || !motivo) {
       return NextResponse.json({ error: "Faltan datos requeridos (monto, motivo)" }, { status: 400 })
@@ -51,6 +51,11 @@ export async function POST(
       }
       if (comp) concepto += ` (ref. ${comp.tipo_comprobante} ${comp.numero_comprobante})`
     }
+    // Vínculo estructural para que la ANULACIÓN del pago revierta también este
+    // ajuste (cobranza_anular busca las marcas): [pago:<id>] identifica el pago
+    // que lo originó; [saldo:<id>] marca que además saldó ese comprobante.
+    if (pago_id) concepto += ` [pago:${pago_id}]`
+    if (aplicar_saldo && comprobante_id && Number(monto) < 0) concepto += ` [saldo:${comprobante_id}]`
 
     const { data, error } = await supabase.rpc("cc_ajuste_manual", {
       p_cliente_id: cliente_id,

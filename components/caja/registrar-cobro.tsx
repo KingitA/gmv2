@@ -420,6 +420,8 @@ export function RegistrarCobro({
               // La falta cae en el último comprobante imputado: se salda también ahí
               comprobante_id: imputaciones[imputaciones.length - 1]?.comprobante_id,
               aplicar_saldo: true,
+              // Vínculo al pago: si el pago se anula, el ajuste se revierte con él
+              pago_id: pagoId,
             }),
           })
           const ajData = await ajRes.json()
