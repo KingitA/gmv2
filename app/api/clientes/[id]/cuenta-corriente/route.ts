@@ -111,7 +111,8 @@ export async function GET(
             id,
             comprobante_id,
             monto_imputado,
-            tipo_comprobante
+            tipo_comprobante,
+            estado
           `)
                     .eq("pago_id", pago.id);
 

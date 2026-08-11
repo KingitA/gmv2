@@ -96,10 +96,12 @@ export async function POST(
 }
 
 /**
- * DELETE — eliminar un ajuste manual del libro mayor.
- * Solo borra filas tipo_movimiento='ajuste' + referencia_tipo='ajuste_manual'
- * del cliente (los ajustes manuales no tocan comprobantes ni kardex, así que
- * eliminarlos solo recalcula v_saldo_clientes — sin efectos colaterales).
+ * DELETE — anular un ajuste manual del libro mayor.
+ * El libro es de doble entrada: NO se borran filas (se perdería el rastro en
+ * el extracto). En su lugar se postea el CONTRA-ASIENTO exacto vía
+ * cc_ajuste_manual, con la marca [reversa:<id>] para que el mismo ajuste no
+ * pueda revertirse dos veces. El efecto sobre v_saldo_clientes es idéntico
+ * al borrado, pero auditable.
  * Body: { movimiento_id }
  */
 export async function DELETE(
@@ -131,16 +133,37 @@ export async function DELETE(
         { status: 400 }
       )
     }
-
-    const { error: delErr } = await admin
+    const marcaReversa = `[reversa:${movimiento_id}]`
+    if ((mov.observaciones || "").includes("[reversa:")) {
+      return NextResponse.json(
+        { error: "Este movimiento ya es la reversa de otro ajuste — no se revierte una reversa" },
+        { status: 400 }
+      )
+    }
+    const { data: yaRevertido } = await admin
       .from("cuenta_corriente_clientes")
-      .delete()
-      .eq("id", movimiento_id)
-    if (delErr) throw delErr
+      .select("id")
+      .eq("cliente_id", cliente_id)
+      .ilike("observaciones", `%${marcaReversa}%`)
+      .limit(1)
+    if (yaRevertido?.length) {
+      return NextResponse.json({ error: "Este ajuste ya fue eliminado (tiene su reversa)" }, { status: 400 })
+    }
+
+    // Contra-asiento: si el ajuste era débito, la reversa es crédito y viceversa
+    const monto = Math.round((Number(mov.debe || 0) - Number(mov.haber || 0)) * 100) / 100
+    const { error: revErr } = await admin.rpc("cc_ajuste_manual", {
+      p_cliente_id: cliente_id,
+      p_tipo: monto > 0 ? "credito" : "debito",
+      p_monto: Math.abs(monto),
+      p_concepto: `Eliminación de ajuste — ${(mov.observaciones || "sin detalle").slice(0, 120)} ${marcaReversa}`,
+      p_usuario_id: auth.user.id,
+    })
+    if (revErr) throw new Error(revErr.message)
 
     return NextResponse.json({
       success: true,
-      mensaje: `Ajuste eliminado ($ ${Number(mov.debe || 0) - Number(mov.haber || 0) >= 0 ? mov.debe : mov.haber})`,
+      mensaje: `Ajuste revertido con contra-asiento ($ ${Math.abs(monto)})`,
     })
   } catch (error: any) {
     console.error("[clientes/ajustes] DELETE error:", error)

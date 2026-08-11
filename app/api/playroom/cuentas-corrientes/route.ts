@@ -3,17 +3,21 @@ import { NextResponse } from 'next/server'
 import { todayArgentina } from '@/lib/utils'
 import { fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 
-const TIPOS_VENTA = ['FA', 'FB', 'FC']
+// Débitos cobrables: facturas, presupuestos y notas de débito. Antes solo
+// FA/FB/FC — el aging ignoraba PRES/ND y sobreestimaba o subestimaba la deuda
+// vs. el libro mayor y la pantalla de cuenta corriente.
+const TIPOS_DEBITO = ['FA', 'FB', 'FC', 'PRES', 'ND', 'NDA', 'NDB', 'NDC']
 
 export async function GET() {
   try {
     const supabase = createAdminClient()
 
-    // Comprobantes con saldo pendiente (paginado)
+    // Comprobantes con saldo pendiente (paginado). Excluye anulados.
     const comprobantes = await fetchAllRows(() => supabase
       .from('comprobantes_venta')
       .select('id, cliente_id, pedido_id, tipo_comprobante, numero_comprobante, punto_venta, fecha, fecha_vencimiento, total_factura, saldo_pendiente, estado_pago')
-      .in('tipo_comprobante', TIPOS_VENTA)
+      .in('tipo_comprobante', TIPOS_DEBITO)
+      .is('anulado_en', null)
       .gt('saldo_pendiente', 0))
 
     if (!comprobantes.length) return NextResponse.json({ rows: [], summary: { total: 0, t0_30: 0, t31_60: 0, t61_90: 0, t90_mas: 0 } })

@@ -29,6 +29,7 @@ import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
+import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 
 const DESCUENTO_CONTADO_PCT = 10
 const IVA_PCT = 0.21
@@ -62,6 +63,8 @@ interface ComprobanteGenerado {
 export interface ResultadoBonificacion {
   total_bonificacion: number
   comprobantes_generados: ComprobanteGenerado[]
+  /** Asientos de libro mayor que no entraron (con reintento agotado) */
+  advertencias?: string[]
 }
 
 export interface ParamsBonificacion {
@@ -177,6 +180,7 @@ async function filtrarYaBonificados(
 
 async function crearComprobante(
   supabase: SupabaseClient,
+  avisosLibro: string[],
   params: {
     tipo: string
     numero: string
@@ -220,7 +224,8 @@ async function crearComprobante(
 
   // Libro mayor: la NC/REV de bonificación acredita al cliente (haber).
   // Junto al pago (haber) cancela la factura (debe): FA − pago − NC = 0.
-  const { error: ccError } = await supabase.rpc("cc_postear", {
+  // Con reintento + advertencia visible si falla (nunca silencioso).
+  const ccAviso = await postearLibroConAviso(supabase, {
     p_cliente_id:         params.cliente_id,
     p_tipo_movimiento:    "nota_credito",
     p_debe:               0,
@@ -230,8 +235,8 @@ async function crearComprobante(
     p_numero_comprobante: params.numero,
     p_observaciones:      params.observaciones || "Bonificación pago contado",
     p_usuario_id:         null,
-  })
-  if (ccError) console.error("[cc_postear] bonificación", data.id, ccError.message)
+  }, `bonificación ${params.tipo} ${params.numero}`)
+  if (ccAviso) avisosLibro.push(ccAviso)
 
   return data
 }
@@ -450,6 +455,7 @@ export async function generarBonificacionContado(
   const facturasC: ComprobanteInput[] = comprobantes.filter(c => c.tipo_comprobante === "FC")
 
   const comprobantesGenerados: ComprobanteGenerado[] = []
+  const avisosLibro: string[] = []
   let totalBonificacion = 0
 
   // ─── PRESUPUESTOS → REV (documento interno: PV 0001, sin CAE, sin QR) ──────
@@ -464,7 +470,7 @@ export async function generarBonificacionContado(
 
     const totalNeto = r2(lineas.reduce((s, l) => s + l.precio_neto, 0))
 
-    const { id } = await crearComprobante(supabase, {
+    const { id } = await crearComprobante(supabase, avisosLibro, {
       tipo: "REV",
       numero,
       puntoVenta,
@@ -673,7 +679,7 @@ export async function generarBonificacionContado(
 
     let id: string
     try {
-      const res = await crearComprobante(supabase, {
+      const res = await crearComprobante(supabase, avisosLibro, {
         tipo: tipoNC,
         numero,
         puntoVenta: puntoVentaFiscal,
@@ -738,6 +744,7 @@ export async function generarBonificacionContado(
   return {
     total_bonificacion: r2(totalBonificacion),
     comprobantes_generados: comprobantesGenerados,
+    ...(avisosLibro.length ? { advertencias: avisosLibro } : {}),
   }
 }
 

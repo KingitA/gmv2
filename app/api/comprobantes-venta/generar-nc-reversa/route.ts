@@ -13,6 +13,7 @@ import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
 import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
+import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 
 export async function POST(request: Request) {
   try {
@@ -456,8 +457,8 @@ export async function POST(request: Request) {
       .eq("punto_venta", numeracion.punto_venta)
 
     // Libro mayor: la NC/Reversa acredita al cliente (haber). Fuente única del
-    // saldo (v_saldo_clientes); reemplaza el insert legacy a cuenta_corriente_ajustes.
-    const { error: ccError } = await supabase.rpc('cc_postear', {
+    // saldo (v_saldo_clientes); si falla, la advertencia viaja en la respuesta.
+    const ccAviso = await postearLibroConAviso(supabase, {
       p_cliente_id:         devolucion.cliente_id,
       p_tipo_movimiento:    'nota_credito',
       p_debe:               0,
@@ -467,8 +468,7 @@ export async function POST(request: Request) {
       p_numero_comprobante: numeroComprobante,
       p_observaciones:      `${tipoFinal} ${numeroComprobante} — Devolución${motivo_ajuste ? ': ' + motivo_ajuste : ''}`,
       p_usuario_id:         auth.user.id,
-    })
-    if (ccError) console.error('[cc_postear] NC/REV', comprobante.id, ccError.message)
+    }, `${tipoFinal} ${numeroComprobante}`)
 
     // Imputación automática NC↔FA (Fase A3): aplicar el crédito de la NC
     // contra los comprobantes de origen de la devolución hasta agotarlo.
@@ -633,6 +633,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      ...(ccAviso ? { advertencia_libro_mayor: ccAviso } : {}),
       comprobante: {
         id: comprobante.id,
         tipo: tipoFinal,

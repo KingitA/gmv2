@@ -14,6 +14,7 @@ import { TASA_PERCEPCION_IVA } from '@/lib/comprobantes/calcular-percepciones'
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from '@/lib/arca/registro-cae'
 import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
+import { postearLibroConAviso } from '@/lib/cuenta-corriente/postear-libro'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -332,6 +333,7 @@ export async function POST(
     // cobrables en los selectores de pago. cc_imputar_credito los deja en 0 /
     // pagado sin tocar el libro mayor (ya posteado). No-fatal: si falla, la
     // anulación fiscal ya está hecha y el par se puede imputar a mano.
+    const advertencias: string[] = []
     try {
       const { error: impErr } = await supabase.rpc('cc_imputar_credito', {
         p_credito_id: inverso.id,
@@ -339,9 +341,13 @@ export async function POST(
         p_monto: null,
         p_usuario_id: auth.user.id,
       })
-      if (impErr) console.error('[anular] cc_imputar_credito falló:', impErr.message)
+      if (impErr) {
+        console.error('[anular] cc_imputar_credito falló:', impErr.message)
+        advertencias.push(`La cancelación de saldos ${numeroComprobante} ↔ ${original.numero_comprobante} falló (${impErr.message}): imputá el par a mano desde la cuenta corriente.`)
+      }
     } catch (e: any) {
       console.error('[anular] cc_imputar_credito:', e?.message)
+      advertencias.push(`La cancelación de saldos ${numeroComprobante} ↔ ${original.numero_comprobante} falló: imputá el par a mano desde la cuenta corriente.`)
     }
 
     // El remito del comprobante anulado también se anula. Su PDF no se toca
@@ -388,7 +394,7 @@ export async function POST(
     const ccMovimiento = CC_MOVIMIENTO[tipoInverso]
     if (ccMovimiento) {
       const tf = Number(totalFactura)
-      const { error: ccError } = await supabase.rpc('cc_postear', {
+      const ccAviso = await postearLibroConAviso(supabase, {
         p_cliente_id:         original.cliente_id,
         p_tipo_movimiento:    tipoInverso.startsWith('NC') || tipoInverso === 'REV' ? 'nota_credito' : 'nota_debito',
         p_debe:               Math.max(tf, 0),
@@ -398,8 +404,8 @@ export async function POST(
         p_numero_comprobante: numeroComprobante,
         p_observaciones:      `Anulación ${tipoInverso} ${numeroComprobante} → ${original.numero_comprobante}`,
         p_usuario_id:         auth.user.id,
-      })
-      if (ccError) console.error('[cc_postear] anulación', inverso.id, ccError.message)
+      }, `anulación ${tipoInverso} ${numeroComprobante}`)
+      if (ccAviso) advertencias.push(ccAviso)
     }
 
     // ─── 13. Comisiones negativas si el original tenía comisión ───
@@ -504,6 +510,7 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
+      ...(advertencias.length ? { advertencias } : {}),
       inverso: {
         id:              inverso.id,
         tipo_comprobante: tipoInverso,

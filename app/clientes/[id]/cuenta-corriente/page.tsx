@@ -30,6 +30,7 @@ import { useToast } from "@/hooks/use-toast";
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { FechaInput } from "@/components/finanzas/fecha-input";
+import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible";
 
 const ArrowLeftIcon = () => (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -84,6 +85,7 @@ interface Imputacion {
     comprobante_id: string;
     monto_imputado: number;
     tipo_comprobante: string;
+    estado?: string | null;
 }
 
 interface Pago {
@@ -252,20 +254,18 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             });
 
             // Plata a cuenta: lo del pago que no se aplicó a ningún comprobante
-            // (entrega a cuenta o sobrante). El "pozo" del pago = plata entregada
-            // + créditos aplicados (NC/REV imputadas al pago SUMAN, no restan);
-            // lo consumido = imputaciones a facturas/presupuestos (débitos).
+            // (entrega a cuenta o sobrante). Fórmula única compartida con la
+            // Caja del Día: lib/cuenta-corriente/pago-disponible.ts.
             if (pago.estado === "confirmado") {
-                const TIPOS_CRED = ["NC", "NCA", "NCB", "NCC", "REV"];
                 const tipoDe = new Map(data.comprobantes.map((c) => [c.id, c.tipo_comprobante]));
-                let pozo = Number(pago.monto);
-                let consumido = 0;
-                for (const i of pago.imputaciones || []) {
-                    const monto = Math.abs(Number(i.monto_imputado) || 0);
-                    if (TIPOS_CRED.includes(tipoDe.get(i.comprobante_id) ?? "")) pozo += monto;
-                    else consumido += monto;
-                }
-                const disponible = Math.round((pozo - consumido) * 100) / 100;
+                const disponible = disponibleDePago(
+                    pago.monto,
+                    (pago.imputaciones || []).map((i) => ({
+                        monto_imputado: i.monto_imputado,
+                        estado: i.estado,
+                        tipo_comprobante_destino: tipoDe.get(i.comprobante_id) ?? null,
+                    })),
+                );
                 if (disponible > 0.009) {
                     documentos.push({
                         id: `acuenta-${pago.id}`,
@@ -499,6 +499,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         debito: "Ajuste (débito)",
         credito: "Ajuste (crédito)",
         devolucion: "Devolución",
+        presupuesto: "Presupuesto",
     };
     // Con el tipo real del comprobante referenciado, la etiqueta es exacta
     // (la REV interna no es lo mismo que una NC fiscal)
@@ -517,10 +518,16 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         NDC: "Nota de débito",
         REM: "Remito",
     };
-    const etiquetaMov = (m: MovimientoCC) =>
-        (m.comprobante_tipo && ETIQUETA_TIPO[m.comprobante_tipo]) ??
-        ETIQUETA_MOV[m.tipo_movimiento] ??
-        (m.tipo_movimiento || "Movimiento");
+    const etiquetaMov = (m: MovimientoCC) => {
+        // La reversa de un pago anulado se postea como tipo 'ajuste' pero NO es
+        // un ajuste manual: rotularla por su referencia real.
+        if (m.referencia_tipo === "pago_anulacion") return "Anulación de pago";
+        return (
+            (m.comprobante_tipo && ETIQUETA_TIPO[m.comprobante_tipo]) ??
+            ETIQUETA_MOV[m.tipo_movimiento] ??
+            (m.tipo_movimiento || "Movimiento")
+        );
+    };
     // Filtro por fecha (vista detallada). El saldo acumulado se calcula sobre
     // TODOS los movimientos (si no, arrancaría de cero en la fecha filtrada).
     const enRango = (fecha: string) => {

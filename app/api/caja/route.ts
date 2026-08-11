@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from "@/lib/utils"
+import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 
 // ─── La Caja del Día — Etapa 1 (lectura) ────────────────────────────────────
 // Feed unificado del libro diario de plata para /caja. Combina en TS (sin SQL
@@ -223,9 +224,12 @@ export async function GET(request: NextRequest) {
         : [],
     ])
     const pagoKardexDe = new Map(pagosKardexArr.map((p) => [p.id, p]))
-    const imputadoPorPago = new Map<string, number>()
+    // Imputaciones vivas por pago — el disponible se calcula con la fórmula
+    // única compartida con la cta cte (lib/cuenta-corriente/pago-disponible)
+    const impsPorPago = new Map<string, any[]>()
     for (const i of imputacionesArr) {
-      imputadoPorPago.set(i.pago_id, (imputadoPorPago.get(i.pago_id) ?? 0) + num(i.monto_imputado))
+      if (!impsPorPago.has(i.pago_id)) impsPorPago.set(i.pago_id, [])
+      impsPorPago.get(i.pago_id)!.push(i)
     }
 
     const clienteNombre = new Map(clientesArr.map((c) => [c.id, c.nombre]))
@@ -287,9 +291,7 @@ export async function GET(request: NextRequest) {
           base.entrada = monto
           // ¿Quedó plata del pago sin aplicar a comprobantes? → chip "Imputar".
           const pagoK = k.pago_id ? pagoKardexDe.get(k.pago_id) : null
-          const disponible = pagoK
-            ? Math.max(0, num(pagoK.monto) - (imputadoPorPago.get(k.pago_id) ?? 0))
-            : 0
+          const disponible = pagoK ? disponibleDePago(pagoK.monto, impsPorPago.get(k.pago_id)) : 0
           if (pagoK && disponible > 0.01 && (k.cliente_id || pagoK.cliente_id)) {
             base.imputable = true
             base.imputacion_disponible = disponible
@@ -570,6 +572,15 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    // ── Control diario: libro mayor vs documentos (v_cc_reconciliacion) ──
+    // Cualquier cliente con diferencia real es un descuadre a investigar; la
+    // caja lo muestra como alerta para que no pase un día sin mirarse.
+    let reconciliacionDescuadres = 0
+    try {
+      const { data: recon } = await supabase.from("v_cc_reconciliacion").select("diferencia")
+      reconciliacionDescuadres = (recon || []).filter((r: any) => Math.abs(num(r.diferencia)) > 0.01).length
+    } catch { /* la vista puede no existir aún */ }
+
     // ── Armado final ──
     const delDia = [...filas, ...filasPend].sort((a, b) => (a.hora ?? "").localeCompare(b.hora ?? ""))
     const totales = {
@@ -593,6 +604,7 @@ export async function GET(request: NextRequest) {
         transferencias_por_confirmar: pendPanel.transferencias,
         rendiciones_en_camino: filasRend.length,
       },
+      reconciliacion_descuadres: reconciliacionDescuadres,
     })
   } catch (error: any) {
     console.error("[caja] error:", error)

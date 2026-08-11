@@ -11,6 +11,7 @@ import { calcularPercepciones } from "@/lib/comprobantes/calcular-percepciones"
 import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
+import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 
 /**
  * Genera Notas de Débito (NDA/NDB) para ventas.
@@ -308,8 +309,8 @@ export async function POST(request: Request) {
       .eq('punto_venta', puntoVenta)
 
     // Libro mayor: la Nota de Débito incrementa la deuda del cliente (debe).
-    // Fuente única del saldo (v_saldo_clientes); reemplaza cuenta_corriente_ajustes.
-    const { error: ccError } = await supabase.rpc('cc_postear', {
+    // Fuente única del saldo (v_saldo_clientes); si falla, advertencia visible.
+    const ccAviso = await postearLibroConAviso(supabase, {
       p_cliente_id:         cliente_id,
       p_tipo_movimiento:    'nota_debito',
       p_debe:               totalComprobante,
@@ -319,8 +320,7 @@ export async function POST(request: Request) {
       p_numero_comprobante: numeroComprobante,
       p_observaciones:      `${tipoFinal} ${numeroComprobante} — ${concepto}`,
       p_usuario_id:         auth?.user?.id ?? null,
-    })
-    if (ccError) console.error('[cc_postear] ND', comprobante.id, ccError.message)
+    }, `${tipoFinal} ${numeroComprobante}`)
 
     // ─── Generar PDF con QR y subirlo al bucket ───
     try {
@@ -390,6 +390,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      ...(ccAviso ? { advertencia_libro_mayor: ccAviso } : {}),
       comprobante: {
         id:              comprobante.id,
         tipo:            tipoFinal,

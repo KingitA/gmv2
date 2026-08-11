@@ -427,6 +427,13 @@ export default function CajaDelDiaPage() {
           </div>
         )}
 
+        {(feed as any)?.reconciliacion_descuadres > 0 && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            ⚠ Hay {(feed as any).reconciliacion_descuadres} cliente(s) con el libro mayor desalineado de sus
+            comprobantes. Revisá <code className="font-mono">/api/finanzas/reconciliacion</code> antes del cierre.
+          </div>
+        )}
+
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
           {/* ── Lista de movimientos ── */}
           <div className="min-w-0 flex-1">

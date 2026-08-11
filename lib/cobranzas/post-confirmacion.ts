@@ -113,6 +113,7 @@ export async function procesarPostConfirmacion(
           pago_id: pagoId,
         })
         if (r.total_bonificacion > 0) result.bonificacion = { total: r.total_bonificacion }
+        if (r.advertencias?.length) result.bonificacion_error = r.advertencias.join(" · ")
       }
       // Retirar la marca (aunque no hubiera nada para bonificar): idempotencia
       await supabase

@@ -20,6 +20,7 @@ import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeH
 import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { generarRemitosParaPedido, type ResultadoRemitos } from "@/lib/remitos/generar-remito"
+import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 
 type CondicionSegmento = {
   lista_precio_id: string | null
@@ -608,6 +609,11 @@ export async function POST(request: Request) {
       remitos.errores.push(remErr.message)
     }
 
+    // Asientos de libro mayor que no entraron: advertencia visible, nunca silenciosa
+    const advertenciasLibro = comprobantesGenerados
+      .map((c: any) => c.cc_aviso)
+      .filter(Boolean)
+
     return NextResponse.json({
       success: true,
       comprobantes: comprobantesGenerados,
@@ -615,6 +621,7 @@ export async function POST(request: Request) {
       total_pedido: round2(totalPedido),
       bonificacion_contado: bonificacion,
       remitos,
+      ...(advertenciasLibro.length ? { advertencias_libro_mayor: advertenciasLibro } : {}),
     })
   } catch (error: any) {
     console.error("[Generar Comprobantes] Error:", error)
@@ -875,8 +882,8 @@ async function generarComprobante(
   // ─── Libro mayor (cuenta corriente del cliente) ───
   // El comprobante incrementa la deuda del cliente: debe = total_factura.
   // Fuente única del saldo (v_saldo_clientes). Si falla, no se aborta el
-  // comprobante (ya tiene CAE): la reconciliación detecta el faltante.
-  const { error: ccError } = await supabase.rpc('cc_postear', {
+  // comprobante (ya tiene CAE) pero la advertencia viaja en la respuesta.
+  const ccAviso = await postearLibroConAviso(supabase, {
     p_cliente_id:         pedido.cliente_id,
     p_tipo_movimiento:    tipoComprobante === 'PRES' ? 'presupuesto' : 'factura',
     p_debe:               totalFactura,
@@ -886,8 +893,7 @@ async function generarComprobante(
     p_numero_comprobante: numeroComprobante,
     p_observaciones:      `${tipoComprobante} ${numeroComprobante}`,
     p_usuario_id:         creadoPor ?? null,
-  })
-  if (ccError) console.error('[cc_postear] comprobante', comprobante.id, ccError.message)
+  }, `${tipoComprobante} ${numeroComprobante}`)
 
   // ─── Stock ───
   for (const item of items) {
@@ -925,5 +931,6 @@ async function generarComprobante(
     percepcion_iibb:   comprobante.percepcion_iibb ?? 0,
     cae:               cae ?? null,
     vencimiento_cae:   vencimientoCae ?? null,
+    cc_aviso:          ccAviso,
   }
 }
