@@ -555,7 +555,7 @@ export function RegistrarCobro({
           <Plus className="h-4 w-4" /> Otro método
         </button>
         <button
-          onClick={registrar}
+          onClick={() => registrar()}
           disabled={guardando}
           className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
         >
