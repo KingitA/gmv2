@@ -127,16 +127,6 @@ interface CuentaCorrienteData {
     movimientos?: MovimientoCC[];
 }
 
-interface PagoFormData {
-    tipo: 'efectivo' | 'cheque' | 'transferencia';
-    monto: number;
-    detalles: {
-        numero_cheque?: string;
-        banco?: string;
-        fecha_cheque?: string;
-        referencia?: string;
-    };
-}
 
 interface DocumentoUnificado {
     id: string;
@@ -163,14 +153,9 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     const [fechaHasta, setFechaHasta] = useState("");
 
     // Modal states
-    const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
     const [selectedDocumentos, setSelectedDocumentos] = useState<string[]>([]);
-    const [pagosForm, setPagosForm] = useState<PagoFormData[]>([]);
-    const [observaciones, setObservaciones] = useState("");
 
-    // Pago contado 10%
-    const [aplicarContado, setAplicarContado] = useState(false);
 
     // Adjustment form
     const [selectedComprobanteForAdjustment, setSelectedComprobanteForAdjustment] = useState<string>("");
@@ -295,108 +280,6 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         );
     };
 
-    /** Bonificación contado 10%: la NC es proporcional a TODOS los componentes
-     *  (neto + IVA + percepciones) → exactamente 10% del total facturado. */
-    const calcularBonificacionContado = (): number => {
-        if (!data) return 0;
-        return selectedDocumentos.reduce((sum, id) => {
-            const comp = data.comprobantes.find(c => c.id === id);
-            if (!comp) return sum;
-            if (["PRES", "FA", "FB", "FC"].includes(comp.tipo_comprobante)) {
-                return sum + Math.abs(comp.total_factura) * 0.1;
-            }
-            return sum;
-        }, 0);
-    };
-
-    const handleAddPagoForm = () => {
-        setPagosForm([...pagosForm, { tipo: 'efectivo', monto: 0, detalles: {} }]);
-    };
-
-    const handleRemovePagoForm = (index: number) => {
-        setPagosForm(pagosForm.filter((_, i) => i !== index));
-    };
-
-    const handleSubmitPayment = async () => {
-        if (selectedDocumentos.length === 0) {
-            toast({ variant: "destructive", title: "Error", description: "Selecciona al menos un comprobante" });
-            return;
-        }
-
-        const totalPago = pagosForm.reduce((sum, p) => sum + Number(p.monto), 0);
-        if (totalPago <= 0) {
-            toast({ variant: "destructive", title: "Error", description: "Ingresa un monto válido" });
-            return;
-        }
-
-        try {
-            const allDocs = getDocumentosUnificados();
-            const response = await fetch('/api/pagos', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    cliente_id: clienteId,
-                    monto_total: totalPago,
-                    pagos: pagosForm,
-                    documentos_imputados: selectedDocumentos.map(id => {
-                        const doc = allDocs.find(d => d.id === id);
-                        return {
-                            id,
-                            tipo: doc?.es_devolucion ? 'devolucion' : 'factura',
-                            monto: doc?.saldo || 0
-                        };
-                    }),
-                    observaciones
-                }),
-            });
-
-            if (!response.ok) throw new Error('Error al registrar pago');
-
-            const pagoResult = await response.json();
-
-            // Generar bonificación pago contado 10% si corresponde
-            if (aplicarContado && selectedDocumentos.length > 0) {
-                const comprobanteIds = selectedDocumentos.filter(id => {
-                    const doc = allDocs.find(d => d.id === id);
-                    return doc && !doc.es_devolucion && doc.tipo !== "PAGO";
-                });
-
-                if (comprobanteIds.length > 0) {
-                    try {
-                        const bonifRes = await fetch('/api/pagos/generar-bonificacion', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                cliente_id: clienteId,
-                                comprobante_ids: comprobanteIds,
-                                pago_id: pagoResult?.pago?.id || pagoResult?.id,
-                            }),
-                        });
-                        const bonifData = await bonifRes.json();
-                        if (bonifRes.ok && bonifData.total_bonificacion > 0) {
-                            toast({
-                                title: "Bonificación contado generada",
-                                description: `NC/REV por $${Math.round(bonifData.total_bonificacion).toLocaleString('es-AR')} generados automáticamente`,
-                            });
-                        }
-                    } catch {
-                        // Si falla la bonificación, no bloqueamos el pago ya registrado
-                        toast({ variant: "destructive", title: "Atención", description: "Pago registrado, pero hubo un error al generar la bonificación contado. Verificar manualmente." });
-                    }
-                }
-            }
-
-            toast({ title: "Éxito", description: "Pago registrado correctamente" });
-            setShowPaymentModal(false);
-            setSelectedDocumentos([]);
-            setPagosForm([]);
-            setObservaciones("");
-            setAplicarContado(false);
-            fetchData();
-        } catch (error) {
-            toast({ variant: "destructive", title: "Error", description: "No se pudo registrar el pago" });
-        }
-    };
 
     const handleSubmitAdjustment = async () => {
         if (!selectedComprobanteForAdjustment || !adjustmentMonto || !adjustmentMotivo) {
@@ -841,110 +724,6 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                 </Card>
             </main>
 
-            {/* Payment Modal */}
-            <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>Registrar Pago</DialogTitle>
-                        <DialogDescription>
-                            Total seleccionado: ${totalSeleccionado.toLocaleString('es-AR')}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                        <div>
-                            <Label>Formas de Pago</Label>
-                            {pagosForm.map((pago, index) => (
-                                <div key={index} className="border rounded p-3 mt-2 space-y-2">
-                                    <div className="flex gap-2">
-                                        <Select value={pago.tipo} onValueChange={(v: any) => {
-                                            const newForms = [...pagosForm];
-                                            newForms[index].tipo = v;
-                                            setPagosForm(newForms);
-                                        }}>
-                                            <SelectTrigger className="w-40">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="efectivo">Efectivo</SelectItem>
-                                                <SelectItem value="cheque">Cheque</SelectItem>
-                                                <SelectItem value="transferencia">Transferencia</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <Input
-                                            type="number"
-                                            placeholder="Monto"
-                                            value={pago.monto}
-                                            onChange={(e) => {
-                                                const newForms = [...pagosForm];
-                                                newForms[index].monto = parseFloat(e.target.value) || 0;
-                                                setPagosForm(newForms);
-                                            }}
-                                        />
-                                        <Button variant="ghost" size="sm" onClick={() => handleRemovePagoForm(index)}>×</Button>
-                                    </div>
-                                    {pago.tipo === 'cheque' && (
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <Input placeholder="N° Cheque" onChange={(e) => {
-                                                const newForms = [...pagosForm];
-                                                newForms[index].detalles.numero_cheque = e.target.value;
-                                                setPagosForm(newForms);
-                                            }} />
-                                            <Input placeholder="Banco" onChange={(e) => {
-                                                const newForms = [...pagosForm];
-                                                newForms[index].detalles.banco = e.target.value;
-                                                setPagosForm(newForms);
-                                            }} />
-                                        </div>
-                                    )}
-                                    {pago.tipo === 'transferencia' && (
-                                        <Input placeholder="Referencia" onChange={(e) => {
-                                            const newForms = [...pagosForm];
-                                            newForms[index].detalles.referencia = e.target.value;
-                                            setPagosForm(newForms);
-                                        }} />
-                                    )}
-                                </div>
-                            ))}
-                            <Button variant="outline" size="sm" onClick={handleAddPagoForm} className="mt-2 w-full">
-                                + Agregar forma de pago
-                            </Button>
-                        </div>
-                        <div>
-                            <Label>Observaciones</Label>
-                            <Textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} />
-                        </div>
-
-                        {/* Pago contado — bonificación 10% */}
-                        {selectedDocumentos.length > 0 && (
-                            <div className={`flex items-start gap-3 rounded-lg border p-3 transition-colors ${aplicarContado ? "bg-amber-50 border-amber-200" : "bg-muted/30"}`}>
-                                <Checkbox
-                                    id="aplicar-contado"
-                                    checked={aplicarContado}
-                                    onCheckedChange={(v) => setAplicarContado(!!v)}
-                                    className="mt-0.5"
-                                />
-                                <div className="flex-1">
-                                    <label htmlFor="aplicar-contado" className="text-sm font-medium cursor-pointer">
-                                        Aplicar 10% descuento pago contado
-                                    </label>
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                        Se generará automáticamente una NC/REV (artículo 11115) por cada comprobante seleccionado.
-                                    </p>
-                                    {aplicarContado && (
-                                        <p className="text-sm font-bold text-amber-700 mt-1">
-                                            Bonificación estimada: ${Math.round(calcularBonificacionContado()).toLocaleString('es-AR')}
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => { setShowPaymentModal(false); setAplicarContado(false); }}>Cancelar</Button>
-                        <Button onClick={handleSubmitPayment}>Registrar Pago{aplicarContado ? " + Bonif. Contado" : ""}</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
 
             {/* Adjustment Modal */}
             <Dialog open={showAdjustmentModal} onOpenChange={setShowAdjustmentModal}>

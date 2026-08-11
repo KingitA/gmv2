@@ -61,9 +61,6 @@ export async function GET(
             .eq("cliente_id", cliente_id)
             .order("fecha", { ascending: false }));
 
-        console.log("[DEBUG] Cliente ID:", cliente_id);
-        console.log("[DEBUG] Cliente data:", cliente);
-        console.log("[DEBUG] Comprobantes encontrados:", comprobantes.length);
 
         // Fetch pedido numbers for comprobantes that have pedido_id
         const comprobantesConPedido = await Promise.all(

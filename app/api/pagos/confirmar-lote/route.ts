@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
+import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 
 // POST /api/pagos/confirmar-lote
 // Rendición en lote: confirma varios pagos pendientes de una sola vez (rendición
@@ -36,16 +37,30 @@ export async function POST(request: NextRequest) {
 
     const confirmados: string[] = []
     const errores: string[] = []
+    const bonifErrores: string[] = []
     for (const pagoId of ids) {
       try {
         const r = await confirmarCobranza(supabase, admin, { pagoId, usuarioId: auth.user.id })
+        // Camino único post-confirmación: comisiones 'cobrada' + billetera +
+        // bonificación 10% diferida (MARCA_CONTADO) — el lote ya no se saltea nada.
+        const post = await procesarPostConfirmacion(supabase, admin, {
+          pagoId,
+          usuarioId: auth.user.id,
+          paidComprobanteIds: r.paidComprobanteIds,
+        })
+        if (post.bonificacion_error) bonifErrores.push(`${pagoId}: ${post.bonificacion_error}`)
         confirmados.push(r.numero_recibo || pagoId)
       } catch (e: any) {
         errores.push(`${pagoId}: ${e.message}`)
       }
     }
 
-    return NextResponse.json({ success: true, confirmados, errores })
+    return NextResponse.json({
+      success: true,
+      confirmados,
+      errores,
+      ...(bonifErrores.length ? { bonificacion_errores: bonifErrores } : {}),
+    })
   } catch (error: any) {
     console.error("[confirmar-lote] error:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
