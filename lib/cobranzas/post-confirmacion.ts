@@ -18,8 +18,10 @@ export interface PostConfirmacionResult {
  *   - Rendición de viajante → POST /api/finanzas/rendiciones/[id]/confirmar
  *
  * Hace dos cosas, ambas idempotentes:
- *  1. Comisiones 'cobrada' + billetera del viajante por los comprobantes que
- *     quedaron saldados con este pago.
+ *  1. Bonificación 10% contado (primero: la NC/REV salda el último tramo).
+ *  2. Comisiones 'cobrada' por los comprobantes que quedaron saldados.
+ *  La billetera NO se toca acá: la manejan los endpoints de cobro en la calle
+ *  (crédito) y la rendición (débito).
  *  2. Bonificación 10% contado diferida: si el pago viajó con MARCA_CONTADO
  *     en observaciones, emite la NC/REV sobre los comprobantes imputados que
  *     aún no la tienen y retira la marca.
@@ -33,12 +35,9 @@ export async function procesarPostConfirmacion(
   {
     pagoId,
     usuarioId,
-    paidComprobanteIds,
   }: {
     pagoId: string
     usuarioId: string
-    /** Si el caller no los tiene (rendiciones), se derivan de la DB. */
-    paidComprobanteIds?: string[]
   },
 ): Promise<PostConfirmacionResult> {
   const result: PostConfirmacionResult = { bonificacion: null, bonificacion_error: null }
@@ -64,31 +63,11 @@ export async function procesarPostConfirmacion(
     )
   }
 
-  // ── 1. Comisiones 'cobrada' + billetera ──
-  let paidIds = paidComprobanteIds
-  if (!paidIds) {
-    // Derivar: comprobantes imputados por este pago que quedaron saldados.
-    const compIds = [...montoPorComprobante.keys()]
-    if (compIds.length) {
-      const { data: comps } = await supabase
-        .from("comprobantes_venta")
-        .select("id, saldo_pendiente")
-        .in("id", compIds)
-      paidIds = (comps || []).filter((c: any) => Number(c.saldo_pendiente) <= 0.005).map((c: any) => c.id)
-    } else {
-      paidIds = []
-    }
-  }
-  for (const comprobanteId of paidIds) {
-    await generarComisionesCobradas(supabase, {
-      comprobanteId,
-      pagoId,
-      montoImputado: montoPorComprobante.get(comprobanteId) ?? 0,
-      usuarioId,
-    })
-  }
-
-  // ── 2. Bonificación 10% contado diferida (MARCA_CONTADO) ──
+  // ── 1. Bonificación 10% contado diferida (MARCA_CONTADO) ──
+  // VA PRIMERO: con 10% contado, el último comprobante recién queda saldado
+  // cuando la NC/REV le imputa el 10% restante. Si las comisiones se calcularan
+  // antes (como hacía el código original), ese comprobante quedaba sin comisión
+  // 'cobrada' para siempre.
   try {
     if (pago.observaciones?.includes(MARCA_CONTADO)) {
       const compIds = [...montoPorComprobante.keys()]
@@ -126,23 +105,34 @@ export async function procesarPostConfirmacion(
     result.bonificacion_error = bonifErr?.message || "La bonificación del 10% falló — generala a mano"
   }
 
+  // ── 2. Comisiones 'cobrada' ──
+  // Se deriva DESPUÉS de la bonificación: comprobantes imputados por este pago
+  // que quedaron saldados (por plata y/o por la NC del 10%).
+  let paidIds: string[] = []
+  const compIds = [...montoPorComprobante.keys()]
+  if (compIds.length) {
+    const { data: comps } = await supabase
+      .from("comprobantes_venta")
+      .select("id, saldo_pendiente")
+      .in("id", compIds)
+    paidIds = (comps || []).filter((c: any) => Number(c.saldo_pendiente) <= 0.005).map((c: any) => c.id)
+  }
+  for (const comprobanteId of paidIds) {
+    await generarComisionesCobradas(supabase, { comprobanteId, usuarioId })
+  }
+
   return result
 }
 
 /**
  * Al saldarse un comprobante: comisiones 'cobrada' por línea (fórmula única),
- * movimiento en billetera del viajante y trazabilidad en kardex de stock.
- * Idempotente: no duplica comisiones ni billetera si se re-procesa el pago.
+ * y trazabilidad en kardex de stock.
+ * Idempotente: no duplica comisiones si se re-procesa el pago.
  * Accesorio al circuito financiero — un fallo acá no debe frenar la cobranza.
  */
 async function generarComisionesCobradas(
   supabase: SupabaseClient,
-  {
-    comprobanteId,
-    pagoId,
-    montoImputado,
-    usuarioId,
-  }: { comprobanteId: string; pagoId: string; montoImputado: number; usuarioId: string },
+  { comprobanteId, usuarioId }: { comprobanteId: string; usuarioId: string },
 ) {
   try {
     const { data: items } = await supabase
@@ -234,25 +224,12 @@ async function generarComisionesCobradas(
         }
       }
 
-      // Movimiento en billetera del viajante (una sola vez por pago+comprobante)
-      const { data: yaBilletera } = await supabase
-        .from("billetera_movimientos")
-        .select("id")
-        .eq("referencia_id", pagoId)
-        .eq("referencia_tipo", "pago_cliente")
-        .eq("tipo", "cobro_cliente")
-        .limit(1)
-      if (!yaBilletera?.length) {
-        await supabase.from("billetera_movimientos").insert({
-          viajante_id: viajanteId,
-          tipo: "cobro_cliente",
-          monto: montoImputado,
-          concepto: `Cobro ${comp?.tipo_comprobante ?? "comprobante"}`,
-          referencia_id: pagoId,
-          referencia_tipo: "pago_cliente",
-          fecha: nowArgentina(),
-        })
-      }
+      // NOTA: acá NO se toca la billetera del viajante. La billetera es la
+      // plata que el viajante/chofer tiene físicamente en la calle: la
+      // acreditan SUS endpoints de cobro al crearse el pago y la debita la
+      // rendición. Acreditarla al confirmar (como hacía el código original)
+      // inflaba la billetera del vendedor cuando cobraba la OFICINA — plata
+      // que él nunca tuvo.
     }
 
     // Marcar comisiones 'vendida' del pedido como comprobante_cobrado para consulta

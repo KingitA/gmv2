@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
         const post = await procesarPostConfirmacion(supabase, admin, {
           pagoId,
           usuarioId: auth.user.id,
-          paidComprobanteIds: r.paidComprobanteIds,
+
         })
         if (post.bonificacion_error) bonifErrores.push(`${pagoId}: ${post.bonificacion_error}`)
         confirmados.push(r.numero_recibo || pagoId)

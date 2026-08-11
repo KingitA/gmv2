@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
         await procesarPostConfirmacion(supabase, admin, {
           pagoId: pago_id,
           usuarioId: auth.user.id,
-          paidComprobanteIds: r.paidComprobanteIds,
+
         })
       }
       resultados.push({ cliente_id: asig.cliente_id, pago_id, monto: montoCliente, numero_recibo, ...(dedup ? { dedup } : {}) })

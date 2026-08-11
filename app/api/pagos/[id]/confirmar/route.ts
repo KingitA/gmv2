@@ -56,7 +56,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       const post = await procesarPostConfirmacion(supabase, admin, {
         pagoId: id,
         usuarioId: auth.user.id,
-        paidComprobanteIds: result.paidComprobanteIds,
+
       })
 
       return NextResponse.json({
