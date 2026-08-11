@@ -124,7 +124,9 @@ BEGIN
     NULLIF(p_payload->>'vendedor_id', '')::uuid,
     NULLIF(p_payload->>'viaje_id', '')::uuid,
     NULLIF(p_payload->>'cobranza_id', '')::uuid,
-    NULLIF(p_payload->>'cobrador_tipo', ''),
+    -- cobrador_tipo es NOT NULL con default 'oficina' (cobros de /caja y
+    -- /mostrador no mandan el campo): un NULL explícito pisaría el default.
+    COALESCE(NULLIF(p_payload->>'cobrador_tipo', ''), 'oficina'),
     v_monto,
     COALESCE(NULLIF(p_payload->>'fecha_pago', '')::date, CURRENT_DATE),
     NULLIF(p_payload->>'observaciones', ''),
