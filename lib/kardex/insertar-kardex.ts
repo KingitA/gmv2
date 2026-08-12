@@ -322,8 +322,11 @@ export async function vincularKardexAComprobante(
   metodo_facturacion: string,
   color_dinero: string,
   facturador_id?: string | null,
+  /** Artículos que van en ESTE comprobante. Sin esto, un pedido facturado en
+   *  varios comprobantes vinculaba TODAS sus líneas al primero (bug 13/08). */
+  articulo_ids?: string[],
 ): Promise<void> {
-  const { error } = await supabase
+  let query = supabase
     .from('kardex')
     .update({
       comprobante_venta_id,
@@ -336,6 +339,8 @@ export async function vincularKardexAComprobante(
     })
     .eq('pedido_id', pedido_id)
     .is('comprobante_venta_id', null)
+  if (articulo_ids?.length) query = query.in('articulo_id', articulo_ids)
+  const { error } = await query
 
   if (error) {
     console.error('[Kardex] Error vinculando comprobante:', error.message)

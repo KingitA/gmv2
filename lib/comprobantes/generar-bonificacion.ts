@@ -751,8 +751,10 @@ export async function generarBonificacionContado(
 /**
  * Por cada comprobante con comisión ya COBRADA, inserta un ajuste negativo del 10%
  * (descuento financiero). Idempotente: no debita dos veces el mismo comprobante.
+ * Exportada: la post-confirmación la llama DESPUÉS de generar las comisiones
+ * (acá adentro corría antes de que existieran y no debitaba nada).
  */
-async function debitarComisionPorFinanciero(supabase: any, comprobante_ids: string[]) {
+export async function debitarComisionPorFinanciero(supabase: any, comprobante_ids: string[]) {
   if (!comprobante_ids?.length) return
   const MOTIVO = "Débito por NC financiera 10% (descuento contado) sobre comisión ya cobrada"
   for (const compId of comprobante_ids) {

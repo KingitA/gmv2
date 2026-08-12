@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { nowArgentina } from "@/lib/utils"
-import { getComisionPorcentaje, calcularComisionMonto } from "@/lib/comisiones/calcular"
-import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
+import { generarBonificacionContado, debitarComisionPorFinanciero } from "@/lib/comprobantes/generar-bonificacion"
 import { MARCA_CONTADO } from "@/lib/constants"
 
 export interface PostConfirmacionResult {
@@ -121,12 +120,45 @@ export async function procesarPostConfirmacion(
     await generarComisionesCobradas(supabase, { comprobanteId, usuarioId })
   }
 
+  // ── 3. Débito del 10% financiero sobre la comisión ──
+  // "Cobró comisión por $100 de venta, pero con la NC la venta real fue $90":
+  // −10% de la comisión de los comprobantes que tienen bonificación viva.
+  // VA DESPUÉS de generar las comisiones (dentro de la bonificación corría
+  // antes de que existieran y no debitaba nada). Idempotente por motivo.
+  try {
+    if (paidIds.length) {
+      const { data: bonifImps } = await supabase
+        .from("imputaciones")
+        .select("comprobante_id, credito:comprobantes_venta!imputaciones_credito_comprobante_id_fkey(observaciones, anulado_en, estado_pago)")
+        .in("comprobante_id", paidIds)
+        .not("credito_comprobante_id", "is", null)
+        .neq("estado", "anulado")
+      const bonificados = [
+        ...new Set(
+          (bonifImps || [])
+            .filter((i: any) => {
+              const cr = i.credito
+              return cr && !cr.anulado_en && cr.estado_pago !== "anulado" &&
+                (cr.observaciones || "").startsWith("Bonificación contado")
+            })
+            .map((i: any) => i.comprobante_id),
+        ),
+      ]
+      if (bonificados.length) await debitarComisionPorFinanciero(supabase, bonificados)
+    }
+  } catch (debErr: any) {
+    console.error("[post-confirmacion] débito comisión 10%:", debErr?.message)
+  }
+
   return result
 }
 
 /**
- * Al saldarse un comprobante: comisiones 'cobrada' por línea (fórmula única),
- * y trazabilidad en kardex de stock.
+ * Al saldarse un comprobante: comisiones 'cobrada' por línea, tomadas DEL
+ * KARDEX — el % y monto pactados al armar el pedido (definición del negocio
+ * 13/08: "vale el % con el que se vendió"; un cambio posterior en la config
+ * del vendedor no toca ventas viejas). Antes se recalculaban desde la config
+ * actual del vendedor y podían diferir del kardex.
  * Idempotente: no duplica comisiones si se re-procesa el pago.
  * Accesorio al circuito financiero — un fallo acá no debe frenar la cobranza.
  */
@@ -135,101 +167,63 @@ async function generarComisionesCobradas(
   { comprobanteId, usuarioId }: { comprobanteId: string; usuarioId: string },
 ) {
   try {
-    const { data: items } = await supabase
-      .from("comprobantes_venta_detalle")
-      .select(
-        "articulo_id, cantidad, precio_unitario, precio_lista, bonif_viajante_pct, es_bonificado, articulos(segmento_precio, iva_ventas)",
-      )
-      .eq("comprobante_id", comprobanteId)
+    // Idempotencia: si el comprobante ya tiene comisiones 'cobrada' reales
+    // (no débitos por NC financiera), este cobro ya fue procesado.
+    const { data: yaCobradas } = await supabase
+      .from("comisiones")
+      .select("id")
+      .eq("comprobante_venta_id", comprobanteId)
+      .eq("tipo", "cobrada")
+      .gt("monto", 0)
+      .limit(1)
 
-    const { data: comp } = await supabase
-      .from("comprobantes_venta")
-      .select("tipo_comprobante, pedido_id")
-      .eq("id", comprobanteId)
-      .single()
-
-    let viajanteId: string | null = null
-    if (comp?.pedido_id) {
-      const { data: pedidoData } = await supabase
-        .from("pedidos")
-        .select("clientes(vendedor_id)")
-        .eq("id", comp.pedido_id)
-        .single()
-      viajanteId = (pedidoData?.clientes as any)?.vendedor_id ?? null
-    }
-
-    if (viajanteId && items?.length) {
-      // Idempotencia: si el comprobante ya tiene comisiones 'cobrada' reales
-      // (no débitos por NC financiera), este pago ya fue procesado.
-      const { data: yaCobradas } = await supabase
-        .from("comisiones")
-        .select("id")
+    if (!yaCobradas?.length) {
+      // Fuente: líneas de kardex del comprobante (una comisión por línea,
+      // con el % grabado al vender y el vínculo kardex_id para trazabilidad).
+      const { data: lineas } = await supabase
+        .from("kardex")
+        .select("id, articulo_id, cantidad, precio_unitario_final, comision_viajante_pct, comision_viajante_monto, vendedor_id, pedido_id")
         .eq("comprobante_venta_id", comprobanteId)
-        .eq("tipo", "cobrada")
-        .gt("monto", 0)
-        .limit(1)
-      const yaProcesado = Boolean(yaCobradas?.length)
+        .eq("tipo_movimiento", "venta")
+        .not("comision_viajante_monto", "is", null)
+        .neq("comision_viajante_monto", 0)
 
-      if (!yaProcesado) {
-        const { data: vendedor } = await supabase
-          .from("vendedores")
-          .select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus")
-          .eq("id", viajanteId)
-          .single()
-
-        const metodo = ["PRES", "REV"].includes(comp?.tipo_comprobante ?? "") ? "presupuesto" : "factura"
-
-        // Comisión COBRADA con la fórmula única (= la vendida): base = neto final,
-        // tasa = comisión% − viajante%. La mercadería bonificada (es_bonificado) resta
-        // (comisión negativa por el valor regalado). El financiero, si aplica, lo debita
-        // la NC financiera (generar-bonificacion).
-        const cobradas = (items ?? [])
-          .filter((item: any) => item.articulos?.segmento_precio && vendedor)
-          .map((item: any) => {
-            const { segmento_precio, iva_ventas } = item.articulos
-            const comisionPct = getComisionPorcentaje(vendedor!, segmento_precio, iva_ventas)
-            const viajantePct = Number(item.bonif_viajante_pct ?? 0)
-            const esBonif = item.es_bonificado === true
-            // Para la línea bonificada el precio cobrado es $0: la base es su P.Lista
-            // real (valor regalado) y la comisión se RESTA.
-            const baseUnit = esBonif ? Number(item.precio_lista ?? 0) : Number(item.precio_unitario)
-            const { monto, tasaEfectivaPct } = calcularComisionMonto({
-              precioNetoUnitario: baseUnit,
-              cantidad: Number(item.cantidad),
-              metodoFacturacion: metodo,
-              ivaVentas: iva_ventas,
-              comisionPct,
-              viajantePct,
-            })
-            return {
-              viajante_id: viajanteId,
-              pedido_id: comp?.pedido_id ?? null,
-              comprobante_venta_id: comprobanteId,
-              tipo: "cobrada",
-              articulo_id: item.articulo_id,
-              segmento: segmento_precio,
-              cantidad: Number(item.cantidad),
-              precio_neto_unitario: baseUnit,
-              porcentaje: tasaEfectivaPct,
-              monto: esBonif ? -monto : monto,
-              comprobante_cobrado: true,
-              fecha_comprobante_cobrado: nowArgentina(),
-              pagado: false,
-            }
-          })
-          .filter((c: any) => c.monto !== 0)
-
-        if (cobradas.length) {
-          await supabase.from("comisiones").insert(cobradas)
+      const conVendedor = (lineas || []).filter((l: any) => l.vendedor_id)
+      if (conVendedor.length) {
+        // Segmento del artículo (informativo, para filtros de la UI)
+        const artIds = [...new Set(conVendedor.map((l: any) => l.articulo_id).filter(Boolean))]
+        const segmentoDe = new Map<string, string | null>()
+        if (artIds.length) {
+          const { data: arts } = await supabase
+            .from("articulos")
+            .select("id, segmento_precio")
+            .in("id", artIds)
+          for (const a of arts || []) segmentoDe.set(a.id, a.segmento_precio ?? null)
         }
+
+        const cobradas = conVendedor.map((l: any) => ({
+          viajante_id: l.vendedor_id,
+          pedido_id: l.pedido_id ?? null,
+          comprobante_venta_id: comprobanteId,
+          kardex_id: l.id,
+          tipo: "cobrada",
+          articulo_id: l.articulo_id ?? null,
+          segmento: l.articulo_id ? segmentoDe.get(l.articulo_id) ?? null : null,
+          cantidad: Number(l.cantidad ?? 0),
+          precio_neto_unitario: Number(l.precio_unitario_final ?? 0),
+          porcentaje: Number(l.comision_viajante_pct ?? 0),
+          monto: Number(l.comision_viajante_monto ?? 0),
+          comprobante_cobrado: true,
+          fecha_comprobante_cobrado: nowArgentina(),
+          pagado: false,
+        }))
+        await supabase.from("comisiones").insert(cobradas)
       }
 
       // NOTA: acá NO se toca la billetera del viajante. La billetera es la
       // plata que el viajante/chofer tiene físicamente en la calle: la
       // acreditan SUS endpoints de cobro al crearse el pago y la debita la
-      // rendición. Acreditarla al confirmar (como hacía el código original)
-      // inflaba la billetera del vendedor cuando cobraba la OFICINA — plata
-      // que él nunca tuvo.
+      // rendición.
     }
 
     // Marcar comisiones 'vendida' del pedido como comprobante_cobrado para consulta

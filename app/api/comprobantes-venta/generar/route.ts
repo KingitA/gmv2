@@ -424,7 +424,9 @@ export async function POST(request: Request) {
       .eq('pedido_id', pedido_id)
 
     if ((kardexCount ?? 0) > 0) {
-      // Entries exist: just link them to the comprobante
+      // Entries exist: link each comprobante ONLY with the kardex lines of the
+      // articles it contains (a pedido facturado en varios comprobantes antes
+      // vinculaba todas las líneas al primero).
       for (const comp of comprobantesGenerados) {
         if (!comp.id) continue
         const esP = comp.tipo_comprobante === 'PRES'
@@ -432,6 +434,7 @@ export async function POST(request: Request) {
           supabase, pedido_id, comp.id, comp.tipo_comprobante,
           comp.numero, esP ? 'Presupuesto' : 'Factura', esP ? 'NEGRO' : 'BLANCO',
           auth.user.id,
+          (comp._items as ItemCalculado[]).map((i) => i.articulo_id).filter(Boolean),
         )
       }
     } else {
@@ -487,13 +490,18 @@ export async function POST(request: Request) {
       await distribuirPercepcionesKardex(supabase, pedido_id, percIva, percIibb)
     }
 
-    // ── Vincular comisión al comprobante principal ────────────────────────────
-    if (comprobantesGenerados.length > 0 && comprobantesGenerados[0].id) {
+    // ── Vincular comisiones a SU comprobante (por artículo) ──────────────────
+    // Antes: todas al primero — mismo bug que el vínculo de kardex.
+    for (const comp of comprobantesGenerados) {
+      if (!comp.id) continue
+      const artIds = (comp._items as ItemCalculado[]).map((i) => i.articulo_id).filter(Boolean)
+      if (!artIds.length) continue
       await supabase
         .from("comisiones")
-        .update({ comprobante_venta_id: comprobantesGenerados[0].id })
+        .update({ comprobante_venta_id: comp.id })
         .eq("pedido_id", pedido_id)
         .is("comprobante_venta_id", null)
+        .in("articulo_id", artIds)
     }
 
     // ─── 6. Total del pedido (informativo) ───
