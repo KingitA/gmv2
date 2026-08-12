@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 
 /**
  * Ajuste manual de cuenta corriente del cliente.
@@ -86,6 +87,20 @@ export async function POST(
             estado_pago: nuevoSaldo <= 0.009 ? "pagado" : "parcial",
           })
           .eq("id", comprobante_id)
+      }
+
+      // El ajuste llega DESPUÉS de que el pago se confirmó: si recién ahora el
+      // comprobante quedó saldado, la post-confirmación (idempotente) completa
+      // lo que faltó — típicamente la comisión 'cobrada' de ese comprobante.
+      if (pago_id) {
+        try {
+          await procesarPostConfirmacion(supabase, admin, {
+            pagoId: pago_id,
+            usuarioId: auth.user.id,
+          })
+        } catch (postErr: any) {
+          console.error("[clientes/ajustes] post-confirmación tras ajuste:", postErr?.message)
+        }
       }
     }
 
