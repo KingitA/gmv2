@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
 import { hybridSearchIds } from "@/lib/search/hybrid"
+import { buscarConFiltros } from "@/lib/search/buscar-con-filtros"
 
 export async function getViajanteClientes() {
   const supabase = await createClient()
@@ -71,20 +72,19 @@ export async function searchClientes(searchTerm: string) {
 
   const isRestricted = (roles.includes("viajante") || roles.includes("vendedor")) && !roles.includes("admin")
 
-  // Motor unificado: el RPC decide qué matchea (ids); hidratamos aplicando la
-  // restricción por vendedor para usuarios no-admin.
-  const ids = await hybridSearchIds("clientes", searchTerm, 30)
-  if (ids.length === 0) return []
-
-  let query = supabase.from("clientes").select("*").eq("activo", true).in("id", ids)
-  if (isRestricted) query = query.eq("vendedor_id", user.id)
-
-  const { data, error } = await query
-  if (error) throw error
-
-  // Conservar el orden de relevancia del motor
-  const map = new Map((data || []).map((r: any) => [r.id, r]))
-  return ids.map((id) => map.get(id)).filter(Boolean)
+  // Motor unificado con filtros COMPUESTOS: para viajantes/vendedores, la restricción
+  // por vendedor entra DENTRO de la búsqueda (no después del corte por relevancia), y
+  // un pase literal sobre search_text (nombre + dirección + localidad + …) garantiza no
+  // perder ninguno de SUS clientes que matcheen.
+  return await buscarConFiltros({
+    sb: supabase, table: "clientes", entity: "clientes", q: searchTerm, select: "*",
+    hayFiltro: isRestricted,
+    aplicarFiltros: (qb) => {
+      qb = qb.eq("activo", true)
+      if (isRestricted) qb = qb.eq("vendedor_id", user.id)
+      return qb
+    },
+  })
 }
 
 export async function createCliente(formData: {

@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { padEan13, padEanArray } from "@/lib/utils/ean"
 import { hybridSearchIds } from "@/lib/search/hybrid"
+import { buscarConFiltros } from "@/lib/search/buscar-con-filtros"
 
 const SELECT_SEARCH = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id, marca:marca_id(descripcion)"
 const SELECT_FULL   = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id, marca:marca_id(descripcion)"
@@ -44,13 +45,19 @@ export async function buscarArticulosDeposito(
       }
     }
 
-    // Motor unificado: ids por relevancia; hidratamos respetando filtros (proveedor/categoria)
-    const ids = await hybridSearchIds("articulos", q, 30)
-    if (ids.length === 0) return { data: [] }
-    const { data, error } = await base().in("id", ids)
-    if (error) { console.error("[deposito] buscar texto:", error.message); return { data: [], error: error.message } }
-    const map = new Map((data || []).map((r: any) => [r.id, r]))
-    return { data: ids.map((id) => map.get(id)).filter(Boolean) }
+    // Motor unificado con filtros COMPUESTOS (relevancia + literal, dentro del filtro).
+    // Evita el bug de filtrar por proveedor/categoría DESPUÉS del corte por relevancia.
+    const hayFiltro = !!(opciones?.proveedorId || opciones?.categoria)
+    const data = await buscarConFiltros({
+      sb, table: "articulos", entity: "articulos", q, select: SELECT_SEARCH, hayFiltro,
+      aplicarFiltros: (qb) => {
+        qb = qb.eq("activo", true)
+        if (opciones?.proveedorId) qb = qb.eq("proveedor_id", opciones.proveedorId)
+        if (opciones?.categoria) qb = qb.ilike("categoria", opciones.categoria)
+        return qb
+      },
+    })
+    return { data }
   } catch (e: any) {
     console.error("[deposito] buscar exception:", e?.message)
     return { data: [], error: e?.message || "Error inesperado" }

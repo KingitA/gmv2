@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { padEan13 } from "@/lib/utils/ean"
 import { hybridSearchIds } from "@/lib/search/hybrid"
+import { buscarConFiltros } from "@/lib/search/buscar-con-filtros"
 
 const SELECT = "*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)"
 
@@ -35,22 +36,15 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // Con proveedor filtrado buscamos DENTRO de ese proveedor (conjunto chico) por
-        // subcadena en search_text, y traemos TODOS los que matchean — no el top-50 global.
-        // Así "jab" en Kenvue devuelve todos los jabones de Kenvue, no solo los que
-        // quedaban entre los 50 más relevantes de todo el catálogo.
+        // Con proveedor filtrado, buscamos DENTRO del proveedor combinando relevancia
+        // (léxico + embeddings) y completitud literal (todos los que matchean por
+        // descripción/marca/proveedor en search_text). No es el top-50 global recortado.
         if (proveedor) {
-            let query = supabase
-                .from("articulos")
-                .select(SELECT)
-                .eq("activo", true)
-                .eq("proveedor_id", proveedor)
-            for (const tok of q.split(/\s+/).filter(t => t.length >= 2)) {
-                query = query.ilike("search_text", `%${tok.replace(/[%_]/g, "")}%`)
-            }
-            const { data, error } = await query.order("descripcion").limit(500)
-            if (error) { console.error("[articulos/buscar] proveedor:", error); throw error }
-            return NextResponse.json(data || [])
+            const data = await buscarConFiltros({
+                sb: supabase, table: "articulos", entity: "articulos", q, select: SELECT, hayFiltro: true,
+                aplicarFiltros: (qb) => qb.eq("activo", true).eq("proveedor_id", proveedor),
+            })
+            return NextResponse.json(data)
         }
 
         // Sin filtro: búsqueda híbrida unificada global (léxica trigram + vector), top-50
