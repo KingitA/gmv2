@@ -254,9 +254,9 @@ export default function ArticulosPage() {
         if(searchCache.current?.q===sd.trim()&&searchCache.current?.pf===pf){
           results=searchCache.current.results
         } else {
-          const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}`)
+          const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}${pf!=="todos"?`&proveedor=${pf}`:""}`)
           results=res.ok?await res.json():[]
-          if(pf!=="todos") results=results.filter((x:any)=>x.proveedor_id===pf)
+          // El filtro de proveedor ya lo aplica el servidor (busca dentro del proveedor).
           if(sortCol && isSortable(sortCol)){
             results.sort((a:any,b:any)=>{
               const av=clientSortVal(a,sortCol)
@@ -406,10 +406,9 @@ export default function ArticulosPage() {
       // Respeta el filtro que se ve en pantalla (búsqueda de texto + proveedor) y trae TODO.
       let data:any[]=[]
       if(sd.trim()){
-        // Búsqueda de texto activa → exporta lo mismo que muestra el buscador
-        const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}`)
-        let results=res.ok?await res.json():[]
-        if(pf!=="todos") results=results.filter((x:any)=>x.proveedor_id===pf)
+        // Búsqueda de texto activa → exporta lo mismo que muestra el buscador (respeta proveedor)
+        const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}${pf!=="todos"?`&proveedor=${pf}`:""}`)
+        const results=res.ok?await res.json():[]
         data=results
       } else {
         // Sin búsqueda → todos los activos (respetando proveedor), en tandas de 1000 para
