@@ -82,16 +82,44 @@ export async function crearCobranza(
 }
 
 /**
- * Recorta las imputaciones para que su suma nunca supere el monto del pago
- * (de primera a última, misma regla histórica del ERP). La RPC rechaza
- * Σ imputaciones > monto: el excedente NO se imputa — queda como saldo
- * pendiente del comprobante hasta que lo cubra la NC (bonificación 10%,
- * devolución) o un pago futuro. Devuelve solo las que quedaron con monto > 0.
+ * Recorta las imputaciones para que su suma nunca supere el monto del pago.
+ * La RPC rechaza Σ imputaciones > monto: el excedente NO se imputa — queda
+ * como saldo pendiente hasta que lo cubra la NC (10%, devolución) o un pago
+ * futuro. Devuelve solo las que quedaron con monto > 0.
+ *
+ * Dos modos:
+ * - "secuencial" (default): de primera a última, regla histórica — para pagos
+ *   parciales comunes (se salda lo más viejo primero).
+ * - "proporcional": cada imputación recibe la misma fracción del pago. ES EL
+ *   MODO OBLIGATORIO para cobros con 10% CONTADO: el pago es el 90% del total
+ *   y cada comprobante debe recibir SU 90% (la REV cubre el 10% de cada uno).
+ *   Con recorte secuencial, el orden de la lista decidía qué comprobante se
+ *   quedaba sin imputación → sin bonificación y pendiente (bug real, 12/08).
  */
 export function recortarImputaciones<T extends { monto_imputado: number }>(
   imputaciones: T[],
   montoPago: number,
+  modo: "secuencial" | "proporcional" = "secuencial",
 ): T[] {
+  const total = imputaciones.reduce((s, i) => s + Number(i.monto_imputado), 0)
+  if (total <= montoPago + 0.005) {
+    return imputaciones.filter((i) => Number(i.monto_imputado) > 0.005)
+  }
+
+  if (modo === "proporcional") {
+    const factor = montoPago / total
+    const out = imputaciones
+      .map((imp) => ({ ...imp, monto_imputado: Math.round(Number(imp.monto_imputado) * factor * 100) / 100 }))
+      .filter((i) => i.monto_imputado > 0.005)
+    // El último absorbe la diferencia de redondeo: Σ == monto al centavo
+    const suma = out.reduce((s, i) => s + i.monto_imputado, 0)
+    const diff = Math.round((montoPago - suma) * 100) / 100
+    if (out.length && Math.abs(diff) > 0.001) {
+      out[out.length - 1].monto_imputado = Math.round((out[out.length - 1].monto_imputado + diff) * 100) / 100
+    }
+    return out
+  }
+
   let remaining = montoPago
   const out: T[] = []
   for (const imp of imputaciones) {

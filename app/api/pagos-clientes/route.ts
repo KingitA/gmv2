@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { MARCA_CONTADO } from "@/lib/constants"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
@@ -227,13 +228,18 @@ export async function POST(request: NextRequest) {
     })
 
     // ── 2. Alta transaccional (pago + detalle + cheques + imputaciones) ──
-    // Si el total imputado supera el pago real, recortar (de primero a último);
-    // el excedente queda como saldo del comprobante (lo cubre NC o pago futuro).
+    // Si el total imputado supera el pago real, recortar; el excedente queda
+    // como saldo del comprobante (lo cubre la NC o un pago futuro).
+    // Con 10% CONTADO el recorte es PROPORCIONAL: el pago es el 90% del total
+    // y cada comprobante debe recibir SU 90% (la REV cubre el 10% de cada uno).
+    // Secuencial acá dejaba comprobantes enteros sin imputación según el orden.
+    const esContado = Boolean(observaciones?.includes?.(MARCA_CONTADO))
     const impsRecortadas = recortarImputaciones(
       ((imputaciones as any[]) || [])
         .filter((i: any) => i?.comprobante_id)
         .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto_imputado) })),
       montoTotal,
+      esContado ? "proporcional" : "secuencial",
     )
 
     const { pago_id, dedup } = await crearCobranza(supabase, {
