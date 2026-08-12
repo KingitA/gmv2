@@ -240,12 +240,18 @@ async function generarComisionesCobradas(
       .eq("tipo", "vendida")
       .eq("comprobante_cobrado", false)
 
-    // Registrar cobrador_id en kardex para trazabilidad
+    // KARDEX = fuente de verdad de los hechos del artículo: al saldarse el
+    // comprobante se tilda "cobrado" en sus líneas (lo leen el módulo de
+    // vendedores y el Playroom). cobranza_anular lo destilda si el pago cae.
     await supabase
       .from("kardex")
-      .update({ cobrador_id: usuarioId })
+      .update({
+        comprobante_cobrado: true,
+        fecha_comprobante_cobrado: nowArgentina(),
+        cobrador_id: usuarioId,
+      })
       .eq("comprobante_venta_id", comprobanteId)
-      .is("cobrador_id", null)
+      .eq("comprobante_cobrado", false)
   } catch (comErr) {
     console.error("Error creando comisiones cobradas:", comErr)
   }
