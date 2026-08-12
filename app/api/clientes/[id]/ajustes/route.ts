@@ -37,12 +37,34 @@ export async function POST(
       return NextResponse.json({ error: "Faltan datos requeridos (monto, motivo)" }, { status: 400 })
     }
 
+    // ── Resolver el comprobante destino del aplicar_saldo ──
+    // El front manda "el último de su lista", pero con el reparto proporcional
+    // del pago NO puede saber cuál quedó con saldo: eso lo decide el servidor.
+    // Si el ajuste viene de un pago, el destino real es el comprobante DE ESE
+    // PAGO que quedó con saldo pendiente (el de mayor saldo si hay varios).
+    let saldoTargetId: string | null =
+      aplicar_saldo && comprobante_id && Number(monto) < 0 ? comprobante_id : null
+    if (aplicar_saldo && Number(monto) < 0 && pago_id) {
+      const { data: impsPago } = await supabase
+        .from("imputaciones")
+        .select("comprobante_id, comprobante:comprobantes_venta!imputaciones_comprobante_id_fkey(id, saldo_pendiente, tipo_comprobante)")
+        .eq("pago_id", pago_id)
+        .eq("estado", "confirmado")
+        .not("comprobante_id", "is", null)
+      const conSaldo = (impsPago || [])
+        .map((i: any) => i.comprobante)
+        .filter((c: any) => c && Number(c.saldo_pendiente) > 0.005)
+        .sort((a: any, b: any) => Number(b.saldo_pendiente) - Number(a.saldo_pendiente))
+      if (conSaldo.length) saldoTargetId = conSaldo[0].id
+    }
+
     let concepto = String(motivo)
-    if (comprobante_id) {
+    const refId = saldoTargetId || comprobante_id
+    if (refId) {
       const { data: comp } = await supabase
         .from("comprobantes_venta")
         .select("numero_comprobante, tipo_comprobante, cliente_id")
-        .eq("id", comprobante_id)
+        .eq("id", refId)
         .single()
       if (comp && comp.cliente_id !== cliente_id) {
         return NextResponse.json(
@@ -56,7 +78,7 @@ export async function POST(
     // ajuste (cobranza_anular busca las marcas): [pago:<id>] identifica el pago
     // que lo originó; [saldo:<id>] marca que además saldó ese comprobante.
     if (pago_id) concepto += ` [pago:${pago_id}]`
-    if (aplicar_saldo && comprobante_id && Number(monto) < 0) concepto += ` [saldo:${comprobante_id}]`
+    if (saldoTargetId) concepto += ` [saldo:${saldoTargetId}]`
 
     const { data, error } = await supabase.rpc("cc_ajuste_manual", {
       p_cliente_id: cliente_id,
@@ -68,12 +90,12 @@ export async function POST(
     if (error) throw new Error(error.message)
 
     // Ajuste por redondeo: el crédito también baja el saldo del comprobante
-    if (aplicar_saldo && comprobante_id && Number(monto) < 0) {
+    if (saldoTargetId) {
       const admin = createAdminClient()
       const { data: comp } = await admin
         .from("comprobantes_venta")
         .select("saldo_pendiente")
-        .eq("id", comprobante_id)
+        .eq("id", saldoTargetId)
         .single()
       if (comp) {
         const nuevoSaldo = Math.max(
@@ -86,7 +108,7 @@ export async function POST(
             saldo_pendiente: nuevoSaldo,
             estado_pago: nuevoSaldo <= 0.009 ? "pagado" : "parcial",
           })
-          .eq("id", comprobante_id)
+          .eq("id", saldoTargetId)
       }
 
       // El ajuste llega DESPUÉS de que el pago se confirmó: si recién ahora el
