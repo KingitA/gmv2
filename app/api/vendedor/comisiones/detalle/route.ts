@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       let q = supabase
         .from("kardex")
         .select(
-          "id, articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, cantidad, subtotal_total, precio_unitario_final, comision_viajante_pct, comision_viajante_monto, comprobante_venta_id, fecha_comprobante_cobrado, comprobante_cobrado"
+          "id, articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, cantidad, subtotal_total, precio_unitario_final, comision_viajante_pct, comision_viajante_monto, descuento_financiero_pct, comprobante_venta_id, fecha_comprobante_cobrado, comprobante_cobrado"
         )
         .eq("pedido_id", pedidoId)
         .eq("tipo_movimiento", "venta")
@@ -36,18 +36,29 @@ export async function GET(req: NextRequest) {
       return q
     })
 
-    const mapArticulo = (r: any) => ({
-      kardex_id: r.id,
-      articulo_id: r.articulo_id,
-      sku: r.articulo_sku ?? "—",
-      descripcion: r.articulo_descripcion ?? r.articulo_id ?? "—",
-      categoria: r.articulo_categoria ?? "—",
-      cantidad: Number(r.cantidad ?? 0),
-      precio_unitario: Number(r.precio_unitario_final ?? 0),
-      subtotal: Number(r.subtotal_total ?? 0),
-      comision_pct: Number(r.comision_viajante_pct ?? 0),
-      comision_monto: Number(r.comision_viajante_monto ?? 0),
-    })
+    // REGLA DE ORO: el número que ve el vendedor es el NETO que va a cobrar.
+    // Si el comprobante se cobró con bonificación contado, la línea trae
+    // descuento_financiero_pct y la comisión neta = pactada × (1 − pct/100).
+    // La pactada y el débito viajan aparte para explicar el porqué.
+    const mapArticulo = (r: any) => {
+      const pactada = Number(r.comision_viajante_monto ?? 0)
+      const descPct = Number(r.descuento_financiero_pct ?? 0)
+      const neta = descPct > 0 ? Math.round(pactada * (1 - descPct / 100) * 100) / 100 : pactada
+      return {
+        kardex_id: r.id,
+        articulo_id: r.articulo_id,
+        sku: r.articulo_sku ?? "—",
+        descripcion: r.articulo_descripcion ?? r.articulo_id ?? "—",
+        categoria: r.articulo_categoria ?? "—",
+        cantidad: Number(r.cantidad ?? 0),
+        precio_unitario: Number(r.precio_unitario_final ?? 0),
+        subtotal: Number(r.subtotal_total ?? 0),
+        comision_pct: Number(r.comision_viajante_pct ?? 0),
+        comision_monto: neta, // neto: lo que efectivamente cobra
+        comision_pactada: pactada,
+        descuento_financiero_pct: descPct,
+      }
+    }
 
     if (tipo === "vendida") {
       return NextResponse.json({ tipo, articulos: (rows || []).map(mapArticulo) })
@@ -77,13 +88,20 @@ export async function GET(req: NextRequest) {
           total_iva: Number(comp?.total_iva ?? 0),
           total: Number(comp?.total_factura ?? 0),
           total_comision: 0,
+          debito_contado: 0,
           articulos: [],
         })
       }
       const g = grupos.get(cid)!
       const art = mapArticulo(r)
       g.total_comision += art.comision_monto
+      g.debito_contado += art.comision_pactada - art.comision_monto
       g.articulos.push(art)
+    }
+
+    for (const g of grupos.values()) {
+      g.total_comision = Math.round(g.total_comision * 100) / 100
+      g.debito_contado = Math.round(g.debito_contado * 100) / 100
     }
 
     return NextResponse.json({ tipo, comprobantes: [...grupos.values()] })

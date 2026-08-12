@@ -4,10 +4,19 @@ import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 // GET /api/vendedor/comisiones?tipo=cobrada|vendida
-// Comisiones REALES del vendedor desde kardex (misma fuente que el playroom):
-// - totales: disponible (mercadería cobrada, comisión sin retirar), sin_cobrar
-//   (devengada, cliente aún no pagó), retirado (comisión ya pagada)
-// - pedidos: agregado por pedido (monto, comisión, SKUs) según el toggle
+// Comisiones del vendedor. REGLA DE ORO: el vendedor solo ve plata que
+// efectivamente va a cobrar (netos). El monto pactado vive en el kardex
+// (comision_viajante_monto, al % con el que se vendió — la config actual del
+// vendedor NO pisa ventas viejas) y cuando el comprobante se cobró con
+// bonificación contado, la fila trae descuento_financiero_pct: la comisión
+// neta es monto × (1 − pct/100).
+// - totales:
+//   · disponible ("para retirar") = Σ comisiones tipo='cobrada' pagado=false
+//     (la tabla ya incluye los débitos negativos del 10% → da neto solo)
+//   · retirado = Σ tipo='cobrada' pagado=true
+//   · sin_cobrar = devengado desde kardex sin cobrar — ESTIMADO máximo (el
+//     10% contado recién se conoce cuando el cliente paga); la UI lo rotula.
+// - pedidos: agregado por pedido con comisión NETA por línea.
 export async function GET(req: NextRequest) {
   const session = await requireVendedor()
   if (session.error) return session.error
@@ -22,7 +31,7 @@ export async function GET(req: NextRequest) {
       supabase
         .from("kardex")
         .select(
-          "id, pedido_id, numero_pedido, cliente_id, fecha, fecha_comprobante_cobrado, articulo_id, subtotal_total, comision_viajante_monto, comprobante_cobrado"
+          "id, pedido_id, numero_pedido, cliente_id, fecha, fecha_comprobante_cobrado, articulo_id, subtotal_total, comision_viajante_monto, descuento_financiero_pct, comprobante_cobrado"
         )
         .eq("tipo_movimiento", "venta")
         .not("comision_viajante_monto", "is", null)
@@ -31,26 +40,34 @@ export async function GET(req: NextRequest) {
         .in("vendedor_id", session.vendedorIds)
     )
 
-    // Estado de pago de cada comisión (tabla comisiones, por kardex_id)
-    const pagadoPorKardex = new Map<string, boolean>()
+    // Comisión neta de una línea: pactada menos el débito por pago contado
+    const netoLinea = (k: any) => {
+      const bruto = Number(k.comision_viajante_monto || 0)
+      const pct = Number(k.descuento_financiero_pct || 0)
+      return pct > 0 ? bruto * (1 - pct / 100) : bruto
+    }
+
+    // Totales "para retirar" y "retirado" desde la tabla comisiones: es lo que
+    // la empresa efectivamente liquida (incluye los débitos negativos del 10%).
     const comisionesRows = await fetchAllRows(() =>
       supabase
         .from("comisiones")
-        .select("kardex_id, pagado")
+        .select("monto, pagado")
+        .eq("tipo", "cobrada")
         .in("viajante_id", session.vendedorIds)
     )
-    for (const c of comisionesRows) if (c.kardex_id) pagadoPorKardex.set(c.kardex_id, !!c.pagado)
-
-    // Totales sobre TODO el historial
     let disponible = 0
-    let sinCobrar = 0
     let retirado = 0
+    for (const c of comisionesRows) {
+      if (c.pagado) retirado += Number(c.monto || 0)
+      else disponible += Number(c.monto || 0)
+    }
+
+    // Devengado sin cobrar: estimado máximo desde kardex (el débito contado
+    // todavía no se conoce — depende de cómo pague el cliente)
+    let sinCobrar = 0
     for (const k of rows) {
-      const monto = Number(k.comision_viajante_monto || 0)
-      const pagado = pagadoPorKardex.get(k.id) === true
-      if (pagado) retirado += monto
-      else if (k.comprobante_cobrado) disponible += monto
-      else sinCobrar += monto
+      if (!k.comprobante_cobrado) sinCobrar += Number(k.comision_viajante_monto || 0)
     }
 
     // Lista de pedidos según el toggle (formato playroom)
@@ -63,6 +80,7 @@ export async function GET(req: NextRequest) {
       fecha_cobro: string | null
       total_monto: number
       total_comision: number
+      total_debito_contado: number
       skus: Set<string>
     }
     const aggMap = new Map<string, Agg>()
@@ -77,12 +95,18 @@ export async function GET(req: NextRequest) {
           fecha_cobro: k.fecha_comprobante_cobrado?.slice(0, 10) ?? null,
           total_monto: 0,
           total_comision: 0,
+          total_debito_contado: 0,
           skus: new Set(),
         })
       }
       const agg = aggMap.get(pid)!
+      const bruto = Number(k.comision_viajante_monto ?? 0)
+      const neto = netoLinea(k)
       agg.total_monto += Number(k.subtotal_total ?? 0)
-      agg.total_comision += Number(k.comision_viajante_monto ?? 0)
+      // El número que ve el vendedor es SIEMPRE el neto; el débito va aparte
+      // para poder mostrar el porqué ("pactada X − débito 10% = neto").
+      agg.total_comision += neto
+      agg.total_debito_contado += bruto - neto
       if (k.articulo_id) agg.skus.add(k.articulo_id)
     }
 
@@ -105,7 +129,8 @@ export async function GET(req: NextRequest) {
         fecha: agg.fecha,
         fecha_cobro: agg.fecha_cobro,
         total_monto: agg.total_monto,
-        total_comision: agg.total_comision,
+        total_comision: Math.round(agg.total_comision * 100) / 100,
+        total_debito_contado: Math.round(agg.total_debito_contado * 100) / 100,
         cantidad_skus: agg.skus.size,
       }))
       .sort((a, b) => (b.fecha_cobro || b.fecha).localeCompare(a.fecha_cobro || a.fecha))

@@ -32,6 +32,7 @@ interface PedidoComision {
   fecha_cobro: string | null
   total_monto: number
   total_comision: number
+  total_debito_contado?: number
   cantidad_skus: number
 }
 
@@ -44,7 +45,10 @@ interface ArticuloComision {
   precio_unitario: number
   subtotal: number
   comision_pct: number
+  /** Neto que efectivamente cobra (ya descontado el débito por pago contado) */
   comision_monto: number
+  comision_pactada?: number
+  descuento_financiero_pct?: number
 }
 
 interface ComisionesData {
@@ -64,6 +68,7 @@ interface DetalleData {
     total_iva: number
     total: number
     total_comision: number
+    debito_contado?: number
     articulos: ArticuloComision[]
   }[]
 }
@@ -168,6 +173,11 @@ function VendedorBilleteraInner() {
               {a.comision_pct ? `${a.comision_pct}% · ` : ""}
               {formatCurrency(a.comision_monto)}
             </p>
+            {(a.descuento_financiero_pct || 0) > 0 && (
+              <p className="text-amber-600 text-[10px] leading-tight">
+                pactada {formatCurrency(a.comision_pactada || 0)} − {a.descuento_financiero_pct}% contado
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -206,6 +216,11 @@ function VendedorBilleteraInner() {
                       Cobrado {fechaCorta(c.fecha_cobro)} · Neto {formatCurrency(c.total_neto)} + IVA{" "}
                       {formatCurrency(c.total_iva)}
                     </p>
+                    {(c.debito_contado || 0) > 0 && (
+                      <p className="text-amber-700 text-xs mt-0.5">
+                        Débito 10% pago contado: −{formatCurrency(c.debito_contado || 0)}
+                      </p>
+                    )}
                   </div>
                   <p className="font-bold text-emerald-700">{formatCurrency(c.total_comision)}</p>
                 </div>
@@ -348,13 +363,17 @@ function VendedorBilleteraInner() {
                 <div className="bg-white border border-gray-200 rounded-xl p-3 text-center">
                   <p className="text-[11px] text-gray-500 leading-tight">🕐 Sin cobrar</p>
                   <p className="font-bold text-sm mt-1 text-gray-800">
-                    {formatCurrency(comData.totales.sin_cobrar)}
+                    hasta {formatCurrency(comData.totales.sin_cobrar)}
                   </p>
                 </div>
                 <div className="bg-white border border-gray-200 rounded-xl p-3 text-center">
                   <p className="text-[11px] text-gray-500 leading-tight">✓ Retirado</p>
                   <p className="font-bold text-sm mt-1 text-gray-800">{formatCurrency(comData.totales.retirado)}</p>
                 </div>
+                <p className="col-span-3 text-gray-400 text-[11px] px-1 -mt-0.5">
+                  "Sin cobrar" es un estimado máximo: puede bajar si el cliente paga contado (−10% de esa
+                  comisión). "Para retirar" y "Retirado" son netos: es la plata que efectivamente cobrás.
+                </p>
               </div>
             )}
 
@@ -399,6 +418,11 @@ function VendedorBilleteraInner() {
                       <div className="text-right shrink-0">
                         <p className="text-gray-500 text-xs">{formatCurrency(p.total_monto)}</p>
                         <p className="text-emerald-700 font-bold">{formatCurrency(p.total_comision)}</p>
+                        {(p.total_debito_contado || 0) > 0 && (
+                          <p className="text-amber-600 text-[10px] leading-tight">
+                            neto (−10% contado aplicado)
+                          </p>
+                        )}
                       </div>
                     </div>
                   </button>
