@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 /**
  * GET /api/cheques?estado=EN_CARTERA — cartera de cheques con cliente origen
@@ -16,16 +17,13 @@ export async function GET(request: NextRequest) {
     const estado = searchParams.get("estado")
     const tipo = searchParams.get("tipo")
 
-    let query = supabase
-      .from("cheques")
-      .select("*")
-      .order("fecha_vencimiento", { ascending: true })
-      .limit(300)
-    if (estado) query = query.eq("estado", estado)
-    if (tipo) query = query.eq("tipo", tipo)
-
-    const { data: cheques, error } = await query
-    if (error) throw error
+    // Paginado interno: la cartera ya supera 300 → sin esto se ocultaban cheques.
+    const cheques = await fetchAllRows(() => {
+      let q = supabase.from("cheques").select("*").order("fecha_vencimiento", { ascending: true })
+      if (estado) q = q.eq("estado", estado)
+      if (tipo) q = q.eq("tipo", tipo)
+      return q
+    }, "id")
 
     const clienteIds = [...new Set((cheques || []).map((c) => c.cliente_origen_id).filter(Boolean))]
     const cuentaIds = [...new Set((cheques || []).map((c) => c.cuenta_banco_id).filter(Boolean))]

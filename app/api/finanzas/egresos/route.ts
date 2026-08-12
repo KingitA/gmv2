@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 /**
  * POST /api/finanzas/egresos — gasto desde una caja/banco vía RPC `caja_egreso`
@@ -49,13 +50,11 @@ export async function GET() {
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()
-    const { data, error } = await supabase
+    const egresos = await fetchAllRows(() => supabase
       .from("egresos_generales")
       .select("*")
-      .order("fecha", { ascending: false })
-      .limit(100)
-    if (error) throw error
-    return NextResponse.json({ egresos: data || [] })
+      .order("fecha", { ascending: false }), "id")
+    return NextResponse.json({ egresos })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { formatDateAR } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -213,7 +214,8 @@ export default function ComprobantesVentaPage() {
   const cargarComprobantes = async () => {
     try {
       setCargando(true)
-      const { data, error } = await supabase
+      // Paginado interno: comprobantes_venta crece sin límite → sin esto se cortaría en 1000.
+      const data = await fetchAllRows(() => supabase
         .from("comprobantes_venta")
         .select(
           `
@@ -223,9 +225,7 @@ export default function ComprobantesVentaPage() {
         `,
         )
         .order("fecha", { ascending: false })
-        .order("numero_comprobante", { ascending: false })
-
-      if (error) throw error
+        .order("numero_comprobante", { ascending: false }), "id")
       setComprobantes(data || [])
 
       // Remitos indexados por comprobante (solo activos: los anulados no se ofrecen)

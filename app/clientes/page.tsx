@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, X, ExternalLink } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { formatDateAR } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ImportClientesDialog, clientesFieldLabel } from "@/components/clientes/ImportClientesDialog"
@@ -135,13 +136,15 @@ export default function ClientesPage() {
 
   async function loadClientes() {
     const supabase = createClient()
-    const { data, error } = await supabase
-      .from("clientes")
-      .select("*, localidades(nombre, zonas(nombre))")
-      .eq("activo", true)
-      .order("nombre_razon_social")
-
-    if (error) {
+    // Paginado interno para no cortar en 1000 (el padrón crece).
+    let data: any[]
+    try {
+      data = await fetchAllRows(() => supabase
+        .from("clientes")
+        .select("*, localidades(nombre, zonas(nombre))")
+        .eq("activo", true)
+        .order("nombre_razon_social"), "id")
+    } catch (error) {
       console.error("[v0] Error loading clientes:", error)
       return
     }

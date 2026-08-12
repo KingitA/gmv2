@@ -5,6 +5,7 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { toast } from "sonner"
 import { formatDateAR } from "@/lib/utils"
 import { localMatch } from "@/lib/search/local-match"
@@ -319,27 +320,22 @@ export default function ClientesPedidosPage() {
   const cargarPedidos = async () => {
     try {
       setCargando(true)
-      let query = supabase
-        .from("pedidos")
-        .select(`
+      // Paginado interno: PostgREST corta en 1000 y ya hay 1159+ pedidos → se ocultaban.
+      const buildPedidosQuery = () => {
+        let q = supabase
+          .from("pedidos")
+          .select(`
           *,
           clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, listas_precio:lista_precio_id (nombre)),
           vendedores (nombre),
           viajes (nombre, fecha)
         `)
-
-      // Only show eliminated orders when explicitly filtered
-      if (filtroEstado !== "eliminado") {
-        query = query.neq("estado", "eliminado")
+        if (filtroEstado !== "eliminado") q = q.neq("estado", "eliminado")
+        return q
+          .order("prioridad", { ascending: true })
+          .order("numero_pedido", { ascending: false })
       }
-
-      query = query
-        .order("prioridad", { ascending: true })
-        .order("numero_pedido", { ascending: false })
-
-      const { data, error } = await query
-
-      if (error) throw error
+      const data = await fetchAllRows(buildPedidosQuery, "id")
       setPedidos(data || [])
     } catch (error) {
       console.error("Error cargando pedidos:", JSON.stringify(error, null, 2))

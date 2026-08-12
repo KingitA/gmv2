@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
         if (proveedor) {
             const data = await buscarConFiltros({
                 sb: supabase, table: "articulos", entity: "articulos", q, select: SELECT, hayFiltro: true,
+                literalLimit: 5000, // el export por proveedor+texto no debe cortarse
                 aplicarFiltros: (qb) => qb.eq("activo", true).eq("proveedor_id", proveedor),
             })
             return NextResponse.json(data)

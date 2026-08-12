@@ -111,15 +111,17 @@ export async function GET(request: Request) {
     if (vista === "proveedor") {
       const proveedorId = searchParams.get("proveedor") || ""
       if (!proveedorId) return NextResponse.json({ error: "Se requiere proveedor." }, { status: 400 })
-      let query = supabase
-        .from("articulos")
-        .select(SELECT)
-        .eq("activo", true).gt("precio_base", 0)
-        .eq("proveedor_id", proveedorId)
-      if (categoriaId) query = query.eq("categoria_id", categoriaId)
-      if (subcategoriaId) query = query.eq("subcategoria_id", subcategoriaId)
-      const { data: articulos } = await query.order("descripcion").limit(1000)
-      return NextResponse.json({ articulos: (articulos || []).map((a: any) => mapArticulo(a)) })
+      const articulos = await fetchAllRows(() => {
+        let q = supabase
+          .from("articulos")
+          .select(SELECT)
+          .eq("activo", true).gt("precio_base", 0)
+          .eq("proveedor_id", proveedorId)
+        if (categoriaId) q = q.eq("categoria_id", categoriaId)
+        if (subcategoriaId) q = q.eq("subcategoria_id", subcategoriaId)
+        return q.order("descripcion")
+      }, "id")
+      return NextResponse.json({ articulos: articulos.map((a: any) => mapArticulo(a)) })
     }
 
     if (vista === "categoria") {
