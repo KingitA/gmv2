@@ -76,6 +76,12 @@ export async function anularCobranza(
     p_motivo: motivo || null,
   })
   if (error) throw new Error(`cobranza_anular: ${error.message}`)
+
+  // Liberar las devoluciones que este pago había descontado (vuelven a estar
+  // disponibles para otro cobro). Best-effort: no voltea la anulación.
+  const { error: descErr } = await supabase.from("devoluciones_descuentos").delete().eq("pago_id", pagoId)
+  if (descErr) console.error("[cobranzas] limpiar descuentos de devolución:", descErr.message)
+
   return {
     yaAnulado: Boolean(data?.ya_anulado),
     estabaConfirmado: Boolean(data?.estaba_confirmado),

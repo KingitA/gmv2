@@ -13,6 +13,7 @@ interface ClienteRow {
   nombre: string
   localidad: string | null
   saldo_actual: number
+  saldo_proyectado?: number
 }
 
 export default function VendedorPagoPage() {
@@ -104,14 +105,20 @@ export default function VendedorPagoPage() {
                 <p className="text-gray-500 text-sm truncate">{c.localidad || "—"}</p>
               </div>
               <div className="text-right shrink-0">
-                {c.saldo_actual > 0 ? (
-                  <>
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-red-400">Debe</p>
-                    <p className="font-bold text-red-600">{formatCurrency(c.saldo_actual)}</p>
-                  </>
-                ) : (
-                  <p className="text-gray-400 text-sm font-medium">Al día</p>
-                )}
+                {(() => {
+                  const proy = c.saldo_proyectado ?? c.saldo_actual
+                  if (proy > 0.01)
+                    return (
+                      <>
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-red-400">Debe</p>
+                        <p className="font-bold text-red-600">{formatCurrency(proy)}</p>
+                        {Math.abs(c.saldo_actual - proy) > 0.01 && (
+                          <p className="text-gray-400 text-[10px]">real {formatCurrency(c.saldo_actual)}</p>
+                        )}
+                      </>
+                    )
+                  return <p className="text-green-600 text-sm font-bold">$ 0,00</p>
+                })()}
               </div>
             </button>
           ))

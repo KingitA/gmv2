@@ -33,11 +33,25 @@ export async function POST(request: NextRequest) {
     // monto, contado}] — el monto va como pago a cuenta (sin imputación) y el
     // flag contado marca pago_contado_10 (NC del 10% al facturar).
     const totalMetodos = metodos.reduce((s: number, m: any) => s + Number(m.monto || 0), 0)
+    // Devoluciones descontadas del cobro (array nuevo; c.devolucion single es legacy)
+    const devolucionesDe = (c: any): { devolucion_id: string; monto: number }[] => {
+      const arr = Array.isArray(c.devoluciones) ? c.devoluciones : c.devolucion ? [c.devolucion] : []
+      return arr
+        .map((d: any) => ({ devolucion_id: d.devolucion_id, monto: Number(d.monto ?? d.monto_descontado ?? 0) }))
+        .filter((d: any) => d.devolucion_id && d.monto > 0)
+    }
+    // bonificacion_proyectada: NC 10% contado que emitirá el ERP al confirmar
+    //   (las imputaciones van completas; la NC salda el resto).
+    // ajuste_redondeo: crédito por redondeo que el front asienta vía
+    //   /api/clientes/[id]/ajustes después de crear el pago.
+    // Ambos cubren parte de lo imputado sin ser plata entregada.
     const montoCliente = (c: any) =>
       (c.imputaciones || []).reduce((s: number, i: any) => s + Number(i.monto || 0), 0) +
       (c.pedidos || []).reduce((s: number, p: any) => s + Number(p.monto || 0), 0) +
       Number(c.pago_a_cuenta || 0) -
-      Number(c.devolucion?.monto_descontado || 0)
+      Number(c.bonificacion_proyectada || 0) -
+      Number(c.ajuste_redondeo || 0) -
+      devolucionesDe(c).reduce((s, d) => s + d.monto, 0)
     const totalClientes = clientes.reduce((s: number, c: any) => s + montoCliente(c), 0)
 
     if (totalMetodos <= 0) {
@@ -71,6 +85,41 @@ export async function POST(request: NextRequest) {
         if (!p.pedido_id || Number(p.monto) <= 0) {
           return NextResponse.json({ error: "Pedido anticipado inválido" }, { status: 400 })
         }
+      }
+    }
+
+    // ── Validar devoluciones descontadas (pendientes, del cliente, con tope) ──
+    const todosDescuentos = clientes.flatMap((c: any) =>
+      devolucionesDe(c).map((d) => ({ ...d, cliente_id: c.cliente_id }))
+    )
+    if (todosDescuentos.length) {
+      const devIds = [...new Set(todosDescuentos.map((d) => d.devolucion_id))]
+      const { data: devs } = await supabase
+        .from("devoluciones")
+        .select("id, cliente_id, estado, monto_total")
+        .in("id", devIds)
+      const devMap = new Map((devs || []).map((d: any) => [d.id, d]))
+      const { data: usados } = await supabase
+        .from("devoluciones_descuentos")
+        .select("devolucion_id, monto")
+        .in("devolucion_id", devIds)
+      const usadoPorDev = new Map<string, number>()
+      for (const u of usados || [])
+        usadoPorDev.set(u.devolucion_id, (usadoPorDev.get(u.devolucion_id) || 0) + Number(u.monto))
+
+      for (const d of todosDescuentos) {
+        const dev = devMap.get(d.devolucion_id)
+        if (!dev) return NextResponse.json({ error: "Devolución inexistente" }, { status: 400 })
+        if (dev.cliente_id !== d.cliente_id)
+          return NextResponse.json({ error: "La devolución no es de ese cliente" }, { status: 400 })
+        if (dev.estado !== "pendiente")
+          return NextResponse.json({ error: "La devolución ya fue procesada por la oficina" }, { status: 400 })
+        const restante = Number(dev.monto_total || 0) - (usadoPorDev.get(d.devolucion_id) || 0)
+        if (d.monto > restante + 0.01)
+          return NextResponse.json(
+            { error: `La devolución tiene ${restante.toFixed(2)} disponibles y se intentó descontar ${d.monto.toFixed(2)}` },
+            { status: 400 }
+          )
       }
     }
 
@@ -216,6 +265,19 @@ export async function POST(request: NextRequest) {
       if (dedup) {
         pagosCreados.push({ pago_id: pago.id, cliente_id: c.cliente_id, monto: montoPago, estado: "pendiente_rendicion", dedup: true })
         continue
+      }
+
+      // ── Devoluciones descontadas: asentar el vínculo (anti doble uso) ──
+      const descuentosCliente = devolucionesDe(c)
+      if (descuentosCliente.length) {
+        const { error: descErr } = await supabase.from("devoluciones_descuentos").insert(
+          descuentosCliente.map((d) => ({
+            devolucion_id: d.devolucion_id,
+            pago_id: pago.id,
+            monto: Math.round(d.monto * 100) / 100,
+          }))
+        )
+        if (descErr) console.error("[viajante/cobro] descuento devolución:", descErr.message)
       }
 
       // ── Pedidos anticipados: vincular al pago; contado marca el 10% ──

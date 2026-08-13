@@ -41,6 +41,7 @@ interface Ficha {
     metodo_facturacion: string | null
     vendedor_id: string | null
     saldo_actual: number
+    saldo_proyectado?: number
     actualizado_at: string | null
     actualizado_por_nombre: string | null
   }
@@ -235,13 +236,29 @@ export default function VendedorClienteFichaPage() {
       </header>
 
       <div className="p-4 space-y-5 max-w-2xl mx-auto">
-        {/* Saldo */}
+        {/* Saldo: PROYECTADO primero (lo que va a deber cuando el ERP confirme
+            lo ya cobrado); el real, chiquito abajo. Si el vendedor acaba de
+            cobrar, el número grande tiene que reflejarlo. */}
         <section className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-center">
-          <p className="text-gray-500 text-sm">Saldo de cuenta corriente</p>
-          <p className={`text-3xl font-bold mt-1 ${cliente.saldo_actual > 0 ? "text-red-600" : "text-green-600"}`}>
-            {formatCurrency(cliente.saldo_actual)}
-          </p>
-          {cliente.saldo_actual > 0 && <p className="text-gray-400 text-sm mt-1">El cliente debe</p>}
+          {(() => {
+            const proy = cliente.saldo_proyectado ?? cliente.saldo_actual
+            const hayPendiente = Math.abs(cliente.saldo_actual - proy) > 0.01
+            return (
+              <>
+                <p className="text-gray-500 text-sm">Saldo {hayPendiente ? "proyectado" : "de cuenta corriente"}</p>
+                <p className={`text-3xl font-bold mt-1 ${proy > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                  {Math.abs(proy) < 0.01 ? "$ 0,00" : formatCurrency(proy)}
+                </p>
+                {proy > 0.01 && <p className="text-gray-400 text-sm mt-1">El cliente debe</p>}
+                {hayPendiente && (
+                  <p className="text-gray-400 text-xs mt-1">
+                    Real: {formatCurrency(cliente.saldo_actual)} — la diferencia son cobros/devoluciones que el
+                    ERP todavía no confirmó
+                  </p>
+                )}
+              </>
+            )
+          })()}
         </section>
 
         {/* Acciones */}

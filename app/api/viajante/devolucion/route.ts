@@ -32,44 +32,71 @@ export async function POST(request: NextRequest) {
       ? cliente.vendedor_id
       : session.vendedorIds[0]
 
+    // Condiciones válidas: solo "vendible" repone stock al confirmar
+    const CONDICIONES = new Set(["vendible", "dañado", "vencido"])
+    for (const i of items) {
+      if (!i.articulo_id || Number(i.cantidad) <= 0 || Number(i.precio_venta_original) <= 0) {
+        return NextResponse.json({ error: "Cada ítem requiere artículo, cantidad y precio." }, { status: 400 })
+      }
+      if (i.condicion && !CONDICIONES.has(i.condicion)) {
+        return NextResponse.json({ error: `Condición inválida: ${i.condicion}` }, { status: 400 })
+      }
+    }
+
     const montoTotal = items.reduce(
       (s: number, i: any) => s + Number(i.precio_venta_original || 0) * Number(i.cantidad || 0),
       0
     )
 
-    const { count } = await supabase
+    // Numeración DEV-#####: max actual + 1, con reintentos ante colisión
+    // concurrente (el count(*)+1 anterior chocaba contra el UNIQUE).
+    let devolucion: { id: string } | null = null
+    let numeroDevolucion = ""
+    const { data: ultimo } = await supabase
       .from("devoluciones")
-      .select("*", { count: "exact", head: true })
-    const numeroDevolucion = `DEV-${String((count || 0) + 1).padStart(5, "0")}`
+      .select("numero_devolucion")
+      .like("numero_devolucion", "DEV-%")
+      .order("numero_devolucion", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    let proximo = (parseInt(String(ultimo?.numero_devolucion || "DEV-0").replace(/\D/g, ""), 10) || 0) + 1
 
-    const { data: devolucion, error: devErr } = await supabase
-      .from("devoluciones")
-      .insert({
-        numero_devolucion: numeroDevolucion,
-        cliente_id,
-        vendedor_id: vendedorId,
-        creado_por: session.user.id,
-        pedido_id: pedido_id || null,
-        viaje_id: null,
-        retira_viajante: true,
-        observaciones: observaciones || "Devolución registrada por viajante",
-        estado: "pendiente",
-        monto_total: montoTotal,
-      })
-      .select("id")
-      .single()
-    if (devErr) throw devErr
+    for (let intento = 0; intento < 5 && !devolucion; intento++, proximo++) {
+      numeroDevolucion = `DEV-${String(proximo).padStart(5, "0")}`
+      const { data, error: devErr } = await supabase
+        .from("devoluciones")
+        .insert({
+          numero_devolucion: numeroDevolucion,
+          cliente_id,
+          vendedor_id: vendedorId,
+          creado_por: session.user.id,
+          pedido_id: pedido_id || null,
+          viaje_id: null,
+          retira_viajante: true,
+          observaciones: observaciones || null,
+          estado: "pendiente",
+          monto_total: montoTotal,
+        })
+        .select("id")
+        .single()
+      if (data) devolucion = data
+      else if (devErr && devErr.code !== "23505") throw devErr // 23505 = unique violation → reintenta
+    }
+    if (!devolucion) {
+      return NextResponse.json({ error: "No se pudo numerar la devolución. Reintentá." }, { status: 500 })
+    }
 
     const { error: itemsErr } = await supabase.from("devoluciones_detalle").insert(
       items.map((i: any) => ({
-        devolucion_id: devolucion.id,
+        devolucion_id: devolucion!.id,
         articulo_id: i.articulo_id,
         cantidad: Number(i.cantidad),
         precio_venta_original: Number(i.precio_venta_original || 0),
-        motivo: i.motivo || "Devolución en la calle",
+        motivo: null, // eliminado del flujo — el detalle libre va en observaciones
         condicion: i.condicion || "vendible",
         es_vendible: i.condicion ? i.condicion === "vendible" : true,
         comprobante_venta_id: i.comprobante_venta_id || null,
+        fecha_venta_original: i.fecha_venta_original || null,
       }))
     )
     if (itemsErr) throw itemsErr
