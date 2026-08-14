@@ -505,7 +505,9 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                 // PASO 1: BÚSQUEDA EXACTA POR SKU (MULTIVARIANTE DE CEROS)
                 // Maneja casos como "000022" → "22", "22" → "000022", EAN13, etc.
                 // ═══════════════════════════════════════════════════════════════
-                let rawCode = item.code ? String(item.code).trim() : ""
+                // La IA suele devolver el código CON el numeral/paréntesis ("#112225",
+                // "(#040377)"). Sacamos esos símbolos para poder matchear contra el SKU limpio.
+                let rawCode = item.code ? String(item.code).trim().replace(/[#()]/g, "").trim() : ""
 
                 // Extraer código de paréntesis: "(#000022)" o "(033100)"
                 if (!rawCode && baseDescription) {
