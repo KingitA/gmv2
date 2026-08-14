@@ -17,6 +17,10 @@ export async function generateEmbedding(text: string): Promise<number[]> {
         body: JSON.stringify({
             model: `models/${EMBED_MODEL}`,
             content: { parts: [{ text: cleanedText }] },
+            // Fijamos 768 para coincidir con los embeddings guardados (columna vector(768)).
+            // gemini-embedding-001 cambió su default a 3072; sin esto la consulta queda en
+            // 3072 y las RPC match_* fallan con "different vector dimensions 768 and 3072".
+            outputDimensionality: 768,
         }),
     });
 
