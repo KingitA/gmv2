@@ -513,6 +513,12 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                     if (codeInParens) rawCode = codeInParens[1]
                 }
 
+                // Código con numeral pegado, sin paréntesis: "#106229 JABON..." (formato Megasur)
+                if (!rawCode && baseDescription) {
+                    const hashCode = baseDescription.match(/#\s*(\d{2,})/)
+                    if (hashCode) rawCode = hashCode[1]
+                }
+
                 // Primer token numérico del texto como fallback de código
                 if (!rawCode && baseDescription) {
                     const firstNumeric = baseDescription.trim().match(/^(\d{2,10})(?:\s|$)/)
@@ -704,6 +710,21 @@ Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON
 
             } catch (e: any) {
                 console.error(`Error matching item '${item.description}':`, e.message || e)
+            }
+
+            // Hidratar campos completos del artículo (la vectorial y algunos pasos solo
+            // devuelven id/descripción/sku → el frontend mostraba "SIN BULTO / SIN EAN" y
+            // el pedido se creaba sin precio_base).
+            if (match?.id) {
+                try {
+                    const sbH = createAdminClient()
+                    const { data: full } = await sbH
+                        .from("articulos")
+                        .select("id, sku, descripcion, ean13, codigo_bulto, unidades_por_bulto, precio_base, precio_base_contado")
+                        .eq("id", match.id)
+                        .maybeSingle()
+                    if (full) match = { ...match, ...full }
+                } catch { /* si falla, dejamos el match como estaba */ }
             }
 
             if (match) {
