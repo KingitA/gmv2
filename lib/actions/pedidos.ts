@@ -257,7 +257,8 @@ const SEGMENTO_PEDIDO_COLS =
   "metodo_facturacion_pedido,lista_precio_pedido_id," +
   "lista_limpieza_pedido_id,metodo_limpieza_pedido," +
   "lista_perf0_pedido_id,metodo_perf0_pedido," +
-  "lista_perf_plus_pedido_id,metodo_perf_plus_pedido"
+  "lista_perf_plus_pedido_id,metodo_perf_plus_pedido," +
+  "bonif_viajante_pedido_pct"
 const SEGMENTO_CLIENTE_COLS =
   "metodo_facturacion,lista_precio_id,lista_limpieza_id,metodo_limpieza," +
   "lista_perf0_id,metodo_perf0,lista_perf_plus_id,metodo_perf_plus"
@@ -344,7 +345,15 @@ function getDescuentoGeneral(
 }
 
 /** Trae las bonificaciones general + viajante activas de un cliente. */
-async function fetchBonifGeneralViajante(supabase: any, clienteId: string): Promise<{
+// `pedidoOverrides.bonif_viajante_pedido_pct` (columna pedidos.bonif_viajante_pedido_pct
+// o override en memoria del preview): si es número, pisa la bonificación
+// viajante de la ficha para TODOS los segmentos en este pedido ("solo este
+// pedido" desde la app vendedor). null/undefined = heredar del cliente.
+async function fetchBonifGeneralViajante(
+  supabase: any,
+  clienteId: string,
+  pedidoOverrides?: { bonif_viajante_pedido_pct?: number | null } | null,
+): Promise<{
   general: Array<{ segmento: string | null; porcentaje: number }>
   viajante: Array<{ segmento: string | null; porcentaje: number }>
 }> {
@@ -354,9 +363,14 @@ async function fetchBonifGeneralViajante(supabase: any, clienteId: string): Prom
     .eq("cliente_id", clienteId)
     .eq("activo", true)
     .in("tipo", ["general", "viajante"])
+  const ovr = pedidoOverrides?.bonif_viajante_pedido_pct
+  const viajante =
+    typeof ovr === "number" && Number.isFinite(ovr)
+      ? [{ segmento: null, porcentaje: ovr }]
+      : (data ?? []).filter((b: any) => b.tipo === "viajante")
   return {
     general:  (data ?? []).filter((b: any) => b.tipo === "general"),
-    viajante: (data ?? []).filter((b: any) => b.tipo === "viajante"),
+    viajante,
   }
 }
 
@@ -447,6 +461,8 @@ export async function previewPrecioArticulo(
     lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
     lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
+    // Bonificación viajante SOLO para este pedido (pisa la de la ficha)
+    bonif_viajante_pedido_pct?: number | null
     // Condiciones por proveedor (este pedido) — pisan al rubro para esa mercadería
     condiciones_proveedor?: CondicionProveedor[]
     // Condiciones por marca (este pedido) — ganan sobre proveedor
@@ -496,7 +512,7 @@ export async function previewPrecioArticulo(
     listaId = resuelto.listaId
     metodoRaw = resuelto.metodoRaw
   }
-  const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId)
+  const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId, overrides)
   const bonif = resolverBonifItem(cond, general, viajante, segmento)
   const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
   const metodo = toMetodoFacturacion(metodoRaw)
@@ -532,6 +548,7 @@ export async function previewPreciosArticulos(
     lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
     lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
+    bonif_viajante_pedido_pct?: number | null
   } = {},
 ): Promise<Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }>> {
   if (!articuloIds?.length) return []
@@ -572,7 +589,7 @@ export async function previewPreciosArticulos(
   const listasCache: Record<string, DatosLista> = {}
   const condicionesProveedor = await fetchCondicionesProveedor(supabase, clienteId)
   const condicionesMarca = await fetchCondicionesMarca(supabase, clienteId)
-  const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId)
+  const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId, overrides)
 
   const out: Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }> = []
   for (const art of articulos || []) {
@@ -755,6 +772,10 @@ export async function createPedido(data: {
   // Descuentos por segmento cargados en el pedido (general/viajante/mercadería).
   // Si vienen, se usan en lugar de las bonificaciones permanentes del cliente.
   bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
+  // Bonificación viajante SOLO para este pedido (todos los segmentos). Se
+  // persiste en pedidos.bonif_viajante_pedido_pct para que los ítems que se
+  // agreguen después y los re-precios la respeten.
+  bonif_viajante_pedido_pct?: number | null
   // Mercadería bonificada elegida al crear el pedido: artículos a regalar + % .
   // Las unidades se calculan por monto (% × neto) repartido parejo, y luego se
   // reajustan en vivo al preparar en depósito.
@@ -804,7 +825,9 @@ export async function createPedido(data: {
   const bonifGeneral: Array<{ segmento: string | null; porcentaje: number }> =
     bonifData.filter((b: any) => b.tipo === "general")
   const bonificacionesViajante: Array<{ segmento: string | null; porcentaje: number }> =
-    bonifData.filter((b: any) => b.tipo === "viajante")
+    typeof data.bonif_viajante_pedido_pct === "number"
+      ? [{ segmento: null, porcentaje: data.bonif_viajante_pedido_pct }]
+      : bonifData.filter((b: any) => b.tipo === "viajante")
 
   // Condiciones por proveedor: del cliente + overrides del formulario (este pedido)
   const condicionesProveedor = mergeCondicionesProveedor(
@@ -912,6 +935,7 @@ export async function createPedido(data: {
       ...(data.metodo_perf0_pedido          ? { metodo_perf0_pedido:          data.metodo_perf0_pedido }          : {}),
       ...(data.lista_perf_plus_pedido_id    ? { lista_perf_plus_pedido_id:    data.lista_perf_plus_pedido_id }    : {}),
       ...(data.metodo_perf_plus_pedido      ? { metodo_perf_plus_pedido:      data.metodo_perf_plus_pedido }      : {}),
+      ...(typeof data.bonif_viajante_pedido_pct === "number" ? { bonif_viajante_pedido_pct: data.bonif_viajante_pedido_pct } : {}),
       total_flete: 0,
       total_impuestos: percepciones,
       total: Math.round((total + percepciones) * 100) / 100,
@@ -1360,7 +1384,7 @@ export async function agregarItemPedido(
   const { listaId, metodoRaw: metodoItemRaw, metodo, listaDatos, cond } =
     await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas)
 
-  const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
+  const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido)
   const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
   const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, bonif)
 
@@ -1517,7 +1541,7 @@ export async function agregarItemBonificado(
   const precioListaRef = precio.precioLista  // P.Lista real del producto bonificado
   // Viajante del segmento: se guarda en la línea para que la comisión "cobrada" use
   // la misma tasa (comisión% − viajante%) al restar el valor regalado.
-  const { viajante: bonifViajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
+  const { viajante: bonifViajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido)
   const viajantePctBonif = getDescuentoViajante(bonifViajante, segmentoBonif)
 
   const { error } = await supabase.from("pedidos_detalle").insert({
@@ -1711,7 +1735,7 @@ async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string
   const listasCache: Record<string, DatosLista> = {}
   const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
   const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
-  const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id)
+  const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido)
 
   const { data: items } = await supabase
     .from("pedidos_detalle")
@@ -1799,13 +1823,18 @@ export async function repreciarPedidosAbiertosCliente(clienteId: string) {
   return { success: true, repreciados, errores }
 }
 
-// Cambia el método de facturación del pedido y re-precia TODO el carrito al
-// instante (incluye pedidos ya "pendientes"). Usado por el módulo vendedor
-// al tocar el selector de método. `forzarReprecio` re-precia aunque el
-// override no cambie (p. ej. cuando cambió el método guardado del CLIENTE).
-export async function aplicarMetodoPedidoVendedor(
+// Condiciones "solo este pedido" desde el módulo vendedor: método, lista y/o
+// bonificación viajante del pedido. Guarda los overrides que vengan definidos
+// (""/null = volver a lo del cliente) y re-precia TODO el carrito al instante
+// (incluye pedidos ya "pendientes"). `forzarReprecio` re-precia aunque nada
+// cambie (p. ej. cuando cambió la config guardada del CLIENTE).
+export async function aplicarCondicionesPedidoVendedor(
   pedidoId: string,
-  metodoFacturacion: string,
+  cond: {
+    metodo_facturacion_pedido?: string | null
+    lista_precio_pedido_id?: string | null
+    bonif_viajante_pedido_pct?: number | null
+  },
   opts: { forzarReprecio?: boolean } = {}
 ) {
   const supabase = await createClient()
@@ -1821,21 +1850,46 @@ export async function aplicarMetodoPedidoVendedor(
     .single()
   if (!pedido) throw new Error("Pedido no encontrado")
 
-  const metodoNuevo = limpiarCentinela(metodoFacturacion) || null
-  const metodoActual = (pedido as any).metodo_facturacion_pedido || null
-  if (metodoNuevo === metodoActual && !opts.forzarReprecio) return { success: true, sinCambios: true }
+  const patch: Record<string, any> = {}
+  if (cond.metodo_facturacion_pedido !== undefined) {
+    const v = limpiarCentinela(cond.metodo_facturacion_pedido || "") || null
+    if (v !== ((pedido as any).metodo_facturacion_pedido || null)) patch.metodo_facturacion_pedido = v
+  }
+  if (cond.lista_precio_pedido_id !== undefined) {
+    const v = limpiarCentinela(cond.lista_precio_pedido_id || "") || null
+    if (v !== ((pedido as any).lista_precio_pedido_id || null)) patch.lista_precio_pedido_id = v
+  }
+  if (cond.bonif_viajante_pedido_pct !== undefined) {
+    const raw = cond.bonif_viajante_pedido_pct
+    const v = typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : null
+    if (v !== ((pedido as any).bonif_viajante_pedido_pct ?? null)) patch.bonif_viajante_pedido_pct = v
+  }
 
-  await supabase
-    .from("pedidos")
-    .update({ metodo_facturacion_pedido: metodoNuevo, actualizado_por: user.id })
-    .eq("id", pedidoId)
-  ;(pedido as any).metodo_facturacion_pedido = metodoNuevo
+  if (!Object.keys(patch).length && !opts.forzarReprecio) return { success: true, sinCambios: true }
+
+  if (Object.keys(patch).length) {
+    const { error } = await supabase
+      .from("pedidos")
+      .update({ ...patch, actualizado_por: user.id })
+      .eq("id", pedidoId)
+    if (error) throw error
+    Object.assign(pedido as any, patch)
+  }
 
   await repreciarItemsPedido(supabase, pedido, pedidoId)
   const total = await recalcularTotalPedido(supabase, pedidoId)
 
   revalidatePath("/clientes-pedidos")
   return { success: true, total }
+}
+
+// Compat: solo método (lo usaba la primera versión de la app)
+export async function aplicarMetodoPedidoVendedor(
+  pedidoId: string,
+  metodoFacturacion: string,
+  opts: { forzarReprecio?: boolean } = {}
+) {
+  return aplicarCondicionesPedidoVendedor(pedidoId, { metodo_facturacion_pedido: metodoFacturacion }, opts)
 }
 
 // ─── Confirmación del pedido armado en vivo por el vendedor ─────────────────

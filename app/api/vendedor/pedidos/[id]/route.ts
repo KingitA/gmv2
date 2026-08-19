@@ -16,8 +16,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const { data: pedido, error } = await supabase
       .from("pedidos")
       .select(
-        `id, numero_pedido, fecha, estado, total, observaciones, metodo_facturacion_pedido, vendedor_id, cliente_id, created_at,
-         clientes:cliente_id(id, nombre, localidad, metodo_facturacion),
+        `id, numero_pedido, fecha, estado, total, observaciones, metodo_facturacion_pedido, lista_precio_pedido_id, bonif_viajante_pedido_pct, vendedor_id, cliente_id, created_at,
+         clientes:cliente_id(id, nombre, localidad, metodo_facturacion, lista_precio_id, lista:lista_precio_id(nombre)),
          pedidos_detalle(id, articulo_id, cantidad, precio_base, precio_final, subtotal, es_bonificado, estado_item,
            articulos:articulo_id(id, sku, descripcion, unidades_por_bulto, imagen_url))`
       )

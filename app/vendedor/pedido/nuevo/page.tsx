@@ -6,7 +6,7 @@ import { formatCurrency } from "@/lib/utils"
 import {
   actualizarCantidadItem,
   agregarItemPedido,
-  aplicarMetodoPedidoVendedor,
+  aplicarCondicionesPedidoVendedor,
   confirmarPedidoVendedor,
   createPedido,
   eliminarItemPedido,
@@ -54,8 +54,24 @@ interface ClienteSel {
   nombre: string
   localidad: string | null
   metodo_facturacion: string | null
+  lista_precio_id?: string | null
+  lista?: { nombre: string } | null
+  vendedor_id?: string | null
   saldo_actual?: number
 }
+
+// Condiciones comerciales "solo este pedido" (overrides guardados en pedidos.*)
+interface CondPedido {
+  metodo: string            // "" = método del cliente
+  lista: string             // "" = lista del cliente
+  bonif: number | null      // null = bonificación viajante de la ficha
+}
+const COND_VACIA: CondPedido = { metodo: "", lista: "", bonif: null }
+const condToOverrides = (c: CondPedido) => ({
+  ...(c.metodo ? { metodo_facturacion_pedido: c.metodo } : {}),
+  ...(c.lista ? { lista_precio_pedido_id: c.lista } : {}),
+  ...(c.bonif !== null ? { bonif_viajante_pedido_pct: c.bonif } : {}),
+})
 
 // Datos mínimos del artículo dentro del carrito (al retomar un pedido
 // guardado solo tenemos lo que devuelve el detalle, no el Articulo completo).
@@ -228,8 +244,22 @@ function NuevoPedidoInner() {
   // Panel de acceso rápido al cliente (ficha, CC, método de facturación)
   const [verCliente, setVerCliente] = useState(false)
   const [metodoSel, setMetodoSel] = useState("")
+  const [listaSel, setListaSel] = useState("")
+  const [bonifSel, setBonifSel] = useState<string>("")
   const [obs, setObs] = useState("")
-  const [metodoOverride, setMetodoOverride] = useState("")
+  // Overrides "solo este pedido" (persisten en pedidos.metodo_facturacion_pedido /
+  // lista_precio_pedido_id / bonif_viajante_pedido_pct)
+  const [cond, setCond] = useState<CondPedido>(COND_VACIA)
+  const metodoOverride = cond.metodo
+  const setMetodoOverride = (m: string) => setCond((p) => ({ ...p, metodo: m }))
+  // Catálogos para el panel del cliente: listas, permiso de lista, viajantes
+  const [catFicha, setCatFicha] = useState<{
+    listas_precio: { id: string; nombre: string }[]
+    vendedores: { id: string; lista_precio_id?: string | null; lista_nombre?: string | null }[]
+    puede_cambiar_lista: boolean
+  } | null>(null)
+  // Bonificación viajante vigente en la ficha (por segmento)
+  const [bonifCliente, setBonifCliente] = useState<Record<string, number> | null>(null)
   const [confirmando, setConfirmando] = useState(false)
   const [pedidoOk, setPedidoOk] = useState<{ numero: string; editado?: boolean } | null>(null)
 
@@ -282,7 +312,11 @@ function NuevoPedidoInner() {
       )
       if (opts?.hydrateMeta) {
         setObs(p.observaciones || "")
-        setMetodoOverride(p.metodo_facturacion_pedido || "")
+        setCond({
+          metodo: p.metodo_facturacion_pedido || "",
+          lista: p.lista_precio_pedido_id || "",
+          bonif: typeof p.bonif_viajante_pedido_pct === "number" ? p.bonif_viajante_pedido_pct : null,
+        })
         if (p.clientes) {
           setCliente((prev) =>
             prev || {
@@ -290,6 +324,8 @@ function NuevoPedidoInner() {
               nombre: p.clientes.nombre,
               localidad: p.clientes.localidad,
               metodo_facturacion: p.clientes.metodo_facturacion,
+              lista_precio_id: p.clientes.lista_precio_id ?? null,
+              lista: p.clientes.lista ?? null,
             }
           )
         }
@@ -336,6 +372,30 @@ function NuevoPedidoInner() {
     }
   }, [clienteParam])
 
+  // Catálogos del panel (listas, permiso) una vez; bonif viajante por cliente
+  useEffect(() => {
+    fetch("/api/vendedor/catalogos-ficha")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) return
+        setCatFicha({
+          listas_precio: d.listas_precio || [],
+          vendedores: d.vendedores || [],
+          puede_cambiar_lista: !!d.puede_cambiar_lista,
+        })
+      })
+      .catch(() => {})
+  }, [])
+  const cargarBonifCliente = useCallback((clienteId: string) => {
+    fetch(`/api/vendedor/cliente/${clienteId}/bonificaciones`)
+      .then((r) => r.json())
+      .then((d) => setBonifCliente(d.bonificaciones || null))
+      .catch(() => setBonifCliente(null))
+  }, [])
+  useEffect(() => {
+    if (cliente?.id) cargarBonifCliente(cliente.id)
+  }, [cliente?.id, cargarBonifCliente])
+
   useEffect(() => {
     if (!clienteParam) {
       fetch("/api/vendedor/clientes")
@@ -362,11 +422,7 @@ function NuevoPedidoInner() {
       if (!ids.length) return
       for (const id of ids) preciosPedidos.current.add(id)
       try {
-        const res = await previewPreciosArticulos(
-          cliente.id,
-          ids,
-          metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}
-        )
+        const res = await previewPreciosArticulos(cliente.id, ids, condToOverrides(cond))
         setPrecios((prev) => {
           const next = { ...prev }
           for (const p of res)
@@ -379,7 +435,7 @@ function NuevoPedidoInner() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cliente, metodoOverride]
+    [cliente, cond.metodo, cond.lista, cond.bonif]
   )
 
   // Vacía el cache de precios y recalcula todo lo cargado en pantalla
@@ -395,11 +451,11 @@ function NuevoPedidoInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listas, artsCategoria, resultados, cargarPrecios])
 
-  // Al cambiar el método del pedido, los precios del catálogo se recalculan
+  // Al cambiar método/lista/bonif del pedido, los precios del catálogo se recalculan
   useEffect(() => {
     recalcularPreciosCatalogo()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metodoOverride])
+  }, [cond.metodo, cond.lista, cond.bonif])
 
   // ── Carga de listas por filtro (novedades/ofertas/habituales) ───────
   const cargarLista = useCallback(
@@ -542,11 +598,7 @@ function NuevoPedidoInner() {
     setSelPrecio(null)
     setCargandoPrecio(true)
     try {
-      const p = await previewPrecioArticulo(
-        cliente!.id,
-        a.id,
-        metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}
-      )
+      const p = await previewPrecioArticulo(cliente!.id, a.id, condToOverrides(cond))
       setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, especial: p.especial ?? null, bonifViajantePct: p.bonifViajantePct || 0 })
     } catch {
       setSelPrecio(null)
@@ -585,7 +637,7 @@ function NuevoPedidoInner() {
             cliente_id: cliente.id,
             items: [{ producto_id: art.id, cantidad: cant, precio_unitario: 0, descuento: 0 }],
             estado_inicial: "en_venta",
-            ...(metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}),
+            ...condToOverrides(cond),
           })
           pedidoIdRef.current = pedido.id
           setPedidoId(pedido.id)
@@ -612,15 +664,20 @@ function NuevoPedidoInner() {
     })
   }
 
-  // Cambio de método de facturación: si el pedido ya existe, re-precia TODO
-  // el carrito en el server y refresca; el catálogo recalcula por el effect.
-  const cambiarMetodo = (metodo: string) => {
-    setMetodoOverride(metodo)
+  // "Solo este pedido": guarda los overrides en el pedido (si ya existe) y
+  // re-precia TODO el carrito en el server; el catálogo recalcula por el effect.
+  // Si el pedido todavía no existe, quedan en memoria y viajan en createPedido.
+  const aplicarSoloPedido = (nueva: CondPedido) => {
+    setCond(nueva)
     if (!pedidoIdRef.current) return
     setSync("saving")
     enqueue(async () => {
       try {
-        await aplicarMetodoPedidoVendedor(pedidoIdRef.current!, metodo)
+        await aplicarCondicionesPedidoVendedor(pedidoIdRef.current!, {
+          metodo_facturacion_pedido: nueva.metodo || null,
+          lista_precio_pedido_id: nueva.lista || null,
+          bonif_viajante_pedido_pct: nueva.bonif,
+        })
         await refreshPedido(pedidoIdRef.current!)
         setSync("idle")
       } catch (e: any) {
@@ -630,35 +687,69 @@ function NuevoPedidoInner() {
       }
     })
   }
+  const cambiarMetodo = (metodo: string) => aplicarSoloPedido({ ...cond, metodo })
 
-  // Guardar el método EN LA FICHA del cliente (queda para futuros pedidos),
-  // limpiando el override del pedido y repreciando carrito + catálogo.
-  const guardarMetodoCliente = (metodo: string) => {
-    if (!cliente || !metodo) return
+  // "Guardar para el cliente": escribe en la FICHA (queda para futuros
+  // pedidos), limpia los overrides del pedido y re-precia carrito + catálogo.
+  const guardarParaCliente = (sel: { metodo?: string; lista?: string; bonif?: number | null }) => {
+    if (!cliente) return
     setVerCliente(false)
     setSync("saving")
     enqueue(async () => {
       try {
-        const res = await fetch(`/api/vendedor/cliente/${cliente.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ metodo_facturacion: metodo }),
-        })
-        const d = await res.json()
-        if (d.error) throw new Error(d.error)
-        setCliente((prev) => (prev ? { ...prev, metodo_facturacion: metodo } : prev))
+        const patch: Record<string, any> = {}
+        if (sel.metodo) patch.metodo_facturacion = sel.metodo
+        if (sel.lista !== undefined && catFicha?.puede_cambiar_lista) patch.lista_precio_id = sel.lista || null
+        if (Object.keys(patch).length) {
+          const res = await fetch(`/api/vendedor/cliente/${cliente.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+          })
+          const d = await res.json()
+          if (d.error) throw new Error(d.error)
+        }
+        if (typeof sel.bonif === "number") {
+          const res = await fetch(`/api/vendedor/cliente/${cliente.id}/bonificaciones`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ limpieza_bazar: sel.bonif, perf0: sel.bonif, perf_plus: sel.bonif }),
+          })
+          const d = await res.json()
+          if (d.error) throw new Error(d.error)
+        }
+        // Refrescar la ficha en memoria (lista con nombre, método) y la bonif
+        const r = await fetch(`/api/vendedor/cliente/${cliente.id}`)
+        const dc = await r.json()
+        if (!dc.error && dc.cliente) setCliente(dc.cliente)
+        cargarBonifCliente(cliente.id)
+
+        // El pedido pasa a heredar TODO del cliente (sin overrides)
+        const limpia: CondPedido = {
+          metodo: sel.metodo ? "" : cond.metodo,
+          lista: sel.lista !== undefined ? "" : cond.lista,
+          bonif: typeof sel.bonif === "number" ? null : cond.bonif,
+        }
         if (pedidoIdRef.current) {
-          // el pedido pasa a usar el método del cliente (sin override)
-          await aplicarMetodoPedidoVendedor(pedidoIdRef.current, "", { forzarReprecio: true })
+          await aplicarCondicionesPedidoVendedor(
+            pedidoIdRef.current,
+            {
+              metodo_facturacion_pedido: limpia.metodo || null,
+              lista_precio_pedido_id: limpia.lista || null,
+              bonif_viajante_pedido_pct: limpia.bonif,
+            },
+            { forzarReprecio: true }
+          )
           await refreshPedido(pedidoIdRef.current)
         }
-        if (metodoOverride) setMetodoOverride("") // el effect recalcula el catálogo
+        const cambioCond = limpia.metodo !== cond.metodo || limpia.lista !== cond.lista || limpia.bonif !== cond.bonif
+        if (cambioCond) setCond(limpia) // el effect recalcula el catálogo
         else recalcularPreciosCatalogo()
         setSync("idle")
       } catch (e: any) {
-        console.error("Error guardando método del cliente:", e)
+        console.error("Error guardando condiciones del cliente:", e)
         setSync("error")
-        alert(`No se pudo guardar el método del cliente: ${e?.message || e}`)
+        alert(`No se pudo guardar en la ficha del cliente: ${e?.message || e}`)
       }
     })
   }
@@ -739,7 +830,7 @@ function NuevoPedidoInner() {
       setNumeroPedido(null)
       setEstadoPedido(null)
       setObs("")
-      setMetodoOverride("")
+      setCond(COND_VACIA)
       window.history.replaceState(null, "", `/vendedor/pedido/nuevo?cliente=${cliente.id}`)
     } catch (e: any) {
       alert(`Error al confirmar el pedido: ${e?.message || e}`)
@@ -1039,7 +1130,9 @@ function NuevoPedidoInner() {
           )}
           <button
             onClick={() => {
-              setMetodoSel(metodoOverride || cliente.metodo_facturacion || "")
+              setMetodoSel(cond.metodo || cliente.metodo_facturacion || "")
+              setListaSel(cond.lista || cliente.lista_precio_id || "")
+              setBonifSel(cond.bonif !== null ? String(cond.bonif) : "")
               setVerCliente(true)
             }}
             className="w-10 h-10 rounded-xl bg-emerald-600 border border-emerald-500 flex items-center justify-center text-lg shrink-0 active:scale-95"
@@ -1457,59 +1550,162 @@ function NuevoPedidoInner() {
               </button>
             </div>
 
-            <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-              <div>
-                <p className="text-gray-700 font-bold text-sm">Método de facturación</p>
-                <p className="text-gray-400 text-xs">
-                  Actual: {metodoOverride ? `${metodoOverride} (solo este pedido)` : cliente.metodo_facturacion || "—"}
-                </p>
-              </div>
-              <select
-                value={metodoSel}
-                onChange={(e) => setMetodoSel(e.target.value)}
-                className="w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
-              >
-                <option value="">Elegir método...</option>
-                <option value="Factura">Factura</option>
-                <option value="Final">Final (Mixto)</option>
-                <option value="Presupuesto">Presupuesto</option>
-              </select>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    if (!metodoSel) return
-                    setVerCliente(false)
-                    cambiarMetodo(metodoSel)
-                  }}
-                  disabled={!metodoSel}
-                  className="bg-white border border-gray-300 disabled:opacity-40 text-gray-700 rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
-                >
-                  Solo este pedido
-                </button>
-                <button
-                  onClick={() => guardarMetodoCliente(metodoSel)}
-                  disabled={!metodoSel}
-                  className="bg-gray-900 disabled:opacity-40 text-white rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
-                >
-                  Guardar para el cliente
-                </button>
-              </div>
-              <p className="text-gray-400 text-xs">
-                En ambos casos se recalculan al instante los precios del catálogo y de los artículos ya cargados en
-                el pedido — de estos precios sale la factura.
-              </p>
-              {metodoOverride && (
-                <button
-                  onClick={() => {
-                    setVerCliente(false)
-                    cambiarMetodo("")
-                  }}
-                  className="w-full text-emerald-700 text-sm font-bold py-1"
-                >
-                  Volver al método del cliente ({cliente.metodo_facturacion || "—"})
-                </button>
-              )}
-            </div>
+            {(() => {
+              // Lista impuesta por el viajante del cliente (LISTA NECO → Neco, etc.):
+              // no se guarda en ficha; sí se puede pisar "solo este pedido" si tiene permiso.
+              const viajCliente = catFicha?.vendedores.find((v) => v.id === cliente.vendedor_id)
+              const listaImpuesta = viajCliente?.lista_nombre || null
+              const puedeLista = !!catFicha?.puede_cambiar_lista
+              const listaNombre = (id: string | null | undefined) =>
+                catFicha?.listas_precio.find((l) => l.id === id)?.nombre || null
+              const listaClienteNombre = cliente.lista?.nombre || listaNombre(cliente.lista_precio_id) || "Estándar"
+              const bonifFichaTxt = bonifCliente
+                ? (() => {
+                    const vals = [bonifCliente.limpieza_bazar || 0, bonifCliente.perf0 || 0, bonifCliente.perf_plus || 0]
+                    if (vals.every((v) => v === vals[0])) return vals[0] ? `${vals[0]}%` : "sin bonificación"
+                    return `L/B ${vals[0]}% · P0 ${vals[1]}% · P+ ${vals[2]}%`
+                  })()
+                : "…"
+              const bonifNum = bonifSel.trim() === "" ? null : Number(bonifSel.replace(",", "."))
+              const bonifValida = bonifNum !== null && Number.isFinite(bonifNum) && bonifNum >= 0 && bonifNum <= 100
+              const btnSolo = "bg-white border border-gray-300 disabled:opacity-40 text-gray-700 rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
+              const btnCliente = "bg-gray-900 disabled:opacity-40 text-white rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
+              const selCls = "w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
+              return (
+                <div className="space-y-3 max-h-[60dvh] overflow-y-auto -mx-1 px-1">
+                  {/* ── Método ── */}
+                  <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                    <div>
+                      <p className="text-gray-700 font-bold text-sm">Método de facturación</p>
+                      <p className="text-gray-400 text-xs">
+                        Actual: {cond.metodo ? `${cond.metodo} (solo este pedido)` : cliente.metodo_facturacion || "—"}
+                      </p>
+                    </div>
+                    <select value={metodoSel} onChange={(e) => setMetodoSel(e.target.value)} className={selCls}>
+                      <option value="">Elegir método...</option>
+                      <option value="Factura">Factura</option>
+                      <option value="Final">Final (Mixto)</option>
+                      <option value="Presupuesto">Presupuesto</option>
+                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => { if (!metodoSel) return; setVerCliente(false); cambiarMetodo(metodoSel) }}
+                        disabled={!metodoSel}
+                        className={btnSolo}
+                      >
+                        Solo este pedido
+                      </button>
+                      <button onClick={() => guardarParaCliente({ metodo: metodoSel })} disabled={!metodoSel} className={btnCliente}>
+                        Guardar para el cliente
+                      </button>
+                    </div>
+                    {cond.metodo && (
+                      <button onClick={() => { setVerCliente(false); cambiarMetodo("") }} className="w-full text-emerald-700 text-sm font-bold py-1">
+                        Volver al método del cliente ({cliente.metodo_facturacion || "—"})
+                      </button>
+                    )}
+                  </div>
+
+                  {/* ── Lista de precios ── */}
+                  <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                    <div>
+                      <p className="text-gray-700 font-bold text-sm">Lista de precios</p>
+                      <p className="text-gray-400 text-xs">
+                        Actual: {cond.lista ? `${listaNombre(cond.lista) || "—"} (solo este pedido)` : listaClienteNombre}
+                        {listaImpuesta && !cond.lista ? " (por viajante)" : ""}
+                      </p>
+                    </div>
+                    {puedeLista ? (
+                      <>
+                        <select value={listaSel} onChange={(e) => setListaSel(e.target.value)} className={selCls}>
+                          <option value="">Estándar (sin lista)</option>
+                          {(catFicha?.listas_precio || []).map((l) => (
+                            <option key={l.id} value={l.id}>{l.nombre}</option>
+                          ))}
+                        </select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => { setVerCliente(false); aplicarSoloPedido({ ...cond, lista: listaSel }) }}
+                            className={btnSolo}
+                          >
+                            Solo este pedido
+                          </button>
+                          <button
+                            onClick={() => guardarParaCliente({ lista: listaSel })}
+                            disabled={!!listaImpuesta}
+                            title={listaImpuesta ? "La lista la impone el viajante asignado" : undefined}
+                            className={btnCliente}
+                          >
+                            Guardar para el cliente
+                          </button>
+                        </div>
+                        {listaImpuesta && (
+                          <p className="text-gray-400 text-xs">
+                            La ficha lleva lista <b>{listaImpuesta}</b> por el viajante asignado; para cambiarla de forma permanente, reasigná el viajante desde la ficha.
+                          </p>
+                        )}
+                        {cond.lista && (
+                          <button onClick={() => { setVerCliente(false); aplicarSoloPedido({ ...cond, lista: "" }) }} className="w-full text-emerald-700 text-sm font-bold py-1">
+                            Volver a la lista del cliente ({listaClienteNombre})
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-gray-400 text-xs">No tenés permiso para cambiar la lista de precios.</p>
+                    )}
+                  </div>
+
+                  {/* ── Bonificación viajante ── */}
+                  <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                    <div>
+                      <p className="text-gray-700 font-bold text-sm">Bonificación viajante</p>
+                      <p className="text-gray-400 text-xs">
+                        Actual: {cond.bonif !== null ? `${cond.bonif}% (solo este pedido)` : `ficha: ${bonifFichaTxt}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={bonifSel}
+                        onChange={(e) => setBonifSel(e.target.value)}
+                        inputMode="decimal"
+                        placeholder="0"
+                        className={`${selCls} text-right text-lg font-bold`}
+                      />
+                      <span className="text-gray-500 font-bold text-lg">%</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => { if (!bonifValida) return; setVerCliente(false); aplicarSoloPedido({ ...cond, bonif: bonifNum }) }}
+                        disabled={!bonifValida}
+                        className={btnSolo}
+                      >
+                        Solo este pedido
+                      </button>
+                      <button
+                        onClick={() => { if (!bonifValida) return; guardarParaCliente({ bonif: bonifNum }) }}
+                        disabled={!bonifValida}
+                        className={btnCliente}
+                      >
+                        Guardar para el cliente
+                      </button>
+                    </div>
+                    <p className="text-gray-400 text-xs">
+                      Descuento sobre el neto de cada línea; se descuenta de tu comisión. "Guardar para el cliente" lo aplica a los tres segmentos (en la ficha podés afinarlo por segmento).
+                    </p>
+                    {cond.bonif !== null && (
+                      <button onClick={() => { setVerCliente(false); aplicarSoloPedido({ ...cond, bonif: null }) }} className="w-full text-emerald-700 text-sm font-bold py-1">
+                        Volver a la bonificación de la ficha ({bonifFichaTxt})
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="text-gray-400 text-xs px-1">
+                    En todos los casos se recalculan al instante los precios del catálogo y de los artículos ya cargados en
+                    el pedido — de estos precios sale la factura.
+                  </p>
+                </div>
+              )
+            })()}
           </div>
         </div>
       )}
@@ -1781,6 +1977,15 @@ function NuevoPedidoInner() {
                 <p className="text-gray-400 text-xs mt-1">
                   Al cambiar el método, todos los precios del pedido se recalculan al instante.
                 </p>
+                {(cond.lista || cond.bonif !== null) && (
+                  <p className="text-amber-700 text-xs mt-2 font-medium">
+                    Solo este pedido:
+                    {cond.lista ? ` lista ${catFicha?.listas_precio.find((l) => l.id === cond.lista)?.nombre || "—"}` : ""}
+                    {cond.lista && cond.bonif !== null ? " ·" : ""}
+                    {cond.bonif !== null ? ` viajante ${cond.bonif}%` : ""}
+                    {" "}(se cambia desde 👤)
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-gray-500 text-sm block mb-1">Observaciones</label>
