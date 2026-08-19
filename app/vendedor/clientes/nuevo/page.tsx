@@ -17,6 +17,20 @@ interface Catalogos {
   puede_cambiar_lista?: boolean
 }
 
+// Fuera del componente de página: si se define adentro, React lo trata como
+// un componente nuevo en cada render y remonta los inputs (se pierde el foco
+// a cada tecla, saltando al campo con autoFocus).
+const inputCls = "w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
+
+function Campo({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="text-gray-500 text-sm block mb-1">{label}</label>
+      {children}
+    </div>
+  )
+}
+
 const VACIO: Catalogos = {
   condiciones_pago: [],
   condiciones_entrega: [],
@@ -94,14 +108,6 @@ export default function VendedorClienteNuevoPage() {
       setGuardando(false)
     }
   }
-
-  const Campo = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div>
-      <label className="text-gray-500 text-sm block mb-1">{label}</label>
-      {children}
-    </div>
-  )
-  const inputCls = "w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
 
   return (
     <div className="min-h-screen bg-gray-50 pb-36">

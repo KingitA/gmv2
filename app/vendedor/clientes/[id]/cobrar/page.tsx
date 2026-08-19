@@ -505,10 +505,14 @@ export default function VendedorCobrarPage() {
   const proyectado = cliente.saldo_proyectado ?? cliente.saldo_actual
   const proyectadoCero = Math.abs(proyectado) < 0.01
 
-  const FilaComprobante = ({ cp }: { cp: Comprobante }) => {
+  // Función de render (no componente): definida adentro del componente de
+  // página, un sub-componente se remontaría en cada tecla y el MontoInput
+  // perdería el foco.
+  const filaComprobante = (cp: Comprobante) => {
     const activo = imputaciones[cp.id] !== undefined
     return (
       <div
+        key={cp.id}
         className={`rounded-xl border-2 px-3 py-2 flex items-center gap-2 ${
           activo ? "border-emerald-500 bg-emerald-50/40" : "border-gray-200 bg-white"
         }`}
@@ -649,7 +653,7 @@ export default function VendedorCobrarPage() {
                     {comps.length > 0 && expandido && (
                       <div className="px-3 pb-3 space-y-1.5 border-t border-gray-100 pt-2 bg-gray-50/60">
                         {comps.map((cp) => (
-                          <FilaComprobante key={cp.id} cp={cp} />
+                          filaComprobante(cp)
                         ))}
                       </div>
                     )}
@@ -661,7 +665,7 @@ export default function VendedorCobrarPage() {
                 <div className="space-y-1.5 pt-1">
                   <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 px-1">Otros comprobantes</p>
                   {compsSueltos.map((cp) => (
-                    <FilaComprobante key={cp.id} cp={cp} />
+                    filaComprobante(cp)
                   ))}
                 </div>
               )}
