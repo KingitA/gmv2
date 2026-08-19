@@ -89,6 +89,7 @@ interface CartItem {
   cantidad: number
   precio: number // al cliente
   precioNeto: number
+  pendiente?: boolean // optimista: todavía no confirmado por el server
 }
 
 interface CatalogoSubcategoria {
@@ -231,6 +232,7 @@ function NuevoPedidoInner() {
   const preciosPedidos = useRef<Set<string>>(new Set())
 
   const [sel, setSel] = useState<Articulo | null>(null)
+  const selIdRef = useRef<string | null>(null) // guarda contra respuestas tardías de preview
   const [zoomFoto, setZoomFoto] = useState<string | null>(null)
   const [buscarFoto, setBuscarFoto] = useState(false)
   const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct?: number } | null>(null)
@@ -278,6 +280,14 @@ function NuevoPedidoInner() {
   useEffect(() => {
     cartRef.current = cart
   }, [cart])
+  // Escritura del carrito con el ref sincronizado AL INSTANTE (no al próximo
+  // render): las operaciones encoladas leen cartRef y no pueden ver estado viejo.
+  const updateCart = (fn: (prev: CartItem[]) => CartItem[]) => {
+    const next = fn(cartRef.current)
+    cartRef.current = next
+    setCart(next)
+  }
+  const esTmp = (detalleId: string) => detalleId.startsWith("tmp-")
 
   // Serializa las mutaciones al pedido (evita carreras entre taps rápidos)
   const enqueue = (op: () => Promise<void>) => {
@@ -295,7 +305,7 @@ function NuevoPedidoInner() {
       setNumeroPedido(p.numero_pedido || null)
       setEstadoPedido(p.estado || null)
       const items = (p.pedidos_detalle || []).filter((i: any) => !i.es_bonificado)
-      setCart(
+      updateCart(() =>
         items.map((i: any) => ({
           detalleId: i.id,
           articulo: {
@@ -595,15 +605,26 @@ function NuevoPedidoInner() {
     // Sin default de 1: arranca vacío. En habituales precarga la última cantidad.
     setSelCantidad(a.cantidad_habitual || "")
     setSelModo("unidad")
-    setSelPrecio(null)
-    setCargandoPrecio(true)
+    // Si el listado ya calculó el precio de este artículo (mismo cliente, mismas
+    // condiciones, mismo motor), la ficha abre con precio al instante y se
+    // confirma en background; si no, se espera al server.
+    const cacheado = precios[a.id]
+    if (cacheado) {
+      setSelPrecio({ precio: cacheado.precio, precioNeto: cacheado.precioNeto, contado: cacheado.contado, especial: cacheado.especial ?? null, bonifViajantePct: cacheado.bonifViajantePct || 0 })
+      setCargandoPrecio(false)
+    } else {
+      setSelPrecio(null)
+      setCargandoPrecio(true)
+    }
+    selIdRef.current = a.id
     try {
       const p = await previewPrecioArticulo(cliente!.id, a.id, condToOverrides(cond))
+      if (selIdRef.current !== a.id) return // el vendedor ya abrió otro artículo
       setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, especial: p.especial ?? null, bonifViajantePct: p.bonifViajantePct || 0 })
     } catch {
-      setSelPrecio(null)
+      if (selIdRef.current === a.id && !cacheado) setSelPrecio(null)
     } finally {
-      setCargandoPrecio(false)
+      if (selIdRef.current === a.id) setCargandoPrecio(false)
     }
   }
 
@@ -624,18 +645,46 @@ function NuevoPedidoInner() {
 
   // Agregar ítem: crea el pedido "en_venta" al primer artículo, después
   // sincroniza cada alta contra pedidos_detalle. Los precios los fija el server.
+  // UI optimista: el ítem aparece en el carrito al instante con el precio del
+  // preview (mismo motor que el server) marcado "pendiente"; cuando el server
+  // responde se reemplaza por la línea real (id, precio, total). Si falla, se
+  // revierte. Así no hay que esperar action + refetch para ver el artículo.
   const agregarAlCarrito = () => {
     if (!sel || !selPrecio || selUnidades <= 0 || !cliente) return
     const art = sel
     const cant = selUnidades // siempre se guarda en unidades
+    const precioPrev = selPrecio
     setSel(null)
     setSync("saving")
+
+    const cartArt: CartArticulo = {
+      id: art.id,
+      descripcion: art.descripcion,
+      sku: art.sku ?? null,
+      unidades_por_bulto: art.unidades_por_bulto ?? null,
+      imagen_url: art.imagen_url ?? null,
+    }
+
+    // Optimista (síncrono sobre cartRef): si el artículo ya está en el carrito
+    // (real o pendiente) se suma la cantidad; si no, entra una línea temporal.
+    let tempId: string | null = null
+    const yaEstaba = cartRef.current.find((i) => i.articulo.id === art.id)
+    if (yaEstaba) {
+      updateCart((prev) => prev.map((i) => (i.articulo.id === art.id ? { ...i, cantidad: i.cantidad + cant, pendiente: true } : i)))
+    } else {
+      tempId = `tmp-${art.id}-${Date.now()}`
+      updateCart((prev) => [...prev, { detalleId: tempId!, articulo: cartArt, cantidad: cant, precio: precioPrev.precio, precioNeto: precioPrev.precioNeto, pendiente: true }])
+    }
+
     enqueue(async () => {
       try {
         if (!pedidoIdRef.current) {
+          // Primer artículo: crea el pedido. La cantidad sale del carrito (puede
+          // haber sumado taps mientras esperaba).
+          const cantActual = cartRef.current.find((i) => i.articulo.id === art.id)?.cantidad ?? cant
           const pedido: any = await createPedido({
             cliente_id: cliente.id,
-            items: [{ producto_id: art.id, cantidad: cant, precio_unitario: 0, descuento: 0 }],
+            items: [{ producto_id: art.id, cantidad: cantActual, precio_unitario: 0, descuento: 0 }],
             estado_inicial: "en_venta",
             ...condToOverrides(cond),
           })
@@ -645,19 +694,49 @@ function NuevoPedidoInner() {
           setEstadoPedido("en_venta")
           // URL con ?pedido= para que un refresh/back retome este pedido
           window.history.replaceState(null, "", `/vendedor/pedido/nuevo?cliente=${cliente.id}&pedido=${pedido.id}`)
+          // Única vez que se refetchea: necesitamos los ids reales de las líneas.
+          // Las líneas temporales de OTROS artículos que ya se encolaron se
+          // preservan (sus ops corren después y las reemplazan).
+          const tmpOtros = cartRef.current.filter((i) => esTmp(i.detalleId) && i.articulo.id !== art.id)
           await refreshPedido(pedido.id)
+          if (tmpOtros.length) updateCart((prev) => [...prev, ...tmpOtros])
+          return
+        }
+
+        // Al momento de ejecutar (no de tapear): ¿la línea ya tiene id real?
+        const linea = cartRef.current.find((i) => i.articulo.id === art.id)
+        if (!linea) return // la quitaron mientras esperaba
+        if (!esTmp(linea.detalleId)) {
+          // Ya existe en DB: mandar la cantidad TOTAL actual (idempotente)
+          await actualizarCantidadItem(linea.detalleId, pedidoIdRef.current, linea.cantidad)
+          updateCart((prev) => prev.map((i) => (i.articulo.id === art.id ? { ...i, pendiente: false } : i)))
         } else {
-          const existente = cartRef.current.find((i) => i.articulo.id === art.id)
-          if (existente) {
-            await actualizarCantidadItem(existente.detalleId, pedidoIdRef.current, existente.cantidad + cant)
-          } else {
-            await agregarItemPedido(pedidoIdRef.current, art.id, cant)
-          }
-          await refreshPedido(pedidoIdRef.current)
+          const r: any = await agregarItemPedido(pedidoIdRef.current, art.id, linea.cantidad)
+          const it = r?.item
+          updateCart((prev) =>
+            prev.map((i) =>
+              i.articulo.id === art.id
+                ? {
+                    ...i,
+                    detalleId: it?.id || i.detalleId,
+                    precio: typeof it?.precio_final === "number" ? it.precio_final : i.precio,
+                    precioNeto: typeof it?.precio_base === "number" ? it.precio_base : i.precioNeto,
+                    // si hubo más taps después, la cantidad local es mayor: la próxima op la sincroniza
+                    pendiente: i.cantidad !== (it?.cantidad ?? i.cantidad),
+                  }
+                : i
+            )
+          )
         }
         setSync("idle")
       } catch (e: any) {
         console.error("Error guardando ítem del pedido:", e)
+        // Revertir lo optimista de ESTE tap
+        updateCart((prev) =>
+          prev
+            .map((i) => (i.articulo.id === art.id ? { ...i, cantidad: i.cantidad - cant, pendiente: false } : i))
+            .filter((i) => i.cantidad > 0)
+        )
         setSync("error")
         alert(`No se pudo guardar el artículo en el pedido: ${e?.message || e}`)
       }
@@ -756,8 +835,11 @@ function NuevoPedidoInner() {
 
   // Cambiar cantidad desde el carrito: optimista + sync con debounce
   const setCantidadItem = (detalleId: string, cantidad: number) => {
-    if (cantidad < 1 || !pedidoIdRef.current) return
-    setCart((prev) => prev.map((i) => (i.detalleId === detalleId ? { ...i, cantidad } : i)))
+    if (cantidad < 1) return
+    updateCart((prev) => prev.map((i) => (i.detalleId === detalleId ? { ...i, cantidad } : i)))
+    // Línea todavía temporal (el alta está en cola): el alta ya manda la
+    // cantidad vigente del carrito al ejecutarse; no hay nada que sincronizar.
+    if (esTmp(detalleId) || !pedidoIdRef.current) return
     const t = cantTimers.current.get(detalleId)
     if (t) clearTimeout(t)
     cantTimers.current.set(
@@ -767,7 +849,10 @@ function NuevoPedidoInner() {
         setSync("saving")
         enqueue(async () => {
           try {
-            await actualizarCantidadItem(detalleId, pedidoIdRef.current!, cantidad)
+            // Cantidad vigente al ejecutar (puede haber cambiado en la cola)
+            const actual = cartRef.current.find((i) => i.detalleId === detalleId)
+            if (!actual) return
+            await actualizarCantidadItem(detalleId, pedidoIdRef.current!, actual.cantidad)
             setSync("idle")
           } catch (e) {
             console.error("Error actualizando cantidad:", e)
@@ -780,13 +865,14 @@ function NuevoPedidoInner() {
   }
 
   const quitarItem = (detalleId: string) => {
-    if (!pedidoIdRef.current) return
     const t = cantTimers.current.get(detalleId)
     if (t) {
       clearTimeout(t)
       cantTimers.current.delete(detalleId)
     }
-    setCart((prev) => prev.filter((i) => i.detalleId !== detalleId))
+    updateCart((prev) => prev.filter((i) => i.detalleId !== detalleId))
+    // Temporal: el alta encolada no encuentra la línea y no hace nada
+    if (esTmp(detalleId) || !pedidoIdRef.current) return
     setSync("saving")
     enqueue(async () => {
       try {
@@ -823,7 +909,7 @@ function NuevoPedidoInner() {
         metodo_facturacion_pedido: metodoOverride,
       })
       setPedidoOk({ numero: res?.numero_pedido || numeroPedido || "", editado: editandoExistente })
-      setCart([])
+      updateCart(() => [])
       setVerCarrito(false)
       pedidoIdRef.current = null
       setPedidoId(null)

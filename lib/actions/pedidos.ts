@@ -296,8 +296,10 @@ async function resolverListaMetodoItem(
 }
 
 async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
+  // Incluye sku/descripcion/stock/unidades_por_bulto para que agregarItem y
+  // previewPrecio no necesiten una segunda consulta al artículo.
   const [{ data: articulo }, { data: descuentosDB }] = await Promise.all([
-    supabase.from("articulos").select("id,proveedor_id,marca_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
+    supabase.from("articulos").select("id,sku,descripcion,unidades_por_bulto,stock_actual,proveedor_id,marca_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)").eq("id", productoId).single(),
     supabase.from("articulos_descuentos").select("tipo,porcentaje,orden").eq("articulo_id", productoId).order("orden"),
   ])
   if (!articulo) throw new Error("Artículo no encontrado")
@@ -471,34 +473,30 @@ export async function previewPrecioArticulo(
 ): Promise<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null; descripcion: string; sku: string; unidades_por_bulto: number; bonifViajantePct: number }> {
   const supabase = await createClient()
 
-  const [clienteRes, articuloRes] = await Promise.all([
+  // Todo lo que depende solo de (cliente, artículo) se trae en paralelo: una
+  // sola ida y vuelta a la DB en vez de siete en serie.
+  const [clienteRes, articuloRes, formulasReglas, condProvBase, condMarcaBase, bonifs] = await Promise.all([
     supabase.from("clientes").select(`
       id, vendedor_id, metodo_facturacion, lista_precio_id,
       lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0,
       lista_perf_plus_id, metodo_perf_plus
     `).eq("id", clienteId).single(),
     fetchArticuloConDescuentos(supabase, articuloId),
+    fetchFormulasReglas(supabase),
+    fetchCondicionesProveedor(supabase, clienteId),
+    fetchCondicionesMarca(supabase, clienteId),
+    fetchBonifGeneralViajante(supabase, clienteId, overrides),
   ])
 
   if (!clienteRes.data) throw new Error("Cliente no encontrado")
   const clienteInfo = clienteRes.data
   const articulo = articuloRes
-
-  const { data: artMeta } = await supabase
-    .from("articulos").select("descripcion, sku, unidades_por_bulto").eq("id", articuloId).single()
-
-  const formulasReglas = await fetchFormulasReglas(supabase)
+  const artMeta = articulo
   const listasCache: Record<string, DatosLista> = {}
 
   // Condición por proveedor + marca (del cliente + override del formulario). Marca gana.
-  const condicionesProveedor = mergeCondicionesProveedor(
-    await fetchCondicionesProveedor(supabase, clienteId),
-    overrides.condiciones_proveedor,
-  )
-  const condicionesMarca = mergeCondicionesMarca(
-    await fetchCondicionesMarca(supabase, clienteId),
-    overrides.condiciones_marca,
-  )
+  const condicionesProveedor = mergeCondicionesProveedor(condProvBase, overrides.condiciones_proveedor)
+  const condicionesMarca = mergeCondicionesMarca(condMarcaBase, overrides.condiciones_marca)
   const { cond } = resolverCondSegmento(articulo, condicionesProveedor, condicionesMarca)
 
   const segmento = detectarSegmento(articulo)
@@ -512,7 +510,7 @@ export async function previewPrecioArticulo(
     listaId = resuelto.listaId
     metodoRaw = resuelto.metodoRaw
   }
-  const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId, overrides)
+  const { general, viajante } = bonifs
   const bonif = resolverBonifItem(cond, general, viajante, segmento)
   const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
   const metodo = toMetodoFacturacion(metodoRaw)
@@ -1360,31 +1358,45 @@ export async function agregarItemPedido(
   cantidad: number
 ) {
   const supabase = await createClient()
-  await assertPedidoEditable(supabase, pedidoId)
 
-  const { data: { user } } = await supabase.auth.getUser()
-
-  // Fetch pedido con TODOS los overrides de segmento + cliente con su config de segmento
-  const { data: pedido } = await supabase
-    .from("pedidos")
-    .select(`cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
-    .eq("id", pedidoId)
-    .single()
+  // Etapa 1 (paralelo): pedido+estado+cliente, usuario, fórmulas, artículo.
+  // Mismas consultas que antes, pero en una sola ida y vuelta.
+  const [{ data: pedido }, { data: { user } }, formulasReglas, articuloConDescuentos] = await Promise.all([
+    supabase
+      .from("pedidos")
+      .select(`estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
+      .eq("id", pedidoId)
+      .single(),
+    supabase.auth.getUser(),
+    fetchFormulasReglas(supabase),
+    fetchArticuloConDescuentos(supabase, productoId),
+  ])
   if (!pedido) throw new Error("Pedido no encontrado")
+  if (pedido.estado === "eliminado") throw new Error("El pedido está eliminado y no puede modificarse")
+  if (pedido.estado === "facturado" || pedido.estado === "entregado")
+    throw new Error("El pedido ya fue facturado/entregado y no puede modificarse")
 
   const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
-  const formulasReglas = await fetchFormulasReglas(supabase)
   const listasCache: Record<string, DatosLista> = {}
-  const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
-  const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
+  const vendedorId = (pedido.clientes as any)?.vendedor_id ?? null
 
-  const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
+  // Etapa 2 (paralelo): lo que depende del cliente/pedido.
+  const [condProvMap, condMarcaMap, { general, viajante }, vendedorRes] = await Promise.all([
+    fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId),
+    fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId),
+    fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido),
+    vendedorId
+      ? supabase.from("vendedores").select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus").eq("id", vendedorId).single()
+      : Promise.resolve({ data: null }),
+  ])
+  const vendedorComisionesAgregar: { comision_limpieza_bazar: number; comision_perfumeria_0: number; comision_perfumeria_plus: number } | null =
+    (vendedorRes as any)?.data ?? null
+
   const segmentoArt = detectarSegmento(articuloConDescuentos)
   // Resolución por segmento (igual que createPedido): marca > proveedor > override pedido > cliente > general
   const { listaId, metodoRaw: metodoItemRaw, metodo, listaDatos, cond } =
     await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas)
 
-  const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido)
   const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
   const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, bonif)
 
@@ -1392,35 +1404,32 @@ export async function agregarItemPedido(
   const ofertaPct = esEspecial ? (articuloConDescuentos.oferta_lista_especial || 0) : (articuloConDescuentos.descuento_propio || 0)
   const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
 
-  const { error } = await supabase.from("pedidos_detalle").insert({
-    pedido_id: pedidoId,
-    articulo_id: productoId,
-    cantidad,
-    precio_base: precio.precioNeto,
-    precio_final: precio.precioAlCliente,
-    subtotal: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
-    precio_costo: articuloConDescuentos.precio_compra || 0,
-    lista_precio_id: listaId,
-    metodo_facturacion_item: metodoItemRaw,
-    precio_lista: precioListaBruto,
-    descuento_propio_pct: ofertaPct,
-    bonif_general_pct: precio.bonifGeneralPct,
-    bonif_viajante_pct: precio.bonifViajantePct,
-  })
+  const subtotalLinea = Math.round(precio.precioAlCliente * cantidad * 100) / 100
+  const { data: lineaInsertada, error } = await supabase
+    .from("pedidos_detalle")
+    .insert({
+      pedido_id: pedidoId,
+      articulo_id: productoId,
+      cantidad,
+      precio_base: precio.precioNeto,
+      precio_final: precio.precioAlCliente,
+      subtotal: subtotalLinea,
+      precio_costo: articuloConDescuentos.precio_compra || 0,
+      lista_precio_id: listaId,
+      metodo_facturacion_item: metodoItemRaw,
+      precio_lista: precioListaBruto,
+      descuento_propio_pct: ofertaPct,
+      bonif_general_pct: precio.bonifGeneralPct,
+      bonif_viajante_pct: precio.bonifViajantePct,
+    })
+    .select("id")
+    .single()
 
   if (error) throw error
 
   // ── Insertar en kardex ──────────────────────────────────────────────────
-  const [{ data: artInfo }, { data: clienteVendedor }] = await Promise.all([
-    supabase.from("articulos").select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual, segmento_precio").eq("id", productoId).single(),
-    supabase.from("clientes").select("vendedor_id").eq("id", pedido.cliente_id).single(),
-  ])
-  const vendedorId = (clienteVendedor as any)?.vendedor_id ?? (pedido.clientes as any)?.vendedor_id ?? null
-  let vendedorComisionesAgregar: { comision_limpieza_bazar: number; comision_perfumeria_0: number; comision_perfumeria_plus: number } | null = null
-  if (vendedorId) {
-    const { data: vd } = await supabase.from("vendedores").select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus").eq("id", vendedorId).single()
-    vendedorComisionesAgregar = vd ?? null
-  }
+  // artInfo sale del mismo fetch del artículo (ya trae sku/descripcion/stock)
+  const artInfo = articuloConDescuentos
 
   const ivaIncluido = precio.precioAlCliente === precio.precioNeto
   const ivaMonto = ivaIncluido ? 0 : Math.round((precio.precioAlCliente - precio.precioNeto) * 100) / 100
@@ -1449,7 +1458,7 @@ export async function agregarItemPedido(
     return { comision_viajante_pct: tasaEfectivaPct, comision_viajante_monto: monto }
   })()
 
-  await insertarKardex(
+  const kardexPromise = insertarKardex(
     createAdminClient(),
     {
       tipo_movimiento: "venta",
@@ -1496,15 +1505,38 @@ export async function agregarItemPedido(
     },
   )
 
-  // Marcar actualizado_por en el pedido
-  if (user?.id) {
-    await supabase.from("pedidos").update({ actualizado_por: user.id }).eq("id", pedidoId)
+  // Kardex y total en paralelo; actualizado_por va en el mismo update del total.
+  const [, { data: allItems }] = await Promise.all([
+    kardexPromise,
+    supabase.from("pedidos_detalle").select("subtotal, es_bonificado").eq("pedido_id", pedidoId),
+  ])
+  const total = Math.round(
+    (allItems || []).filter((i: any) => !i.es_bonificado).reduce((s: number, i: any) => s + (i.subtotal || 0), 0) * 100
+  ) / 100
+  const { error: totErr } = await supabase
+    .from("pedidos")
+    .update({ total, subtotal: total, ...(user?.id ? { actualizado_por: user.id } : {}) })
+    .eq("id", pedidoId)
+  if (totErr) throw totErr
+
+  // Sin revalidatePath: las pantallas del ERP que muestran pedidos cargan por
+  // cliente (supabase-js), y el re-render RSC sumaba latencia a cada tap.
+  // Se devuelve la línea para que la app actualice el carrito sin refetch.
+  return {
+    success: true,
+    item: {
+      id: lineaInsertada?.id as string,
+      articulo_id: productoId,
+      cantidad,
+      precio_final: precio.precioAlCliente,
+      precio_base: precio.precioNeto,
+      subtotal: subtotalLinea,
+      sku: artInfo?.sku ?? null,
+      descripcion: artInfo?.descripcion ?? null,
+      unidades_por_bulto: artInfo?.unidades_por_bulto ?? null,
+    },
+    total,
   }
-
-  await recalcularTotalPedido(supabase, pedidoId)
-
-  revalidatePath("/clientes-pedidos")
-  return { success: true }
 }
 
 export async function agregarItemBonificado(
@@ -1653,40 +1685,35 @@ export async function actualizarCantidadItem(
 ) {
   if (cantidad <= 0) throw new Error("La cantidad debe ser mayor a 0")
   const supabase = await createClient()
-  await assertPedidoEditable(supabase, pedidoId)
 
-  const { data: item, error: fetchError } = await supabase
-    .from("pedidos_detalle")
-    .select("precio_final")
-    .eq("id", itemId)
-    .single()
+  const [, itemRes] = await Promise.all([
+    assertPedidoEditable(supabase, pedidoId),
+    supabase.from("pedidos_detalle").select("precio_final").eq("id", itemId).eq("pedido_id", pedidoId).single(),
+  ])
+  const item = itemRes.data
+  if (itemRes.error || !item) throw new Error("Ítem no encontrado")
 
-  if (fetchError || !item) throw new Error("Ítem no encontrado")
-
+  const subtotal = Math.round(item.precio_final * cantidad * 100) / 100
   const { error } = await supabase
     .from("pedidos_detalle")
-    .update({ cantidad, subtotal: item.precio_final * cantidad })
+    .update({ cantidad, subtotal })
     .eq("id", itemId)
 
   if (error) throw error
 
-  await recalcularTotalPedido(supabase, pedidoId)
-
-  revalidatePath("/clientes-pedidos")
-  return { success: true }
+  const total = await recalcularTotalPedido(supabase, pedidoId)
+  return { success: true, subtotal, total }
 }
 
 export async function eliminarItemPedido(itemId: string, pedidoId: string) {
   const supabase = await createClient()
   await assertPedidoEditable(supabase, pedidoId)
 
-  const { error } = await supabase.from("pedidos_detalle").delete().eq("id", itemId)
+  const { error } = await supabase.from("pedidos_detalle").delete().eq("id", itemId).eq("pedido_id", pedidoId)
   if (error) throw error
 
-  await recalcularTotalPedido(supabase, pedidoId)
-
-  revalidatePath("/clientes-pedidos")
-  return { success: true }
+  const total = await recalcularTotalPedido(supabase, pedidoId)
+  return { success: true, total }
 }
 
 export async function guardarItemsPedido(
