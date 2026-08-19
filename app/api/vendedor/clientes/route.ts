@@ -191,7 +191,7 @@ export async function POST(request: Request) {
         localidad: localidad?.trim() || null,
         telefono: telefono?.trim() || null,
         mail: mail?.trim() || null,
-        lista_precio_id: lista_precio_id || null,
+        lista_precio_id: session.puedeCambiarLista ? lista_precio_id || null : null,
         vendedor_id: vendedorId,
         activo: true,
         puntaje: 50,

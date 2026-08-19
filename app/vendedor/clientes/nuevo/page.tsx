@@ -14,6 +14,7 @@ interface Catalogos {
   vendedores: { id: string; nombre: string }[]
   condiciones_iva: string[]
   metodos_facturacion: string[]
+  puede_cambiar_lista?: boolean
 }
 
 const VACIO: Catalogos = {
@@ -142,12 +143,14 @@ export default function VendedorClienteNuevoPage() {
                 {cat.metodos_facturacion.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </Campo>
-            <Campo label="Lista de precios">
-              <select value={f.lista_precio_id} onChange={set("lista_precio_id")} className={inputCls}>
-                <option value="">Estándar</option>
-                {cat.listas_precio.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-              </select>
-            </Campo>
+            {cat.puede_cambiar_lista && (
+              <Campo label="Lista de precios">
+                <select value={f.lista_precio_id} onChange={set("lista_precio_id")} className={inputCls}>
+                  <option value="">Estándar</option>
+                  {cat.listas_precio.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+                </select>
+              </Campo>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <Campo label="Condición de pago">

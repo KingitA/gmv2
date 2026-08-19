@@ -32,6 +32,7 @@ export async function GET() {
       vendedores: vendedores || [],
       condiciones_iva: ["Responsable Inscripto", "Monotributista", "Exento", "Consumidor Final"],
       metodos_facturacion: ["Factura", "Final", "Presupuesto"],
+      puede_cambiar_lista: session.puedeCambiarLista,
     })
   } catch (error: any) {
     console.error("[vendedor] Error en GET /api/vendedor/catalogos-ficha:", error)

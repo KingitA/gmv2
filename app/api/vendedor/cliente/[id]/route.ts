@@ -235,6 +235,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const patch: Record<string, any> = {}
 
+    // La lista de precios solo la cambian los viajantes habilitados
+    // (vendedores.puede_cambiar_lista) — el resto ni la ve en la UI
+    if (body.lista_precio_id !== undefined && !session.puedeCambiarLista) {
+      return NextResponse.json({ error: "No tenés permiso para cambiar la lista de precios." }, { status: 403 })
+    }
+
     // Datos de la ficha (solo whitelist)
     for (const campo of CAMPOS_EDITABLES) {
       if (body[campo] !== undefined) {

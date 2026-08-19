@@ -70,6 +70,7 @@ interface Catalogos {
   vendedores: { id: string; nombre: string }[]
   condiciones_iva: string[]
   metodos_facturacion: string[]
+  puede_cambiar_lista?: boolean
 }
 
 // Badges de doble firma según contrato docs/CONTRATO-API-VIAJANTES.md
@@ -140,7 +141,7 @@ export default function VendedorClienteFichaPage() {
     inicial.condicion_entrega = c.condicion_entrega || ""
     inicial.condicion_iva = c.condicion_iva || ""
     inicial.metodo_facturacion = c.metodo_facturacion || ""
-    inicial.lista_precio_id = c.lista_precio_id || ""
+    if (catalogos.puede_cambiar_lista) inicial.lista_precio_id = c.lista_precio_id || ""
     setForm(inicial)
     setEditando(true)
   }
@@ -441,20 +442,22 @@ export default function VendedorClienteFichaPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="text-gray-500 text-sm block mb-1">Lista de precios</label>
-                <select
-                  value={form.lista_precio_id || ""}
-                  onChange={(e) => setForm((prev) => ({ ...prev, lista_precio_id: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
-                >
-                  <option value="">Sin lista (cálculo estándar)</option>
-                  {catalogos.listas_precio.map((l) => (
-                    <option key={l.id} value={l.id}>{l.nombre}</option>
-                  ))}
-                </select>
-                <p className="text-gray-400 text-xs mt-1">Cambiar la lista recalcula los precios de los próximos pedidos.</p>
-              </div>
+              {catalogos.puede_cambiar_lista && (
+                <div>
+                  <label className="text-gray-500 text-sm block mb-1">Lista de precios</label>
+                  <select
+                    value={form.lista_precio_id || ""}
+                    onChange={(e) => setForm((prev) => ({ ...prev, lista_precio_id: e.target.value }))}
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
+                  >
+                    <option value="">Sin lista (cálculo estándar)</option>
+                    {catalogos.listas_precio.map((l) => (
+                      <option key={l.id} value={l.id}>{l.nombre}</option>
+                    ))}
+                  </select>
+                  <p className="text-gray-400 text-xs mt-1">Cambiar la lista recalcula los precios de los próximos pedidos.</p>
+                </div>
+              )}
 
               <div>
                 <label className="text-gray-500 text-sm block mb-1">Condición de pago</label>

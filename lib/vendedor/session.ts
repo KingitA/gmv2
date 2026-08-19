@@ -15,6 +15,7 @@ export interface VendedorRecord {
   comision_limpieza_bazar: number | null
   comision_perfumeria_0: number | null
   comision_perfumeria_plus: number | null
+  puede_cambiar_lista?: boolean | null
 }
 
 interface VendedorSuccess {
@@ -22,6 +23,10 @@ interface VendedorSuccess {
   roles: string[]
   vendedores: VendedorRecord[]
   vendedorIds: string[]
+  /** Permiso para cambiar la lista de precios de sus clientes (flag en
+   *  vendedores.puede_cambiar_lista; alcanza con que un viajante del usuario
+   *  lo tenga). Admin siempre puede. */
+  puedeCambiarLista: boolean
   error: null
 }
 
@@ -30,6 +35,7 @@ interface VendedorFailure {
   roles: null
   vendedores: null
   vendedorIds: null
+  puedeCambiarLista: false
   error: NextResponse
 }
 
@@ -41,6 +47,7 @@ function fail(status: number, message: string): VendedorFailure {
     roles: null,
     vendedores: null,
     vendedorIds: null,
+    puedeCambiarLista: false,
     error: NextResponse.json({ error: message }, { status }),
   }
 }
@@ -66,7 +73,7 @@ export async function requireVendedor(): Promise<VendedorSessionResult> {
   const supabase = await createClient()
   const { data: vendedores, error } = await supabase
     .from("vendedores")
-    .select("id, nombre, comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus")
+    .select("id, nombre, comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus, puede_cambiar_lista")
     .eq("usuario_id", auth.user.id)
     .eq("activo", true)
 
@@ -83,6 +90,7 @@ export async function requireVendedor(): Promise<VendedorSessionResult> {
     roles,
     vendedores,
     vendedorIds: vendedores.map((v) => v.id),
+    puedeCambiarLista: roles.includes("admin") || vendedores.some((v) => v.puede_cambiar_lista === true),
     error: null,
   }
 }
