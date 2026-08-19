@@ -12,7 +12,7 @@ import {
   Plus, Upload, ShoppingCart, TrendingUp, Package, ChevronDown, Check,
   FileDown, FileUp, SlidersHorizontal, X, Pencil, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react"
-import { ImportArticulosDialog, articulosFieldLabel } from "@/components/articulos/ImportArticulosDialog"
+import { ImportArticulosDialog, articulosFieldLabel, articulosValueFormat } from "@/components/articulos/ImportArticulosDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import { History } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
@@ -1479,6 +1479,7 @@ export default function ArticulosPage() {
         nombreLabel="Descripción"
         statuses={["actualizado", "sin_cambios", "nuevo", "error"]}
         fieldLabel={articulosFieldLabel}
+        valueFormat={articulosValueFormat}
       />
     </div>
   )

@@ -73,6 +73,20 @@ const SKIP_ID = "__skip__"
 
 export const articulosFieldLabel = (id: string) => DB_FIELD_DEFS.find(d => d.id === id)?.label ?? id
 
+// Campos de plata (se muestran con 2 decimales) y de porcentaje (se muestran con %).
+const CAMPOS_PLATA = new Set(["precio_base", "precio_base_contado", "precio_lista_especial", "precio_compra"])
+const CAMPOS_PORCENTAJE = new Set(["descuento_propio", "oferta_lista_especial", "porcentaje_ganancia"])
+
+/** Formatea un valor para el Excel según el tipo de campo (plata 2 decimales, % en porcentajes). */
+export const articulosValueFormat = (campo: string, valor: any): string => {
+  if (valor === null || valor === undefined || valor === "") return "—"
+  const s = String(valor).trim()
+  const n = parseFloat(s.replace(",", "."))
+  if (CAMPOS_PLATA.has(campo) && !isNaN(n)) return n.toFixed(2)          // 385.284 → "385.28"
+  if (CAMPOS_PORCENTAJE.has(campo) && !isNaN(n)) return `${n}%`          // 20 → "20%"
+  return s
+}
+
 /** Deduce iva_compras desde el símbolo del Excel: 0=adq.stock, +=factura, 1/2=mixto. */
 function mapIvaCompras(raw: string): string | undefined {
   const s = raw.trim().toLowerCase()
@@ -617,6 +631,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
               statuses={["actualizado", "sin_cambios", "nuevo", "error"]}
               archivo={fileName}
               fieldLabel={fieldLabel}
+              valueFormat={articulosValueFormat}
             />
           </div>
         )}

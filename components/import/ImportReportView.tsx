@@ -10,7 +10,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Download } from "lucide-react"
-import { exportReportToExcel, type ReportFila } from "@/lib/import/export-excel"
+import { exportReportToExcel, type ReportFila, type ValueFormat } from "@/lib/import/export-excel"
 
 export interface StatusDef {
   key: string
@@ -47,9 +47,10 @@ interface Props {
   statuses: string[]
   archivo?: string
   fieldLabel?: (campo: string) => string
+  valueFormat?: ValueFormat
 }
 
-export function ImportReportView({ filas, totalFilas, claveLabel, nombreLabel, statuses, archivo, fieldLabel = (c) => c }: Props) {
+export function ImportReportView({ filas, totalFilas, claveLabel, nombreLabel, statuses, archivo, fieldLabel = (c) => c, valueFormat }: Props) {
   const [filtro, setFiltro] = useState<string>("todos")
 
   const cuenta = (key: string) =>
@@ -90,7 +91,7 @@ export function ImportReportView({ filas, totalFilas, claveLabel, nombreLabel, s
           {filasFiltradas.length > 300 && " Mostrando primeras 300."}
         </div>
         <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs"
-          onClick={() => exportReportToExcel({ filas: filasFiltradas, claveLabel, nombreLabel, fieldLabel, archivo })}
+          onClick={() => exportReportToExcel({ filas: filasFiltradas, claveLabel, nombreLabel, fieldLabel, valueFormat, archivo })}
           disabled={filasFiltradas.length === 0}>
           <Download className="w-3.5 h-3.5" />
           Exportar {filtro !== "todos" ? "filtro" : "todo"} a Excel

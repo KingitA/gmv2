@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ArrowLeft, AlertCircle, Loader2, History } from "lucide-react"
 import { ImportReportView } from "@/components/import/ImportReportView"
-import type { ReportFila } from "@/lib/import/export-excel"
+import type { ReportFila, ValueFormat } from "@/lib/import/export-excel"
 
 interface ResumenItem {
   id: string
@@ -35,6 +35,7 @@ interface Props {
   nombreLabel: string
   statuses: string[]
   fieldLabel?: (campo: string) => string
+  valueFormat?: ValueFormat
 }
 
 function fmtFecha(iso: string): string {
@@ -42,7 +43,7 @@ function fmtFecha(iso: string): string {
   return d.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
 }
 
-export function HistorialImportacionesDialog({ open, onOpenChange, modulo, claveLabel, nombreLabel, statuses, fieldLabel }: Props) {
+export function HistorialImportacionesDialog({ open, onOpenChange, modulo, claveLabel, nombreLabel, statuses, fieldLabel, valueFormat }: Props) {
   const [lista, setLista] = useState<ResumenItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -147,6 +148,7 @@ export function HistorialImportacionesDialog({ open, onOpenChange, modulo, clave
               statuses={statuses}
               archivo={detalle.archivo}
               fieldLabel={fieldLabel}
+              valueFormat={valueFormat}
             />
           </div>
         )}
