@@ -40,6 +40,8 @@ interface Ficha {
     condicion_entrega: string | null
     metodo_facturacion: string | null
     vendedor_id: string | null
+    lista_precio_id: string | null
+    lista?: { nombre: string } | null
     saldo_actual: number
     saldo_proyectado?: number
     actualizado_at: string | null
@@ -64,6 +66,10 @@ interface Catalogos {
   condiciones_pago: { id: string; nombre: string }[]
   condiciones_entrega: { id: string; codigo: string; nombre: string }[]
   localidades: { id: string; nombre: string; provincia: string | null }[]
+  listas_precio: { id: string; nombre: string }[]
+  vendedores: { id: string; nombre: string }[]
+  condiciones_iva: string[]
+  metodos_facturacion: string[]
 }
 
 // Badges de doble firma según contrato docs/CONTRATO-API-VIAJANTES.md
@@ -82,7 +88,6 @@ export default function VendedorClienteFichaPage() {
   const [data, setData] = useState<Ficha | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [vendedores, setVendedores] = useState<{ id: string; nombre: string }[]>([])
   const [reasignando, setReasignando] = useState(false)
   const [editando, setEditando] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
@@ -91,7 +96,13 @@ export default function VendedorClienteFichaPage() {
     condiciones_pago: [],
     condiciones_entrega: [],
     localidades: [],
+    listas_precio: [],
+    vendedores: [],
+    condiciones_iva: [],
+    metodos_facturacion: [],
   })
+  // Viajantes del propio usuario: únicos destinos válidos de reasignación
+  const vendedores = catalogos.vendedores
 
   const cargar = () => {
     fetch(`/api/vendedor/cliente/${id}`)
@@ -106,10 +117,6 @@ export default function VendedorClienteFichaPage() {
 
   useEffect(() => {
     cargar()
-    fetch("/api/vendedores")
-      .then((r) => r.json())
-      .then((d) => Array.isArray(d) && setVendedores(d))
-      .catch(() => {})
     fetch("/api/vendedor/catalogos-ficha")
       .then((r) => r.json())
       .then((d) => !d.error && setCatalogos(d))
@@ -131,6 +138,9 @@ export default function VendedorClienteFichaPage() {
     inicial.provincia = c.provincia || ""
     inicial.condicion_pago = c.condicion_pago || ""
     inicial.condicion_entrega = c.condicion_entrega || ""
+    inicial.condicion_iva = c.condicion_iva || ""
+    inicial.metodo_facturacion = c.metodo_facturacion || ""
+    inicial.lista_precio_id = c.lista_precio_id || ""
     setForm(inicial)
     setEditando(true)
   }
@@ -176,7 +186,7 @@ export default function VendedorClienteFichaPage() {
   const reasignar = async (vendedorId: string) => {
     if (!vendedorId || vendedorId === data?.cliente.vendedor_id) return
     const destino = vendedores.find((v) => v.id === vendedorId)
-    if (!confirm(`¿Reasignar este cliente a ${destino?.nombre}? Va a dejar de aparecer en tu lista.`)) return
+    if (!confirm(`¿Asignar este cliente a ${destino?.nombre}?`)) return
     setReasignando(true)
     try {
       const res = await fetch(`/api/vendedor/cliente/${id}`, {
@@ -186,10 +196,7 @@ export default function VendedorClienteFichaPage() {
       })
       const d = await res.json()
       if (d.error) alert(d.error)
-      else {
-        alert(`Cliente reasignado a ${d.vendedor.nombre}.`)
-        router.push("/vendedor/clientes")
-      }
+      else cargar() // sigue siendo un viajante del usuario: el cliente no desaparece
     } finally {
       setReasignando(false)
     }
@@ -405,6 +412,50 @@ export default function VendedorClienteFichaPage() {
                 )}
               </div>
 
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-gray-500 text-sm block mb-1">Condición IVA</label>
+                  <select
+                    value={form.condicion_iva || ""}
+                    onChange={(e) => setForm((prev) => ({ ...prev, condicion_iva: e.target.value }))}
+                    className="w-full rounded-xl border border-gray-300 px-3 py-3 text-gray-900 bg-white"
+                  >
+                    <option value="">Sin definir</option>
+                    {catalogos.condiciones_iva.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-gray-500 text-sm block mb-1">Método facturación</label>
+                  <select
+                    value={form.metodo_facturacion || ""}
+                    onChange={(e) => setForm((prev) => ({ ...prev, metodo_facturacion: e.target.value }))}
+                    className="w-full rounded-xl border border-gray-300 px-3 py-3 text-gray-900 bg-white"
+                  >
+                    <option value="">Sin definir</option>
+                    {catalogos.metodos_facturacion.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-gray-500 text-sm block mb-1">Lista de precios</label>
+                <select
+                  value={form.lista_precio_id || ""}
+                  onChange={(e) => setForm((prev) => ({ ...prev, lista_precio_id: e.target.value }))}
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
+                >
+                  <option value="">Sin lista (cálculo estándar)</option>
+                  {catalogos.listas_precio.map((l) => (
+                    <option key={l.id} value={l.id}>{l.nombre}</option>
+                  ))}
+                </select>
+                <p className="text-gray-400 text-xs mt-1">Cambiar la lista recalcula los precios de los próximos pedidos.</p>
+              </div>
+
               <div>
                 <label className="text-gray-500 text-sm block mb-1">Condición de pago</label>
                 <select
@@ -460,6 +511,7 @@ export default function VendedorClienteFichaPage() {
               <Dato label="CUIT" valor={cliente.cuit} />
               <Dato label="Condición IVA" valor={cliente.condicion_iva} />
               <Dato label="Método facturación" valor={cliente.metodo_facturacion} />
+              <Dato label="Lista de precios" valor={cliente.lista?.nombre || (cliente.lista_precio_id ? "—" : "Estándar")} />
               <Dato label="Condición de pago" valor={cliente.condicion_pago} />
               <Dato label="Condición de entrega" valor={nombreEntrega(cliente.condicion_entrega)} />
               <Dato
@@ -478,21 +530,24 @@ export default function VendedorClienteFichaPage() {
             </>
           )}
 
-          <div className="pt-3 border-t border-gray-100">
-            <label className="text-gray-500 text-sm block mb-2">Vendedor asignado</label>
-            <select
-              value={cliente.vendedor_id || ""}
-              onChange={(e) => reasignar(e.target.value)}
-              disabled={reasignando}
-              className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
-            >
-              {vendedores.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
+          {vendedores.length > 1 && (
+            <div className="pt-3 border-t border-gray-100">
+              <label className="text-gray-500 text-sm block mb-2">Vendedor asignado</label>
+              <select
+                value={cliente.vendedor_id || ""}
+                onChange={(e) => reasignar(e.target.value)}
+                disabled={reasignando}
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
+              >
+                {vendedores.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.nombre}
+                  </option>
+                ))}
+              </select>
+              <p className="text-gray-400 text-xs mt-1">Solo entre los viajantes de tu usuario.</p>
+            </div>
+          )}
 
           {cliente.actualizado_at && (
             <p className="text-gray-400 text-xs pt-2">

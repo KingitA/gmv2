@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const { data: cliente } = await supabase
       .from("clientes")
       .select(
-        "id, nombre, razon_social, cuit, direccion, localidad, localidad_id, provincia, telefono, mail, condicion_iva, condicion_pago, condicion_entrega, metodo_facturacion, vendedor_id, codigo_cliente"
+        "id, nombre, razon_social, cuit, direccion, localidad, localidad_id, provincia, telefono, mail, condicion_iva, condicion_pago, condicion_entrega, metodo_facturacion, vendedor_id, codigo_cliente, lista_precio_id, lista:lista_precio_id(nombre)"
       )
       .eq("id", id)
       .in("vendedor_id", session.vendedorIds)
@@ -204,8 +204,10 @@ const CAMPOS_EDITABLES = [
   "mail",
   "condicion_pago",
   "condicion_entrega",
+  "condicion_iva",
   "metodo_facturacion",
   "localidad_id",
+  "lista_precio_id",
 ] as const
 
 // PATCH /api/vendedor/cliente/[id]
@@ -244,11 +246,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "El nombre no puede quedar vacío." }, { status: 400 })
     }
 
-    // Reasignación de vendedor (opcional)
+    // Reasignación de vendedor (opcional) — SOLO entre los viajantes del
+    // propio usuario (ej. FREIJE DANIEL ↔ FREIJE DANIEL LISTA NECO)
     let vendedorDestino: { id: string; nombre: string } | null = null
     if (body.vendedor_id !== undefined) {
       if (!body.vendedor_id || typeof body.vendedor_id !== "string") {
         return NextResponse.json({ error: "vendedor_id inválido." }, { status: 400 })
+      }
+      if (!session.vendedorIds.includes(body.vendedor_id)) {
+        return NextResponse.json({ error: "Solo podés asignar el cliente a un viajante de tu usuario." }, { status: 403 })
       }
       const { data: vd } = await supabase
         .from("vendedores")

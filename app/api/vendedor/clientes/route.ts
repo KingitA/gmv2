@@ -118,3 +118,95 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
+
+// POST /api/vendedor/clientes — alta de cliente desde la calle.
+// El cliente nace asignado a uno de los viajantes del usuario (si no se
+// indica, al primero) y listo para levantarle un pedido en el momento.
+// El trigger clientes_sync_localidad_fk completa localidad/provincia desde
+// localidad_id (o resuelve el FK si viene solo el texto).
+export async function POST(request: Request) {
+  const session = await requireVendedor()
+  if (session.error) return session.error
+
+  try {
+    const supabase = await createClient()
+    const body = await request.json()
+    const {
+      nombre,
+      razon_social,
+      cuit,
+      condicion_iva,
+      metodo_facturacion,
+      condicion_pago,
+      condicion_entrega,
+      direccion,
+      localidad_id,
+      localidad,
+      telefono,
+      mail,
+      lista_precio_id,
+      vendedor_id,
+    } = body
+
+    const nombreFinal = String(nombre || razon_social || "").trim()
+    if (!nombreFinal) {
+      return NextResponse.json({ error: "Ingresá el nombre o razón social." }, { status: 400 })
+    }
+
+    const vendedorId =
+      vendedor_id && session.vendedorIds.includes(vendedor_id) ? vendedor_id : session.vendedorIds[0]
+    if (!vendedorId) {
+      return NextResponse.json({ error: "Tu usuario no tiene viajante asignado." }, { status: 400 })
+    }
+
+    const cuitLimpio = cuit ? String(cuit).trim() : null
+    if (cuitLimpio) {
+      const { data: dup } = await supabase
+        .from("clientes")
+        .select("id, nombre")
+        .eq("cuit", cuitLimpio)
+        .eq("activo", true)
+        .maybeSingle()
+      if (dup) {
+        return NextResponse.json(
+          { error: `Ya existe un cliente con ese CUIT: ${dup.nombre}`, cliente_existente_id: dup.id },
+          { status: 409 }
+        )
+      }
+    }
+
+    const { data: cliente, error } = await supabase
+      .from("clientes")
+      .insert({
+        nombre: nombreFinal,
+        razon_social: razon_social?.trim() || null,
+        nombre_razon_social: razon_social?.trim() || nombreFinal,
+        cuit: cuitLimpio,
+        condicion_iva: condicion_iva || null,
+        metodo_facturacion: metodo_facturacion || null,
+        condicion_pago: condicion_pago || null,
+        condicion_entrega: condicion_entrega || null,
+        direccion: direccion?.trim() || null,
+        localidad_id: localidad_id || null,
+        localidad: localidad?.trim() || null,
+        telefono: telefono?.trim() || null,
+        mail: mail?.trim() || null,
+        lista_precio_id: lista_precio_id || null,
+        vendedor_id: vendedorId,
+        activo: true,
+        puntaje: 50,
+        nivel_puntaje: "REGULAR",
+        retira_en_deposito: false,
+        actualizado_por: session.user.id,
+        actualizado_at: new Date().toISOString(),
+      })
+      .select("id, nombre, localidad, metodo_facturacion")
+      .single()
+    if (error) throw error
+
+    return NextResponse.json({ success: true, cliente }, { status: 201 })
+  } catch (error: any) {
+    console.error("[vendedor] Error en POST /api/vendedor/clientes:", error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+}

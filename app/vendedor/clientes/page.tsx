@@ -81,6 +81,12 @@ export default function VendedorClientesPage() {
           </button>
           <h1 className="text-xl font-bold flex-1">Mis Clientes</h1>
           <span className="text-emerald-200 text-sm">{clientes.length}</span>
+          <button
+            onClick={() => router.push("/vendedor/clientes/nuevo")}
+            className="bg-white text-emerald-700 rounded-xl px-3.5 py-2 text-sm font-bold active:scale-95 transition-transform"
+          >
+            + NUEVO
+          </button>
         </div>
         <div className="px-4 pb-3 space-y-2">
           <input
