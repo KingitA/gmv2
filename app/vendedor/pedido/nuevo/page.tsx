@@ -61,17 +61,32 @@ interface ClienteSel {
 }
 
 // Condiciones comerciales "solo este pedido" (overrides guardados en pedidos.*)
+type BonifSeg = Partial<Record<"limpieza_bazar" | "perf0" | "perf_plus", number>>
+interface BonifPedidoUI {
+  viajante?: BonifSeg | null
+  mercaderia?: BonifSeg | null
+}
 interface CondPedido {
-  metodo: string            // "" = método del cliente
-  lista: string             // "" = lista del cliente
-  bonif: number | null      // null = bonificación viajante de la ficha
+  metodo: string                 // "" = método del cliente
+  lista: string                  // "" = lista del cliente
+  bonif: BonifPedidoUI | null    // null = bonificaciones de la ficha (por tipo y segmento)
 }
 const COND_VACIA: CondPedido = { metodo: "", lista: "", bonif: null }
+const SEGS = ["limpieza_bazar", "perf0", "perf_plus"] as const
+const SEG_LABEL: Record<(typeof SEGS)[number], string> = { limpieza_bazar: "Limpieza / Bazar", perf0: "Perfumería 0", perf_plus: "Perfumería plus" }
+const bonifVacia = (b: BonifPedidoUI | null | undefined) =>
+  !b || ((!b.viajante || !Object.keys(b.viajante).length) && (!b.mercaderia || !Object.keys(b.mercaderia).length))
 const condToOverrides = (c: CondPedido) => ({
   ...(c.metodo ? { metodo_facturacion_pedido: c.metodo } : {}),
   ...(c.lista ? { lista_precio_pedido_id: c.lista } : {}),
-  ...(c.bonif !== null ? { bonif_viajante_pedido_pct: c.bonif } : {}),
+  ...(!bonifVacia(c.bonif) ? { bonif_pedido: c.bonif } : {}),
 })
+const fmtSeg = (s: BonifSeg | null | undefined) => {
+  if (!s) return "—"
+  const v = SEGS.map((k) => s[k] ?? 0)
+  if (v.every((x) => x === v[0])) return v[0] ? `${v[0]}%` : "0%"
+  return `L/B ${v[0]}% · P0 ${v[1]}% · P+ ${v[2]}%`
+}
 
 // Datos mínimos del artículo dentro del carrito (al retomar un pedido
 // guardado solo tenemos lo que devuelve el detalle, no el Articulo completo).
@@ -247,7 +262,8 @@ function NuevoPedidoInner() {
   const [verCliente, setVerCliente] = useState(false)
   const [metodoSel, setMetodoSel] = useState("")
   const [listaSel, setListaSel] = useState("")
-  const [bonifSel, setBonifSel] = useState<string>("")
+  // Edición de bonificaciones en el panel: { "viajante.limpieza_bazar": "10", ... }
+  const [bonifSel, setBonifSel] = useState<Record<string, string>>({})
   const [obs, setObs] = useState("")
   // Overrides "solo este pedido" (persisten en pedidos.metodo_facturacion_pedido /
   // lista_precio_pedido_id / bonif_viajante_pedido_pct)
@@ -260,8 +276,8 @@ function NuevoPedidoInner() {
     vendedores: { id: string; lista_precio_id?: string | null; lista_nombre?: string | null }[]
     puede_cambiar_lista: boolean
   } | null>(null)
-  // Bonificación viajante vigente en la ficha (por segmento)
-  const [bonifCliente, setBonifCliente] = useState<Record<string, number> | null>(null)
+  // Bonificaciones vigentes en la ficha (por tipo y segmento)
+  const [bonifCliente, setBonifCliente] = useState<{ viajante: BonifSeg; mercaderia: BonifSeg } | null>(null)
   const [confirmando, setConfirmando] = useState(false)
   const [pedidoOk, setPedidoOk] = useState<{ numero: string; editado?: boolean } | null>(null)
 
@@ -325,7 +341,7 @@ function NuevoPedidoInner() {
         setCond({
           metodo: p.metodo_facturacion_pedido || "",
           lista: p.lista_precio_pedido_id || "",
-          bonif: typeof p.bonif_viajante_pedido_pct === "number" ? p.bonif_viajante_pedido_pct : null,
+          bonif: p.bonif_pedido && typeof p.bonif_pedido === "object" ? p.bonif_pedido : null,
         })
         if (p.clientes) {
           setCliente((prev) =>
@@ -399,7 +415,10 @@ function NuevoPedidoInner() {
   const cargarBonifCliente = useCallback((clienteId: string) => {
     fetch(`/api/vendedor/cliente/${clienteId}/bonificaciones`)
       .then((r) => r.json())
-      .then((d) => setBonifCliente(d.bonificaciones || null))
+      .then((d) => {
+        const b = d.bonificaciones
+        setBonifCliente(b ? { viajante: b.viajante || {}, mercaderia: b.mercaderia || {} } : null)
+      })
       .catch(() => setBonifCliente(null))
   }, [])
   useEffect(() => {
@@ -755,7 +774,7 @@ function NuevoPedidoInner() {
         await aplicarCondicionesPedidoVendedor(pedidoIdRef.current!, {
           metodo_facturacion_pedido: nueva.metodo || null,
           lista_precio_pedido_id: nueva.lista || null,
-          bonif_viajante_pedido_pct: nueva.bonif,
+          bonif_pedido: bonifVacia(nueva.bonif) ? null : nueva.bonif,
         })
         await refreshPedido(pedidoIdRef.current!)
         setSync("idle")
@@ -770,7 +789,7 @@ function NuevoPedidoInner() {
 
   // "Guardar para el cliente": escribe en la FICHA (queda para futuros
   // pedidos), limpia los overrides del pedido y re-precia carrito + catálogo.
-  const guardarParaCliente = (sel: { metodo?: string; lista?: string; bonif?: number | null }) => {
+  const guardarParaCliente = (sel: { metodo?: string; lista?: string; bonif?: BonifPedidoUI | null }) => {
     if (!cliente) return
     setVerCliente(false)
     setSync("saving")
@@ -788,11 +807,15 @@ function NuevoPedidoInner() {
           const d = await res.json()
           if (d.error) throw new Error(d.error)
         }
-        if (typeof sel.bonif === "number") {
+        if (sel.bonif) {
+          // Cada tipo/segmento presente se escribe en la ficha (0 = sin bonif.)
+          const body: { viajante: BonifSeg; mercaderia: BonifSeg } = { viajante: {}, mercaderia: {} }
+          for (const tipo of ["viajante", "mercaderia"] as const)
+            for (const s of SEGS) body[tipo][s] = sel.bonif[tipo]?.[s] ?? 0
           const res = await fetch(`/api/vendedor/cliente/${cliente.id}/bonificaciones`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ limpieza_bazar: sel.bonif, perf0: sel.bonif, perf_plus: sel.bonif }),
+            body: JSON.stringify(body),
           })
           const d = await res.json()
           if (d.error) throw new Error(d.error)
@@ -807,7 +830,7 @@ function NuevoPedidoInner() {
         const limpia: CondPedido = {
           metodo: sel.metodo ? "" : cond.metodo,
           lista: sel.lista !== undefined ? "" : cond.lista,
-          bonif: typeof sel.bonif === "number" ? null : cond.bonif,
+          bonif: sel.bonif ? null : cond.bonif,
         }
         if (pedidoIdRef.current) {
           await aplicarCondicionesPedidoVendedor(
@@ -815,13 +838,14 @@ function NuevoPedidoInner() {
             {
               metodo_facturacion_pedido: limpia.metodo || null,
               lista_precio_pedido_id: limpia.lista || null,
-              bonif_viajante_pedido_pct: limpia.bonif,
+              bonif_pedido: bonifVacia(limpia.bonif) ? null : limpia.bonif,
             },
             { forzarReprecio: true }
           )
           await refreshPedido(pedidoIdRef.current)
         }
-        const cambioCond = limpia.metodo !== cond.metodo || limpia.lista !== cond.lista || limpia.bonif !== cond.bonif
+        const cambioCond =
+          limpia.metodo !== cond.metodo || limpia.lista !== cond.lista || JSON.stringify(limpia.bonif) !== JSON.stringify(cond.bonif)
         if (cambioCond) setCond(limpia) // el effect recalcula el catálogo
         else recalcularPreciosCatalogo()
         setSync("idle")
@@ -1218,7 +1242,14 @@ function NuevoPedidoInner() {
             onClick={() => {
               setMetodoSel(cond.metodo || cliente.metodo_facturacion || "")
               setListaSel(cond.lista || cliente.lista_precio_id || "")
-              setBonifSel(cond.bonif !== null ? String(cond.bonif) : "")
+              // Arranca con lo vigente: override del pedido si hay, si no la ficha
+              const init: Record<string, string> = {}
+              for (const tipo of ["viajante", "mercaderia"] as const)
+                for (const s of SEGS) {
+                  const v = cond.bonif?.[tipo]?.[s] ?? bonifCliente?.[tipo]?.[s] ?? 0
+                  init[`${tipo}.${s}`] = v ? String(v) : ""
+                }
+              setBonifSel(init)
               setVerCliente(true)
             }}
             className="w-10 h-10 rounded-xl bg-emerald-600 border border-emerald-500 flex items-center justify-center text-lg shrink-0 active:scale-95"
@@ -1645,15 +1676,23 @@ function NuevoPedidoInner() {
               const listaNombre = (id: string | null | undefined) =>
                 catFicha?.listas_precio.find((l) => l.id === id)?.nombre || null
               const listaClienteNombre = cliente.lista?.nombre || listaNombre(cliente.lista_precio_id) || "Estándar"
-              const bonifFichaTxt = bonifCliente
-                ? (() => {
-                    const vals = [bonifCliente.limpieza_bazar || 0, bonifCliente.perf0 || 0, bonifCliente.perf_plus || 0]
-                    if (vals.every((v) => v === vals[0])) return vals[0] ? `${vals[0]}%` : "sin bonificación"
-                    return `L/B ${vals[0]}% · P0 ${vals[1]}% · P+ ${vals[2]}%`
-                  })()
-                : "…"
-              const bonifNum = bonifSel.trim() === "" ? null : Number(bonifSel.replace(",", "."))
-              const bonifValida = bonifNum !== null && Number.isFinite(bonifNum) && bonifNum >= 0 && bonifNum <= 100
+              // Bonificaciones: parseo de la grilla (tipo × segmento) a BonifPedidoUI
+              const parsePct = (s: string | undefined) => {
+                const t = (s ?? "").trim()
+                if (t === "") return 0
+                const n = Number(t.replace(",", "."))
+                return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : NaN
+              }
+              const bonifParsed: BonifPedidoUI = { viajante: {}, mercaderia: {} }
+              let bonifValida = true
+              for (const tipo of ["viajante", "mercaderia"] as const)
+                for (const s of SEGS) {
+                  const n = parsePct(bonifSel[`${tipo}.${s}`])
+                  if (Number.isNaN(n)) bonifValida = false
+                  else bonifParsed[tipo]![s] = n
+                }
+              const fichaViaj = fmtSeg(bonifCliente?.viajante)
+              const fichaMerc = fmtSeg(bonifCliente?.mercaderia)
               const btnSolo = "bg-white border border-gray-300 disabled:opacity-40 text-gray-700 rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
               const btnCliente = "bg-gray-900 disabled:opacity-40 text-white rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
               const selCls = "w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
@@ -1741,34 +1780,67 @@ function NuevoPedidoInner() {
                     )}
                   </div>
 
-                  {/* ── Bonificación viajante ── */}
+                  {/* ── Descuentos por segmento: viajante y mercadería ── */}
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                     <div>
-                      <p className="text-gray-700 font-bold text-sm">Bonificación viajante</p>
+                      <p className="text-gray-700 font-bold text-sm">Descuentos por segmento</p>
                       <p className="text-gray-400 text-xs">
-                        Actual: {cond.bonif !== null ? `${cond.bonif}% (solo este pedido)` : `ficha: ${bonifFichaTxt}`}
+                        {!bonifVacia(cond.bonif) ? (
+                          <>Solo este pedido · viajante {fmtSeg(cond.bonif?.viajante ?? bonifCliente?.viajante)} · mercadería {fmtSeg(cond.bonif?.mercaderia ?? bonifCliente?.mercaderia)}</>
+                        ) : (
+                          <>Ficha · viajante {fichaViaj} · mercadería {fichaMerc}</>
+                        )}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        value={bonifSel}
-                        onChange={(e) => setBonifSel(e.target.value)}
-                        inputMode="decimal"
-                        placeholder="0"
-                        className={`${selCls} text-right text-lg font-bold`}
-                      />
-                      <span className="text-gray-500 font-bold text-lg">%</span>
+                    <div className="grid grid-cols-[1fr_4.5rem_4.5rem] gap-2 items-center text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                      <span>Segmento</span>
+                      <span className="text-center text-orange-600">Viajante</span>
+                      <span className="text-center text-green-700">Mercad.</span>
                     </div>
+                    {SEGS.map((s) => (
+                      <div key={s} className="grid grid-cols-[1fr_4.5rem_4.5rem] gap-2 items-center">
+                        <span className="text-sm text-gray-700">{SEG_LABEL[s]}</span>
+                        {(["viajante", "mercaderia"] as const).map((tipo) => (
+                          <div key={tipo} className="relative">
+                            <input
+                              value={bonifSel[`${tipo}.${s}`] ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value.replace(/[^\d.,]/g, "")
+                                setBonifSel((prev) => ({ ...prev, [`${tipo}.${s}`]: v }))
+                              }}
+                              inputMode="decimal"
+                              placeholder="0"
+                              className="w-full rounded-lg border border-gray-300 bg-white pl-2 pr-6 py-2.5 text-right font-bold"
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => {
+                        // Atajo: copiar la primera fila a las otras dos
+                        setBonifSel((prev) => {
+                          const n = { ...prev }
+                          for (const tipo of ["viajante", "mercaderia"] as const)
+                            for (const s of SEGS) n[`${tipo}.${s}`] = prev[`${tipo}.limpieza_bazar`] ?? ""
+                          return n
+                        })
+                      }}
+                      className="text-emerald-700 text-xs font-bold"
+                    >
+                      ⤓ Mismo % en los tres segmentos (copia la fila Limpieza / Bazar)
+                    </button>
                     <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => { if (!bonifValida) return; setVerCliente(false); aplicarSoloPedido({ ...cond, bonif: bonifNum }) }}
+                        onClick={() => { if (!bonifValida) return; setVerCliente(false); aplicarSoloPedido({ ...cond, bonif: bonifParsed }) }}
                         disabled={!bonifValida}
                         className={btnSolo}
                       >
                         Solo este pedido
                       </button>
                       <button
-                        onClick={() => { if (!bonifValida) return; guardarParaCliente({ bonif: bonifNum }) }}
+                        onClick={() => { if (!bonifValida) return; guardarParaCliente({ bonif: bonifParsed }) }}
                         disabled={!bonifValida}
                         className={btnCliente}
                       >
@@ -1776,11 +1848,12 @@ function NuevoPedidoInner() {
                       </button>
                     </div>
                     <p className="text-gray-400 text-xs">
-                      Descuento sobre el neto de cada línea; se descuenta de tu comisión. "Guardar para el cliente" lo aplica a los tres segmentos (en la ficha podés afinarlo por segmento).
+                      <b>Viajante</b>: descuento sobre el neto de cada línea del segmento; sale de tu comisión y ya se ve en el precio.{" "}
+                      <b>Mercadería</b>: % del neto del segmento que se entrega en mercadería sin cargo (la arma depósito/ERP; no cambia precios).
                     </p>
-                    {cond.bonif !== null && (
+                    {!bonifVacia(cond.bonif) && (
                       <button onClick={() => { setVerCliente(false); aplicarSoloPedido({ ...cond, bonif: null }) }} className="w-full text-emerald-700 text-sm font-bold py-1">
-                        Volver a la bonificación de la ficha ({bonifFichaTxt})
+                        Volver a los descuentos de la ficha (viajante {fichaViaj} · mercadería {fichaMerc})
                       </button>
                     )}
                   </div>
@@ -2063,12 +2136,13 @@ function NuevoPedidoInner() {
                 <p className="text-gray-400 text-xs mt-1">
                   Al cambiar el método, todos los precios del pedido se recalculan al instante.
                 </p>
-                {(cond.lista || cond.bonif !== null) && (
+                {(cond.lista || !bonifVacia(cond.bonif)) && (
                   <p className="text-amber-700 text-xs mt-2 font-medium">
                     Solo este pedido:
                     {cond.lista ? ` lista ${catFicha?.listas_precio.find((l) => l.id === cond.lista)?.nombre || "—"}` : ""}
-                    {cond.lista && cond.bonif !== null ? " ·" : ""}
-                    {cond.bonif !== null ? ` viajante ${cond.bonif}%` : ""}
+                    {cond.lista && !bonifVacia(cond.bonif) ? " ·" : ""}
+                    {cond.bonif?.viajante && Object.keys(cond.bonif.viajante).length ? ` viajante ${fmtSeg(cond.bonif.viajante)}` : ""}
+                    {cond.bonif?.mercaderia && Object.keys(cond.bonif.mercaderia).length ? ` · mercadería ${fmtSeg(cond.bonif.mercaderia)}` : ""}
                     {" "}(se cambia desde 👤)
                   </p>
                 )}

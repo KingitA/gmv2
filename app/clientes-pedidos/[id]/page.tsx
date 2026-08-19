@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo, repreciarPedido } from "@/lib/actions/pedidos"
+import { detectarSegmentoBonif, SEGMENTOS_BONIF, SEGMENTO_LABEL, type SegmentoBonif } from "@/lib/pricing/segmento"
 import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
@@ -84,7 +85,7 @@ export default function PedidoEditPage() {
     setLoading(true)
     const [pedRes, itemsRes, listasRes, vendRes] = await Promise.all([
       supabase.from("pedidos").select(`
-        id, numero_pedido, fecha, estado, total, subtotal, cliente_id, bonif_mercaderia_pct,
+        id, numero_pedido, fecha, estado, total, subtotal, cliente_id, bonif_mercaderia_pct, bonif_pedido,
         metodo_facturacion_pedido, condicion_entrega, observaciones,
         lista_precio_pedido_id, lista_limpieza_pedido_id, metodo_limpieza_pedido,
         lista_perf0_pedido_id, metodo_perf0_pedido,
@@ -95,7 +96,7 @@ export default function PedidoEditPage() {
       `).eq("id", id).single(),
       supabase.from("pedidos_detalle").select(`
         id, cantidad, cantidad_preparada, estado_item, precio_base, precio_final, subtotal, es_bonificado,
-        articulos (id, sku, descripcion, proveedores:proveedor_id (nombre))
+        articulos (id, sku, descripcion, segmento_precio, iva_ventas, categoria, rubros:rubro_id (slug), proveedores:proveedor_id (nombre))
       `).eq("pedido_id", id).order("created_at" as any),
       supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
@@ -249,19 +250,49 @@ export default function PedidoEditPage() {
   }
 
   // ── Mercadería bonificada por monto (Feature 3) ──────────────────────────
-  // Monto a bonificar = total NO bonificado × % mercadería. Unidades por artículo =
-  // round(monto / precio) — el entero cuyo valor total queda más cerca del monto.
+  // Monto a bonificar = Σ por segmento (neto del segmento × % mercadería del
+  // segmento). El % de cada segmento sale de: override "solo este pedido"
+  // (pedidos.bonif_pedido.mercaderia, app vendedor) > % general del pedido
+  // (bonif_mercaderia_pct, este input) > ficha del cliente por segmento.
+  // Unidades por artículo = round(monto / precio).
+  function pctMercaderiaSeg(seg: SegmentoBonif): number {
+    const ovr = pedido?.bonif_pedido?.mercaderia
+    if (ovr && typeof ovr[seg] === "number") return ovr[seg]
+    if (pedido?.bonif_mercaderia_pct != null) return bonifPct || 0
+    const ficha = bonifMercaderia.find((b: any) => b.segmento === seg) || bonifMercaderia.find((b: any) => !b.segmento)
+    return ficha?.porcentaje ?? (bonifPct || 0)
+  }
+  const hayMercPorSegmento = () => {
+    const ovr = pedido?.bonif_pedido?.mercaderia
+    if (ovr && Object.keys(ovr).length) return true
+    return pedido?.bonif_mercaderia_pct == null && bonifMercaderia.some((b: any) => !!b.segmento)
+  }
   function calcBonifTotals() {
-    const totalNoBonif = items.filter(i => !i.es_bonificado).reduce((s, i) => {
-      const d = getDisplayItem(i); return s + ((d.precio_final || 0) * (d.cantidad || 0))
-    }, 0)
+    const porSeg: Record<SegmentoBonif, { base: number; pct: number; monto: number }> = {
+      limpieza_bazar: { base: 0, pct: pctMercaderiaSeg("limpieza_bazar"), monto: 0 },
+      perf0: { base: 0, pct: pctMercaderiaSeg("perf0"), monto: 0 },
+      perf_plus: { base: 0, pct: pctMercaderiaSeg("perf_plus"), monto: 0 },
+    }
+    let totalNoBonif = 0
+    for (const i of items.filter(i => !i.es_bonificado)) {
+      const d = getDisplayItem(i)
+      const v = (d.precio_final || 0) * (d.cantidad || 0)
+      totalNoBonif += v
+      porSeg[detectarSegmentoBonif(i.articulos || {})].base += v
+    }
+    let monto = 0
+    for (const seg of SEGMENTOS_BONIF) {
+      porSeg[seg].monto = Math.round(porSeg[seg].base * porSeg[seg].pct / 100 * 100) / 100
+      monto += porSeg[seg].monto
+    }
+    monto = Math.round(monto * 100) / 100
     const asignado = items.filter(i => i.es_bonificado).reduce((s, i) => s + ((i.precio_final || 0) * (i.cantidad || 0)), 0)
-    const monto = Math.round(totalNoBonif * (bonifPct || 0) / 100 * 100) / 100
     return {
       totalNoBonif: Math.round(totalNoBonif * 100) / 100,
       monto,
       asignado: Math.round(asignado * 100) / 100,
       restante: Math.round((monto - asignado) * 100) / 100,
+      porSeg,
     }
   }
 
@@ -540,9 +571,19 @@ export default function PedidoEditPage() {
               <div className="flex-1">
                 <p className="text-sm font-semibold text-amber-800">Mercadería bonificada</p>
                 <p className="text-xs text-amber-600 mt-0.5">
-                  El monto a bonificar = total del pedido × % mercadería. Las unidades de cada artículo se calculan
+                  El monto a bonificar = neto de cada segmento × % mercadería del segmento. Las unidades de cada artículo se calculan
                   para acercarse a ese monto (precio de lista, 100% bonificado).
-                  {bonifMercaderia.length > 0 && <> El cliente tiene <b>{bt.totalNoBonif > 0 ? `${bonifPct}%` : `${bonifPct}%`}</b> preasignado.</>}
+                  {hayMercPorSegmento() ? (
+                    <>
+                      {" "}% por segmento {pedido?.bonif_pedido?.mercaderia ? "(solo este pedido, app vendedor)" : "(ficha del cliente)"}:{" "}
+                      {SEGMENTOS_BONIF.map((s, i) => (
+                        <span key={s}>{i > 0 ? " · " : ""}{SEGMENTO_LABEL[s]} <b>{bt.porSeg[s].pct}%</b></span>
+                      ))}
+                      . Un % general cargado acá vale para los segmentos sin % propio de este pedido (y pisa la ficha).
+                    </>
+                  ) : (
+                    bonifMercaderia.length > 0 && <> El cliente tiene <b>{bonifPct}%</b> preasignado.</>
+                  )}
                 </p>
               </div>
             </div>

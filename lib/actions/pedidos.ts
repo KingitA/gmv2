@@ -10,34 +10,15 @@ import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/prici
 import { insertarKardex, type DescuentoKardex } from "@/lib/kardex/insertar-kardex"
 import { getComisionPorcentaje, getPrecioNeto, calcularComisionMonto } from "@/lib/comisiones/calcular"
 
-// ─── Tipos de segmento de proveedor ──────────────────────────────────────────
-type Segmento = "limpieza" | "perf0" | "perf_plus"
-
-function detectarSegmento(articulo: {
-  categoria?: string | null
-  iva_compras?: string | null
-  iva_ventas?: string | null
-  segmento_precio?: string | null
-  rubros?: { slug: string } | null
-}): Segmento {
-  // 1. Override explícito
-  if (articulo.segmento_precio === "perfumeria") return _segPerf(articulo)
-  if (articulo.segmento_precio === "limpieza_bazar") return "limpieza"
-
-  // 2. Slug relacional del rubro
-  const slug = articulo.rubros?.slug
-  if (slug === "perfumeria") return _segPerf(articulo)
-  if (slug === "limpieza" || slug === "bazar") return "limpieza"
-
-  // 3. Fallback: texto de categoría
-  const cat = (articulo.categoria || "").toUpperCase()
-  if (cat.includes("PERFUMERIA") || cat.includes("PERFUMERÍA")) return _segPerf(articulo)
-  return "limpieza"
-}
-
-function _segPerf(a: { iva_ventas?: string | null }): Segmento {
-  return a.iva_ventas === "presupuesto" ? "perf0" : "perf_plus"
-}
+// ─── Segmento de artículo: helper compartido (lib/pricing/segmento.ts) ───────
+import {
+  detectarSegmento,
+  SEGMENTO_BONIF,
+  normalizarBonifPedido,
+  bonifSegAFilas,
+  type Segmento,
+  type BonifPedido,
+} from "@/lib/pricing/segmento"
 
 function toMetodoFacturacion(raw: string | null | undefined): MetodoFacturacion {
   if (!raw) return "Final"
@@ -258,7 +239,7 @@ const SEGMENTO_PEDIDO_COLS =
   "lista_limpieza_pedido_id,metodo_limpieza_pedido," +
   "lista_perf0_pedido_id,metodo_perf0_pedido," +
   "lista_perf_plus_pedido_id,metodo_perf_plus_pedido," +
-  "bonif_viajante_pedido_pct"
+  "bonif_pedido"
 const SEGMENTO_CLIENTE_COLS =
   "metodo_facturacion,lista_precio_id,lista_limpieza_id,metodo_limpieza," +
   "lista_perf0_id,metodo_perf0,lista_perf_plus_id,metodo_perf_plus"
@@ -309,13 +290,6 @@ async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
 
 function round2(n: number) { return Math.round(n * 100) / 100 }
 
-// Mapeo entre Segmento interno y clave de bonificaciones en DB
-const SEGMENTO_BONIF: Record<Segmento, string> = {
-  limpieza:  "limpieza_bazar",
-  perf0:     "perf0",
-  perf_plus: "perf_plus",
-}
-
 /**
  * Devuelve el descuento_viajante (%) aplicable al segmento dado.
  * Prioriza segmento específico sobre segmento NULL (todos).
@@ -347,14 +321,15 @@ function getDescuentoGeneral(
 }
 
 /** Trae las bonificaciones general + viajante activas de un cliente. */
-// `pedidoOverrides.bonif_viajante_pedido_pct` (columna pedidos.bonif_viajante_pedido_pct
-// o override en memoria del preview): si es número, pisa la bonificación
-// viajante de la ficha para TODOS los segmentos en este pedido ("solo este
-// pedido" desde la app vendedor). null/undefined = heredar del cliente.
+// `pedidoOverrides.bonif_pedido` (columna pedidos.bonif_pedido jsonb o override
+// en memoria del preview): { viajante: {limpieza_bazar, perf0, perf_plus} }.
+// Si trae `viajante`, pisa la bonificación viajante de la ficha por segmento
+// en este pedido ("solo este pedido" desde la app vendedor); los segmentos
+// que no defina heredan del cliente. Sin override = ficha del cliente.
 async function fetchBonifGeneralViajante(
   supabase: any,
   clienteId: string,
-  pedidoOverrides?: { bonif_viajante_pedido_pct?: number | null } | null,
+  pedidoOverrides?: { bonif_pedido?: BonifPedido | null } | null,
 ): Promise<{
   general: Array<{ segmento: string | null; porcentaje: number }>
   viajante: Array<{ segmento: string | null; porcentaje: number }>
@@ -365,15 +340,26 @@ async function fetchBonifGeneralViajante(
     .eq("cliente_id", clienteId)
     .eq("activo", true)
     .in("tipo", ["general", "viajante"])
-  const ovr = pedidoOverrides?.bonif_viajante_pedido_pct
-  const viajante =
-    typeof ovr === "number" && Number.isFinite(ovr)
-      ? [{ segmento: null, porcentaje: ovr }]
-      : (data ?? []).filter((b: any) => b.tipo === "viajante")
+  const ficha = (data ?? []).filter((b: any) => b.tipo === "viajante")
   return {
     general:  (data ?? []).filter((b: any) => b.tipo === "general"),
-    viajante,
+    viajante: mezclarViajanteOverride(ficha, pedidoOverrides?.bonif_pedido),
   }
+}
+
+// Override por segmento del pedido sobre la ficha: los segmentos definidos en
+// el override pisan; el resto queda como en la ficha.
+function mezclarViajanteOverride(
+  ficha: Array<{ segmento: string | null; porcentaje: number }>,
+  bonifPedido?: BonifPedido | null,
+): Array<{ segmento: string | null; porcentaje: number }> {
+  const ovr = normalizarBonifPedido(bonifPedido)?.viajante
+  if (!ovr) return ficha
+  const filasOvr = bonifSegAFilas(ovr)
+  const segsOvr = new Set(filasOvr.map((f) => f.segmento))
+  // La fila "sin segmento" de la ficha sigue valiendo para los segmentos no pisados,
+  // pero una fila específica pisada se reemplaza.
+  return [...filasOvr, ...ficha.filter((f) => !segsOvr.has(f.segmento))]
 }
 
 /** Resuelve los % de general/viajante para un ítem (condición de segmento > bonificación por segmento). */
@@ -463,8 +449,8 @@ export async function previewPrecioArticulo(
     lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
     lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
-    // Bonificación viajante SOLO para este pedido (pisa la de la ficha)
-    bonif_viajante_pedido_pct?: number | null
+    // Bonificaciones SOLO para este pedido por segmento (pisan la ficha)
+    bonif_pedido?: BonifPedido | null
     // Condiciones por proveedor (este pedido) — pisan al rubro para esa mercadería
     condiciones_proveedor?: CondicionProveedor[]
     // Condiciones por marca (este pedido) — ganan sobre proveedor
@@ -546,7 +532,7 @@ export async function previewPreciosArticulos(
     lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
     lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
-    bonif_viajante_pedido_pct?: number | null
+    bonif_pedido?: BonifPedido | null
   } = {},
 ): Promise<Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }>> {
   if (!articuloIds?.length) return []
@@ -770,10 +756,10 @@ export async function createPedido(data: {
   // Descuentos por segmento cargados en el pedido (general/viajante/mercadería).
   // Si vienen, se usan en lugar de las bonificaciones permanentes del cliente.
   bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
-  // Bonificación viajante SOLO para este pedido (todos los segmentos). Se
-  // persiste en pedidos.bonif_viajante_pedido_pct para que los ítems que se
-  // agreguen después y los re-precios la respeten.
-  bonif_viajante_pedido_pct?: number | null
+  // Bonificaciones SOLO para este pedido, por segmento y tipo (viajante /
+  // mercadería). Se persisten en pedidos.bonif_pedido (jsonb) para que los
+  // ítems que se agreguen después y los re-precios las respeten.
+  bonif_pedido?: BonifPedido | null
   // Mercadería bonificada elegida al crear el pedido: artículos a regalar + % .
   // Las unidades se calculan por monto (% × neto) repartido parejo, y luego se
   // reajustan en vivo al preparar en depósito.
@@ -822,10 +808,9 @@ export async function createPedido(data: {
   }
   const bonifGeneral: Array<{ segmento: string | null; porcentaje: number }> =
     bonifData.filter((b: any) => b.tipo === "general")
+  const bonifPedidoNorm = normalizarBonifPedido(data.bonif_pedido)
   const bonificacionesViajante: Array<{ segmento: string | null; porcentaje: number }> =
-    typeof data.bonif_viajante_pedido_pct === "number"
-      ? [{ segmento: null, porcentaje: data.bonif_viajante_pedido_pct }]
-      : bonifData.filter((b: any) => b.tipo === "viajante")
+    mezclarViajanteOverride(bonifData.filter((b: any) => b.tipo === "viajante"), bonifPedidoNorm)
 
   // Condiciones por proveedor: del cliente + overrides del formulario (este pedido)
   const condicionesProveedor = mergeCondicionesProveedor(
@@ -933,7 +918,7 @@ export async function createPedido(data: {
       ...(data.metodo_perf0_pedido          ? { metodo_perf0_pedido:          data.metodo_perf0_pedido }          : {}),
       ...(data.lista_perf_plus_pedido_id    ? { lista_perf_plus_pedido_id:    data.lista_perf_plus_pedido_id }    : {}),
       ...(data.metodo_perf_plus_pedido      ? { metodo_perf_plus_pedido:      data.metodo_perf_plus_pedido }      : {}),
-      ...(typeof data.bonif_viajante_pedido_pct === "number" ? { bonif_viajante_pedido_pct: data.bonif_viajante_pedido_pct } : {}),
+      ...(bonifPedidoNorm ? { bonif_pedido: bonifPedidoNorm } : {}),
       total_flete: 0,
       total_impuestos: percepciones,
       total: Math.round((total + percepciones) * 100) / 100,
@@ -1860,7 +1845,8 @@ export async function aplicarCondicionesPedidoVendedor(
   cond: {
     metodo_facturacion_pedido?: string | null
     lista_precio_pedido_id?: string | null
-    bonif_viajante_pedido_pct?: number | null
+    // { viajante?: {seg:%}, mercaderia?: {seg:%} } — null = heredar todo de la ficha
+    bonif_pedido?: BonifPedido | null
   },
   opts: { forzarReprecio?: boolean } = {}
 ) {
@@ -1886,10 +1872,10 @@ export async function aplicarCondicionesPedidoVendedor(
     const v = limpiarCentinela(cond.lista_precio_pedido_id || "") || null
     if (v !== ((pedido as any).lista_precio_pedido_id || null)) patch.lista_precio_pedido_id = v
   }
-  if (cond.bonif_viajante_pedido_pct !== undefined) {
-    const raw = cond.bonif_viajante_pedido_pct
-    const v = typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : null
-    if (v !== ((pedido as any).bonif_viajante_pedido_pct ?? null)) patch.bonif_viajante_pedido_pct = v
+  if (cond.bonif_pedido !== undefined) {
+    const v = normalizarBonifPedido(cond.bonif_pedido)
+    const actual = normalizarBonifPedido((pedido as any).bonif_pedido)
+    if (JSON.stringify(v) !== JSON.stringify(actual)) patch.bonif_pedido = v
   }
 
   if (!Object.keys(patch).length && !opts.forzarReprecio) return { success: true, sinCambios: true }

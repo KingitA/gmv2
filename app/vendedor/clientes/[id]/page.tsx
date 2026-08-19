@@ -108,21 +108,30 @@ export default function VendedorClienteFichaPage() {
   // ¿El viajante actual del cliente impone la lista? → no se elige a mano
   const listaImpuesta = vendedores.find((v) => v.id === data?.cliente.vendedor_id)?.lista_nombre || null
 
-  // Bonificación de viajante por segmento
-  const [bonif, setBonif] = useState<Record<string, number>>({})
+  // Bonificaciones por segmento y tipo (viajante / mercadería)
+  type BonifTipos = { viajante: Record<string, number>; mercaderia: Record<string, number> }
+  const [bonif, setBonif] = useState<BonifTipos>({ viajante: {}, mercaderia: {} })
+  // edición: { "viajante.limpieza_bazar": "10", ... }
   const [bonifEdit, setBonifEdit] = useState<Record<string, string> | null>(null)
   const [bonifGuardando, setBonifGuardando] = useState(false)
   const cargarBonif = () =>
     fetch(`/api/vendedor/cliente/${id}/bonificaciones`)
       .then((r) => r.json())
-      .then((d) => !d.error && setBonif(d.bonificaciones || {}))
+      .then((d) => {
+        if (d.error) return
+        const b = d.bonificaciones || {}
+        setBonif({ viajante: b.viajante || {}, mercaderia: b.mercaderia || {} })
+      })
       .catch(() => {})
   const guardarBonif = async () => {
     if (!bonifEdit || bonifGuardando) return
     setBonifGuardando(true)
     try {
-      const body: Record<string, number> = {}
-      for (const [k, v] of Object.entries(bonifEdit)) body[k] = parseFloat(String(v).replace(",", ".")) || 0
+      const body: { viajante: Record<string, number>; mercaderia: Record<string, number> } = { viajante: {}, mercaderia: {} }
+      for (const [k, v] of Object.entries(bonifEdit)) {
+        const [tipo, seg] = k.split(".") as ["viajante" | "mercaderia", string]
+        body[tipo][seg] = parseFloat(String(v).replace(",", ".")) || 0
+      }
       const res = await fetch(`/api/vendedor/cliente/${id}/bonificaciones`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -602,14 +611,17 @@ export default function VendedorClienteFichaPage() {
               precio y se descuenta de la comisión del viajante */}
           <div className="pt-3 border-t border-gray-100">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-gray-500 text-sm">Bonificación viajante (descuento al cliente)</label>
+              <label className="text-gray-500 text-sm">Descuentos por segmento (viajante y mercadería)</label>
               {!bonifEdit ? (
                 <button
-                  onClick={() =>
-                    setBonifEdit(
-                      Object.fromEntries((catalogos.segmentos || []).map((s) => [s.key, bonif[s.key] ? String(bonif[s.key]) : ""]))
-                    )
-                  }
+                  onClick={() => {
+                    const init: Record<string, string> = {}
+                    for (const s of catalogos.segmentos || []) {
+                      init[`viajante.${s.key}`] = bonif.viajante[s.key] ? String(bonif.viajante[s.key]) : ""
+                      init[`mercaderia.${s.key}`] = bonif.mercaderia[s.key] ? String(bonif.mercaderia[s.key]) : ""
+                    }
+                    setBonifEdit(init)
+                  }}
                   className="text-emerald-700 text-sm font-bold"
                 >
                   ✏️ Editar
@@ -618,21 +630,35 @@ export default function VendedorClienteFichaPage() {
             </div>
             {bonifEdit ? (
               <div className="space-y-2">
+                <div className="grid grid-cols-[1fr_5rem_5rem] gap-2 items-center text-[11px] font-bold uppercase tracking-wide text-gray-400">
+                  <span>Segmento</span>
+                  <span className="text-center text-orange-600">Viajante</span>
+                  <span className="text-center text-green-700">Mercadería</span>
+                </div>
                 {(catalogos.segmentos || []).map((s) => (
-                  <div key={s.key} className="flex items-center gap-2">
-                    <span className="flex-1 text-sm text-gray-700">{s.label}</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={bonifEdit[s.key] ?? ""}
-                      onChange={(e) => setBonifEdit((prev) => ({ ...(prev || {}), [s.key]: e.target.value.replace(/[^\d.,]/g, "") }))}
-                      placeholder="0"
-                      className="w-20 rounded-lg border border-gray-300 px-2 py-2 text-right font-bold"
-                    />
-                    <span className="text-gray-400 text-sm">%</span>
+                  <div key={s.key} className="grid grid-cols-[1fr_5rem_5rem] gap-2 items-center">
+                    <span className="text-sm text-gray-700">{s.label}</span>
+                    {(["viajante", "mercaderia"] as const).map((tipo) => (
+                      <div key={tipo} className="relative">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={bonifEdit[`${tipo}.${s.key}`] ?? ""}
+                          onChange={(e) =>
+                            setBonifEdit((prev) => ({ ...(prev || {}), [`${tipo}.${s.key}`]: e.target.value.replace(/[^\d.,]/g, "") }))
+                          }
+                          placeholder="0"
+                          className="w-full rounded-lg border border-gray-300 pl-2 pr-6 py-2 text-right font-bold"
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+                      </div>
+                    ))}
                   </div>
                 ))}
-                <p className="text-gray-400 text-xs">Se aplica sobre el neto de cada artículo del segmento y se descuenta de tu comisión.</p>
+                <p className="text-gray-400 text-xs">
+                  <b>Viajante</b>: descuento sobre el neto de cada artículo del segmento; sale de tu comisión.{" "}
+                  <b>Mercadería</b>: % del neto del segmento que se entrega en mercadería sin cargo (la arma depósito).
+                </p>
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <button onClick={() => setBonifEdit(null)} className="bg-white border border-gray-300 text-gray-700 rounded-xl py-2.5 font-bold text-sm">
                     Cancelar
@@ -643,16 +669,23 @@ export default function VendedorClienteFichaPage() {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {(catalogos.segmentos || []).map((s) => (
-                  <span
-                    key={s.key}
-                    className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                      bonif[s.key] ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"
-                    }`}
-                  >
-                    {s.label}: {bonif[s.key] ? `−${bonif[s.key]}%` : "sin bonif."}
-                  </span>
+              <div className="space-y-1.5">
+                {(["viajante", "mercaderia"] as const).map((tipo) => (
+                  <div key={tipo} className="flex flex-wrap items-center gap-1.5">
+                    <span className={`text-[11px] font-bold uppercase w-20 ${tipo === "viajante" ? "text-orange-600" : "text-green-700"}`}>
+                      {tipo === "viajante" ? "Viajante" : "Mercadería"}
+                    </span>
+                    {(catalogos.segmentos || []).map((s) => (
+                      <span
+                        key={s.key}
+                        className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                          bonif[tipo][s.key] ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"
+                        }`}
+                      >
+                        {s.label}: {bonif[tipo][s.key] ? `${bonif[tipo][s.key]}%` : "—"}
+                      </span>
+                    ))}
+                  </div>
                 ))}
               </div>
             )}
