@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo } from "@/lib/actions/pedidos"
+import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo, repreciarPedido } from "@/lib/actions/pedidos"
 import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
@@ -194,6 +194,21 @@ export default function PedidoEditPage() {
       }
       const { error: hErr } = await supabase.from("pedidos").update(headerUpdate).eq("id", id)
       if (hErr) throw hErr
+
+      // Si cambió lista/método (general o por segmento) del pedido, las líneas
+      // se re-precian: el cambio tiene que llegar a la factura, no quedar en el
+      // encabezado. Se hace ANTES de aplicar ediciones manuales de precio para
+      // que un precio tocado a mano en esta misma pantalla no se pise.
+      const CAMPOS_PRECIO = [
+        "metodo_facturacion_pedido", "lista_precio_pedido_id",
+        "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
+        "lista_perf0_pedido_id", "metodo_perf0_pedido",
+        "lista_perf_plus_pedido_id", "metodo_perf_plus_pedido",
+      ] as const
+      const cambioPrecio = CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
+      if (cambioPrecio && !["facturado", "entregado", "eliminado"].includes(headerForm.estado)) {
+        await repreciarPedido(id)
+      }
 
       const changes = Object.entries(itemEdits).map(([itemId, edit]) => ({ id: itemId, ...edit }))
       if (changes.length > 0) await guardarItemsPedido(id, changes)

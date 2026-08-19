@@ -1749,6 +1749,24 @@ async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string
   }
 }
 
+// Re-precia UN pedido (cualquier estado editable) con sus overrides actuales
+// y la config vigente del cliente. Lo usa el ERP al guardar el encabezado del
+// pedido (método/lista/segmentación del pedido) desde /clientes-pedidos/[id].
+export async function repreciarPedido(pedidoId: string) {
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+  const { data: pedido, error } = await supabase
+    .from("pedidos")
+    .select(`id,estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
+    .eq("id", pedidoId)
+    .single()
+  if (error || !pedido) throw new Error("Pedido no encontrado")
+  await repreciarItemsPedido(supabase, pedido, pedidoId)
+  const total = await recalcularTotalPedido(supabase, pedidoId)
+  revalidatePath("/clientes-pedidos")
+  return { success: true, total }
+}
+
 // Re-precia los pedidos ABIERTOS de un cliente (en_venta / pendiente: todavía
 // no impresos ni facturados) con su configuración comercial ACTUAL: lista,
 // método, bonificaciones y condiciones por proveedor/marca. Se invoca cada vez

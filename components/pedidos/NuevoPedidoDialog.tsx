@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -328,6 +329,10 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
           }
           if (toInsert.length > 0) await sb.from("bonificaciones").insert(toInsert)
         }
+
+        // Cambió la config permanente del cliente: los pedidos abiertos
+        // (en_venta/pendiente) se re-precian para facturar con la nueva
+        try { await repreciarPedidosAbiertosCliente(cliente.id) } catch (e) { console.error("repreciar:", e) }
       }
     }
 
