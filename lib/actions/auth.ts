@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { getHomeForRoles } from "@/lib/role-utils"
 
 /**
  * Login por nombre de usuario + contraseña.
@@ -50,9 +51,11 @@ export async function loginUser(nombreUsuario: string, password: string) {
 
     const roles = rolesData?.map((r: any) => r.roles?.nombre).filter(Boolean) || []
 
-    // Sin módulo activo: no dejar pasar
-    const erpRoles = ['admin', 'administrativo', 'deposito', 'chofer']
-    if (!roles.some(r => erpRoles.includes(r))) {
+    // Sin módulo activo: no dejar pasar. La fuente de verdad de qué roles
+    // tienen módulo es getHomeForRoles (role-utils) — antes había acá una
+    // lista fija sin 'vendedor' ni 'mostrador' y los usuarios con ese rol
+    // puro rebotaban con "tu módulo aún no está disponible".
+    if (!getHomeForRoles(roles)) {
         await supabase.auth.signOut()
         return { success: false, error: 'Tu módulo aún no está disponible. Contactá al administrador.' }
     }
