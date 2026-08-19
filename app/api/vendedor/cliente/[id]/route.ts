@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
+import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 
 // GET /api/vendedor/cliente/[id]
 // Ficha del cliente + cuenta corriente: comprobantes con saldo pendiente
@@ -210,6 +211,9 @@ const CAMPOS_EDITABLES = [
   "lista_precio_id",
 ] as const
 
+// Campos cuyo cambio altera los precios de los pedidos abiertos del cliente
+const CAMPOS_PRECIO = ["lista_precio_id", "metodo_facturacion", "condicion_iva"] as const
+
 // PATCH /api/vendedor/cliente/[id]
 // Edita datos de la ficha (whitelist) y/o reasigna el vendedor. Deja
 // registrado quién y cuándo modificó (clientes.actualizado_por/_at).
@@ -292,7 +296,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .update({ actualizado_por: session.user.id, actualizado_at: new Date().toISOString() })
       .eq("id", id)
 
-    return NextResponse.json({ success: true, ...(vendedorDestino ? { vendedor: vendedorDestino } : {}) })
+    // Si cambió algo que define el precio (lista, método, viajante que impone
+    // lista), los pedidos abiertos del cliente se re-precian para que lo que
+    // llega a facturar coincida con la ficha — no solo la visual
+    let repreciados = 0
+    if (CAMPOS_PRECIO.some((c) => patch[c] !== undefined)) {
+      const r = await repreciarPedidosAbiertosCliente(id)
+      repreciados = r.repreciados
+    }
+
+    return NextResponse.json({
+      success: true,
+      pedidos_repreciados: repreciados,
+      ...(vendedorDestino ? { vendedor: vendedorDestino } : {}),
+    })
   } catch (error: any) {
     console.error("[vendedor] Error en PATCH /api/vendedor/cliente/[id]:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })

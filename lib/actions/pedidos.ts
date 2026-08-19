@@ -1749,6 +1749,38 @@ async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string
   }
 }
 
+// Re-precia los pedidos ABIERTOS de un cliente (en_venta / pendiente: todavía
+// no impresos ni facturados) con su configuración comercial ACTUAL: lista,
+// método, bonificaciones y condiciones por proveedor/marca. Se invoca cada vez
+// que cambia algo de eso en la ficha (ERP o app vendedor) para que lo que se
+// factura coincida con lo que el cliente tiene asignado, no con el snapshot
+// tomado al armar el carrito. Los pedidos ya impresos no se tocan: el papel
+// que salió es el compromiso con el cliente. Best-effort por pedido.
+export async function repreciarPedidosAbiertosCliente(clienteId: string) {
+  const supabase = await createClient()
+  const { data: pedidos, error } = await supabase
+    .from("pedidos")
+    .select(`id,estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
+    .eq("cliente_id", clienteId)
+    .in("estado", ["en_venta", "pendiente"])
+  if (error) throw error
+
+  let repreciados = 0
+  const errores: string[] = []
+  for (const pedido of pedidos || []) {
+    try {
+      await repreciarItemsPedido(supabase, pedido, pedido.id)
+      await recalcularTotalPedido(supabase, pedido.id)
+      repreciados++
+    } catch (e: any) {
+      errores.push(`${(pedido as any).numero_pedido || pedido.id}: ${e?.message || e}`)
+    }
+  }
+  if (repreciados > 0) revalidatePath("/clientes-pedidos")
+  if (errores.length) console.error("[repreciarPedidosAbiertosCliente]", clienteId, errores)
+  return { success: true, repreciados, errores }
+}
+
 // Cambia el método de facturación del pedido y re-precia TODO el carrito al
 // instante (incluye pedidos ya "pendientes"). Usado por el módulo vendedor
 // al tocar el selector de método. `forzarReprecio` re-precia aunque el
@@ -1818,6 +1850,12 @@ export async function confirmarPedidoVendedor(
   if (cambioMetodo) {
     await supabase.from("pedidos").update({ metodo_facturacion_pedido: metodoNuevo }).eq("id", pedidoId)
     ;(pedido as any).metodo_facturacion_pedido = metodoNuevo
+  }
+  // Al confirmar un carrito en_venta se re-precia SIEMPRE: las líneas traen el
+  // precio de cuando se agregaron y la lista/método/bonificación del cliente
+  // pudo cambiar mientras tanto (ficha ERP o app). Lo que pasa a pendiente
+  // queda con la configuración vigente, que es la que se factura.
+  if (cambioMetodo || pedido.estado === "en_venta") {
     await repreciarItemsPedido(supabase, pedido, pedidoId)
   }
 

@@ -29,10 +29,6 @@ interface VendedorSuccess {
    *  vendedores.puede_cambiar_lista; alcanza con que un viajante del usuario
    *  lo tenga). Admin siempre puede. */
   puedeCambiarLista: boolean
-  /** Listas de precio con las que puede vender: null = todas las activas.
-   *  Unión de listas_permitidas de sus viajantes (si alguno no restringe,
-   *  ve todas). */
-  listasPermitidas: string[] | null
   error: null
 }
 
@@ -42,7 +38,6 @@ interface VendedorFailure {
   vendedores: null
   vendedorIds: null
   puedeCambiarLista: false
-  listasPermitidas: null
   error: NextResponse
 }
 

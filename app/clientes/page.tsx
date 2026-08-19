@@ -14,6 +14,7 @@ import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, 
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 import { formatDateAR } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ImportClientesDialog, clientesFieldLabel } from "@/components/clientes/ImportClientesDialog"
@@ -249,6 +250,13 @@ export default function ClientesPage() {
         return
       }
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id: editingCliente.id }) }).catch(() => {})
+      // Lista/método/vendedor definen el precio: re-preciar pedidos abiertos del cliente
+      try {
+        const r = await repreciarPedidosAbiertosCliente(editingCliente.id)
+        if (r.repreciados > 0) alert(`Se re-preciaron ${r.repreciados} pedido(s) abierto(s) del cliente con la nueva configuración.`)
+      } catch (e: any) {
+        alert(`Cliente guardado, pero no se pudieron re-preciar los pedidos abiertos: ${e?.message || e}`)
+      }
     } else {
       const { data: newCliente, error } = await supabase.from("clientes").insert(dataToSave).select("id").single()
 

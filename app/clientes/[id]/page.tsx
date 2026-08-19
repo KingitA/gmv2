@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Save, Loader2, ExternalLink, TrendingUp, TrendingDown, Minus, Trash2, Plus } from "lucide-react"
 import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION } from "@/components/pedidos/SegmentacionCondiciones"
+import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 import Link from "next/link"
 
 function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
@@ -307,7 +308,16 @@ export default function ClienteDetailPage() {
       if (insErr) { alert(`Error al guardar descuentos: ${insErr.message}`); setSavingBonif(false); return }
     }
 
-    // 4. Recargar para confirmar
+    // 4. Lista/método/bonificaciones definen el precio: los pedidos abiertos
+    //    (en_venta/pendiente) del cliente se re-precian con la config nueva
+    try {
+      const r = await repreciarPedidosAbiertosCliente(id)
+      if (r.repreciados > 0) alert(`Se re-preciaron ${r.repreciados} pedido(s) abierto(s) del cliente con la nueva configuración.`)
+    } catch (e: any) {
+      alert(`Cliente guardado, pero no se pudieron re-preciar los pedidos abiertos: ${e?.message || e}`)
+    }
+
+    // 5. Recargar para confirmar
     await loadBonificaciones()
     setSavingBonif(false)
   }
@@ -345,6 +355,13 @@ export default function ClienteDetailPage() {
         }
       } catch {}
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id }) }).catch(() => {})
+      // El formulario general también guarda lista/método/vendedor: re-preciar abiertos
+      try {
+        const r = await repreciarPedidosAbiertosCliente(id)
+        if (r.repreciados > 0) alert(`Se re-preciaron ${r.repreciados} pedido(s) abierto(s) del cliente con la nueva configuración.`)
+      } catch (e: any) {
+        alert(`Cliente guardado, pero no se pudieron re-preciar los pedidos abiertos: ${e?.message || e}`)
+      }
       router.push("/clientes")
     }
     setSaving(false)

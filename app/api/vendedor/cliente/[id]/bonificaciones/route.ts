@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 
 // Bonificación de VIAJANTE del cliente, por segmento (tabla bonificaciones,
 // tipo='viajante'). Es el descuento que el viajante le concede al cliente
@@ -107,7 +108,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       .update({ actualizado_por: session.user.id, actualizado_at: new Date().toISOString() })
       .eq("id", id)
 
-    return NextResponse.json({ success: true })
+    // La bonificación viajante entra en el precio de cada línea: los pedidos
+    // abiertos del cliente se re-precian con el porcentaje nuevo
+    const { repreciados } = await repreciarPedidosAbiertosCliente(id)
+
+    return NextResponse.json({ success: true, pedidos_repreciados: repreciados })
   } catch (error: any) {
     console.error("[vendedor] PUT bonificaciones:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
