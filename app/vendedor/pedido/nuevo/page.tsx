@@ -211,13 +211,13 @@ function NuevoPedidoInner() {
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Precios por artículo para las listas del catálogo (batch, por cliente+método)
-  const [precios, setPrecios] = useState<Record<string, { precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null }>>({})
+  const [precios, setPrecios] = useState<Record<string, { precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct?: number }>>({})
   const preciosPedidos = useRef<Set<string>>(new Set())
 
   const [sel, setSel] = useState<Articulo | null>(null)
   const [zoomFoto, setZoomFoto] = useState<string | null>(null)
   const [buscarFoto, setBuscarFoto] = useState(false)
-  const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null } | null>(null)
+  const [selPrecio, setSelPrecio] = useState<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct?: number } | null>(null)
   // Cantidad en el modo elegido; arranca vacía (sin el "1" fantasma)
   const [selCantidad, setSelCantidad] = useState<number | "">("")
   const [selModo, setSelModo] = useState<"unidad" | "fraccion" | "bulto">("unidad")
@@ -370,7 +370,7 @@ function NuevoPedidoInner() {
         setPrecios((prev) => {
           const next = { ...prev }
           for (const p of res)
-            next[p.articulo_id] = { precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, ivaIncluido: p.ivaIncluido, especial: p.especial ?? null }
+            next[p.articulo_id] = { precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, ivaIncluido: p.ivaIncluido, especial: p.especial ?? null, bonifViajantePct: p.bonifViajantePct || 0 }
           return next
         })
       } catch (e) {
@@ -547,7 +547,7 @@ function NuevoPedidoInner() {
         a.id,
         metodoOverride ? { metodo_facturacion_pedido: metodoOverride } : {}
       )
-      setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, especial: p.especial ?? null })
+      setSelPrecio({ precio: p.precio, precioNeto: p.precioNeto, contado: p.contado, especial: p.especial ?? null, bonifViajantePct: p.bonifViajantePct || 0 })
     } catch {
       setSelPrecio(null)
     } finally {
@@ -972,6 +972,14 @@ function NuevoPedidoInner() {
             {!p?.especial && a.descuento_propio > 0 && (
               <span className="inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold mt-1">
                 -{a.descuento_propio}%
+              </span>
+            )}
+            {(p?.bonifViajantePct || 0) > 0 && (
+              <span
+                className="inline-block bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ml-1"
+                title="Bonificación viajante del cliente, ya aplicada en el precio"
+              >
+                viaj. −{p!.bonifViajantePct}%
               </span>
             )}
           </div>
@@ -1591,6 +1599,11 @@ function NuevoPedidoInner() {
                     </p>
                   ) : (
                     <p className="text-gray-500 text-sm mt-1">Sin IVA incluido</p>
+                  )}
+                  {(selPrecio.bonifViajantePct || 0) > 0 && (
+                    <p className="text-sky-700 text-xs font-bold mt-1">
+                      Incluye bonificación viajante −{selPrecio.bonifViajantePct}% de este cliente
+                    </p>
                   )}
                 </>
                 )

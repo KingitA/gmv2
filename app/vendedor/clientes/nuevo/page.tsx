@@ -11,7 +11,7 @@ interface Catalogos {
   condiciones_entrega: { id: string; codigo: string; nombre: string }[]
   localidades: { id: string; nombre: string; provincia: string | null }[]
   listas_precio: { id: string; nombre: string }[]
-  vendedores: { id: string; nombre: string }[]
+  vendedores: { id: string; nombre: string; lista_precio_id?: string | null; lista_nombre?: string | null }[]
   condiciones_iva: string[]
   metodos_facturacion: string[]
   puede_cambiar_lista?: boolean
@@ -74,6 +74,10 @@ export default function VendedorClienteNuevoPage() {
 
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF((p) => ({ ...p, [k]: e.target.value }))
+
+  // Lista impuesta por el viajante elegido (o el único del usuario)
+  const viajanteSel = cat.vendedores.find((v) => v.id === f.vendedor_id) || (cat.vendedores.length === 1 ? cat.vendedores[0] : null)
+  const listaImpuesta = viajanteSel?.lista_nombre || null
 
   const guardar = async (irAPedido: boolean) => {
     if (guardando) return
@@ -149,14 +153,20 @@ export default function VendedorClienteNuevoPage() {
                 {cat.metodos_facturacion.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </Campo>
-            {cat.puede_cambiar_lista && (
+            {listaImpuesta ? (
+              <Campo label="Lista de precios">
+                <div className={`${inputCls} bg-gray-50 text-gray-600`}>
+                  {listaImpuesta} <span className="text-xs text-gray-400">(por viajante)</span>
+                </div>
+              </Campo>
+            ) : cat.puede_cambiar_lista ? (
               <Campo label="Lista de precios">
                 <select value={f.lista_precio_id} onChange={set("lista_precio_id")} className={inputCls}>
                   <option value="">Estándar</option>
                   {cat.listas_precio.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
                 </select>
               </Campo>
-            )}
+            ) : null}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <Campo label="Condición de pago">
@@ -175,7 +185,12 @@ export default function VendedorClienteNuevoPage() {
           {cat.vendedores.length > 1 && (
             <Campo label="Viajante">
               <select value={f.vendedor_id} onChange={set("vendedor_id")} className={inputCls}>
-                {cat.vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+                <option value="">Elegir viajante...</option>
+                {cat.vendedores.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.nombre}{v.lista_nombre ? ` → lista ${v.lista_nombre}` : ""}
+                  </option>
+                ))}
               </select>
             </Campo>
           )}

@@ -67,10 +67,11 @@ interface Catalogos {
   condiciones_entrega: { id: string; codigo: string; nombre: string }[]
   localidades: { id: string; nombre: string; provincia: string | null }[]
   listas_precio: { id: string; nombre: string }[]
-  vendedores: { id: string; nombre: string }[]
+  vendedores: { id: string; nombre: string; lista_precio_id?: string | null; lista_nombre?: string | null }[]
   condiciones_iva: string[]
   metodos_facturacion: string[]
   puede_cambiar_lista?: boolean
+  segmentos?: { key: string; label: string }[]
 }
 
 // Badges de doble firma según contrato docs/CONTRATO-API-VIAJANTES.md
@@ -104,6 +105,39 @@ export default function VendedorClienteFichaPage() {
   })
   // Viajantes del propio usuario: únicos destinos válidos de reasignación
   const vendedores = catalogos.vendedores
+  // ¿El viajante actual del cliente impone la lista? → no se elige a mano
+  const listaImpuesta = vendedores.find((v) => v.id === data?.cliente.vendedor_id)?.lista_nombre || null
+
+  // Bonificación de viajante por segmento
+  const [bonif, setBonif] = useState<Record<string, number>>({})
+  const [bonifEdit, setBonifEdit] = useState<Record<string, string> | null>(null)
+  const [bonifGuardando, setBonifGuardando] = useState(false)
+  const cargarBonif = () =>
+    fetch(`/api/vendedor/cliente/${id}/bonificaciones`)
+      .then((r) => r.json())
+      .then((d) => !d.error && setBonif(d.bonificaciones || {}))
+      .catch(() => {})
+  const guardarBonif = async () => {
+    if (!bonifEdit || bonifGuardando) return
+    setBonifGuardando(true)
+    try {
+      const body: Record<string, number> = {}
+      for (const [k, v] of Object.entries(bonifEdit)) body[k] = parseFloat(String(v).replace(",", ".")) || 0
+      const res = await fetch(`/api/vendedor/cliente/${id}/bonificaciones`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      const d = await res.json()
+      if (d.error) alert(d.error)
+      else {
+        setBonifEdit(null)
+        cargarBonif()
+      }
+    } finally {
+      setBonifGuardando(false)
+    }
+  }
 
   const cargar = () => {
     fetch(`/api/vendedor/cliente/${id}`)
@@ -118,6 +152,7 @@ export default function VendedorClienteFichaPage() {
 
   useEffect(() => {
     cargar()
+    cargarBonif()
     fetch("/api/vendedor/catalogos-ficha")
       .then((r) => r.json())
       .then((d) => !d.error && setCatalogos(d))
@@ -442,7 +477,7 @@ export default function VendedorClienteFichaPage() {
                 </div>
               </div>
 
-              {catalogos.puede_cambiar_lista && (
+              {catalogos.puede_cambiar_lista && !listaImpuesta && (
                 <div>
                   <label className="text-gray-500 text-sm block mb-1">Lista de precios</label>
                   <select
@@ -514,7 +549,13 @@ export default function VendedorClienteFichaPage() {
               <Dato label="CUIT" valor={cliente.cuit} />
               <Dato label="Condición IVA" valor={cliente.condicion_iva} />
               <Dato label="Método facturación" valor={cliente.metodo_facturacion} />
-              <Dato label="Lista de precios" valor={cliente.lista?.nombre || (cliente.lista_precio_id ? "—" : "Estándar")} />
+              <Dato
+                label="Lista de precios"
+                valor={
+                  (cliente.lista?.nombre || (cliente.lista_precio_id ? "—" : "Estándar")) +
+                  (listaImpuesta ? " (por viajante)" : "")
+                }
+              />
               <Dato label="Condición de pago" valor={cliente.condicion_pago} />
               <Dato label="Condición de entrega" valor={nombreEntrega(cliente.condicion_entrega)} />
               <Dato
@@ -545,12 +586,77 @@ export default function VendedorClienteFichaPage() {
                 {vendedores.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.nombre}
+                    {v.lista_nombre ? ` → lista ${v.lista_nombre}` : ""}
                   </option>
                 ))}
               </select>
-              <p className="text-gray-400 text-xs mt-1">Solo entre los viajantes de tu usuario.</p>
+              <p className="text-gray-400 text-xs mt-1">
+                Solo entre los viajantes de tu usuario.
+                {vendedores.some((v) => v.lista_nombre) ? " El viajante define la lista de precios del cliente." : ""}
+              </p>
             </div>
           )}
+
+          {/* Bonificación de viajante por segmento: descuento que el viajante le
+              concede al cliente sobre el neto; el catálogo ya lo aplica en el
+              precio y se descuenta de la comisión del viajante */}
+          <div className="pt-3 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-gray-500 text-sm">Bonificación viajante (descuento al cliente)</label>
+              {!bonifEdit ? (
+                <button
+                  onClick={() =>
+                    setBonifEdit(
+                      Object.fromEntries((catalogos.segmentos || []).map((s) => [s.key, bonif[s.key] ? String(bonif[s.key]) : ""]))
+                    )
+                  }
+                  className="text-emerald-700 text-sm font-bold"
+                >
+                  ✏️ Editar
+                </button>
+              ) : null}
+            </div>
+            {bonifEdit ? (
+              <div className="space-y-2">
+                {(catalogos.segmentos || []).map((s) => (
+                  <div key={s.key} className="flex items-center gap-2">
+                    <span className="flex-1 text-sm text-gray-700">{s.label}</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={bonifEdit[s.key] ?? ""}
+                      onChange={(e) => setBonifEdit((prev) => ({ ...(prev || {}), [s.key]: e.target.value.replace(/[^\d.,]/g, "") }))}
+                      placeholder="0"
+                      className="w-20 rounded-lg border border-gray-300 px-2 py-2 text-right font-bold"
+                    />
+                    <span className="text-gray-400 text-sm">%</span>
+                  </div>
+                ))}
+                <p className="text-gray-400 text-xs">Se aplica sobre el neto de cada artículo del segmento y se descuenta de tu comisión.</p>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button onClick={() => setBonifEdit(null)} className="bg-white border border-gray-300 text-gray-700 rounded-xl py-2.5 font-bold text-sm">
+                    Cancelar
+                  </button>
+                  <button onClick={guardarBonif} disabled={bonifGuardando} className="bg-emerald-600 text-white rounded-xl py-2.5 font-bold text-sm disabled:bg-gray-300">
+                    {bonifGuardando ? "Guardando..." : "Guardar"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {(catalogos.segmentos || []).map((s) => (
+                  <span
+                    key={s.key}
+                    className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                      bonif[s.key] ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"
+                    }`}
+                  >
+                    {s.label}: {bonif[s.key] ? `−${bonif[s.key]}%` : "sin bonif."}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
 
           {cliente.actualizado_at && (
             <p className="text-gray-400 text-xs pt-2">

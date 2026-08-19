@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
-import { requireVendedor } from "@/lib/vendedor/session"
+import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 
 // GET /api/vendedor/cliente/[id]
 // Ficha del cliente + cuenta corriente: comprobantes con saldo pendiente
@@ -273,6 +273,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       }
       vendedorDestino = vd
       patch.vendedor_id = vd.id
+      // El viajante impone su lista (ej. "LISTA NECO" → Neco, "FREIJE DANIEL" → Viajante)
+      const listaImpuesta = listaDelViajante(session, vd.id)
+      if (listaImpuesta) patch.lista_precio_id = listaImpuesta
     }
 
     if (!Object.keys(patch).length) {

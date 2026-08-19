@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
-import { requireVendedor } from "@/lib/vendedor/session"
+import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -191,7 +191,9 @@ export async function POST(request: Request) {
         localidad: localidad?.trim() || null,
         telefono: telefono?.trim() || null,
         mail: mail?.trim() || null,
-        lista_precio_id: session.puedeCambiarLista ? lista_precio_id || null : null,
+        // La lista la impone el viajante; si no impone, la elige quien tiene permiso
+        lista_precio_id:
+          listaDelViajante(session, vendedorId) || (session.puedeCambiarLista ? lista_precio_id || null : null),
         vendedor_id: vendedorId,
         activo: true,
         puntaje: 50,

@@ -16,6 +16,8 @@ export interface VendedorRecord {
   comision_perfumeria_0: number | null
   comision_perfumeria_plus: number | null
   puede_cambiar_lista?: boolean | null
+  /** Lista que impone este viajante a sus clientes (null = no impone) */
+  lista_precio_id?: string | null
 }
 
 interface VendedorSuccess {
@@ -27,6 +29,10 @@ interface VendedorSuccess {
    *  vendedores.puede_cambiar_lista; alcanza con que un viajante del usuario
    *  lo tenga). Admin siempre puede. */
   puedeCambiarLista: boolean
+  /** Listas de precio con las que puede vender: null = todas las activas.
+   *  Unión de listas_permitidas de sus viajantes (si alguno no restringe,
+   *  ve todas). */
+  listasPermitidas: string[] | null
   error: null
 }
 
@@ -36,6 +42,7 @@ interface VendedorFailure {
   vendedores: null
   vendedorIds: null
   puedeCambiarLista: false
+  listasPermitidas: null
   error: NextResponse
 }
 
@@ -73,7 +80,7 @@ export async function requireVendedor(): Promise<VendedorSessionResult> {
   const supabase = await createClient()
   const { data: vendedores, error } = await supabase
     .from("vendedores")
-    .select("id, nombre, comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus, puede_cambiar_lista")
+    .select("id, nombre, comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus, puede_cambiar_lista, lista_precio_id")
     .eq("usuario_id", auth.user.id)
     .eq("activo", true)
 
@@ -93,4 +100,9 @@ export async function requireVendedor(): Promise<VendedorSessionResult> {
     puedeCambiarLista: roles.includes("admin") || vendedores.some((v) => v.puede_cambiar_lista === true),
     error: null,
   }
+}
+
+/** Lista que impone un viajante (vendedores.lista_precio_id), o null. */
+export function listaDelViajante(session: VendedorSuccess, vendedorId: string | null | undefined): string | null {
+  return session.vendedores.find((v) => v.id === vendedorId)?.lista_precio_id || null
 }

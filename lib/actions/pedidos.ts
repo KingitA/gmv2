@@ -452,7 +452,7 @@ export async function previewPrecioArticulo(
     // Condiciones por marca (este pedido) — ganan sobre proveedor
     condiciones_marca?: CondicionMarca[]
   } = {},
-): Promise<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null; descripcion: string; sku: string; unidades_por_bulto: number }> {
+): Promise<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null; descripcion: string; sku: string; unidades_por_bulto: number; bonifViajantePct: number }> {
   const supabase = await createClient()
 
   const [clienteRes, articuloRes] = await Promise.all([
@@ -515,6 +515,8 @@ export async function previewPrecioArticulo(
     descripcion: artMeta?.descripcion || "",
     sku: artMeta?.sku || "",
     unidades_por_bulto: artMeta?.unidades_por_bulto || 1,
+    // Ya aplicada en `precio`; se expone para que la app del vendedor lo muestre
+    bonifViajantePct: precio.bonifViajantePct,
   }
 }
 
@@ -531,7 +533,7 @@ export async function previewPreciosArticulos(
     lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
   } = {},
-): Promise<Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null }>> {
+): Promise<Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }>> {
   if (!articuloIds?.length) return []
   const ids = [...new Set(articuloIds)].slice(0, 600)
   const supabase = await createClient()
@@ -572,7 +574,7 @@ export async function previewPreciosArticulos(
   const condicionesMarca = await fetchCondicionesMarca(supabase, clienteId)
   const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId)
 
-  const out: Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null }> = []
+  const out: Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }> = []
   for (const art of articulos || []) {
     try {
       const articulo = { ...art, descuentos: descPorArt.get(art.id) || [] }
@@ -604,6 +606,7 @@ export async function previewPreciosArticulos(
         especial: precio.esListaEspecial
           ? { bruto: precio.precioBrutoEspecial, oferta_pct: precio.ofertaEspecialPct }
           : null,
+        bonifViajantePct: precio.bonifViajantePct,
       })
     } catch {
       // artículo sin precio calculable: se omite de la respuesta

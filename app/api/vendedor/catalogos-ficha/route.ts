@@ -21,7 +21,12 @@ export async function GET() {
         supabase.from("condiciones_entrega").select("id, codigo, nombre").eq("activo", true).order("nombre"),
         supabase.from("localidades").select("id, nombre, provincia").order("provincia").order("nombre"),
         supabase.from("listas_precio").select("id, nombre").eq("activo", true).order("nombre"),
-        supabase.from("vendedores").select("id, nombre").in("id", session.vendedorIds).eq("activo", true).order("nombre"),
+        supabase
+          .from("vendedores")
+          .select("id, nombre, lista_precio_id, lista:lista_precio_id(nombre)")
+          .in("id", session.vendedorIds)
+          .eq("activo", true)
+          .order("nombre"),
       ])
 
     return NextResponse.json({
@@ -29,7 +34,19 @@ export async function GET() {
       condiciones_entrega: entregaCat || [],
       localidades: localidades || [],
       listas_precio: listas || [],
-      vendedores: vendedores || [],
+      // lista_precio_id / lista_nombre: si el viajante impone lista, la UI
+      // oculta el selector de lista y muestra "Lista: X (por viajante)"
+      vendedores: (vendedores || []).map((v: any) => ({
+        id: v.id,
+        nombre: v.nombre,
+        lista_precio_id: v.lista_precio_id || null,
+        lista_nombre: v.lista?.nombre || null,
+      })),
+      segmentos: [
+        { key: "limpieza_bazar", label: "Limpieza y bazar" },
+        { key: "perf0", label: "Perfumería 0" },
+        { key: "perf_plus", label: "Perfumería plus" },
+      ],
       condiciones_iva: ["Responsable Inscripto", "Monotributista", "Exento", "Consumidor Final"],
       metodos_facturacion: ["Factura", "Final", "Presupuesto"],
       puede_cambiar_lista: session.puedeCambiarLista,
