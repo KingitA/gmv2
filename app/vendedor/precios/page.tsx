@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { previewPreciosListas } from "@/lib/actions/pedidos"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 // Consulta de precios por lista + método de facturación, sin cliente:
 // el vendedor navega el catálogo (o busca) y ve cada artículo con el precio
@@ -187,6 +188,15 @@ export default function VendedorPreciosPage() {
 
   const visibles = resultados ?? articulos
   const enLista = !!resultados || !!catSel
+
+  // "Atrás" físico: desarma un paso interno por vez en vez de salir del módulo
+  useBackTrap(() => {
+    if (zoomFoto) { setZoomFoto(null); return true }
+    if (verAgregar) { setVerAgregar(false); return true }
+    if (resultados) { setResultados(null); setQ(""); return true }
+    if (catSel) { setCatSel(null); setArticulos([]); return true }
+    return false
+  })
 
   return (
     <div className="min-h-screen bg-gray-50 pb-10">

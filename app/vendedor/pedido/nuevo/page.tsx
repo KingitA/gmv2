@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { localMatch } from "@/lib/search/local-match"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import {
   actualizarCantidadItem,
   agregarItemPedido,
@@ -607,6 +608,23 @@ function NuevoPedidoInner() {
     else if (nav.s === "provs") setNav({ s: "home" })
     else router.back()
   }
+
+  // Botón "atrás" físico del teléfono/tablet: desarma UN paso interno por vez
+  // (foto → sheet → búsqueda → nivel del catálogo) en vez de sacar al vendedor
+  // de la pantalla y hacerle perder el pedido a medio armar.
+  useBackTrap(() => {
+    if (zoomFoto) { setZoomFoto(null); return true }
+    if (buscarFoto) { setBuscarFoto(false); return true }
+    if (sel) { setSel(null); return true }
+    if (verCliente) { setVerCliente(false); return true }
+    if (verCarrito) { setVerCarrito(false); return true }
+    if (!cliente || pedidoOk) return false // selector de cliente / pantalla de éxito: salir normal
+    if (qFiltro) { setQFiltro(""); return true }
+    if (q) { setQ(""); setResultados([]); return true }
+    if (subSel) { setSubSel(null); return true }
+    if (nav.s !== "home") { volver(); return true }
+    return false // home del catálogo, nada abierto: salir de verdad
+  })
 
   // ¿Es un código escaneado? (colectora/lector: solo dígitos, 8-14 = EAN/DUN)
   const esScan = (v: string) => /^[0-9]{8,14}$/.test(v.trim())
