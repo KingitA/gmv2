@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { NuevaLocalidadSheet } from "@/components/vendedor/NuevaLocalidadSheet"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 // Alta de cliente desde la calle. Al guardar, va directo a levantarle un
 // pedido (o a la ficha). Nace asignado a un viajante del usuario.
@@ -63,6 +64,12 @@ export default function VendedorClienteNuevoPage() {
   })
   const [guardando, setGuardando] = useState(false)
   const [verNuevaLocalidad, setVerNuevaLocalidad] = useState(false)
+
+  // "Atrás" físico: primero cierra el alta de localidad, después sale
+  useBackTrap(() => {
+    if (verNuevaLocalidad) { setVerNuevaLocalidad(false); return true }
+    return false
+  })
 
   useEffect(() => {
     fetch("/api/vendedor/catalogos-ficha")

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { NuevaLocalidadSheet } from "@/components/vendedor/NuevaLocalidadSheet"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 interface Comprobante {
   id: string
@@ -117,6 +118,15 @@ export default function VendedorClienteFichaPage() {
   // edición: { "viajante.limpieza_bazar": "10", ... }
   const [bonifEdit, setBonifEdit] = useState<Record<string, string> | null>(null)
   const [bonifGuardando, setBonifGuardando] = useState(false)
+
+  // "Atrás" físico: cierra el alta de localidad / cancela la edición en curso
+  // antes de abandonar la ficha
+  useBackTrap(() => {
+    if (verNuevaLocalidad) { setVerNuevaLocalidad(false); return true }
+    if (bonifEdit) { setBonifEdit(null); return true }
+    if (editando) { setEditando(false); return true }
+    return false
+  })
   const cargarBonif = () =>
     fetch(`/api/vendedor/cliente/${id}/bonificaciones`)
       .then((r) => r.json())

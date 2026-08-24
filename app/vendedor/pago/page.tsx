@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 // Panel PAGO — acceso rápido desde el inicio para cobrar: buscás el cliente,
 // ves cuánto debe, y entrás directo a la pantalla de cobro (pedidos +
@@ -23,6 +24,12 @@ export default function VendedorPagoPage() {
   const [clientes, setClientes] = useState<ClienteRow[]>([])
   const [cargando, setCargando] = useState(true)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // "Atrás" físico: limpia la búsqueda antes de salir
+  useBackTrap(() => {
+    if (q) { setQ(""); buscar("", soloDeuda); return true }
+    return false
+  })
 
   const buscar = (texto: string, conDeuda: boolean) => {
     setCargando(true)

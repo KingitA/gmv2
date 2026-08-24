@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { useBcraDeudor } from "@/components/pagos/BcraDeudorChip"
 import { MARCA_CONTADO } from "@/lib/constants"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 // Cobro del viajante — espejo del patrón de /caja (Caja del Día):
 //  · "¿Qué paga?": pedidos con estado; tilde directa (sin casilla emergente),
@@ -202,6 +203,13 @@ export default function VendedorCobrarPage() {
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
   const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
+
+  // "Atrás" físico: cierra el diálogo/desglose abierto antes de irse de la pantalla
+  useBackTrap(() => {
+    if (dialogoFalta !== null) { setDialogoFalta(null); return true }
+    if (abierto) { setAbierto(null); return true }
+    return false
+  })
   const idemKey = useRef<string>(crypto.randomUUID())
 
   useEffect(() => {

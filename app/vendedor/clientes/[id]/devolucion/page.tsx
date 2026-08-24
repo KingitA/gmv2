@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { previewPrecioArticulo } from "@/lib/actions/pedidos"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 // Devolución en la calle — la devolución NO es sobre un pedido: se busca en
 // las COMPRAS FACTURADAS del cliente y se devuelve al último precio al que se
@@ -63,6 +64,15 @@ export default function VendedorDevolucionPage() {
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
   const [ok, setOk] = useState<string | null>(null)
+
+  // "Atrás" físico: sale del modo catálogo ("nunca vendido") o limpia la
+  // búsqueda antes de abandonar la pantalla
+  useBackTrap(() => {
+    if (ok) return false // pantalla de éxito: salir normal
+    if (modoCatalogo) { setModoCatalogo(false); setQCat(""); setResultadosCat([]); return true }
+    if (q) { setQ(""); return true }
+    return false
+  })
 
   useEffect(() => {
     Promise.all([

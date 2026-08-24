@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 interface ClienteItem {
   id: string
@@ -31,6 +32,13 @@ export default function VendedorClientesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // "Atrás" físico: limpia búsqueda/filtros antes de salir del listado
+  useBackTrap(() => {
+    if (q) { setQ(""); cargar("", filtro, localidad); return true }
+    if (localidad || filtro !== "todos") { setLocalidad(""); setFiltro("todos"); cargar(q, "todos", ""); return true }
+    return false
+  })
 
   const cargar = (busqueda: string, f: string, loc: string) => {
     setLoading(true)

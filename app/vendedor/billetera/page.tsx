@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 interface Movimiento {
   id: string
@@ -99,6 +100,12 @@ function VendedorBilleteraInner() {
   const [comTipo, setComTipo] = useState<"cobrada" | "vendida">("cobrada")
   const [comLoading, setComLoading] = useState(false)
   const [pedidoSel, setPedidoSel] = useState<PedidoComision | null>(null)
+
+  // "Atrás" físico: cierra el detalle del pedido antes de salir de la billetera
+  useBackTrap(() => {
+    if (pedidoSel) { setPedidoSel(null); return true }
+    return false
+  })
   const [detalle, setDetalle] = useState<DetalleData | null>(null)
   const [detalleLoading, setDetalleLoading] = useState(false)
 
