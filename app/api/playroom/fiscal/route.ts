@@ -54,6 +54,10 @@ export async function GET(req: NextRequest) {
       .gte('fecha', dateFrom)
       .lte('fecha', dateTo)
       .in('tipo_comprobante', tiposFiltro)
+      // Los documentos de APERTURA (saldos migrados del sistema anterior) no
+      // son emisiones propias: ya fueron declarados por el sistema viejo y no
+      // deben aparecer en el control fiscal (sí en cobranzas/aging).
+      .not('observaciones', 'ilike', 'APERTURA GM%')
       .order('fecha', { ascending: true })
       .order('numero_comprobante', { ascending: true }))
 
