@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { localMatch } from "@/lib/search/local-match"
 import {
   actualizarCantidadItem,
   agregarItemPedido,
@@ -53,6 +54,10 @@ interface Articulo {
 interface ClienteSel {
   id: string
   nombre: string
+  razon_social?: string | null
+  cuit?: string | null
+  codigo_cliente?: string | null
+  direccion?: string | null
   localidad: string | null
   metodo_facturacion: string | null
   lista_precio_id?: string | null
@@ -1099,11 +1104,12 @@ function NuevoPedidoInner() {
 
   // ── Selector de cliente ─────────────────────────────────────────────
   if (!cliente) {
+    // Mismos campos que el buscador del ERP: nombre, razón social, dirección
+    // ("belgrano" → el cliente de calle Belgrano), localidad, CUIT y código.
+    // localMatch normaliza acentos y soporta varias palabras en cualquier orden.
     const filtrados = qCliente
-      ? clientes.filter(
-          (c) =>
-            c.nombre.toLowerCase().includes(qCliente.toLowerCase()) ||
-            (c.localidad || "").toLowerCase().includes(qCliente.toLowerCase())
+      ? clientes.filter((c) =>
+          localMatch(qCliente, c.nombre, c.razon_social, c.direccion, c.localidad, c.cuit, c.codigo_cliente)
         )
       : clientes
     return (
@@ -1131,7 +1137,9 @@ function NuevoPedidoInner() {
               className="w-full bg-white rounded-xl shadow-sm border border-gray-200 p-4 text-left active:scale-[0.98]"
             >
               <p className="font-bold text-gray-900">{c.nombre}</p>
-              <p className="text-gray-500 text-sm">{c.localidad || "—"}</p>
+              <p className="text-gray-500 text-sm">
+                {[c.direccion, c.localidad].filter(Boolean).join(" · ") || "—"}
+              </p>
             </button>
           ))}
         </div>

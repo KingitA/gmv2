@@ -18,12 +18,14 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from("clientes")
-      .select("id, nombre, cuit, localidad, condicion_pago, metodo_facturacion, vendedor_id")
+      .select("id, nombre, razon_social, cuit, codigo_cliente, direccion, localidad, condicion_pago, metodo_facturacion, vendedor_id")
       .in("vendedor_id", session.vendedorIds)
       .eq("activo", true)
       .order("nombre")
 
-    if (q) query = query.or(`nombre.ilike.%${q}%,cuit.ilike.%${q}%,razon_social.ilike.%${q}%`)
+    // Mismos campos que el buscador del ERP/importador: un cliente se encuentra
+    // también por su dirección ("belgrano" → el de calle Belgrano), código o localidad
+    if (q) query = query.or(`nombre.ilike.%${q}%,razon_social.ilike.%${q}%,cuit.ilike.%${q}%,codigo_cliente.ilike.%${q}%,direccion.ilike.%${q}%,localidad.ilike.%${q}%`)
     if (localidad) query = query.eq("localidad", localidad)
 
     const { data: clientes, error } = await query

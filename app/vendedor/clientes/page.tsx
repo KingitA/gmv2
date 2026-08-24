@@ -8,6 +8,7 @@ interface ClienteItem {
   id: string
   nombre: string
   cuit: string | null
+  direccion?: string | null
   localidad: string | null
   condicion_pago: string | null
   saldo_actual: number
@@ -149,7 +150,7 @@ export default function VendedorClientesPage() {
                 <div className="min-w-0">
                   <p className="font-bold text-gray-900 truncate">{c.nombre}</p>
                   <p className="text-gray-500 text-sm truncate">
-                    {[c.localidad, c.condicion_pago].filter(Boolean).join(" · ") || "—"}
+                    {[c.direccion, c.localidad, c.condicion_pago].filter(Boolean).join(" · ") || "—"}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
