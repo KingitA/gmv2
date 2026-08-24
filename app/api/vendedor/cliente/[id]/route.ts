@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
+import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 
 // GET /api/vendedor/cliente/[id]
@@ -93,6 +94,55 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .order("fecha_pago", { ascending: false })
       .limit(10)
 
+    // ── PLATA A FAVOR del cliente (el vendedor debe verla al cobrar: sin esto
+    // podría cobrar la deuda bruta cuando el cliente tiene crédito) ──
+    // a) Créditos documento vivos: NC/REV con saldo disponible
+    const { data: creditosVivos } = await supabase
+      .from("comprobantes_venta")
+      .select("id, tipo_comprobante, numero_comprobante, fecha, saldo_pendiente")
+      .eq("cliente_id", id)
+      .lt("saldo_pendiente", -0.005)
+      .is("anulado_en", null)
+      .neq("estado_pago", "anulado")
+      .order("fecha", { ascending: true })
+
+    // b) Entregas a cuenta: pagos confirmados sin imputar (fórmula única)
+    const { data: pagosConfirmados } = await supabase
+      .from("pagos_clientes")
+      .select("id, monto, fecha_pago")
+      .eq("cliente_id", id)
+      .eq("estado", "confirmado")
+    const confIds = (pagosConfirmados || []).map((p: any) => p.id)
+    const impsPorPagoConf = new Map<string, any[]>()
+    if (confIds.length) {
+      const { data: impsConf } = await supabase
+        .from("imputaciones")
+        .select("pago_id, monto_imputado, estado, comprobante:comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante)")
+        .in("pago_id", confIds)
+      for (const i of impsConf || []) {
+        if (!impsPorPagoConf.has(i.pago_id)) impsPorPagoConf.set(i.pago_id, [])
+        impsPorPagoConf.get(i.pago_id)!.push(i)
+      }
+    }
+    const aCuenta = (pagosConfirmados || [])
+      .map((p: any) => ({
+        pago_id: p.id,
+        fecha: p.fecha_pago,
+        disponible: disponibleDePago(
+          p.monto,
+          (impsPorPagoConf.get(p.id) || []).map((i: any) => ({
+            monto_imputado: i.monto_imputado,
+            estado: i.estado,
+            tipo_comprobante_destino: (i.comprobante as any)?.tipo_comprobante ?? null,
+          })),
+        ),
+      }))
+      .filter((p: any) => p.disponible > 0.005)
+    const totalAFavor = Math.round((
+      (creditosVivos || []).reduce((s: number, c: any) => s + Math.abs(Number(c.saldo_pendiente)), 0)
+      + aCuenta.reduce((s: number, p: any) => s + p.disponible, 0)
+    ) * 100) / 100
+
     // Devoluciones sin confirmar (todavía no tienen NC/reversa emitida), con
     // cuánto ya se descontó en cobros anteriores (se puede descontar parcial).
     const { data: devolucionesPendientes } = await supabase
@@ -178,6 +228,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         actualizado_por_nombre: actualizadoPorNombre,
       },
       comprobantes: comprobantes || [],
+      creditos: creditosVivos || [],
+      a_cuenta: aCuenta,
+      total_a_favor: totalAFavor,
       pedidos_cobrables: pedidosCobrables,
       pedidos_cobro: pedidosCobro,
       devoluciones_pendientes: devolucionesConRestante,

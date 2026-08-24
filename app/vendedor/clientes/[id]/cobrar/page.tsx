@@ -169,6 +169,11 @@ export default function VendedorCobrarPage() {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [pedidos, setPedidos] = useState<PedidoCobro[]>([])
   const [devoluciones, setDevoluciones] = useState<DevolucionPendiente[]>([])
+  // Plata A FAVOR del cliente (créditos NC/REV + entregas a cuenta): el
+  // vendedor la tiene que ver ANTES de cobrar — se descuenta de la deuda.
+  const [creditos, setCreditos] = useState<{ id: string; tipo_comprobante: string; numero_comprobante: string; saldo_pendiente: number }[]>([])
+  const [aCuenta, setACuenta] = useState<{ pago_id: string; fecha: string; disponible: number }[]>([])
+  const [totalAFavor, setTotalAFavor] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -202,6 +207,9 @@ export default function VendedorCobrarPage() {
           setComprobantes(d.comprobantes || [])
           setPedidos(d.pedidos_cobro || [])
           setDevoluciones((d.devoluciones_pendientes || []).filter((x: any) => x.restante > 0))
+          setCreditos(d.creditos || [])
+          setACuenta(d.a_cuenta || [])
+          setTotalAFavor(Number(d.total_a_favor || 0))
         }
       })
       .catch(() => setError("Error al cargar el cliente"))
@@ -670,6 +678,40 @@ export default function VendedorCobrarPage() {
                 </div>
               )}
 
+              {/* Plata a favor del cliente: NO se cobra — se descuenta de la deuda.
+                  La aplica la oficina; acá es información para no cobrar de más. */}
+              {totalAFavor > 0.005 && (
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-600 px-1">
+                    💚 Plata a favor del cliente — descontala de lo que cobres
+                  </p>
+                  {creditos.map((c) => (
+                    <div key={c.id} className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-3 py-2 flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-emerald-800 text-sm">
+                          {c.tipo_comprobante === "REV" ? "Reversa" : "Nota de crédito"} {c.numero_comprobante}
+                        </p>
+                        <p className="text-emerald-600 text-xs">crédito disponible</p>
+                      </div>
+                      <span className="font-bold text-emerald-700">{formatCurrency(Math.abs(c.saldo_pendiente))}</span>
+                    </div>
+                  ))}
+                  {aCuenta.map((p) => (
+                    <div key={p.pago_id} className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-3 py-2 flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-emerald-800 text-sm">Entrega a cuenta</p>
+                        <p className="text-emerald-600 text-xs">{p.fecha?.split("-").reverse().join("/")}</p>
+                      </div>
+                      <span className="font-bold text-emerald-700">{formatCurrency(p.disponible)}</span>
+                    </div>
+                  ))}
+                  <p className="text-emerald-700 text-xs px-1">
+                    Total a favor {formatCurrency(totalAFavor)} · la oficina lo imputa a los comprobantes — vos cobrá la diferencia.
+                    El 10% contado no aplica sobre esta plata.
+                  </p>
+                </div>
+              )}
+
               {/* Devoluciones descontables */}
               {devoluciones.length > 0 && (
                 <div className="space-y-1.5 pt-1">
@@ -843,6 +885,7 @@ export default function VendedorCobrarPage() {
               Seleccionado {formatCurrency(totalAsignado)}
               {bonificacionEstimada > 0 ? ` − NC ${formatCurrency(bonificacionEstimada)}` : ""}
               {totalDevoluciones > 0 ? ` − dev. ${formatCurrency(totalDevoluciones)}` : ""}
+              {totalAFavor > 0.005 ? ` · tiene ${formatCurrency(totalAFavor)} a favor` : ""}
             </span>
             <span>Entregado {formatCurrency(totalMetodos)}</span>
           </div>

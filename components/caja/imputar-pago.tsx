@@ -2,8 +2,9 @@
 
 // Imputación posterior de un cobro ya confirmado, desde la Caja del Día.
 // Misma experiencia que choferes/vendedores: ComprobantesSelector con pedidos
-// completos, comprobantes dentro del pedido y chip "Dto. ctdo", más la opción
-// de aplicar el 10% por pago contado (genera NC/REV vía generar-bonificacion).
+// completos, comprobantes dentro del pedido y chip "Dto. ctdo".
+// SIN opción de 10% contado: la plata A CUENTA no genera bonificación (regla
+// de negocio 25/08 — el descuento es por plata nueva entregada al pagar).
 // Backend: PATCH /api/pagos/[id]/confirmar — cobranza_confirmar es idempotente
 // sobre confirmados y aplica solo las imputaciones nuevas. Lo que no se impute
 // queda a cuenta del cliente (su saldo ya bajó al confirmarse el cobro).
@@ -46,7 +47,6 @@ export function ImputarPago({
   const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
-  const [aplicarContado, setAplicarContado] = useState(false)
   const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
 
   useEffect(() => {
@@ -72,27 +72,13 @@ export function ImputarPago({
   const totalImputado = imputaciones.reduce((s, i) => s + i.monto_imputado, 0)
   const restante = pago.disponible - totalImputado
 
-  // La NC del 10% es proporcional a TODOS los componentes (neto+IVA+percepciones)
-  // → exactamente 10% del total de cada comprobante.
-  const bonificacionEstimada = useMemo(() => {
-    if (!aplicarContado) return 0
-    let total = 0
-    for (const i of imputaciones) {
-      if (dtosHechos.has(i.comprobante_id)) continue
-      const comp = comprobantes.find((c) => c.id === i.comprobante_id)
-      if (comp) total += Math.abs(Number(comp.total_factura)) * 0.1
-    }
-    return round2(total)
-  }, [aplicarContado, imputaciones, dtosHechos, comprobantes])
-
   const imputar = async (modoDiferencia?: "saldo" | "ajuste") => {
     setDialogoFalta(null)
     if (!imputaciones.length) {
       toast({ variant: "destructive", title: "Nada para imputar", description: "Tildá al menos un comprobante" })
       return
     }
-    // La NC del 10% también cubre parte de lo imputado
-    const disponibleTotal = round2(pago.disponible + (aplicarContado ? bonificacionEstimada : 0))
+    const disponibleTotal = round2(pago.disponible)
     const falta = round2(totalImputado - disponibleTotal)
     let lista = imputaciones.map((i) => ({ ...i }))
     if (falta > 0.01) {
@@ -145,25 +131,7 @@ export function ImputarPago({
         }
       }
 
-      // Bonificación 10% contado sobre lo recién imputado (excluye los que ya la tienen)
-      let bonifMsg = ""
-      if (aplicarContado) {
-        const ids = imputaciones.map((i) => i.comprobante_id).filter((id) => !dtosHechos.has(id))
-        if (ids.length) {
-          try {
-            const bonifRes = await fetch("/api/pagos/generar-bonificacion", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ cliente_id: pago.cliente_id, comprobante_ids: ids, pago_id: pago.pago_id }),
-            })
-            const bonifData = await bonifRes.json()
-            if (bonifRes.ok) bonifMsg = ` NC por bonificación contado: $ ${fmt(Number(bonifData.total_bonificacion) || 0)}.`
-            else bonifMsg = ` ⚠ La bonificación falló: ${bonifData.error || "revisala a mano"}.`
-          } catch {
-            bonifMsg = " ⚠ La bonificación no se pudo generar — revisala a mano."
-          }
-        }
-      }
+      const bonifMsg = ""
 
       toast({
         title: "Pago imputado",
@@ -217,16 +185,11 @@ export function ImputarPago({
         )}
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
-            <input
-              type="checkbox"
-              checked={aplicarContado}
-              onChange={(e) => setAplicarContado(e.target.checked)}
-              className="h-3.5 w-3.5"
-            />
-            10% descuento pago contado
-            {bonificacionEstimada > 0 && <span style={NUM}>· NC estimada $ {fmt(bonificacionEstimada)}</span>}
-          </label>
+          {/* Regla de negocio (25/08): la plata A CUENTA no lleva el 10% de
+              contado — el descuento es por plata nueva entregada en el momento
+              del pago, no por aplicar crédito viejo. Por eso acá no hay opción
+              de bonificación. */}
+          <span className="text-xs text-slate-400">La plata a cuenta no genera 10% contado</span>
           <span>
             Imputado: <b style={NUM}>$ {fmt(totalImputado)}</b>
           </span>
@@ -249,7 +212,6 @@ export function ImputarPago({
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {guardando && <Loader2 className="h-4 w-4 animate-spin" />}✓ Imputar
-            {aplicarContado && bonificacionEstimada > 0 ? " + Bonif. contado" : ""}
           </button>
           <button
             onClick={onCerrar}
@@ -267,7 +229,7 @@ export function ImputarPago({
                 Falta pagar <span style={NUM}>$ {fmt(dialogoFalta)}</span>
               </h3>
               <p className="mt-1 text-xs text-slate-500">
-                Lo disponible del cobro{aplicarContado ? " (más la NC del 10%)" : ""} no cubre lo
+                Lo disponible del cobro no cubre lo
                 seleccionado. ¿Qué hacemos con la diferencia?
               </p>
               <div className="mt-4 flex flex-col gap-2">
