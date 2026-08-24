@@ -659,6 +659,47 @@ function NuevoPedidoInner() {
     ejecutarBusqueda(q)
   }
 
+  // ── Escaneo global (colectora sin foco en el buscador) ──────────────
+  // La colectora emite los dígitos como teclado a toda velocidad y termina
+  // con Enter. Este listener junta ráfagas de dígitos (gap < 150 ms) aunque
+  // el foco esté en cualquier lado de la pantalla, y al Enter dispara la
+  // apertura directa del artículo. Si el foco está en un input real (buscar,
+  // cantidad, observaciones) no interfiere: ahí manda el input.
+  const escanearGlobal = useRef<(code: string) => void>(() => {})
+  escanearGlobal.current = (code: string) => {
+    if (!cliente) return
+    setQ(code) // si no hay match exacto, el código queda en el buscador con resultados
+    setBuscando(true)
+    ejecutarBusqueda(code)
+  }
+  useEffect(() => {
+    let buf = ""
+    let last = 0
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      const enInput =
+        !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)
+      if (enInput) return
+      const now = Date.now()
+      if (now - last > 150) buf = "" // tipeo humano/lento: no es un escaneo
+      last = now
+      if (/^[0-9]$/.test(e.key)) {
+        buf += e.key
+        return
+      }
+      if ((e.key === "Enter" || e.key === "Tab") && /^[0-9]{8,14}$/.test(buf)) {
+        e.preventDefault()
+        const code = buf
+        buf = ""
+        escanearGlobal.current(code)
+        return
+      }
+      buf = "" // cualquier otra tecla corta la ráfaga
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [])
+
   // ── Detalle de artículo + precio en vivo ────────────────────────────
   const abrirArticulo = async (a: Articulo) => {
     setSel(a)
