@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
@@ -137,6 +138,9 @@ export async function POST(request: NextRequest) {
       comprobante_urls, // [{url, nombre}] — fotos de comprobantes (cheque/transferencia)
       idempotency_key,  // uuid generado por el front al armar el formulario:
                         // reintentos/doble click devuelven el MISMO pago
+      creditos_aplicar, // [{tipo:'nc'|'ac', id, monto}] — créditos existentes
+                        // tildados en el cobro (NC/REV vivas o plata a cuenta):
+                        // descuentan de lo entregado y se aplican al confirmar
     } = body
 
     if (!cliente_id || !metodos?.length) {
@@ -227,6 +231,29 @@ export async function POST(request: NextRequest) {
       }
     })
 
+    // ── 1b. Créditos existentes tildados en el cobro ──
+    // Se validan, se asignan FIFO contra los débitos seleccionados y la
+    // instrucción viaja con el pago ([CREDITOS:...]) — se ejecuta al
+    // confirmar. Débitos con crédito quedan fuera del 10% contado.
+    const creditosSel = (Array.isArray(creditos_aplicar) ? creditos_aplicar : [])
+      .map((cr: any) => ({ tipo: cr.tipo === "ac" ? "ac" as const : "nc" as const, id: cr.id, monto: Number(cr.monto || 0) }))
+      .filter((cr: any) => cr.id && cr.monto > 0)
+    let debitosNetos = ((imputaciones as any[]) || [])
+      .filter((i: any) => i?.comprobante_id)
+      .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto_imputado) }))
+    let marcaCred = ""
+    if (creditosSel.length) {
+      try {
+        await validarCreditos(supabase, cliente_id, creditosSel)
+      } catch (e: any) {
+        return NextResponse.json({ error: `Créditos: ${e.message}` }, { status: 400 })
+      }
+      const asignacion = asignarCreditosFIFO(debitosNetos, creditosSel)
+      debitosNetos = asignacion.debitosRestantes
+      marcaCred = marcaCreditos(asignacion.pares)
+    }
+    const obsConCreditos = [observaciones, marcaCred].filter(Boolean).join(" ") || null
+
     // ── 2. Alta transaccional (pago + detalle + cheques + imputaciones) ──
     // Si el total imputado supera el pago real, recortar; el excedente queda
     // como saldo del comprobante (lo cubre la NC o un pago futuro).
@@ -234,13 +261,7 @@ export async function POST(request: NextRequest) {
     // y cada comprobante debe recibir SU 90% (la REV cubre el 10% de cada uno).
     // Secuencial acá dejaba comprobantes enteros sin imputación según el orden.
     const esContado = Boolean(observaciones?.includes?.(MARCA_CONTADO))
-    const impsRecortadas = recortarImputaciones(
-      ((imputaciones as any[]) || [])
-        .filter((i: any) => i?.comprobante_id)
-        .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto_imputado) })),
-      montoTotal,
-      esContado ? "proporcional" : "secuencial",
-    )
+    const impsRecortadas = recortarImputaciones(debitosNetos, montoTotal, esContado ? "proporcional" : "secuencial")
 
     const { pago_id, dedup } = await crearCobranza(supabase, {
       idempotency_key: idempotency_key || null,
@@ -249,7 +270,7 @@ export async function POST(request: NextRequest) {
       viaje_id: viaje_id || null,
       monto: montoTotal,
       fecha_pago: fecha_pago || todayArgentina(),
-      observaciones: observaciones || null,
+      observaciones: obsConCreditos,
       estado: "pendiente",
       creado_por: auth.user.id,
       detalles,

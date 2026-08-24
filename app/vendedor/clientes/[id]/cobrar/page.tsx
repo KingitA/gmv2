@@ -169,11 +169,14 @@ export default function VendedorCobrarPage() {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [pedidos, setPedidos] = useState<PedidoCobro[]>([])
   const [devoluciones, setDevoluciones] = useState<DevolucionPendiente[]>([])
-  // Plata A FAVOR del cliente (créditos NC/REV + entregas a cuenta): el
-  // vendedor la tiene que ver ANTES de cobrar — se descuenta de la deuda.
+  // Plata A FAVOR del cliente (créditos NC/REV + entregas a cuenta): líneas
+  // TILDABLES igual que el sistema viejo de Recibos — el crédito elegido
+  // descuenta del total a saldar y se aplica al confirmarse el cobro.
   const [creditos, setCreditos] = useState<{ id: string; tipo_comprobante: string; numero_comprobante: string; saldo_pendiente: number }[]>([])
   const [aCuenta, setACuenta] = useState<{ pago_id: string; fecha: string; disponible: number }[]>([])
   const [totalAFavor, setTotalAFavor] = useState(0)
+  // credSel: clave "nc:<id>" | "ac:<id>" → monto a usar de ese crédito
+  const [credSel, setCredSel] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -247,19 +250,38 @@ export default function VendedorCobrarPage() {
   const totalAsignado = round2(totalImputado + totalPedidos)
   const totalMetodos = round2(efectivo + metodos.reduce((s, m) => s + (m.monto || 0), 0))
 
+  // Créditos tildados (NC/REV + a cuenta): descuentan del total a saldar
+  const totalCreditos = round2(Object.values(credSel).reduce((s, v) => s + (v || 0), 0))
+
+  // Débitos que reciben crédito (asignación FIFO en el MISMO orden en que se
+  // envían al backend): quedan EXCLUIDOS del 10% contado — el descuento es
+  // solo por plata nueva (regla de negocio 25/08).
+  const debitosConCredito = useMemo(() => {
+    const tocados = new Set<string>()
+    let restante = totalCreditos
+    for (const [compId, monto] of Object.entries(imputaciones)) {
+      if (restante <= 0.005) break
+      if (!(monto > 0)) continue
+      tocados.add(compId)
+      restante = round2(restante - Math.min(monto, restante))
+    }
+    return tocados
+  }, [imputaciones, totalCreditos])
+
   // NC 10% proyectada ("proyección reversa"): 10% de los comprobantes
-  // seleccionados COMPLETOS cuando el check general está activo
+  // seleccionados COMPLETOS pagados con plata nueva (sin crédito encima)
   const bonificacionEstimada = useMemo(() => {
     if (!contadoGeneral) return 0
     let bonif = 0
     for (const cp of comprobantes) {
       const imp = imputaciones[cp.id]
-      if (imp !== undefined && Math.abs(imp - cp.saldo_pendiente) < 0.01) bonif += cp.total_factura * 0.1
+      if (imp !== undefined && Math.abs(imp - cp.saldo_pendiente) < 0.01 && !debitosConCredito.has(cp.id))
+        bonif += cp.total_factura * 0.1
     }
     return round2(bonif)
-  }, [contadoGeneral, imputaciones, comprobantes])
+  }, [contadoGeneral, imputaciones, comprobantes, debitosConCredito])
 
-  const cubierto = round2(totalMetodos + totalDevoluciones + bonificacionEstimada)
+  const cubierto = round2(totalMetodos + totalDevoluciones + bonificacionEstimada + totalCreditos)
   const falta = round2(totalAsignado - cubierto)
   const sobrante = round2(cubierto - totalAsignado)
 
@@ -441,8 +463,16 @@ export default function VendedorCobrarPage() {
             pedidos: Object.entries(pedidosSel)
               .filter(([, monto]) => monto > 0)
               .map(([pedido_id, monto]) => ({ pedido_id, monto, contado: !!contadoSel[pedido_id] })),
-            pago_a_cuenta: Math.max(0, round2(totalMetodos + totalDevoluciones + bonificacionEstimada + ajustePorRedondeo - asignadoFinal)),
+            pago_a_cuenta: Math.max(0, round2(totalMetodos + totalDevoluciones + bonificacionEstimada + totalCreditos + ajustePorRedondeo - asignadoFinal)),
             bonificacion_proyectada: contadoGeneral ? bonificacionEstimada : 0,
+            // Créditos tildados: [{tipo:'nc'|'ac', id, monto}] — el backend los
+            // asigna FIFO a los débitos y los aplica al confirmar
+            creditos: Object.entries(credSel)
+              .filter(([, monto]) => monto > 0)
+              .map(([key, monto]) => {
+                const [tipo, ...rest] = key.split(":")
+                return { tipo, id: rest.join(":"), monto }
+              }),
             ajuste_redondeo: ajustePorRedondeo,
             devoluciones: Object.entries(devSel)
               .filter(([, monto]) => monto > 0)
@@ -678,36 +708,79 @@ export default function VendedorCobrarPage() {
                 </div>
               )}
 
-              {/* Plata a favor del cliente: NO se cobra — se descuenta de la deuda.
-                  La aplica la oficina; acá es información para no cobrar de más. */}
+              {/* Créditos del cliente (NC/REV + plata a cuenta): TILDABLES como
+                  en el sistema viejo de Recibos — descuentan del total a saldar
+                  y se aplican a los comprobantes al confirmarse el cobro. */}
               {totalAFavor > 0.005 && (
                 <div className="space-y-1.5 pt-1">
                   <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-600 px-1">
-                    💚 Plata a favor del cliente — descontala de lo que cobres
+                    Créditos a favor — tildá los que descuentan de este cobro
                   </p>
-                  {creditos.map((c) => (
-                    <div key={c.id} className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-3 py-2 flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-emerald-800 text-sm">
-                          {c.tipo_comprobante === "REV" ? "Reversa" : "Nota de crédito"} {c.numero_comprobante}
-                        </p>
-                        <p className="text-emerald-600 text-xs">crédito disponible</p>
+                  {creditos.map((c) => {
+                    const key = `nc:${c.id}`
+                    const disp = round2(Math.abs(c.saldo_pendiente))
+                    const activo = credSel[key] !== undefined
+                    return (
+                      <div key={c.id} className={`rounded-xl border-2 px-3 py-2 flex items-center gap-2 ${activo ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
+                        <button
+                          onClick={() => setCredSel((prev) => {
+                            const next = { ...prev }
+                            if (next[key] !== undefined) delete next[key]
+                            else next[key] = disp
+                            return next
+                          })}
+                          className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                        >
+                          <span className="text-lg shrink-0">{activo ? "☑" : "☐"}</span>
+                          <div className="min-w-0">
+                            <p className="font-bold text-gray-900 text-sm">
+                              {c.tipo_comprobante === "REV" ? "Reversa" : "Nota de crédito"} {c.numero_comprobante}
+                            </p>
+                            <p className="text-emerald-600 text-xs">crédito disponible {formatCurrency(disp)}</p>
+                          </div>
+                        </button>
+                        {activo && (
+                          <MontoInput
+                            valor={credSel[key]}
+                            onCommit={(v) => setCredSel((prev) => ({ ...prev, [key]: Math.min(Math.max(0, v), disp) }))}
+                          />
+                        )}
                       </div>
-                      <span className="font-bold text-emerald-700">{formatCurrency(Math.abs(c.saldo_pendiente))}</span>
-                    </div>
-                  ))}
-                  {aCuenta.map((p) => (
-                    <div key={p.pago_id} className="rounded-xl border-2 border-emerald-200 bg-emerald-50 px-3 py-2 flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-emerald-800 text-sm">Entrega a cuenta</p>
-                        <p className="text-emerald-600 text-xs">{p.fecha?.split("-").reverse().join("/")}</p>
+                    )
+                  })}
+                  {aCuenta.map((p) => {
+                    const key = `ac:${p.pago_id}`
+                    const disp = round2(p.disponible)
+                    const activo = credSel[key] !== undefined
+                    return (
+                      <div key={p.pago_id} className={`rounded-xl border-2 px-3 py-2 flex items-center gap-2 ${activo ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
+                        <button
+                          onClick={() => setCredSel((prev) => {
+                            const next = { ...prev }
+                            if (next[key] !== undefined) delete next[key]
+                            else next[key] = disp
+                            return next
+                          })}
+                          className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                        >
+                          <span className="text-lg shrink-0">{activo ? "☑" : "☐"}</span>
+                          <div className="min-w-0">
+                            <p className="font-bold text-gray-900 text-sm">Entrega a cuenta {p.fecha?.split("-").reverse().join("/")}</p>
+                            <p className="text-emerald-600 text-xs">disponible {formatCurrency(disp)}</p>
+                          </div>
+                        </button>
+                        {activo && (
+                          <MontoInput
+                            valor={credSel[key]}
+                            onCommit={(v) => setCredSel((prev) => ({ ...prev, [key]: Math.min(Math.max(0, v), disp) }))}
+                          />
+                        )}
                       </div>
-                      <span className="font-bold text-emerald-700">{formatCurrency(p.disponible)}</span>
-                    </div>
-                  ))}
-                  <p className="text-emerald-700 text-xs px-1">
-                    Total a favor {formatCurrency(totalAFavor)} · la oficina lo imputa a los comprobantes — vos cobrá la diferencia.
-                    El 10% contado no aplica sobre esta plata.
+                    )
+                  })}
+                  <p className="text-gray-400 text-xs px-1">
+                    El crédito tildado se aplica a los comprobantes seleccionados al confirmarse el cobro.
+                    Los comprobantes cubiertos por crédito no llevan el 10% contado.
                   </p>
                 </div>
               )}
@@ -885,7 +958,8 @@ export default function VendedorCobrarPage() {
               Seleccionado {formatCurrency(totalAsignado)}
               {bonificacionEstimada > 0 ? ` − NC ${formatCurrency(bonificacionEstimada)}` : ""}
               {totalDevoluciones > 0 ? ` − dev. ${formatCurrency(totalDevoluciones)}` : ""}
-              {totalAFavor > 0.005 ? ` · tiene ${formatCurrency(totalAFavor)} a favor` : ""}
+              {totalCreditos > 0.005 ? ` − créditos ${formatCurrency(totalCreditos)}` : ""}
+              {totalCreditos <= 0.005 && totalAFavor > 0.005 ? ` · tiene ${formatCurrency(totalAFavor)} a favor` : ""}
             </span>
             <span>Entregado {formatCurrency(totalMetodos)}</span>
           </div>

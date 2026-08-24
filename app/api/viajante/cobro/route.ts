@@ -4,6 +4,8 @@ import { requireVendedor } from "@/lib/vendedor/session"
 import { todayArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
+import { MARCA_CONTADO } from "@/lib/constants"
 
 /**
  * POST /api/viajante/cobro — cobro en la calle del viajante (Fase E).
@@ -45,12 +47,20 @@ export async function POST(request: NextRequest) {
     // ajuste_redondeo: crédito por redondeo que el front asienta vía
     //   /api/clientes/[id]/ajustes después de crear el pago.
     // Ambos cubren parte de lo imputado sin ser plata entregada.
+    // Créditos existentes tildados en el cobro (NC/REV vivas o plata a cuenta):
+    // descuentan de lo que hay que entregar; se aplican en la confirmación.
+    const creditosDe = (c: any): { tipo: "nc" | "ac"; id: string; monto: number }[] =>
+      (Array.isArray(c.creditos) ? c.creditos : [])
+        .map((cr: any) => ({ tipo: cr.tipo === "ac" ? "ac" as const : "nc" as const, id: cr.id, monto: Number(cr.monto || 0) }))
+        .filter((cr: any) => cr.id && cr.monto > 0)
+
     const montoCliente = (c: any) =>
       (c.imputaciones || []).reduce((s: number, i: any) => s + Number(i.monto || 0), 0) +
       (c.pedidos || []).reduce((s: number, p: any) => s + Number(p.monto || 0), 0) +
       Number(c.pago_a_cuenta || 0) -
       Number(c.bonificacion_proyectada || 0) -
       Number(c.ajuste_redondeo || 0) -
+      creditosDe(c).reduce((s, cr) => s + cr.monto, 0) -
       devolucionesDe(c).reduce((s, d) => s + d.monto, 0)
     const totalClientes = clientes.reduce((s: number, c: any) => s + montoCliente(c), 0)
 
@@ -184,7 +194,27 @@ export async function POST(request: NextRequest) {
             .map((p: any) => pedidosDb.get(p.pedido_id)?.numero_pedido || p.pedido_id)
             .join(", ")}`
         : ""
-      const obsPago = [observaciones, notaAnticipo].filter(Boolean).join(" · ") || null
+      // Créditos del cliente: validar y asignarlos FIFO contra los débitos
+      // seleccionados; la instrucción viaja con el pago ([CREDITOS:...]) y se
+      // ejecuta en la confirmación (rendición). Los débitos con crédito quedan
+      // fuera del 10% contado.
+      const creditosCliente = creditosDe(c)
+      let paresCreditos: ReturnType<typeof asignarCreditosFIFO>["pares"] = []
+      let debitosNetos = (c.imputaciones || [])
+        .filter((i: any) => i?.comprobante_id)
+        .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto) }))
+      if (creditosCliente.length) {
+        try {
+          await validarCreditos(supabase, c.cliente_id, creditosCliente)
+        } catch (e: any) {
+          return NextResponse.json({ error: `Créditos de ${nombreDe.get(c.cliente_id) || c.cliente_id}: ${e.message}` }, { status: 400 })
+        }
+        const asignacion = asignarCreditosFIFO(debitosNetos, creditosCliente)
+        paresCreditos = asignacion.pares
+        debitosNetos = asignacion.debitosRestantes
+      }
+
+      const obsPago = [observaciones, notaAnticipo, marcaCreditos(paresCreditos)].filter(Boolean).join(" · ") || null
 
       // ── Detalles por método (proporcional al monto del cliente) ──
       // Color de cheques: derivado de las imputaciones de ESTE cliente
@@ -254,11 +284,12 @@ export async function POST(request: NextRequest) {
         estado: "pendiente_rendicion",
         creado_por: session.user.id,
         detalles,
+        // Débitos NETOS de créditos; con 10% contado el recorte es proporcional
+        // (cada comprobante recibe su 90% — el orden no importa)
         imputaciones: recortarImputaciones(
-          (c.imputaciones || [])
-            .filter((i: any) => i?.comprobante_id)
-            .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto) })),
+          debitosNetos,
           montoPago,
+          (obsPago || "").includes(MARCA_CONTADO) ? "proporcional" : "secuencial",
         ),
       })
       const pago = { id: pagoId }

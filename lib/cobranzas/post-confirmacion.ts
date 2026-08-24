@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { nowArgentina } from "@/lib/utils"
 import { generarBonificacionContado, debitarComisionPorFinanciero } from "@/lib/comprobantes/generar-bonificacion"
+import { parsearMarcaCreditos, quitarMarcaCreditos, ejecutarCreditosDePago } from "@/lib/cobranzas/creditos"
 import { MARCA_CONTADO } from "@/lib/constants"
 
 export interface PostConfirmacionResult {
@@ -62,6 +63,25 @@ export async function procesarPostConfirmacion(
     )
   }
 
+  // ── 0. Créditos existentes tildados en el cobro (marca [CREDITOS:...]) ──
+  // Igual que el sistema viejo de Recibos: NC/REV y plata a cuenta elegidas
+  // se aplican contra los débitos seleccionados. Corre ANTES del 10%: los
+  // débitos cubiertos por crédito quedan excluidos de la bonificación (regla
+  // de negocio 25/08: el 10% es solo por plata nueva).
+  const paresCreditos = parsearMarcaCreditos(pago.observaciones)
+  const debitosConCredito = new Set(paresCreditos.map((p) => p.debito_id))
+  if (paresCreditos.length) {
+    const avisosCreditos = await ejecutarCreditosDePago(supabase, paresCreditos)
+    if (avisosCreditos.length) {
+      console.error("[post-confirmacion] créditos:", avisosCreditos.join(" · "))
+      result.bonificacion_error = [result.bonificacion_error, ...avisosCreditos].filter(Boolean).join(" · ")
+    }
+    // Retirar la marca (idempotencia: no se re-ejecutan)
+    const obsSinMarca = quitarMarcaCreditos(pago.observaciones || "")
+    await supabase.from("pagos_clientes").update({ observaciones: obsSinMarca || null }).eq("id", pagoId)
+    pago.observaciones = obsSinMarca
+  }
+
   // ── 1. Bonificación 10% contado diferida (MARCA_CONTADO) ──
   // VA PRIMERO: con 10% contado, el último comprobante recién queda saldado
   // cuando la NC/REV le imputa el 10% restante. Si las comisiones se calcularan
@@ -69,7 +89,7 @@ export async function procesarPostConfirmacion(
   // 'cobrada' para siempre.
   try {
     if (pago.observaciones?.includes(MARCA_CONTADO)) {
-      const compIds = [...montoPorComprobante.keys()]
+      const compIds = [...montoPorComprobante.keys()].filter((id) => !debitosConCredito.has(id))
       let bonificables: string[] = []
       if (compIds.length) {
         const { data: comps } = await supabase
