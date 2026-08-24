@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { createClient } from "@/lib/supabase/client"
 
 interface PedidoResumen {
   id: string
@@ -44,6 +45,18 @@ export default function VendedorHomePage() {
   const [data, setData] = useState<MeData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [saliendo, setSaliendo] = useState(false)
+
+  const cerrarSesion = async () => {
+    if (saliendo || !confirm("¿Cerrar la sesión?")) return
+    setSaliendo(true)
+    try {
+      await createClient().auth.signOut()
+    } finally {
+      // replace: que "atrás" no vuelva a una pantalla con sesión muerta
+      window.location.replace("/auth/login")
+    }
+  }
 
   useEffect(() => {
     fetch("/api/vendedor/me")
@@ -73,10 +86,13 @@ export default function VendedorHomePage() {
         <div className="text-center space-y-4 p-8">
           <p className="text-red-500 text-xl">{error}</p>
           <button
-            onClick={() => router.push("/auth/login")}
+            onClick={async () => {
+              try { await createClient().auth.signOut() } catch {}
+              window.location.replace("/auth/login")
+            }}
             className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-lg font-medium"
           >
-            Iniciar sesión
+            Cambiar de cuenta
           </button>
         </div>
       </div>
@@ -91,12 +107,22 @@ export default function VendedorHomePage() {
           <p className="text-emerald-200 text-sm">GM ERP — Vendedores</p>
           <h1 className="text-xl font-bold">{data?.usuario.nombre || data?.usuario.email}</h1>
         </div>
-        <button
-          onClick={() => router.push("/vendedor/billetera")}
-          className="bg-emerald-600 px-4 py-2 rounded-xl text-sm font-medium border border-emerald-500"
-        >
-          💰 Billetera
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/vendedor/billetera")}
+            className="bg-emerald-600 px-4 py-2 rounded-xl text-sm font-medium border border-emerald-500"
+          >
+            💰 Billetera
+          </button>
+          <button
+            onClick={cerrarSesion}
+            disabled={saliendo}
+            className="bg-emerald-800 px-3 py-2 rounded-xl text-sm font-medium border border-emerald-600 disabled:opacity-60"
+            title="Cerrar sesión"
+          >
+            {saliendo ? "…" : "🚪 Salir"}
+          </button>
+        </div>
       </header>
 
       <div className="p-4 space-y-6 max-w-2xl mx-auto">
