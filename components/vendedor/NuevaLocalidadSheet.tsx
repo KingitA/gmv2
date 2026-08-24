@@ -38,10 +38,9 @@ export function NuevaLocalidadSheet({
   const [nuevaZona, setNuevaZona] = useState<string | null>(null) // null = cerrado
   const [guardando, setGuardando] = useState(false)
 
-  const crearZona = async () => {
-    const nz = (nuevaZona || "").trim()
-    if (!nz || guardando) return
-    setGuardando(true)
+  // Crea la zona y devuelve su id (o el de la existente si ya estaba).
+  // null = falló (ya se mostró el alert).
+  const postZona = async (nz: string): Promise<string | null> => {
     try {
       const res = await fetch("/api/vendedor/zonas", {
         method: "POST",
@@ -53,17 +52,24 @@ export function NuevaLocalidadSheet({
         setZonasLocal((prev) => (prev.some((z) => z.id === d.zona_existente.id) ? prev : [...prev, d.zona_existente]))
         setZonaId(d.zona_existente.id)
         setNuevaZona(null)
-        return
+        return d.zona_existente.id
       }
-      if (!res.ok || d.error) { alert(d.error || "No se pudo crear la zona."); return }
+      if (!res.ok || d.error) { alert(d.error || "No se pudo crear la zona."); return null }
       setZonasLocal((prev) => [...prev, d.zona])
       setZonaId(d.zona.id)
       setNuevaZona(null)
+      return d.zona.id
     } catch {
       alert("Error de conexión.")
-    } finally {
-      setGuardando(false)
+      return null
     }
+  }
+
+  const crearZona = async () => {
+    const nz = (nuevaZona || "").trim()
+    if (!nz || guardando) return
+    setGuardando(true)
+    try { await postZona(nz) } finally { setGuardando(false) }
   }
 
   const guardar = async () => {
@@ -71,10 +77,19 @@ export function NuevaLocalidadSheet({
     if (guardando) return
     setGuardando(true)
     try {
+      // Si quedó una zona tipeada sin confirmar con "Crear", se crea acá
+      // mismo: guardar la localidad nunca descarta lo que se escribió.
+      let zonaFinal = zonaId || null
+      const nz = (nuevaZona || "").trim()
+      if (nz) {
+        const idZona = await postZona(nz)
+        if (!idZona) return // el alert ya explicó; no guardamos a medias
+        zonaFinal = idZona
+      }
       const res = await fetch("/api/vendedor/localidades", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nombre: nombre.trim(), provincia, codigo_postal: cp.trim(), zona_id: zonaId || null }),
+        body: JSON.stringify({ nombre: nombre.trim(), provincia, codigo_postal: cp.trim(), zona_id: zonaFinal }),
       })
       const d = await res.json()
       if (res.status === 409 && d.localidad_existente) {

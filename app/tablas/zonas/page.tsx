@@ -350,15 +350,21 @@ export default function ZonasPage() {
                           <Truck className="h-3 w-3" />
                           Transporte
                         </Badge>
-                      ) : (
+                      ) : zona.tipo_flete ? (
                         <Badge variant="outline" className="gap-1">
                           <Package className="h-3 w-3" />
                           Propio
                         </Badge>
+                      ) : (
+                        // Zona dada de alta desde la app del vendedor: el flete
+                        // se define acá en el ERP
+                        <Badge variant="outline" className="gap-1 border-amber-400 text-amber-700">
+                          ⚠ Definir flete
+                        </Badge>
                       )}
                     </TableCell>
                     <TableCell>{zona.transportes?.nombre || "-"}</TableCell>
-                    <TableCell className="font-semibold">{zona.porcentaje_flete}%</TableCell>
+                    <TableCell className="font-semibold">{zona.porcentaje_flete != null ? `${zona.porcentaje_flete}%` : "—"}</TableCell>
                     <TableCell>{zona.dias_visita || "-"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-2 justify-end">
