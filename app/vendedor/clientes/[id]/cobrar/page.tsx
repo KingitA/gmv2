@@ -560,7 +560,9 @@ export default function VendedorCobrarPage() {
             <p className="font-bold text-gray-900 text-sm">
               {cp.tipo_comprobante} {cp.numero_comprobante}
             </p>
-            <p className="text-gray-400 text-xs">saldo {formatCurrency(cp.saldo_pendiente)}</p>
+            <p className="text-gray-400 text-xs">
+              {cp.fecha ? `${cp.fecha.slice(0, 10).split("-").reverse().join("/")} · ` : ""}saldo {formatCurrency(cp.saldo_pendiente)}
+            </p>
           </div>
         </button>
         {activo && (

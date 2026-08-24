@@ -216,6 +216,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
                       <Checkbox checked={checked} onCheckedChange={() => toggleComprobante(comp)} />
                       <Badge variant="outline" className="text-xs">{comp.tipo_comprobante}</Badge>
                       <span className="font-mono text-xs">{comp.numero_comprobante}</span>
+                      <span className="text-[10px] text-muted-foreground">{comp.fecha ? comp.fecha.slice(0, 10).split("-").reverse().join("/") : ""}</span>
                       {dtoHecho && <span className="text-[10px] font-semibold text-green-700 bg-green-100 rounded px-1.5 py-0.5">Dto. ctdo</span>}
                       <span className="ml-auto font-mono text-orange-600">saldo ${fmtARS(Number(comp.saldo_pendiente))}</span>
                       {checked ? (
@@ -246,6 +247,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
                 <Checkbox checked={checked} onCheckedChange={() => toggleComprobante(comp)} />
                 <Badge variant="outline" className="text-xs">{comp.tipo_comprobante}</Badge>
                 <span className="font-mono text-xs">{comp.numero_comprobante}</span>
+                <span className="text-[10px] text-muted-foreground">{comp.fecha ? comp.fecha.slice(0, 10).split("-").reverse().join("/") : ""}</span>
                 <span className="ml-auto font-mono text-orange-600">saldo ${fmtARS(Number(comp.saldo_pendiente))}</span>
                 {checked ? (
                   <Input
