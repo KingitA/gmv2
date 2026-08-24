@@ -75,8 +75,9 @@ export default function VendedorPreciosPage() {
   const [buscando, setBuscando] = useState(false)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // precios[articulo_id] = número por combo (alineado con `combos`)
-  const [precios, setPrecios] = useState<Record<string, Array<number | null>>>({})
+  // precios[articulo_id] = {cc, contado} por combo (alineado con `combos`)
+  const [precios, setPrecios] = useState<Record<string, Array<{ cc: number; contado: number } | null>>>({})
+  const [zoomFoto, setZoomFoto] = useState<string | null>(null)
   const pedidosRef = useRef<Set<string>>(new Set())
   const combosRef = useRef<Combo[]>([])
 
@@ -299,7 +300,9 @@ export default function VendedorPreciosPage() {
                 <div key={a.id} className="bg-white rounded-xl border border-gray-200 p-3.5">
                   <div className="flex gap-3">
                     {a.imagen_url && (
-                      <img src={a.imagen_url} alt="" className="w-12 h-12 rounded-lg object-contain bg-gray-50 shrink-0" />
+                      <button onClick={() => setZoomFoto(a.imagen_url)} className="shrink-0 active:opacity-80">
+                        <img src={a.imagen_url} alt="" className="w-14 h-14 rounded-lg object-contain bg-gray-50" />
+                      </button>
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-gray-900 text-sm leading-snug">{a.descripcion}</p>
@@ -311,14 +314,28 @@ export default function VendedorPreciosPage() {
                     </div>
                   </div>
                   <div className={`mt-2.5 grid gap-1.5 ${combos.length <= 2 ? "grid-cols-2" : combos.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-                    {combos.map((c, i) => (
-                      <div key={comboKey(c) + i} className="bg-gray-50 rounded-lg px-2.5 py-1.5">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 truncate">{labelCombo(c)}</p>
-                        <p className="font-bold text-gray-900">
-                          {p === undefined ? "…" : p[i] === null ? "—" : formatCurrency(p[i] as number)}
-                        </p>
-                      </div>
-                    ))}
+                    {combos.map((c, i) => {
+                      const pc = p?.[i]
+                      return (
+                        <div key={comboKey(c) + i} className="bg-gray-50 rounded-lg px-2.5 py-1.5">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 truncate">{labelCombo(c)}</p>
+                          {p === undefined ? (
+                            <p className="font-bold text-gray-900">…</p>
+                          ) : !pc ? (
+                            <p className="font-bold text-gray-900">—</p>
+                          ) : (
+                            <>
+                              <p className="font-bold text-gray-900 leading-tight">
+                                {formatCurrency(pc.cc)} <span className="text-[10px] font-bold text-gray-400">C.CTE</span>
+                              </p>
+                              <p className="font-bold text-emerald-700 text-sm leading-tight">
+                                {formatCurrency(pc.contado)} <span className="text-[10px] font-bold text-emerald-600/70">CONTADO</span>
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )
@@ -326,6 +343,14 @@ export default function VendedorPreciosPage() {
           </div>
         )}
       </div>
+
+      {/* Foto ampliada */}
+      {zoomFoto && (
+        <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4" onClick={() => setZoomFoto(null)}>
+          <img src={zoomFoto} alt="" className="max-w-full max-h-[85dvh] object-contain rounded-xl" />
+          <button className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-xl leading-none">✕</button>
+        </div>
+      )}
 
       {/* Sheet: agregar comparación */}
       {verAgregar && (

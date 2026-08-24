@@ -531,7 +531,7 @@ export async function previewPrecioArticulo(
 export async function previewPreciosListas(
   articuloIds: string[],
   combos: Array<{ lista_id: string; metodo: string }>,
-): Promise<Array<{ articulo_id: string; precios: Array<number | null> }>> {
+): Promise<Array<{ articulo_id: string; precios: Array<{ cc: number; contado: number } | null> }>> {
   if (!articuloIds?.length || !combos?.length) return []
   const ids = [...new Set(articuloIds)].slice(0, 400)
   const combosOk = combos.slice(0, 6)
@@ -581,12 +581,18 @@ export async function previewPreciosListas(
     }))
   )
 
-  const out: Array<{ articulo_id: string; precios: Array<number | null> }> = []
+  const out: Array<{ articulo_id: string; precios: Array<{ cc: number; contado: number } | null> }> = []
   for (const art of articulosRes.data || []) {
     const articulo = { ...art, descuentos: descPorArt.get(art.id) || [] }
     const precios = combosDatos.map((cd) => {
       try {
-        return calcularPrecioPedido(articulo as any, cd.listaDatos, cd.metodo, {}).precioAlCliente
+        const p = calcularPrecioPedido(articulo as any, cd.listaDatos, cd.metodo, {})
+        // Contado = 10% menos (regla de la NC por pago contado). La lista
+        // Especial no tiene contado: es neto fijo + IVA.
+        return {
+          cc: p.precioAlCliente,
+          contado: p.esListaEspecial ? p.precioAlCliente : round2(p.precioAlCliente * 0.9),
+        }
       } catch {
         return null
       }
