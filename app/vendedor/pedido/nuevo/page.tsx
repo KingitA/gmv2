@@ -28,7 +28,8 @@ import { BuscarPorFoto } from "@/components/vendedor/buscar-por-foto"
 interface Articulo {
   id: string
   sku: string | null
-  ean13: string | null
+  // En DB es text[]: un artículo puede tener varios códigos de barras
+  ean13: string | string[] | null
   descripcion: string
   unidades_por_bulto: number | null
   tipo_fraccion?: string | null
@@ -241,6 +242,10 @@ function NuevoPedidoInner() {
   const [resultados, setResultados] = useState<Articulo[]>([])
   const [buscando, setBuscando] = useState(false)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Colectora: después de agregar un artículo escaneado, el foco vuelve al
+  // buscador para encadenar el próximo escaneo sin tocar la pantalla
+  const inputBusqueda = useRef<HTMLInputElement | null>(null)
+  const vinoDeScan = useRef(false)
 
   // Precios por artículo para las listas del catálogo (batch, por cliente+método)
   const [precios, setPrecios] = useState<Record<string, { precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct?: number }>>({})
@@ -594,6 +599,40 @@ function NuevoPedidoInner() {
     else router.back()
   }
 
+  // ¿Es un código escaneado? (colectora/lector: solo dígitos, 8-14 = EAN/DUN)
+  const esScan = (v: string) => /^[0-9]{8,14}$/.test(v.trim())
+  // ¿El artículo matchea EXACTO el código? (ean13 puede ser lista)
+  const matchExacto = (a: Articulo, code: string) =>
+    a.sku === code || (Array.isArray(a.ean13) ? (a.ean13 as any).includes(code) : a.ean13 === code)
+
+  const ejecutarBusqueda = (value: string) => {
+    if (!cliente) return
+    const code = value.trim()
+    const params = new URLSearchParams({ vista: "buscar", cliente: cliente.id, q: code })
+    fetch(`/api/vendedor/articulos?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const arts: Articulo[] = d.articulos || []
+        // Colectora: un código escaneado con coincidencia 1 a 1 abre la ficha
+        // del artículo directo, sin pasar por el listado de resultados.
+        if (esScan(code)) {
+          const exacto = arts.find((a) => matchExacto(a, code)) || (arts.length === 1 ? arts[0] : null)
+          if (exacto) {
+            setQ("")
+            setResultados([])
+            vinoDeScan.current = true
+            cargarPrecios([exacto])
+            abrirArticulo(exacto)
+            return
+          }
+        }
+        setResultados(arts)
+        cargarPrecios(arts)
+      })
+      .catch(() => setResultados([]))
+      .finally(() => setBuscando(false))
+  }
+
   const onBuscar = (value: string) => {
     setQ(value)
     if (debounce.current) clearTimeout(debounce.current)
@@ -603,19 +642,16 @@ function NuevoPedidoInner() {
       return
     }
     setBuscando(true)
-    debounce.current = setTimeout(() => {
-      if (!cliente) return
-      const params = new URLSearchParams({ vista: "buscar", cliente: cliente.id, q: value })
-      fetch(`/api/vendedor/articulos?${params}`)
-        .then((r) => r.json())
-        .then((d) => {
-          const arts = d.articulos || []
-          setResultados(arts)
-          cargarPrecios(arts)
-        })
-        .catch(() => setResultados([]))
-        .finally(() => setBuscando(false))
-    }, 400)
+    // Un código completo de colectora no espera el debounce de tipeo
+    debounce.current = setTimeout(() => ejecutarBusqueda(value), esScan(value) ? 80 : 400)
+  }
+
+  // Enter del lector (sufijo estándar de las colectoras): buscar YA
+  const onBuscarEnter = () => {
+    if (!q.trim()) return
+    if (debounce.current) clearTimeout(debounce.current)
+    setBuscando(true)
+    ejecutarBusqueda(q)
   }
 
   // ── Detalle de artículo + precio en vivo ────────────────────────────
@@ -674,6 +710,11 @@ function NuevoPedidoInner() {
     const cant = selUnidades // siempre se guarda en unidades
     const precioPrev = selPrecio
     setSel(null)
+    // Si el artículo vino de un escaneo, dejar el buscador listo para el próximo
+    if (vinoDeScan.current) {
+      vinoDeScan.current = false
+      setTimeout(() => inputBusqueda.current?.focus(), 50)
+    }
     setSync("saving")
 
     const cartArt: CartArticulo = {
@@ -1271,9 +1312,11 @@ function NuevoPedidoInner() {
                 <path d="M16.5 16.5 21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
               <input
+                ref={inputBusqueda}
                 type="search"
                 value={q}
                 onChange={(e) => onBuscar(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onBuscarEnter() } }}
                 placeholder="Buscar artículo, SKU o EAN..."
                 className="w-full rounded-xl pl-11 pr-4 py-3 text-gray-900 text-lg bg-white outline-none"
               />
