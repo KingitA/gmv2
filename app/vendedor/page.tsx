@@ -152,6 +152,14 @@ export default function VendedorHomePage() {
             <p className="text-gray-500 text-sm mt-1">Historial y estados</p>
           </button>
           <button
+            onClick={() => router.push("/vendedor/precios")}
+            className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-left active:scale-95 transition-transform"
+          >
+            <p className="text-3xl mb-2">💲</p>
+            <p className="text-lg font-bold text-gray-900">Precios</p>
+            <p className="text-gray-500 text-sm mt-1">Consultá y compará listas</p>
+          </button>
+          <button
             onClick={() => router.push("/vendedor/viajes")}
             className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 text-left active:scale-95 transition-transform"
           >

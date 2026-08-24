@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { NuevaLocalidadSheet } from "@/components/vendedor/NuevaLocalidadSheet"
 
 interface Comprobante {
   id: string
@@ -72,6 +73,7 @@ interface Catalogos {
   metodos_facturacion: string[]
   puede_cambiar_lista?: boolean
   segmentos?: { key: string; label: string }[]
+  zonas?: { id: string; nombre: string }[]
 }
 
 // Badges de doble firma según contrato docs/CONTRATO-API-VIAJANTES.md
@@ -94,6 +96,7 @@ export default function VendedorClienteFichaPage() {
   const [editando, setEditando] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
   const [guardando, setGuardando] = useState(false)
+  const [verNuevaLocalidad, setVerNuevaLocalidad] = useState(false)
   const [catalogos, setCatalogos] = useState<Catalogos>({
     condiciones_pago: [],
     condiciones_entrega: [],
@@ -437,21 +440,30 @@ export default function VendedorClienteFichaPage() {
 
               <div>
                 <label className="text-gray-500 text-sm block mb-1">Localidad</label>
-                <select
-                  value={form.localidad_id || ""}
-                  onChange={(e) => elegirLocalidad(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
-                >
-                  <option value="">
-                    {form.localidad ? `${form.localidad} (sin vincular)` : "Elegir localidad..."}
-                  </option>
-                  {catalogos.localidades.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.nombre}
-                      {l.provincia ? ` — ${l.provincia}` : ""}
+                <div className="flex gap-2">
+                  <select
+                    value={form.localidad_id || ""}
+                    onChange={(e) => elegirLocalidad(e.target.value)}
+                    className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 bg-white"
+                  >
+                    <option value="">
+                      {form.localidad ? `${form.localidad} (sin vincular)` : "Elegir localidad..."}
                     </option>
-                  ))}
-                </select>
+                    {catalogos.localidades.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.nombre}
+                        {l.provincia ? ` — ${l.provincia}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setVerNuevaLocalidad(true)}
+                    className="shrink-0 bg-white border-2 border-emerald-600 text-emerald-700 rounded-xl px-3 font-bold text-sm"
+                  >
+                    + Nueva
+                  </button>
+                </div>
                 {form.provincia && (
                   <p className="text-gray-400 text-xs mt-1">Provincia: {form.provincia} (se completa sola)</p>
                 )}
@@ -706,6 +718,18 @@ export default function VendedorClienteFichaPage() {
           )}
         </section>
       </div>
+
+      {verNuevaLocalidad && (
+        <NuevaLocalidadSheet
+          zonas={catalogos.zonas || []}
+          onCerrar={() => setVerNuevaLocalidad(false)}
+          onCreada={(l) => {
+            setCatalogos((prev) => ({ ...prev, localidades: [...prev.localidades, { id: l.id, nombre: l.nombre, provincia: l.provincia }] }))
+            setForm((prev) => ({ ...prev, localidad_id: l.id, localidad: l.nombre, provincia: l.provincia || "" }))
+            setVerNuevaLocalidad(false)
+          }}
+        />
+      )}
     </div>
   )
 }

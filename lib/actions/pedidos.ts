@@ -520,6 +520,82 @@ export async function previewPrecioArticulo(
   }
 }
 
+// ─── Consulta de precios por lista+método (módulo PRECIOS del vendedor) ──────
+// Precio "de tabla": motor completo (recargos de lista, fórmulas, oferta,
+// IVA según método) SIN cliente — sin bonificaciones ni condiciones por
+// proveedor/marca. Sirve para comparar cómo queda un artículo en Neco
+// Factura vs Neco Final vs Viajante, etc.
+// Seguridad: solo listas permitidas para el usuario — admin ve todas; un
+// vendedor ve Neco más las listas que imponen sus viajantes (ej. Freije:
+// Neco + Viajante). Un combo con lista no permitida corta con error.
+export async function previewPreciosListas(
+  articuloIds: string[],
+  combos: Array<{ lista_id: string; metodo: string }>,
+): Promise<Array<{ articulo_id: string; precios: Array<number | null> }>> {
+  if (!articuloIds?.length || !combos?.length) return []
+  const ids = [...new Set(articuloIds)].slice(0, 400)
+  const combosOk = combos.slice(0, 6)
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error("No autenticado")
+
+  const [{ data: rolesData }, { data: vendedores }, { data: listas }] = await Promise.all([
+    supabase.from("usuarios_roles").select("roles(nombre)").eq("usuario_id", user.id),
+    supabase.from("vendedores").select("id, lista_precio_id").eq("usuario_id", user.id).eq("activo", true),
+    supabase.from("listas_precio").select("id, codigo").eq("activo", true),
+  ])
+  const roles = (rolesData || []).map((r: any) => r.roles?.nombre)
+  const esAdmin = roles.includes("admin")
+  const necoId = (listas || []).find((l: any) => l.codigo === "neco")?.id
+  const permitidas = new Set<string>(
+    esAdmin
+      ? (listas || []).map((l: any) => l.id)
+      : [necoId, ...(vendedores || []).map((v: any) => v.lista_precio_id)].filter(Boolean)
+  )
+  for (const c of combosOk) {
+    if (!permitidas.has(c.lista_id)) throw new Error("No tenés acceso a una de las listas pedidas.")
+  }
+
+  const [articulosRes, descuentosRes, formulasReglas] = await Promise.all([
+    supabase
+      .from("articulos")
+      .select("id,proveedor_id,marca_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)")
+      .in("id", ids),
+    supabase.from("articulos_descuentos").select("articulo_id,tipo,porcentaje,orden").in("articulo_id", ids).order("orden"),
+    fetchFormulasReglas(supabase),
+  ])
+
+  const descPorArt = new Map<string, DescuentoTipado[]>()
+  for (const d of descuentosRes.data || []) {
+    const list = descPorArt.get(d.articulo_id) || []
+    list.push({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden })
+    descPorArt.set(d.articulo_id, list)
+  }
+
+  const listasCache: Record<string, DatosLista> = {}
+  const combosDatos = await Promise.all(
+    combosOk.map(async (c) => ({
+      listaDatos: await fetchListaDatos(supabase, c.lista_id, listasCache, formulasReglas),
+      metodo: toMetodoFacturacion(c.metodo),
+    }))
+  )
+
+  const out: Array<{ articulo_id: string; precios: Array<number | null> }> = []
+  for (const art of articulosRes.data || []) {
+    const articulo = { ...art, descuentos: descPorArt.get(art.id) || [] }
+    const precios = combosDatos.map((cd) => {
+      try {
+        return calcularPrecioPedido(articulo as any, cd.listaDatos, cd.metodo, {}).precioAlCliente
+      } catch {
+        return null
+      }
+    })
+    out.push({ articulo_id: art.id, precios })
+  }
+  return out
+}
+
 // Precios de una LISTA de artículos para un cliente en una sola llamada
 // (para mostrar precios en el catálogo del vendedor). Misma resolución que
 // previewPrecioArticulo pero con fetches batcheados y caches compartidos.

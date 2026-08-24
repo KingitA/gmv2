@@ -15,12 +15,13 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    const [{ data: pagoCat }, { data: entregaCat }, { data: localidades }, { data: listas }, { data: vendedores }] =
+    const [{ data: pagoCat }, { data: entregaCat }, { data: localidades }, { data: listas }, { data: zonas }, { data: vendedores }] =
       await Promise.all([
         supabase.from("condiciones_pago").select("id, nombre").eq("activo", true).order("nombre"),
         supabase.from("condiciones_entrega").select("id, codigo, nombre").eq("activo", true).order("nombre"),
         supabase.from("localidades").select("id, nombre, provincia").order("provincia").order("nombre"),
         supabase.from("listas_precio").select("id, nombre").eq("activo", true).order("nombre"),
+        supabase.from("zonas").select("id, nombre").order("nombre"),
         supabase
           .from("vendedores")
           .select("id, nombre, lista_precio_id, lista:lista_precio_id(nombre)")
@@ -32,6 +33,7 @@ export async function GET() {
     return NextResponse.json({
       condiciones_pago: pagoCat || [],
       condiciones_entrega: entregaCat || [],
+      zonas: zonas || [],
       localidades: localidades || [],
       listas_precio: listas || [],
       // lista_precio_id / lista_nombre: si el viajante impone lista, la UI

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { NuevaLocalidadSheet } from "@/components/vendedor/NuevaLocalidadSheet"
 
 // Alta de cliente desde la calle. Al guardar, va directo a levantarle un
 // pedido (o a la ficha). Nace asignado a un viajante del usuario.
@@ -15,6 +16,7 @@ interface Catalogos {
   condiciones_iva: string[]
   metodos_facturacion: string[]
   puede_cambiar_lista?: boolean
+  zonas?: { id: string; nombre: string }[]
 }
 
 // Fuera del componente de página: si se define adentro, React lo trata como
@@ -60,6 +62,7 @@ export default function VendedorClienteNuevoPage() {
     vendedor_id: "",
   })
   const [guardando, setGuardando] = useState(false)
+  const [verNuevaLocalidad, setVerNuevaLocalidad] = useState(false)
 
   useEffect(() => {
     fetch("/api/vendedor/catalogos-ficha")
@@ -202,14 +205,23 @@ export default function VendedorClienteNuevoPage() {
             <input value={f.direccion} onChange={set("direccion")} className={inputCls} placeholder="Calle y número" />
           </Campo>
           <Campo label="Localidad">
-            <select value={f.localidad_id} onChange={set("localidad_id")} className={inputCls}>
-              <option value="">Elegir localidad...</option>
-              {cat.localidades.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.nombre}{l.provincia ? ` — ${l.provincia}` : ""}
-                </option>
-              ))}
-            </select>
+            <div className="flex gap-2">
+              <select value={f.localidad_id} onChange={set("localidad_id")} className={inputCls}>
+                <option value="">Elegir localidad...</option>
+                {cat.localidades.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.nombre}{l.provincia ? ` — ${l.provincia}` : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setVerNuevaLocalidad(true)}
+                className="shrink-0 bg-white border-2 border-emerald-600 text-emerald-700 rounded-xl px-3 font-bold text-sm"
+              >
+                + Nueva
+              </button>
+            </div>
           </Campo>
           <div className="grid grid-cols-2 gap-2">
             <Campo label="Teléfono">
@@ -221,6 +233,18 @@ export default function VendedorClienteNuevoPage() {
           </div>
         </section>
       </div>
+
+      {verNuevaLocalidad && (
+        <NuevaLocalidadSheet
+          zonas={cat.zonas || []}
+          onCerrar={() => setVerNuevaLocalidad(false)}
+          onCreada={(l) => {
+            setCat((prev) => ({ ...prev, localidades: [...prev.localidades, { id: l.id, nombre: l.nombre, provincia: l.provincia }] }))
+            setF((prev) => ({ ...prev, localidad_id: l.id }))
+            setVerNuevaLocalidad(false)
+          }}
+        />
+      )}
 
       <div className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 p-4">
         <div className="max-w-2xl mx-auto grid grid-cols-2 gap-2">

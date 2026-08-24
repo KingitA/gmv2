@@ -47,3 +47,44 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
+
+// POST /api/vendedor/zonas
+// Alta de zona desde la calle: solo nombre (+ descripción opcional). El tipo
+// de flete y los costos quedan pendientes para cargar desde el ERP.
+export async function POST(request: Request) {
+  const session = await requireVendedor()
+  if (session.error) return session.error
+
+  try {
+    const supabase = await createClient()
+    const body = await request.json()
+    const nombre = String(body.nombre || "").trim().toUpperCase()
+    const descripcion = String(body.descripcion || "").trim() || null
+
+    if (!nombre) return NextResponse.json({ error: "El nombre de la zona es obligatorio." }, { status: 400 })
+
+    const { data: existente } = await supabase
+      .from("zonas")
+      .select("id, nombre")
+      .ilike("nombre", nombre)
+      .maybeSingle()
+    if (existente) {
+      return NextResponse.json(
+        { error: `La zona "${existente.nombre}" ya existe.`, zona_existente: existente },
+        { status: 409 }
+      )
+    }
+
+    const { data: zona, error } = await supabase
+      .from("zonas")
+      .insert({ nombre, descripcion })
+      .select("id, nombre, descripcion")
+      .single()
+    if (error) throw error
+
+    return NextResponse.json({ success: true, zona })
+  } catch (error: any) {
+    console.error("[vendedor] Error en POST /api/vendedor/zonas:", error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+}
