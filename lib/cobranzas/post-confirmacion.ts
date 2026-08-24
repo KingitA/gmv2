@@ -65,13 +65,13 @@ export async function procesarPostConfirmacion(
 
   // ── 0. Créditos existentes tildados en el cobro (marca [CREDITOS:...]) ──
   // Igual que el sistema viejo de Recibos: NC/REV y plata a cuenta elegidas
-  // se aplican contra los débitos seleccionados. Corre ANTES del 10%: los
-  // débitos cubiertos por crédito quedan excluidos de la bonificación (regla
-  // de negocio 25/08: el 10% es solo por plata nueva).
+  // se aplican contra los débitos seleccionados. Regla del 10% (25/08):
+  // bonif neta = 10% × (débitos sin dto − créditos mercadería sin dto) —
+  // los débitos bonifican completo y cada crédito con aplicar_10 asienta un
+  // débito del 10% de lo usado (dentro de ejecutarCreditosDePago).
   const paresCreditos = parsearMarcaCreditos(pago.observaciones)
-  const debitosConCredito = new Set(paresCreditos.map((p) => p.debito_id))
   if (paresCreditos.length) {
-    const avisosCreditos = await ejecutarCreditosDePago(supabase, paresCreditos)
+    const avisosCreditos = await ejecutarCreditosDePago(supabase, paresCreditos, pagoId)
     if (avisosCreditos.length) {
       console.error("[post-confirmacion] créditos:", avisosCreditos.join(" · "))
       result.bonificacion_error = [result.bonificacion_error, ...avisosCreditos].filter(Boolean).join(" · ")
@@ -89,7 +89,13 @@ export async function procesarPostConfirmacion(
   // 'cobrada' para siempre.
   try {
     if (pago.observaciones?.includes(MARCA_CONTADO)) {
-      const compIds = [...montoPorComprobante.keys()].filter((id) => !debitosConCredito.has(id))
+      // Candidatos: los imputados por el pago Y los débitos cubiertos por
+      // créditos (un débito 100% cubierto por crédito también bonifica — el
+      // 10% del crédito ya se debitó en el paso 0: neto correcto).
+      const compIds = [...new Set([
+        ...montoPorComprobante.keys(),
+        ...paresCreditos.map((p) => p.debito_id),
+      ])]
       let bonificables: string[] = []
       if (compIds.length) {
         const { data: comps } = await supabase

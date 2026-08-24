@@ -236,7 +236,7 @@ export async function POST(request: NextRequest) {
     // instrucción viaja con el pago ([CREDITOS:...]) — se ejecuta al
     // confirmar. Débitos con crédito quedan fuera del 10% contado.
     const creditosSel = (Array.isArray(creditos_aplicar) ? creditos_aplicar : [])
-      .map((cr: any) => ({ tipo: cr.tipo === "ac" ? "ac" as const : "nc" as const, id: cr.id, monto: Number(cr.monto || 0) }))
+      .map((cr: any) => ({ tipo: cr.tipo === "ac" ? "ac" as const : "nc" as const, id: cr.id, monto: Number(cr.monto || 0), aplicar_10: !!cr.aplicar_10 }))
       .filter((cr: any) => cr.id && cr.monto > 0)
     let debitosNetos = ((imputaciones as any[]) || [])
       .filter((i: any) => i?.comprobante_id)

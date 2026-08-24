@@ -177,6 +177,10 @@ export default function VendedorCobrarPage() {
   const [totalAFavor, setTotalAFavor] = useState(0)
   // credSel: clave "nc:<id>" | "ac:<id>" → monto a usar de ese crédito
   const [credSel, setCredSel] = useState<Record<string, number>>({})
+  // cred10: crédito de MERCADERÍA sin el 10% hecho → se le aplica el 10% en
+  // contra al usarlo en cobro contado. El operador lo destilda si la NC ya
+  // tiene el descuento hecho. Nunca aplica a la plata a cuenta.
+  const [cred10, setCred10] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -253,33 +257,22 @@ export default function VendedorCobrarPage() {
   // Créditos tildados (NC/REV + a cuenta): descuentan del total a saldar
   const totalCreditos = round2(Object.values(credSel).reduce((s, v) => s + (v || 0), 0))
 
-  // Débitos que reciben crédito (asignación FIFO en el MISMO orden en que se
-  // envían al backend): quedan EXCLUIDOS del 10% contado — el descuento es
-  // solo por plata nueva (regla de negocio 25/08).
-  const debitosConCredito = useMemo(() => {
-    const tocados = new Set<string>()
-    let restante = totalCreditos
-    for (const [compId, monto] of Object.entries(imputaciones)) {
-      if (restante <= 0.005) break
-      if (!(monto > 0)) continue
-      tocados.add(compId)
-      restante = round2(restante - Math.min(monto, restante))
-    }
-    return tocados
-  }, [imputaciones, totalCreditos])
-
-  // NC 10% proyectada ("proyección reversa"): 10% de los comprobantes
-  // seleccionados COMPLETOS pagados con plata nueva (sin crédito encima)
+  // NC 10% proyectada — regla 25/08: bonif neta = 10% × (débitos sin dto −
+  // créditos de MERCADERÍA sin dto). Los débitos completos bonifican SIEMPRE;
+  // cada crédito NC con su check de 10% activo resta el 10% de lo usado
+  // (crédito a precio lleno usado en cobro contado → vale 90%).
   const bonificacionEstimada = useMemo(() => {
     if (!contadoGeneral) return 0
     let bonif = 0
     for (const cp of comprobantes) {
       const imp = imputaciones[cp.id]
-      if (imp !== undefined && Math.abs(imp - cp.saldo_pendiente) < 0.01 && !debitosConCredito.has(cp.id))
-        bonif += cp.total_factura * 0.1
+      if (imp !== undefined && Math.abs(imp - cp.saldo_pendiente) < 0.01) bonif += cp.total_factura * 0.1
+    }
+    for (const [key, monto] of Object.entries(credSel)) {
+      if (key.startsWith("nc:") && cred10[key] && monto > 0) bonif -= monto * 0.1
     }
     return round2(bonif)
-  }, [contadoGeneral, imputaciones, comprobantes, debitosConCredito])
+  }, [contadoGeneral, imputaciones, comprobantes, credSel, cred10])
 
   const cubierto = round2(totalMetodos + totalDevoluciones + bonificacionEstimada + totalCreditos)
   const falta = round2(totalAsignado - cubierto)
@@ -471,7 +464,13 @@ export default function VendedorCobrarPage() {
               .filter(([, monto]) => monto > 0)
               .map(([key, monto]) => {
                 const [tipo, ...rest] = key.split(":")
-                return { tipo, id: rest.join(":"), monto }
+                return {
+                  tipo,
+                  id: rest.join(":"),
+                  monto,
+                  // 10% en contra: solo NC de mercadería sin dto, en cobro contado
+                  aplicar_10: tipo === "nc" && contadoGeneral && !!cred10[key],
+                }
               }),
             ajuste_redondeo: ajustePorRedondeo,
             devoluciones: Object.entries(devSel)
@@ -723,12 +722,17 @@ export default function VendedorCobrarPage() {
                     return (
                       <div key={c.id} className={`rounded-xl border-2 px-3 py-2 flex items-center gap-2 ${activo ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
                         <button
-                          onClick={() => setCredSel((prev) => {
-                            const next = { ...prev }
-                            if (next[key] !== undefined) delete next[key]
-                            else next[key] = disp
-                            return next
-                          })}
+                          onClick={() => {
+                            setCredSel((prev) => {
+                              const next = { ...prev }
+                              if (next[key] !== undefined) delete next[key]
+                              else next[key] = disp
+                              return next
+                            })
+                            // Default: crédito de mercadería sin dto → 10% activo
+                            // cuando el cobro es contado; destildable.
+                            setCred10((prev) => (prev[key] === undefined ? { ...prev, [key]: true } : prev))
+                          }}
                           className="flex items-center gap-2 min-w-0 flex-1 text-left"
                         >
                           <span className="text-lg shrink-0">{activo ? "☑" : "☐"}</span>
@@ -739,6 +743,17 @@ export default function VendedorCobrarPage() {
                             <p className="text-emerald-600 text-xs">crédito disponible {formatCurrency(disp)}</p>
                           </div>
                         </button>
+                        {activo && contadoGeneral && (
+                          <button
+                            onClick={() => setCred10((prev) => ({ ...prev, [key]: !prev[key] }))}
+                            className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold border-2 ${
+                              cred10[key] ? "border-amber-400 bg-amber-50 text-amber-800" : "border-gray-200 bg-white text-gray-400"
+                            }`}
+                            title="Crédito de mercadería SIN el 10% hecho: se le aplica el 10% en contra. Destildá si la NC ya tiene el descuento."
+                          >
+                            {cred10[key] ? "☑" : "☐"} 10%
+                          </button>
+                        )}
                         {activo && (
                           <MontoInput
                             valor={credSel[key]}
@@ -780,7 +795,8 @@ export default function VendedorCobrarPage() {
                   })}
                   <p className="text-gray-400 text-xs px-1">
                     El crédito tildado se aplica a los comprobantes seleccionados al confirmarse el cobro.
-                    Los comprobantes cubiertos por crédito no llevan el 10% contado.
+                    Con cobro contado: el check "10%" marca los créditos de mercadería SIN el descuento hecho
+                    (se les aplica el 10% en contra); destildalo si la NC ya lo tiene. La plata a cuenta nunca lleva 10%.
                   </p>
                 </div>
               )}

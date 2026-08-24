@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     // descuentan de lo que hay que entregar; se aplican en la confirmación.
     const creditosDe = (c: any): { tipo: "nc" | "ac"; id: string; monto: number }[] =>
       (Array.isArray(c.creditos) ? c.creditos : [])
-        .map((cr: any) => ({ tipo: cr.tipo === "ac" ? "ac" as const : "nc" as const, id: cr.id, monto: Number(cr.monto || 0) }))
+        .map((cr: any) => ({ tipo: cr.tipo === "ac" ? "ac" as const : "nc" as const, id: cr.id, monto: Number(cr.monto || 0), aplicar_10: !!cr.aplicar_10 }))
         .filter((cr: any) => cr.id && cr.monto > 0)
 
     const montoCliente = (c: any) =>

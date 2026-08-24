@@ -24,6 +24,11 @@ export interface CreditoSeleccionado {
   id: string
   /** cuánto usar de este crédito (tope: su disponible) */
   monto: number
+  /** Crédito por MERCADERÍA sin el 10% hecho: al usarlo en un cobro contado
+   *  se le aplica el 10% EN CONTRA (el crédito vale 90% — regla 25/08:
+   *  bonif neta = 10% × (débitos sin dto − créditos mercadería sin dto)).
+   *  Nunca aplica a 'ac' (la plata a cuenta no es mercadería). */
+  aplicar_10?: boolean
 }
 
 export interface ParCredito {
@@ -31,6 +36,7 @@ export interface ParCredito {
   credito_id: string
   debito_id: string
   monto: number
+  aplicar_10?: boolean
 }
 
 const MARCA_INICIO = "[CREDITOS:"
@@ -62,7 +68,13 @@ export function asignarCreditosFIFO(
       if (disponible <= 0.005) break
       if (d.monto_imputado <= 0.005) continue
       const aplica = r2(Math.min(disponible, d.monto_imputado))
-      pares.push({ tipo: cr.tipo, credito_id: cr.id, debito_id: d.comprobante_id, monto: aplica })
+      pares.push({
+        tipo: cr.tipo,
+        credito_id: cr.id,
+        debito_id: d.comprobante_id,
+        monto: aplica,
+        aplicar_10: cr.tipo === "nc" && !!cr.aplicar_10,
+      })
       d.monto_imputado = r2(d.monto_imputado - aplica)
       disponible = r2(disponible - aplica)
       conCredito.add(d.comprobante_id)
@@ -125,7 +137,7 @@ export async function validarCreditos(
 /** Serializa los pares como marca para las observaciones del pago. */
 export function marcaCreditos(pares: ParCredito[]): string {
   if (!pares.length) return ""
-  return `${MARCA_INICIO}${JSON.stringify(pares.map((p) => [p.tipo, p.credito_id, p.debito_id, p.monto]))}]`
+  return `${MARCA_INICIO}${JSON.stringify(pares.map((p) => [p.tipo, p.credito_id, p.debito_id, p.monto, p.aplicar_10 ? 1 : 0]))}]`
 }
 
 /** Extrae y parsea la marca [CREDITOS:...] de unas observaciones. */
@@ -137,7 +149,7 @@ export function parsearMarcaCreditos(obs: string | null | undefined): ParCredito
   if (j < 0) return []
   try {
     const arr = JSON.parse(s.slice(i + MARCA_INICIO.length, j + 1))
-    return (arr as any[]).map((p) => ({ tipo: p[0], credito_id: p[1], debito_id: p[2], monto: Number(p[3]) }))
+    return (arr as any[]).map((p) => ({ tipo: p[0], credito_id: p[1], debito_id: p[2], monto: Number(p[3]), aplicar_10: p[4] === 1 }))
   } catch {
     return []
   }
@@ -161,6 +173,7 @@ export function quitarMarcaCreditos(obs: string): string {
 export async function ejecutarCreditosDePago(
   supabase: SupabaseClient,
   pares: ParCredito[],
+  pagoId: string,
 ): Promise<string[]> {
   const avisos: string[] = []
   for (const p of pares) {
@@ -173,6 +186,30 @@ export async function ejecutarCreditosDePago(
           p_usuario_id: null,
         })
         if (error) throw new Error(error.message)
+
+        // Crédito de MERCADERÍA sin el 10% hecho, usado en cobro contado:
+        // se le aplica el 10% EN CONTRA (débito por el 10% de lo usado).
+        // Con la marca [pago:] la anulación del pago lo revierte también.
+        if (p.aplicar_10) {
+          const debito10 = Math.round(p.monto * 0.10 * 100) / 100
+          if (debito10 > 0.005) {
+            const { data: nc } = await supabase
+              .from("comprobantes_venta")
+              .select("cliente_id, tipo_comprobante, numero_comprobante")
+              .eq("id", p.credito_id)
+              .single()
+            if (nc) {
+              const { error: ajErr } = await supabase.rpc("cc_ajuste_manual", {
+                p_cliente_id: nc.cliente_id,
+                p_tipo: "debito",
+                p_monto: debito10,
+                p_concepto: `Ajuste 10% contado sobre crédito ${nc.tipo_comprobante} ${nc.numero_comprobante} (usado $${p.monto.toFixed(2)}) [pago:${pagoId}]`,
+                p_usuario_id: null,
+              })
+              if (ajErr) throw new Error(`ajuste 10% s/crédito: ${ajErr.message}`)
+            }
+          }
+        }
       } else {
         const { error: insErr } = await supabase.from("imputaciones").insert({
           pago_id: p.credito_id,
