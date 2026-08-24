@@ -700,6 +700,41 @@ function NuevoPedidoInner() {
     return () => window.removeEventListener("keydown", onKey, true)
   }, [])
 
+  // ── Input trampa para Android (Chrome / WebView de la colectora) ────
+  // En Android el lector inyecta el código como texto de teclado virtual
+  // (IME): sin un campo enfocado, no llega a ningún lado y el listener de
+  // teclas de arriba nunca se entera. Este input invisible se queda con el
+  // foco siempre que el vendedor no esté usando un campo real, recibe el
+  // escaneo y dispara la apertura directa. inputMode="none" evita que se
+  // abra el teclado en pantalla.
+  const trapRef = useRef<HTMLInputElement | null>(null)
+  const trapTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!cliente) return
+    const tick = setInterval(() => {
+      const ae = document.activeElement as HTMLElement | null
+      const enCampoReal =
+        !!ae && ae !== trapRef.current &&
+        (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT" || ae.isContentEditable)
+      if (!enCampoReal) trapRef.current?.focus({ preventScroll: true })
+    }, 400)
+    return () => clearInterval(tick)
+  }, [cliente])
+
+  const flushTrap = () => {
+    const el = trapRef.current
+    if (!el) return
+    const code = el.value.trim()
+    el.value = ""
+    if (/^[0-9]{8,14}$/.test(code)) escanearGlobal.current(code)
+  }
+  const onTrapChange = () => {
+    // Fallback por pausa: si el sufijo Enter no llega (algunas colectoras
+    // mandan solo el código), a los 250 ms sin teclas nuevas se procesa igual
+    if (trapTimer.current) clearTimeout(trapTimer.current)
+    trapTimer.current = setTimeout(flushTrap, 250)
+  }
+
   // ── Detalle de artículo + precio en vivo ────────────────────────────
   const abrirArticulo = async (a: Articulo) => {
     setSel(a)
@@ -1308,6 +1343,27 @@ function NuevoPedidoInner() {
   // ── Pantalla principal de armado ────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
+      {/* Input trampa: recibe el escaneo de la colectora en Android aunque no
+          haya ningún campo tocado (ver comentario en la lógica). Invisible y
+          fuera del flujo táctil; inputMode="none" = sin teclado en pantalla. */}
+      <input
+        ref={trapRef}
+        onChange={onTrapChange}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault()
+            if (trapTimer.current) clearTimeout(trapTimer.current)
+            flushTrap()
+          }
+        }}
+        inputMode="none"
+        autoCapitalize="off"
+        autoCorrect="off"
+        autoComplete="off"
+        tabIndex={-1}
+        aria-hidden
+        className="fixed top-0 left-0 w-px h-px opacity-0 pointer-events-none"
+      />
       <header className="bg-emerald-700 text-white sticky top-0 z-10 shadow-md">
         <div className="px-5 py-3 flex items-center gap-3">
           <button onClick={volver} className="text-2xl leading-none px-1">←</button>
