@@ -233,6 +233,10 @@ function NuevoPedidoInner() {
   const [artsCategoria, setArtsCategoria] = useState<Articulo[]>([])
   const [cargandoArts, setCargandoArts] = useState(false)
   const [subSel, setSubSel] = useState<string | null>(null)
+  // Búsqueda local DENTRO del filtro/categoría abierta (no toca el server)
+  const [qFiltro, setQFiltro] = useState("")
+  // Cambiar de pantalla/categoría limpia la búsqueda del filtro
+  useEffect(() => setQFiltro(""), [nav])
 
   // ── Navegación por proveedor ────────────────────────────────────────
   const [proveedores, setProveedores] = useState<ProveedorCatalogo[]>([])
@@ -1123,9 +1127,14 @@ function NuevoPedidoInner() {
     else if (nav.ctx.tipo === "proveedor" && nav.catId === null) base = listaDeCtx(nav.ctx) // todas
     else base = listaDeCtx(nav.ctx).filter((a) => claveCategoria(a) === (nav.catId || "otros"))
     if (subSel) base = base.filter((a) => claveSubcategoria(a) === subSel)
+    // Búsqueda de texto dentro del filtro aplicado (acentos-insensible, multi-palabra)
+    if (qFiltro.trim())
+      base = base.filter((a) =>
+        localMatch(qFiltro, a.descripcion, a.sku, Array.isArray(a.ean13) ? a.ean13 : [a.ean13], a.marca, a.subcategoria_nombre)
+      )
     return base
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nav, artsCategoria, listas, artsProveedor, subSel])
+  }, [nav, artsCategoria, listas, artsProveedor, subSel, qFiltro])
 
   // Chips de subcategoría derivados de los artículos presentes
   const subchips = useMemo(() => {
@@ -1704,6 +1713,29 @@ function NuevoPedidoInner() {
         ) : (
           /* ── Lista de artículos de la categoría ── */
           <div className="space-y-3">
+            {/* Búsqueda DENTRO del filtro aplicado (proveedor, habituales,
+                ofertas, categoría...): filtra la lista ya cargada, en vivo */}
+            <div className="relative">
+              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden>
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                <path d="M16.5 16.5 21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <input
+                type="search"
+                value={qFiltro}
+                onChange={(e) => setQFiltro(e.target.value)}
+                placeholder={`Buscar en ${ctxLabel(nav.ctx) || "este listado"}...`}
+                className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-9 py-2.5 text-gray-900 outline-none"
+              />
+              {qFiltro && (
+                <button
+                  onClick={() => setQFiltro("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-xs leading-none"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
             {/* Chips de categoría (navegación por proveedor: se entra al
                 listado completo y las categorías filtran desde acá) */}
             {nav.ctx.tipo === "proveedor" && categoriasCtx.length > 1 && (
@@ -1768,9 +1800,11 @@ function NuevoPedidoInner() {
               </div>
             ) : articulosVisibles.length === 0 ? (
               <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
-                {nav.ctx.tipo === "proveedor" && nav.catId === null
-                  ? "Este proveedor no tiene artículos activos con precio."
-                  : "No hay artículos en esta categoría."}
+                {qFiltro.trim()
+                  ? <>Nada con “{qFiltro}” acá. <button onClick={() => { setNav({ s: "home" }); onBuscar(qFiltro) }} className="text-emerald-700 font-bold underline">Buscar en todo el catálogo</button></>
+                  : nav.ctx.tipo === "proveedor" && nav.catId === null
+                    ? "Este proveedor no tiene artículos activos con precio."
+                    : "No hay artículos en esta categoría."}
               </div>
             ) : (
               <div className="space-y-2">
