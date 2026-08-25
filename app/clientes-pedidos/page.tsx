@@ -589,12 +589,24 @@ export default function ClientesPedidosPage() {
         ? (pedidoMerc as any).bonif_mercaderia_pct
         : ((bonifs || []).find((b: any) => b.tipo === "mercaderia")?.porcentaje ?? 0)
 
+      // Descuentos de un segmento (general/viajante propios del segmento o generales
+      // "todos", + mercadería del pedido). Formato "−3% general · −5% viajante".
       const bonifLines = (segKey: string | null) => {
-        const rows = (bonifs || []).filter(b => b.segmento === segKey || b.segmento === "todos" || !b.segmento)
-        if (rows.length === 0) return ""
-        return "<div style='font-size:11px;color:#555;margin-top:3px'>" +
-          rows.map(b => `${b.tipo.charAt(0).toUpperCase() + b.tipo.slice(1)}: -${b.porcentaje}%`).join(" / ") +
-          "</div>"
+        const rows = (bonifs || []).filter(b =>
+          b.tipo !== "mercaderia" && Number(b.porcentaje) > 0 &&
+          (b.segmento === segKey || b.segmento === "todos" || !b.segmento))
+        const parts: string[] = []
+        const seen = new Set<string>()
+        for (const b of rows) {
+          const nombre = b.tipo === "general" ? "general" : "viajante"
+          const k = `${nombre}-${b.porcentaje}`
+          if (seen.has(k)) continue
+          seen.add(k)
+          parts.push(`−${b.porcentaje}% ${nombre}`)
+        }
+        if (Number(mercEfectiva) > 0) parts.push(`−${mercEfectiva}% mercadería`)
+        if (parts.length === 0) return ""
+        return `<div style="font-size:12px;color:#c2410c;font-weight:bold;margin-top:2px;">${parts.join(" · ")}</div>`
       }
 
       // Siempre cargar los detalles frescos de la DB por pedido.id: el estado
@@ -610,6 +622,8 @@ export default function ClientesPedidosPage() {
             sigla,
             iva_ventas,
             orden_deposito,
+            proveedor_id,
+            marca_id,
             proveedores:proveedor_id (nombre),
             marcas:marca_id (descripcion)
           )
@@ -618,6 +632,41 @@ export default function ClientesPedidosPage() {
 
       if (error) throw error
       const detalles = data || []
+
+      // Segmentación por proveedor/marca del cliente (se factura aparte), filtrada
+      // a los que realmente aparecen en este pedido. Va en su propio bloque.
+      const provIdsEnPedido = new Set((detalles as any[]).map(d => d.articulos?.proveedor_id).filter(Boolean))
+      const marcaIdsEnPedido = new Set((detalles as any[]).map(d => d.articulos?.marca_id).filter(Boolean))
+      const PROV_SEL = "proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, proveedores:proveedor_id (nombre)"
+      const MARCA_SEL = "marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, marcas:marca_id (descripcion)"
+      const [{ data: cliProv }, { data: pedProv }, { data: cliMarca }, { data: pedMarca }] = await Promise.all([
+        supabase.from("cliente_proveedor_condicion").select(PROV_SEL).eq("cliente_id", pedido.cliente_id),
+        supabase.from("pedido_proveedor_condicion").select(PROV_SEL).eq("pedido_id", pedido.id),
+        supabase.from("cliente_marca_condicion").select(MARCA_SEL).eq("cliente_id", pedido.cliente_id),
+        supabase.from("pedido_marca_condicion").select(MARCA_SEL).eq("pedido_id", pedido.id),
+      ])
+      // El override del pedido pisa la condición del cliente (misma clave)
+      const condProvMap = new Map<string, any>()
+      for (const r of (cliProv || [])) condProvMap.set(r.proveedor_id, r)
+      for (const r of (pedProv || [])) condProvMap.set(r.proveedor_id, r)
+      const condMarcaMap = new Map<string, any>()
+      for (const r of (cliMarca || [])) condMarcaMap.set(r.marca_id, r)
+      for (const r of (pedMarca || [])) condMarcaMap.set(r.marca_id, r)
+      const condProv = [...condProvMap.values()]
+      const condMarca = [...condMarcaMap.values()]
+      const condDesc = (r: any) => {
+        const parts: string[] = []
+        if (Number(r.dto_general_pct) > 0) parts.push(`−${r.dto_general_pct}% general`)
+        if (Number(r.dto_viajante_pct) > 0) parts.push(`−${r.dto_viajante_pct}% viajante`)
+        if (Number(r.dto_mercaderia_pct) > 0) parts.push(`−${r.dto_mercaderia_pct}% mercadería`)
+        return parts.join(" · ")
+      }
+      const segmentadosAparte = [
+        ...(condProv || []).filter((r: any) => provIdsEnPedido.has(r.proveedor_id))
+          .map((r: any) => ({ nombre: (r.proveedores as any)?.nombre || "Proveedor", ...r })),
+        ...(condMarca || []).filter((r: any) => marcaIdsEnPedido.has(r.marca_id))
+          .map((r: any) => ({ nombre: (r.marcas as any)?.descripcion || "Marca", ...r })),
+      ]
 
       // Ordenar por orden_deposito (los null van al final), luego por proveedor y descripción
       const detallesOrdenados = [...detalles].sort((a, b) => {
@@ -711,6 +760,7 @@ export default function ClientesPedidosPage() {
                       return `
                         <div class="label">${s.label}</div>
                         <div class="value" style="margin-bottom: 2px;">${s.metodo || c?.metodo_facturacion || "—"} — ${listaNombre}</div>
+                        ${bonifLines(s.segKey)}
                       `
                     }).join('')
                   } else {
@@ -720,19 +770,26 @@ export default function ClientesPedidosPage() {
                       <div class="value">${listaNombre}</div>
                       <div class="label" style="margin-top: 8px;">Forma de Facturación</div>
                       <div class="value">${pedido.metodo_facturacion_pedido || pedido.clientes?.metodo_facturacion || "—"}</div>
+                      ${bonifLines(null)}
                     `
                   }
-                })()}
-                ${(() => {
-                  const desc = resumenBonificaciones(bonifs || [], mercEfectiva)
-                  return desc.length
-                    ? `<div class="label" style="margin-top: 8px;">Descuento</div><div class="value" style="color:#c2410c;font-weight:bold;">${desc.join(" · ")}</div>`
-                    : ""
                 })()}
                 <div class="label" style="margin-top: 8px;">Vendedor</div>
                 <div class="value">${pedido.vendedores?.nombre || "Sin asignar"}</div>
               </div>
             </div>
+
+            ${segmentadosAparte.length ? `
+            <div class="info-box" style="margin-bottom: 20px;">
+              <div class="label" style="margin-bottom: 6px;">Segmentado aparte (proveedor / marca — se factura por separado)</div>
+              ${segmentadosAparte.map(r => {
+                const listaNombre = listaName(r.lista_precio_id) || "Lista del segmento general"
+                const desc = condDesc(r)
+                return `<div style="margin-bottom: 4px;">
+                  <span class="value">${r.nombre}:</span> ${r.metodo_facturacion || "—"} — ${listaNombre}${desc ? ` <span style="color:#c2410c;font-weight:bold;">${desc}</span>` : ""}
+                </div>`
+              }).join("")}
+            </div>` : ""}
 
             <table>
               <thead>
