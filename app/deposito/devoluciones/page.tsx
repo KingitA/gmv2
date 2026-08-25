@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 
 interface DetalleDevolucion {
@@ -45,6 +46,18 @@ export default function DevolucionesPage() {
 
   useEffect(() => { cargar() }, [])
   useEffect(() => { if (vista==="scanner") setTimeout(()=>inputRef.current?.focus(),100) }, [vista])
+
+  // "Atrás" físico: retroceder de a un paso en el flujo (confirmar → resultados →
+  // scanner → home). En el scanner, primero limpia la búsqueda si hay texto.
+  useBackTrap(() => {
+    if (vista==="confirmar") { setVista("resultados"); setDevSeleccionada(null); return true }
+    if (vista==="resultados") { setVista("scanner"); setArticuloBuscado(null); setDevConArticulo([]); return true }
+    if (vista==="scanner") {
+      if (busqueda) { setBusqueda(""); setResultados([]); return true }
+      setVista("home"); return true
+    }
+    return false
+  })
 
   const cargar = () => {
     setLoading(true)

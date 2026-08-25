@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 import { useParams, useRouter } from "next/navigation"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
@@ -224,6 +225,19 @@ export default function RecibirMercaderiaDetallePage() {
     if (!necesitaControlBultos) return
     fetch("/api/transportes").then(r=>r.json()).then(d=>{ if (Array.isArray(d)) setTransportes(d.filter((t:any)=>t.activo!==false)) }).catch(()=>{})
   }, [necesitaControlBultos])
+
+  // "Atrás" físico: cerrar de a una capa (panel de cantidad → scanner/búsqueda →
+  // documentos → vista de faltantes). Con todo cerrado, sale a la lista de órdenes.
+  useBackTrap(() => {
+    if (articuloSel || itemActivo) { setArticuloSel(null); setItemActivo(null); setCantidadInput(""); return true }
+    if (scannerOpen) {
+      if (busqueda) { setBusqueda(""); setResultados([]); return true }
+      setScannerOpen(false); return true
+    }
+    if (verDocumentos) { setVerDocumentos(false); return true }
+    if (vistaFaltantes) { setVistaFaltantes(false); return true }
+    return false
+  })
 
   const guardarConformidad = async (estado: "conforme"|"no_conforme"|"omitida") => {
     if (!recepcion) return

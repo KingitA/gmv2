@@ -9,6 +9,7 @@ import { buscarArticulosDeposito, actualizarDatosArticulo, ajustarStock } from "
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { toast } from "sonner"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 
 type Articulo = {
@@ -86,6 +87,14 @@ export default function DepositoPage() {
   }, [])
 
   useBarcodeScanner({ onScan: onScanCodigo })
+
+  // "Atrás" físico: cerrar de a una capa (form de edición → ficha → búsqueda)
+  useBackTrap(() => {
+    if (editMode) { setEditMode(null); return true }
+    if (selected) { setSelected(null); return true }
+    if (query) { setQuery(""); return true }
+    return false
+  })
 
   const guardarDatos = async () => {
     if (!selected) return

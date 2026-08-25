@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { formatCurrency } from "@/lib/utils"
 
 interface PedidoChofer {
@@ -69,6 +70,12 @@ export default function ViajeDashboardPage() {
       })
       .finally(() => setLoading(false))
   }, [viajeId])
+
+  // "Atrás" físico: cerrar el modal de confirmación antes de salir de la página
+  useBackTrap(() => {
+    if (showConfirmFinalizar) { setShowConfirmFinalizar(false); return true }
+    return false
+  })
 
   const esReadOnly = READONLY_ESTADOS.includes(data?.viaje.estado || "")
 

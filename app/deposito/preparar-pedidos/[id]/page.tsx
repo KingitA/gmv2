@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 
 interface DetallePedido {
@@ -137,6 +138,18 @@ export default function PickingPage() {
   }, [pedidoId])
 
   useEffect(() => { if (scannerOpen) setTimeout(() => inputRef.current?.focus(), 100) }, [scannerOpen])
+
+  // "Atrás" físico: cerrar de a una capa (panel de cantidad → scanner/búsqueda →
+  // vista de faltantes). Recién con todo cerrado deja salir a la lista de pedidos.
+  useBackTrap(() => {
+    if (articuloSel || itemActivo) { setArticuloSel(null); setItemActivo(null); setCantidadInput(""); return true }
+    if (scannerOpen) {
+      if (busqueda) { setBusqueda(""); setResultados([]); return true }
+      setScannerOpen(false); return true
+    }
+    if (vistaFaltantes) { setVistaFaltantes(false); return true }
+    return false
+  })
 
   const showToast = (msg: string, tipo: "ok"|"err") => { setToast({msg,tipo}); setTimeout(()=>setToast(null),3000) }
 

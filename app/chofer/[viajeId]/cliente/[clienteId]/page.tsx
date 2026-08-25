@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, memo } from "react"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { useRouter, useParams, useSearchParams } from "next/navigation"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
 import { formatCurrency } from "@/lib/utils"
@@ -138,6 +139,17 @@ export default function ClienteEntregaPage() {
     if (accion === "cobrar") { setShowCobroSheet(true); accionAplicada.current = true }
     else if (accion === "devolucion") { setShowDevolucionSheet(true); accionAplicada.current = true }
   }, [data, searchParams])
+
+  // "Atrás" físico: cerrar los sheets (y primero la búsqueda de la devolución)
+  // antes de salir de la ficha del cliente.
+  useBackTrap(() => {
+    if (showDevolucionSheet) {
+      if (busquedaArticulo) { setBusquedaArticulo(""); return true }
+      setShowDevolucionSheet(false); setDevError(null); return true
+    }
+    if (showCobroSheet) { setShowCobroSheet(false); return true }
+    return false
+  })
 
   // La selección de comprobantes/pedidos la maneja ComprobantesSelector (incluye anticipos).
 

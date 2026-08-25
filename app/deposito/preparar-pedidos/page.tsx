@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { formatDateAR } from "@/lib/utils"
 
 const C = {
@@ -116,6 +117,12 @@ export default function PrepararPedidosPage() {
 
     return () => { supabase.removeChannel(channel) }
   }, [])
+
+  // "Atrás" físico: cerrar el aviso de pedido urgente antes de salir del listado
+  useBackTrap(() => {
+    if (urgentModal) { setUrgentModal(null); return true }
+    return false
+  })
 
   const toggleGroup = (nivel: number) => {
     setOpenGroups(prev => {

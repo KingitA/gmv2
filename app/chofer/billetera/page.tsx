@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { formatCurrency } from "@/lib/utils"
 
 interface Movimiento {
@@ -56,6 +57,12 @@ export default function BilleteraPage() {
   }
 
   useEffect(() => { cargarDatos() }, [])
+
+  // "Atrás" físico: cerrar el sheet de gasto antes de salir de la página
+  useBackTrap(() => {
+    if (showGastoSheet) { setShowGastoSheet(false); return true }
+    return false
+  })
 
   const guardarGasto = async () => {
     if (!monto || Number(monto) <= 0) return
