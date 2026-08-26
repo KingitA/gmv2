@@ -55,6 +55,32 @@ export default function PendienteRendirPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Rechazar un cobro declarado (no llegó la plata / mal cargado / prueba):
+  // nunca tocó libro ni caja, así que se descarta limpio. Si la rendición
+  // queda sin pagos, se cancela sola.
+  const [rechazando, setRechazando] = useState<string | null>(null)
+  const rechazarPago = async (rendicionId: string, pago: any) => {
+    const motivo = window.prompt(`Rechazar el cobro de ${pago.cliente} por ${fmt(pago.monto)}.\n¿Motivo?`)
+    if (motivo === null) return
+    if (!motivo.trim()) { toast({ variant: "destructive", title: "Indicá el motivo del rechazo" }); return }
+    setRechazando(pago.id)
+    try {
+      const res = await fetch(`/api/finanzas/rendiciones/${rendicionId}/rechazar-pago`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pago_id: pago.id, motivo: motivo.trim() }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error)
+      toast({ title: "Pago rechazado", description: d.mensaje })
+      load()
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "No se pudo rechazar", description: e.message })
+    } finally {
+      setRechazando(null)
+    }
+  }
+
   const confirmarRendicion = async (rendicionId: string) => {
     if (!cajaDestino) {
       toast({ variant: "destructive", title: "Elegí la caja destino del efectivo" })
@@ -271,7 +297,18 @@ export default function PendienteRendirPage() {
                               </p>
                             ))}
                           </div>
-                          <div className="text-right font-semibold tabular-nums">{fmt(p.monto)}</div>
+                          <div className="text-right">
+                            <p className="font-semibold tabular-nums">{fmt(p.monto)}</p>
+                            <button
+                              type="button"
+                              onClick={() => rechazarPago(r.id, p)}
+                              disabled={rechazando === p.id || confirmandoRendicion === r.id}
+                              className="text-[11px] text-red-600 hover:underline disabled:opacity-50"
+                              title="No llegó la plata / mal cargado / prueba: el cobro se descarta y no entra a caja ni a la cuenta del cliente"
+                            >
+                              {rechazando === p.id ? "..." : "✕ Rechazar"}
+                            </button>
+                          </div>
                         </div>
                       )
                     })}

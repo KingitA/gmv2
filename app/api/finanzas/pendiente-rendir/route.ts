@@ -113,7 +113,7 @@ export async function GET() {
       const { data: pagosRend } = await supabase
         .from("pagos_clientes")
         .select(`
-          id, monto, fecha_pago, observaciones, cliente_id,
+          id, monto, fecha_pago, observaciones, cliente_id, estado,
           clientes(nombre, razon_social),
           pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, referencia, color_cheque),
           imputaciones(monto_imputado, estado, comprobantes_venta(tipo_comprobante, numero_comprobante))
@@ -124,7 +124,8 @@ export async function GET() {
     const desgloseRendicion = (r: any) => {
       const pagos = (r.rendicion_items || [])
         .map((i: any) => pagosRendMap.get(i.pago_id))
-        .filter(Boolean)
+        // Un pago rechazado/anulado por la oficina ya no es parte de lo que se rinde
+        .filter((p: any) => p && ["pendiente", "pendiente_rendicion"].includes(p.estado))
         .map((p: any) => ({
           id: p.id,
           cliente: p.clientes?.razon_social || p.clientes?.nombre || p.cliente_id,
