@@ -104,6 +104,58 @@ export async function GET() {
       ((p as any).pagos_detalle || []).some((d: any) => !["transferencia", "deposito"].includes(d.tipo_pago))
     )
 
+    // ── Desglose de cada rendición declarada: pago por pago, con cliente,
+    // comprobantes imputados, medios (cheques enumerados) y totales por medio,
+    // para que la oficina COTEJE la plata y los cheques antes de confirmar. ──
+    const pagoIdsRend = [...new Set(rendicionesAbiertas.flatMap((r: any) => (r.rendicion_items || []).map((i: any) => i.pago_id)))]
+    const pagosRendMap = new Map<string, any>()
+    if (pagoIdsRend.length) {
+      const { data: pagosRend } = await supabase
+        .from("pagos_clientes")
+        .select(`
+          id, monto, fecha_pago, observaciones, cliente_id,
+          clientes(nombre, razon_social),
+          pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, referencia, color_cheque),
+          imputaciones(monto_imputado, estado, comprobantes_venta(tipo_comprobante, numero_comprobante))
+        `)
+        .in("id", pagoIdsRend)
+      for (const p of pagosRend || []) pagosRendMap.set(p.id, p)
+    }
+    const desgloseRendicion = (r: any) => {
+      const pagos = (r.rendicion_items || [])
+        .map((i: any) => pagosRendMap.get(i.pago_id))
+        .filter(Boolean)
+        .map((p: any) => ({
+          id: p.id,
+          cliente: p.clientes?.razon_social || p.clientes?.nombre || p.cliente_id,
+          fecha: p.fecha_pago,
+          monto: Number(p.monto),
+          observaciones: (p.observaciones || "").replace(/\[[^\]]*\]/g, "").trim() || null,
+          medios: (p.pagos_detalle || []).map((d: any) => ({
+            tipo: d.tipo_pago,
+            monto: Number(d.monto),
+            banco: d.banco,
+            numero_cheque: d.numero_cheque,
+            fecha_cheque: d.fecha_cheque,
+            referencia: d.referencia,
+            color: d.color_cheque,
+          })),
+          comprobantes: (p.imputaciones || [])
+            .filter((i: any) => i.estado !== "anulado")
+            .map((i: any) => ({
+              numero: i.comprobantes_venta ? `${i.comprobantes_venta.tipo_comprobante} ${i.comprobantes_venta.numero_comprobante}` : "—",
+              monto: Number(i.monto_imputado),
+            })),
+        }))
+      const totales: Record<string, { cantidad: number; monto: number }> = {}
+      for (const p of pagos) for (const m of p.medios) {
+        totales[m.tipo] = totales[m.tipo] || { cantidad: 0, monto: 0 }
+        totales[m.tipo].cantidad += 1
+        totales[m.tipo].monto += m.monto
+      }
+      return { pagos, totales }
+    }
+
     return NextResponse.json({
       cobradores: [...grupos.values()].sort((a, b) => b.total - a.total),
       total_en_calle: [...grupos.values()].reduce((s, g) => s + g.total, 0),
@@ -118,6 +170,7 @@ export async function GET() {
         diferencia: Number(r.diferencia),
         cantidad_pagos: (r.rendicion_items || []).length,
         observaciones: r.observaciones,
+        ...desgloseRendicion(r),
       })),
       sin_verificar: sinVerificar.map((p) => ({
         id: p.id,

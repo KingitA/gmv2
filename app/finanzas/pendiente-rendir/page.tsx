@@ -26,6 +26,18 @@ export default function PendienteRendirPage() {
   // confirmar: la oficina elige BLANCO/NEGRO y se reintenta con ese color.
   const [pagosSinColor, setPagosSinColor] = useState<Record<string, string[]>>({})
   const [colorElegido, setColorElegido] = useState<Record<string, string>>({})
+  // Control físico de la rendición: qué pagos la oficina verificó (cotejó la
+  // plata / los cheques). Solo esos se confirman. Por defecto, todos tildados;
+  // destildar = queda pendiente de rendir, no se pierde.
+  const [noVerificados, setNoVerificados] = useState<Record<string, Set<string>>>({})
+  const [abierta, setAbierta] = useState<Record<string, boolean>>({})
+  const toggleVerificado = (rendId: string, pagoId: string) =>
+    setNoVerificados((prev) => {
+      const set = new Set(prev[rendId] || [])
+      if (set.has(pagoId)) set.delete(pagoId)
+      else set.add(pagoId)
+      return { ...prev, [rendId]: set }
+    })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -48,6 +60,13 @@ export default function PendienteRendirPage() {
       toast({ variant: "destructive", title: "Elegí la caja destino del efectivo" })
       return
     }
+    const rend = (data?.rendiciones_declaradas || []).find((r: any) => r.id === rendicionId)
+    const excluidos = noVerificados[rendicionId] || new Set<string>()
+    const pagosVerificados: string[] = (rend?.pagos || []).map((p: any) => p.id).filter((id: string) => !excluidos.has(id))
+    if (!pagosVerificados.length) {
+      toast({ variant: "destructive", title: "No hay pagos verificados", description: "Tildá al menos un pago como cotejado para confirmar." })
+      return
+    }
     setConfirmandoRendicion(rendicionId)
     try {
       const res = await fetch(`/api/finanzas/rendiciones/${rendicionId}/confirmar`, {
@@ -56,6 +75,9 @@ export default function PendienteRendirPage() {
         body: JSON.stringify({
           caja_destino_tipo: "CAJA",
           caja_destino_id: cajaDestino,
+          // La oficina cotejó estos pagos (checklist del desglose): son los que
+          // se confirman. Sin esto el RPC no encontraba "ningún pago verificado".
+          pagos_verificados: pagosVerificados,
           forzar_diferencia: Boolean(forzar[rendicionId]),
           ...(colorElegido[rendicionId] && pagosSinColor[rendicionId]?.length
             ? {
@@ -159,7 +181,8 @@ export default function PendienteRendirPage() {
             </div>
             <div className="space-y-2">
               {data.rendiciones_declaradas.map((r: any) => (
-                <div key={r.id} className="flex items-center justify-between border-2 border-amber-200 bg-amber-50/40 rounded-lg px-4 py-3">
+                <div key={r.id} className="border-2 border-amber-200 bg-amber-50/40 rounded-lg px-4 py-3">
+                <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium">
                       {r.cobrador_nombre}
@@ -167,6 +190,12 @@ export default function PendienteRendirPage() {
                       <span className="text-sm text-muted-foreground ml-2">
                         {new Date(r.fecha).toLocaleString("es-AR")} · {r.cantidad_pagos} pagos
                       </span>
+                      <button
+                        onClick={() => setAbierta((p) => ({ ...p, [r.id]: !p[r.id] }))}
+                        className="ml-3 text-xs font-semibold text-blue-700 hover:underline"
+                      >
+                        {abierta[r.id] === false ? "▸ Ver desglose" : "▾ Ocultar desglose"}
+                      </button>
                     </p>
                     <p className="text-xs text-muted-foreground">
                       Efectivo declarado {fmt(r.efectivo_declarado)} · registrado {fmt(r.efectivo_registrado)}
@@ -204,6 +233,61 @@ export default function PendienteRendirPage() {
                       {confirmandoRendicion === r.id ? "..." : forzar[r.id] ? "Confirmar CON diferencia" : "✓ Confirmar rendición"}
                     </Button>
                   </div>
+                </div>
+
+                {/* ── Desglose para cotejar: pago por pago, medios, cheques, totales ── */}
+                {abierta[r.id] !== false && (r.pagos?.length ?? 0) > 0 && (
+                  <div className="mt-3 rounded-lg border bg-white">
+                    <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-x-3 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground border-b">
+                      <span>Cotejado</span><span>Cliente / comprobantes</span><span>Cómo pagó</span><span>Detalle</span><span className="text-right">Monto</span>
+                    </div>
+                    {r.pagos.map((p: any) => {
+                      const excluido = noVerificados[r.id]?.has(p.id)
+                      return (
+                        <div key={p.id} className={`grid grid-cols-[auto_1fr_1fr_1fr_auto] gap-x-3 px-3 py-2 text-sm border-b last:border-b-0 ${excluido ? "opacity-50" : ""}`}>
+                          <label className="flex items-start pt-0.5">
+                            <input type="checkbox" checked={!excluido} onChange={() => toggleVerificado(r.id, p.id)} className="h-4 w-4" />
+                          </label>
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{p.cliente}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {p.comprobantes.length
+                                ? p.comprobantes.map((c: any) => `${c.numero} ${fmt(c.monto)}`).join(" · ")
+                                : "a cuenta (sin imputar)"}
+                              {p.observaciones ? ` · ${p.observaciones}` : ""}
+                            </p>
+                          </div>
+                          <div className="text-xs">
+                            {p.medios.map((m: any, i: number) => (
+                              <p key={i} className="capitalize">{m.tipo} {fmt(m.monto)}</p>
+                            ))}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {p.medios.map((m: any, i: number) => (
+                              <p key={i}>
+                                {m.tipo === "cheque" && `${m.banco || "—"} N° ${m.numero_cheque || "—"} · venc ${m.fecha_cheque ? m.fecha_cheque.split("-").reverse().join("/") : "—"}${m.color ? ` · ${m.color}` : ""}`}
+                                {m.tipo === "transferencia" && `ref ${m.referencia || "—"}`}
+                                {m.tipo === "efectivo" && "—"}
+                              </p>
+                            ))}
+                          </div>
+                          <div className="text-right font-semibold tabular-nums">{fmt(p.monto)}</div>
+                        </div>
+                      )
+                    })}
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 py-2 bg-slate-50 text-xs rounded-b-lg">
+                      <span className="font-semibold uppercase tracking-wide text-muted-foreground">Totales a cotejar:</span>
+                      {Object.entries(r.totales || {}).map(([tipo, t]: [string, any]) => (
+                        <span key={tipo} className="capitalize">
+                          {tipo}: <b className="tabular-nums">{fmt(t.monto)}</b>{tipo === "cheque" ? ` (${t.cantidad} cheque${t.cantidad === 1 ? "" : "s"})` : ""}
+                        </span>
+                      ))}
+                      <span className="ml-auto">
+                        Verificados: <b>{r.pagos.length - (noVerificados[r.id]?.size ?? 0)}</b> de {r.pagos.length}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 </div>
               ))}
             </div>
