@@ -528,6 +528,17 @@ export async function POST(request: Request) {
       }
     }
 
+    // ─── 8. Marcar el pedido como FACTURADO acá, en el servidor ───
+    // Antes lo hacía la pantalla desde el navegador en un segundo paso; si ese paso
+    // no llegaba (permisos, pestaña cerrada, red), el comprobante quedaba emitido
+    // pero el pedido seguía "impreso" y editable. Con comprobante emitido, el pedido
+    // queda bloqueado sí o sí (lib/pedidos/estados.ts).
+    if (comprobantesGenerados.length > 0) {
+      const { error: estadoErr } = await supabase
+        .from("pedidos").update({ estado: "facturado" }).eq("id", pedido_id)
+      if (estadoErr) console.error("[generar] No se pudo marcar el pedido como facturado:", estadoErr)
+    }
+
     // ─── 9. Generar PDFs y subirlos al bucket ───
     // Se hace en background — si falla no bloquea el comprobante ya emitido con CAE.
     const { data: empresaData } = await supabase.from('configuracion_empresa').select('*').single()
