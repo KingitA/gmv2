@@ -50,6 +50,10 @@ export function ControlarRendicion({
   const [efectivoContado, setEfectivoContado] = useState("")
   const [cajaDestino, setCajaDestino] = useState("")
   const [requiereForzar, setRequiereForzar] = useState(false)
+  // Pagos declarados (para rechazar uno que no llegó / está mal / era prueba)
+  const [pagosDeclarados, setPagosDeclarados] = useState<{ id: string; cliente: string; monto: number; medios: string }[]>([])
+  const [rechazando, setRechazando] = useState<string | null>(null)
+  const [recarga, setRecarga] = useState(0)
 
   const cajas = useMemo(() => cuentas.filter((c) => c.grupo === "EFECTIVO"), [cuentas])
 
@@ -64,18 +68,27 @@ export function ControlarRendicion({
           .single()
         if (rendErr) throw rendErr
         const pagoIds = (rend.rendicion_items || []).map((i: any) => i.pago_id)
-        const { data: pagos, error: pagErr } = await supabase
+        const { data: pagosAll, error: pagErr } = await supabase
           .from("pagos_clientes")
-          .select("id, monto, cliente_id, clientes(nombre), pagos_detalle(*)")
+          .select("id, monto, estado, cliente_id, clientes(nombre), pagos_detalle(*)")
           .in("id", pagoIds.length ? pagoIds : ["00000000-0000-0000-0000-000000000000"])
         if (pagErr) throw pagErr
+        // Un pago ya rechazado/anulado no forma parte de lo que se rinde
+        const pagos = (pagosAll || []).filter((p: any) => ["pendiente", "pendiente_rendicion"].includes(p.estado))
 
         const fisicos: ChequeFisico[] = []
         const digs: { desc: string; monto: number }[] = []
         const digPagos: string[] = []
         const sinColor: { pago_id: string; cliente: string }[] = []
+        const declarados: { id: string; cliente: string; monto: number; medios: string }[] = []
         for (const p of pagos || []) {
           const cliente = (p as any).clientes?.nombre ?? "Cliente"
+          declarados.push({
+            id: p.id,
+            cliente,
+            monto: Number(p.monto),
+            medios: ((p as any).pagos_detalle || []).map((d: any) => `${d.tipo_pago} $ ${fmt(Number(d.monto))}`).join(" + "),
+          })
           let soloDigital = true
           for (const d of (p as any).pagos_detalle || []) {
             const esEcheq = d.tipo_pago === "cheque" && d.color_cheque === "ECHEQ"
@@ -110,6 +123,7 @@ export function ControlarRendicion({
         setDigitales(digs)
         setPagosDigitales(digPagos)
         setPagosSinColor(sinColor)
+        setPagosDeclarados(declarados)
         setEfectivoContado(String(Number(rend.efectivo_declarado ?? 0)))
       } catch (e: any) {
         toast({ variant: "destructive", title: "Error", description: e.message })
@@ -120,7 +134,36 @@ export function ControlarRendicion({
     }
     cargar()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rendicionId])
+  }, [rendicionId, recarga])
+
+  // Rechazar un cobro declarado: nunca tocó libro ni caja, se descarta limpio
+  // (pago → rechazado, imputaciones pendientes fuera, cheques ANULADO). Si la
+  // rendición queda vacía, se cancela sola y desaparece de "Esperando la plata".
+  const rechazarPago = async (p: { id: string; cliente: string; monto: number }) => {
+    const motivo = window.prompt(`Rechazar el cobro de ${p.cliente} por $ ${fmt(p.monto)}.\n¿Motivo? (no llegó la plata, mal cargado, prueba…)`)
+    if (motivo === null) return
+    if (!motivo.trim()) {
+      toast({ variant: "destructive", title: "Indicá el motivo del rechazo" })
+      return
+    }
+    setRechazando(p.id)
+    try {
+      const res = await fetch(`/api/finanzas/rendiciones/${rendicionId}/rechazar-pago`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pago_id: p.id, motivo: motivo.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "No se pudo rechazar")
+      toast({ title: "Pago rechazado", description: data.mensaje })
+      if (data.rendicion_cancelada) onListo()
+      else setRecarga((n) => n + 1)
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: e.message })
+    } finally {
+      setRechazando(null)
+    }
+  }
 
   const chequesOk = cheques.filter((c) => checks[c.key])
   const chequesFaltantes = cheques.filter((c) => !checks[c.key])
@@ -200,6 +243,34 @@ export function ControlarRendicion({
               Cotejá lo que te entregó contra lo declarado, con la persona adelante. Las
               transferencias y echeqs ya viajan por su canal — esto es solo lo físico.
             </p>
+
+            {/* Pagos declarados: qué cobros trae, con opción de rechazar uno */}
+            {pagosDeclarados.length > 0 && (
+              <div className="mt-4">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                  Cobros declarados ({pagosDeclarados.length})
+                </div>
+                <div className="mt-1.5 flex flex-col gap-1">
+                  {pagosDeclarados.map((p) => (
+                    <div key={p.id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm">
+                      <span className="flex-1 min-w-0 truncate">
+                        {p.cliente} <span className="text-xs text-slate-400">· {p.medios || "sin detalle"}</span>
+                      </span>
+                      <span className="font-semibold" style={NUM}>$ {fmt(p.monto)}</span>
+                      <button
+                        type="button"
+                        onClick={() => rechazarPago(p)}
+                        disabled={rechazando === p.id || guardando}
+                        title="No llegó la plata / mal cargado / prueba: el cobro se descarta, no entra a caja ni a la cuenta del cliente"
+                        className="rounded-md border border-red-200 px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {rechazando === p.id ? "…" : "✕ Rechazar"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Cheques físicos */}
             {cheques.length > 0 && (
