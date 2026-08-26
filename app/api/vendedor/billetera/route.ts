@@ -82,6 +82,16 @@ export async function GET(request: Request) {
 
     const totalPendiente = comisionesPendientes.reduce((s, c) => s + Number(c.monto), 0)
 
+    // Deuda por rendiciones: la billetera es una cuenta corriente. Si cobró
+    // $100 y entregó $90, los $10 quedan acá (movimientos 'rendicion_diferencia',
+    // positivo = debe, negativo = se le debe).
+    const { data: difs } = await supabase
+      .from("billetera_movimientos")
+      .select("monto")
+      .in("viajante_id", session.vendedorIds)
+      .eq("referencia_tipo", "rendicion_diferencia")
+    const deudaRendiciones = Math.round((difs ?? []).reduce((s: number, m: any) => s + Number(m.monto), 0) * 100) / 100
+
     const { data: historial, count } = await supabase
       .from("billetera_movimientos")
       .select("id, tipo, medio, monto, concepto, fecha, referencia_id, referencia_tipo", { count: "exact" })
@@ -124,6 +134,7 @@ export async function GET(request: Request) {
       desglose,
       pagos_sin_rendir: cantidadSinRendir,
       en_viaje: { total: enViajeTotal, cantidad: enViaje.length },
+      deuda_rendiciones: deudaRendiciones,
       comisiones_pendientes: comisionesPendientes,
       total_pendiente_comisiones: totalPendiente,
       historial: historialEnriquecido,

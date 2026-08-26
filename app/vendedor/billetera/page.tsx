@@ -19,6 +19,7 @@ interface BilleteraData {
   desglose: { efectivo: number; cheques: number; transferencias: number }
   pagos_sin_rendir: number
   en_viaje: { total: number; cantidad: number }
+  deuda_rendiciones?: number
   comisiones_pendientes: any[]
   total_pendiente_comisiones: number
   historial: Movimiento[]
@@ -292,6 +293,17 @@ function VendedorBilleteraInner() {
                 📦 En viaje a oficina: <span className="font-bold">{formatCurrency(data.en_viaje.total)}</span>{" "}
                 ({data.en_viaje.cantidad} {data.en_viaje.cantidad === 1 ? "cobro" : "cobros"}) — esperando
                 confirmación
+              </p>
+            </div>
+          )}
+          {Math.abs(data.deuda_rendiciones ?? 0) > 0.005 && (
+            <div className={`rounded-xl px-3 py-2 mt-3 text-sm border ${(data.deuda_rendiciones ?? 0) > 0 ? "bg-red-400/20 border-red-300/40" : "bg-sky-400/20 border-sky-300/40"}`}>
+              <p className="text-white">
+                {(data.deuda_rendiciones ?? 0) > 0 ? (
+                  <>⚠ Faltante de rendiciones: <span className="font-bold">{formatCurrency(data.deuda_rendiciones!)}</span> — lo seguís debiendo a oficina, se descuenta en tu próxima rendición.</>
+                ) : (
+                  <>✔ Entregaste de más en rendiciones: <span className="font-bold">{formatCurrency(Math.abs(data.deuda_rendiciones!))}</span> a tu favor.</>
+                )}
               </p>
             </div>
           )}

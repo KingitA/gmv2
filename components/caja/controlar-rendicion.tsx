@@ -390,8 +390,9 @@ export function ControlarRendicion({
               {difEfectivo !== 0 && (
                 <p className="mt-2 text-xs text-slate-500">
                   Si confirmás con diferencia: los clientes quedan pagos por lo que cobró el vendedor, a la caja entra
-                  lo que contaste, y la diferencia queda registrada como “Diferencia rendición” a nombre del cobrador
-                  (auditable). Si la plata tiene que aparecer, no confirmes: dejá la rendición esperando.
+                  lo que contaste, y {difEfectivo < 0 ? "el faltante le queda debiendo en su billetera" : "el sobrante queda a favor suyo en su billetera"}{" "}
+                  (es su cuenta corriente: cobró 100, entregó 90, sigue debiendo 10). Si la plata tiene que aparecer
+                  ahora, no confirmes: dejá la rendición esperando.
                 </p>
               )}
             </div>
