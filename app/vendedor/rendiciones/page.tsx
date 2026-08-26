@@ -11,6 +11,7 @@ import { formatCurrency } from "@/lib/utils"
 interface PagoPendiente {
   id: string
   monto: number
+  monto_efectivo?: number
   fecha_pago: string
   cliente_nombre: string
   metodo_resumen: string
@@ -86,9 +87,16 @@ export default function VendedorRendicionesPage() {
 
   const rendir = async () => {
     if (!seleccionados.size || enviando) return
+    const efectivoSel = pagos.filter((p) => seleccionados.has(p.id)).reduce((s, p) => s + (p.monto_efectivo ?? 0), 0)
+    const difDeclarado = Math.round((efectivoDeclarado - efectivoSel) * 100) / 100
     if (
       !confirm(
-        `¿Rendir ${formatCurrency(totalSeleccionado)} (${seleccionados.size} cobros)?\n\nOficina recibe el aviso de que el dinero está en viaje y tu billetera queda en 0. Los pagos se confirman cuando oficina recibe la plata.`
+        `¿Rendir ${seleccionados.size} cobro${seleccionados.size === 1 ? "" : "s"} por ${formatCurrency(totalSeleccionado)}?\n\n` +
+          `Efectivo que declarás llevar: ${formatCurrency(efectivoDeclarado)}` +
+          (difDeclarado !== 0
+            ? `\n⚠ Según los cobros deberías llevar ${formatCurrency(efectivoSel)} en efectivo (${difDeclarado > 0 ? "sobran" : "faltan"} ${formatCurrency(Math.abs(difDeclarado))}). Oficina lo va a ver al controlar.`
+            : "") +
+          `\n\nOficina recibe el aviso de que el dinero está en viaje y tu billetera queda en 0. Los pagos se confirman cuando oficina recibe la plata.`
       )
     )
       return
@@ -109,7 +117,7 @@ export default function VendedorRendicionesPage() {
         return
       }
       alert(
-        `✅ Rendición enviada por ${formatCurrency(totalSeleccionado)}. La plata figura "en viaje a oficina" hasta que la confirmen.`
+        `✅ Rendición enviada: ${seleccionados.size} cobro${seleccionados.size === 1 ? "" : "s"} por ${formatCurrency(totalSeleccionado)}, efectivo declarado ${formatCurrency(Number(d.efectivo_declarado ?? efectivoDeclarado))}. La plata figura "en viaje a oficina" hasta que la confirmen.`
       )
       setObs("")
       setLoading(true)

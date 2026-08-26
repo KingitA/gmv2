@@ -168,8 +168,13 @@ export function ControlarRendicion({
   const chequesOk = cheques.filter((c) => checks[c.key])
   const chequesFaltantes = cheques.filter((c) => !checks[c.key])
   const efectivoDeclarado = Number(rendicion?.efectivo_declarado ?? 0)
+  // Lo que los COBROS dicen que entró en efectivo (Σ pagos_detalle efectivo).
+  // Es contra esto que se mide la diferencia: si el vendedor cobró 1.241.200 y
+  // trae 1.241.000, faltan 200 aunque él haya "declarado" 1.241.000.
+  const efectivoRegistrado = Number(rendicion?.efectivo_registrado ?? 0)
   const contadoNum = Number(efectivoContado.replace(",", ".")) || 0
-  const difEfectivo = contadoNum - efectivoDeclarado
+  const difEfectivo = Math.round((contadoNum - efectivoRegistrado) * 100) / 100
+  const difDeclarado = Math.round((efectivoDeclarado - efectivoRegistrado) * 100) / 100
 
   const confirmar = async (forzar: boolean) => {
     if (!cajaDestino) {
@@ -187,10 +192,13 @@ export function ControlarRendicion({
     }
     setGuardando(true)
     try {
-      // Verificados: pagos cuyos cheques físicos están todos tildados + los 100% digitales
-      const pagosConFisicoCompleto = [...new Set(cheques.map((c) => c.pago_id))].filter(
-        (pid) => cheques.filter((c) => c.pago_id === pid).every((c) => checks[c.key])
-      )
+      // Verificados: TODOS los cobros declarados, salvo los que traen cheques
+      // físicos sin tildar. (Antes solo entraban los que tenían cheques o eran
+      // 100% digitales: un cobro solo en efectivo nunca se verificaba y el RPC
+      // cortaba con "ningún pago verificado".)
+      const pagosVerificados = pagosDeclarados
+        .map((p) => p.id)
+        .filter((pid) => cheques.filter((c) => c.pago_id === pid).every((c) => checks[c.key]))
       const res = await fetch(`/api/finanzas/rendiciones/${rendicionId}/confirmar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -198,7 +206,7 @@ export function ControlarRendicion({
           caja_destino_tipo: "CAJA",
           caja_destino_id: cajaDestino,
           efectivo_declarado: contadoNum,
-          pagos_verificados: [...pagosConFisicoCompleto, ...pagosDigitales],
+          pagos_verificados: pagosVerificados,
           forzar_diferencia: forzar,
           colores_cheque: Object.keys(colores).length ? colores : undefined,
         }),
@@ -344,12 +352,23 @@ export function ControlarRendicion({
 
             {/* Efectivo */}
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-wrap items-center gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                 <span>
-                  💵 Efectivo declarado: <b style={NUM}>$ {fmt(efectivoDeclarado)}</b>
+                  💵 Cobrado en efectivo: <b style={NUM}>$ {fmt(efectivoRegistrado)}</b>
+                  <span className="text-xs text-slate-400"> (según los cobros)</span>
                 </span>
+                <span>
+                  Declaró traer: <b style={NUM}>$ {fmt(efectivoDeclarado)}</b>
+                  {difDeclarado !== 0 && (
+                    <span className="ml-1 text-xs font-semibold text-amber-700" style={NUM}>
+                      ({difDeclarado > 0 ? "+" : "−"} $ {fmt(Math.abs(difDeclarado))} vs cobrado)
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
                 <span className="flex items-center gap-1.5">
-                  contado:
+                  Contado por vos:
                   <input
                     value={efectivoContado}
                     onChange={(e) => setEfectivoContado(e.target.value.replace(/[^\d.,]/g, ""))}
@@ -360,14 +379,21 @@ export function ControlarRendicion({
                 </span>
                 {difEfectivo === 0 ? (
                   <span className="rounded-full bg-green-100 px-3 py-0.5 text-[11px] font-bold text-green-700">
-                    ✓ coincide
+                    ✓ coincide con lo cobrado
                   </span>
                 ) : (
                   <span className="rounded-full bg-red-100 px-3 py-0.5 text-[11px] font-bold text-red-700" style={NUM}>
-                    diferencia {difEfectivo > 0 ? "+" : "−"} $ {fmt(Math.abs(difEfectivo))}
+                    {difEfectivo > 0 ? "sobra" : "falta"} $ {fmt(Math.abs(difEfectivo))} vs lo cobrado
                   </span>
                 )}
               </div>
+              {difEfectivo !== 0 && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Si confirmás con diferencia: los clientes quedan pagos por lo que cobró el vendedor, a la caja entra
+                  lo que contaste, y la diferencia queda registrada como “Diferencia rendición” a nombre del cobrador
+                  (auditable). Si la plata tiene que aparecer, no confirmes: dejá la rendición esperando.
+                </p>
+              )}
             </div>
 
             {/* Digitales informativos */}

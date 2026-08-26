@@ -52,6 +52,7 @@ export async function GET() {
       return {
         id: p.id,
         monto: Number(p.monto),
+        monto_efectivo: ef,
         fecha_pago: p.fecha_pago,
         cliente_nombre: p.clientes?.nombre || "—",
         metodo_resumen: detalles.length
