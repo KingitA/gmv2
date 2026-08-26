@@ -2035,8 +2035,17 @@ export async function aplicarCondicionesPedidoVendedor(
     if (v !== ((pedido as any).lista_precio_pedido_id || null)) patch.lista_precio_pedido_id = v
   }
   if (cond.bonif_pedido !== undefined) {
-    const v = normalizarBonifPedido(cond.bonif_pedido)
+    // MERGE por tipo, no reemplazo: la app solo maneja viajante/mercadería;
+    // un `general` "solo este pedido" cargado desde el ERP debe sobrevivir.
+    // Un tipo que la app manda explícitamente (aunque sea vacío) sí se pisa.
     const actual = normalizarBonifPedido((pedido as any).bonif_pedido)
+    const entrante = (cond.bonif_pedido || {}) as Record<string, unknown>
+    const fusion: Record<string, unknown> = { ...(actual || {}) }
+    for (const tipo of ["general", "viajante", "mercaderia"]) {
+      if (tipo in entrante) fusion[tipo] = entrante[tipo]
+      else if (cond.bonif_pedido === null && tipo !== "general") delete fusion[tipo]
+    }
+    const v = normalizarBonifPedido(fusion)
     if (JSON.stringify(v) !== JSON.stringify(actual)) patch.bonif_pedido = v
   }
 

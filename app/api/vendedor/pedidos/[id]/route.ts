@@ -59,7 +59,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const segmentos = SEGMENTOS_BONIF.map((seg) => {
       const fila: Record<string, any> = { segmento: seg }
       for (const tipo of ["general", "viajante", "mercaderia"] as const) {
-        const o = tipo !== "general" ? ovr?.[tipo]?.[seg] : undefined
+        // general también puede venir "solo este pedido" (lo carga el ERP)
+        const o = ovr?.[tipo]?.[seg]
         const f = fichaPct(tipo, seg)
         fila[tipo] = {
           pct: typeof o === "number" ? o : f ?? 0,
