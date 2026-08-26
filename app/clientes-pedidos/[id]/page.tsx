@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo, repreciarPedido, actualizarEncabezadoPedido } from "@/lib/actions/pedidos"
 import { esPedidoEditable, puedeEditarEntrega, transicionesManuales, motivoBloqueo, ESTADO_LABEL } from "@/lib/pedidos/estados"
-import { detectarSegmentoBonif, SEGMENTOS_BONIF, SEGMENTO_LABEL, type SegmentoBonif } from "@/lib/pricing/segmento"
+import { detectarSegmentoBonif, SEGMENTOS_BONIF, SEGMENTO_LABEL, normalizarBonifPedido, type SegmentoBonif } from "@/lib/pricing/segmento"
 import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
@@ -45,6 +45,12 @@ export default function PedidoEditPage() {
   const [foundBonif, setFoundBonif] = useState<any[]>([])
   const [qtyBonif, setQtyBonif] = useState(0)
   const [bonifPct, setBonifPct] = useState(0)
+  // Descuentos por segmento: ficha del cliente (general/viajante/mercadería) y
+  // override "solo este pedido" (pedidos.bonif_pedido, el mismo que usa la app
+  // del vendedor). Form: clave `${tipo}.${segmento}` → string ("" = hereda).
+  const [bonifFicha, setBonifFicha] = useState<any[]>([])
+  const [bonifPedidoForm, setBonifPedidoForm] = useState<Record<string, string>>({})
+  const [condSegmento, setCondSegmento] = useState<any[]>([])
   const [recalcBonif, setRecalcBonif] = useState(false)
   const [showBonifPanel, setShowBonifPanel] = useState(false)
   const [headerOpen, setHeaderOpen] = useState(true)
@@ -97,16 +103,54 @@ export default function PedidoEditPage() {
     setListasPrecio(listasRes.data || [])
     setVendedores(vendRes.data || [])
     if (p?.cliente_id) {
-      const { data: bonif } = await supabase
-        .from("bonificaciones")
-        .select("id, porcentaje, segmento")
-        .eq("cliente_id", p.cliente_id)
-        .eq("tipo", "mercaderia")
-        .eq("activo", true)
-      setBonifMercaderia(bonif || [])
+      const [{ data: bonifTodas }, { data: cmPed }, { data: cpPed }, { data: cmCli }, { data: cpCli }] = await Promise.all([
+        supabase.from("bonificaciones").select("id, tipo, porcentaje, segmento").eq("cliente_id", p.cliente_id).eq("activo", true).in("tipo", ["general", "viajante", "mercaderia"]),
+        supabase.from("pedido_marca_condicion").select("marca_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
+        supabase.from("pedido_proveedor_condicion").select("proveedor_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
+        supabase.from("cliente_marca_condicion").select("marca_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("cliente_id", p.cliente_id),
+        supabase.from("cliente_proveedor_condicion").select("proveedor_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("cliente_id", p.cliente_id),
+      ])
+      const bonif = (bonifTodas || []).filter((b: any) => b.tipo === "mercaderia")
+      setBonifFicha(bonifTodas || [])
+      setBonifMercaderia(bonif)
       // % efectivo: override del pedido (si lo tiene) o el mayor de la ficha del cliente
-      const pctFicha = (bonif || []).reduce((m: number, b: any) => Math.max(m, b.porcentaje || 0), 0)
+      const pctFicha = bonif.reduce((m: number, b: any) => Math.max(m, b.porcentaje || 0), 0)
       setBonifPct(p.bonif_mercaderia_pct != null ? p.bonif_mercaderia_pct : pctFicha)
+
+      // Override "solo este pedido" → form
+      const ovr = normalizarBonifPedido(p.bonif_pedido)
+      const form: Record<string, string> = {}
+      for (const tipo of ["viajante", "mercaderia"] as const)
+        for (const seg of SEGMENTOS_BONIF) {
+          const v = ovr?.[tipo]?.[seg]
+          form[`${tipo}.${seg}`] = typeof v === "number" ? String(v) : ""
+        }
+      setBonifPedidoForm(form)
+
+      // Condiciones por marca / proveedor (pedido pisa ficha), con nombre
+      const marcaIds = [...new Set([...(cmPed || []), ...(cmCli || [])].map((c: any) => c.marca_id))]
+      const provIds = [...new Set([...(cpPed || []), ...(cpCli || [])].map((c: any) => c.proveedor_id))]
+      const [{ data: marcas }, { data: provs }] = await Promise.all([
+        marcaIds.length ? supabase.from("marcas").select("id, descripcion").in("id", marcaIds) : Promise.resolve({ data: [] as any[] }),
+        provIds.length ? supabase.from("proveedores").select("id, nombre").in("id", provIds) : Promise.resolve({ data: [] as any[] }),
+      ])
+      const nm = new Map((marcas || []).map((m: any) => [m.id, m.descripcion]))
+      const np = new Map((provs || []).map((x: any) => [x.id, x.nombre]))
+      const conds: any[] = []
+      const vistas = new Set<string>()
+      for (const [origen, rows, ambito] of [
+        ["pedido", cmPed || [], "marca"], ["pedido", cpPed || [], "proveedor"],
+        ["ficha", cmCli || [], "marca"], ["ficha", cpCli || [], "proveedor"],
+      ] as const) {
+        for (const c of rows as any[]) {
+          const refId = ambito === "marca" ? c.marca_id : c.proveedor_id
+          const k = `${ambito}:${refId}`
+          if (vistas.has(k)) continue
+          vistas.add(k)
+          conds.push({ ...c, ambito, origen, nombre: ambito === "marca" ? nm.get(refId) || "Marca" : np.get(refId) || "Proveedor" })
+        }
+      }
+      setCondSegmento(conds)
     }
     if (p) {
       setHeaderForm({
@@ -181,6 +225,7 @@ export default function PedidoEditPage() {
         metodo_perf_plus_pedido: headerForm.metodo_perf_plus_pedido || null,
         observaciones: headerForm.observaciones || null,
         bonif_mercaderia_pct: bonifPct || null,
+        bonif_pedido: bonifPedidoDesdeForm(),
       }
       // El servidor aplica la traba por estado: si el pedido ya no es editable,
       // solo toma condicion_entrega (y el estado si es una transición válida).
@@ -198,7 +243,9 @@ export default function PedidoEditPage() {
           "lista_perf0_pedido_id", "metodo_perf0_pedido",
           "lista_perf_plus_pedido_id", "metodo_perf_plus_pedido",
         ] as const
-        const cambioPrecio = CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
+        const cambioBonif =
+          JSON.stringify(normalizarBonifPedido(headerUpdate.bonif_pedido)) !== JSON.stringify(normalizarBonifPedido((pedido as any)?.bonif_pedido))
+        const cambioPrecio = cambioBonif || CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
         if (cambioPrecio && esPedidoEditable(headerForm.estado)) {
           await repreciarPedido(id)
         }
@@ -248,6 +295,29 @@ export default function PedidoEditPage() {
   // (pedidos.bonif_pedido.mercaderia, app vendedor) > % general del pedido
   // (bonif_mercaderia_pct, este input) > ficha del cliente por segmento.
   // Unidades por artículo = round(monto / precio).
+  // Form de descuentos por segmento → jsonb bonif_pedido (null = hereda todo de la ficha)
+  function bonifPedidoDesdeForm() {
+    const out: any = {}
+    for (const tipo of ["viajante", "mercaderia"] as const) {
+      const seg: Record<string, number> = {}
+      for (const s of SEGMENTOS_BONIF) {
+        const raw = (bonifPedidoForm[`${tipo}.${s}`] ?? "").trim().replace(",", ".")
+        if (raw === "") continue
+        const n = Number(raw)
+        if (Number.isFinite(n)) seg[s] = n
+      }
+      if (Object.keys(seg).length) out[tipo] = seg
+    }
+    return normalizarBonifPedido(out)
+  }
+  // % de la ficha para un tipo/segmento (segmento específico > "todos")
+  function pctFicha(tipo: string, seg: SegmentoBonif): number | null {
+    const esp = bonifFicha.find((b: any) => b.tipo === tipo && b.segmento === seg)
+    if (esp) return Number(esp.porcentaje) || 0
+    const todos = bonifFicha.find((b: any) => b.tipo === tipo && !b.segmento)
+    return todos ? Number(todos.porcentaje) || 0 : null
+  }
+
   function pctMercaderiaSeg(seg: SegmentoBonif): number {
     const ovr = pedido?.bonif_pedido?.mercaderia
     if (ovr && typeof ovr[seg] === "number") return ovr[seg]
@@ -553,6 +623,68 @@ export default function PedidoEditPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Row 4: Descuentos por segmento (misma columna bonif_pedido que la app del vendedor) */}
+              <div>
+                <div className="flex items-baseline justify-between mb-3">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Descuentos por segmento</p>
+                  <p className="text-[11px] text-slate-400">
+                    Vacío = hereda de la ficha del cliente. Al guardar se re-precian los renglones y se actualiza el kardex.
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-[10px] uppercase tracking-wide text-slate-500">
+                        <th className="text-left font-bold pb-2">Segmento</th>
+                        <th className="text-center font-bold pb-2 w-32">General <span className="font-normal normal-case">(ficha)</span></th>
+                        <th className="text-center font-bold pb-2 w-36 text-orange-700">Viajante</th>
+                        <th className="text-center font-bold pb-2 w-36 text-green-700">Mercadería</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {SEGMENTOS_BONIF.map((seg) => (
+                        <tr key={seg} className="border-t border-slate-100">
+                          <td className="py-1.5 text-slate-700">{SEGMENTO_LABEL[seg]}</td>
+                          <td className="py-1.5 text-center tabular-nums text-slate-600">{pctFicha("general", seg) ?? 0}%</td>
+                          {(["viajante", "mercaderia"] as const).map((tipo) => {
+                            const ficha = pctFicha(tipo, seg)
+                            const val = bonifPedidoForm[`${tipo}.${seg}`] ?? ""
+                            return (
+                              <td key={tipo} className="py-1.5 px-2">
+                                <div className="relative">
+                                  <Input
+                                    className={`h-8 text-right pr-6 tabular-nums ${val !== "" ? "border-amber-400 bg-amber-50" : ""}`}
+                                    value={val}
+                                    placeholder={ficha != null ? `${ficha}` : "0"}
+                                    disabled={!editable}
+                                    inputMode="decimal"
+                                    onChange={(e) => setBonifPedidoForm((prev) => ({ ...prev, [`${tipo}.${seg}`]: e.target.value.replace(/[^\d.,]/g, "") }))}
+                                  />
+                                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">%</span>
+                                </div>
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {condSegmento.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 space-y-1">
+                    <p className="font-bold text-slate-500 uppercase tracking-wide text-[10px]">Condiciones por marca / proveedor (van en comprobante aparte)</p>
+                    {condSegmento.map((c: any) => (
+                      <p key={`${c.ambito}:${c.marca_id || c.proveedor_id}`}>
+                        <span className="font-semibold">{c.nombre}</span>
+                        <span className="text-slate-400"> · {c.ambito}{c.origen === "pedido" ? " · solo este pedido" : " · ficha"}</span>
+                        {" — "}general {Number(c.dto_general_pct || 0)}% · viajante {Number(c.dto_viajante_pct || 0)}% · mercadería {Number(c.dto_mercaderia_pct || 0)}%
+                        {c.metodo_facturacion ? ` · ${c.metodo_facturacion}` : ""}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

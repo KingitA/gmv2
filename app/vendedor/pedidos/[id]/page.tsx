@@ -13,6 +13,10 @@ interface DetalleItem {
   precio_final: number
   subtotal: number
   es_bonificado: boolean | null
+  precio_lista?: number | null
+  descuento_propio_pct?: number | null
+  bonif_general_pct?: number | null
+  bonif_viajante_pct?: number | null
   articulos?: {
     id: string
     sku: string | null
@@ -33,6 +37,32 @@ interface PedidoDetalle {
   cliente_id: string
   clientes?: { id: string; nombre: string; localidad: string | null; metodo_facturacion: string | null } | null
   pedidos_detalle: DetalleItem[]
+}
+
+// Cabecera de descuentos con datos reales (la arma /api/vendedor/pedidos/[id])
+interface DescuentosPedido {
+  segmentos: Array<{
+    segmento: "limpieza_bazar" | "perf0" | "perf_plus"
+    general: { pct: number; origen: string }
+    viajante: { pct: number; origen: string }
+    mercaderia: { pct: number; origen: string }
+  }>
+  condiciones: Array<{
+    ambito: "marca" | "proveedor"
+    origen: "pedido" | "ficha"
+    nombre: string
+    dto_general_pct: number
+    dto_viajante_pct: number
+    dto_mercaderia_pct: number
+    metodo_facturacion: string | null
+  }>
+  solo_este_pedido: boolean
+}
+
+const SEG_LABEL: Record<string, string> = {
+  limpieza_bazar: "Limpieza / Bazar",
+  perf0: "Perfumería 0",
+  perf_plus: "Perfumería plus",
 }
 
 const ESTADO_BADGE: Record<string, string> = {
@@ -62,6 +92,7 @@ function PedidoDetalleInner() {
   const [pedido, setPedido] = useState<PedidoDetalle | null>(null)
   const [comprobantes, setComprobantes] = useState<Array<{ id: string; tipo_comprobante: string; numero_comprobante: string; estado_pdf: string }>>([])
   const [remitos, setRemitos] = useState<Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }>>([])
+  const [descuentos, setDescuentos] = useState<DescuentosPedido | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sync, setSync] = useState<"idle" | "saving" | "error">("idle")
@@ -76,6 +107,7 @@ function PedidoDetalleInner() {
       setPedido(d.pedido)
       setComprobantes(d.comprobantes || [])
       setRemitos(d.remitos || [])
+      setDescuentos(d.descuentos || null)
       setError(null)
     } catch (e: any) {
       setError(e?.message || "No se pudo cargar el pedido")
@@ -254,6 +286,44 @@ function PedidoDetalleInner() {
           </div>
         )}
 
+        {/* Descuentos aplicados: lo que REALMENTE tiene cada renglón, no lo que dice la ficha */}
+        {descuentos && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
+            <div className="flex items-baseline justify-between">
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Descuentos de este pedido</p>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${descuentos.solo_este_pedido ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"}`}>
+                {descuentos.solo_este_pedido ? "solo este pedido" : "ficha del cliente"}
+              </span>
+            </div>
+            <div className="grid grid-cols-[1fr_3.5rem_3.5rem_3.5rem] gap-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">
+              <span>Segmento</span>
+              <span className="text-center">Gral.</span>
+              <span className="text-center text-orange-600">Viaj.</span>
+              <span className="text-center text-green-700">Merc.</span>
+            </div>
+            {descuentos.segmentos.map((s) => (
+              <div key={s.segmento} className="grid grid-cols-[1fr_3.5rem_3.5rem_3.5rem] gap-1 text-sm items-center">
+                <span className="text-gray-700">{SEG_LABEL[s.segmento] || s.segmento}</span>
+                <span className="text-center tabular-nums text-gray-600">{s.general.pct}%</span>
+                <span className={`text-center tabular-nums font-bold ${s.viajante.origen === "pedido" ? "text-amber-700" : "text-orange-600"}`}>{s.viajante.pct}%</span>
+                <span className={`text-center tabular-nums font-bold ${s.mercaderia.origen === "pedido" ? "text-amber-700" : "text-green-700"}`}>{s.mercaderia.pct}%</span>
+              </div>
+            ))}
+            {descuentos.condiciones.length > 0 && (
+              <div className="pt-2 border-t border-gray-100 space-y-1">
+                {descuentos.condiciones.map((c) => (
+                  <p key={`${c.ambito}:${c.nombre}`} className="text-xs text-gray-600">
+                    <span className="font-bold">{c.nombre}</span>
+                    <span className="text-gray-400"> ({c.ambito}{c.origen === "pedido" ? ", solo este pedido" : ""})</span>
+                    {" · "}gral. {c.dto_general_pct}% · viaj. {c.dto_viajante_pct}% · merc. {c.dto_mercaderia_pct}%
+                  </p>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-gray-400">Viajante y general ya están dentro del precio de cada artículo. Mercadería se entrega sin cargo.</p>
+          </div>
+        )}
+
         {/* Items */}
         <div className="space-y-2">
           <div className="flex items-center justify-between px-1">
@@ -281,6 +351,14 @@ function PedidoDetalleInner() {
                     {i.articulos?.sku ? `SKU ${i.articulos.sku}` : ""}
                     {i.articulos?.unidades_por_bulto ? ` · ${i.articulos.unidades_por_bulto} u/bulto` : ""}
                   </p>
+                  {(Number(i.descuento_propio_pct) > 0 || Number(i.bonif_general_pct) > 0 || Number(i.bonif_viajante_pct) > 0) && (
+                    <p className="text-[11px] mt-0.5 text-gray-500">
+                      {i.precio_lista ? `Lista ${formatCurrency(i.precio_lista)}` : ""}
+                      {Number(i.descuento_propio_pct) > 0 ? ` · oferta −${Number(i.descuento_propio_pct)}%` : ""}
+                      {Number(i.bonif_general_pct) > 0 ? ` · gral. −${Number(i.bonif_general_pct)}%` : ""}
+                      {Number(i.bonif_viajante_pct) > 0 ? <span className="text-orange-600 font-bold"> · viajante −{Number(i.bonif_viajante_pct)}%</span> : ""}
+                    </p>
+                  )}
                 </div>
                 {editable && (
                   <button onClick={() => quitar(i)} className="text-red-500 text-xl leading-none px-1">

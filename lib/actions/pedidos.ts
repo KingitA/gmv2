@@ -7,7 +7,9 @@ import { getNextOrderNumber } from "@/lib/utils/next-order-number"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { calcularPrecioPedido } from "@/lib/pricing/calcular-precio-pedido"
 import type { DatosLista, MetodoFacturacion, DescuentoTipado } from "@/lib/pricing/calculator"
-import { insertarKardex, type DescuentoKardex } from "@/lib/kardex/insertar-kardex"
+import { insertarKardex } from "@/lib/kardex/insertar-kardex"
+import { buildKardexDescuentos } from "@/lib/kardex/descuentos"
+import { sincronizarKardexPedido } from "@/lib/kardex/sincronizar-pedido"
 import { getComisionPorcentaje, getPrecioNeto, calcularComisionMonto } from "@/lib/comisiones/calcular"
 
 // ─── Segmento de artículo: helper compartido (lib/pricing/segmento.ts) ───────
@@ -383,69 +385,8 @@ function resolverBonifItem(
   return { generalPct: getDescuentoGeneral(general, segmento), viajantePct: getDescuentoViajante(viajante, segmento) }
 }
 
-/**
- * Arma el desglose de descuentos por línea para el kardex.
- * Cascada escalonada (neto basis, pre-IVA adj): P.Lista bruto −oferta −general −viajante.
- *   - oferta (descuento_propio): YA viene incluida en precioLista; back-calculamos su monto.
- *   - general: sobre precioLista.
- *   - viajante: sobre el neto post-general (= precioConDescuento).
- * kardex.precio_lista se mantiene = precioLista (post-oferta, pre-bonif) para no alterar el margen.
- */
-function buildKardexDescuentos(
-  precioLista: number,        // engine: post-recargo, post-oferta, PRE-bonif (pre-IVA adj)
-  precioConDescuento: number, // engine: precioLista * (1-general/100)*(1-viajante/100)
-  ofertaPct: number,          // descuento_propio del artículo
-  generalPct: number,         // bonificación general del cliente (por segmento)
-  viajantePct: number,        // bonificación viajante del cliente (por segmento)
-): {
-  precio_lista: number
-  descuentos_json: DescuentoKardex[]
-  descuento_oferta_pct: number | null
-  descuento_oferta_monto: number | null
-  descuento_general_pct: number | null
-  descuento_general_monto: number | null
-  descuento_viajante_pct: number | null
-  descuento_viajante_monto: number | null
-} {
-  const descuentos_json: DescuentoKardex[] = []
-
-  let descuento_oferta_pct: number | null = null
-  let descuento_oferta_monto: number | null = null
-  if (ofertaPct > 0) {
-    const bruto = round2(precioLista / (1 - ofertaPct / 100))
-    descuento_oferta_pct = ofertaPct
-    descuento_oferta_monto = round2(bruto - precioLista)
-    descuentos_json.push({ tipo: 'oferta', porcentaje: ofertaPct, monto_unitario: descuento_oferta_monto })
-  }
-
-  const afterGeneral = round2(precioLista * (1 - generalPct / 100))
-  let descuento_general_pct: number | null = null
-  let descuento_general_monto: number | null = null
-  if (generalPct > 0) {
-    descuento_general_pct = generalPct
-    descuento_general_monto = round2(precioLista - afterGeneral)
-    descuentos_json.push({ tipo: 'general', porcentaje: generalPct, monto_unitario: descuento_general_monto })
-  }
-
-  let descuento_viajante_pct: number | null = null
-  let descuento_viajante_monto: number | null = null
-  if (viajantePct > 0) {
-    descuento_viajante_pct = viajantePct
-    descuento_viajante_monto = round2(afterGeneral - precioConDescuento)
-    descuentos_json.push({ tipo: 'viajante', porcentaje: viajantePct, monto_unitario: descuento_viajante_monto })
-  }
-
-  return {
-    precio_lista: precioLista,
-    descuentos_json,
-    descuento_oferta_pct,
-    descuento_oferta_monto,
-    descuento_general_pct,
-    descuento_general_monto,
-    descuento_viajante_pct,
-    descuento_viajante_monto,
-  }
-}
+// buildKardexDescuentos vive en lib/kardex/descuentos.ts (la comparte el
+// sincronizador de kardex desde los renglones: lib/kardex/sincronizar-pedido.ts).
 
 // ─── Preview precio (sin escribir a DB) — para mostrador ─────────────────────
 export async function previewPrecioArticulo(
@@ -1432,6 +1373,9 @@ const CAMPOS_ENCABEZADO = [
   "lista_precio_pedido_id", "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
   "lista_perf0_pedido_id", "metodo_perf0_pedido", "lista_perf_plus_pedido_id",
   "metodo_perf_plus_pedido", "observaciones", "bonif_mercaderia_pct",
+  // Descuentos por segmento "solo este pedido" (viajante/mercadería), mismo
+  // jsonb que usa la app del vendedor — el ERP los ve y edita en la misma columna.
+  "bonif_pedido",
 ] as const
 
 export async function actualizarEncabezadoPedido(
@@ -1448,6 +1392,7 @@ export async function actualizarEncabezadoPedido(
 
   if (editable) {
     for (const k of CAMPOS_ENCABEZADO) if (k in patch) update[k] = patch[k]
+    if ("bonif_pedido" in update) update.bonif_pedido = normalizarBonifPedido(update.bonif_pedido)
   } else if (puedeEditarEntrega(pedido.estado)) {
     if ("condicion_entrega" in patch) update.condicion_entrega = patch.condicion_entrega
   }
@@ -1499,6 +1444,15 @@ async function recalcularTotalPedido(supabase: any, pedidoId: string) {
     (allItems || []).filter((i: any) => !i.es_bonificado).reduce((s: number, i: any) => s + (i.subtotal || 0), 0) * 100
   ) / 100
   await supabase.from("pedidos").update({ total, subtotal: total }).eq("id", pedidoId)
+
+  // El kardex es el espejo de los renglones: cada vez que cambian (cantidad,
+  // precio, reprecio por cabecera, alta/baja) se vuelve a alinear. Best-effort:
+  // no bloquea la edición del pedido, pero deja rastro si falla.
+  try {
+    await sincronizarKardexPedido(createAdminClient(), pedidoId)
+  } catch (e: any) {
+    console.error("[recalcularTotalPedido] kardex desalineado para", pedidoId, e?.message || e)
+  }
   return total
 }
 
@@ -1887,16 +1841,7 @@ export async function guardarItemsPedido(
     if (error) throw error
   }
 
-  const { data: allItems } = await supabase
-    .from("pedidos_detalle")
-    .select("subtotal, es_bonificado")
-    .eq("pedido_id", pedidoId)
-
-  const total = Math.round(
-    (allItems || []).filter(i => !i.es_bonificado).reduce((s, i) => s + (i.subtotal || 0), 0) * 100
-  ) / 100
-
-  await supabase.from("pedidos").update({ total }).eq("id", pedidoId)
+  await recalcularTotalPedido(supabase, pedidoId)
 
   revalidatePath("/clientes-pedidos")
   return { success: true }

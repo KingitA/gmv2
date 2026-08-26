@@ -10,7 +10,8 @@ import {
   type DescuentoTipado,
 } from "@/lib/pricing/calculator"
 import { generarBonificacionContado } from "@/lib/comprobantes/generar-bonificacion"
-import { insertarKardex, vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
+import { vincularKardexAComprobante, distribuirPercepcionesKardex } from "@/lib/kardex/insertar-kardex"
+import { sincronizarKardexPedido } from "@/lib/kardex/sincronizar-pedido"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { REQUIERE_CAE, TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
@@ -415,72 +416,28 @@ export async function POST(request: Request) {
       comprobantesGenerados.push({ ...resultado, _segmento: segmentoGrupo, _items: grupoItems })
     }
 
-    // ── Kardex: vincular entradas existentes o crear si no existen ────────────
-    // Entries may already exist from createPedido (session client, may have failed
-    // silently due to RLS). Here we use admin client so it always succeeds.
-    const { count: kardexCount } = await supabase
-      .from('kardex')
-      .select('id', { count: 'exact', head: true })
-      .eq('pedido_id', pedido_id)
-
-    if ((kardexCount ?? 0) > 0) {
-      // Entries exist: link each comprobante ONLY with the kardex lines of the
-      // articles it contains (a pedido facturado en varios comprobantes antes
-      // vinculaba todas las líneas al primero).
-      for (const comp of comprobantesGenerados) {
-        if (!comp.id) continue
-        const esP = comp.tipo_comprobante === 'PRES'
-        await vincularKardexAComprobante(
-          supabase, pedido_id, comp.id, comp.tipo_comprobante,
-          comp.numero, esP ? 'Presupuesto' : 'Factura', esP ? 'NEGRO' : 'BLANCO',
-          auth.user.id,
-          (comp._items as ItemCalculado[]).map((i) => i.articulo_id).filter(Boolean),
-        )
-      }
-    } else {
-      // No entries: create them now with full comprobante data (admin client bypasses RLS)
-      for (const comp of comprobantesGenerados) {
-        if (!comp.id) continue
-        const esP = comp.tipo_comprobante === 'PRES'
-        const colorDinero = esP ? 'NEGRO' : 'BLANCO'
-        const metodoFact = esP ? 'Presupuesto' : 'Factura'
-        for (const item of (comp._items as ItemCalculado[])) {
-          const ivaPct = !item.ivaIncluido && item.ivaUnitario > 0 ? 21 : 0
-          await insertarKardex(supabase, {
-            tipo_movimiento: 'venta',
-            fecha: nowArgentina(),
-            articulo_id: item.articulo_id,
-            cantidad: item.cantidad,
-            precio_lista: item.precioBase,
-            precio_unitario_final: item.precioFinal,
-            iva_porcentaje: ivaPct,
-            iva_monto_unitario: item.ivaUnitario,
-            iva_incluido: item.ivaIncluido,
-            subtotal_neto: round2(item.precioBase * item.cantidad),
-            subtotal_iva: item.subtotalIva,
-            subtotal_total: item.subtotalFinal,
-            cliente_id: pedido.cliente.id,
-            vendedor_id: (pedido.cliente as any).vendedor_id ?? null,
-            pedido_id: pedido_id,
-            comprobante_venta_id: comp.id,
-            tipo_comprobante: comp.tipo_comprobante,
-            numero_comprobante: comp.numero,
-            metodo_facturacion: metodoFact,
-            color_dinero: colorDinero,
-            va_en_comprobante: item.vaEnComprobante,
-            provincia_destino: (pedido.cliente as any).provincia ?? null,
-            facturador_id: auth.user.id,
-          }, {
-            sku: item.sku,
-            descripcion: item.descripcion,
-            categoria: item.segmento,
-            marca_id: item.marcaId,
-            proveedor_id: item.proveedorId,
-            iva_compras: item.ivaCompras,
-            iva_ventas: item.ivaVentas,
-          })
-        }
-      }
+    // ── Kardex: alinear con los renglones y recién ahí vincular ─────────────
+    // Antes había dos caminos: si ya había líneas (createPedido) solo se
+    // vinculaban —con los precios de cuando se cargó el pedido: sin el dto
+    // viajante aplicado después, con artículos ya quitados—; si no había, se
+    // creaban sin desglose de descuentos. Ahora hay UN camino: el sincronizador
+    // deja el kardex igual a los renglones que se acaban de facturar (crea lo
+    // que falta, corrige lo que cambió, quita lo que ya no está) y después cada
+    // comprobante se vincula SOLO con las líneas de sus artículos.
+    try {
+      await sincronizarKardexPedido(supabase, pedido_id, { operadorId: auth.user.id })
+    } catch (e: any) {
+      console.error("[generar] kardex desalineado antes de vincular:", e?.message || e)
+    }
+    for (const comp of comprobantesGenerados) {
+      if (!comp.id) continue
+      const esP = comp.tipo_comprobante === 'PRES'
+      await vincularKardexAComprobante(
+        supabase, pedido_id, comp.id, comp.tipo_comprobante,
+        comp.numero, esP ? 'Presupuesto' : 'Factura', esP ? 'NEGRO' : 'BLANCO',
+        auth.user.id,
+        (comp._items as ItemCalculado[]).map((i) => i.articulo_id).filter(Boolean),
+      )
     }
 
     // ── Distribuir percepciones IVA/IIBB del comprobante entre ítems del kardex
