@@ -247,10 +247,19 @@ export async function sincronizarKardexPedido(
       const valores = valoresLinea(det, vend, metodoPedido, listaPedido)
       const existente = libres[i]
       if (existente) {
+        // Línea que apuntaba a un comprobante ANULADO: se desvincula (la
+        // anulación no toca el kardex) para que al volver a facturar el
+        // pedido se enganche al comprobante nuevo. Solo se limpia el vínculo;
+        // la línea sigue siendo la misma venta.
+        const desvincular =
+          existente.comprobante_venta_id && !vivos.has(existente.comprobante_venta_id)
+            ? { comprobante_venta_id: null, tipo_comprobante: null, numero_comprobante: null, comprobante_cobrado: false, fecha_comprobante_cobrado: null }
+            : {}
         const { error } = await admin
           .from("kardex")
           .update({
             ...valores,
+            ...desvincular,
             cliente_id: pedido.cliente_id,
             vendedor_id: vendedorId,
             numero_pedido: pedido.numero_pedido ?? null,
