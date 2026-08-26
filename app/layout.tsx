@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/layout/sidebar"
 import { MainContent } from "@/components/layout/main-content"
 import { NavbarWrapper } from "@/components/auth/navbar-wrapper"
 import { Toaster } from "@/components/ui/sonner"
+import { Toaster as ToasterRadix } from "@/components/ui/toaster"
 import { DocumentTitle } from "@/components/layout/document-title"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" })
@@ -45,6 +46,9 @@ export default async function RootLayout({
         <NavbarWrapper />
         <Analytics />
         <Toaster richColors position="top-right" />
+        {/* Mensajes de useToast (caja, rendiciones, cta cte, imputar…): sin este
+            componente montado, TODOS esos avisos —errores incluidos— eran invisibles. */}
+        <ToasterRadix />
       </body>
     </html>
   )
