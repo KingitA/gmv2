@@ -341,6 +341,13 @@ export default function ArticulosPage() {
     setDm(p=>({...p,[dma.id]:v.map((d,i)=>({...d,orden:i+1}))})); setDms(false); setDma(null)
   }
 
+  // Listas fijas para campos "a elección" (antes texto libre → PACK/PACKS/PACL, BLIS/BLISTER, CAJ/CAJA/CAJAS...).
+  // Si un artículo trae un valor viejo que no está en la lista, se muestra como opción "(actual)" para no perderlo.
+  const UNIDADES_MEDIDA = ["UN","KG","LT","MT","PACK","CAJA","BLISTER","SET"]
+  const TIPOS_FRACCION  = ["UN","PACK","BLISTER","CAJA","DOCENA","SET","DISPLAY"]
+  const opcionesCon = (lista:string[], actual:string|null|undefined) =>
+    actual && !lista.includes(actual) ? [...lista, actual] : lista
+
   // Ficha (unificado crear + editar)
   const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",rubro_id:null as string|null,precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,precio_lista_especial:null as number|null,oferta_lista_especial:null as number|null,descuento_propio:0,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
   const normIvaC=(v:any)=>v==="adquisicion_stock"?"adquisicion_stock":v==="mixto"?"mixto":v==="0"?"adquisicion_stock":"factura"
@@ -476,6 +483,15 @@ export default function ArticulosPage() {
     setBulkSaving(true)
     const updates:Record<string,any>={}
     for(const f of bulkFields) updates[f]=bulkVals[f]??null
+    // Rubro / Categoría / Subcategoría van juntos (cascada) y se guardan igual que la ficha:
+    // rubro (texto) + rubro_id + categoria/subcategoria (texto); el trigger sincroniza los FK.
+    if(bulkFields.has("taxonomia")){
+      delete updates.taxonomia
+      const r=rubrosData.find((x:any)=>x.id===bulkVals.tax_rubro_id)
+      if(!r){ alert("Elegí un rubro para aplicar la clasificación"); setBulkSaving(false); return }
+      updates.rubro=r.nombre; updates.rubro_id=r.id
+      updates.categoria=bulkVals.tax_categoria||""; updates.subcategoria=bulkVals.tax_subcategoria||""
+    }
     let ok=0
     const updatedIds=new Set<string>()
     for(const id of sel){
@@ -998,13 +1014,21 @@ export default function ArticulosPage() {
             <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">SKU {fa?.id==="__new__"&&<span className="text-red-500">*</span>}</Label><Input className="h-8 text-xs font-mono" value={ff.sku} onChange={e=>setFf(p=>({...p,sku:e.target.value}))}/></div>
               <div><Label className="text-xs">Unid/Bulto</Label><Input type="number" className="h-8 text-xs" value={ff.unidades_por_bulto||""} onChange={e=>setFf(p=>({...p,unidades_por_bulto:parseInt(e.target.value)||1}))}/></div>
-              <div><Label className="text-xs">Unid. Medida</Label><Input className="h-8 text-xs uppercase" placeholder="UN" value={ff.unidad_de_medida} onChange={e=>setFf(p=>({...p,unidad_de_medida:e.target.value.toUpperCase()}))}/></div>
+              <div><Label className="text-xs">Unid. Medida</Label>
+                <Select value={ff.unidad_de_medida||"none"} onValueChange={v=>setFf(p=>({...p,unidad_de_medida:v==="none"?"":v}))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="—"/></SelectTrigger>
+                  <SelectContent><SelectItem value="none">—</SelectItem>{opcionesCon(UNIDADES_MEDIDA,ff.unidad_de_medida).map(u=><SelectItem key={u} value={u}>{u}{!UNIDADES_MEDIDA.includes(u)?" (actual)":""}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
             {/* Fracción / pack */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Tipo de fracción <span className="text-slate-400 font-normal">(pack, blister, docena...)</span></Label>
-                <Input className="h-8 text-xs" placeholder="Ej: pack, blister, docena, caja" value={ff.tipo_fraccion} onChange={e=>setFf(p=>({...p,tipo_fraccion:e.target.value}))}/>
+                <Select value={ff.tipo_fraccion||"none"} onValueChange={v=>setFf(p=>({...p,tipo_fraccion:v==="none"?"":v}))}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="—"/></SelectTrigger>
+                  <SelectContent><SelectItem value="none">—</SelectItem>{opcionesCon(TIPOS_FRACCION,ff.tipo_fraccion).map(t=><SelectItem key={t} value={t}>{t}{!TIPOS_FRACCION.includes(t)?" (actual)":""}</SelectItem>)}</SelectContent>
+                </Select>
               </div>
               <div>
                 <Label className="text-xs">Unidades por fracción</Label>
@@ -1424,20 +1448,53 @@ export default function ArticulosPage() {
                     <SelectContent>{marcas.map(m=><SelectItem key={m.id} value={m.id}>{m.descripcion}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
+                {/* Rubro → Categoría → Subcategoría (cascada, un solo tilde) */}
+                {(()=>{
+                  const on=bulkFields.has("taxonomia")
+                  const rubroSel=rubrosData.find((r:any)=>r.id===bulkVals.tax_rubro_id)
+                  const cats=rubroSel?categoriasData.filter((c:any)=>c.rubro_id===rubroSel.id):[]
+                  const catSel=cats.find((c:any)=>c.nombre===bulkVals.tax_categoria)
+                  const subs=catSel?subcategoriasData.filter((s:any)=>s.categoria_id===catSel.id):[]
+                  const dis=`h-7 text-xs flex-1 ${!on?"opacity-30":""}`
+                  return (
+                    <div className="flex items-start gap-3">
+                      <button onClick={()=>toggleBulkField("taxonomia",null)}
+                        className={`w-5 h-5 mt-1 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${on?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
+                        {on&&<Check className="h-3 w-3 text-white"/>}
+                      </button>
+                      <Label className={`text-xs w-36 flex-shrink-0 mt-1.5 ${on?"text-slate-800 font-semibold":"text-slate-400"}`}>Rubro / Cat. / Subcat.</Label>
+                      <div className="flex-1 space-y-1.5">
+                        <Select disabled={!on} value={bulkVals.tax_rubro_id??""} onValueChange={v=>setBulkVals(bv=>({...bv,tax_rubro_id:v,tax_categoria:"",tax_subcategoria:""}))}>
+                          <SelectTrigger className={dis}><SelectValue placeholder="Rubro"/></SelectTrigger>
+                          <SelectContent>{rubrosData.map((r:any)=><SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>)}</SelectContent>
+                        </Select>
+                        <Select disabled={!on||!rubroSel} value={bulkVals.tax_categoria||"none"} onValueChange={v=>setBulkVals(bv=>({...bv,tax_categoria:v==="none"?"":v,tax_subcategoria:""}))}>
+                          <SelectTrigger className={dis}><SelectValue placeholder={rubroSel?"Categoría":"Elegí un rubro"}/></SelectTrigger>
+                          <SelectContent><SelectItem value="none">Sin categoría</SelectItem>{cats.map((c:any)=><SelectItem key={c.id} value={c.nombre}>{c.nombre}</SelectItem>)}</SelectContent>
+                        </Select>
+                        <Select disabled={!on||!catSel} value={bulkVals.tax_subcategoria||"none"} onValueChange={v=>setBulkVals(bv=>({...bv,tax_subcategoria:v==="none"?"":v}))}>
+                          <SelectTrigger className={dis}><SelectValue placeholder={catSel?"Subcategoría":"Elegí una categoría"}/></SelectTrigger>
+                          <SelectContent><SelectItem value="none">Sin subcategoría</SelectItem>{subs.map((s:any)=><SelectItem key={s.id} value={s.nombre}>{s.nombre}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )
+                })()}
+                {/* Unidad de medida / Tipo de fracción — listas fijas */}
                 {[
-                  {f:"categoria",  label:"Categoría",   def:""},
-                  {f:"subcategoria",label:"Subcategoría",def:""},
-                ].map(({f,label,def})=>(
+                  {f:"unidad_de_medida",label:"Unid. Medida",   opts:UNIDADES_MEDIDA},
+                  {f:"tipo_fraccion",   label:"Tipo de fracción",opts:TIPOS_FRACCION},
+                ].map(({f,label,opts})=>(
                   <div key={f} className="flex items-center gap-3">
-                    <button onClick={()=>toggleBulkField(f,def)}
+                    <button onClick={()=>toggleBulkField(f,"")}
                       className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${bulkFields.has(f)?"bg-indigo-600 border-indigo-600":"border-slate-300 hover:border-indigo-400"}`}>
                       {bulkFields.has(f)&&<Check className="h-3 w-3 text-white"/>}
                     </button>
                     <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has(f)?"text-slate-800 font-semibold":"text-slate-400"}`}>{label}</Label>
-                    <Input disabled={!bulkFields.has(f)} value={bulkFields.has(f)?(bulkVals[f]??def):""}
-                      placeholder={bulkFields.has(f)?"Valor nuevo":"—"}
-                      className={`h-7 text-xs flex-1 ${!bulkFields.has(f)?"opacity-30":""}`}
-                      onChange={e=>setBulkVals(v=>({...v,[f]:e.target.value}))}/>
+                    <Select disabled={!bulkFields.has(f)} value={bulkVals[f]||"none"} onValueChange={v=>setBulkVals(bv=>({...bv,[f]:v==="none"?"":v}))}>
+                      <SelectTrigger className={`h-7 text-xs flex-1 ${!bulkFields.has(f)?"opacity-30":""}`}><SelectValue placeholder="Seleccionar"/></SelectTrigger>
+                      <SelectContent><SelectItem value="none">—</SelectItem>{opts.map(o=><SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+                    </Select>
                   </div>
                 ))}
                 <div className="flex items-center gap-3">
