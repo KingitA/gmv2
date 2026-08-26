@@ -23,16 +23,79 @@ export async function getSaldosCliente(
 ): Promise<SaldosCliente> {
   const [{ data: saldoRow }, { data: pend }] = await Promise.all([
     supabase.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", clienteId).maybeSingle(),
-    supabase.from("pagos_clientes").select("monto").eq("cliente_id", clienteId).in("estado", ESTADOS_PENDIENTES as unknown as string[]),
+    supabase
+      .from("pagos_clientes")
+      .select("id, monto, observaciones")
+      .eq("cliente_id", clienteId)
+      .in("estado", ESTADOS_PENDIENTES as unknown as string[]),
   ])
 
   const saldo_real = Number((saldoRow as any)?.saldo_actual ?? 0)
   const pendiente_verificacion = (pend || []).reduce((s: number, p: any) => s + Number(p.monto), 0)
 
+  // ── Proyección EXACTA (una sola fórmula para todas las pantallas) ──
+  // Un cobro pendiente es una promesa completa: al confirmarse baja el libro
+  // por (a) la plata, (b) la NC del 10% contado real (10% del total de cada
+  // débito bonificable imputado, incluidos los cubiertos por créditos),
+  // (c) el ajuste por redondeo prometido; y sube por (d) el débito del 10%
+  // sobre créditos de mercadería sin dto. Aplicar créditos NC/a cuenta no
+  // mueve el libro (ya estaban), así que no entra acá.
+  let bajaProyectada = pendiente_verificacion
+  const pagosPend = (pend || []) as any[]
+  if (pagosPend.length) {
+    const { parsearMarcaCreditos } = await import("@/lib/cobranzas/creditos")
+    const { parsearMarcaAjuste } = await import("@/lib/cobranzas/ajuste")
+    const { MARCA_CONTADO } = await import("@/lib/constants")
+
+    const ids = pagosPend.map((p) => p.id)
+    const { data: imps } = await supabase
+      .from("imputaciones")
+      .select("pago_id, comprobante_id")
+      .in("pago_id", ids)
+      .neq("estado", "anulado")
+      .not("comprobante_id", "is", null)
+
+    // Débitos bonificables por pago: imputados por el pago ∪ cubiertos por créditos
+    const debitosPorPago = new Map<string, Set<string>>()
+    for (const i of imps || []) {
+      if (!debitosPorPago.has(i.pago_id)) debitosPorPago.set(i.pago_id, new Set())
+      debitosPorPago.get(i.pago_id)!.add(i.comprobante_id)
+    }
+    const paresPorPago = new Map<string, ReturnType<typeof parsearMarcaCreditos>>()
+    for (const p of pagosPend) {
+      const pares = parsearMarcaCreditos(p.observaciones)
+      paresPorPago.set(p.id, pares)
+      for (const par of pares) {
+        if (!debitosPorPago.has(p.id)) debitosPorPago.set(p.id, new Set())
+        debitosPorPago.get(p.id)!.add(par.debito_id)
+      }
+    }
+    const todosDebitos = [...new Set([...debitosPorPago.values()].flatMap((s) => [...s]))]
+    const totalDe = new Map<string, number>()
+    if (todosDebitos.length) {
+      const { data: comps } = await supabase
+        .from("comprobantes_venta")
+        .select("id, total_factura, tipo_comprobante, anulado_en")
+        .in("id", todosDebitos)
+        .in("tipo_comprobante", ["FA", "FB", "FC", "PRES"])
+        .is("anulado_en", null)
+      for (const c of comps || []) totalDe.set(c.id, Math.abs(Number(c.total_factura)))
+    }
+
+    for (const p of pagosPend) {
+      const contado = (p.observaciones || "").includes(MARCA_CONTADO)
+      if (contado) {
+        for (const d of debitosPorPago.get(p.id) || []) bajaProyectada += (totalDe.get(d) ?? 0) * 0.1
+        for (const par of paresPorPago.get(p.id) || []) if (par.aplicar_10) bajaProyectada -= par.monto * 0.1
+      }
+      bajaProyectada += parsearMarcaAjuste(p.observaciones)
+    }
+  }
+
   return {
     saldo_real,
     pendiente_verificacion,
-    saldo_proyectado: Math.round((saldo_real - pendiente_verificacion) * 100) / 100,
+    saldo_proyectado: Math.round((saldo_real - bajaProyectada) * 100) / 100,
   }
 }
 

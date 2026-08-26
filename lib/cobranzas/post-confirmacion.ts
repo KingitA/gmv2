@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { nowArgentina } from "@/lib/utils"
 import { generarBonificacionContado, debitarComisionPorFinanciero } from "@/lib/comprobantes/generar-bonificacion"
 import { parsearMarcaCreditos, quitarMarcaCreditos, ejecutarCreditosDePago } from "@/lib/cobranzas/creditos"
+import { parsearMarcaAjuste, quitarMarcaAjuste, ejecutarAjusteDePago } from "@/lib/cobranzas/ajuste"
 import { MARCA_CONTADO } from "@/lib/constants"
 
 export interface PostConfirmacionResult {
@@ -128,6 +129,26 @@ export async function procesarPostConfirmacion(
   } catch (bonifErr: any) {
     console.error("[post-confirmacion] bonificación 10% diferida falló:", bonifErr?.message)
     result.bonificacion_error = bonifErr?.message || "La bonificación del 10% falló — generala a mano"
+  }
+
+  // ── 1b. Ajuste por redondeo prometido en el cobro (marca [AJUSTE:x]) ──
+  // Se asienta recién ahora (cobro confirmado), después de la NC del 10% y
+  // antes de las comisiones: salda el comprobante que quedó con los centavos.
+  const montoAjuste = parsearMarcaAjuste(pago.observaciones)
+  if (montoAjuste > 0.005) {
+    const aviso = await ejecutarAjusteDePago(supabase, {
+      pagoId,
+      clienteId: pago.cliente_id,
+      monto: montoAjuste,
+      usuarioId: usuarioId || null,
+    })
+    if (aviso) {
+      console.error("[post-confirmacion] ajuste:", aviso)
+      result.bonificacion_error = [result.bonificacion_error, aviso].filter(Boolean).join(" · ")
+    }
+    const obsSinAjuste = quitarMarcaAjuste(pago.observaciones || "")
+    await supabase.from("pagos_clientes").update({ observaciones: obsSinAjuste || null }).eq("id", pagoId)
+    pago.observaciones = obsSinAjuste
   }
 
   // ── 2. Comisiones 'cobrada' ──

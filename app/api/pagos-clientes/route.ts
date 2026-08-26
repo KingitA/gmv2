@@ -6,6 +6,7 @@ import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
+import { topeAjuste, marcaAjuste } from "@/lib/cobranzas/ajuste"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
@@ -141,6 +142,8 @@ export async function POST(request: NextRequest) {
       creditos_aplicar, // [{tipo:'nc'|'ac', id, monto}] — créditos existentes
                         // tildados en el cobro (NC/REV vivas o plata a cuenta):
                         // descuentan de lo entregado y se aplican al confirmar
+      ajuste_redondeo,  // número — centavos/pesos que faltan y se perdonan
+                        // (tope 1% de los comprobantes); se asienta al confirmar
     } = body
 
     if (!cliente_id || !metodos?.length) {
@@ -252,7 +255,20 @@ export async function POST(request: NextRequest) {
       debitosNetos = asignacion.debitosRestantes
       marcaCred = marcaCreditos(asignacion.pares)
     }
-    const obsConCreditos = [observaciones, marcaCred].filter(Boolean).join(" ") || null
+    // Ajuste por redondeo: tope 1% de los débitos seleccionados; viaja como
+    // promesa ([AJUSTE:x]) y se asienta en la confirmación.
+    const montoAjuste = Math.round(Number(ajuste_redondeo || 0) * 100) / 100
+    if (montoAjuste > 0.005) {
+      const totalDebitosSel = ((imputaciones as any[]) || []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0)
+      const tope = topeAjuste(totalDebitosSel)
+      if (montoAjuste > tope + 0.005) {
+        return NextResponse.json(
+          { error: `El ajuste por redondeo ($${montoAjuste.toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados ($${tope.toFixed(2)}). Dejá el saldo pendiente.` },
+          { status: 400 },
+        )
+      }
+    }
+    const obsConCreditos = [observaciones, marcaCred, marcaAjuste(montoAjuste)].filter(Boolean).join(" ") || null
 
     // ── 2. Alta transaccional (pago + detalle + cheques + imputaciones) ──
     // Si el total imputado supera el pago real, recortar; el excedente queda

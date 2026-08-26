@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
+import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 
 // GET /api/vendedor/cliente/[id]
@@ -168,38 +169,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       restante: Math.max(0, Math.round((Number(d.monto_total || 0) - (descontadoPorDev.get(d.id) || 0)) * 100) / 100),
     }))
 
-    // ── Saldo PROYECTADO: lo que el cliente va a deber cuando el ERP confirme
-    // lo ya cobrado en la calle. El vendedor acaba de recibir la plata: si le
-    // mostramos la deuda vieja parece que lo tratamos de mentiroso.
-    // proyectado = real − imputaciones pendientes − a cuenta pendiente −
-    //              devoluciones pendientes (la NC futura acredita el total).
-    // El 10% contado entra solo: sus imputaciones cubren el 100% del
-    // comprobante aunque el pago sea el 90% ("proyección reversa").
-    const { data: pagosPend } = await supabase
-      .from("pagos_clientes")
-      .select("id, monto, observaciones")
-      .eq("cliente_id", id)
-      .in("estado", ["pendiente", "pendiente_rendicion"])
-    const pagoPendIds = (pagosPend || []).map((p: any) => p.id)
-    const impPorPago = new Map<string, number>()
-    if (pagoPendIds.length) {
-      const { data: impsPend } = await supabase
-        .from("imputaciones")
-        .select("pago_id, monto_imputado")
-        .in("pago_id", pagoPendIds)
-        .eq("estado", "pendiente")
-      for (const i of impsPend || [])
-        impPorPago.set(i.pago_id, (impPorPago.get(i.pago_id) || 0) + Number(i.monto_imputado))
-    }
-    let bajaProyectada = 0
-    for (const p of pagosPend || []) {
-      const imp = impPorPago.get(p.id) || 0
-      bajaProyectada += imp + Math.max(0, Number(p.monto || 0) - imp) // imputado + a cuenta
-      // "Proyección reversa": pago con marca contado → la NC 10% futura
-      // cubre imput/9 más (las imputaciones quedaron al 90% del comprobante)
-      if ((p.observaciones || "").includes("[10% CONTADO]")) bajaProyectada += imp / 9
-    }
-    for (const d of devolucionesConRestante) bajaProyectada += Number(d.monto_total || 0)
+    // ── Saldo REAL y PROYECTADO: UNA sola fórmula para todas las pantallas
+    // (lib/cuenta-corriente/saldo.ts). El proyectado descuenta exactamente lo
+    // que los cobros pendientes van a hacer al confirmarse (plata + NC 10%
+    // real + ajuste − débito 10% s/créditos). Las devoluciones en proceso NO
+    // entran (todavía no son documento): se muestran aparte como estimado.
+    const saldos = await getSaldosCliente(supabase, id)
 
     // Vista unificada para la pantalla de cobro: TODOS los pedidos vigentes
     // del cliente con su estado; el front les asocia comprobantes (por
@@ -222,8 +197,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({
       cliente: {
         ...cliente,
-        saldo_actual: Number(saldo?.saldo_actual) || 0,
-        saldo_proyectado: Math.round(((Number(saldo?.saldo_actual) || 0) - bajaProyectada) * 100) / 100,
+        saldo_actual: saldos.saldo_real,
+        saldo_proyectado: saldos.saldo_proyectado,
+        pendiente_verificacion: saldos.pendiente_verificacion,
+        devoluciones_en_proceso: devolucionesConRestante.reduce((s: number, d: any) => s + Number(d.restante || 0), 0),
         actualizado_at: actualizadoAt,
         actualizado_por_nombre: actualizadoPorNombre,
       },

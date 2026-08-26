@@ -432,6 +432,18 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             .filter((m) => enRango(m.fecha));
     })();
 
+    // Cobros en la calle (pendientes de verificación): son PROMESAS, no tocan
+    // el libro hasta que la oficina confirma. Se muestran en gris en el
+    // extracto (sin sumar) y como chip en cada comprobante que imputan.
+    const cobrosEnCalle = (data.pagos ?? []).filter((p) => p.estado === "pendiente" || p.estado === "pendiente_rendicion");
+    const enCallePorComprobante = new Map<string, number>();
+    for (const p of cobrosEnCalle) {
+        for (const i of p.imputaciones || []) {
+            if (i.estado === "anulado") continue;
+            enCallePorComprobante.set(i.comprobante_id, (enCallePorComprobante.get(i.comprobante_id) ?? 0) + Number(i.monto_imputado || 0));
+        }
+    }
+
     // Filas de la tabla según la vista: "saldos" = solo lo que tiene saldo
     // (deuda o a favor); "detallada" = todo, con filtro de fechas.
     const documentosVisibles = documentosUnificados.filter((doc) => {
@@ -596,6 +608,30 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                             </TableCell>
                                         </TableRow>
                                     )}
+                                    {/* Cobros en la calle: promesas sin verificar — en gris, no suman */}
+                                    {cobrosEnCalle.map((p) => (
+                                        <TableRow key={`calle-${p.id}`} className="bg-slate-50/70 text-gray-400 italic">
+                                            <TableCell className="whitespace-nowrap">{new Date(p.fecha_pago).toLocaleDateString('es-AR')}</TableCell>
+                                            <TableCell className="whitespace-nowrap">Cobro en calle — sin verificar</TableCell>
+                                            <TableCell className="max-w-[340px] truncate" title={p.observaciones || ""}>
+                                                {p.estado === "pendiente_rendicion" ? "pendiente de rendición" : "pendiente de confirmación"}
+                                                {(p.observaciones || "").includes("[10% CONTADO]") ? " · con 10% contado" : ""}
+                                            </TableCell>
+                                            <TableCell />
+                                            <TableCell className="text-right tabular-nums">(−${Number(p.monto).toLocaleString('es-AR')})</TableCell>
+                                            <TableCell />
+                                        </TableRow>
+                                    ))}
+                                    {cobrosEnCalle.length > 0 && data.cliente.saldo_proyectado != null && (
+                                        <TableRow className="bg-slate-100">
+                                            <TableCell colSpan={5} className="font-semibold text-gray-600">
+                                                Saldo proyectado (si la oficina confirma lo cobrado en calle, con su 10%, créditos y ajustes)
+                                            </TableCell>
+                                            <TableCell className={`text-right font-bold tabular-nums ${data.cliente.saldo_proyectado > 0 ? "text-red-500" : "text-green-600"}`}>
+                                                ${data.cliente.saldo_proyectado.toLocaleString('es-AR')}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                 </TableBody>
                             </Table>
                         </div>
@@ -676,6 +712,11 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 </TableCell>
                                                 <TableCell className={`text-right font-bold ${doc.es_credito ? 'text-green-600' : ''}`}>
                                                     {doc.es_credito ? '-' : ''}${Math.abs(doc.saldo).toLocaleString('es-AR')}
+                                                    {(enCallePorComprobante.get(doc.id) ?? 0) > 0.005 && (
+                                                        <span className="ml-2 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 align-middle" title="Cobrado por el vendedor/chofer, pendiente de verificación en oficina">
+                                                            en calle ${enCallePorComprobante.get(doc.id)!.toLocaleString('es-AR')}
+                                                        </span>
+                                                    )}
                                                 </TableCell>
                                                 <TableCell>
                                                     {doc.tipo === "PAGO"

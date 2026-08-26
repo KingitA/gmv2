@@ -5,6 +5,7 @@ import { todayArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
+import { topeAjuste, marcaAjuste } from "@/lib/cobranzas/ajuste"
 import { MARCA_CONTADO } from "@/lib/constants"
 
 /**
@@ -214,7 +215,21 @@ export async function POST(request: NextRequest) {
         debitosNetos = asignacion.debitosRestantes
       }
 
-      const obsPago = [observaciones, notaAnticipo, marcaCreditos(paresCreditos)].filter(Boolean).join(" · ") || null
+      // Ajuste por redondeo: TOPE 1% de los débitos tildados (más es perdonar
+      // plata → oficina). Viaja como promesa y se asienta al confirmar.
+      const montoAjuste = Math.round(Number(c.ajuste_redondeo || 0) * 100) / 100
+      if (montoAjuste > 0.005) {
+        const totalDebitosSel = (c.imputaciones || []).reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
+        const tope = topeAjuste(totalDebitosSel)
+        if (montoAjuste > tope + 0.005) {
+          return NextResponse.json(
+            { error: `El ajuste por redondeo ($${montoAjuste.toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados ($${tope.toFixed(2)}). Dejá el saldo pendiente: lo resuelve la oficina.` },
+            { status: 400 },
+          )
+        }
+      }
+
+      const obsPago = [observaciones, notaAnticipo, marcaCreditos(paresCreditos), marcaAjuste(montoAjuste)].filter(Boolean).join(" · ") || null
 
       // ── Detalles por método (proporcional al monto del cliente) ──
       // Color de cheques: derivado de las imputaciones de ESTE cliente

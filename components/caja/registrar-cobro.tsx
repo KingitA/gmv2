@@ -22,6 +22,7 @@ import { BcraDeudorMulti } from "@/components/pagos/BcraDeudorChip"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
 import { MARCA_CONTADO } from "@/lib/constants"
+import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { Camera, ChevronDown, ChevronUp, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
 
 export interface CuentaFondos {
@@ -391,6 +392,9 @@ export function RegistrarCobro({
           comprobante_urls: archivos,
           confirmar: esEfectivo,
           idempotency_key: idemKeyRef.current,
+          // Ajuste por redondeo: viaja adentro del cobro y se asienta al
+          // confirmarse (en el acto si es efectivo). Tope 1% (server valida).
+          ajuste_redondeo: modoDiferencia === "ajuste" && falta > 0.01 ? falta : 0,
         }),
       })
       const data = await res.json()
@@ -407,30 +411,12 @@ export function RegistrarCobro({
         bonifMsg = " El 10% quedó agendado: la NC/REV sale sola al confirmar el valor."
       }
 
-      // Ajuste por redondeo: la diferencia se acredita en cuenta corriente
-      let ajusteMsg = ""
-      if (modoDiferencia === "ajuste" && falta > 0.01) {
-        try {
-          const ajRes = await fetch(`/api/clientes/${cliente.id}/ajustes`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              monto: -falta,
-              motivo: `Ajuste por redondeo — cobro $ ${fmt(totalMetodos)} vs imputado $ ${fmt(totalSeleccionado)}`,
-              // La falta cae en el último comprobante imputado: se salda también ahí
-              comprobante_id: imputaciones[imputaciones.length - 1]?.comprobante_id,
-              aplicar_saldo: true,
-              // Vínculo al pago: si el pago se anula, el ajuste se revierte con él
-              pago_id: pagoId,
-            }),
-          })
-          const ajData = await ajRes.json()
-          if (!ajRes.ok) throw new Error(ajData.error)
-          ajusteMsg = ` Diferencia de $ ${fmt(falta)} pasada como ajuste por redondeo.`
-        } catch {
-          ajusteMsg = ` ⚠ El ajuste por redondeo de $ ${fmt(falta)} falló — hacelo a mano desde la cuenta corriente.`
-        }
-      }
+      // El ajuste por redondeo viajó adentro del cobro y lo asienta el servidor
+      // al confirmar (en el acto si es efectivo; al aceptar el valor si no).
+      const ajusteMsg =
+        modoDiferencia === "ajuste" && falta > 0.01
+          ? ` Diferencia de $ ${fmt(falta)} como ajuste por redondeo${esEfectivo ? "." : " (se asienta al confirmar el valor)."}`
+          : ""
 
       const recorteMsg = recorte > 0.01 ? ` Pago parcial: quedan $ ${fmt(recorte)} de saldo en el comprobante.` : ""
       toast({
@@ -743,15 +729,22 @@ export function RegistrarCobro({
               seleccionado. ¿Qué hacemos con la diferencia?
             </p>
             <div className="mt-4 flex flex-col gap-2">
-              <button
-                onClick={() => registrar("ajuste")}
-                className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700"
-              >
-                Pasar como ajuste por redondeo
-                <span className="block text-[11px] font-normal opacity-80">
-                  El comprobante queda saldado; los $ {fmt(dialogoFalta)} se acreditan como ajuste en la cuenta
-                </span>
-              </button>
+              {dialogoFalta <= topeAjuste(totalSeleccionado) + 0.005 ? (
+                <button
+                  onClick={() => registrar("ajuste")}
+                  className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700"
+                >
+                  Pasar como ajuste por redondeo
+                  <span className="block text-[11px] font-normal opacity-80">
+                    El comprobante queda saldado; los $ {fmt(dialogoFalta)} se acreditan como ajuste en la cuenta
+                  </span>
+                </button>
+              ) : (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Supera el tope de ajuste por redondeo (1% de lo seleccionado = $ {fmt(topeAjuste(totalSeleccionado))}).
+                  Perdonar más que eso es una decisión de cuentas corrientes: dejá el saldo pendiente y resolvelo desde la cuenta del cliente.
+                </p>
+              )}
               <button
                 onClick={() => registrar("saldo")}
                 className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"

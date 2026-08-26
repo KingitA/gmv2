@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
+import { topeAjuste } from "@/lib/cobranzas/ajuste"
 
 /**
  * Ajuste manual de cuenta corriente del cliente.
@@ -35,6 +36,24 @@ export async function POST(
 
     if (!monto || !motivo) {
       return NextResponse.json({ error: "Faltan datos requeridos (monto, motivo)" }, { status: 400 })
+    }
+
+    // Ajuste atado a un pago = "redondeo": tope 1% de lo imputado por ese pago.
+    // (Los ajustes manuales de la oficina, sin pago, no tienen tope.)
+    if (pago_id && Number(monto) < 0) {
+      const { data: impsPago } = await supabase
+        .from("imputaciones")
+        .select("monto_imputado")
+        .eq("pago_id", pago_id)
+        .neq("estado", "anulado")
+      const totalImputado = (impsPago || []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0)
+      const tope = topeAjuste(totalImputado)
+      if (Math.abs(Number(monto)) > tope + 0.005) {
+        return NextResponse.json(
+          { error: `El ajuste por redondeo ($${Math.abs(Number(monto)).toFixed(2)}) supera el tope del 1% de lo imputado por el pago ($${tope.toFixed(2)}).` },
+          { status: 400 },
+        )
+      }
     }
 
     // ── Resolver el comprobante destino del aplicar_saldo ──

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { useBcraDeudor } from "@/components/pagos/BcraDeudorChip"
 import { MARCA_CONTADO } from "@/lib/constants"
+import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 // Cobro del viajante — espejo del patrón de /caja (Caja del Día):
@@ -502,25 +503,8 @@ export default function VendedorCobrarPage() {
         return
       }
 
-      // Ajuste por redondeo: crédito en cuenta corriente atado al pago
-      if (ajustePorRedondeo > 0.01) {
-        const pagoId = d.pagos?.[0]?.pago_id || d.pagos_creados?.[0]?.pago_id
-        try {
-          await fetch(`/api/clientes/${cliente.id}/ajustes`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              monto: -ajustePorRedondeo,
-              motivo: `Ajuste por redondeo — cobro ${formatCurrency(cubierto)} vs imputado ${formatCurrency(totalAsignado)}`,
-              aplicar_saldo: true,
-              pago_id: pagoId || null,
-            }),
-          })
-        } catch {
-          alert("El cobro se registró pero el ajuste por redondeo falló — avisá a la oficina.")
-        }
-      }
-
+      // El ajuste por redondeo viajó ADENTRO del cobro (ajuste_redondeo): se
+      // asienta cuando la oficina lo confirma, no acá.
       idemKey.current = crypto.randomUUID()
       alert(`✅ Cobro registrado por ${formatCurrency(totalMetodos)}. Queda pendiente de rendición.`)
       router.push(`/vendedor/clientes/${cliente.id}`)
@@ -1020,12 +1004,19 @@ export default function VendedorCobrarPage() {
             <p className="text-gray-500 text-sm text-center">
               Lo entregado no llega a cubrir lo seleccionado. ¿Qué hacemos con la diferencia?
             </p>
-            <button onClick={() => registrar("ajuste")} className="w-full bg-emerald-600 text-white rounded-xl py-3 font-bold">
-              Pasar como ajuste por redondeo
-              <span className="block text-[11px] font-medium text-emerald-100">
-                El comprobante queda saldado; {formatCurrency(dialogoFalta)} se acreditan como ajuste
-              </span>
-            </button>
+            {dialogoFalta <= topeAjuste(totalImputado) + 0.005 ? (
+              <button onClick={() => registrar("ajuste")} className="w-full bg-emerald-600 text-white rounded-xl py-3 font-bold">
+                Pasar como ajuste por redondeo
+                <span className="block text-[11px] font-medium text-emerald-100">
+                  El comprobante queda saldado; {formatCurrency(dialogoFalta)} se acreditan al confirmar el cobro
+                </span>
+              </button>
+            ) : (
+              <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 text-center">
+                Supera el tope de ajuste (1% de lo seleccionado = {formatCurrency(topeAjuste(totalImputado))}). Perdonar
+                más que eso lo decide la oficina: dejá el saldo pendiente.
+              </p>
+            )}
             <button onClick={() => registrar("saldo")} className="w-full bg-white border-2 border-gray-300 text-gray-700 rounded-xl py-3 font-bold">
               Dejar saldo pendiente
               <span className="block text-[11px] font-medium text-gray-400">
