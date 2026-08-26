@@ -374,17 +374,23 @@ function mezclarOverride(
   return [...filasOvr, ...ficha.filter((f) => !segsOvr.has(f.segmento))]
 }
 
-/** Resuelve los % de general/viajante para un ítem (condición de segmento > bonificación por segmento). */
+/**
+ * Resuelve los % de general/viajante para un ítem.
+ * Con condición por proveedor/marca: cada % que la condición DEFINE (no null) pisa;
+ * el que deja en null se hereda de la resolución normal (override del pedido > ficha).
+ * Antes un null se tomaba como 0 y se perdía, p. ej., el viajante "solo este pedido"
+ * en la mercadería de un proveedor con condición que solo fijaba el general.
+ */
 function resolverBonifItem(
   cond: CondicionSegmento | null,
   general: Array<{ segmento: string | null; porcentaje: number }>,
   viajante: Array<{ segmento: string | null; porcentaje: number }>,
   segmento: Segmento,
 ): { generalPct: number; viajantePct: number } {
-  if (cond) {
-    return { generalPct: cond.dto_general_pct || 0, viajantePct: cond.dto_viajante_pct || 0 }
-  }
-  return { generalPct: getDescuentoGeneral(general, segmento), viajantePct: getDescuentoViajante(viajante, segmento) }
+  const definido = (v: number | null | undefined) => v !== null && v !== undefined && Number.isFinite(Number(v))
+  const generalPct = cond && definido(cond.dto_general_pct) ? Number(cond.dto_general_pct) : getDescuentoGeneral(general, segmento)
+  const viajantePct = cond && definido(cond.dto_viajante_pct) ? Number(cond.dto_viajante_pct) : getDescuentoViajante(viajante, segmento)
+  return { generalPct, viajantePct }
 }
 
 // buildKardexDescuentos vive en lib/kardex/descuentos.ts (la comparte el
@@ -916,19 +922,17 @@ export async function createPedido(data: {
     let generalPct: number
     let viajantePct: number
     if (cond) {
-      // La mercadería del segmento se cotiza con su lista/método y sus propios
-      // descuentos general/viajante (escalonados en el neto por línea).
+      // La mercadería del segmento se cotiza con su lista/método. Los descuentos
+      // que la condición define pisan; los que deja en null se heredan (override
+      // del pedido > ficha) — misma regla que resolverBonifItem.
       listaId = cond.lista_precio_id
       metodoRaw = cond.metodo_facturacion || "Final"
-      generalPct = cond.dto_general_pct || 0
-      viajantePct = cond.dto_viajante_pct || 0
     } else {
       const resuelto = resolverListaSegmento(segmento, segmentoOverrides, clienteInfo)
       listaId = resuelto.listaId
       metodoRaw = resuelto.metodoRaw
-      generalPct = getDescuentoGeneral(bonifGeneral, segmento)
-      viajantePct = getDescuentoViajante(bonificacionesViajante, segmento)
     }
+    ;({ generalPct, viajantePct } = resolverBonifItem(cond, bonifGeneral, bonificacionesViajante, segmento))
     const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
     const metodo = toMetodoFacturacion(metodoRaw)
     const precio = calcularPrecioPedido(articulo, listaDatos, metodo, { generalPct, viajantePct })
