@@ -124,7 +124,7 @@ export default function PedidoEditPage() {
       // Override "solo este pedido" → form
       const ovr = normalizarBonifPedido(p.bonif_pedido)
       const form: Record<string, string> = {}
-      for (const tipo of ["viajante", "mercaderia"] as const)
+      for (const tipo of ["general", "viajante", "mercaderia"] as const)
         for (const seg of SEGMENTOS_BONIF) {
           const v = ovr?.[tipo]?.[seg]
           form[`${tipo}.${seg}`] = typeof v === "number" ? String(v) : ""
@@ -331,7 +331,7 @@ export default function PedidoEditPage() {
   // Form de descuentos por segmento → jsonb bonif_pedido (null = hereda todo de la ficha)
   function bonifPedidoDesdeForm() {
     const out: any = {}
-    for (const tipo of ["viajante", "mercaderia"] as const) {
+    for (const tipo of ["general", "viajante", "mercaderia"] as const) {
       const seg: Record<string, number> = {}
       for (const s of SEGMENTOS_BONIF) {
         const raw = (bonifPedidoForm[`${tipo}.${s}`] ?? "").trim().replace(",", ".")
@@ -671,7 +671,7 @@ export default function PedidoEditPage() {
                     <thead>
                       <tr className="text-[10px] uppercase tracking-wide text-slate-500">
                         <th className="text-left font-bold pb-2">Segmento</th>
-                        <th className="text-center font-bold pb-2 w-32">General <span className="font-normal normal-case">(ficha)</span></th>
+                        <th className="text-center font-bold pb-2 w-36 text-indigo-700">General</th>
                         <th className="text-center font-bold pb-2 w-36 text-orange-700">Viajante</th>
                         <th className="text-center font-bold pb-2 w-36 text-green-700">Mercadería</th>
                       </tr>
@@ -680,8 +680,8 @@ export default function PedidoEditPage() {
                       {SEGMENTOS_BONIF.map((seg) => (
                         <tr key={seg} className="border-t border-slate-100">
                           <td className="py-1.5 text-slate-700">{SEGMENTO_LABEL[seg]}</td>
-                          <td className="py-1.5 text-center tabular-nums text-slate-600">{pctFicha("general", seg) ?? 0}%</td>
-                          {(["viajante", "mercaderia"] as const).map((tipo) => {
+                          {/* General también es override "solo este pedido" (lo persiste el ERP al crear y el motor lo respeta) */}
+                          {(["general", "viajante", "mercaderia"] as const).map((tipo) => {
                             const ficha = pctFicha(tipo, seg)
                             const val = bonifPedidoForm[`${tipo}.${seg}`] ?? ""
                             return (
