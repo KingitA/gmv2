@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo, repreciarPedido, actualizarEncabezadoPedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo, repreciarPedido, actualizarEncabezadoPedido, guardarCondicionesPedido } from "@/lib/actions/pedidos"
+import { SegmentacionCondiciones, condRowsToProveedor, condRowsToMarca, EMPTY_SEGMENTACION, type SegmentacionValue } from "@/components/pedidos/SegmentacionCondiciones"
 import { esPedidoEditable, puedeEditarEntrega, transicionesManuales, motivoBloqueo, ESTADO_LABEL } from "@/lib/pedidos/estados"
 import { detectarSegmentoBonif, SEGMENTOS_BONIF, SEGMENTO_LABEL, normalizarBonifPedido, type SegmentoBonif } from "@/lib/pricing/segmento"
 import { localMatch } from "@/lib/search/local-match"
@@ -59,6 +60,9 @@ export default function PedidoEditPage() {
   const [listasPrecio, setListasPrecio] = useState<any[]>([])
   const [vendedores, setVendedores] = useState<any[]>([])
   const [itemEdits, setItemEdits] = useState<Record<string, ItemEdit>>({})
+  // Condiciones por proveedor / marca "solo este pedido" (editor)
+  const [segPedido, setSegPedido] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
+  const [savingCond, setSavingCond] = useState(false)
   const [headerForm, setHeaderForm] = useState({
     estado: "",
     metodo_facturacion_pedido: "",
@@ -105,8 +109,8 @@ export default function PedidoEditPage() {
     if (p?.cliente_id) {
       const [{ data: bonifTodas }, { data: cmPed }, { data: cpPed }, { data: cmCli }, { data: cpCli }] = await Promise.all([
         supabase.from("bonificaciones").select("id, tipo, porcentaje, segmento").eq("cliente_id", p.cliente_id).eq("activo", true).in("tipo", ["general", "viajante", "mercaderia"]),
-        supabase.from("pedido_marca_condicion").select("marca_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
-        supabase.from("pedido_proveedor_condicion").select("proveedor_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
+        supabase.from("pedido_marca_condicion").select("marca_id, lista_precio_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
+        supabase.from("pedido_proveedor_condicion").select("proveedor_id, lista_precio_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
         supabase.from("cliente_marca_condicion").select("marca_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("cliente_id", p.cliente_id),
         supabase.from("cliente_proveedor_condicion").select("proveedor_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("cliente_id", p.cliente_id),
       ])
@@ -151,6 +155,19 @@ export default function PedidoEditPage() {
         }
       }
       setCondSegmento(conds)
+      // Editor: solo las condiciones del PEDIDO (las de la ficha se ven, no se editan acá)
+      const aRow = (c: any, refId: string, nombre: string) => ({
+        ref_id: refId, nombre,
+        lista_precio_id: c.lista_precio_id ?? null,
+        metodo_facturacion: c.metodo_facturacion || "Factura",
+        dto_general_pct: c.dto_general_pct ?? null,
+        dto_viajante_pct: c.dto_viajante_pct ?? null,
+        dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+      })
+      setSegPedido({
+        proveedor: (cpPed || []).map((c: any) => aRow(c, c.proveedor_id, String(np.get(c.proveedor_id) || "Proveedor"))),
+        marca: (cmPed || []).map((c: any) => aRow(c, c.marca_id, String(nm.get(c.marca_id) || "Marca"))),
+      })
     }
     if (p) {
       setHeaderForm({
@@ -259,6 +276,22 @@ export default function PedidoEditPage() {
       alert(err.message || "Error al guardar")
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Guarda las condiciones por proveedor / marca de este pedido y re-precia las líneas.
+  async function guardarCondiciones() {
+    setSavingCond(true)
+    try {
+      await guardarCondicionesPedido(id, {
+        proveedor: condRowsToProveedor(segPedido.proveedor),
+        marca: condRowsToMarca(segPedido.marca),
+      })
+      await loadAll()
+    } catch (err: any) {
+      alert(err.message || "Error al guardar las condiciones")
+    } finally {
+      setSavingCond(false)
     }
   }
 
@@ -672,17 +705,33 @@ export default function PedidoEditPage() {
                     </tbody>
                   </table>
                 </div>
-                {condSegmento.length > 0 && (
-                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 space-y-1">
+                {/* Condiciones por marca / proveedor: las de la FICHA se ven; las del PEDIDO se editan
+                    (solo este pedido, pisan a la ficha para esa mercadería y se facturan aparte). */}
+                {(condSegmento.some((c: any) => c.origen === "ficha") || editable) && (
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 space-y-2">
                     <p className="font-bold text-slate-500 uppercase tracking-wide text-[10px]">Condiciones por marca / proveedor (van en comprobante aparte)</p>
-                    {condSegmento.map((c: any) => (
+                    {condSegmento.filter((c: any) => c.origen === "ficha").map((c: any) => (
                       <p key={`${c.ambito}:${c.marca_id || c.proveedor_id}`}>
                         <span className="font-semibold">{c.nombre}</span>
-                        <span className="text-slate-400"> · {c.ambito}{c.origen === "pedido" ? " · solo este pedido" : " · ficha"}</span>
+                        <span className="text-slate-400"> · {c.ambito} · ficha del cliente</span>
                         {" — "}general {Number(c.dto_general_pct || 0)}% · viajante {Number(c.dto_viajante_pct || 0)}% · mercadería {Number(c.dto_mercaderia_pct || 0)}%
                         {c.metodo_facturacion ? ` · ${c.metodo_facturacion}` : ""}
+                        {segPedido.marca.some(r => r.ref_id === c.marca_id) || segPedido.proveedor.some(r => r.ref_id === c.proveedor_id)
+                          ? <span className="text-teal-700 font-semibold"> · pisada por este pedido</span> : null}
                       </p>
                     ))}
+                    {editable && (
+                      <div className="pt-1 space-y-2">
+                        <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wide">Solo este pedido</p>
+                        <SegmentacionCondiciones listas={listasPrecio} value={segPedido} onChange={setSegPedido} />
+                        <div className="flex justify-end">
+                          <Button type="button" size="sm" className="h-8 bg-teal-600 hover:bg-teal-700" onClick={guardarCondiciones} disabled={savingCond}>
+                            {savingCond ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+                            Guardar condiciones y re-preciar
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

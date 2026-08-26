@@ -16,6 +16,7 @@ import { getComisionPorcentaje, getPrecioNeto, calcularComisionMonto } from "@/l
 import {
   detectarSegmento,
   SEGMENTO_BONIF,
+  SEGMENTOS_BONIF,
   normalizarBonifPedido,
   bonifSegAFilas,
   type Segmento,
@@ -350,20 +351,21 @@ async function fetchBonifGeneralViajante(
     .eq("cliente_id", clienteId)
     .eq("activo", true)
     .in("tipo", ["general", "viajante"])
-  const ficha = (data ?? []).filter((b: any) => b.tipo === "viajante")
+  const rows = data ?? []
   return {
-    general:  (data ?? []).filter((b: any) => b.tipo === "general"),
-    viajante: mezclarViajanteOverride(ficha, pedidoOverrides?.bonif_pedido),
+    general:  mezclarOverride(rows.filter((b: any) => b.tipo === "general"),  pedidoOverrides?.bonif_pedido, "general"),
+    viajante: mezclarOverride(rows.filter((b: any) => b.tipo === "viajante"), pedidoOverrides?.bonif_pedido, "viajante"),
   }
 }
 
 // Override por segmento del pedido sobre la ficha: los segmentos definidos en
-// el override pisan; el resto queda como en la ficha.
-function mezclarViajanteOverride(
+// el override pisan; el resto queda como en la ficha. Vale para general y viajante.
+function mezclarOverride(
   ficha: Array<{ segmento: string | null; porcentaje: number }>,
-  bonifPedido?: BonifPedido | null,
+  bonifPedido: BonifPedido | null | undefined,
+  tipo: "general" | "viajante",
 ): Array<{ segmento: string | null; porcentaje: number }> {
-  const ovr = normalizarBonifPedido(bonifPedido)?.viajante
+  const ovr = normalizarBonifPedido(bonifPedido)?.[tipo]
   if (!ovr) return ficha
   const filasOvr = bonifSegAFilas(ovr)
   const segsOvr = new Set(filasOvr.map((f) => f.segmento))
@@ -837,11 +839,36 @@ export async function createPedido(data: {
       .in("tipo", ["general", "viajante"])
     bonifData = bonifTabla ?? []
   }
+  // Las bonificaciones inline (ERP nuevo pedido) se PERSISTEN como override del
+  // pedido (bonif_pedido): si no, un re-precio o un ítem agregado después volvía
+  // a los % de la ficha y el mismo pedido quedaba con descuentos distintos.
+  const filasAOverride = (tipo: string): Record<string, number> | undefined => {
+    if (!data.bonificaciones_pedido?.length) return undefined
+    const o: Record<string, number> = {}
+    for (const b of data.bonificaciones_pedido.filter((x) => x.tipo === tipo)) {
+      const pct = Number(b.porcentaje) || 0
+      const segs = b.segmento && b.segmento !== "todos" ? [b.segmento] : [...SEGMENTOS_BONIF]
+      for (const s of segs) if (o[s] === undefined) o[s] = pct
+    }
+    return Object.keys(o).length ? o : undefined
+  }
+  const ovrGeneral = filasAOverride("general")
+  const ovrViajante = filasAOverride("viajante")
+  const ovrMercaderia = filasAOverride("mercaderia")
+  const bonifPedidoNorm = normalizarBonifPedido({
+    ...(data.bonif_pedido || {}),
+    ...(ovrGeneral    ? { general:    ovrGeneral }    : {}),
+    ...(ovrViajante   ? { viajante:   ovrViajante }   : {}),
+    ...(ovrMercaderia ? { mercaderia: ovrMercaderia } : {}),
+  })
   const bonifGeneral: Array<{ segmento: string | null; porcentaje: number }> =
-    bonifData.filter((b: any) => b.tipo === "general")
-  const bonifPedidoNorm = normalizarBonifPedido(data.bonif_pedido)
+    mezclarOverride(bonifData.filter((b: any) => b.tipo === "general"), bonifPedidoNorm, "general")
   const bonificacionesViajante: Array<{ segmento: string | null; porcentaje: number }> =
-    mezclarViajanteOverride(bonifData.filter((b: any) => b.tipo === "viajante"), bonifPedidoNorm)
+    mezclarOverride(bonifData.filter((b: any) => b.tipo === "viajante"), bonifPedidoNorm, "viajante")
+  // % mercadería inline "para todos los segmentos" → bonif_mercaderia_pct del pedido
+  // (antes se descartaba en silencio).
+  const mercInline = (data.bonificaciones_pedido || []).find((b) => b.tipo === "mercaderia" && (!b.segmento || b.segmento === "todos"))
+  const mercInlinePct = mercInline ? Number(mercInline.porcentaje) || 0 : 0
 
   // Condiciones por proveedor: del cliente + overrides del formulario (este pedido)
   const condicionesProveedor = mergeCondicionesProveedor(
@@ -950,6 +977,7 @@ export async function createPedido(data: {
       ...(data.lista_perf_plus_pedido_id    ? { lista_perf_plus_pedido_id:    data.lista_perf_plus_pedido_id }    : {}),
       ...(data.metodo_perf_plus_pedido      ? { metodo_perf_plus_pedido:      data.metodo_perf_plus_pedido }      : {}),
       ...(bonifPedidoNorm ? { bonif_pedido: bonifPedidoNorm } : {}),
+      ...(mercInlinePct > 0 ? { bonif_mercaderia_pct: mercInlinePct } : {}),
       total_flete: 0,
       total_impuestos: percepciones,
       total: Math.round((total + percepciones) * 100) / 100,
@@ -1827,15 +1855,35 @@ export async function guardarItemsPedido(
   const supabase = await createClient()
   await assertPedidoEditable(supabase, pedidoId)
 
+  // Precio actual de cada línea, para acompañar el neto cuando se toca el precio a mano.
+  const { data: actuales } = await supabase
+    .from("pedidos_detalle")
+    .select("id, precio_final, precio_base")
+    .in("id", changes.map((c) => c.id))
+    .eq("pedido_id", pedidoId)
+  const actualPorId = new Map((actuales || []).map((r: any) => [r.id, r]))
+
   for (const change of changes) {
+    const upd: Record<string, any> = {
+      cantidad: change.cantidad,
+      precio_final: change.precio_final,
+      subtotal: Math.round(change.precio_final * change.cantidad * 100) / 100,
+      estado_item: change.estado_item,
+    }
+    // Precio editado a mano: el NETO (precio_base) tiene que moverse en la misma
+    // proporción. Si no, la Factura A usa el neto viejo y la diferencia se cuela
+    // como "IVA" (la línea y el IVA discriminado salen mal).
+    const act = actualPorId.get(change.id)
+    if (act && Number(act.precio_final) !== Number(change.precio_final)) {
+      const viejoFinal = Number(act.precio_final) || 0
+      const viejoNeto = Number(act.precio_base) || 0
+      upd.precio_base = viejoFinal > 0 && viejoNeto > 0
+        ? Math.round(viejoNeto * (change.precio_final / viejoFinal) * 100) / 100
+        : Math.round((change.precio_final / 1.21) * 100) / 100
+    }
     const { error } = await supabase
       .from("pedidos_detalle")
-      .update({
-        cantidad: change.cantidad,
-        precio_final: change.precio_final,
-        subtotal: Math.round(change.precio_final * change.cantidad * 100) / 100,
-        estado_item: change.estado_item,
-      })
+      .update(upd)
       .eq("id", change.id)
       .eq("pedido_id", pedidoId)
     if (error) throw error
@@ -2002,6 +2050,54 @@ export async function aplicarCondicionesPedidoVendedor(
   await repreciarItemsPedido(supabase, pedido, pedidoId)
   const total = await recalcularTotalPedido(supabase, pedidoId)
 
+  revalidatePath("/clientes-pedidos")
+  return { success: true, total }
+}
+
+// ─── Condiciones por proveedor / marca "solo este pedido" (ficha del pedido, ERP) ───
+// Reemplaza las condiciones del pedido por las recibidas y re-precia todas las
+// líneas (la condición cambia lista/método/descuentos de esa mercadería y se
+// factura aparte). Antes solo se podían cargar al crear el pedido.
+export async function guardarCondicionesPedido(
+  pedidoId: string,
+  cond: { proveedor: CondicionProveedor[]; marca: CondicionMarca[] },
+) {
+  const supabase = await createClient()
+  await assertPedidoEditable(supabase, pedidoId)
+
+  const { data: pedido } = await supabase
+    .from("pedidos")
+    .select(`id,estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
+    .eq("id", pedidoId)
+    .single()
+  if (!pedido) throw new Error("Pedido no encontrado")
+
+  const { error: dp } = await supabase.from("pedido_proveedor_condicion").delete().eq("pedido_id", pedidoId)
+  if (dp) throw dp
+  const { error: dm } = await supabase.from("pedido_marca_condicion").delete().eq("pedido_id", pedidoId)
+  if (dm) throw dm
+
+  const provRows = (cond.proveedor || []).filter((c) => c?.proveedor_id).map((c) => ({
+    pedido_id: pedidoId, proveedor_id: c.proveedor_id,
+    lista_precio_id: c.lista_precio_id ?? null, metodo_facturacion: c.metodo_facturacion ?? null,
+    dto_general_pct: c.dto_general_pct ?? null, dto_viajante_pct: c.dto_viajante_pct ?? null, dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+  }))
+  if (provRows.length) {
+    const { error } = await supabase.from("pedido_proveedor_condicion").insert(provRows)
+    if (error) throw error
+  }
+  const marcaRows = (cond.marca || []).filter((c) => c?.marca_id).map((c) => ({
+    pedido_id: pedidoId, marca_id: c.marca_id,
+    lista_precio_id: c.lista_precio_id ?? null, metodo_facturacion: c.metodo_facturacion ?? null,
+    dto_general_pct: c.dto_general_pct ?? null, dto_viajante_pct: c.dto_viajante_pct ?? null, dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+  }))
+  if (marcaRows.length) {
+    const { error } = await supabase.from("pedido_marca_condicion").insert(marcaRows)
+    if (error) throw error
+  }
+
+  await repreciarItemsPedido(supabase, pedido, pedidoId)
+  const total = await recalcularTotalPedido(supabase, pedidoId)
   revalidatePath("/clientes-pedidos")
   return { success: true, total }
 }

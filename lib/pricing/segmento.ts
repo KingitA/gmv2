@@ -61,6 +61,7 @@ export function detectarSegmentoBonif(articulo: ArticuloSegmentable): SegmentoBo
  */
 export type BonifPorSegmento = Partial<Record<SegmentoBonif, number>>
 export interface BonifPedido {
+  general?: BonifPorSegmento | null
   viajante?: BonifPorSegmento | null
   mercaderia?: BonifPorSegmento | null
 }
@@ -69,7 +70,7 @@ export interface BonifPedido {
 export function normalizarBonifPedido(input: any): BonifPedido | null {
   if (!input || typeof input !== "object") return null
   const out: BonifPedido = {}
-  for (const tipo of ["viajante", "mercaderia"] as const) {
+  for (const tipo of ["general", "viajante", "mercaderia"] as const) {
     const src = input[tipo]
     if (!src || typeof src !== "object") continue
     const seg: BonifPorSegmento = {}

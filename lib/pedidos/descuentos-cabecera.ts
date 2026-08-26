@@ -56,7 +56,7 @@ export async function calcularDescuentosPedido(
 
   // ── Por segmento ──
   const segs: DescuentosSegmento[] = SEGMENTOS_BONIF.map((seg) => {
-    const general = pctFicha(ficha, "general", seg)
+    const general = typeof ovr?.general?.[seg] === "number" ? ovr!.general![seg]! : pctFicha(ficha, "general", seg)
     const viajante = typeof ovr?.viajante?.[seg] === "number" ? ovr!.viajante![seg]! : pctFicha(ficha, "viajante", seg)
     const mercaderia = typeof ovr?.mercaderia?.[seg] === "number" ? ovr!.mercaderia![seg]!
       : mercPedido != null ? Number(mercPedido) || 0 : pctFicha(ficha, "mercaderia", seg)

@@ -668,6 +668,15 @@ async function createOrderFromEmail(
     vendedorId?: string | null,
     facturacionOverride?: string | null
 ) {
+    // FAIL-SAFE: este camino arma las líneas con articulos.precio_compra (COSTO) y sin
+    // lista / método / bonificaciones / condiciones del cliente. Hoy está apagado
+    // (canAutoCreate=false). Si alguien lo vuelve a prender, cortamos acá y el
+    // pedido cae a revisión manual (imports), que sí usa el motor de precios
+    // (createPedido). Para reactivarlo hay que reescribirlo sobre createPedido.
+    if (!process.env.EMAIL_AUTO_CREATE_PEDIDOS_A_COSTO) {
+        throw new Error('Auto-creación desde mail deshabilitada: precios sin motor. Va a revisión manual.')
+    }
+
     // 1. Generate order number (numeric-only)
     const { getNextOrderNumber } = await import('@/lib/utils/next-order-number')
     const numeroPedido = await getNextOrderNumber(db)
@@ -778,6 +787,10 @@ async function accumulateIntoOrder(
     items: ParseResult['items'],
     facturacionOverride?: string | null
 ) {
+    // FAIL-SAFE: mismo motivo que createOrderFromEmail (líneas a costo, sin motor de precios).
+    if (!process.env.EMAIL_AUTO_CREATE_PEDIDOS_A_COSTO) {
+        throw new Error('Acumulación automática desde mail deshabilitada: precios sin motor. Va a revisión manual.')
+    }
     const matchedItems = items.filter(i => i.matchedProduct && i.matchedProduct.id)
     if (matchedItems.length === 0) return
 
