@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { actualizarCantidadItem, eliminarItemPedido, softDeletePedido } from "@/lib/actions/pedidos"
+import { esPedidoEditable, puedeEliminarPedido } from "@/lib/pedidos/estados"
 
 interface DetalleItem {
   id: string
@@ -53,8 +54,6 @@ const ESTADO_LABEL: Record<string, string> = {
 }
 
 // El vendedor puede modificar el pedido mientras no entró al circuito de depósito
-const ESTADOS_EDITABLES = new Set(["en_venta", "pendiente", "impreso"])
-
 function PedidoDetalleInner() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
@@ -89,7 +88,8 @@ function PedidoDetalleInner() {
     cargar()
   }, [cargar])
 
-  const editable = !!pedido && ESTADOS_EDITABLES.has(pedido.estado)
+  // Misma regla que el ERP (lib/pedidos/estados.ts): en_venta / pendiente / impreso / en_preparacion
+  const editable = !!pedido && esPedidoEditable(pedido.estado)
   const items = pedido?.pedidos_detalle || []
   const itemsVenta = items.filter((i) => !i.es_bonificado)
   const itemsBonif = items.filter((i) => i.es_bonificado)
@@ -382,7 +382,7 @@ function PedidoDetalleInner() {
         )}
 
         {/* Eliminar */}
-        {(pedido.estado === "pendiente" || pedido.estado === "en_venta") && (
+        {puedeEliminarPedido(pedido.estado) && (
           <button
             onClick={eliminarPedido}
             disabled={eliminando}

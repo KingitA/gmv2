@@ -19,6 +19,14 @@ import {
   type Segmento,
   type BonifPedido,
 } from "@/lib/pricing/segmento"
+import {
+  esPedidoEditable,
+  puedeEliminarPedido,
+  puedeEditarEntrega,
+  puedeCambiarEstado,
+  motivoBloqueo,
+  ESTADO_LABEL,
+} from "@/lib/pedidos/estados"
 
 function toMetodoFacturacion(raw: string | null | undefined): MetodoFacturacion {
   if (!raw) return "Final"
@@ -1362,8 +1370,9 @@ export async function softDeletePedido(pedidoId: string) {
     throw new Error("Pedido no encontrado")
   }
 
-  if (pedido.estado !== "pendiente" && pedido.estado !== "en_venta") {
-    throw new Error("Solo se pueden eliminar pedidos en estado 'pendiente' o 'en venta'")
+  // Misma regla que editar: en_venta / pendiente / impreso / en_preparacion.
+  if (!puedeEliminarPedido(pedido.estado)) {
+    throw new Error(`No se puede eliminar un pedido ${(ESTADO_LABEL[pedido.estado] || pedido.estado).toLowerCase()}. Solo se eliminan pedidos en venta, pendientes, impresos o en preparación.`)
   }
 
   // Soft-delete: change state and record timestamp
@@ -1390,6 +1399,81 @@ export async function softDeletePedido(pedidoId: string) {
   return { success: true, numero_pedido: pedido.numero_pedido }
 }
 
+// ─── Cambio manual de estado (desplegable del ERP) ───────────────────────────
+// Solo transiciones del flujo (lib/pedidos/estados.ts). Facturado lo pone la
+// emisión de comprobantes; en_viaje la asignación de viaje. Nunca se vuelve
+// atrás de facturado.
+export async function cambiarEstadoPedidoManual(pedidoId: string, nuevoEstado: string) {
+  const supabase = await createClient()
+  const { data: pedido, error } = await supabase
+    .from("pedidos").select("id, estado").eq("id", pedidoId).single()
+  if (error || !pedido) throw new Error("Pedido no encontrado")
+  if (pedido.estado === nuevoEstado) return { success: true, estado: nuevoEstado }
+  if (!puedeCambiarEstado(pedido.estado, nuevoEstado)) {
+    throw new Error(
+      `No se puede pasar un pedido de "${ESTADO_LABEL[pedido.estado] || pedido.estado}" a "${ESTADO_LABEL[nuevoEstado] || nuevoEstado}".`
+    )
+  }
+  const { error: upErr } = await supabase
+    .from("pedidos").update({ estado: nuevoEstado }).eq("id", pedidoId)
+  if (upErr) throw new Error(upErr.message)
+  revalidatePath("/clientes-pedidos")
+  return { success: true, estado: nuevoEstado }
+}
+
+// ─── Encabezado del pedido (ficha /clientes-pedidos/[id]) ────────────────────
+// Aplica la traba por estado del lado del servidor:
+// - editable: se guarda todo el encabezado (estado solo si es transición válida).
+// - facturado / listo / pendiente_facturacion: SOLO condicion_entrega (+ estado
+//   listo_para_retirar ↔ listo_para_enviar). El resto se descarta.
+// - en_viaje: solo estado (entregado / rechazado). Finales: nada.
+const CAMPOS_ENCABEZADO = [
+  "metodo_facturacion_pedido", "condicion_entrega", "vendedor_id",
+  "lista_precio_pedido_id", "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
+  "lista_perf0_pedido_id", "metodo_perf0_pedido", "lista_perf_plus_pedido_id",
+  "metodo_perf_plus_pedido", "observaciones", "bonif_mercaderia_pct",
+] as const
+
+export async function actualizarEncabezadoPedido(
+  pedidoId: string,
+  patch: Partial<Record<(typeof CAMPOS_ENCABEZADO)[number] | "estado", any>>,
+) {
+  const supabase = await createClient()
+  const { data: pedido, error } = await supabase
+    .from("pedidos").select("id, estado").eq("id", pedidoId).single()
+  if (error || !pedido) throw new Error("Pedido no encontrado")
+
+  const editable = esPedidoEditable(pedido.estado)
+  const update: Record<string, any> = {}
+
+  if (editable) {
+    for (const k of CAMPOS_ENCABEZADO) if (k in patch) update[k] = patch[k]
+  } else if (puedeEditarEntrega(pedido.estado)) {
+    if ("condicion_entrega" in patch) update.condicion_entrega = patch.condicion_entrega
+  }
+
+  if (patch.estado && patch.estado !== pedido.estado) {
+    if (!puedeCambiarEstado(pedido.estado, patch.estado)) {
+      throw new Error(
+        `No se puede pasar un pedido de "${ESTADO_LABEL[pedido.estado] || pedido.estado}" a "${ESTADO_LABEL[patch.estado] || patch.estado}".`
+      )
+    }
+    update.estado = patch.estado
+  }
+
+  if (Object.keys(update).length === 0) {
+    // Nada aplicable: si intentaron tocar campos bloqueados, avisar.
+    const intentoBloqueado = Object.keys(patch).some(k => k !== "estado" && !(k in update))
+    if (intentoBloqueado && !editable) throw new Error(motivoBloqueo(pedido.estado) || "El pedido no puede modificarse")
+    return { success: true, aplicado: [] as string[], editable }
+  }
+
+  const { error: upErr } = await supabase.from("pedidos").update(update).eq("id", pedidoId)
+  if (upErr) throw new Error(upErr.message)
+  revalidatePath("/clientes-pedidos")
+  return { success: true, aplicado: Object.keys(update), editable }
+}
+
 // ─── Edición de pedidos pendientes ─────────────────────────────────────────
 
 async function assertPedidoEditable(supabase: any, pedidoId: string) {
@@ -1399,9 +1483,8 @@ async function assertPedidoEditable(supabase: any, pedidoId: string) {
     .eq("id", pedidoId)
     .single()
   if (error || !data) throw new Error("Pedido no encontrado")
-  if (data.estado === "eliminado") throw new Error("El pedido está eliminado y no puede modificarse")
-  if (data.estado === "facturado" || data.estado === "entregado")
-    throw new Error("El pedido ya fue facturado/entregado y no puede modificarse")
+  // Lista blanca: solo en_venta / pendiente / impreso / en_preparacion (lib/pedidos/estados.ts)
+  if (!esPedidoEditable(data.estado)) throw new Error(motivoBloqueo(data.estado) || "El pedido no puede modificarse")
   return data
 }
 

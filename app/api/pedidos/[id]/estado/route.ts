@@ -1,8 +1,11 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { nowArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
+import { puedeCambiarEstado, ESTADO_LABEL } from "@/lib/pedidos/estados"
 
+// PATCH: cambio manual de estado. Solo acepta transiciones del flujo
+// (lib/pedidos/estados.ts): nunca se vuelve atrás de facturado.
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -15,18 +18,22 @@ export async function PATCH(
     const body = await request.json()
     const { estado } = body
 
-    if (!estado) {
+    if (!estado || !(estado in ESTADO_LABEL)) {
       return NextResponse.json(
-        { error: "Estado es requerido" },
+        { error: `Estado no válido. Debe ser: ${Object.keys(ESTADO_LABEL).join(", ")}` },
         { status: 400 }
       )
     }
 
-    // Validar estados permitidos
-    const estadosPermitidos = ["pendiente", "en_viaje", "entregado", "cancelado"]
-    if (!estadosPermitidos.includes(estado)) {
+    const { data: actual, error: fetchError } = await supabase
+      .from("pedidos").select("id, estado").eq("id", id).single()
+    if (fetchError || !actual) {
+      return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 })
+    }
+
+    if (!puedeCambiarEstado(actual.estado, estado)) {
       return NextResponse.json(
-        { error: `Estado no válido. Debe ser: ${estadosPermitidos.join(", ")}` },
+        { error: `No se puede pasar un pedido de "${ESTADO_LABEL[actual.estado] || actual.estado}" a "${ESTADO_LABEL[estado]}".` },
         { status: 400 }
       )
     }

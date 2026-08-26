@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo, repreciarPedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo, repreciarPedido, actualizarEncabezadoPedido } from "@/lib/actions/pedidos"
+import { esPedidoEditable, puedeEditarEntrega, transicionesManuales, motivoBloqueo, ESTADO_LABEL } from "@/lib/pedidos/estados"
 import { detectarSegmentoBonif, SEGMENTOS_BONIF, SEGMENTO_LABEL, type SegmentoBonif } from "@/lib/pricing/segmento"
 import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
@@ -23,18 +24,6 @@ const ESTADO_COLORS: Record<string, string> = {
   entregado: "bg-green-100 text-green-800 border-green-300",
   en_viaje: "bg-purple-100 text-purple-800 border-purple-300",
 }
-
-const ESTADOS_PEDIDO = [
-  { value: "pendiente", label: "Pendiente" },
-  { value: "impreso", label: "Impreso" },
-  { value: "en_preparacion", label: "En Preparación" },
-  { value: "pendiente_facturacion", label: "Pendiente Facturación" },
-  { value: "facturado", label: "Facturado" },
-  { value: "listo_para_retirar", label: "Listo para Retirar" },
-  { value: "listo_para_enviar", label: "Listo para Enviar" },
-  { value: "en_viaje", label: "En Viaje" },
-  { value: "entregado", label: "Entregado" },
-]
 
 export default function PedidoEditPage() {
   const { id } = useParams<{ id: string }>()
@@ -193,26 +182,30 @@ export default function PedidoEditPage() {
         observaciones: headerForm.observaciones || null,
         bonif_mercaderia_pct: bonifPct || null,
       }
-      const { error: hErr } = await supabase.from("pedidos").update(headerUpdate).eq("id", id)
-      if (hErr) throw hErr
+      // El servidor aplica la traba por estado: si el pedido ya no es editable,
+      // solo toma condicion_entrega (y el estado si es una transición válida).
+      const editableAhora = esPedidoEditable(pedido?.estado)
+      await actualizarEncabezadoPedido(id, headerUpdate)
 
-      // Si cambió lista/método (general o por segmento) del pedido, las líneas
-      // se re-precian: el cambio tiene que llegar a la factura, no quedar en el
-      // encabezado. Se hace ANTES de aplicar ediciones manuales de precio para
-      // que un precio tocado a mano en esta misma pantalla no se pise.
-      const CAMPOS_PRECIO = [
-        "metodo_facturacion_pedido", "lista_precio_pedido_id",
-        "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
-        "lista_perf0_pedido_id", "metodo_perf0_pedido",
-        "lista_perf_plus_pedido_id", "metodo_perf_plus_pedido",
-      ] as const
-      const cambioPrecio = CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
-      if (cambioPrecio && !["facturado", "entregado", "eliminado"].includes(headerForm.estado)) {
-        await repreciarPedido(id)
+      if (editableAhora) {
+        // Si cambió lista/método (general o por segmento) del pedido, las líneas
+        // se re-precian: el cambio tiene que llegar a la factura, no quedar en el
+        // encabezado. Se hace ANTES de aplicar ediciones manuales de precio para
+        // que un precio tocado a mano en esta misma pantalla no se pise.
+        const CAMPOS_PRECIO = [
+          "metodo_facturacion_pedido", "lista_precio_pedido_id",
+          "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
+          "lista_perf0_pedido_id", "metodo_perf0_pedido",
+          "lista_perf_plus_pedido_id", "metodo_perf_plus_pedido",
+        ] as const
+        const cambioPrecio = CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
+        if (cambioPrecio && esPedidoEditable(headerForm.estado)) {
+          await repreciarPedido(id)
+        }
+
+        const changes = Object.entries(itemEdits).map(([itemId, edit]) => ({ id: itemId, ...edit }))
+        if (changes.length > 0) await guardarItemsPedido(id, changes)
       }
-
-      const changes = Object.entries(itemEdits).map(([itemId, edit]) => ({ id: itemId, ...edit }))
-      if (changes.length > 0) await guardarItemsPedido(id, changes)
 
       await loadAll()
     } catch (err: any) {
@@ -363,6 +356,12 @@ export default function PedidoEditPage() {
   }
 
   const estadoColor = ESTADO_COLORS[pedido?.estado] || "bg-slate-100 text-slate-700 border-slate-300"
+  // Trabas por estado (lib/pedidos/estados.ts): editable = todo; si no, solo forma de entrega.
+  const editable = esPedidoEditable(pedido?.estado)
+  const entregaEditable = puedeEditarEntrega(pedido?.estado)
+  const bloqueo = motivoBloqueo(pedido?.estado)
+  const opcionesEstado = [pedido?.estado, ...transicionesManuales(pedido?.estado)].filter(Boolean) as string[]
+  const puedeGuardar = editable || entregaEditable || opcionesEstado.length > 1
   const liveTotal = items.map(i => getDisplayItem(i)).reduce((sum, i) => sum + (i.precio_final ?? 0) * (i.cantidad ?? 0), 0)
   const hasUnsaved = Object.keys(itemEdits).length > 0
 
@@ -400,12 +399,12 @@ export default function PedidoEditPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${estadoColor}`}>
-              {pedido?.estado}
+              {ESTADO_LABEL[pedido?.estado] || pedido?.estado}
             </span>
             <span className="text-xl font-bold text-slate-800">
               ${liveTotal.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
-            <Button onClick={savePedido} disabled={saving} className="gap-2">
+            <Button onClick={savePedido} disabled={saving || !puedeGuardar} className="gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Guardar pedido
               {hasUnsaved && <span className="ml-1 h-2 w-2 rounded-full bg-amber-400 inline-block" />}
@@ -415,6 +414,12 @@ export default function PedidoEditPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+
+        {bloqueo && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 font-medium">
+            🔒 {bloqueo}
+          </div>
+        )}
 
         {/* Encabezado del pedido */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -434,10 +439,11 @@ export default function PedidoEditPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <Label className="text-xs text-slate-500 mb-1 block">Estado</Label>
-                  <Select value={headerForm.estado} onValueChange={(v) => setHeaderForm({ ...headerForm, estado: v })}>
+                  {/* Solo transiciones del flujo; sin opciones = estado final o lo mueve otro proceso */}
+                  <Select value={headerForm.estado} onValueChange={(v) => setHeaderForm({ ...headerForm, estado: v })} disabled={opcionesEstado.length <= 1}>
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {ESTADOS_PEDIDO.map(e => <SelectItem key={e.value} value={e.value}>{e.label}</SelectItem>)}
+                      {opcionesEstado.map(e => <SelectItem key={e} value={e}>{ESTADO_LABEL[e] || e}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -446,6 +452,7 @@ export default function PedidoEditPage() {
                   <Select
                     value={headerForm.metodo_facturacion_pedido || "__heredar__"}
                     onValueChange={(v) => setHeaderForm({ ...headerForm, metodo_facturacion_pedido: v === "__heredar__" ? "" : v })}
+                    disabled={!editable}
                   >
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -458,7 +465,7 @@ export default function PedidoEditPage() {
                 </div>
                 <div>
                   <Label className="text-xs text-slate-500 mb-1 block">Condición de Entrega</Label>
-                  <Select value={headerForm.condicion_entrega || "__heredar__"} onValueChange={(v) => setHeaderForm({ ...headerForm, condicion_entrega: v === "__heredar__" ? "" : v })}>
+                  <Select value={headerForm.condicion_entrega || "__heredar__"} onValueChange={(v) => setHeaderForm({ ...headerForm, condicion_entrega: v === "__heredar__" ? "" : v })} disabled={!entregaEditable}>
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__heredar__">{defaultEntrega} (del cliente)</SelectItem>
@@ -470,7 +477,7 @@ export default function PedidoEditPage() {
                 </div>
                 <div>
                   <Label className="text-xs text-slate-500 mb-1 block">Vendedor</Label>
-                  <Select value={headerForm.vendedor_id || "__none__"} onValueChange={(v) => setHeaderForm({ ...headerForm, vendedor_id: v === "__none__" ? "" : v })}>
+                  <Select value={headerForm.vendedor_id || "__none__"} onValueChange={(v) => setHeaderForm({ ...headerForm, vendedor_id: v === "__none__" ? "" : v })} disabled={!editable}>
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">{defaultVendedor} (del cliente)</SelectItem>
@@ -487,6 +494,7 @@ export default function PedidoEditPage() {
                   <Select
                     value={headerForm.lista_precio_pedido_id || "__heredar__"}
                     onValueChange={(v) => setHeaderForm({ ...headerForm, lista_precio_pedido_id: v === "__heredar__" ? "" : v })}
+                    disabled={!editable}
                   >
                     <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -502,6 +510,7 @@ export default function PedidoEditPage() {
                     value={headerForm.observaciones}
                     onChange={(e) => setHeaderForm({ ...headerForm, observaciones: e.target.value })}
                     placeholder="Notas internas del pedido..."
+                    disabled={!editable}
                   />
                 </div>
               </div>
@@ -520,6 +529,7 @@ export default function PedidoEditPage() {
                       <Select
                         value={(headerForm as any)[metodoKey] || "__heredar__"}
                         onValueChange={(v) => setHeaderForm({ ...headerForm, [metodoKey]: v === "__heredar__" ? "" : v })}
+                        disabled={!editable}
                       >
                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -532,6 +542,7 @@ export default function PedidoEditPage() {
                       <Select
                         value={(headerForm as any)[listaKey] || "__heredar__"}
                         onValueChange={(v) => setHeaderForm({ ...headerForm, [listaKey]: v === "__heredar__" ? "" : v })}
+                        disabled={!editable}
                       >
                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -552,6 +563,7 @@ export default function PedidoEditPage() {
             pedidos sin mercadería bonificada). */}
         {(() => {
           const hasBonif = items.some(i => i.es_bonificado)
+          if (!hasBonif && !editable) return null
           if (!hasBonif && !showBonifPanel) {
             return (
               <button
@@ -588,6 +600,7 @@ export default function PedidoEditPage() {
               </div>
             </div>
 
+            {editable && (
             <div className="bg-white rounded-2xl border border-amber-200 p-5 shadow-sm space-y-4">
               <div className="flex items-end gap-4 flex-wrap">
                 <div>
@@ -638,6 +651,7 @@ export default function PedidoEditPage() {
               </div>
               <p className="text-[11px] text-slate-400">Dejá las unidades en "auto" para que se calculen por monto, o tipeá una cantidad fija.</p>
             </div>
+            )}
           </>
           )
         })()}
@@ -655,14 +669,16 @@ export default function PedidoEditPage() {
                 onChange={(e) => setFilterQuery(e.target.value)}
               />
             </div>
-            <Button
-              size="sm"
-              className="gap-1.5 shrink-0"
-              onClick={() => { setShowAddPanel(o => !o); setQuery(""); setFound([]); setSelectedProduct(null); setQty(1) }}
-            >
-              <Plus className="h-4 w-4" />
-              Agregar artículo
-            </Button>
+            {editable && (
+              <Button
+                size="sm"
+                className="gap-1.5 shrink-0"
+                onClick={() => { setShowAddPanel(o => !o); setQuery(""); setFound([]); setSelectedProduct(null); setQty(1) }}
+              >
+                <Plus className="h-4 w-4" />
+                Agregar artículo
+              </Button>
+            )}
           </div>
 
           {/* Panel agregar artículo (colapsable) */}
@@ -779,6 +795,7 @@ export default function PedidoEditPage() {
                           key={`p-${item.id}-${displayItem.precio_final ?? 0}`}
                           type="number" step="0.01" min={0}
                           className="h-8 pl-5 text-right text-sm font-semibold"
+                          disabled={!editable}
                           defaultValue={displayItem.precio_final ?? 0}
                           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur() }}
                           onBlur={(e) => {
@@ -801,6 +818,7 @@ export default function PedidoEditPage() {
                         key={`q-${item.id}-${displayItem.cantidad ?? 0}`}
                         type="number" min={0}
                         className="h-8 w-20 text-center font-semibold text-sm"
+                        disabled={!editable}
                         defaultValue={displayItem.cantidad ?? 0}
                         onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur() }}
                         onBlur={(e) => {
@@ -830,14 +848,16 @@ export default function PedidoEditPage() {
 
                     {/* Acciones */}
                     <div className="col-span-3 flex items-center justify-end gap-1">
-                      <Button
-                        variant={isFaltante ? "destructive" : "outline"}
-                        size="sm"
-                        className="h-7 px-2 text-[11px] font-bold"
-                        onClick={() => toggleFaltante(item, displayItem)}
-                      >
-                        {isFaltante ? "✓ Faltante" : "Faltante"}
-                      </Button>
+                      {editable && (
+                        <Button
+                          variant={isFaltante ? "destructive" : "outline"}
+                          size="sm"
+                          className="h-7 px-2 text-[11px] font-bold"
+                          onClick={() => toggleFaltante(item, displayItem)}
+                        >
+                          {isFaltante ? "✓ Faltante" : "Faltante"}
+                        </Button>
+                      )}
                       {hasEdit && (
                         <Button
                           variant="ghost" size="icon"
@@ -848,13 +868,15 @@ export default function PedidoEditPage() {
                           <Undo2 className="h-3.5 w-3.5" />
                         </Button>
                       )}
-                      <Button
-                        variant="ghost" size="icon"
-                        className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50"
-                        onClick={() => eliminarItem(item.id, item.articulos?.descripcion || "artículo")}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      {editable && (
+                        <Button
+                          variant="ghost" size="icon"
+                          className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50"
+                          onClick={() => eliminarItem(item.id, item.articulos?.descripcion || "artículo")}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )

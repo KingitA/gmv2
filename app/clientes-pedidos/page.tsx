@@ -43,7 +43,8 @@ import { NuevoPedidoDialog } from "@/components/pedidos/NuevoPedidoDialog"
 import { ReviewPedidoDialog } from "@/components/pedidos/ReviewPedidoDialog"
 import { useOrderQueue } from "@/hooks/use-order-queue"
 import type { QueueItem } from "@/hooks/use-order-queue"
-import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido, marcarPedidoImpreso } from "@/lib/actions/pedidos"
+import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido, marcarPedidoImpreso, cambiarEstadoPedidoManual, softDeletePedido } from "@/lib/actions/pedidos"
+import { transicionesManuales, puedeEliminarPedido, puedeAsignarViaje, ESTADO_LABEL } from "@/lib/pedidos/estados"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -478,22 +479,29 @@ export default function ClientesPedidosPage() {
     }
   }
 
+  // Cambio manual de estado: pasa por el servidor, que solo acepta transiciones
+  // del flujo (lib/pedidos/estados.ts). Nunca se vuelve atrás de facturado.
   const cambiarEstadoPedido = async (pedidoId: string, nuevoEstado: string) => {
     try {
-      const { error } = await supabase.from("pedidos").update({ estado: nuevoEstado }).eq("id", pedidoId)
-
-      if (error) throw error
+      await cambiarEstadoPedidoManual(pedidoId, nuevoEstado)
 
       await cargarPedidos()
       if (pedidoSeleccionado?.id === pedidoId) {
         setPedidoSeleccionado({ ...pedidoSeleccionado, estado: nuevoEstado })
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error cambiando estado:", error)
+      toast.error(error?.message || "No se pudo cambiar el estado")
     }
   }
 
   const asignarViaje = async (pedidoId: string, viajeId: string) => {
+    // Un viaje se asigna recién con el pedido facturado / listo (pasa a en_viaje).
+    const estadoActual = pedidos.find(p => p.id === pedidoId)?.estado ?? pedidoSeleccionado?.estado
+    if (!puedeAsignarViaje(estadoActual)) {
+      toast.error(`El pedido está ${(ESTADO_LABEL[estadoActual || ""] || estadoActual || "").toLowerCase()}: se asigna a un viaje una vez facturado.`)
+      return
+    }
     try {
       const { error } = await supabase
         .from("pedidos")
@@ -592,7 +600,7 @@ export default function ClientesPedidosPage() {
       // Descuentos de un segmento (general/viajante propios del segmento o generales
       // "todos", + mercadería del pedido). Formato "−3% general · −5% viajante".
       const bonifLines = (segKey: string | null) => {
-        const rows = (bonifs || []).filter(b =>
+        const rows = (bonifs || []).filter((b: any) =>
           b.tipo !== "mercaderia" && Number(b.porcentaje) > 0 &&
           (b.segmento === segKey || b.segmento === "todos" || !b.segmento))
         const parts: string[] = []
@@ -870,21 +878,14 @@ export default function ClientesPedidosPage() {
     if (!pedidoAEliminar) return
     setEliminando(true)
     try {
-      const { error } = await supabase
-        .from("pedidos")
-        .update({
-          estado: "eliminado",
-          eliminado_at: new Date().toISOString(),
-        })
-        .eq("id", pedidoAEliminar.id)
-
-      if (error) throw error
+      // Por servidor: aplica la traba por estado y marca el kardex del pedido.
+      await softDeletePedido(pedidoAEliminar.id)
 
       await cargarPedidos()
       setPedidoAEliminar(null)
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error eliminando pedido:", error)
-      alert("Error al eliminar el pedido")
+      alert(error?.message || "Error al eliminar el pedido")
     } finally {
       setEliminando(false)
     }
@@ -1282,7 +1283,7 @@ export default function ClientesPedidosPage() {
                             {pedido.total > 0 && (
                               <span className="text-sm font-bold text-gray-700">${pedido.total.toLocaleString("es-AR")}</span>
                             )}
-                            {pedido.estado !== "eliminado" && (
+                            {puedeEliminarPedido(pedido.estado) && (
                               <Button
                                 variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50"
                                 onClick={(e) => { e.stopPropagation(); setPedidoAEliminar(pedido) }}
@@ -1393,7 +1394,7 @@ export default function ClientesPedidosPage() {
                     <FileText className="h-3.5 w-3.5 mr-1.5" />Editar pedido
                   </Button>
                 </Link>
-                {pedidoSeleccionado.estado !== "eliminado" ? (
+                {puedeEliminarPedido(pedidoSeleccionado.estado) ? (
                   <Button size="sm" variant="outline"
                     onClick={() => { setModalDetalleAbierto(false); setPedidoAEliminar(pedidoSeleccionado) }}
                     className="border-red-400/50 text-red-300 hover:bg-red-500/20">
@@ -1448,14 +1449,20 @@ export default function ClientesPedidosPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <p className="text-xs text-slate-500 mb-1.5">Cambiar estado</p>
-                    <Select value={pedidoSeleccionado.estado} onValueChange={(value) => cambiarEstadoPedido(pedidoSeleccionado.id, value)}>
-                      <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {ESTADOS_PEDIDO.map((estado) => (
-                          <SelectItem key={estado.value} value={estado.value}>{estado.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {/* Solo transiciones del flujo (lib/pedidos/estados.ts); sin opciones = final o lo mueve otro proceso */}
+                    {(() => {
+                      const opciones = [pedidoSeleccionado.estado, ...transicionesManuales(pedidoSeleccionado.estado)]
+                      return (
+                        <Select value={pedidoSeleccionado.estado} onValueChange={(value) => cambiarEstadoPedido(pedidoSeleccionado.id, value)} disabled={opciones.length <= 1}>
+                          <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {opciones.map((e) => (
+                              <SelectItem key={e} value={e}>{ESTADO_LABEL[e] || e}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )
+                    })()}
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 mb-1.5">Viaje</p>
@@ -1464,6 +1471,8 @@ export default function ClientesPedidosPage() {
                         <p className="text-sm font-semibold text-purple-700">🚚 {pedidoSeleccionado.viajes.nombre}</p>
                         <p className="text-xs text-purple-500">{formatDateAR(pedidoSeleccionado.viajes.fecha)}</p>
                       </div>
+                    ) : !puedeAsignarViaje(pedidoSeleccionado.estado) ? (
+                      <p className="text-xs text-slate-400 italic px-1 py-2">Se asigna una vez facturado</p>
                     ) : (
                       <div className="flex gap-1.5">
                         <Select value={viajeAsignado} onValueChange={setViajeAsignado}>
