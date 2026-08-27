@@ -205,7 +205,7 @@ export default function VendedorRendicionesPage() {
                 >
                   {enviando
                     ? "Enviando..."
-                    : `📤 RENDIR DINERO EN CUENTA · ${formatCurrency(totalSeleccionado)}`}
+                    : "📤 RENDIR DINERO"}
                 </button>
                 <p className="text-gray-400 text-xs text-center">
                   Oficina recibe el aviso de que el dinero está en viaje y tu billetera queda en 0.

@@ -62,7 +62,8 @@ export default function PedidoEditPage() {
   const [itemEdits, setItemEdits] = useState<Record<string, ItemEdit>>({})
   // Condiciones por proveedor / marca "solo este pedido" (editor)
   const [segPedido, setSegPedido] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
-  const [savingCond, setSavingCond] = useState(false)
+  // Foto de las condiciones al cargar: "Guardar pedido" las persiste solo si cambiaron
+  const [segPedidoInicial, setSegPedidoInicial] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
   const [headerForm, setHeaderForm] = useState({
     estado: "",
     metodo_facturacion_pedido: "",
@@ -164,10 +165,12 @@ export default function PedidoEditPage() {
         dto_viajante_pct: c.dto_viajante_pct ?? null,
         dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
       })
-      setSegPedido({
+      const segCargado = {
         proveedor: (cpPed || []).map((c: any) => aRow(c, c.proveedor_id, String(np.get(c.proveedor_id) || "Proveedor"))),
         marca: (cmPed || []).map((c: any) => aRow(c, c.marca_id, String(nm.get(c.marca_id) || "Marca"))),
-      })
+      }
+      setSegPedido(segCargado)
+      setSegPedidoInicial(segCargado)
     }
     if (p) {
       setHeaderForm({
@@ -250,6 +253,16 @@ export default function PedidoEditPage() {
       await actualizarEncabezadoPedido(id, headerUpdate)
 
       if (editableAhora) {
+        // Condiciones por proveedor/marca "solo este pedido": UN solo Guardar.
+        // guardarCondicionesPedido ya re-precia las líneas.
+        const cambioCond = JSON.stringify(segPedido) !== JSON.stringify(segPedidoInicial)
+        if (cambioCond) {
+          await guardarCondicionesPedido(id, {
+            proveedor: condRowsToProveedor(segPedido.proveedor),
+            marca: condRowsToMarca(segPedido.marca),
+          })
+        }
+
         // Si cambió lista/método (general o por segmento) del pedido, las líneas
         // se re-precian: el cambio tiene que llegar a la factura, no quedar en el
         // encabezado. Se hace ANTES de aplicar ediciones manuales de precio para
@@ -263,7 +276,7 @@ export default function PedidoEditPage() {
         const cambioBonif =
           JSON.stringify(normalizarBonifPedido(headerUpdate.bonif_pedido)) !== JSON.stringify(normalizarBonifPedido((pedido as any)?.bonif_pedido))
         const cambioPrecio = cambioBonif || CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
-        if (cambioPrecio && esPedidoEditable(headerForm.estado)) {
+        if (cambioPrecio && !cambioCond && esPedidoEditable(headerForm.estado)) {
           await repreciarPedido(id)
         }
 
@@ -276,22 +289,6 @@ export default function PedidoEditPage() {
       alert(err.message || "Error al guardar")
     } finally {
       setSaving(false)
-    }
-  }
-
-  // Guarda las condiciones por proveedor / marca de este pedido y re-precia las líneas.
-  async function guardarCondiciones() {
-    setSavingCond(true)
-    try {
-      await guardarCondicionesPedido(id, {
-        proveedor: condRowsToProveedor(segPedido.proveedor),
-        marca: condRowsToMarca(segPedido.marca),
-      })
-      await loadAll()
-    } catch (err: any) {
-      alert(err.message || "Error al guardar las condiciones")
-    } finally {
-      setSavingCond(false)
     }
   }
 
@@ -724,12 +721,7 @@ export default function PedidoEditPage() {
                       <div className="pt-1 space-y-2">
                         <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wide">Solo este pedido</p>
                         <SegmentacionCondiciones listas={listasPrecio} value={segPedido} onChange={setSegPedido} />
-                        <div className="flex justify-end">
-                          <Button type="button" size="sm" className="h-8 bg-teal-600 hover:bg-teal-700" onClick={guardarCondiciones} disabled={savingCond}>
-                            {savingCond ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
-                            Guardar condiciones y re-preciar
-                          </Button>
-                        </div>
+                        <p className="text-[10px] text-slate-400">Se guardan con “Guardar pedido” (arriba) y re-precian las líneas.</p>
                       </div>
                     )}
                   </div>

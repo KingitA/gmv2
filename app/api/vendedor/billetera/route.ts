@@ -30,9 +30,14 @@ export async function GET(request: Request) {
     const declarados = new Set<string>()
     const { data: abiertas } = await supabase
       .from("rendiciones")
-      .select("id")
+      .select("id, efectivo_declarado, efectivo_registrado")
       .in("cobrador_id", session.vendedorIds)
       .eq("estado", "abierta")
+    // Faltante ya declarado (cobró X en efectivo, dijo que lleva menos):
+    // se muestra de entrada como deuda, sin esperar a que oficina confirme.
+    const faltanteDeclarado = Math.round(
+      (abiertas ?? []).reduce((s, r: any) => s + Math.max(0, Number(r.efectivo_registrado) - Number(r.efectivo_declarado)), 0) * 100,
+    ) / 100
     if (abiertas?.length) {
       const { data: items } = await supabase
         .from("rendicion_items")
@@ -135,6 +140,7 @@ export async function GET(request: Request) {
       pagos_sin_rendir: cantidadSinRendir,
       en_viaje: { total: enViajeTotal, cantidad: enViaje.length },
       deuda_rendiciones: deudaRendiciones,
+      faltante_declarado: faltanteDeclarado,
       comisiones_pendientes: comisionesPendientes,
       total_pendiente_comisiones: totalPendiente,
       historial: historialEnriquecido,

@@ -163,8 +163,10 @@ export async function procesarPostConfirmacion(
       .in("id", compIds)
     paidIds = (comps || []).filter((c: any) => Number(c.saldo_pendiente) <= 0.005).map((c: any) => c.id)
   }
+  // Con el cliente ADMIN: la comisión del vendedor no depende de los permisos
+  // del usuario que confirma (27/08: Fitterer PRES 10 quedó sin 'cobradas').
   for (const comprobanteId of paidIds) {
-    await generarComisionesCobradas(supabase, { comprobanteId, usuarioId })
+    await generarComisionesCobradas(admin, { comprobanteId, usuarioId })
   }
 
   // ── 3. Débito del 10% financiero sobre la comisión ──
@@ -191,7 +193,7 @@ export async function procesarPostConfirmacion(
             .map((i: any) => i.comprobante_id),
         ),
       ]
-      if (bonificados.length) await debitarComisionPorFinanciero(supabase, bonificados)
+      if (bonificados.length) await debitarComisionPorFinanciero(admin, bonificados)
     }
   } catch (debErr: any) {
     console.error("[post-confirmacion] débito comisión 10%:", debErr?.message)
@@ -264,7 +266,12 @@ async function generarComisionesCobradas(
           fecha_comprobante_cobrado: nowArgentina(),
           pagado: false,
         }))
-        await supabase.from("comisiones").insert(cobradas)
+        const { error: insErr } = await supabase.from("comisiones").insert(cobradas)
+        if (insErr) {
+          // Que no pase en silencio: sin estas filas el vendedor no ve su comisión
+          console.error("[comisiones cobradas] insert falló:", insErr.message, { comprobanteId, filas: cobradas.length })
+          throw new Error(`comisiones cobradas: ${insErr.message}`)
+        }
       }
 
       // NOTA: acá NO se toca la billetera del viajante. La billetera es la

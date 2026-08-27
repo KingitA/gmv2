@@ -159,7 +159,11 @@ export async function GET(request: NextRequest) {
       ),
     ]
     const cobradorIds = [
-      ...new Set(rendiciones.map((r: any) => r.cobrador_id).filter(Boolean) as string[]),
+      ...new Set([
+        ...(rendiciones.map((r: any) => r.cobrador_id).filter(Boolean) as string[]),
+        // rendiciones confirmadas y cobros en calle del kardex: nombre, no id
+        ...(kardex.map((k: any) => k.cobrador_id).filter(Boolean) as string[]),
+      ]),
     ]
 
     const [clientesArr, proveedoresArr, chequesArr, opsArr, vendedoresArr, profilesArr] =
@@ -207,7 +211,7 @@ export async function GET(request: NextRequest) {
     const [pagosKardexArr, imputacionesArr] = await Promise.all([
       pagoIdsKardex.length
         ? fetchByIds<any>(
-            (c) => supabase.from("pagos_clientes").select("id, monto, cliente_id").in("id", c),
+            (c) => supabase.from("pagos_clientes").select("id, monto, cliente_id, cobrador_tipo").in("id", c),
             pagoIdsKardex
           )
         : [],
@@ -283,6 +287,21 @@ export async function GET(request: NextRequest) {
           base.categoria = esEcheq ? "echeq" : esTransf ? "transferencia" : "cobro"
           base.quien = (k.cliente_id && clienteNombre.get(k.cliente_id)) || k.concepto || "Cobro"
           base.sub = "Cobro"
+          // Efectivo cobrado EN LA CALLE (viajante/chofer): está en la billetera
+          // del cobrador, a la caja entra recién con la rendición. Se muestra
+          // neutro para no sumarlo dos veces (cobro + rendición confirmada).
+          const pagoCalle = k.pago_id ? pagoKardexDe.get(k.pago_id) : null
+          const esEfectivo = !esTransf && !esCheque && !esEcheq
+          const enCalle =
+            k.destino_tipo === "BILLETERA" ||
+            (esEfectivo && pagoCalle?.cobrador_tipo && pagoCalle.cobrador_tipo !== "oficina")
+          if (enCalle) {
+            base.sub = "Cobro en calle"
+            base.medio = `💵 Efectivo en billetera de ${cobradorNombre.get(k.cobrador_id) ?? pagoCalle?.cobrador_tipo ?? "cobrador"} → entra a caja con la rendición`
+            base.neutro = monto
+            base.estado = { tipo: "ok", texto: "✓ En billetera" }
+            break
+          }
           base.medio = esTransf
             ? `🏦 Transferencia → ${cuenta(k.destino_tipo, k.destino_id)}`
             : esCheque
@@ -306,7 +325,7 @@ export async function GET(request: NextRequest) {
         }
         case "RENDICION_VIAJE": {
           base.categoria = "rendicion"
-          base.quien = k.concepto || "Rendición"
+          base.quien = `RENDICIÓN · ${cobradorNombre.get(k.cobrador_id) ?? k.concepto ?? "cobrador"}`
           base.sub = "Rendición confirmada"
           base.medio = `💵 Efectivo → ${cuenta(k.destino_tipo, k.destino_id)}`
           base.entrada = monto

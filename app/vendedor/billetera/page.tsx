@@ -20,6 +20,7 @@ interface BilleteraData {
   pagos_sin_rendir: number
   en_viaje: { total: number; cantidad: number }
   deuda_rendiciones?: number
+  faltante_declarado?: number
   comisiones_pendientes: any[]
   total_pendiente_comisiones: number
   historial: Movimiento[]
@@ -294,6 +295,12 @@ function VendedorBilleteraInner() {
                 ({data.en_viaje.cantidad} {data.en_viaje.cantidad === 1 ? "cobro" : "cobros"}) — esperando
                 confirmación
               </p>
+              {(data.faltante_declarado ?? 0) > 0.005 && (
+                <p className="text-red-100 font-semibold mt-1">
+                  ⚠ Declaraste llevar {formatCurrency(data.faltante_declarado!)} menos de lo cobrado en efectivo: te queda
+                  como deuda con oficina.
+                </p>
+              )}
             </div>
           )}
           {Math.abs(data.deuda_rendiciones ?? 0) > 0.005 && (

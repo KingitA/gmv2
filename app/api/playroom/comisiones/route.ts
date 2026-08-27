@@ -84,8 +84,7 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // ── Camino con filtros granulares (cliente/pedido/artículo/comprobante):
-    //    conjuntos chicos, se mantiene el escaneo paginado del kardex ──────────
+    // ── Camino con filtros granulares (cliente/pedido/artículo/comprobante) ──
 
     type Agg = {
       devengado: number; devengadoPrev: number
@@ -131,9 +130,78 @@ export async function GET(req: NextRequest) {
       return q.order('id', { ascending: true })
     }
 
-    // ── VENDIDA: comisiones por fecha de creación del movimiento ─────────────
-    // ── COBRADA: comisiones donde el cliente ya pagó el comprobante ──────────
-    const dateField = tipoFiltro === 'cobrada' ? 'fecha_comprobante_cobrado' : 'fecha'
+    // ── COBRADA: lo efectivamente cobrado vive en `comisiones` tipo 'cobrada'
+    //    (por línea + débito −10% de contado). El kardex tiene la comisión
+    //    VENDIDA, antes del descuento. Mismo criterio que el RPC (v2). ────────
+    if (tipoFiltro === 'cobrada') {
+      let cq = supabase
+        .from('comisiones')
+        .select('id, viajante_id, pedido_id, articulo_id, comprobante_venta_id, monto, pagado, fecha_comprobante_cobrado, created_at, kardex:kardex_id(cliente_id, articulo_categoria), pedidos:pedido_id(cliente_id)')
+        .eq('tipo', 'cobrada')
+        .neq('monto', 0)
+        .order('id', { ascending: true })
+      if (viajanteId) cq = cq.eq('viajante_id', viajanteId)
+      if (articuloId) cq = cq.eq('articulo_id', articuloId)
+      if (pedidoId) cq = cq.eq('pedido_id', pedidoId)
+      if (comprobanteId) cq = cq.eq('comprobante_venta_id', comprobanteId)
+      const cobradasRows = await fetchAllRows(() => cq)
+
+      for (const c of cobradasRows as any[]) {
+        const cliente = c.kardex?.cliente_id ?? c.pedidos?.cliente_id ?? null
+        if (clienteId && cliente !== clienteId) continue
+        const monto = Number(c.monto ?? 0)
+        const vid = c.viajante_id ?? 'sin_vendedor'
+        const fechaFiltro = (c.fecha_comprobante_cobrado ?? c.created_at ?? '').slice(0, 10)
+        const inCurrent = fechaFiltro >= dateFrom && fechaFiltro <= dateTo
+        const inPrev = fechaFiltro >= prev.from && fechaFiltro <= prev.to
+        if (!inCurrent && !inPrev) continue
+        const agg = ensureAgg(vid)
+        if (inCurrent) {
+          agg.devengado += monto
+          agg.cobrable += monto
+          if (c.pagado) agg.pagado += monto
+          else agg.pendiente += monto
+          if (c.pedido_id) agg.pedidos.add(c.pedido_id)
+          if (cliente) agg.clientes.add(cliente)
+          const seg = c.kardex?.articulo_categoria ?? (monto < 0 ? 'dto. 10% contado' : 'sin_segmento')
+          agg.por_segmento[seg] = (agg.por_segmento[seg] ?? 0) + monto
+        }
+        if (inPrev) agg.devengadoPrev += monto
+      }
+
+      const rowsC = [...aggMap.entries()]
+        .map(([vId, agg]) => ({
+          viajante_id: vId,
+          nombre: agg.nombre,
+          devengado: agg.devengado,
+          devengado_anterior: agg.devengadoPrev,
+          variacion_pct: agg.devengadoPrev > 0
+            ? ((agg.devengado - agg.devengadoPrev) / Math.abs(agg.devengadoPrev)) * 100
+            : agg.devengado > 0 ? 100 : 0,
+          cobrable: agg.cobrable,
+          pagado: agg.pagado,
+          pendiente_cobro: agg.pendiente,
+          cantidad_pedidos: agg.pedidos.size,
+          cantidad_clientes: agg.clientes.size,
+          por_segmento: agg.por_segmento,
+        }))
+        .filter(r => r.devengado !== 0 || r.devengado_anterior !== 0)
+        .sort((a, b) => b.devengado - a.devengado)
+      if (!rowsC.length) return NextResponse.json(empty)
+      return NextResponse.json({
+        rows: rowsC,
+        summary: {
+          total_devengado: rowsC.reduce((s, r) => s + r.devengado, 0),
+          total_cobrable: rowsC.reduce((s, r) => s + r.cobrable, 0),
+          total_pagado: rowsC.reduce((s, r) => s + r.pagado, 0),
+          total_pendiente: rowsC.reduce((s, r) => s + r.pendiente_cobro, 0),
+        },
+        meta: { dateFrom, dateTo, prevFrom: prev.from, prevTo: prev.to, tipo: tipoFiltro },
+      })
+    }
+
+    // ── VENDIDA: comisiones por fecha de creación del movimiento (kardex) ────
+    const dateField = 'fecha'
 
     // Paginate to bypass Supabase PostgREST max_rows server-side cap (default 1000)
     const PAGE_SIZE = 1000
