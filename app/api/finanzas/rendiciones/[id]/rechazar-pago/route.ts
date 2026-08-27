@@ -84,6 +84,34 @@ export async function POST(
       chequesAnulados = ch?.length ?? 0
     }
 
+    // Billetera: el cobro en calle había acreditado la billetera del cobrador
+    // (movimiento cobro_cliente). Si el cobro no existe, esa plata tampoco:
+    // contra-movimiento para que la billetera no quede inflada.
+    const { data: credito } = await admin
+      .from("billetera_movimientos")
+      .select("viajante_id, monto")
+      .eq("referencia_id", pago_id)
+      .eq("tipo", "cobro_cliente")
+      .maybeSingle()
+    const { data: yaRevertido } = await admin
+      .from("billetera_movimientos")
+      .select("id")
+      .eq("referencia_id", pago_id)
+      .eq("referencia_tipo", "pago_rechazado")
+      .maybeSingle()
+    if (credito && !yaRevertido) {
+      await admin.from("billetera_movimientos").insert({
+        viajante_id: credito.viajante_id,
+        tipo: "debito",
+        monto: -Math.abs(Number(credito.monto)),
+        concepto: `Cobro rechazado por oficina: ${motivoTxt}`,
+        referencia_id: pago_id,
+        referencia_tipo: "pago_rechazado",
+        fecha: nowArgentina(),
+        creado_por: auth.user.id,
+      })
+    }
+
     // Ítem de la rendición: destildado, con rastro
     await admin
       .from("rendicion_items")
