@@ -24,9 +24,12 @@ const C = {
 }
 
 // Item con swipe: deslizás → panel queda visible → clickeás para confirmar
-function SwipeItem({ item, onConfirmFaltante, saving, bgReveal, colorReveal, labelReveal, iconReveal }:
+// Quién preparó el renglón (registro en picking_items). esOtro = lo tomó otra persona → bloqueado.
+type PreparadorUI = { nombre: string; esOtro: boolean }
+
+function SwipeItem({ item, onConfirmFaltante, saving, bgReveal, colorReveal, labelReveal, iconReveal, preparador }:
   { item: DetallePedido; onConfirmFaltante: (item: DetallePedido) => void; saving: boolean
-    bgReveal: string; colorReveal: string; labelReveal: string; iconReveal: string }) {
+    bgReveal: string; colorReveal: string; labelReveal: string; iconReveal: string; preparador?: PreparadorUI }) {
 
   const [dx, setDx] = useState(0)
   const [revealed, setRevealed] = useState(false)
@@ -91,6 +94,11 @@ function SwipeItem({ item, onConfirmFaltante, saving, bgReveal, colorReveal, lab
             {item.es_bonificado && (
               <span style={{ color:"#b45309", fontSize:14, fontWeight:600 }}>Bonificado — agregar como ítem normal</span>
             )}
+            {preparador && (
+              <span style={{ background: preparador.esOtro ? "#eef2ff" : C.greenL, color: preparador.esOtro ? "#4338ca" : C.green, border: `1px solid ${preparador.esOtro ? "#c7d2fe" : C.greenB}`, fontSize:12, fontWeight:700, padding:"2px 8px", borderRadius:999, flexShrink:0 }}>
+                {preparador.esOtro ? "🔒 " : "👤 "}{preparador.nombre}
+              </span>
+            )}
           </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -126,6 +134,9 @@ export default function PickingPage() {
   const [finalizando, setFinalizando] = useState(false)
   const [vistaFaltantes, setVistaFaltantes] = useState(false)
   const [toast, setToast] = useState<{ msg: string; tipo: "ok"|"err" }|null>(null)
+  // Quién preparó cada renglón (id renglón → usuario) y quién soy yo
+  const [preparadores, setPreparadores] = useState<Record<string, { usuario_id: string | null; usuario_nombre: string }>>({})
+  const [miUsuario, setMiUsuario] = useState<{ id: string | null; nombre: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const searchTimeout = useRef<NodeJS.Timeout>()
 
@@ -134,8 +145,31 @@ export default function PickingPage() {
       .then(r => r.json()).then(data => {
         if (data.error) { showToast(data.error, "err"); return }
         setPedido(data.pedido); setItems(data.pedido.pedidos_detalle || [])
+        setPreparadores(data.preparadores?.porRenglon || {})
+        setMiUsuario(data.usuario || null)
       }).catch(() => showToast("Error de conexión", "err")).finally(() => setLoading(false))
   }, [pedidoId])
+
+  // Badge del renglón + regla: un renglón lo prepara UNA persona
+  const prepDe = (item: DetallePedido): PreparadorUI | undefined => {
+    const p = preparadores[item.id]
+    if (!p) return undefined
+    const esOtro = p.usuario_id ? p.usuario_id !== miUsuario?.id : p.usuario_nombre !== miUsuario?.nombre
+    return { nombre: p.usuario_nombre, esOtro }
+  }
+  const tomadoPorOtro = (item: DetallePedido): string | null => {
+    const p = prepDe(item)
+    return p?.esOtro ? p.nombre : null
+  }
+  // Refleja en memoria lo que devolvió el servidor (preparado_por null = liberado)
+  const aplicarPreparadoPor = (itemId: string, preparado_por: any) => {
+    setPreparadores(prev => {
+      const n = { ...prev }
+      if (preparado_por) n[itemId] = { usuario_id: preparado_por.usuario_id ?? null, usuario_nombre: preparado_por.usuario_nombre }
+      else delete n[itemId]
+      return n
+    })
+  }
 
   useEffect(() => { if (scannerOpen) setTimeout(() => inputRef.current?.focus(), 100) }, [scannerOpen])
 
@@ -172,6 +206,8 @@ export default function PickingPage() {
   const seleccionarDeBusqueda = (art: ArticuloFound) => {
     const item = items.find(i => i.articulo_id === art.id)
     if (!item) { showToast(`"${art.descripcion}" no está en este pedido`, "err"); return }
+    const otro = tomadoPorOtro(item)
+    if (otro) { showToast(`🔒 Ya lo preparó ${otro}`, "err"); return }
     setArticuloSel(art); setItemActivo(item)
     setCantidadInput(String(item.cantidad))
     setBusqueda(""); setResultados([]); setScannerOpen(false)
@@ -186,11 +222,14 @@ export default function PickingPage() {
       if (!art) { scanError(); showToast(`No se encontró el código ${code}`, "err"); return }
       const item = items.find(i => i.articulo_id === art.id)
       if (!item) { scanError(); showToast(`"${art.descripcion}" no está en este pedido`, "err"); return }
+      // Un renglón lo prepara una sola persona: si otro ya lo escaneó, no se abre
+      const otro = tomadoPorOtro(item)
+      if (otro) { scanError(); showToast(`🔒 Ya lo preparó ${otro}`, "err"); return }
       scanOk()
       setArticuloSel(art); setItemActivo(item); setCantidadInput(String(item.cantidad))
       setBusqueda(""); setResultados([]); setScannerOpen(false)
     } catch { scanError(); showToast("Error de conexión", "err") }
-  }, [items])
+  }, [items, preparadores, miUsuario])
 
   // Activo salvo cuando hay un modal de cantidad abierto o se está finalizando.
   useBarcodeScanner({ onScan: onScanCodigo, enabled: !articuloSel && !finalizando })
@@ -211,6 +250,7 @@ export default function PickingPage() {
           ? { ...i, cantidad_preparada: cantidad, estado_item: data.estado_item }
           : mergeBonif(i, data.bonificados_actualizados)
       ))
+      aplicarPreparadoPor(itemActivo.id, data.preparado_por)
       showToast(esFaltante ? "Marcado como faltante" : "✓ Guardado", "ok")
       setArticuloSel(null); setItemActivo(null); setCantidadInput("")
     } catch { showToast("Error al guardar", "err") }
@@ -225,14 +265,14 @@ export default function PickingPage() {
         body: JSON.stringify({ pedido_detalle_id: item.id, cantidad_preparada: 0, es_faltante: true, cantidad_pedida: item.cantidad }),
       })
       const data = await r.json()
-      if (!data.error) {
-        setItems(prev => prev.map(i =>
-          i.id === item.id
-            ? { ...i, cantidad_preparada: 0, estado_item: "FALTANTE" }
-            : mergeBonif(i, data.bonificados_actualizados)
-        ))
-        showToast("Marcado como faltante", "ok")
-      }
+      if (data.error) { showToast(data.error, "err"); return }
+      setItems(prev => prev.map(i =>
+        i.id === item.id
+          ? { ...i, cantidad_preparada: 0, estado_item: "FALTANTE" }
+          : mergeBonif(i, data.bonificados_actualizados)
+      ))
+      aplicarPreparadoPor(item.id, data.preparado_por)
+      showToast("Marcado como faltante", "ok")
     } finally { setSaving(false) }
   }
 
@@ -244,14 +284,14 @@ export default function PickingPage() {
         body: JSON.stringify({ pedido_detalle_id: item.id, cantidad_preparada: 0, es_faltante: false, cantidad_pedida: item.cantidad }),
       })
       const data = await r.json()
-      if (!data.error) {
-        setItems(prev => prev.map(i =>
-          i.id === item.id
-            ? { ...i, cantidad_preparada: 0, estado_item: "PENDIENTE" }
-            : mergeBonif(i, data.bonificados_actualizados)
-        ))
-        showToast("Devuelto a pendientes", "ok")
-      }
+      if (data.error) { showToast(data.error, "err"); return }
+      setItems(prev => prev.map(i =>
+        i.id === item.id
+          ? { ...i, cantidad_preparada: 0, estado_item: "PENDIENTE" }
+          : mergeBonif(i, data.bonificados_actualizados)
+      ))
+      aplicarPreparadoPor(item.id, null) // liberado: lo puede tomar cualquiera
+      showToast("Devuelto a pendientes", "ok")
     } finally { setSaving(false) }
   }
 
@@ -386,7 +426,7 @@ export default function PickingPage() {
       <div style={{ display:"flex", flexDirection:"column" }}>
         {faltantesList.map(item => (
           <SwipeItem
-            key={item.id} item={item} saving={saving}
+            key={item.id} item={item} saving={saving} preparador={prepDe(item)}
             onConfirmFaltante={devolverAPendiente}
             bgReveal={C.green} colorReveal="#fff" iconReveal="↩" labelReveal="Pendiente"
           />
@@ -446,7 +486,7 @@ export default function PickingPage() {
           <>
             <div style={{ fontSize:12, fontWeight:700, color:C.light, textTransform:"uppercase", letterSpacing:"0.1em", padding:"2px 2px 10px" }}>Pendientes ({pendientesList.length})</div>
             {pendientesList.map(item => (
-              <SwipeItem key={item.id} item={item} saving={saving} onConfirmFaltante={marcarFaltante}
+              <SwipeItem key={item.id} item={item} saving={saving} onConfirmFaltante={marcarFaltante} preparador={prepDe(item)}
                 bgReveal={C.red} colorReveal="#fff" iconReveal="✕" labelReveal="Faltante" />
             ))}
           </>
@@ -455,7 +495,7 @@ export default function PickingPage() {
           <>
             <div style={{ fontSize:12, fontWeight:700, color:C.light, textTransform:"uppercase", letterSpacing:"0.1em", padding:"8px 2px 10px" }}>Preparados ({completosList.length})</div>
             {completosList.map(item => (
-              <SwipeItem key={item.id} item={item} saving={saving} onConfirmFaltante={marcarFaltante}
+              <SwipeItem key={item.id} item={item} saving={saving} onConfirmFaltante={marcarFaltante} preparador={prepDe(item)}
                 bgReveal={C.red} colorReveal="#fff" iconReveal="✕" labelReveal="Faltante" />
             ))}
           </>

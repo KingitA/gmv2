@@ -186,6 +186,8 @@ export default function ClientesPedidosPage() {
   const [detallesPedido, setDetallesPedido] = useState<PedidoDetalle[]>([])
   // Descuentos efectivos del pedido abierto (ficha + overrides del pedido + condiciones aparte)
   const [descPedido, setDescPedido] = useState<DescuentosPedido | null>(null)
+  // Quién preparó el pedido abierto (picking_items): [{ nombre, renglones, desde, hasta }]
+  const [preparadoresPedido, setPreparadoresPedido] = useState<Array<{ nombre: string; renglones: number; desde: string | null; hasta: string | null }>>([])
   const [viajeAsignado, setViajeAsignado] = useState<string>("")
   const [cargando, setCargando] = useState(true)
   const [sortColumn, setSortColumn] = useState<string>("numero_pedido")
@@ -236,6 +238,11 @@ export default function ClientesPedidosPage() {
     calcularDescuentosPedido(supabase, p.id, p.cliente_id, listaName)
       .then(d => { if (vivo) setDescPedido(d) })
       .catch(() => { if (vivo) setDescPedido(null) })
+    setPreparadoresPedido([])
+    fetch(`/api/deposito/picking/item?pedido_id=${p.id}`)
+      .then(r => r.json())
+      .then(d => { if (vivo && Array.isArray(d?.resumen)) setPreparadoresPedido(d.resumen) })
+      .catch(() => {})
     return () => { vivo = false }
   }, [pedidoSeleccionado?.id, listasPrecio.length])
 
@@ -1403,6 +1410,25 @@ export default function ClientesPedidosPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Quién lo preparó (registro por renglón en depósito) */}
+              {preparadoresPedido.length > 0 && (
+                <div className="bg-indigo-50 rounded-xl px-4 py-3 border border-indigo-100">
+                  <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mb-1.5">Preparó</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {preparadoresPedido.map((pr, i) => {
+                      const hora = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" }) : ""
+                      const fecha = pr.desde ? formatDateAR(pr.desde) : ""
+                      return (
+                        <p key={i} className="text-sm text-indigo-900">
+                          <span className="font-bold">👤 {pr.nombre}</span>
+                          <span className="text-indigo-600 text-xs"> · {pr.renglones} renglón{pr.renglones !== 1 ? "es" : ""}{fecha ? ` · ${fecha} ${hora(pr.desde)}${pr.hasta && pr.hasta !== pr.desde ? `–${hora(pr.hasta)}` : ""}` : ""}</span>
+                        </p>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Comprobantes */}
               {comprobantesGenerados[pedidoSeleccionado.id]?.length > 0 && (

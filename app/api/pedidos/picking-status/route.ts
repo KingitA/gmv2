@@ -2,6 +2,9 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 
+// Estado de preparación por pedido para el listado del ERP. Un pedido lo pueden
+// preparar varias personas: `operario` lista a todas (sesiones activas + quienes
+// registraron renglones en picking_items).
 export async function GET() {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -9,7 +12,6 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    // Obtener todas las sesiones activas con info del operario
     const { data: sesiones, error } = await supabase
       .from("picking_sesiones")
       .select(`
@@ -23,40 +25,58 @@ export async function GET() {
 
     if (error) throw error
 
-    // Buscar nombres de usuarios
-    const userIds = (sesiones || []).map(s => s.usuario_id).filter(Boolean)
+    // Nombres de usuarios de las sesiones
+    const userIds = [...new Set((sesiones || []).map(s => s.usuario_id).filter(Boolean))]
     let userNames: Record<string, string> = {}
     if (userIds.length > 0) {
-      const { data: usuarios } = await supabase
-        .from("usuarios")
-        .select("id, nombre")
-        .in("id", userIds)
-      if (usuarios) {
-        userNames = Object.fromEntries(usuarios.map(u => [u.id, u.nombre]))
+      const { data: usuarios } = await supabase.from("usuarios").select("id, nombre").in("id", userIds)
+      if (usuarios) userNames = Object.fromEntries(usuarios.map(u => [u.id, u.nombre]))
+    }
+
+    // Quiénes ya prepararon renglones en esos pedidos (picking_items)
+    const pedidoIds = [...new Set((sesiones || []).map(s => s.pedido_id))]
+    const nombresPorPedido = new Map<string, Set<string>>()
+    if (pedidoIds.length > 0) {
+      const { data: regs } = await supabase
+        .from("picking_items")
+        .select("usuario_nombre, pedidos_detalle!inner(pedido_id)")
+        .in("pedidos_detalle.pedido_id", pedidoIds)
+      for (const r of (regs || []) as any[]) {
+        const pid = r.pedidos_detalle?.pedido_id
+        if (!pid || !r.usuario_nombre) continue
+        if (!nombresPorPedido.has(pid)) nombresPorPedido.set(pid, new Set())
+        nombresPorPedido.get(pid)!.add(r.usuario_nombre)
       }
     }
 
-    // Mapear por pedido_id
     const pickingStatus: Record<string, {
       operario: string
+      operarios: string[]
       estado: string
       inicio: string | null
       progreso: { total: number; preparados: number; faltantes: number; pendientes: number }
     }> = {}
 
     for (const s of (sesiones || [])) {
+      const nombre = userNames[s.usuario_id] || s.usuario_email?.split("@")[0] || "Operario"
+      const prev = pickingStatus[s.pedido_id]
+      const nombres = new Set<string>(prev?.operarios || [])
+      nombres.add(nombre)
+      for (const n of nombresPorPedido.get(s.pedido_id) || []) nombres.add(n)
+
       const detalles = (s as any).pedidos?.pedidos_detalle || []
       const total = detalles.length
       const preparados = detalles.filter((d: any) => d.estado_item === "COMPLETO" || d.estado_item === "PARCIAL").length
       const faltantes = detalles.filter((d: any) => d.estado_item === "FALTANTE").length
       const pendientes = total - preparados - faltantes
 
-      const operarioNombre = userNames[s.usuario_id] || s.usuario_email?.split("@")[0] || "Operario"
-
+      const inicio = prev?.inicio && s.fecha_inicio ? (prev.inicio < s.fecha_inicio ? prev.inicio : s.fecha_inicio) : (prev?.inicio || s.fecha_inicio)
+      const operarios = [...nombres]
       pickingStatus[s.pedido_id] = {
-        operario: operarioNombre,
+        operario: operarios.join(", "),
+        operarios,
         estado: s.estado,
-        inicio: s.fecha_inicio,
+        inicio,
         progreso: { total, preparados, faltantes, pendientes },
       }
     }

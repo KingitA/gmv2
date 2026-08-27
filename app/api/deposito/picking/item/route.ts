@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { nowArgentina } from "@/lib/utils"
+import { getUsuarioActual, getOCrearSesion, getPreparadoresPedido } from "@/lib/deposito/preparadores"
 
 /**
  * Recalcula EN VIVO las cantidades de los artículos bonificados de un pedido
@@ -44,7 +45,22 @@ async function recalcularBonificados(supabase: any, pedido_id: string) {
   return out
 }
 
-// PATCH: Actualizar cantidad_preparada y estado_item en pedidos_detalle
+// GET ?pedido_id= — quién preparó cada renglón + resumen por persona (modal del ERP)
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth()
+  if (auth.error) return auth.error
+  try {
+    const pedido_id = new URL(request.url).searchParams.get("pedido_id")
+    if (!pedido_id) return NextResponse.json({ error: "pedido_id requerido" }, { status: 400 })
+    const supabase = await createClient()
+    return NextResponse.json(await getPreparadoresPedido(supabase, pedido_id))
+  } catch (error: any) {
+    return NextResponse.json({ error: `Error: ${error?.message}` }, { status: 500 })
+  }
+}
+
+// PATCH: Actualizar cantidad_preparada y estado_item en pedidos_detalle,
+// registrando QUIÉN lo preparó (picking_items). Un renglón = un preparador.
 export async function PATCH(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -67,6 +83,30 @@ export async function PATCH(request: NextRequest) {
       estado_item = "PARCIAL"
     }
 
+    const usuario = await getUsuarioActual(supabase)
+
+    const { data: det, error: detErr } = await supabase
+      .from("pedidos_detalle")
+      .select("id, pedido_id, articulo_id, cantidad")
+      .eq("id", pedido_detalle_id)
+      .single()
+    if (detErr || !det) return NextResponse.json({ error: "Renglón no encontrado" }, { status: 404 })
+
+    // ── Traba: el renglón lo tomó otra persona → no se puede tocar ──
+    const { data: reg } = await supabase
+      .from("picking_items")
+      .select("id, usuario_id, usuario_nombre")
+      .eq("pedido_detalle_id", pedido_detalle_id)
+      .limit(1)
+      .maybeSingle()
+    const esDeOtro = !!reg && (reg.usuario_id ? reg.usuario_id !== usuario.id : reg.usuario_nombre !== usuario.nombre)
+    if (esDeOtro) {
+      return NextResponse.json(
+        { error: `Ya lo preparó ${reg!.usuario_nombre}. Solo esa persona puede modificarlo.`, preparado_por: reg!.usuario_nombre },
+        { status: 409 }
+      )
+    }
+
     const { data, error } = await supabase
       .from("pedidos_detalle")
       .update({ cantidad_preparada, estado_item })
@@ -78,13 +118,39 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: `Error: ${error.message}` }, { status: 500 })
     }
 
+    // ── Registro de quién lo preparó ──
+    let preparado_por: { usuario_id: string | null; usuario_nombre: string; fecha_escaneo: string } | null = null
+    if (estado_item === "PENDIENTE") {
+      // Devuelto a pendiente: se libera para que lo pueda tomar cualquiera
+      if (reg) await supabase.from("picking_items").delete().eq("id", reg.id)
+    } else {
+      const sesion = await getOCrearSesion(supabase, det.pedido_id, usuario)
+      const fecha = nowArgentina()
+      const fila = {
+        sesion_id: sesion.id,
+        pedido_detalle_id,
+        articulo_id: det.articulo_id,
+        cantidad_pedida: det.cantidad,
+        cantidad_preparada,
+        estado: estado_item === "COMPLETO" ? "preparado" : estado_item === "PARCIAL" ? "parcial" : "faltante",
+        usuario_id: usuario.id,
+        usuario_nombre: usuario.nombre,
+        fecha_escaneo: fecha,
+      }
+      const { error: regErr } = reg
+        ? await supabase.from("picking_items").update(fila).eq("id", reg.id)
+        : await supabase.from("picking_items").insert(fila)
+      if (regErr) console.error("[picking/item] No se pudo registrar el preparador:", regErr.message)
+      preparado_por = { usuario_id: usuario.id, usuario_nombre: usuario.nombre, fecha_escaneo: fecha }
+    }
+
     // Recalcular en vivo las cantidades bonificadas según lo realmente preparado
     let bonificados_actualizados: Array<{ id: string; cantidad: number }> = []
     if (data?.pedido_id && !data?.es_bonificado) {
       bonificados_actualizados = await recalcularBonificados(supabase, data.pedido_id)
     }
 
-    return NextResponse.json({ ...data, bonificados_actualizados })
+    return NextResponse.json({ ...data, bonificados_actualizados, preparado_por })
 
   } catch (error: any) {
     return NextResponse.json({ error: `Error: ${error?.message}` }, { status: 500 })
@@ -123,14 +189,22 @@ export async function POST(request: NextRequest) {
       .update({ estado: "pendiente_facturacion" })
       .eq("id", pedido_id)
 
-    // Cerrar sesión de picking
+    // Cerrar TODAS las sesiones de picking del pedido (una por persona)
     await supabase
       .from("picking_sesiones")
       .update({ estado: "TERMINADO", fin_at: nowArgentina() })
       .eq("pedido_id", pedido_id)
       .eq("estado", "EN_PROGRESO")
 
-    return NextResponse.json({ ok: true })
+    // Dejar los preparadores en el kardex del pedido (uuid[])
+    const { resumen } = await getPreparadoresPedido(supabase, pedido_id)
+    const ids = resumen.map((r) => r.usuario_id).filter((x): x is string => !!x)
+    if (ids.length) {
+      const { error: kErr } = await supabase.from("kardex").update({ preparadores_ids: ids }).eq("pedido_id", pedido_id)
+      if (kErr) console.error("[picking] No se pudo grabar preparadores_ids en kardex:", kErr.message)
+    }
+
+    return NextResponse.json({ ok: true, preparadores: resumen })
 
   } catch (error: any) {
     return NextResponse.json({ error: `Error: ${error?.message}` }, { status: 500 })

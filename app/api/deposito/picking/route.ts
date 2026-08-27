@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 import { padEan13 } from "@/lib/utils/ean"
+import { getUsuarioActual, getOCrearSesion, getPreparadoresPedido } from "@/lib/deposito/preparadores"
 
 // POST: Iniciar o retomar sesión de picking para un pedido
 export async function POST(request: NextRequest) {
@@ -41,42 +42,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Obtener usuario
-    const { data: { user } } = await supabase.auth.getUser()
-    const usuarioEmail = user?.email || "deposito@sistema"
-    const usuarioId = user?.id || null
-
-    // Buscar sesión existente para este pedido
-    const { data: sesionExistente } = await supabase
-      .from("picking_sesiones")
-      .select("id, estado, usuario_email")
-      .eq("pedido_id", pedido_id)
-      .eq("estado", "EN_PROGRESO")
-      .maybeSingle()
-
-    if (!sesionExistente) {
-      // Crear nueva sesión usando estructura real de la tabla
-      const { error: sesionError } = await supabase
-        .from("picking_sesiones")
-        .insert({
-          pedido_id,
-          usuario_id: usuarioId,
-          usuario_email: usuarioEmail,
-          estado: "EN_PROGRESO",
-        })
-
-      if (sesionError) {
-        return NextResponse.json(
-          { error: `Error creando sesión: ${sesionError.message}` },
-          { status: 500 }
-        )
-      }
-
-      // Marcar pedido como en_preparacion
+    // Sesión de picking POR PERSONA: un pedido lo pueden preparar varios usuarios,
+    // cada uno con su sesión (antes había una sola por pedido y el primero que lo
+    // abría figuraba como "el" preparador).
+    const usuario = await getUsuarioActual(supabase)
+    await getOCrearSesion(supabase, pedido_id, usuario)
+    if (pedido.estado !== "en_preparacion") {
       await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
     }
 
-    return NextResponse.json({ pedido })
+    // Quién preparó cada renglón (para mostrar badges y bloquear los tomados por otro)
+    const preparadores = await getPreparadoresPedido(supabase, pedido_id)
+
+    return NextResponse.json({ pedido, preparadores, usuario: { id: usuario.id, nombre: usuario.nombre } })
 
   } catch (error: any) {
     return NextResponse.json({ error: `Error: ${error?.message}` }, { status: 500 })
