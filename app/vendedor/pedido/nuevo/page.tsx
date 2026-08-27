@@ -1893,9 +1893,22 @@ function NuevoPedidoInner() {
                 }
               const fichaViaj = fmtSeg(bonifCliente?.viajante)
               const fichaMerc = fmtSeg(bonifCliente?.mercaderia)
-              const btnSolo = "bg-white border border-gray-300 disabled:opacity-40 text-gray-700 rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
               const btnCliente = "bg-gray-900 disabled:opacity-40 text-white rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
               const selCls = "w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
+              // ── UN SOLO guardado para toda la condición del pedido (método + lista + descuentos) ──
+              // Lo que coincide con la ficha NO se guarda como override (queda "hereda de la ficha");
+              // así, para volver a lo del cliente alcanza con elegir de nuevo el valor de la ficha.
+              const fichaMetodo = cliente.metodo_facturacion || ""
+              const fichaLista = cliente.lista_precio_id || ""
+              const bonifIgualFicha = (["viajante", "mercaderia"] as const).every((t) =>
+                SEGS.every((s) => (bonifParsed[t]?.[s] ?? 0) === (bonifCliente?.[t]?.[s] ?? 0)))
+              const nuevaCond: CondPedido = {
+                metodo: metodoSel && metodoSel !== fichaMetodo ? metodoSel : "",
+                lista: puedeLista ? (listaSel && listaSel !== fichaLista ? listaSel : "") : cond.lista,
+                bonif: bonifIgualFicha ? null : bonifParsed,
+              }
+              const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) ? null : cond.bonif })
+              const hayOverride = !!cond.metodo || !!cond.lista || !bonifVacia(cond.bonif)
               return (
                 <div className="space-y-3 max-h-[60dvh] overflow-y-auto -mx-1 px-1">
                   {/* ── Método ── */}
@@ -1908,27 +1921,10 @@ function NuevoPedidoInner() {
                     </div>
                     <select value={metodoSel} onChange={(e) => setMetodoSel(e.target.value)} className={selCls}>
                       <option value="">Elegir método...</option>
-                      <option value="Factura">Factura</option>
-                      <option value="Final">Final (Mixto)</option>
-                      <option value="Presupuesto">Presupuesto</option>
+                      <option value="Factura">Factura{fichaMetodo === "Factura" ? " (ficha)" : ""}</option>
+                      <option value="Final">Final (Mixto){fichaMetodo === "Final" ? " (ficha)" : ""}</option>
+                      <option value="Presupuesto">Presupuesto{fichaMetodo === "Presupuesto" ? " (ficha)" : ""}</option>
                     </select>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => { if (!metodoSel) return; setVerCliente(false); cambiarMetodo(metodoSel) }}
-                        disabled={!metodoSel}
-                        className={btnSolo}
-                      >
-                        Solo este pedido
-                      </button>
-                      <button onClick={() => guardarParaCliente({ metodo: metodoSel })} disabled={!metodoSel} className={btnCliente}>
-                        Guardar para el cliente
-                      </button>
-                    </div>
-                    {cond.metodo && (
-                      <button onClick={() => { setVerCliente(false); cambiarMetodo("") }} className="w-full text-emerald-700 text-sm font-bold py-1">
-                        Volver al método del cliente ({cliente.metodo_facturacion || "—"})
-                      </button>
-                    )}
                   </div>
 
                   {/* ── Lista de precios ── */}
@@ -1945,34 +1941,13 @@ function NuevoPedidoInner() {
                         <select value={listaSel} onChange={(e) => setListaSel(e.target.value)} className={selCls}>
                           <option value="">Estándar (sin lista)</option>
                           {(catFicha?.listas_precio || []).map((l) => (
-                            <option key={l.id} value={l.id}>{l.nombre}</option>
+                            <option key={l.id} value={l.id}>{l.nombre}{l.id === fichaLista ? " (ficha)" : ""}</option>
                           ))}
                         </select>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => { setVerCliente(false); aplicarSoloPedido({ ...cond, lista: listaSel }) }}
-                            className={btnSolo}
-                          >
-                            Solo este pedido
-                          </button>
-                          <button
-                            onClick={() => guardarParaCliente({ lista: listaSel })}
-                            disabled={!!listaImpuesta}
-                            title={listaImpuesta ? "La lista la impone el viajante asignado" : undefined}
-                            className={btnCliente}
-                          >
-                            Guardar para el cliente
-                          </button>
-                        </div>
                         {listaImpuesta && (
                           <p className="text-gray-400 text-xs">
                             La ficha lleva lista <b>{listaImpuesta}</b> por el viajante asignado; para cambiarla de forma permanente, reasigná el viajante desde la ficha.
                           </p>
-                        )}
-                        {cond.lista && (
-                          <button onClick={() => { setVerCliente(false); aplicarSoloPedido({ ...cond, lista: "" }) }} className="w-full text-emerald-700 text-sm font-bold py-1">
-                            Volver a la lista del cliente ({listaClienteNombre})
-                          </button>
                         )}
                       </>
                     ) : (
@@ -2031,37 +2006,51 @@ function NuevoPedidoInner() {
                     >
                       ⤓ Mismo % en los tres segmentos (copia la fila Limpieza / Bazar)
                     </button>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => { if (!bonifValida) return; setVerCliente(false); aplicarSoloPedido({ ...cond, bonif: bonifParsed }) }}
-                        disabled={!bonifValida}
-                        className={btnSolo}
-                      >
-                        Solo este pedido
-                      </button>
-                      <button
-                        onClick={() => { if (!bonifValida) return; guardarParaCliente({ bonif: bonifParsed }) }}
-                        disabled={!bonifValida}
-                        className={btnCliente}
-                      >
-                        Guardar para el cliente
-                      </button>
-                    </div>
                     <p className="text-gray-400 text-xs">
                       <b>Viajante</b>: descuento sobre el neto de cada línea del segmento; sale de tu comisión y ya se ve en el precio.{" "}
                       <b>Mercadería</b>: % del neto del segmento que se entrega en mercadería sin cargo (la arma depósito/ERP; no cambia precios).
+                      {" "}Ficha: viajante {fichaViaj} · mercadería {fichaMerc}.
                     </p>
-                    {!bonifVacia(cond.bonif) && (
-                      <button onClick={() => { setVerCliente(false); aplicarSoloPedido({ ...cond, bonif: null }) }} className="w-full text-emerald-700 text-sm font-bold py-1">
-                        Volver a los descuentos de la ficha (viajante {fichaViaj} · mercadería {fichaMerc})
-                      </button>
-                    )}
                   </div>
 
-                  <p className="text-gray-400 text-xs px-1">
-                    En todos los casos se recalculan al instante los precios del catálogo y de los artículos ya cargados en
-                    el pedido — de estos precios sale la factura.
-                  </p>
+                  {/* ── UN SOLO guardado para método + lista + descuentos ── */}
+                  <div className="sticky bottom-0 bg-white pt-2 pb-1 space-y-2 border-t border-gray-100">
+                    {!bonifValida && <p className="text-red-600 text-xs font-medium">Revisá los porcentajes: hay un valor inválido.</p>}
+                    <button
+                      onClick={() => { if (!bonifValida || !hayCambios) return; setVerCliente(false); aplicarSoloPedido(nuevaCond) }}
+                      disabled={!bonifValida || !hayCambios}
+                      className="w-full bg-emerald-600 disabled:opacity-40 text-white rounded-xl py-3.5 text-base font-bold active:scale-[0.97]"
+                    >
+                      ✅ Aplicar a este pedido
+                    </button>
+                    <p className="text-gray-400 text-[11px] text-center">
+                      Guarda método, lista y descuentos juntos y recalcula al instante todos los precios (de ahí sale la factura).
+                      Lo que coincide con la ficha no queda como "solo este pedido".
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => {
+                          if (!bonifValida) return
+                          guardarParaCliente({
+                            metodo: metodoSel || undefined,
+                            lista: puedeLista && !listaImpuesta ? listaSel : undefined,
+                            bonif: bonifIgualFicha ? undefined : bonifParsed,
+                          })
+                        }}
+                        disabled={!bonifValida}
+                        className={btnCliente}
+                      >
+                        Guardar en la ficha del cliente
+                      </button>
+                      <button
+                        onClick={() => { setVerCliente(false); aplicarSoloPedido(COND_VACIA) }}
+                        disabled={!hayOverride}
+                        className="bg-white border border-gray-300 disabled:opacity-40 text-gray-700 rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
+                      >
+                        ↩ Volver a lo del cliente
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )
             })()}
