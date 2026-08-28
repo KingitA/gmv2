@@ -91,6 +91,96 @@ const condToOverrides = (c: CondPedido) => ({
   ...(c.lista ? { lista_precio_pedido_id: c.lista } : {}),
   ...(!bonifVacia(c.bonif) ? { bonif_pedido: c.bonif } : {}),
 })
+// Fila compacta del catálogo desplegable: miniatura (tap = foto grande) ·
+// sku · descripción · -oferta% · marca · x u/bulto · precio, y a la derecha
+// una casilla de cantidad con "bultos" (si no, unidades) + botón agregar.
+// Vive FUERA del componente de página: si se definiera adentro, React la
+// remontaría en cada render y la casilla perdería el foco a cada tecla.
+function FilaArticulo({
+  a,
+  precio,
+  enCarrito,
+  onAbrir,
+  onZoom,
+  onAgregar,
+}: {
+  a: Articulo
+  precio?: { precio: number; precioNeto: number; especial: { bruto: number; oferta_pct: number } | null }
+  enCarrito?: number
+  onAbrir: () => void
+  onZoom: () => void
+  onAgregar: (unidades: number) => void
+}) {
+  const [cant, setCant] = useState("")
+  const [bultos, setBultos] = useState(false)
+  if (precio && precio.precio <= 0) return null
+  const ub = a.unidades_por_bulto || 1
+  const n = parseFloat(cant.replace(",", "."))
+  const unidades = Number.isFinite(n) && n > 0 ? (bultos ? n * ub : n) : 0
+  const agregar = () => {
+    if (unidades <= 0) return
+    onAgregar(unidades)
+    setCant("")
+  }
+  return (
+    <div className={`w-full flex items-center gap-2 rounded-lg pl-1.5 pr-1.5 py-1.5 bg-white border ${enCarrito ? "border-emerald-500" : "border-gray-100"}`}>
+      {/* Miniatura: tap abre la foto grande */}
+      <button onClick={onZoom} className="w-11 h-11 rounded-md bg-gray-50 shrink-0 overflow-hidden flex items-center justify-center active:opacity-70">
+        {a.imagen_url ? (
+          <img src={a.imagen_url} alt="" loading="lazy" className="w-full h-full object-contain" />
+        ) : (
+          <span className="text-gray-300 text-lg">📦</span>
+        )}
+      </button>
+      {/* Descripción: tap abre la ficha completa */}
+      <button onClick={onAbrir} className="min-w-0 flex-1 text-left active:opacity-70">
+        <p className="font-bold text-gray-900 text-[13px] leading-snug">
+          {a.descripcion}
+          {a.descuento_propio > 0 && (
+            <span className="ml-1.5 inline-block bg-red-100 text-red-700 px-1.5 rounded text-[10px] font-bold align-middle">-{a.descuento_propio}%</span>
+          )}
+          {enCarrito ? (
+            <span className="ml-1.5 inline-block bg-emerald-600 text-white px-1.5 rounded text-[10px] font-bold align-middle">🛒 {enCarrito}</span>
+          ) : null}
+        </p>
+        <p className="text-[11px] text-gray-400 truncate">
+          <span className="font-mono">{a.sku || "—"}</span>
+          {a.marca ? ` · ${a.marca}` : ""}
+          {a.unidades_por_bulto ? ` · x${a.unidades_por_bulto}` : ""}
+          {" · "}
+          <span className="font-bold text-gray-700">{precio ? formatCurrency(precio.especial ? precio.precioNeto : precio.precio) : "…"}</span>
+        </p>
+      </button>
+      {/* Cantidad + bultos + agregar */}
+      <div className="shrink-0 flex items-center gap-1">
+        <div className="flex flex-col items-center gap-0.5">
+          <input
+            value={cant}
+            onChange={(e) => setCant(e.target.value.replace(/[^\d.,]/g, ""))}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregar() } }}
+            inputMode="decimal"
+            placeholder="0"
+            className="w-14 rounded-md border border-gray-300 px-1.5 py-1.5 text-center font-bold text-gray-900 text-sm"
+            aria-label="Cantidad"
+          />
+          <label className="flex items-center gap-1 text-[10px] text-gray-500 select-none">
+            <input type="checkbox" checked={bultos} onChange={(e) => setBultos(e.target.checked)} className="w-3 h-3 accent-emerald-600" />
+            bultos{bultos && ub > 1 ? ` (=${unidades} u)` : ""}
+          </label>
+        </div>
+        <button
+          onClick={agregar}
+          disabled={unidades <= 0}
+          className="w-9 h-9 rounded-lg bg-emerald-600 text-white text-xl font-bold leading-none disabled:bg-gray-200 disabled:text-gray-400 active:scale-95"
+          aria-label="Agregar al pedido"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const fmtSeg = (s: BonifSeg | null | undefined) => {
   if (!s) return "—"
   const v = SEGS.map((k) => s[k] ?? 0)
@@ -841,14 +931,36 @@ function NuevoPedidoInner() {
   const agregarAlCarrito = () => {
     if (!sel || !selPrecio || selUnidades <= 0 || !cliente) return
     const art = sel
-    const cant = selUnidades // siempre se guarda en unidades
-    const precioPrev = selPrecio
     setSel(null)
     // Si el artículo vino de un escaneo, dejar el buscador listo para el próximo
     if (vinoDeScan.current) {
       vinoDeScan.current = false
       setTimeout(() => inputBusqueda.current?.focus(), 50)
     }
+    agregarArticuloAlPedido(art, selUnidades, selPrecio)
+  }
+
+  // Alta rápida desde una fila del catálogo (casilla de cantidad): usa el
+  // precio ya calculado del listado; si todavía no está, lo pide al server.
+  const agregarRapido = async (art: Articulo, unidades: number) => {
+    if (!cliente || unidades <= 0) return
+    let p = precios[art.id]
+    if (!p) {
+      try {
+        const r = await previewPrecioArticulo(cliente.id, art.id, condToOverrides(cond))
+        p = { precio: r.precio, precioNeto: r.precioNeto, contado: r.contado, ivaIncluido: false, especial: r.especial ?? null, bonifViajantePct: r.bonifViajantePct || 0 }
+      } catch {
+        alert("No se pudo calcular el precio del artículo.")
+        return
+      }
+    }
+    if (p.precio <= 0) { alert("Artículo sin precio: no se puede vender."); return }
+    agregarArticuloAlPedido(art, unidades, { precio: p.precio, precioNeto: p.precioNeto })
+  }
+
+  // Núcleo del alta: optimista + cola serializada contra el server.
+  const agregarArticuloAlPedido = (art: Articulo, cant: number, precioPrev: { precio: number; precioNeto: number }) => {
+    if (!cliente || cant <= 0) return
     setSync("saving")
 
     const cartArt: CartArticulo = {
@@ -1320,38 +1432,6 @@ function NuevoPedidoInner() {
   }
 
   // ── Tarjeta de artículo (compartida por todas las listas) ───────────
-  // Fila compacta (listas desplegables del catálogo): sku · descripción ·
-  // -oferta% · marca · x u/bulto · precio. Tap = ficha del artículo.
-  const FilaArticulo = ({ a }: { a: Articulo }) => {
-    const enCarrito = cart.find((i) => i.articulo.id === a.id)
-    const p = precios[a.id]
-    if (p && p.precio <= 0) return null
-    return (
-      <button
-        onClick={() => abrirArticulo(a)}
-        className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left bg-white border active:bg-emerald-50 ${
-          enCarrito ? "border-emerald-500" : "border-gray-100"
-        }`}
-      >
-        <span className="font-mono text-[11px] text-gray-400 w-14 shrink-0 truncate">{a.sku || "—"}</span>
-        <span className="min-w-0 flex-1">
-          <span className="font-bold text-gray-900 text-[13px] leading-snug">{a.descripcion}</span>
-          {a.descuento_propio > 0 && (
-            <span className="ml-1.5 inline-block bg-red-100 text-red-700 px-1.5 rounded text-[10px] font-bold align-middle">-{a.descuento_propio}%</span>
-          )}
-          {enCarrito && (
-            <span className="ml-1.5 inline-block bg-emerald-600 text-white px-1.5 rounded text-[10px] font-bold align-middle">🛒 {enCarrito.cantidad}</span>
-          )}
-        </span>
-        <span className="text-gray-500 text-[11px] w-16 shrink-0 truncate text-right">{a.marca || ""}</span>
-        <span className="text-gray-400 text-[11px] w-9 shrink-0 text-right">{a.unidades_por_bulto ? `x${a.unidades_por_bulto}` : ""}</span>
-        <span className="font-bold text-gray-900 text-[13px] w-[4.5rem] shrink-0 text-right">
-          {p ? formatCurrency(p.especial ? p.precioNeto : p.precio) : "…"}
-        </span>
-      </button>
-    )
-  }
-
   const ArticuloCard = ({ a }: { a: Articulo }) => {
     const enCarrito = cart.find((i) => i.articulo.id === a.id)
     const p = precios[a.id]
@@ -1657,7 +1737,16 @@ function NuevoPedidoInner() {
                 <CatalogoArbol<Articulo>
                   rubros={catalogo}
                   cargarCategoria={cargarCategoriaArbol}
-                  renderArticulo={(a) => <FilaArticulo a={a} />}
+                  renderArticulo={(a) => (
+                    <FilaArticulo
+                      a={a}
+                      precio={precios[a.id]}
+                      enCarrito={cart.find((i) => i.articulo.id === a.id)?.cantidad}
+                      onAbrir={() => abrirArticulo(a)}
+                      onZoom={() => a.imagen_url && setZoomFoto(a.imagen_url)}
+                      onAgregar={(u) => agregarRapido(a, u)}
+                    />
+                  )}
                   ordenar={(arts) => ordenarArticulos(arts, orden, precioOrden, ventas)}
                   onVerRubro={(r) => abrirRubro(r as CatalogoRubro)}
                   tinte={(nombre) => {
