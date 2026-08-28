@@ -44,14 +44,28 @@ export function exportReportToExcel(opts: {
   const fieldLabel = opts.fieldLabel ?? ((c: string) => c)
   const fmt = opts.valueFormat ?? defaultValueFormat
 
-  // Cuántos bloques Detalle/Antes/Después hacen falta = máximo de campos cambiados
-  // en una misma fila. Mínimo 1 para que errores / no encontrados tengan su columna.
-  const maxCambios = Math.max(1, ...opts.filas.map(f => f.cambios?.length ?? 0))
+  // Cada bloque Detalle/Antes/Después corresponde a UN campo fijo para todo el
+  // Excel (bloque 1 = siempre el mismo campo, bloque 2 = siempre otro, etc.),
+  // así una columna no mezcla "Base contado" en una fila y "Unidades" en otra.
+  // Orden de los bloques: el campo más modificado primero (desempate: primera
+  // aparición). Mínimo 1 bloque para que errores / no encontrados tengan columna.
+  const frecuencia = new Map<string, { n: number; orden: number }>()
+  for (const f of opts.filas) {
+    for (const c of f.cambios ?? []) {
+      const cur = frecuencia.get(c.campo)
+      if (cur) cur.n += 1
+      else frecuencia.set(c.campo, { n: 1, orden: frecuencia.size })
+    }
+  }
+  const campos = [...frecuencia.entries()]
+    .sort((a, b) => b[1].n - a[1].n || a[1].orden - b[1].orden)
+    .map(([campo]) => campo)
+  const bloques = campos.length ? campos : ["__sin_cambios__"]
 
-  // Encabezados: clave, nombre, estado + N bloques (Detalle / Antes / Después).
+  // Encabezados: clave, nombre, estado + un bloque (Detalle / Antes / Después) por campo.
   const suf = (k: number) => (k === 0 ? "" : ` ${k + 1}`)
   const header: string[] = [opts.claveLabel, opts.nombreLabel, "Estado"]
-  for (let k = 0; k < maxCambios; k++) header.push(`Detalle${suf(k)}`, `Antes${suf(k)}`, `Después${suf(k)}`)
+  bloques.forEach((_, k) => header.push(`Detalle${suf(k)}`, `Antes${suf(k)}`, `Después${suf(k)}`))
 
   const rows = opts.filas.map(f => {
     const row: Record<string, any> = {
@@ -59,24 +73,26 @@ export function exportReportToExcel(opts: {
       [opts.nombreLabel]: f.nombre ?? "",
       Estado: STATUS_LABEL[f.status] ?? f.status,
     }
-    // Inicializar todos los bloques vacíos (así todas las filas tienen las mismas columnas)
-    for (let k = 0; k < maxCambios; k++) {
+    // Todas las filas con las mismas columnas (bloques vacíos por defecto)
+    bloques.forEach((_, k) => {
       row[`Detalle${suf(k)}`] = ""
       row[`Antes${suf(k)}`] = ""
       row[`Después${suf(k)}`] = ""
-    }
+    })
     // Errores y "no encontrado" van en el primer Detalle, sin antes/después
     if (f.error) {
       row["Detalle"] = f.error
     } else if (f.status === "no_encontrado") {
       row["Detalle"] = "No existe en el sistema"
     } else {
-      // Un bloque por cada campo que cambió: nombre del campo + valor antes + valor después
-      ;(f.cambios ?? []).forEach((c, k) => {
+      // Cada cambio va al bloque de SU campo (misma columna para todas las filas)
+      for (const c of f.cambios ?? []) {
+        const k = bloques.indexOf(c.campo)
+        if (k < 0) continue
         row[`Detalle${suf(k)}`] = fieldLabel(c.campo)
         row[`Antes${suf(k)}`] = fmt(c.campo, c.actual)
         row[`Después${suf(k)}`] = fmt(c.campo, c.nuevo)
-      })
+      }
     }
     return row
   })
@@ -84,7 +100,7 @@ export function exportReportToExcel(opts: {
   const ws = XLSX.utils.json_to_sheet(rows, { header })
   ws["!cols"] = [
     { wch: 16 }, { wch: 40 }, { wch: 14 },
-    ...Array.from({ length: maxCambios }, () => [{ wch: 24 }, { wch: 18 }, { wch: 18 }]).flat(),
+    ...bloques.flatMap(() => [{ wch: 24 }, { wch: 18 }, { wch: 18 }]),
   ]
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, "Resultados")
