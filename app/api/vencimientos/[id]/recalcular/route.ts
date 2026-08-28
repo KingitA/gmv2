@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requireAuth, getUserRoles } from '@/lib/auth'
+import { esAdmin, esTipoReservado } from '@/lib/finanzas/tipos-reservados'
 
 /**
  * POST /api/vencimientos/[id]/recalcular — re-aplica el acuerdo de pago de la
@@ -24,6 +25,10 @@ export async function POST(
       .eq('id', id)
       .single()
     if (!venc) return NextResponse.json({ error: 'Vencimiento no encontrado' }, { status: 404 })
+    // Sueldos / socios: solo admin (para el resto no existen)
+    if (esTipoReservado(venc.tipo) && !esAdmin(await getUserRoles(auth.user.id))) {
+      return NextResponse.json({ error: 'Vencimiento no encontrado' }, { status: 404 })
+    }
     if (venc.estado !== 'pendiente') {
       return NextResponse.json({ error: 'Solo se recalculan vencimientos pendientes' }, { status: 400 })
     }

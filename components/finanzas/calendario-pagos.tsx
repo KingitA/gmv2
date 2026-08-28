@@ -15,6 +15,7 @@ import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
+import { useMisRoles } from "@/lib/hooks/useMisRoles"
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,8 @@ export function CalendarioPagos({
     const [vencimientos, setVencimientos] = useState<Vencimiento[]>([])
     const [cheques, setCheques] = useState<ChequeCartera[]>([])
     const [emitidos, setEmitidos] = useState<ChequeCartera[]>([])
+    // Sueldos / Socios: solo admin (el servidor también los filtra)
+    const { esAdmin: soyAdmin } = useMisRoles()
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [prefillEmitidos, setPrefillEmitidos] = useState<PrefillEmitidos | null>(null)
@@ -452,14 +455,14 @@ export function CalendarioPagos({
                                             <SelectTrigger><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="factura">Factura de proveedor</SelectItem>
-                                                <SelectItem value="sueldos">Sueldos</SelectItem>
+                                                {soyAdmin && <SelectItem value="sueldos">Sueldos</SelectItem>}
                                                 <SelectItem value="cargas_sociales">Cargas sociales (931, sindicatos, OS)</SelectItem>
                                                 <SelectItem value="impuestos">Impuestos (IVA, IIBB, CM, municipal)</SelectItem>
                                                 <SelectItem value="servicios">Servicios (luz, expensas, teléfono, web)</SelectItem>
                                                 <SelectItem value="honorarios">Honorarios (contador, programador)</SelectItem>
                                                 <SelectItem value="seguros">Seguros (vida, flota)</SelectItem>
                                                 <SelectItem value="vehiculos">Vehículos (gastos extra de flota)</SelectItem>
-                                                <SelectItem value="socios">Socios (adelantos / participaciones)</SelectItem>
+                                                {soyAdmin && <SelectItem value="socios">Socios (adelantos / participaciones)</SelectItem>}
                                                 <SelectItem value="otro">Otro gasto</SelectItem>
                                             </SelectContent>
                                         </Select>

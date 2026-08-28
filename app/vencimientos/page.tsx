@@ -20,6 +20,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import Link from "next/link"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
+import { useMisRoles } from "@/lib/hooks/useMisRoles"
+import { tiposVisibles } from "@/lib/finanzas/tipos-reservados"
 
 const TIPOS_VENCIMIENTO = [
     { value: "factura", label: "Factura de proveedor" },
@@ -58,6 +60,9 @@ interface Vencimiento {
 }
 
 export default function VencimientosPage() {
+    // Sueldos / Socios: solo admin (el servidor también los filtra)
+    const { roles } = useMisRoles()
+    const tiposLista = tiposVisibles(TIPOS_VENCIMIENTO, roles)
     const [vencimientos, setVencimientos] = useState<Vencimiento[]>([])
     const [proveedores, setProveedores] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
@@ -281,7 +286,7 @@ export default function VencimientosPage() {
                                     <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="todos">Todos los tipos</SelectItem>
-                                        {TIPOS_VENCIMIENTO.map(t => (
+                                        {tiposLista.map(t => (
                                             <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
                                         ))}
                                     </SelectContent>
@@ -310,7 +315,7 @@ export default function VencimientosPage() {
                                                     <Select value={formData.tipo} onValueChange={(v) => setFormData({ ...formData, tipo: v })}>
                                                         <SelectTrigger><SelectValue /></SelectTrigger>
                                                         <SelectContent>
-                                                            {TIPOS_VENCIMIENTO.map(t => (
+                                                            {tiposLista.map(t => (
                                                                 <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
                                                             ))}
                                                         </SelectContent>

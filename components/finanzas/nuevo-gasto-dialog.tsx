@@ -12,6 +12,8 @@ import { toast } from "sonner"
 import { todayArgentina } from "@/lib/utils"
 
 import { CATEGORIAS_GASTO } from "@/lib/finanzas/categorias-gasto"
+import { useMisRoles } from "@/lib/hooks/useMisRoles"
+import { tiposVisibles } from "@/lib/finanzas/tipos-reservados"
 
 // Para el alta de gastos no ofrecemos "factura" (eso va por proveedores)
 const TIPOS = CATEGORIAS_GASTO.filter((c) => c.value !== "factura")
@@ -39,6 +41,9 @@ export function NuevoGastoDialog({
   onOpenChange: (o: boolean) => void
   onSaved?: () => void
 }) {
+  // Sueldos / Socios: solo admin (el servidor también lo rechaza)
+  const { roles } = useMisRoles()
+  const tipos = tiposVisibles(TIPOS, roles)
   const [concepto, setConcepto] = useState("")
   const [tipo, setTipo] = useState("servicios")
   const [monto, setMonto] = useState("")
@@ -118,7 +123,7 @@ export function NuevoGastoDialog({
               <Label>Tipo</Label>
               <Select value={tipo} onValueChange={setTipo}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{TIPOS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                <SelectContent>{tipos.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>

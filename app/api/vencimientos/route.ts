@@ -1,13 +1,22 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth'
+import { requireAuth, getUserRoles } from '@/lib/auth'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
+import { esAdmin, esTipoReservado, TIPOS_SOLO_ADMIN } from '@/lib/finanzas/tipos-reservados'
+
+// Sueldos y Socios: SOLO admin los ve / carga / edita. Para el resto no existen.
+const soloAdmin = () => NextResponse.json(
+    { error: 'Solo un administrador puede ver o modificar vencimientos de sueldos o socios.' },
+    { status: 403 }
+)
+const filtroNoAdmin = `(${TIPOS_SOLO_ADMIN.join(',')})`
 
 // GET /api/vencimientos - Listar vencimientos con filtros
 export async function GET(request: Request) {
     const auth = await requireAuth()
     if (auth.error) return auth.error
+    const admin = esAdmin(await getUserRoles(auth.user.id))
 
     const { searchParams } = new URL(request.url)
     const estado = searchParams.get('estado')
@@ -16,6 +25,9 @@ export async function GET(request: Request) {
     const desde = searchParams.get('desde')
     const hasta = searchParams.get('hasta')
     const proximosNDias = searchParams.get('proximos_dias')
+
+    // Un no-admin pidiendo explícitamente sueldos/socios: no hay nada para él
+    if (!admin && esTipoReservado(tipo)) return NextResponse.json([])
 
     const supabase = createAdminClient()
 
@@ -41,6 +53,10 @@ export async function GET(request: Request) {
             }
             if (tipo && tipo !== 'todos') {
                 query = query.eq('tipo', tipo)
+            }
+            // No-admin: sueldos y socios quedan afuera (calendario, lista, panel, totales)
+            if (!admin) {
+                query = query.not('tipo', 'in', filtroNoAdmin)
             }
             if (desde) {
                 query = query.gte('fecha_vencimiento', desde)
@@ -89,6 +105,7 @@ export async function POST(request: Request) {
             { status: 400 }
         )
     }
+    if (esTipoReservado(tipo) && !esAdmin(await getUserRoles(auth.user.id))) return soloAdmin()
 
     const { data, error } = await supabase
         .from('vencimientos')
@@ -140,6 +157,12 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'ID es obligatorio' }, { status: 400 })
     }
 
+    // Traba por rol: ni convertir a sueldos/socios ni tocar uno existente sin ser admin
+    const { data: actual } = await supabase.from('vencimientos').select('tipo').eq('id', id).maybeSingle()
+    if ((esTipoReservado(updateData.tipo) || esTipoReservado(actual?.tipo)) && !esAdmin(await getUserRoles(auth.user.id))) {
+        return soloAdmin()
+    }
+
     updateData.updated_at = nowArgentina()
 
     const { data, error } = await supabase
@@ -168,6 +191,9 @@ export async function DELETE(request: Request) {
     if (!id) {
         return NextResponse.json({ error: 'ID es obligatorio' }, { status: 400 })
     }
+
+    const { data: actual } = await supabase.from('vencimientos').select('tipo').eq('id', id).maybeSingle()
+    if (esTipoReservado(actual?.tipo) && !esAdmin(await getUserRoles(auth.user.id))) return soloAdmin()
 
     const { error } = await supabase
         .from('vencimientos')
