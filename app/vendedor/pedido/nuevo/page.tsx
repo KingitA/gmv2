@@ -555,6 +555,21 @@ function NuevoPedidoInner() {
     [cliente, cargarPrecios]
   )
 
+  // Loader para el árbol del home: todos los artículos de una categoría + precios.
+  // (Hook: tiene que vivir acá arriba, antes de cualquier return temprano.)
+  const cargarCategoriaArbol = useCallback(
+    async (catId: string): Promise<Articulo[]> => {
+      if (!cliente) return []
+      const params = new URLSearchParams({ vista: "categoria", cliente: cliente.id, categoria: catId })
+      const d = await fetch(`/api/vendedor/articulos?${params}`).then((r) => r.json())
+      const arts: Articulo[] = d.articulos || []
+      artsArbolRef.current.set(catId, arts)
+      cargarPrecios(arts)
+      return arts
+    },
+    [cliente, cargarPrecios]
+  )
+
   const abrirFiltro = (tipo: Filtro) => {
     setNav({ s: "cats", ctx: { tipo } })
     cargarLista(tipo)
@@ -1336,20 +1351,6 @@ function NuevoPedidoInner() {
       </button>
     )
   }
-
-  // Loader para el árbol: todos los artículos de una categoría + sus precios
-  const cargarCategoriaArbol = useCallback(
-    async (catId: string): Promise<Articulo[]> => {
-      if (!cliente) return []
-      const params = new URLSearchParams({ vista: "categoria", cliente: cliente.id, categoria: catId })
-      const d = await fetch(`/api/vendedor/articulos?${params}`).then((r) => r.json())
-      const arts: Articulo[] = d.articulos || []
-      artsArbolRef.current.set(catId, arts)
-      cargarPrecios(arts)
-      return arts
-    },
-    [cliente, cargarPrecios]
-  )
 
   const ArticuloCard = ({ a }: { a: Articulo }) => {
     const enCarrito = cart.find((i) => i.articulo.id === a.id)
