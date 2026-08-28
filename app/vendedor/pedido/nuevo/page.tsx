@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { localMatch } from "@/lib/search/local-match"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { CatalogoArbol } from "@/components/vendedor/CatalogoArbol"
+import { OrdenSelector } from "@/components/vendedor/OrdenSelector"
+import { ordenarArticulos, type OrdenArticulos } from "@/lib/vendedor/orden-articulos"
 import {
   actualizarCantidadItem,
   agregarItemPedido,
@@ -236,6 +239,16 @@ function NuevoPedidoInner() {
   const [subSel, setSubSel] = useState<string | null>(null)
   // Búsqueda local DENTRO del filtro/categoría abierta (no toca el server)
   const [qFiltro, setQFiltro] = useState("")
+  // Orden de los listados (precio / ventas / marca) — persiste durante la sesión
+  const [orden, setOrden] = useState<OrdenArticulos>("default")
+  // Unidades vendidas por artículo (180 días) para "ordenar por ventas"
+  const [ventas, setVentas] = useState<Record<string, number>>({})
+  useEffect(() => {
+    fetch("/api/vendedor/articulos-ventas")
+      .then((r) => r.json())
+      .then((d) => setVentas(d.ventas || {}))
+      .catch(() => {})
+  }, [])
   // Cambiar de pantalla/categoría limpia la búsqueda del filtro
   useEffect(() => setQFiltro(""), [nav])
 
@@ -246,6 +259,8 @@ function NuevoPedidoInner() {
   const [artsProveedor, setArtsProveedor] = useState<Articulo[]>([])
   const [cargandoArtsProv, setCargandoArtsProv] = useState(false)
   const provCache = useRef<Map<string, Articulo[]>>(new Map())
+  // Artículos cargados por el árbol del home (por categoría), para re-preciar
+  const artsArbolRef = useRef<Map<string, Articulo[]>>(new Map())
 
   // ── Búsqueda ────────────────────────────────────────────────────────
   const [q, setQ] = useState("")
@@ -490,6 +505,7 @@ function NuevoPedidoInner() {
       ...Object.values(listas).flatMap((l) => l || []),
       ...artsCategoria,
       ...resultados,
+      ...[...artsArbolRef.current.values()].flat(), // categorías abiertas en el árbol
     ]
     if (cargados.length) cargarPrecios(cargados)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1104,6 +1120,31 @@ function NuevoPedidoInner() {
   const listaDeCtx = (ctx: Ctx): Articulo[] =>
     ctx.tipo === "rubro" ? [] : ctx.tipo === "proveedor" ? artsProveedor : listas[ctx.tipo] || []
 
+  // Posición de cada categoría/subcategoría en la taxonomía (el orden que se
+  // arma por drag & drop en el ERP): las agrupaciones de filtros/proveedor se
+  // muestran en ESE orden, no por cantidad. Fallback por nombre (artículos sin FK).
+  const posTaxonomia = useMemo(() => {
+    const cat = new Map<string, number>()
+    const sub = new Map<string, number>()
+    let i = 0, j = 0
+    for (const r of catalogo)
+      for (const c of r.categorias) {
+        cat.set(c.id, i)
+        cat.set(`n:${c.nombre}`, i)
+        i++
+        for (const s of c.subcategorias) {
+          sub.set(s.id, j)
+          sub.set(`n:${s.nombre}`, j)
+          j++
+        }
+      }
+    return { cat, sub }
+  }, [catalogo])
+  const posCat = (key: string | null) => (key && posTaxonomia.cat.has(key) ? posTaxonomia.cat.get(key)! : Number.MAX_SAFE_INTEGER)
+  const posSub = (key: string | null) => (key && posTaxonomia.sub.has(key) ? posTaxonomia.sub.get(key)! : Number.MAX_SAFE_INTEGER)
+  // Precio para ordenar: el que ve el cliente (CC); sin precio cargado → al final
+  const precioOrden = (a: Articulo) => precios[a.id]?.precio
+
   // Tarjetas de categoría según contexto: por rubro sale de la taxonomía;
   // por filtro se agrupa la lista ya cargada (solo categorías con artículos en el filtro).
   const categoriasCtx = useMemo(() => {
@@ -1133,9 +1174,10 @@ function NuevoPedidoInner() {
           rubroNombre: a.rubro_nombre,
         })
     }
-    return [...grupos.values()].sort((a, b) => b.cantidad - a.cantidad)
+    // Orden de la taxonomía (no por cantidad): igual que en el ERP y en el rubro
+    return [...grupos.values()].sort((a, b) => posCat(a.id) - posCat(b.id) || b.cantidad - a.cantidad)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nav, catalogo, listas, artsProveedor])
+  }, [nav, catalogo, listas, artsProveedor, posTaxonomia])
 
   // Artículos visibles en la pantalla de lista
   const articulosVisibles = useMemo(() => {
@@ -1150,9 +1192,20 @@ function NuevoPedidoInner() {
       base = base.filter((a) =>
         localMatch(qFiltro, a.descripcion, a.sku, Array.isArray(a.ean13) ? a.ean13 : [a.ean13], a.marca, a.subcategoria_nombre)
       )
-    return base
+    // Dentro de una categoría del rubro, el orden natural sigue la taxonomía de
+    // subcategorías (drag & drop del ERP); después el orden elegido por el vendedor
+    if (nav.ctx.tipo === "rubro" && !subSel)
+      base = [...base].sort((a, b) => posSub(claveSubcategoria(a)) - posSub(claveSubcategoria(b)))
+    return ordenarArticulos(base, orden, precioOrden, ventas)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nav, artsCategoria, listas, artsProveedor, subSel, qFiltro])
+  }, [nav, artsCategoria, listas, artsProveedor, subSel, qFiltro, orden, ventas, precios, posTaxonomia])
+
+  // Resultados de búsqueda con el orden elegido (default = relevancia del motor)
+  const resultadosOrdenados = useMemo(
+    () => ordenarArticulos(resultados, orden, precioOrden, ventas),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [resultados, orden, ventas, precios]
+  )
 
   // Chips de subcategoría derivados de los artículos presentes
   const subchips = useMemo(() => {
@@ -1171,9 +1224,10 @@ function NuevoPedidoInner() {
       if (g) g.cantidad += 1
       else m.set(key, { id: key, nombre: a.subcategoria_nombre || "—", cantidad: 1 })
     }
-    return [...m.values()].sort((a, b) => b.cantidad - a.cantidad)
+    // Chips en el orden de la taxonomía (drag & drop del ERP), no por cantidad
+    return [...m.values()].sort((a, b) => posSub(a.id) - posSub(b.id) || b.cantidad - a.cantidad)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nav, artsCategoria, listas, artsProveedor])
+  }, [nav, artsCategoria, listas, artsProveedor, posTaxonomia])
 
   // ── Pantalla éxito ──────────────────────────────────────────────────
   if (pedidoOk) {
@@ -1251,6 +1305,52 @@ function NuevoPedidoInner() {
   }
 
   // ── Tarjeta de artículo (compartida por todas las listas) ───────────
+  // Fila compacta (listas desplegables del catálogo): sku · descripción ·
+  // -oferta% · marca · x u/bulto · precio. Tap = ficha del artículo.
+  const FilaArticulo = ({ a }: { a: Articulo }) => {
+    const enCarrito = cart.find((i) => i.articulo.id === a.id)
+    const p = precios[a.id]
+    if (p && p.precio <= 0) return null
+    return (
+      <button
+        onClick={() => abrirArticulo(a)}
+        className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left bg-white border active:bg-emerald-50 ${
+          enCarrito ? "border-emerald-500" : "border-gray-100"
+        }`}
+      >
+        <span className="font-mono text-[11px] text-gray-400 w-14 shrink-0 truncate">{a.sku || "—"}</span>
+        <span className="min-w-0 flex-1">
+          <span className="font-bold text-gray-900 text-[13px] leading-snug">{a.descripcion}</span>
+          {a.descuento_propio > 0 && (
+            <span className="ml-1.5 inline-block bg-red-100 text-red-700 px-1.5 rounded text-[10px] font-bold align-middle">-{a.descuento_propio}%</span>
+          )}
+          {enCarrito && (
+            <span className="ml-1.5 inline-block bg-emerald-600 text-white px-1.5 rounded text-[10px] font-bold align-middle">🛒 {enCarrito.cantidad}</span>
+          )}
+        </span>
+        <span className="text-gray-500 text-[11px] w-16 shrink-0 truncate text-right">{a.marca || ""}</span>
+        <span className="text-gray-400 text-[11px] w-9 shrink-0 text-right">{a.unidades_por_bulto ? `x${a.unidades_por_bulto}` : ""}</span>
+        <span className="font-bold text-gray-900 text-[13px] w-[4.5rem] shrink-0 text-right">
+          {p ? formatCurrency(p.especial ? p.precioNeto : p.precio) : "…"}
+        </span>
+      </button>
+    )
+  }
+
+  // Loader para el árbol: todos los artículos de una categoría + sus precios
+  const cargarCategoriaArbol = useCallback(
+    async (catId: string): Promise<Articulo[]> => {
+      if (!cliente) return []
+      const params = new URLSearchParams({ vista: "categoria", cliente: cliente.id, categoria: catId })
+      const d = await fetch(`/api/vendedor/articulos?${params}`).then((r) => r.json())
+      const arts: Articulo[] = d.articulos || []
+      artsArbolRef.current.set(catId, arts)
+      cargarPrecios(arts)
+      return arts
+    },
+    [cliente, cargarPrecios]
+  )
+
   const ArticuloCard = ({ a }: { a: Articulo }) => {
     const enCarrito = cart.find((i) => i.articulo.id === a.id)
     const p = precios[a.id]
@@ -1484,7 +1584,11 @@ function NuevoPedidoInner() {
             </div>
           ) : (
             <div className="space-y-2">
-              {resultados.map((a) => (
+              <div className="flex items-center justify-between px-1">
+                <p className="text-gray-400 text-xs">{resultados.length} resultados</p>
+                <OrdenSelector value={orden} onChange={setOrden} />
+              </div>
+              {resultadosOrdenados.map((a) => (
                 <ArticuloCard key={a.id} a={a} />
               ))}
             </div>
@@ -1537,107 +1641,30 @@ function NuevoPedidoInner() {
             </div>
 
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 mb-2 px-1">
-                Catálogo por rubro
-              </p>
-              {/* Rubros apilados: header con imagen + título + descripción (entra al
-                  rubro) y debajo las categorías principales como accesos directos */}
-              <div className="space-y-3">
-                {catalogo.map((r) => {
-                  const t = tinteRubro(r.nombre)
-                  const cats = [...r.categorias].sort((a, b) => b.cantidad - a.cantidad)
-                  const top = cats.slice(0, 6)
-                  const resto = cats.length - top.length
-                  const totalArts = r.cantidad ?? cats.reduce((s, c) => s + c.cantidad, 0)
-                  return (
-                    <div
-                      key={r.id}
-                      className="rounded-2xl border overflow-hidden bg-white"
-                      style={{ borderColor: t.border }}
-                    >
-                      <button
-                        onClick={() => abrirRubro(r)}
-                        className="w-full text-left active:opacity-90"
-                        style={{ background: t.bg }}
-                      >
-                        <div className="flex items-center gap-4 p-4">
-                          <div
-                            className="w-20 h-20 shrink-0 rounded-xl overflow-hidden flex items-center justify-center bg-white/60"
-                            style={{ color: t.ink }}
-                          >
-                            {r.imagen_url ? (
-                              <img src={r.imagen_url} alt="" loading="lazy" className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-16 h-16">
-                                <ArteRubro nombre={r.nombre} accent={t.accent} />
-                              </div>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: t.accent }}>
-                              Rubro
-                            </p>
-                            <p className="font-bold text-gray-900 text-xl leading-tight">{r.nombre}</p>
-                            {r.descripcion && (
-                              <p className="text-gray-600 text-sm mt-0.5 line-clamp-2">{r.descripcion}</p>
-                            )}
-                            <p className="text-xs mt-1 font-medium" style={{ color: t.accent }}>
-                              {r.categorias.length} categorías · {totalArts} artículos
-                            </p>
-                          </div>
-                          <span className="text-3xl font-light shrink-0" style={{ color: t.accent }}>
-                            ›
-                          </span>
-                        </div>
-                      </button>
-                      <div className="p-3 grid grid-cols-2 gap-2">
-                        {top.map((c) => (
-                          <button
-                            key={c.id}
-                            onClick={() =>
-                              abrirCategoria(
-                                { tipo: "rubro", rubroId: r.id, rubroNombre: r.nombre },
-                                c.id,
-                                c.nombre,
-                                r.nombre
-                              )
-                            }
-                            className="flex items-center gap-2.5 rounded-xl border p-2.5 text-left active:scale-[0.97] transition-transform"
-                            style={{ background: t.bgSoft, borderColor: t.border }}
-                          >
-                            <div
-                              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                              style={{ background: t.bg, color: t.ink }}
-                            >
-                              <IconoCategoria nombre={c.nombre} className="w-5 h-5" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-bold text-gray-900 text-[13px] leading-snug truncate">{c.nombre}</p>
-                              <p className="text-[11px]" style={{ color: t.accent }}>
-                                {c.cantidad} {c.cantidad === 1 ? "artículo" : "artículos"}
-                              </p>
-                            </div>
-                          </button>
-                        ))}
-                        {resto > 0 && (
-                          <button
-                            onClick={() => abrirRubro(r)}
-                            className="flex items-center justify-center rounded-xl border border-dashed p-2.5 text-[13px] font-bold active:scale-[0.97]"
-                            style={{ borderColor: t.border, color: t.accent }}
-                          >
-                            +{resto} categorías más ›
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-                {catalogo.length === 0 && (
-                  <div className="text-center py-6">
-                    <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
-                  </div>
-                )}
+              <div className="flex items-center justify-between mb-2 px-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Catálogo por rubro</p>
+                <OrdenSelector value={orden} onChange={setOrden} />
               </div>
+              {/* Listas desplegables: Rubro › Categoría › Subcategoría › artículos,
+                  en el orden de la taxonomía (drag & drop del ERP). El › del rubro
+                  abre la vista completa con tarjetas y fotos. */}
+              {catalogo.length === 0 ? (
+                <div className="text-center py-6">
+                  <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                </div>
+              ) : (
+                <CatalogoArbol<Articulo>
+                  rubros={catalogo}
+                  cargarCategoria={cargarCategoriaArbol}
+                  renderArticulo={(a) => <FilaArticulo a={a} />}
+                  ordenar={(arts) => ordenarArticulos(arts, orden, precioOrden, ventas)}
+                  onVerRubro={(r) => abrirRubro(r as CatalogoRubro)}
+                  tinte={(nombre) => {
+                    const t = tinteRubro(nombre)
+                    return { bg: t.bg, border: t.border, ink: t.ink, accent: t.accent }
+                  }}
+                />
+              )}
             </div>
           </div>
         ) : nav.s === "provs" ? (
@@ -1732,27 +1759,31 @@ function NuevoPedidoInner() {
           /* ── Lista de artículos de la categoría ── */
           <div className="space-y-3">
             {/* Búsqueda DENTRO del filtro aplicado (proveedor, habituales,
-                ofertas, categoría...): filtra la lista ya cargada, en vivo */}
-            <div className="relative">
-              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden>
-                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-                <path d="M16.5 16.5 21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <input
-                type="search"
-                value={qFiltro}
-                onChange={(e) => setQFiltro(e.target.value)}
-                placeholder={`Buscar en ${ctxLabel(nav.ctx) || "este listado"}...`}
-                className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-9 py-2.5 text-gray-900 outline-none"
-              />
-              {qFiltro && (
-                <button
-                  onClick={() => setQFiltro("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-xs leading-none"
-                >
-                  ✕
-                </button>
-              )}
+                ofertas, categoría...): filtra la lista ya cargada, en vivo.
+                Al lado, el orden (precio / ventas / marca). */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden>
+                  <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                  <path d="M16.5 16.5 21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <input
+                  type="search"
+                  value={qFiltro}
+                  onChange={(e) => setQFiltro(e.target.value)}
+                  placeholder={`Buscar en ${ctxLabel(nav.ctx) || "este listado"}...`}
+                  className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-9 py-2.5 text-gray-900 outline-none"
+                />
+                {qFiltro && (
+                  <button
+                    onClick={() => setQFiltro("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-xs leading-none"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <OrdenSelector value={orden} onChange={setOrden} className="shrink-0" />
             </div>
             {/* Chips de categoría (navegación por proveedor: se entra al
                 listado completo y las categorías filtran desde acá) */}

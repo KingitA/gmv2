@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { previewPreciosListas } from "@/lib/actions/pedidos"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { CatalogoArbol } from "@/components/vendedor/CatalogoArbol"
+import { OrdenSelector } from "@/components/vendedor/OrdenSelector"
+import { ordenarArticulos, type OrdenArticulos } from "@/lib/vendedor/orden-articulos"
 
 // Consulta de precios por lista + método de facturación, sin cliente:
 // el vendedor navega el catálogo (o busca) y ve cada artículo con el precio
@@ -79,6 +82,19 @@ export default function VendedorPreciosPage() {
   // precios[articulo_id] = {cc, contado} por combo (alineado con `combos`)
   const [precios, setPrecios] = useState<Record<string, Array<{ cc: number; contado: number } | null>>>({})
   const [zoomFoto, setZoomFoto] = useState<string | null>(null)
+  // Orden (precio / ventas / marca) + unidades vendidas 180d para "por ventas"
+  const [orden, setOrden] = useState<OrdenArticulos>("default")
+  const [ventas, setVentas] = useState<Record<string, number>>({})
+  useEffect(() => {
+    fetch("/api/vendedor/articulos-ventas")
+      .then((r) => r.json())
+      .then((d) => setVentas(d.ventas || {}))
+      .catch(() => {})
+  }, [])
+  // Precio para ordenar: cuenta corriente de la primera columna
+  const precioOrden = (a: Articulo) => precios[a.id]?.[0]?.cc
+  const ordenar = (arts: Articulo[]) => ordenarArticulos(arts, orden, precioOrden, ventas)
+  const arbolRef = useRef<Map<string, Articulo[]>>(new Map())
   const pedidosRef = useRef<Set<string>>(new Set())
   const combosRef = useRef<Combo[]>([])
 
@@ -125,10 +141,10 @@ export default function VendedorPreciosPage() {
 
   useEffect(() => {
     combosRef.current = combos
-    // Cambiaron las columnas: recalcular todo lo visible
+    // Cambiaron las columnas: recalcular todo lo visible (incluido el árbol)
     setPrecios({})
     pedidosRef.current = new Set()
-    const visibles = resultados ?? articulos
+    const visibles = [...(resultados ?? articulos), ...[...arbolRef.current.values()].flat()]
     if (visibles.length && combos.length) cargarPrecios(visibles, combos)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [combosKey(combos)])
@@ -186,8 +202,58 @@ export default function VendedorPreciosPage() {
     setCombos((prev) => prev.filter((_, idx) => idx !== i))
   }
 
-  const visibles = resultados ?? articulos
+  const visibles = ordenar(resultados ?? articulos)
   const enLista = !!resultados || !!catSel
+
+  // Loader del árbol: artículos de una categoría + sus precios en las columnas
+  const cargarCategoriaArbol = useCallback(
+    async (catId: string): Promise<Articulo[]> => {
+      const d = await fetch(`/api/vendedor/articulos?vista=categoria&categoria=${catId}`).then((r) => r.json())
+      const arts: Articulo[] = d.articulos || []
+      arbolRef.current.set(catId, arts)
+      cargarPrecios(arts, combosRef.current)
+      return arts
+    },
+    [cargarPrecios]
+  )
+
+  // Fila compacta del árbol: sku · descripción · marca · x u/bulto · precio por columna
+  const FilaArticulo = ({ a }: { a: Articulo }) => {
+    const p = precios[a.id]
+    return (
+      <div className="w-full rounded-lg px-2.5 py-2 bg-white border border-gray-100">
+        <div className="flex items-center gap-2.5">
+          {a.imagen_url ? (
+            <button onClick={() => setZoomFoto(a.imagen_url)} className="shrink-0">
+              <img src={a.imagen_url} alt="" className="w-8 h-8 rounded object-contain bg-gray-50" />
+            </button>
+          ) : (
+            <span className="font-mono text-[11px] text-gray-400 w-8 shrink-0 truncate">{a.sku || ""}</span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="font-bold text-gray-900 text-[13px] leading-snug">{a.descripcion}</span>
+            <span className="block text-[11px] text-gray-400">
+              {a.sku ? `SKU ${a.sku}` : ""}{a.marca ? ` · ${a.marca}` : ""}{a.unidades_por_bulto ? ` · x${a.unidades_por_bulto}` : ""}
+            </span>
+          </span>
+        </div>
+        <div className={`mt-1.5 grid gap-1 ${combos.length <= 2 ? "grid-cols-2" : combos.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+          {combos.map((c, i) => {
+            const pc = p?.[i]
+            return (
+              <div key={comboKey(c) + i} className="bg-gray-50 rounded px-2 py-1 flex items-baseline justify-between gap-1">
+                <span className="text-[9px] font-bold uppercase text-gray-400 truncate">{labelCombo(c)}</span>
+                <span className="text-right leading-tight">
+                  <span className="font-bold text-gray-900 text-[12px]">{p === undefined ? "…" : !pc ? "—" : formatCurrency(pc.cc)}</span>
+                  {pc && <span className="block text-emerald-700 text-[10px] font-bold">{formatCurrency(pc.contado)} ctdo</span>}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
 
   // "Atrás" físico: desarma un paso interno por vez en vez de salir del módulo
   useBackTrap(() => {
@@ -252,27 +318,24 @@ export default function VendedorPreciosPage() {
       </header>
 
       <div className="p-4 max-w-2xl mx-auto space-y-4">
-        {/* Home: categorías */}
+        {/* Home: catálogo como listas desplegables (Rubro › Categoría ›
+            Subcategoría › artículos) en el orden de la taxonomía */}
         {!enLista && (
-          <div className="space-y-4">
-            {catalogo.map((r) => (
-              <section key={r.id}>
-                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400 mb-2">{r.nombre}</h2>
-                <div className="grid grid-cols-2 gap-2">
-                  {r.categorias.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => abrirCategoria(c)}
-                      className="bg-white rounded-xl border border-gray-200 p-3.5 text-left active:scale-[0.97]"
-                    >
-                      <p className="font-bold text-gray-900 text-sm leading-tight">{c.nombre}</p>
-                      <p className="text-gray-400 text-xs mt-0.5">{c.cantidad} artículos</p>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ))}
-            {!catalogo.length && <p className="text-center text-gray-400 py-10">Cargando catálogo...</p>}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Catálogo</p>
+              <OrdenSelector value={orden} onChange={setOrden} />
+            </div>
+            {!catalogo.length ? (
+              <p className="text-center text-gray-400 py-10">Cargando catálogo...</p>
+            ) : (
+              <CatalogoArbol<Articulo>
+                rubros={catalogo}
+                cargarCategoria={cargarCategoriaArbol}
+                renderArticulo={(a) => <FilaArticulo a={a} />}
+                ordenar={ordenar}
+              />
+            )}
           </div>
         )}
 
@@ -300,6 +363,10 @@ export default function VendedorPreciosPage() {
         {/* Listado con precios comparados */}
         {enLista && (
           <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <p className="text-gray-400 text-xs">{visibles.length} artículos</p>
+              <OrdenSelector value={orden} onChange={setOrden} />
+            </div>
             {(cargando || buscando) && <p className="text-center text-gray-400 py-6">Buscando...</p>}
             {!cargando && !buscando && !visibles.length && (
               <p className="text-center text-gray-400 py-10">Sin artículos.</p>
