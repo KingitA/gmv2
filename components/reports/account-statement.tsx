@@ -1,4 +1,5 @@
 "use client"
+import { formatDateAR } from "@/lib/utils"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -33,7 +34,7 @@ export function AccountStatement({ cliente, movimientos, saldoActual, limiteCred
     // Generate CSV export
     const headers = ["Fecha", "Tipo", "Concepto", "Debe", "Haber", "Saldo"]
     const rows = movimientos.map((m) => [
-      new Date(m.fecha).toLocaleDateString("es-AR"),
+      formatDateAR(m.fecha),
       m.tipo.toUpperCase(),
       m.concepto,
       m.tipo === "debe" ? m.importe.toFixed(2) : "",
@@ -109,7 +110,7 @@ export function AccountStatement({ cliente, movimientos, saldoActual, limiteCred
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Calendar className="h-3 w-3" />
-                  {new Date(mov.fecha).toLocaleDateString("es-AR")}
+                  {formatDateAR(mov.fecha)}
                   {mov.referencia && <span>• Ref: {mov.referencia}</span>}
                 </div>
               </div>

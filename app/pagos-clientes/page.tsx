@@ -1,4 +1,5 @@
 "use client"
+import { formatDateAR } from "@/lib/utils"
 
 import { useRef, useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
@@ -51,7 +52,7 @@ interface PagoHistorial {
 
 function genId() { return Math.random().toString(36).slice(2) }
 const fmtARS = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2 })
-const fmtFecha = (d: string) => new Date(d).toLocaleDateString("es-AR")
+const fmtFecha = (d: string) => formatDateAR(d)
 
 function PagosClientesContent() {
   // ── Formulario ──

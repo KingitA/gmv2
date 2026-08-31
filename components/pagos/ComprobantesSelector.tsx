@@ -1,4 +1,5 @@
 "use client"
+import { formatDateAR } from "@/lib/utils"
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
@@ -107,11 +108,14 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
     })
   }, [clienteId])
 
-  // Agrupar comprobantes por pedido
+  // Agrupar comprobantes por pedido. Un comprobante VIVO cuyo pedido fue
+  // eliminado (no está en la lista de pedidos) cae en "Otros comprobantes":
+  // antes desaparecía de la pantalla y la deuda quedaba incobrable.
+  const pedidoIdsVivos = new Set(pedidos.map((p) => p.id))
   const compsPorPedido = new Map<string, Comprobante[]>()
   const sinPedido: Comprobante[] = []
   for (const c of comprobantes) {
-    if (c.pedido_id) {
+    if (c.pedido_id && pedidoIdsVivos.has(c.pedido_id)) {
       if (!compsPorPedido.has(c.pedido_id)) compsPorPedido.set(c.pedido_id, [])
       compsPorPedido.get(c.pedido_id)!.push(c)
     } else sinPedido.push(c)
@@ -192,7 +196,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
               >
                 {facturado ? (abierto ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />) : <span className="w-4" />}
                 <span className="font-semibold text-sm">Pedido #{ped.numero_pedido}</span>
-                <span className="text-xs text-muted-foreground">{new Date(ped.fecha).toLocaleDateString("es-AR")}</span>
+                <span className="text-xs text-muted-foreground">{formatDateAR(ped.fecha)}</span>
                 {facturado ? (
                   <Badge variant="outline" className="text-[10px]">{comps.length} comprob.</Badge>
                 ) : (
@@ -250,6 +254,9 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
                 <Badge variant="outline" className="text-xs">{comp.tipo_comprobante}</Badge>
                 <span className="font-mono text-xs">{comp.numero_comprobante}</span>
                 <span className="text-[10px] text-muted-foreground">{comp.fecha ? comp.fecha.slice(0, 10).split("-").reverse().join("/") : ""}</span>
+                {comp.pedido_id && (
+                  <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-500 border-slate-200">pedido eliminado</Badge>
+                )}
                 <span className="ml-auto font-mono text-orange-600">saldo ${fmtARS(Number(comp.saldo_pendiente))}</span>
                 {checked ? (
                   <Input

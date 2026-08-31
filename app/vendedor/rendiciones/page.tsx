@@ -250,10 +250,16 @@ export default function VendedorRendicionesPage() {
                           className={`px-2 py-1 rounded-full text-xs font-bold ${
                             r.estado === "confirmada"
                               ? "bg-green-100 text-green-700"
-                              : "bg-yellow-100 text-yellow-700"
+                              : r.estado === "cancelada"
+                                ? "bg-gray-200 text-gray-600"
+                                : "bg-yellow-100 text-yellow-700"
                           }`}
                         >
-                          {r.estado === "confirmada" ? "🟢 Confirmada" : "🟡 En viaje"}
+                          {r.estado === "confirmada"
+                            ? "🟢 Confirmada"
+                            : r.estado === "cancelada"
+                              ? "⚫ Cancelada"
+                              : "🟡 En viaje"}
                         </span>
                         <span className="text-gray-400">{expandida ? "▴" : "▾"}</span>
                       </div>

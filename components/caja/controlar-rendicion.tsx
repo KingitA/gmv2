@@ -252,6 +252,38 @@ export function ControlarRendicion({
               transferencias y echeqs ya viajan por su canal — esto es solo lo físico.
             </p>
 
+            {/* Sin pagos vigentes: todos rechazados/anulados por otra vía —
+                no hay nada que recibir, solo cancelarla para que no quede
+                "en viaje" para siempre del lado del cobrador. */}
+            {pagosDeclarados.length === 0 && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p className="text-sm font-semibold text-amber-800">
+                  Esta rendición quedó sin pagos vigentes (fueron rechazados o anulados).
+                </p>
+                <p className="mt-0.5 text-xs text-amber-700">No hay plata para recibir — cancelala para cerrarla.</p>
+                <button
+                  onClick={async () => {
+                    setGuardando(true)
+                    try {
+                      const res = await fetch(`/api/finanzas/rendiciones/${rendicionId}/cancelar`, { method: "POST" })
+                      const data = await res.json()
+                      if (!res.ok) throw new Error(data.error || "No se pudo cancelar")
+                      toast({ title: "Rendición cancelada" })
+                      onListo()
+                    } catch (e: any) {
+                      toast({ variant: "destructive", title: "Error", description: e.message })
+                    } finally {
+                      setGuardando(false)
+                    }
+                  }}
+                  disabled={guardando}
+                  className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  Cancelar rendición
+                </button>
+              </div>
+            )}
+
             {/* Pagos declarados: qué cobros trae, con opción de rechazar uno */}
             {pagosDeclarados.length > 0 && (
               <div className="mt-4">
@@ -420,13 +452,17 @@ export function ControlarRendicion({
                   </option>
                 ))}
               </select>
+              {!cajaDestino && (
+                <span className="text-xs font-semibold text-amber-600">← Falta indicar caja</span>
+              )}
             </div>
 
             <div className="mt-4 flex items-center gap-2">
               {requiereForzar || difEfectivo !== 0 ? (
                 <button
                   onClick={() => confirmar(true)}
-                  disabled={guardando}
+                  disabled={guardando || !cajaDestino}
+                  title={!cajaDestino ? "Falta indicar caja destino" : undefined}
                   className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                 >
                   {guardando && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -435,7 +471,8 @@ export function ControlarRendicion({
               ) : (
                 <button
                   onClick={() => confirmar(false)}
-                  disabled={guardando}
+                  disabled={guardando || !cajaDestino}
+                  title={!cajaDestino ? "Falta indicar caja destino" : undefined}
                   className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                 >
                   {guardando && <Loader2 className="h-4 w-4 animate-spin" />}

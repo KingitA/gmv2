@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, formatDateAR } from "@/lib/utils"
 
 interface RendicionData {
   viaje: {
@@ -154,7 +154,7 @@ export default function RendicionPage() {
             Rendición: {viaje.nombre}
           </h1>
           <p className="text-gray-500">
-            {new Date(viaje.fecha).toLocaleDateString("es-AR", {
+            {new Date(String(viaje.fecha).slice(0, 10) + "T12:00:00").toLocaleDateString("es-AR", {
               weekday: "long",
               day: "numeric",
               month: "long",
@@ -238,7 +238,7 @@ export default function RendicionPage() {
                         {p.clientes?.razon_social || p.clientes?.nombre || p.cliente_id}
                       </p>
                       <p className="text-xs text-gray-400">
-                        {new Date(p.fecha_pago).toLocaleDateString("es-AR")}
+                        {formatDateAR(p.fecha_pago)}
                       </p>
                       <div className="flex gap-1 mt-1 flex-wrap">
                         {(p.pagos_detalle || []).map((d: any, i: number) => (
@@ -336,7 +336,7 @@ export default function RendicionPage() {
                 <div>
                   <p className="font-medium text-gray-800">{g.concepto || "Gasto"}</p>
                   <p className="text-xs text-gray-400">
-                    {new Date(g.fecha).toLocaleDateString("es-AR")}
+                    {formatDateAR(g.fecha)}
                   </p>
                 </div>
                 <p className="font-bold text-red-600">{formatCurrency(Math.abs(Number(g.monto)))}</p>

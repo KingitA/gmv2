@@ -517,7 +517,7 @@ export default function ComprobantesVentaPage() {
                       </div>
                     </TableCell>
                     <TableCell className="font-medium">{comp.numero_comprobante}</TableCell>
-                    <TableCell>{new Date(comp.fecha).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</TableCell>
+                    <TableCell>{formatDateAR(comp.fecha)}</TableCell>
                     <TableCell>
                       <div>
                         <div className="font-medium">{comp.clientes?.nombre_razon_social}</div>

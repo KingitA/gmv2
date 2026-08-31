@@ -29,6 +29,32 @@ async function lexicalIds(entity: SearchEntity, q: string, matchCount: number): 
     return (data || []).map((r: any) => r.id as string)
 }
 
+// De los ids ya rankeados por lo léxico, cuáles contienen el texto buscado
+// completo en su search_text (normalizado sin acentos, como lo guarda el
+// trigger). Preserva el orden de entrada.
+async function substringMatchIds(entity: SearchEntity, q: string, ids: string[]): Promise<string[]> {
+    if (!ids.length) return []
+    try {
+        const supabase = createAdminClient()
+        const nq = q
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[̀-ͯ]/g, "")
+            .replace(/%/g, "")
+            .trim()
+        if (!nq) return []
+        const { data } = await supabase
+            .from(entity)
+            .select("id")
+            .in("id", ids)
+            .ilike("search_text", `%${nq}%`)
+        const match = new Set((data || []).map((r: any) => r.id))
+        return ids.filter((id) => match.has(id))
+    } catch {
+        return []
+    }
+}
+
 // Fallback léxico básico (ilike) equivalente al comportamiento previo, por si la
 // RPC todavía no fue aplicada en la base. Garantiza que nunca haya regresión.
 async function ilikeFallbackIds(entity: SearchEntity, q: string, matchCount: number): Promise<string[]> {
@@ -140,7 +166,17 @@ export async function hybridSearchIds(entity: SearchEntity, q: string, matchCoun
               ? lex
               : await (async () => {
                     const vec = await vectorIds(entity, q, matchCount)
-                    return vec.length === 0 ? lex : rrf([lex, vec])
+                    if (vec.length === 0) return lex
+                    // Lo ESCRITO manda: los resultados que contienen el texto
+                    // buscado van SIEMPRE primero (en su orden léxico); los
+                    // "parecidos" del vector van después. Sin esto, la fusión
+                    // posicional (RRF) podía colar un cliente semánticamente
+                    // parecido por encima del nombre exacto — y en el registro
+                    // de cobros eso terminó en un cobro al cliente equivocado.
+                    const exactos = await substringMatchIds(entity, q, lex)
+                    const setExactos = new Set(exactos)
+                    const resto = rrf([lex, vec]).filter((id) => !setExactos.has(id))
+                    return [...exactos, ...resto]
                 })()
 
     if (!porCodigo.length) return difuso.slice(0, matchCount)

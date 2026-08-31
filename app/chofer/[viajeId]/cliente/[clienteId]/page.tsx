@@ -6,7 +6,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, formatDateAR } from "@/lib/utils"
 
 // ─── Tipos ────────────────────────────────────────────────────
 
@@ -456,7 +456,7 @@ export default function ClienteEntregaPage() {
                 <div key={c.id} className="flex justify-between items-center text-sm">
                   <div>
                     <p className="font-medium text-gray-700">{c.tipo_comprobante} {c.numero_comprobante}</p>
-                    <p className="text-gray-400 text-xs">{new Date(c.fecha).toLocaleDateString("es-AR")}</p>
+                    <p className="text-gray-400 text-xs">{formatDateAR(c.fecha)}</p>
                   </div>
                   <p className="font-bold text-red-600">−{formatCurrency(c.saldo_pendiente)}</p>
                 </div>

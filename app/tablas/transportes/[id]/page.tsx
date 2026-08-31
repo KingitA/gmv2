@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { ArrowLeft, TrendingUp, TrendingDown, Minus, Plus, Truck } from "lucide-react"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, formatDateAR } from "@/lib/utils"
 
 const TIPO_LABELS: Record<string, { label: string; color: string; sign: number }> = {
     faltante_mercaderia: { label: 'Faltante de mercadería', color: 'bg-orange-100 text-orange-800', sign: 1 },
@@ -205,7 +205,7 @@ export default function TransporteCCPage() {
                                                 <p className="text-sm text-muted-foreground mt-1 truncate">{m.descripcion}</p>
                                             )}
                                             <p className="text-xs text-muted-foreground mt-1">
-                                                {new Date(m.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                                {formatDateAR(m.fecha)}
                                             </p>
                                         </div>
                                         <div className={`text-right font-semibold ${esPago ? 'text-green-600' : 'text-orange-600'}`}>

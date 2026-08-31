@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 interface Movimiento {
@@ -360,7 +360,7 @@ function VendedorBilleteraInner() {
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900 text-sm truncate">{m.concepto || t.label}</p>
                         <p className="text-gray-400 text-xs">
-                          {new Date(m.fecha).toLocaleDateString("es-AR")} · {t.label}
+                          {formatDateAR(m.fecha)} · {t.label}
                           {m.medio ? ` · ${m.medio}` : ""}
                         </p>
                       </div>

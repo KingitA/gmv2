@@ -1,4 +1,5 @@
 'use client'
+import { formatDateAR } from '@/lib/utils'
 
 import { useState, useEffect, useCallback } from 'react'
 import { ArrowLeft, RefreshCw, Wallet, TrendingDown, Plus, Minus, CheckSquare, Square } from 'lucide-react'
@@ -266,7 +267,7 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm truncate">{c.articulos?.descripcion ?? 'Artículo'}</p>
                   <p className="text-white/30 text-xs">
-                    {c.segmento ?? '—'} · {c.porcentaje}% · {new Date(c.created_at).toLocaleDateString('es-AR')}
+                    {c.segmento ?? '—'} · {c.porcentaje}% · {formatDateAR(c.created_at)}
                   </p>
                 </div>
                 <span className="font-mono font-semibold text-emerald-400 text-sm flex-shrink-0">{ars(Number(c.monto))}</span>
@@ -299,7 +300,7 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm">{m.concepto}</p>
                   <p className="text-white/30 text-xs">
-                    {tipoLabel(m.tipo)} · {m.medio ? `${m.medio} · ` : ''}{new Date(m.fecha).toLocaleDateString('es-AR')}
+                    {tipoLabel(m.tipo)} · {m.medio ? `${m.medio} · ` : ''}{formatDateAR(m.fecha)}
                   </p>
                 </div>
                 <span className={`font-mono font-semibold text-sm flex-shrink-0 ${tipoColor(m.tipo)}`}>

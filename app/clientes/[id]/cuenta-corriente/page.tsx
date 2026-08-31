@@ -1,4 +1,5 @@
-"use client";
+"use client"
+import { formatDateAR } from "@/lib/utils";
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
@@ -269,7 +270,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         });
 
         // Sort by date descending
-        documentos.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+        documentos.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
 
         return documentos;
     };
@@ -421,7 +422,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     };
     const extracto = (() => {
         const movs = [...(data.movimientos ?? [])].sort(
-            (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
+            (a, b) => String(a.fecha).localeCompare(String(b.fecha))
         );
         let acumulado = 0;
         return movs
@@ -559,7 +560,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                     ) : (
                                         extracto.map((m) => (
                                             <TableRow key={m.key} className={m.tipo_movimiento?.includes("ajuste") || m.tipo_movimiento === "debito" || m.tipo_movimiento === "credito" ? "bg-amber-50/50" : ""}>
-                                                <TableCell className="whitespace-nowrap">{new Date(m.fecha).toLocaleDateString('es-AR')}</TableCell>
+                                                <TableCell className="whitespace-nowrap">{formatDateAR(m.fecha)}</TableCell>
                                                 <TableCell className="font-medium whitespace-nowrap">
                                                     {etiquetaMov(m)}
                                                     {m.numero_comprobante ? (
@@ -611,7 +612,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                     {/* Cobros en la calle: promesas sin verificar — en gris, no suman */}
                                     {cobrosEnCalle.map((p) => (
                                         <TableRow key={`calle-${p.id}`} className="bg-slate-50/70 text-gray-400 italic">
-                                            <TableCell className="whitespace-nowrap">{new Date(p.fecha_pago).toLocaleDateString('es-AR')}</TableCell>
+                                            <TableCell className="whitespace-nowrap">{formatDateAR(p.fecha_pago)}</TableCell>
                                             <TableCell className="whitespace-nowrap">Cobro en calle — sin verificar</TableCell>
                                             <TableCell className="max-w-[340px] truncate" title={p.observaciones || ""}>
                                                 {p.estado === "pendiente_rendicion" ? "pendiente de rendición" : "pendiente de confirmación"}
@@ -697,7 +698,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                         doc.numero
                                                     )}
                                                 </TableCell>
-                                                <TableCell>{new Date(doc.fecha).toLocaleDateString('es-AR')}</TableCell>
+                                                <TableCell>{formatDateAR(doc.fecha)}</TableCell>
                                                 <TableCell>
                                                     {doc.pedido !== "-" ? (
                                                         <Link href={`/pedidos/${doc.pedido}`} className="text-blue-600 hover:underline">

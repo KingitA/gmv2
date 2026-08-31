@@ -18,6 +18,7 @@ import { RegistrarCobro, type CuentaFondos } from "@/components/caja/registrar-c
 import { MoverPlata } from "@/components/caja/mover-plata"
 import { ConfirmarDialog, type PagoAConfirmar } from "@/components/caja/confirmar-dialog"
 import { ControlarRendicion } from "@/components/caja/controlar-rendicion"
+import { TareasFallidas } from "@/components/caja/tareas-fallidas"
 import { CerrarDia } from "@/components/caja/cerrar-dia"
 import { ImputarPago, type PagoAImputar } from "@/components/caja/imputar-pago"
 import { useToast } from "@/hooks/use-toast"
@@ -428,9 +429,17 @@ export default function CajaDelDiaPage() {
         )}
 
         {(feed as any)?.reconciliacion_descuadres > 0 && (
-          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            ⚠ Hay {(feed as any).reconciliacion_descuadres} cliente(s) con el libro mayor desalineado de sus
-            comprobantes. Revisá <code className="font-mono">/api/finanzas/reconciliacion</code> antes del cierre.
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <span>
+              ⚠ Hay {(feed as any).reconciliacion_descuadres} cliente(s) con el libro mayor desalineado de sus
+              comprobantes — conviene resolverlo antes del cierre.
+            </span>
+            <Link
+              href="/finanzas/reconciliacion"
+              className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-700"
+            >
+              Ver detalle
+            </Link>
           </div>
         )}
 
@@ -558,6 +567,8 @@ export default function CajaDelDiaPage() {
                 </span>
               </div>
             </div>
+
+            <TareasFallidas />
 
             <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
               <div className="text-[12.5px] font-bold text-slate-900">

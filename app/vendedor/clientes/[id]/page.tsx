@@ -80,7 +80,9 @@ interface Catalogos {
 // Badges de doble firma según contrato docs/CONTRATO-API-VIAJANTES.md
 function badgePago(estado: string, verificado: boolean) {
   if (estado === "pendiente_rendicion") return { label: "🟡 Sin rendir", cls: "bg-yellow-100 text-yellow-700" }
-  if (estado === "confirmado" && !verificado) return { label: "🔵 Rendido s/verif.", cls: "bg-blue-100 text-blue-700" }
+  // "Verificado" es SOLO con segunda firma real (verificado_por): un pago
+  // recién confirmado por oficina se muestra "Confirmado", no "Verificado".
+  if (estado === "confirmado" && !verificado) return { label: "🔵 Confirmado", cls: "bg-blue-100 text-blue-700" }
   if (estado === "confirmado") return { label: "🟢 Verificado", cls: "bg-green-100 text-green-700" }
   if (estado === "rechazado") return { label: "🔴 Rechazado", cls: "bg-red-100 text-red-700" }
   if (estado === "anulado") return { label: "⚫ Anulado", cls: "bg-gray-200 text-gray-600" }
@@ -158,6 +160,24 @@ export default function VendedorClienteFichaPage() {
       }
     } finally {
       setBonifGuardando(false)
+    }
+  }
+
+  // Eliminar un cobro propio no rendido (el server valida que siga en su poder)
+  const [eliminando, setEliminando] = useState<string | null>(null)
+  const eliminarCobro = async (pagoId: string, monto: number) => {
+    if (!window.confirm(`¿Eliminar el cobro de ${formatCurrency(monto)}?\n\nSolo podés hacerlo mientras la plata siga en tu poder (sin rendir). Se revierte todo: billetera, imputaciones y cheques.`)) return
+    setEliminando(pagoId)
+    try {
+      const res = await fetch(`/api/viajante/cobro/${pagoId}`, { method: "DELETE" })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || "No se pudo eliminar el cobro")
+      alert("Cobro eliminado. La plata salió de tu billetera y el cliente volvió a deber ese monto.")
+      cargar()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setEliminando(null)
     }
   }
 
@@ -411,7 +431,19 @@ export default function VendedorClienteFichaPage() {
                         {p.forma_pago ? ` · ${p.forma_pago}` : ""}
                       </p>
                     </div>
-                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${badge.cls}`}>{badge.label}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${badge.cls}`}>{badge.label}</span>
+                      {(p as any).eliminable && (
+                        <button
+                          onClick={() => eliminarCobro(p.id, p.monto)}
+                          disabled={eliminando === p.id}
+                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-600 disabled:opacity-50"
+                          title="Eliminar este cobro (solo mientras no lo rendiste)"
+                        >
+                          {eliminando === p.id ? "…" : "🗑 Eliminar"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               })}
