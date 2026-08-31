@@ -27,11 +27,15 @@ export async function GET() {
     const pedidos = await fetchByIds(chunk => supabase.from('pedidos').select('id, vendedor_id').in('id', chunk), pedidoIds)
     const pedVendMap = new Map(pedidos.map(p => [p.id, p.vendedor_id]))
 
-    // Clientes y vendedores (paginado)
-    const [clientes, vendedores] = await Promise.all([
+    // Clientes, vendedores y saldo real del LIBRO (fuente única de deuda).
+    // El detalle por comprobante no resta la plata a cuenta ni las NC sin
+    // imputar; el saldo del libro sí. Se muestran ambos y el TOTAL sale del libro.
+    const [clientes, vendedores, saldosLibro] = await Promise.all([
       fetchAllRows(() => supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id')),
       fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
+      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual')),
     ])
+    const libroMap = new Map(saldosLibro.map((s: any) => [s.cliente_id, Number(s.saldo_actual) || 0]))
     const clienteMap = new Map(clientes.map(c => [c.id, c]))
     const vendedorMap = new Map(vendedores.map(v => [v.id, v.nombre]))
 
@@ -78,11 +82,15 @@ export async function GET() {
       .map(([clienteId, agg]) => {
         const cl = clienteMap.get(clienteId)
         const vendedorId = agg.vendedor_id ?? cl?.vendedor_id ?? null
+        const saldoLibro = libroMap.get(clienteId) ?? 0
         return {
           cliente_id: clienteId,
           nombre: cl?.nombre_razon_social ?? cl?.nombre ?? clienteId,
           localidad: cl?.localidad ?? '—',
           vendedor_nombre: vendedorId ? (vendedorMap.get(vendedorId) ?? '—') : '—',
+          // Deuda REAL del libro mayor (fuente única) y detalle por comprobante
+          saldo_libro: saldoLibro,
+          pagos_a_cuenta: Math.max(0, Math.round((agg.total - saldoLibro) * 100) / 100),
           total_deuda: agg.total,
           t0_30: agg.t0_30,
           t31_60: agg.t31_60,
@@ -95,9 +103,13 @@ export async function GET() {
       })
       .sort((a, b) => b.total_deuda - a.total_deuda)
 
-    // Resumen global para KPIs
+    // Resumen global para KPIs. El TOTAL por cobrar sale del LIBRO (deuda
+    // real); los buckets siguen siendo por comprobante y su suma puede
+    // superar el total cuando hay plata a cuenta sin imputar.
     const summary = {
-      total: rows.reduce((s, r) => s + r.total_deuda, 0),
+      total: rows.reduce((s, r) => s + r.saldo_libro, 0),
+      total_por_comprobante: rows.reduce((s, r) => s + r.total_deuda, 0),
+      pagos_a_cuenta: rows.reduce((s, r) => s + r.pagos_a_cuenta, 0),
       t0_30: rows.reduce((s, r) => s + r.t0_30, 0),
       t31_60: rows.reduce((s, r) => s + r.t31_60, 0),
       t61_90: rows.reduce((s, r) => s + r.t61_90, 0),

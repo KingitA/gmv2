@@ -1348,6 +1348,21 @@ export async function softDeletePedido(pedidoId: string) {
     throw new Error(`No se puede eliminar un pedido ${(ESTADO_LABEL[pedido.estado] || pedido.estado).toLowerCase()}. Solo se eliminan pedidos en venta, pendientes, impresos o en preparación.`)
   }
 
+  // Un pedido con comprobante VIVO no se elimina: el comprobante seguiría
+  // generando deuda pero quedaría huérfano (invisible en las pantallas de
+  // imputación, que agrupan por pedido). Primero se anula el comprobante.
+  const { data: compVivo } = await supabase
+    .from("comprobantes_venta")
+    .select("tipo_comprobante, numero_comprobante")
+    .eq("pedido_id", pedidoId)
+    .is("anulado_en", null)
+    .neq("estado_pago", "anulado")
+    .limit(1)
+    .maybeSingle()
+  if (compVivo) {
+    throw new Error(`El pedido tiene el comprobante ${compVivo.tipo_comprobante} ${compVivo.numero_comprobante} vivo — anulá primero el comprobante.`)
+  }
+
   // Soft-delete: change state and record timestamp
   const { error: updateError } = await supabase
     .from("pedidos")

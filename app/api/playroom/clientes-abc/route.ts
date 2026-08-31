@@ -34,13 +34,15 @@ export async function GET(req: NextRequest) {
     const pedidos = await fetchByIds(chunk => supabase.from('pedidos').select('id, vendedor_id').in('id', chunk), pedidoIds)
     const pedVendMap = new Map(pedidos.map(p => [p.id, p.vendedor_id]))
 
-    // Clientes y vendedores (paginado)
-    const [clientes, vendedores] = await Promise.all([
+    // Clientes, vendedores y saldo real del LIBRO (fuente única de deuda)
+    const [clientes, vendedores, saldosLibro] = await Promise.all([
       fetchAllRows(() => supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id, tipo_canal')),
       fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
+      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual')),
     ])
     const clienteMap = new Map(clientes.map(c => [c.id, c]))
     const vendedorMap = new Map(vendedores.map(v => [v.id, v.nombre]))
+    const libroMap = new Map(saldosLibro.map((s: any) => [s.cliente_id, Number(s.saldo_actual) || 0]))
 
     const isVenta = (t: string) => TIPOS_VENTA.includes(t?.trim())
     const isNC = (t: string) => TIPOS_NC.includes(t?.trim())
@@ -66,7 +68,6 @@ export async function GET(req: NextRequest) {
       if (inCurrent(c.fecha)) {
         agg.fact += monto
         agg.count++
-        agg.saldo += Number(c.saldo_pendiente ?? 0)
         if (!agg.ultimaCompra || c.fecha > agg.ultimaCompra) agg.ultimaCompra = c.fecha
         if (!agg.vendedorId && c.pedido_id) agg.vendedorId = pedVendMap.get(c.pedido_id) ?? null
       }
@@ -108,7 +109,9 @@ export async function GET(req: NextRequest) {
           facturacion_anterior: agg.factPrev,
           variacion_pct: variacionPct,
           cantidad_comprobantes: agg.count,
-          saldo_pendiente: agg.saldo,
+          // Deuda real del libro mayor (fuente única), no la suma de saldos
+          // de comprobantes del período (que ignora plata a cuenta y NC sueltas)
+          saldo_pendiente: libroMap.get(clienteId) ?? 0,
           ultima_compra: agg.ultimaCompra,
           estado,
           clasificacion: 'C' as 'A' | 'B' | 'C',

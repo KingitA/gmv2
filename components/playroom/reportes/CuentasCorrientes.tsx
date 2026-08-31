@@ -12,6 +12,8 @@ interface CCRow {
   nombre: string
   localidad: string
   vendedor_nombre: string
+  saldo_libro: number
+  pagos_a_cuenta: number
   total_deuda: number
   t0_30: number
   t31_60: number
@@ -24,6 +26,8 @@ interface CCRow {
 
 interface Summary {
   total: number
+  total_por_comprobante?: number
+  pagos_a_cuenta?: number
   t0_30: number
   t31_60: number
   t61_90: number
@@ -116,9 +120,21 @@ const COLUMNS: Column<CCRow>[] = [
     exportValue: v => String(v),
   },
   {
-    key: 'total_deuda', label: 'Total', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-bold text-white">{ars(v)}</span>,
+    key: 'total_deuda', label: 'Por comprobante', sortable: true, align: 'right',
+    render: v => <span className="font-mono text-white/70">{ars(v)}</span>,
     exportValue: v => String(v),
+  },
+  {
+    key: 'pagos_a_cuenta', label: 'A cuenta', sortable: true, align: 'right',
+    render: v => v > 0
+      ? <span className="font-mono text-emerald-400">−{ars(v)}</span>
+      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+    exportValue: v => String(v ?? 0),
+  },
+  {
+    key: 'saldo_libro', label: 'Debe (libro)', sortable: true, align: 'right',
+    render: v => <span className="font-mono font-bold text-white">{ars(v)}</span>,
+    exportValue: v => String(v ?? 0),
   },
   {
     key: 'comprobante_mas_viejo', label: 'Comp. más viejo', sortable: true,
@@ -183,7 +199,8 @@ export default function CuentasCorrientes() {
 
   const kpis = useMemo(() => {
     const moraTotal = summary.t31_60 + summary.t61_90 + summary.t90_mas
-    const moraPct = summary.total > 0 ? (moraTotal / summary.total) * 100 : 0
+    const baseMora = summary.total_por_comprobante ?? summary.total
+    const moraPct = baseMora > 0 ? (moraTotal / baseMora) * 100 : 0
     const dso = filtered.length > 0
       ? Math.round(filtered.reduce((s, r) => s + r.dias_promedio_mora * r.total_deuda, 0) / filtered.reduce((s, r) => s + r.total_deuda, 0) || 0)
       : 0
@@ -253,12 +270,12 @@ export default function CuentasCorrientes() {
         <KPICard
           label="Total cuentas por cobrar"
           value={loading ? '...' : ars(summary.total)}
-          subLabel={loading ? '' : `${rows.length} clientes con saldo`}
+          subLabel={loading ? '' : `${rows.length} clientes con saldo${(summary.pagos_a_cuenta ?? 0) > 0.01 ? ` · a cuenta ${ars(summary.pagos_a_cuenta!)}` : ''}`}
           loading={loading}
         />
         <KPICard
           label="% en mora (>30 días)"
-          value={loading ? '...' : pct(summary.t31_60 + summary.t61_90 + summary.t90_mas, summary.total)}
+          value={loading ? '...' : pct(summary.t31_60 + summary.t61_90 + summary.t90_mas, summary.total_por_comprobante ?? summary.total)}
           subLabel={loading ? '' : ars(summary.t31_60 + summary.t61_90 + summary.t90_mas)}
           variant={kpis.moraPct > 50 ? 'danger' : kpis.moraPct > 20 ? 'warning' : 'default'}
           loading={loading}
@@ -266,7 +283,7 @@ export default function CuentasCorrientes() {
         <KPICard
           label="En riesgo (+90 días)"
           value={loading ? '...' : ars(summary.t90_mas)}
-          subLabel={loading ? '' : pct(summary.t90_mas, summary.total) + ' del total'}
+          subLabel={loading ? '' : pct(summary.t90_mas, summary.total_por_comprobante ?? summary.total) + ' del total'}
           variant={summary.t90_mas > 0 ? 'danger' : 'default'}
           loading={loading}
         />
@@ -298,7 +315,7 @@ export default function CuentasCorrientes() {
                 <div className="text-lg font-bold font-mono" style={{ color }}>{ars(val)}</div>
                 <div className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>{label}</div>
                 <div className="text-[10px] mt-0.5" style={{ color: `${color}99` }}>
-                  {pct(val, summary.total)} del total
+                  {pct(val, summary.total_por_comprobante ?? summary.total)} del total
                 </div>
               </div>
             )

@@ -205,25 +205,45 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
   if (name === 'consultar_clientes') {
     const { con_deuda, desde, hasta, sin_compra_dias, limit = 20 } = input as ToolInput['consultar_clientes']
 
-    const clientes = await fetchAllRows(() => {
-      let q = supabase.from('clientes').select('id, nombre_razon_social, nombre, localidad, saldo_cuenta_corriente, ultima_compra')
-      if (con_deuda) q = q.gt('saldo_cuenta_corriente', 0)
-      return q
-    })
+    // Deuda desde el LIBRO MAYOR (v_saldo_clientes) — la columna
+    // clientes.saldo_cuenta_corriente no existe (esta consulta estaba rota).
+    // Última compra derivada del comprobante de venta más reciente.
+    const [clientes, saldosLibro, comps] = await Promise.all([
+      fetchAllRows(() => supabase.from('clientes').select('id, nombre_razon_social, nombre, localidad')),
+      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual')),
+      fetchAllRows(() =>
+        supabase
+          .from('comprobantes_venta')
+          .select('cliente_id, fecha')
+          .in('tipo_comprobante', ['FA', 'FB', 'FC', 'PRES'])
+          .is('anulado_en', null)
+      ),
+    ])
     if (!clientes.length) return { resultado: [], meta: {} }
 
-    let filtered = clientes
+    const libroMap = new Map(saldosLibro.map((s: any) => [s.cliente_id, Number(s.saldo_actual) || 0]))
+    const ultimaCompra = new Map<string, string>()
+    for (const c of comps) {
+      const prev = ultimaCompra.get(c.cliente_id)
+      if (!prev || (c.fecha && c.fecha > prev)) ultimaCompra.set(c.cliente_id, c.fecha)
+    }
+
+    let filtered = clientes as any[]
+    if (con_deuda) filtered = filtered.filter((c: any) => (libroMap.get(c.id) ?? 0) > 0)
     if (sin_compra_dias) {
       const cutoff = diasAtrasArgentina(sin_compra_dias)
-      filtered = clientes.filter((c: any) => !c.ultima_compra || c.ultima_compra < cutoff)
+      filtered = filtered.filter((c: any) => {
+        const uc = ultimaCompra.get(c.id)
+        return !uc || uc < cutoff
+      })
     }
 
     const rows = filtered
       .map((c: any) => ({
         cliente: c.nombre_razon_social ?? c.nombre,
         localidad: c.localidad ?? '—',
-        saldo: Math.round(c.saldo_cuenta_corriente ?? 0),
-        ultima_compra: c.ultima_compra ?? 'nunca',
+        saldo: Math.round(libroMap.get(c.id) ?? 0),
+        ultima_compra: ultimaCompra.get(c.id) ?? 'nunca',
       }))
       .sort((a: any, b: any) => b.saldo - a.saldo)
       .slice(0, limit)

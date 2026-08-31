@@ -22,7 +22,7 @@ export async function GET() {
       supabase
         .from("pagos_clientes")
         .select(
-          "id, monto, fecha_pago, viaje_id, cobrador_tipo, creado_por, cliente_id, clientes(nombre), viajes(id, nombre, chofer_id, estado), pagos_detalle(tipo_pago, monto)"
+          "id, monto, fecha_pago, viaje_id, cobrador_tipo, creado_por, vendedor_id, cliente_id, clientes(nombre), viajes(id, nombre, chofer_id, estado), pagos_detalle(tipo_pago, monto)"
         )
         .eq("estado", "pendiente_rendicion")
         .order("fecha_pago", { ascending: true }),
@@ -48,10 +48,17 @@ export async function GET() {
       saldoBilletera.set(s.cuenta_id, (saldoBilletera.get(s.cuenta_id) ?? 0) + Number(s.saldo))
     }
 
-    // Agrupar pendientes por cobrador (chofer del viaje, o creador)
+    // Agrupar pendientes por cobrador. OJO con los espacios de id: la billetera
+    // del VIAJANTE vive en saldos_financieros por vendedores.id (así la escribe
+    // el cobro en calle y la rendición), mientras que la del CHOFER va por su
+    // auth user id. Agrupar por el id equivocado dejaba billetera_saldo en $0.
     const grupos = new Map<string, any>()
     for (const p of pendientesRes.data || []) {
-      const cobradorId = (p as any).viajes?.chofer_id || p.creado_por || "desconocido"
+      const cobradorId =
+        (p.cobrador_tipo === "viajante" && (p as any).vendedor_id) ||
+        (p as any).viajes?.chofer_id ||
+        p.creado_por ||
+        "desconocido"
       if (!grupos.has(cobradorId)) {
         grupos.set(cobradorId, {
           cobrador_id: cobradorId,
@@ -161,18 +168,24 @@ export async function GET() {
       cobradores: [...grupos.values()].sort((a, b) => b.total - a.total),
       total_en_calle: [...grupos.values()].reduce((s, g) => s + g.total, 0),
       cajas: cajasRes.data || [],
-      rendiciones_declaradas: rendicionesAbiertas.map((r: any) => ({
-        id: r.id,
-        cobrador_nombre: nombres.get(r.cobrador_id) ?? r.cobrador_id.slice(0, 8),
-        cobrador_tipo: r.cobrador_tipo,
-        fecha: r.fecha,
-        efectivo_declarado: Number(r.efectivo_declarado),
-        efectivo_registrado: Number(r.efectivo_registrado),
-        diferencia: Number(r.diferencia),
-        cantidad_pagos: (r.rendicion_items || []).length,
-        observaciones: r.observaciones,
-        ...desgloseRendicion(r),
-      })),
+      rendiciones_declaradas: rendicionesAbiertas.map((r: any) => {
+        const desglose = desgloseRendicion(r)
+        return {
+          id: r.id,
+          cobrador_nombre: nombres.get(r.cobrador_id) ?? r.cobrador_id.slice(0, 8),
+          cobrador_tipo: r.cobrador_tipo,
+          fecha: r.fecha,
+          efectivo_declarado: Number(r.efectivo_declarado),
+          efectivo_registrado: Number(r.efectivo_registrado),
+          diferencia: Number(r.diferencia),
+          cantidad_pagos: (r.rendicion_items || []).length,
+          observaciones: r.observaciones,
+          // Todos sus pagos fueron rechazados/anulados/confirmados por otra
+          // vía: no hay nada que recibir — la oficina puede cancelarla.
+          sin_pagos_vigentes: desglose.pagos.length === 0,
+          ...desglose,
+        }
+      }),
       sin_verificar: sinVerificar.map((p) => ({
         id: p.id,
         cliente: (p as any).clientes?.nombre ?? p.cliente_id,

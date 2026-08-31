@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
+import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -33,16 +34,6 @@ export async function GET(request: Request) {
 
     const ids = (clientes || []).map((c) => c.id)
 
-    // Saldos reales desde el libro mayor
-    const saldoPorCliente = new Map<string, number>()
-    if (ids.length) {
-      const { data: saldos } = await supabase
-        .from("v_saldo_clientes")
-        .select("cliente_id, saldo_actual")
-        .in("cliente_id", ids)
-      for (const s of saldos || []) saldoPorCliente.set(s.cliente_id, Number(s.saldo_actual) || 0)
-    }
-
     // Pagos de este vendedor pendientes de rendición
     const sinRendirPorCliente = new Map<string, number>()
     if (ids.length) {
@@ -56,48 +47,16 @@ export async function GET(request: Request) {
         sinRendirPorCliente.set(p.cliente_id, (sinRendirPorCliente.get(p.cliente_id) || 0) + 1)
     }
 
-    // ── Saldo PROYECTADO por cliente: real − cobros pendientes (imputaciones
-    // + a cuenta) − devoluciones pendientes. Es el número que ve el vendedor:
-    // lo que va a deber el cliente cuando el ERP confirme lo ya cobrado.
-    const bajaPorCliente = new Map<string, number>()
-    if (ids.length) {
-      const { data: pagosPend } = await supabase
-        .from("pagos_clientes")
-        .select("id, cliente_id, monto, observaciones")
-        .in("cliente_id", ids)
-        .in("estado", ["pendiente", "pendiente_rendicion"])
-      const pagoIds = (pagosPend || []).map((p: any) => p.id)
-      const impPorPago = new Map<string, number>()
-      if (pagoIds.length) {
-        const { data: imps } = await supabase
-          .from("imputaciones")
-          .select("pago_id, monto_imputado")
-          .in("pago_id", pagoIds)
-          .eq("estado", "pendiente")
-        for (const i of imps || [])
-          impPorPago.set(i.pago_id, (impPorPago.get(i.pago_id) || 0) + Number(i.monto_imputado))
-      }
-      for (const p of pagosPend || []) {
-        const imp = impPorPago.get(p.id) || 0
-        let baja = imp + Math.max(0, Number(p.monto || 0) - imp)
-        if ((p.observaciones || "").includes("[10% CONTADO]")) baja += imp / 9 // NC 10% futura
-        bajaPorCliente.set(p.cliente_id, (bajaPorCliente.get(p.cliente_id) || 0) + baja)
-      }
-      const { data: devsPend } = await supabase
-        .from("devoluciones")
-        .select("cliente_id, monto_total")
-        .in("cliente_id", ids)
-        .eq("estado", "pendiente")
-      for (const d of devsPend || [])
-        bajaPorCliente.set(d.cliente_id, (bajaPorCliente.get(d.cliente_id) || 0) + Number(d.monto_total || 0))
-    }
+    // Saldos real y proyectado desde la fórmula ÚNICA (misma que la ficha del
+    // cliente, el chofer y la cta cte del ERP) — nunca una fórmula propia acá.
+    const saldos = await getSaldosClientes(supabase, ids)
 
     let resultado = (clientes || []).map((c) => {
-      const real = saldoPorCliente.get(c.id) ?? 0
+      const s = saldos.get(c.id)
       return {
         ...c,
-        saldo_actual: real,
-        saldo_proyectado: Math.round((real - (bajaPorCliente.get(c.id) || 0)) * 100) / 100,
+        saldo_actual: s?.saldo_real ?? 0,
+        saldo_proyectado: s?.saldo_proyectado ?? 0,
         pagos_sin_rendir: sinRendirPorCliente.get(c.id) ?? 0,
       }
     })

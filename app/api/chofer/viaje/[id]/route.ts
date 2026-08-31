@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 
 // GET /api/chofer/viaje/[id]
 // Retorna el viaje con sus pedidos, estado de cobro por cliente, y resumen
@@ -87,17 +88,29 @@ export async function GET(
       }
     }
 
+    // Saldo previo desde el LIBRO (fórmula única, misma que la ficha del
+    // cliente): saldo real del cliente menos lo que pesa el propio pedido de
+    // este viaje — antes se sumaban saldo_pendiente de comprobantes, que
+    // ignora pagos a cuenta y NC sin imputar, y daba otro número que la ficha.
+    const clienteIdsViaje = [...new Set((pedidos || []).map((p: any) => p.cliente_id))] as string[]
+    const saldosLibro = await getSaldosClientes(supabase, clienteIdsViaje)
+    const propioPorPedido = new Map<string, number>()
+    if (pedidoIds.length) {
+      const { data: compsPropios } = await supabase
+        .from("comprobantes_venta")
+        .select("pedido_id, saldo_pendiente")
+        .in("pedido_id", pedidoIds)
+        .is("anulado_en", null)
+        .neq("estado_pago", "anulado")
+      for (const c of compsPropios || [])
+        propioPorPedido.set(c.pedido_id, (propioPorPedido.get(c.pedido_id) || 0) + Number(c.saldo_pendiente || 0))
+    }
+
     const pedidosConDatos = await Promise.all(
       (pedidos || []).map(async (pedido: any) => {
-        // Saldo previo: comprobantes pendientes de otros pedidos
-        const { data: comprobantes } = await supabase
-          .from("comprobantes_venta")
-          .select("saldo_pendiente")
-          .eq("cliente_id", pedido.cliente_id)
-          .neq("pedido_id", pedido.id)
-          .gt("saldo_pendiente", 0)
-
-        const saldo_anterior = comprobantes?.reduce((s, c) => s + Number(c.saldo_pendiente), 0) || 0
+        const saldoReal = saldosLibro.get(pedido.cliente_id)?.saldo_real ?? 0
+        const saldo_anterior =
+          Math.round((saldoReal - (propioPorPedido.get(pedido.id) || 0)) * 100) / 100
 
         const cobrado = pagosPorCliente.get(pedido.cliente_id) || 0
         const devuelto = devolucionesPorCliente.get(pedido.cliente_id) || 0

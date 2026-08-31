@@ -21,6 +21,22 @@ export async function POST(
     const body = await request.json().catch(() => ({}))
     const motivo: string = body.motivo || ""
 
+    // Un pago rendido y confirmado no se anula: el efectivo ya viajó
+    // billetera→caja con la rendición y la reversa descuadraría la billetera
+    // del cobrador. (El RPC tiene el mismo guard; acá el mensaje amigable.)
+    const { data: rendido } = await supabase
+      .from("rendicion_items")
+      .select("id, rendiciones!inner(estado)")
+      .eq("pago_id", pagoId)
+      .eq("rendiciones.estado", "confirmada")
+      .limit(1)
+    if (rendido?.length) {
+      return NextResponse.json(
+        { error: "El pago ya fue rendido y confirmado — no se puede anular. Corregilo con un ajuste." },
+        { status: 409 }
+      )
+    }
+
     const result = await anularCobranza(supabase, {
       pagoId,
       usuarioId: auth.user.id,
@@ -42,6 +58,12 @@ export async function POST(
     })
   } catch (error: any) {
     console.error("[pagos-clientes/anular] POST error:", error)
+    if (error.message?.includes("RENDIDO_CONFIRMADO")) {
+      return NextResponse.json(
+        { error: "El pago ya fue rendido y confirmado — no se puede anular. Corregilo con un ajuste." },
+        { status: 409 }
+      )
+    }
     const status = error.message?.includes("no encontrado") ? 404 : 500
     return NextResponse.json({ error: error.message }, { status })
   }
