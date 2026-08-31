@@ -58,6 +58,9 @@ export async function GET(
       .select("id, tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente")
       .eq("cliente_id", clienteId)
       .gt("saldo_pendiente", 0)
+      // Un comprobante anulado no se cobra (mismo filtro que vendedor y ERP)
+      .is("anulado_en", null)
+      .neq("estado_pago", "anulado")
       .order("fecha", { ascending: true })
 
     // Cobros ya registrados del chofer para este cliente en este viaje

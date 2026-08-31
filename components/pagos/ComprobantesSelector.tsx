@@ -62,7 +62,9 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
         .select("id, tipo_comprobante, numero_comprobante, fecha, total_neto, total_factura, saldo_pendiente, estado_pago, pedido_id")
         .eq("cliente_id", clienteId)
         .in("estado_pago", ["pendiente", "parcial"])
-        .in("tipo_comprobante", ["FA", "FB", "FC", "PRES"])
+        // Débitos cobrables: facturas, presupuestos y notas de débito.
+        // (El 10% contado bonifica SOLO FA/FB/FC/PRES — ver saldo.ts.)
+        .in("tipo_comprobante", ["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
         // Un comprobante anulado no se cobra (su NC inversa lo cancela)
         .is("anulado_en", null)
         .order("fecha", { ascending: true }),

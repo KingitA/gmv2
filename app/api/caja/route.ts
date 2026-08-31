@@ -211,7 +211,7 @@ export async function GET(request: NextRequest) {
     const [pagosKardexArr, imputacionesArr] = await Promise.all([
       pagoIdsKardex.length
         ? fetchByIds<any>(
-            (c) => supabase.from("pagos_clientes").select("id, monto, cliente_id, cobrador_tipo").in("id", c),
+            (c) => supabase.from("pagos_clientes").select("id, monto, cliente_id, cobrador_tipo, estado").in("id", c),
             pagoIdsKardex
           )
         : [],
@@ -310,6 +310,13 @@ export async function GET(request: NextRequest) {
           base.entrada = monto
           // ¿Quedó plata del pago sin aplicar a comprobantes? → chip "Imputar".
           const pagoK = k.pago_id ? pagoKardexDe.get(k.pago_id) : null
+          // Un cobro ANULADO no se imputa ni cuenta como "sin imputar": sus
+          // imputaciones anuladas liberaban el disponible y el chip Imputar
+          // reaparecía sobre un pago muerto.
+          if (pagoK?.estado === "anulado") {
+            base.estado = { tipo: "error", texto: "✗ Anulado" }
+            break
+          }
           const disponible = pagoK ? disponibleDePago(pagoK.monto, impsPorPago.get(k.pago_id)) : 0
           if (pagoK && disponible > 0.01 && (k.cliente_id || pagoK.cliente_id)) {
             base.imputable = true

@@ -121,6 +121,10 @@ export function ImputarPago({
               // La falta cae en el último comprobante imputado: se salda también ahí
               comprobante_id: imputaciones[imputaciones.length - 1]?.comprobante_id,
               aplicar_saldo: true,
+              // Vincular el ajuste al pago: activa el tope del 1%, la
+              // resolución del comprobante correcto en el server y la marca
+              // [pago:] que permite revertirlo si el cobro se anula.
+              pago_id: pago.pago_id,
             }),
           })
           const ajData = await ajRes.json()

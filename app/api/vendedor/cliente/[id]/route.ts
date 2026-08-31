@@ -90,7 +90,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
     const { data: pagosRecientes } = await supabase
       .from("pagos_clientes")
-      .select("id, fecha_pago, monto, estado, forma_pago, confirmado_por")
+      .select("id, fecha_pago, monto, estado, forma_pago, verificado_por, cobrador_tipo, vendedor_id, creado_por")
       .eq("cliente_id", id)
       .order("fecha_pago", { ascending: false })
       .limit(10)
@@ -211,9 +211,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       pedidos_cobrables: pedidosCobrables,
       pedidos_cobro: pedidosCobro,
       devoluciones_pendientes: devolucionesConRestante,
-      pagos_recientes: (pagosRecientes || []).map((p) => ({
+      pagos_recientes: (pagosRecientes || []).map((p: any) => ({
         ...p,
-        verificado: p.estado === "confirmado" && !!p.confirmado_por,
+        // Verificado = SEGUNDA firma real (verificado_por), no la confirmación:
+        // antes se usaba confirmado_por y todo pago confirmado salía "Verificado".
+        verificado: p.estado === "confirmado" && !!p.verificado_por,
+        // El vendedor puede eliminar su cobro SOLO mientras esté en su poder
+        // (sin rendir); el server DELETE valida además que no esté declarado.
+        eliminable:
+          p.estado === "pendiente_rendicion" &&
+          p.cobrador_tipo === "viajante" &&
+          (session.vendedorIds.includes(p.vendedor_id) || p.creado_por === session.user.id),
       })),
     })
   } catch (error: any) {

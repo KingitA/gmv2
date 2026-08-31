@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { registrarTareaFallida } from "@/lib/finanzas/tareas-fallidas"
 
 /**
  * Posteo al libro mayor (cc_postear) con reintento y SIN fallo silencioso.
@@ -39,7 +40,15 @@ export async function postearLibroConAviso(
   const aviso =
     `El asiento en cuenta corriente de ${contexto} NO se registró (${lastError}). ` +
     `El documento existe pero el saldo del cliente quedó desactualizado: ` +
-    `revisá /api/finanzas/reconciliacion y reponé el asiento.`
+    `quedó en "Pendientes de reproceso" de la Caja del Día para reintentarlo.`
   console.error(`[cc_postear] ${contexto}:`, lastError)
+  // Persistir para reintento desde /caja (nada falla en silencio)
+  await registrarTareaFallida({
+    tipo: "cc_postear",
+    referencia_tipo: params.p_referencia_tipo,
+    referencia_id: params.p_referencia_id,
+    payload: params,
+    error: `${contexto}: ${lastError}`,
+  })
   return aviso
 }

@@ -197,6 +197,23 @@ export async function procesarPostConfirmacion(
     }
   } catch (debErr: any) {
     console.error("[post-confirmacion] débito comisión 10%:", debErr?.message)
+    result.bonificacion_error = [result.bonificacion_error, `Débito comisión 10%: ${debErr?.message}`]
+      .filter(Boolean)
+      .join(" · ")
+  }
+
+  // ── Nada falla en silencio: si algo quedó a medias, persistirlo para
+  // reintento desde "Pendientes de reproceso" en /caja (la operación entera
+  // es idempotente — re-ejecutarla completa lo que faltó). ──
+  if (result.bonificacion_error) {
+    const { registrarTareaFallida } = await import("@/lib/finanzas/tareas-fallidas")
+    await registrarTareaFallida({
+      tipo: "post_confirmacion",
+      referencia_tipo: "pago_cliente",
+      referencia_id: pagoId,
+      payload: { pagoId, usuarioId },
+      error: result.bonificacion_error,
+    })
   }
 
   return result
