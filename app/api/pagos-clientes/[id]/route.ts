@@ -49,7 +49,7 @@ export async function GET(
       .from("imputaciones")
       .select(`
         *,
-        comprobante:comprobantes_venta(
+        comprobante:comprobantes_venta!imputaciones_comprobante_id_fkey(
           tipo_comprobante, numero_comprobante, fecha, total_factura, saldo_pendiente
         )
       `)

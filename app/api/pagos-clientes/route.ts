@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     const [clientesData, detallesData, imputacionesData] = await Promise.all([
       fetchByIds((chunk) => supabase.from("clientes").select("id, nombre, razon_social, cuit").in("id", chunk), clienteIds),
       fetchByIds((chunk) => supabase.from("pagos_detalle").select("*").in("pago_id", chunk), pagoIds),
-      fetchByIds((chunk) => supabase.from("imputaciones").select("*, comprobante:comprobantes_venta(tipo_comprobante, numero_comprobante, total_factura)").in("pago_id", chunk), pagoIds),
+      fetchByIds((chunk) => supabase.from("imputaciones").select("*, comprobante:comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, numero_comprobante, total_factura)").in("pago_id", chunk), pagoIds),
     ])
 
     // Cargar recibos por batch (tabla puede no existir)

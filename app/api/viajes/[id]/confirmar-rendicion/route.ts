@@ -236,7 +236,7 @@ export async function GET(
           clientes(nombre, razon_social),
           pagos_detalle(tipo_pago, monto),
           imputaciones(comprobante_id, monto_imputado, estado,
-            comprobantes_venta(tipo_comprobante, numero_comprobante))
+            comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, numero_comprobante))
         `)
         .eq("viaje_id", viajeId)
         .in("estado", ["pendiente_rendicion", "confirmado"]),

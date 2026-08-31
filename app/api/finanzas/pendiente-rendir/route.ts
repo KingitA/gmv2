@@ -117,15 +117,19 @@ export async function GET() {
     const pagoIdsRend = [...new Set(rendicionesAbiertas.flatMap((r: any) => (r.rendicion_items || []).map((i: any) => i.pago_id)))]
     const pagosRendMap = new Map<string, any>()
     if (pagoIdsRend.length) {
-      const { data: pagosRend } = await supabase
+      // OJO: imputaciones tiene DOS FKs a comprobantes_venta (comprobante_id y
+      // credito_comprobante_id) — el embed debe nombrar la FK o PostgREST lo
+      // rechaza por ambiguo y el desglose queda vacío en silencio.
+      const { data: pagosRend, error: pagosRendErr } = await supabase
         .from("pagos_clientes")
         .select(`
           id, monto, fecha_pago, observaciones, cliente_id, estado,
           clientes(nombre, razon_social),
           pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, referencia, color_cheque),
-          imputaciones(monto_imputado, estado, comprobantes_venta(tipo_comprobante, numero_comprobante))
+          imputaciones(monto_imputado, estado, comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, numero_comprobante))
         `)
         .in("id", pagoIdsRend)
+      if (pagosRendErr) console.error("[pendiente-rendir] desglose:", pagosRendErr.message)
       for (const p of pagosRend || []) pagosRendMap.set(p.id, p)
     }
     const desgloseRendicion = (r: any) => {

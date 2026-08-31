@@ -100,7 +100,7 @@ export async function GET(
       .from("imputaciones")
       .select(`
         monto_imputado,
-        comprobante:comprobantes_venta(tipo_comprobante, numero_comprobante, fecha, total_factura)
+        comprobante:comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, numero_comprobante, fecha, total_factura)
       `)
       .eq("pago_id", id)
 
