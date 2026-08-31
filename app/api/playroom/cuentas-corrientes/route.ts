@@ -33,7 +33,7 @@ export async function GET() {
     const [clientes, vendedores, saldosLibro] = await Promise.all([
       fetchAllRows(() => supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id')),
       fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
-      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual')),
+      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual'), 'cliente_id'),
     ])
     const libroMap = new Map(saldosLibro.map((s: any) => [s.cliente_id, Number(s.saldo_actual) || 0]))
     const clienteMap = new Map(clientes.map(c => [c.id, c]))

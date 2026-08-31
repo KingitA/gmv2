@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     const [clientes, vendedores, saldosLibro] = await Promise.all([
       fetchAllRows(() => supabase.from('clientes').select('id, nombre, nombre_razon_social, localidad, vendedor_id, tipo_canal')),
       fetchAllRows(() => supabase.from('vendedores').select('id, nombre')),
-      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual')),
+      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual'), 'cliente_id'),
     ])
     const clienteMap = new Map(clientes.map(c => [c.id, c]))
     const vendedorMap = new Map(vendedores.map(v => [v.id, v.nombre]))

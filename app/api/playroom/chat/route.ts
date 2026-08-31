@@ -210,7 +210,7 @@ async function ejecutarTool(name: string, input: any, supabase: any): Promise<an
     // Última compra derivada del comprobante de venta más reciente.
     const [clientes, saldosLibro, comps] = await Promise.all([
       fetchAllRows(() => supabase.from('clientes').select('id, nombre_razon_social, nombre, localidad')),
-      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual')),
+      fetchAllRows(() => supabase.from('v_saldo_clientes').select('cliente_id, saldo_actual'), 'cliente_id'),
       fetchAllRows(() =>
         supabase
           .from('comprobantes_venta')
