@@ -85,7 +85,7 @@ DELETE FROM ordenes_compra_detalle;
 DELETE FROM ordenes_compra;
 
 -- ── 15. Imputaciones ──────────────────────────────────────
-DELETE FROM imputaciones_clientes;
+-- (imputaciones_clientes eliminada por 20260901_aging_v2_drop_imputaciones_clientes)
 DELETE FROM imputaciones;
 
 -- ── 16. Vencimientos ──────────────────────────────────────
