@@ -209,7 +209,14 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
 
   const handleFiles = useCallback((selected: FileList | null) => {
     if (!selected) return
-    setFiles(prev => [...prev, ...Array.from(selected)])
+    // Mismo archivo adjuntado dos veces (click + arrastrar, o re-selección) =
+    // pedido con todos los renglones duplicados. Se descarta el repetido.
+    setFiles(prev => {
+      const nuevos = Array.from(selected).filter(
+        f => !prev.some(p => p.name === f.name && p.size === f.size)
+      )
+      return [...prev, ...nuevos]
+    })
   }, [])
 
   const handleSearch = useCallback(async (term: string) => {

@@ -94,7 +94,11 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                 handleSearchClientes(res.candidateCustomer)
             }
 
-            const allMatched = res.items.length > 0 && res.items.every((i: any) => i.confidence === "HIGH" && i.matchedProduct)
+            // Artículo repetido en el resultado = casi seguro duplicado (archivo doble
+            // o lista leída dos veces): nunca auto-crear, que lo revise una persona.
+            const idsMatch = res.items.filter((i: any) => i.matchedProduct).map((i: any) => i.matchedProduct.id)
+            const sinDuplicados = new Set(idsMatch).size === idsMatch.length
+            const allMatched = res.items.length > 0 && sinDuplicados && res.items.every((i: any) => i.confidence === "HIGH" && i.matchedProduct)
             if (allMatched && foundClienteId) {
                 toast.success("Orden perfecta. Creando pedido automáticamente...")
                 setCreating(true)

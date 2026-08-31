@@ -104,8 +104,14 @@ export function useOrderQueue(onOrderCreated?: () => void) {
           throw new Error(parseResult.errors[0])
         }
 
+        // Un mismo artículo repetido en el resultado = casi seguro un duplicado
+        // (mismo archivo dos veces, o el parser leyó la lista doble). NUNCA se
+        // auto-crea: baja a revisión manual para que una persona lo vea.
+        const matchedIds = parseResult.items.filter(i => i.matchedProduct).map(i => i.matchedProduct!.id)
+        const hayDuplicados = new Set(matchedIds).size !== matchedIds.length
+
         // Check if all items are high confidence and we have the client
-        const allHigh = parseResult.items.length > 0 &&
+        const allHigh = parseResult.items.length > 0 && !hayDuplicados &&
           parseResult.items.every(i => i.confidence === "HIGH" && i.matchedProduct)
 
         if (allHigh) {
