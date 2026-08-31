@@ -103,25 +103,50 @@ function FilaArticulo({
   onAbrir,
   onZoom,
   onAgregar,
+  onActualizar,
+  onQuitar,
 }: {
   a: Articulo
   precio?: { precio: number; precioNeto: number; especial: { bruto: number; oferta_pct: number } | null }
+  /** Unidades ya en el pedido (undefined = no está) */
   enCarrito?: number
   onAbrir: () => void
   onZoom: () => void
   onAgregar: (unidades: number) => void
+  /** Cambiar la cantidad TOTAL de la línea ya agregada */
+  onActualizar: (unidades: number) => void
+  onQuitar: () => void
 }) {
   const [cant, setCant] = useState("")
   const [bultos, setBultos] = useState(false)
+  const [editando, setEditando] = useState(false)
+
+  // La casilla refleja lo que ya está en el pedido (en unidades, en verde).
+  // Mientras el vendedor edita, manda lo que tipea.
+  useEffect(() => {
+    if (!editando) {
+      setCant(enCarrito ? String(enCarrito) : "")
+      if (enCarrito) setBultos(false) // lo agregado se muestra SIEMPRE en unidades
+    }
+  }, [enCarrito, editando])
+
   if (precio && precio.precio <= 0) return null
   const ub = a.unidades_por_bulto || 1
   const n = parseFloat(cant.replace(",", "."))
   const unidades = Number.isFinite(n) && n > 0 ? (bultos ? n * ub : n) : 0
-  const agregar = () => {
-    if (unidades <= 0) return
-    onAgregar(unidades)
-    setCant("")
+  const cambiado = !!enCarrito && unidades !== enCarrito
+
+  const confirmar = () => {
+    setEditando(false)
+    if (!enCarrito) {
+      if (unidades > 0) { onAgregar(unidades); setCant("") }
+      return
+    }
+    if (unidades <= 0) onQuitar()
+    else if (unidades !== enCarrito) onActualizar(unidades)
+    setBultos(false)
   }
+
   return (
     <div className={`w-full flex items-center gap-2 rounded-lg pl-1.5 pr-1.5 py-1.5 bg-white border ${enCarrito ? "border-emerald-500" : "border-gray-100"}`}>
       {/* Miniatura: tap abre la foto grande */}
@@ -139,9 +164,6 @@ function FilaArticulo({
           {a.descuento_propio > 0 && (
             <span className="ml-1.5 inline-block bg-red-100 text-red-700 px-1.5 rounded text-[10px] font-bold align-middle">-{a.descuento_propio}%</span>
           )}
-          {enCarrito ? (
-            <span className="ml-1.5 inline-block bg-emerald-600 text-white px-1.5 rounded text-[10px] font-bold align-middle">🛒 {enCarrito}</span>
-          ) : null}
         </p>
         <p className="text-[11px] text-gray-400 truncate">
           <span className="font-mono">{a.sku || "—"}</span>
@@ -151,31 +173,57 @@ function FilaArticulo({
           <span className="font-bold text-gray-700">{precio ? formatCurrency(precio.especial ? precio.precioNeto : precio.precio) : "…"}</span>
         </p>
       </button>
-      {/* Cantidad + bultos + agregar */}
+      {/* Cantidad (verde si ya está en el pedido) + bultos + acción */}
       <div className="shrink-0 flex items-center gap-1">
         <div className="flex flex-col items-center gap-0.5">
           <input
             value={cant}
-            onChange={(e) => setCant(e.target.value.replace(/[^\d.,]/g, ""))}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregar() } }}
+            onFocus={() => setEditando(true)}
+            onChange={(e) => { setEditando(true); setCant(e.target.value.replace(/[^\d.,]/g, "")) }}
+            onBlur={() => { if (enCarrito && !cambiado) setEditando(false) }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmar(); (e.target as HTMLInputElement).blur() } }}
             inputMode="decimal"
             placeholder="0"
-            className="w-14 rounded-md border border-gray-300 px-1.5 py-1.5 text-center font-bold text-gray-900 text-sm"
+            className={`w-14 rounded-md border px-1.5 py-1.5 text-center font-bold text-sm ${
+              enCarrito
+                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                : "border-gray-300 text-gray-900"
+            }`}
             aria-label="Cantidad"
           />
           <label className="flex items-center gap-1 text-[10px] text-gray-500 select-none">
-            <input type="checkbox" checked={bultos} onChange={(e) => setBultos(e.target.checked)} className="w-3 h-3 accent-emerald-600" />
-            bultos{bultos && ub > 1 ? ` (=${unidades} u)` : ""}
+            <input type="checkbox" checked={bultos} onChange={(e) => { setEditando(true); setBultos(e.target.checked) }} className="w-3 h-3 accent-emerald-600" />
+            bultos{bultos && ub > 1 && unidades > 0 ? ` (=${unidades} u)` : ""}
           </label>
         </div>
-        <button
-          onClick={agregar}
-          disabled={unidades <= 0}
-          className="w-9 h-9 rounded-lg bg-emerald-600 text-white text-xl font-bold leading-none disabled:bg-gray-200 disabled:text-gray-400 active:scale-95"
-          aria-label="Agregar al pedido"
-        >
-          +
-        </button>
+        {!enCarrito ? (
+          <button
+            onClick={confirmar}
+            disabled={unidades <= 0}
+            className="w-9 h-9 rounded-lg bg-emerald-600 text-white text-xl font-bold leading-none disabled:bg-gray-200 disabled:text-gray-400 active:scale-95"
+            aria-label="Agregar al pedido"
+          >
+            +
+          </button>
+        ) : cambiado || editando ? (
+          <button
+            onClick={confirmar}
+            className="w-9 h-9 rounded-lg bg-emerald-600 text-white text-lg font-bold leading-none active:scale-95"
+            aria-label="Confirmar cantidad"
+            title={unidades <= 0 ? "Quitar del pedido" : "Confirmar cantidad"}
+          >
+            ✓
+          </button>
+        ) : (
+          <button
+            onClick={onQuitar}
+            className="w-9 h-9 rounded-lg bg-white border border-red-200 text-red-600 text-lg leading-none active:scale-95"
+            aria-label="Quitar del pedido"
+            title="Quitar del pedido"
+          >
+            🗑
+          </button>
+        )}
       </div>
     </div>
   )
@@ -1737,16 +1785,21 @@ function NuevoPedidoInner() {
                 <CatalogoArbol<Articulo>
                   rubros={catalogo}
                   cargarCategoria={cargarCategoriaArbol}
-                  renderArticulo={(a) => (
-                    <FilaArticulo
-                      a={a}
-                      precio={precios[a.id]}
-                      enCarrito={cart.find((i) => i.articulo.id === a.id)?.cantidad}
-                      onAbrir={() => abrirArticulo(a)}
-                      onZoom={() => a.imagen_url && setZoomFoto(a.imagen_url)}
-                      onAgregar={(u) => agregarRapido(a, u)}
-                    />
-                  )}
+                  renderArticulo={(a) => {
+                    const linea = cart.find((i) => i.articulo.id === a.id)
+                    return (
+                      <FilaArticulo
+                        a={a}
+                        precio={precios[a.id]}
+                        enCarrito={linea?.cantidad}
+                        onAbrir={() => abrirArticulo(a)}
+                        onZoom={() => a.imagen_url && setZoomFoto(a.imagen_url)}
+                        onAgregar={(u) => agregarRapido(a, u)}
+                        onActualizar={(u) => linea && setCantidadItem(linea.detalleId, u)}
+                        onQuitar={() => linea && quitarItem(linea.detalleId)}
+                      />
+                    )
+                  }}
                   ordenar={(arts) => ordenarArticulos(arts, orden, precioOrden, ventas)}
                   onVerRubro={(r) => abrirRubro(r as CatalogoRubro)}
                   tinte={(nombre) => {
