@@ -19,6 +19,7 @@ import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import * as XLSX from "xlsx"
 import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, determinarGrupoPrecio, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
 import { calcularPreciosConFormulas, SUBLISTA_CODIGOS, SUBLISTA_META, type SublistaCodigo } from "@/lib/pricing/formula-evaluator"
+import { cargarTiposArticulo, opcionesCon, TIPOS_BULTO_DEFAULT, TIPOS_FRACCION_DEFAULT } from "@/lib/catalogos/tipos-articulo"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Mode = "compras" | "ventas" | "gestion"
@@ -189,11 +190,13 @@ export default function ArticulosPage() {
   const [exporting,setExporting]   = useState(false)
   const [showImporter,setShowImporter] = useState(false)
   const [showHistorial,setShowHistorial] = useState(false)
+  const [tiposBulto,setTiposBulto] = useState<string[]>(TIPOS_BULTO_DEFAULT)
+  const [tiposFraccion,setTiposFraccion] = useState<string[]>(TIPOS_FRACCION_DEFAULT)
 
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(()=>{
     (async()=>{
-      const [{data:p},{data:m},{data:l},{data:r},{data:rub},{data:cat},{data:sub}] = await Promise.all([
+      const [{data:p},{data:m},{data:l},{data:r},{data:rub},{data:cat},{data:sub},tipos] = await Promise.all([
         sb.from("proveedores").select("id,nombre").eq("activo",true).order("nombre"),
         sb.from("marcas").select("id,codigo,descripcion").eq("activo",true).order("descripcion"),
         sb.from("listas_precio").select("*").eq("activo",true).order("nombre"),
@@ -201,7 +204,9 @@ export default function ArticulosPage() {
         sb.from("rubros").select("id,nombre,slug").order("orden"),
         sb.from("categorias").select("id,rubro_id,nombre").order("orden"),
         sb.from("subcategorias").select("id,categoria_id,nombre").order("orden"),
+        cargarTiposArticulo(sb),
       ])
+      setTiposBulto(tipos.tiposBulto); setTiposFraccion(tipos.tiposFraccion)
       if(p) setProvs(p)
       if(m) setMarcas(m)
       if(l) setListas(l)
@@ -341,12 +346,11 @@ export default function ArticulosPage() {
     setDm(p=>({...p,[dma.id]:v.map((d,i)=>({...d,orden:i+1}))})); setDms(false); setDma(null)
   }
 
-  // Listas fijas para campos "a elección" (antes texto libre → PACK/PACKS/PACL, BLIS/BLISTER, CAJ/CAJA/CAJAS...).
-  // Si un artículo trae un valor viejo que no está en la lista, se muestra como opción "(actual)" para no perderlo.
-  const UNIDADES_MEDIDA = ["UN","KG","LT","MT","PACK","CAJA","BLISTER","SET"]
-  const TIPOS_FRACCION  = ["UN","PACK","BLISTER","CAJA","DOCENA","SET","DISPLAY"]
-  const opcionesCon = (lista:string[], actual:string|null|undefined) =>
-    actual && !lista.includes(actual) ? [...lista, actual] : lista
+  // Listas de "Tipo de bulto" y "Tipo de fracción": vienen de las tablas tipos_bulto / tipos_fraccion
+  // (ABM en /tablas/tipos-bulto y /tablas/tipos-fraccion), cargadas en el init como `tiposBulto` / `tiposFraccion`.
+  // Si un artículo trae un valor que no está activo en la lista, se muestra como opción "(actual)" para no perderlo.
+  const UNIDADES_MEDIDA = tiposBulto
+  const TIPOS_FRACCION  = tiposFraccion
 
   // Ficha (unificado crear + editar)
   const BLANK_FF = {descripcion:"",sku:"",ean13:[] as string[],unidades_por_bulto:1,unidad_de_medida:"",marca_id:null as string|null,categoria:"",subcategoria:"",rubro:"",rubro_id:null as string|null,precio_compra:0,porcentaje_ganancia:0,bonif_recargo:0,iva_compras:"factura",iva_ventas:"factura",proveedor_id:null as string|null,orden_deposito:0,precio_base:null as number|null,precio_base_contado:null as number|null,precio_lista_especial:null as number|null,oferta_lista_especial:null as number|null,descuento_propio:0,imagen_url:"",tipo_fraccion:"",cantidad_fraccion:null as number|null,segmento_precio:null as string|null}
@@ -1014,7 +1018,7 @@ export default function ArticulosPage() {
             <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">SKU {fa?.id==="__new__"&&<span className="text-red-500">*</span>}</Label><Input className="h-8 text-xs font-mono" value={ff.sku} onChange={e=>setFf(p=>({...p,sku:e.target.value}))}/></div>
               <div><Label className="text-xs">Unid/Bulto</Label><Input type="number" className="h-8 text-xs" value={ff.unidades_por_bulto||""} onChange={e=>setFf(p=>({...p,unidades_por_bulto:parseInt(e.target.value)||1}))}/></div>
-              <div><Label className="text-xs">Unid. Medida</Label>
+              <div><Label className="text-xs">Tipo de bulto</Label>
                 <Select value={ff.unidad_de_medida||"none"} onValueChange={v=>setFf(p=>({...p,unidad_de_medida:v==="none"?"":v}))}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="—"/></SelectTrigger>
                   <SelectContent><SelectItem value="none">—</SelectItem>{opcionesCon(UNIDADES_MEDIDA,ff.unidad_de_medida).map(u=><SelectItem key={u} value={u}>{u}{!UNIDADES_MEDIDA.includes(u)?" (actual)":""}</SelectItem>)}</SelectContent>
@@ -1024,7 +1028,7 @@ export default function ArticulosPage() {
             {/* Fracción / pack */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs">Tipo de fracción <span className="text-slate-400 font-normal">(pack, blister, docena...)</span></Label>
+                <Label className="text-xs">Tipo de fracción <span className="text-slate-400 font-normal">(se edita en Tablas)</span></Label>
                 <Select value={ff.tipo_fraccion||"none"} onValueChange={v=>setFf(p=>({...p,tipo_fraccion:v==="none"?"":v}))}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="—"/></SelectTrigger>
                   <SelectContent><SelectItem value="none">—</SelectItem>{opcionesCon(TIPOS_FRACCION,ff.tipo_fraccion).map(t=><SelectItem key={t} value={t}>{t}{!TIPOS_FRACCION.includes(t)?" (actual)":""}</SelectItem>)}</SelectContent>
@@ -1480,9 +1484,9 @@ export default function ArticulosPage() {
                     </div>
                   )
                 })()}
-                {/* Unidad de medida / Tipo de fracción — listas fijas */}
+                {/* Tipo de bulto / Tipo de fracción — catálogos de /tablas */}
                 {[
-                  {f:"unidad_de_medida",label:"Unid. Medida",   opts:UNIDADES_MEDIDA},
+                  {f:"unidad_de_medida",label:"Tipo de bulto",  opts:UNIDADES_MEDIDA},
                   {f:"tipo_fraccion",   label:"Tipo de fracción",opts:TIPOS_FRACCION},
                 ].map(({f,label,opts})=>(
                   <div key={f} className="flex items-center gap-3">

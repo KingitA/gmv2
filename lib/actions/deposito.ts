@@ -4,6 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { padEan13, padEanArray } from "@/lib/utils/ean"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 import { buscarConFiltros } from "@/lib/search/buscar-con-filtros"
+import { cargarTiposArticulo } from "@/lib/catalogos/tipos-articulo"
+
+/** Opciones de Tipo de bulto / Tipo de fracción (tablas tipos_bulto / tipos_fraccion) para los selects de depósito. */
+export async function getTiposArticulo() {
+  return cargarTiposArticulo(createAdminClient())
+}
 
 const SELECT_SEARCH = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id, marca:marca_id(descripcion)"
 const SELECT_FULL   = "id, sku, ean13, codigo_bulto, descripcion, unidades_por_bulto, unidad_de_medida, orden_deposito, stock_actual, proveedor_id, marca:marca_id(descripcion)"

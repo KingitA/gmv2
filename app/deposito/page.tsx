@@ -5,7 +5,8 @@ import { Search, Package, Pencil, X, Minus, Plus } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { buscarArticulosDeposito, actualizarDatosArticulo, ajustarStock } from "@/lib/actions/deposito"
+import { buscarArticulosDeposito, actualizarDatosArticulo, ajustarStock, getTiposArticulo } from "@/lib/actions/deposito"
+import { opcionesCon, TIPOS_BULTO_DEFAULT } from "@/lib/catalogos/tipos-articulo"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { toast } from "sonner"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
@@ -44,6 +45,10 @@ export default function DepositoPage() {
   const [savingStock, setSavingStock] = useState(false)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Opciones de "Tipo de bulto" (tabla tipos_bulto, ABM en /tablas/tipos-bulto)
+  const [tiposBulto, setTiposBulto] = useState<string[]>(TIPOS_BULTO_DEFAULT)
+  useEffect(() => { getTiposArticulo().then(t => setTiposBulto(t.tiposBulto)) }, [])
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -102,6 +107,8 @@ export default function DepositoPage() {
     try {
       const datosParaGuardar = {
         ...editDatos,
+        // "" no es un tipo válido (FK a tipos_bulto): vacío = sin tipo
+        unidad_de_medida: editDatos.unidad_de_medida || null,
         ean13: editDatos.ean13
           ? editDatos.ean13.split(',').map(s => s.trim()).filter(Boolean)
           : undefined,
@@ -229,8 +236,15 @@ export default function DepositoPage() {
                         <Input className="h-11 text-sm mt-1" value={editDatos.ean13} onChange={e => setEditDatos(p => ({ ...p, ean13: e.target.value }))}/>
                       </div>
                       <div>
-                        <Label className="text-xs font-medium text-slate-600">Unidad de medida</Label>
-                        <Input className="h-11 text-sm mt-1 uppercase" placeholder="UN" value={editDatos.unidad_de_medida} onChange={e => setEditDatos(p => ({ ...p, unidad_de_medida: e.target.value.toUpperCase() }))}/>
+                        <Label className="text-xs font-medium text-slate-600">Tipo de bulto</Label>
+                        <select
+                          className="h-11 text-sm mt-1 w-full rounded-md border border-input bg-white px-3"
+                          value={editDatos.unidad_de_medida}
+                          onChange={e => setEditDatos(p => ({ ...p, unidad_de_medida: e.target.value }))}
+                        >
+                          <option value="">—</option>
+                          {opcionesCon(tiposBulto, editDatos.unidad_de_medida).map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">

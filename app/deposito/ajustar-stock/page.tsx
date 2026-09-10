@@ -6,7 +6,9 @@ import {
   actualizarDatosArticulo, ajustarStock, getArticuloExtra,
   buscarArticulosDeposito, getProveedoresDeposito, getCategoriasDeposito,
   getArticulosListado, getArticuloAdyacente, getArticuloPorId, enviarAInexistente,
+  getTiposArticulo,
 } from "@/lib/actions/deposito"
+import { opcionesCon, TIPOS_BULTO_DEFAULT, TIPOS_FRACCION_DEFAULT } from "@/lib/catalogos/tipos-articulo"
 import { localMatch } from "@/lib/search/local-match"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 import { esQrOUrl } from "@/lib/utils/scan-guard"
@@ -71,6 +73,9 @@ export default function ModificacionArticulosPage() {
   const [unidadMedida, setUnidadMedida] = useState("")
   const [tipoFraccion, setTipoFraccion] = useState("")
   const [cantidadFraccion, setCantidadFraccion] = useState("")
+  // Catálogos (/tablas/tipos-bulto y /tablas/tipos-fraccion)
+  const [tiposBulto, setTiposBulto] = useState<string[]>(TIPOS_BULTO_DEFAULT)
+  const [tiposFraccion, setTiposFraccion] = useState<string[]>(TIPOS_FRACCION_DEFAULT)
   const [guardandoDatos, setGuardandoDatos] = useState(false)
   const [msgDatos, setMsgDatos] = useState<{ ok: boolean; txt: string } | null>(null)
 
@@ -94,6 +99,7 @@ export default function ModificacionArticulosPage() {
   useEffect(() => {
     getProveedoresDeposito().then(setProveedores)
     getCategoriasDeposito().then(setCategorias)
+    getTiposArticulo().then(t => { setTiposBulto(t.tiposBulto); setTiposFraccion(t.tiposFraccion) })
   }, [])
 
   // ── Restaurar posición tras recarga / reapertura de la app ──
@@ -289,7 +295,7 @@ export default function ModificacionArticulosPage() {
         ean13: ean13.length > 0 ? ean13 : null,
         codigo_bulto: codigoBulto || null,
         unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : undefined,
-        unidad_de_medida: unidadMedida || undefined,
+        unidad_de_medida: unidadMedida || null,
         tipo_fraccion: tipoFraccion || null,
         cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null,
       })
@@ -794,10 +800,20 @@ export default function ModificacionArticulosPage() {
                 </div>
                 <div style={{...C.card,...C.row2}}>
                   <div><span style={C.label}>Unid. por bulto</span><input style={C.input} type="number" inputMode="numeric" placeholder="—" value={unidadesBulto} onChange={e=>setUnidadesBulto(e.target.value)}/></div>
-                  <div><span style={C.label}>Unidad de medida</span><input style={{...C.input,textTransform:"uppercase"}} type="text" placeholder="UN" value={unidadMedida} onChange={e=>setUnidadMedida(e.target.value.toUpperCase())}/></div>
+                  <div><span style={C.label}>Tipo de bulto</span>
+                    <select style={C.input} value={unidadMedida} onChange={e=>setUnidadMedida(e.target.value)}>
+                      <option value="">—</option>
+                      {opcionesCon(tiposBulto, unidadMedida).map(t=><option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div style={{...C.card,...C.row2}}>
-                  <div><span style={C.label}>Tipo de fracción</span><input style={C.input} type="text" placeholder="pack, blister..." value={tipoFraccion} onChange={e=>setTipoFraccion(e.target.value)}/></div>
+                  <div><span style={C.label}>Tipo de fracción</span>
+                    <select style={C.input} value={tipoFraccion} onChange={e=>setTipoFraccion(e.target.value)}>
+                      <option value="">—</option>
+                      {opcionesCon(tiposFraccion, tipoFraccion).map(t=><option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
                   <div><span style={C.label}>Unidades / fracción</span><input style={C.input} type="number" inputMode="numeric" placeholder="—" value={cantidadFraccion} onChange={e=>setCantidadFraccion(e.target.value)}/></div>
                 </div>
                 {msgDatos&&<div style={C.msg(msgDatos.ok)}>{msgDatos.txt}</div>}

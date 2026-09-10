@@ -13,6 +13,8 @@ import {
   Bookmark,
   Layers,
   Building2,
+  Boxes,
+  Grid2x2,
 } from "lucide-react"
 
 const TABLAS = [
@@ -87,6 +89,20 @@ const TABLAS = [
     desc: "Rubros, categorías y subcategorías de artículos",
   },
   {
+    href: "/tablas/tipos-bulto",
+    icon: Boxes,
+    color: "cyan",
+    title: "Tipos de Bulto",
+    desc: "UN, BULTO, CAJA, PACK — opciones de la ficha de artículo",
+  },
+  {
+    href: "/tablas/tipos-fraccion",
+    icon: Grid2x2,
+    color: "fuchsia",
+    title: "Tipos de Fracción",
+    desc: "PACK, BLISTER, DOCENA — fracción intermedia del artículo",
+  },
+  {
     href: "/tablas/bancos",
     icon: Building2,
     color: "slate",
@@ -107,6 +123,8 @@ const colorMap: Record<string, { border: string; bg: string; text: string }> = {
   indigo:  { border: "border-l-indigo-500",  bg: "bg-indigo-50 group-hover:bg-indigo-100",  text: "text-indigo-600"  },
   violet:  { border: "border-l-violet-500",  bg: "bg-violet-50 group-hover:bg-violet-100",  text: "text-violet-600"  },
   slate:   { border: "border-l-slate-500",   bg: "bg-slate-50 group-hover:bg-slate-100",   text: "text-slate-600"   },
+  cyan:    { border: "border-l-cyan-500",    bg: "bg-cyan-50 group-hover:bg-cyan-100",     text: "text-cyan-600"    },
+  fuchsia: { border: "border-l-fuchsia-500", bg: "bg-fuchsia-50 group-hover:bg-fuchsia-100", text: "text-fuchsia-600" },
 }
 
 export default function TablasPage() {
