@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const estado = searchParams.get("estado") || "pendiente"
 
-    const { data: devoluciones, error } = await supabase
+    let query = supabase
       .from("devoluciones")
       .select(
         `
@@ -18,8 +18,12 @@ export async function GET(request: NextRequest) {
         clientes(nombre, razon_social)
       `
       )
-      .eq("estado", estado)
       .order("created_at", { ascending: false })
+    // 'revision' = bandeja de /revision-devoluciones: pendientes de depósito + pendientes de NC
+    if (estado === "revision") query = query.in("estado", ["pendiente", "confirmado"])
+    else if (estado !== "todos") query = query.eq("estado", estado)
+
+    const { data: devoluciones, error } = await query
 
     if (error) throw error
 
@@ -32,7 +36,7 @@ export async function GET(request: NextRequest) {
           .select(
             `
             *,
-            articulos(nombre, sku)
+            articulos(descripcion, sku)
           `
           )
           .eq("devolucion_id", dev.id)
