@@ -25,8 +25,6 @@ export default function RevisionDevolucionesPage() {
   const [loading, setLoading] = useState(true)
   const [abierta, setAbierta] = useState<string | null>(null)
   const [procesando, setProcesando] = useState<string | null>(null)
-  // Mini menú "Confirmar" (pendiente NC): elegir NC fiscal o Reversa
-  const [eligiendoDoc, setEligiendoDoc] = useState<string | null>(null)
   // Edición inline de cantidades (solo pendiente)
   const [editando, setEditando] = useState<string | null>(null)
   const [cantEdits, setCantEdits] = useState<Record<string, string>>({})
@@ -71,22 +69,25 @@ export default function RevisionDevolucionesPage() {
     } finally { setProcesando(null) }
   }
 
-  // Pendiente NC → emitir documento (el comprobante asociado lo resuelve el generador)
-  async function emitirDocumento(dev: any, tipo: "NC" | "Reversa") {
-    setEligiendoDoc(null)
+  // Pendiente NC → emitir el documento que corresponda. El tipo lo decide el
+  // sistema solo ('auto'): venta por Factura A/B → NCA/NCB (con CAE), venta por
+  // Presupuesto → Reversa; sin comprobante de origen, por el método/condición
+  // IVA del cliente. Genera todo en el acto: documento, cta cte, kardex, comisiones.
+  async function emitirDocumento(dev: any) {
+    if (!window.confirm(`¿Confirmar ${dev.numero_devolucion}? Se emite la NC o Reversa según corresponda y se acredita en la cuenta corriente del cliente.`)) return
     setProcesando(dev.id)
     try {
       const res = await fetch("/api/comprobantes-venta/generar-nc-reversa", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           devolucion_id: dev.id,
-          tipo_comprobante: tipo === "Reversa" ? "REV" : "auto",
+          tipo_comprobante: "auto",
           motivo_ajuste: `Devolución ${dev.numero_devolucion || dev.id.slice(0, 8)}`,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      toast({ title: "Emitida", description: `${data.comprobante?.tipo || tipo} ${data.comprobante?.numero || ""} por ${formatCurrency(Math.abs(data.comprobante?.total ?? 0))}` })
+      toast({ title: "Emitida", description: `${data.comprobante?.tipo || "NC"} ${data.comprobante?.numero || ""} por ${formatCurrency(Math.abs(data.comprobante?.total ?? 0))}` })
       cargar()
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" })
@@ -218,34 +219,24 @@ export default function RevisionDevolucionesPage() {
                       <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-end gap-1.5 items-center">
                           {ocupada && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
-                          {eligiendoDoc === dev.id ? (
-                            <>
-                              <button className={`${btn} bg-emerald-600 text-white border-emerald-600`} disabled={ocupada} onClick={() => emitirDocumento(dev, "NC")}>NC fiscal</button>
-                              <button className={`${btn} bg-slate-700 text-white border-slate-700`} disabled={ocupada} onClick={() => emitirDocumento(dev, "Reversa")}>Reversa</button>
-                              <button className={`${btn} border-slate-300 text-slate-500`} onClick={() => setEligiendoDoc(null)}>×</button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                className={`${btn} bg-emerald-50 border-emerald-300 text-emerald-700`}
-                                disabled={ocupada}
-                                title={dev.estado === "pendiente" ? "Marcar controlada (devuelve stock de vendibles)" : "Emitir NC fiscal o Reversa"}
-                                onClick={() => dev.estado === "pendiente" ? confirmarControl(dev) : setEligiendoDoc(dev.id)}
-                              >
-                                Confirmar
-                              </button>
-                              <button className={`${btn} bg-red-50 border-red-300 text-red-700`} disabled={ocupada} onClick={() => rechazar(dev)}>Rechazar</button>
-                              <button
-                                className={`${btn} border-slate-300 text-slate-600`}
-                                disabled={ocupada || dev.estado !== "pendiente"}
-                                title={dev.estado !== "pendiente" ? "Solo se edita antes del control de depósito" : "Editar cantidades"}
-                                onClick={() => empezarEdicion(dev)}
-                              >
-                                Editar
-                              </button>
-                              <button className={`${btn} border-red-200 text-red-500`} disabled={ocupada} onClick={() => eliminar(dev)}>Eliminar</button>
-                            </>
-                          )}
+                          <button
+                            className={`${btn} bg-emerald-50 border-emerald-300 text-emerald-700`}
+                            disabled={ocupada}
+                            title={dev.estado === "pendiente" ? "Marcar controlada (devuelve stock de vendibles)" : "Emite NC o Reversa según la venta de origen, acredita cta cte"}
+                            onClick={() => dev.estado === "pendiente" ? confirmarControl(dev) : emitirDocumento(dev)}
+                          >
+                            Confirmar
+                          </button>
+                          <button className={`${btn} bg-red-50 border-red-300 text-red-700`} disabled={ocupada} onClick={() => rechazar(dev)}>Rechazar</button>
+                          <button
+                            className={`${btn} border-slate-300 text-slate-600`}
+                            disabled={ocupada || dev.estado !== "pendiente"}
+                            title={dev.estado !== "pendiente" ? "Solo se edita antes del control de depósito" : "Editar cantidades"}
+                            onClick={() => empezarEdicion(dev)}
+                          >
+                            Editar
+                          </button>
+                          <button className={`${btn} border-red-200 text-red-500`} disabled={ocupada} onClick={() => eliminar(dev)}>Eliminar</button>
                         </div>
                       </td>
                     </tr>
