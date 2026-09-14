@@ -739,16 +739,9 @@ function NuevoPedidoInner() {
   }
 
   const abrirProveedor = (p: ProveedorCatalogo) => {
-    // Directo al listado completo del proveedor; las categorías filtran
-    // desde chips en la cabecera (catId null = todas)
+    // Árbol desplegable del proveedor (rubro › categoría › subcategoría)
     setSubSel(null)
-    setNav({
-      s: "arts",
-      ctx: { tipo: "proveedor", proveedorId: p.id, proveedorNombre: p.nombre },
-      catId: null,
-      catNombre: p.nombre,
-      rubroNombre: null,
-    })
+    setNav({ s: "cats", ctx: { tipo: "proveedor", proveedorId: p.id, proveedorNombre: p.nombre } })
     const cacheado = provCache.current.get(p.id)
     if (cacheado) {
       setArtsProveedor(cacheado)
@@ -1385,6 +1378,62 @@ function NuevoPedidoInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav, artsCategoria, listas, artsProveedor, subSel, qFiltro, orden, ventas, precios, posTaxonomia])
 
+  // Árbol desplegable para filtros y proveedor: agrupa la lista YA cargada en
+  // rubro › categoría › subcategoría (orden de taxonomía). qFiltro filtra antes.
+  const arbolCtx = useMemo(() => {
+    if (nav.s !== "cats" || nav.ctx.tipo === "rubro") return null
+    let lista = listaDeCtx(nav.ctx)
+    if (qFiltro.trim())
+      lista = lista.filter((a) =>
+        localMatch(qFiltro, a.descripcion, a.sku, Array.isArray(a.ean13) ? a.ean13 : [a.ean13], a.marca, a.subcategoria_nombre)
+      )
+    const rubroPos = new Map<string, number>()
+    catalogo.forEach((r, i) => {
+      rubroPos.set(r.id, i)
+      rubroPos.set(`n:${r.nombre}`, i)
+    })
+    const claveRubro = (a: Articulo) => a.rubro_id || (a.rubro_nombre ? `n:${a.rubro_nombre}` : "otros")
+    type CatAcc = { id: string; nombre: string; cantidad: number; subs: Map<string, { id: string; nombre: string; cantidad: number }> }
+    const rubrosAcc = new Map<string, { id: string; nombre: string; cantidad: number; cats: Map<string, CatAcc> }>()
+    const artsPorCat = new Map<string, Articulo[]>()
+    for (const a of lista) {
+      const rk = claveRubro(a)
+      let r = rubrosAcc.get(rk)
+      if (!r) { r = { id: rk, nombre: a.rubro_nombre || "Otros", cantidad: 0, cats: new Map() }; rubrosAcc.set(rk, r) }
+      r.cantidad++
+      const ck = claveCategoria(a)
+      let c = r.cats.get(ck)
+      if (!c) { c = { id: ck, nombre: a.categoria_nombre || "Otros", cantidad: 0, subs: new Map() }; r.cats.set(ck, c) }
+      c.cantidad++
+      const sk = claveSubcategoria(a)
+      if (sk) {
+        const s = c.subs.get(sk)
+        if (s) s.cantidad++
+        else c.subs.set(sk, { id: sk, nombre: a.subcategoria_nombre || "—", cantidad: 1 })
+      }
+      if (!artsPorCat.has(ck)) artsPorCat.set(ck, [])
+      artsPorCat.get(ck)!.push(a)
+    }
+    const posR = (k: string) => (rubroPos.has(k) ? rubroPos.get(k)! : Number.MAX_SAFE_INTEGER)
+    const rubros = [...rubrosAcc.values()]
+      .sort((a, b) => posR(a.id) - posR(b.id))
+      .map((r) => ({
+        id: r.id,
+        nombre: r.nombre,
+        cantidad: r.cantidad,
+        categorias: [...r.cats.values()]
+          .sort((a, b) => posCat(a.id) - posCat(b.id))
+          .map((c) => ({
+            id: c.id,
+            nombre: c.nombre,
+            cantidad: c.cantidad,
+            subcategorias: [...c.subs.values()].sort((a, b) => posSub(a.id) - posSub(b.id)),
+          })),
+      }))
+    return { rubros, artsPorCat }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav, listas, artsProveedor, qFiltro, catalogo, posTaxonomia])
+
   // Resultados de búsqueda con el orden elegido (default = relevancia del motor)
   const resultadosOrdenados = useMemo(
     () => ordenarArticulos(resultados, orden, precioOrden, ventas),
@@ -1801,8 +1850,71 @@ function NuevoPedidoInner() {
               </div>
             )}
           </div>
+        ) : nav.s === "cats" && nav.ctx.tipo !== "rubro" ? (
+          /* ── Novedades / Ofertas / Habituales / Proveedor: árbol desplegable
+                (rubro › categoría › subcategoría › filas) del listado cargado ── */
+          (nav.ctx.tipo === "proveedor" ? cargandoArtsProv : cargandoLista && !listas[nav.ctx.tipo]) ? (
+            <div className="text-center py-10">
+              <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden>
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                    <path d="M16.5 16.5 21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    type="search"
+                    value={qFiltro}
+                    onChange={(e) => setQFiltro(e.target.value)}
+                    placeholder={`Buscar en ${ctxLabel(nav.ctx)}...`}
+                    className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-9 py-2.5 text-gray-900 outline-none"
+                  />
+                  {qFiltro && (
+                    <button
+                      onClick={() => setQFiltro("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-xs leading-none"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                <OrdenSelector value={orden} onChange={setOrden} className="shrink-0" />
+              </div>
+              {!arbolCtx || arbolCtx.rubros.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-gray-200 p-6 text-center text-gray-500">
+                  {qFiltro.trim() ? (
+                    <>Nada con “{qFiltro}” acá. <button onClick={() => { setNav({ s: "home" }); onBuscar(qFiltro) }} className="text-emerald-700 font-bold underline">Buscar en todo el catálogo</button></>
+                  ) : nav.ctx.tipo === "habituales" ? (
+                    "Este cliente todavía no tiene artículos habituales. Buscá desde el inicio para armar su primer pedido."
+                  ) : nav.ctx.tipo === "ofertas" ? (
+                    "No hay artículos en oferta en este momento."
+                  ) : nav.ctx.tipo === "novedades" ? (
+                    "No hay ingresos recientes en el catálogo."
+                  ) : (
+                    "Este proveedor no tiene artículos activos con precio."
+                  )}
+                </div>
+              ) : (
+                <CatalogoArbol<Articulo>
+                  key={`arbol-${ctxLabel(nav.ctx)}`}
+                  rubros={arbolCtx.rubros}
+                  articulosDe={(catId) => arbolCtx.artsPorCat.get(catId) || []}
+                  renderArticulo={filaDe}
+                  ordenar={(arts) => ordenarArticulos(arts, orden, precioOrden, ventas)}
+                  abiertoInicial={arbolCtx.rubros.map((r) => r.id)}
+                  tinte={(nombre) => {
+                    const t = tinteRubro(nombre)
+                    return { bg: t.bg, border: t.border, ink: t.ink, accent: t.accent }
+                  }}
+                />
+              )}
+            </div>
+          )
         ) : nav.s === "cats" ? (
-          /* ── Tarjetas de categorías del contexto ── */
+          /* ── Tarjetas de categorías del contexto (rubro: vista galería) ── */
           (nav.ctx.tipo === "proveedor" ? cargandoArtsProv : cargandoLista && nav.ctx.tipo !== "rubro" && !listas[nav.ctx.tipo]) ? (
             <div className="text-center py-10">
               <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />

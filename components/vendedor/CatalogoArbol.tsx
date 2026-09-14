@@ -38,6 +38,7 @@ export interface ArbolArticulo {
 export function CatalogoArbol<T extends ArbolArticulo>({
   rubros,
   cargarCategoria,
+  articulosDe,
   renderArticulo,
   ordenar,
   onVerRubro,
@@ -45,8 +46,11 @@ export function CatalogoArbol<T extends ArbolArticulo>({
   abiertoInicial,
 }: {
   rubros: ArbolRubro[]
-  /** Trae TODOS los artículos de una categoría (el árbol cachea) */
-  cargarCategoria: (catId: string) => Promise<T[]>
+  /** Trae TODOS los artículos de una categoría (el árbol cachea). Omitir si se pasa `articulosDe`. */
+  cargarCategoria?: (catId: string) => Promise<T[]>
+  /** Lista YA en memoria: artículos de una categoría, recalculados en cada render
+   *  (para árboles sobre filtros locales: novedades, ofertas, proveedor...) */
+  articulosDe?: (catId: string) => T[]
   renderArticulo: (a: T) => ReactNode
   /** Orden a aplicar dentro de cada bloque (default: como vienen) */
   ordenar?: (arts: T[]) => T[]
@@ -74,6 +78,7 @@ export function CatalogoArbol<T extends ArbolArticulo>({
   const abrirCat = useCallback(
     async (catId: string) => {
       setCatsAbiertas((prev) => toggle(prev, catId))
+      if (articulosDe || !cargarCategoria) return // lista local: nada que traer
       if (pedidas.current.has(catId)) return
       pedidas.current.add(catId)
       setCargando((prev) => new Set(prev).add(catId))
@@ -90,7 +95,7 @@ export function CatalogoArbol<T extends ArbolArticulo>({
         })
       }
     },
-    [cargarCategoria]
+    [cargarCategoria, articulosDe]
   )
 
   const claveSub = (a: T) => a.subcategoria_id || (a.subcategoria_nombre ? `n:${a.subcategoria_nombre}` : null)
@@ -135,7 +140,7 @@ export function CatalogoArbol<T extends ArbolArticulo>({
               <div className="divide-y divide-gray-100">
                 {r.categorias.map((c) => {
                   const cAbierta = catsAbiertas.has(c.id)
-                  const arts = artsPorCat[c.id]
+                  const arts = articulosDe ? articulosDe(c.id) : artsPorCat[c.id]
                   const cargandoCat = cargando.has(c.id)
                   // Reparto por subcategoría (orden de la taxonomía) + resto
                   const porSub = new Map<string, T[]>()
