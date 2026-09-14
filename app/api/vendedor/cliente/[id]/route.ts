@@ -283,6 +283,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "No tenés permiso para cambiar la lista de precios." }, { status: 403 })
     }
 
+    // La lista "Especial" es de proveedores puntuales: como lista general del
+    // cliente dejaría el resto del catálogo sin precio coherente. Solo ERP.
+    if (body.lista_precio_id) {
+      const { data: listaSel } = await supabase
+        .from("listas_precio")
+        .select("codigo")
+        .eq("id", body.lista_precio_id)
+        .maybeSingle()
+      if (listaSel?.codigo === "especial") {
+        return NextResponse.json({ error: "La lista Especial se administra solo desde el ERP." }, { status: 403 })
+      }
+    }
+
     // Datos de la ficha (solo whitelist)
     for (const campo of CAMPOS_EDITABLES) {
       if (body[campo] !== undefined) {

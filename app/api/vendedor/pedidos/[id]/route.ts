@@ -23,7 +23,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
          clientes:cliente_id(id, nombre, localidad, metodo_facturacion, lista_precio_id, lista:lista_precio_id(nombre)),
          pedidos_detalle(id, articulo_id, cantidad, precio_base, precio_final, subtotal, es_bonificado, estado_item,
            precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct, metodo_facturacion_item,
-           articulos:articulo_id(id, sku, descripcion, unidades_por_bulto, imagen_url, marca_id, proveedor_id))`
+           articulos:articulo_id(id, sku, descripcion, unidades_por_bulto, imagen_url, marca_id, proveedor_id, marca:marca_id(descripcion)))`
       )
       .eq("id", id)
       .is("eliminado_at", null)

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { actualizarCantidadItem, eliminarItemPedido, softDeletePedido } from "@/lib/actions/pedidos"
 import { esPedidoEditable, puedeEliminarPedido } from "@/lib/pedidos/estados"
+import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 
 interface DetalleItem {
   id: string
@@ -23,7 +24,136 @@ interface DetalleItem {
     descripcion: string
     unidades_por_bulto: number | null
     imagen_url: string | null
+    marca?: { descripcion: string } | null
   } | null
+}
+
+// Fila del pedido con el MISMO formato del catálogo: miniatura (tap = foto),
+// datos, y la cantidad en la casilla verde — editable (✓ confirma, 0 = quitar,
+// 🗑 elimina) mientras el pedido lo permita; bloqueada cuando cambió de estado.
+// Fuera del componente de página para que la casilla no pierda el foco.
+function FilaItemPedido({
+  item,
+  editable,
+  onCantidad,
+  onQuitar,
+  onZoom,
+}: {
+  item: DetalleItem
+  editable: boolean
+  onCantidad: (unidades: number) => void
+  onQuitar: () => void
+  onZoom: () => void
+}) {
+  const a = item.articulos
+  const [cant, setCant] = useState(String(item.cantidad))
+  const [bultos, setBultos] = useState(false)
+  const [editando, setEditando] = useState(false)
+  useEffect(() => {
+    if (!editando) {
+      setCant(String(item.cantidad))
+      setBultos(false)
+    }
+  }, [item.cantidad, editando])
+
+  const ub = a?.unidades_por_bulto || 1
+  const n = parseFloat(cant.replace(",", "."))
+  const unidades = Number.isFinite(n) && n > 0 ? (bultos ? n * ub : n) : 0
+  const cambiado = unidades !== item.cantidad
+  const confirmar = () => {
+    setEditando(false)
+    setBultos(false)
+    if (unidades <= 0) onQuitar()
+    else if (unidades !== item.cantidad) onCantidad(unidades)
+  }
+
+  return (
+    <div className="w-full flex items-center gap-2 rounded-lg pl-1.5 pr-1.5 py-1.5 bg-white border border-gray-200">
+      <button
+        onClick={onZoom}
+        disabled={!a?.imagen_url}
+        className="w-11 h-11 rounded-md bg-gray-50 shrink-0 overflow-hidden flex items-center justify-center active:opacity-70"
+      >
+        {a?.imagen_url ? (
+          <img src={a.imagen_url} alt="" loading="lazy" className="w-full h-full object-contain" />
+        ) : (
+          <span className="text-gray-300 text-lg">📦</span>
+        )}
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className="font-bold text-gray-900 text-[13px] leading-snug">
+          {a?.descripcion || "Artículo"}
+          {Number(item.descuento_propio_pct) > 0 && (
+            <span className="ml-1.5 inline-block bg-red-100 text-red-700 px-1.5 rounded text-[10px] font-bold align-middle">
+              -{Number(item.descuento_propio_pct)}%
+            </span>
+          )}
+          {Number(item.bonif_viajante_pct) > 0 && (
+            <span className="ml-1.5 inline-block bg-orange-100 text-orange-700 px-1.5 rounded text-[10px] font-bold align-middle">
+              viaj. −{Number(item.bonif_viajante_pct)}%
+            </span>
+          )}
+        </p>
+        <p className="text-[11px] text-gray-400 truncate">
+          <span className="font-mono">{a?.sku || "—"}</span>
+          {a?.marca?.descripcion ? ` · ${a.marca.descripcion}` : ""}
+          {a?.unidades_por_bulto ? ` · x${a.unidades_por_bulto}` : ""}
+        </p>
+        <p className="text-[11px] truncate">
+          <span className="text-gray-500">{formatCurrency(item.precio_final || 0)} c/u</span>
+          <span className="font-bold text-gray-800"> · {formatCurrency((item.precio_final || 0) * item.cantidad)}</span>
+        </p>
+      </div>
+      <div className="shrink-0 flex items-center gap-1">
+        <div className="flex flex-col items-center gap-0.5">
+          <input
+            value={cant}
+            disabled={!editable}
+            onFocus={() => setEditando(true)}
+            onChange={(e) => { setEditando(true); setCant(e.target.value.replace(/[^\d.,]/g, "")) }}
+            onBlur={() => { if (!cambiado) setEditando(false) }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmar(); (e.target as HTMLInputElement).blur() } }}
+            inputMode="decimal"
+            className={`w-14 rounded-md border px-1.5 py-1.5 text-center font-bold text-sm ${
+              editable
+                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                : "border-gray-200 bg-gray-50 text-gray-500"
+            }`}
+            aria-label="Cantidad"
+          />
+          {editable && (
+            <label className="flex items-center gap-1 text-[10px] text-gray-500 select-none">
+              <input
+                type="checkbox"
+                checked={bultos}
+                onChange={(e) => { setEditando(true); setBultos(e.target.checked) }}
+                className="w-3 h-3 accent-emerald-600"
+              />
+              bultos{bultos && ub > 1 && unidades > 0 ? ` (=${unidades} u)` : ""}
+            </label>
+          )}
+        </div>
+        {editable &&
+          (cambiado || editando ? (
+            <button
+              onClick={confirmar}
+              className="w-9 h-9 rounded-lg bg-emerald-600 text-white text-lg font-bold leading-none active:scale-95"
+              aria-label="Confirmar cantidad"
+            >
+              ✓
+            </button>
+          ) : (
+            <button
+              onClick={onQuitar}
+              className="w-9 h-9 rounded-lg bg-white border border-red-200 text-red-600 text-lg leading-none active:scale-95"
+              aria-label="Quitar del pedido"
+            >
+              🗑
+            </button>
+          ))}
+      </div>
+    </div>
+  )
 }
 
 interface PedidoDetalle {
@@ -98,6 +228,13 @@ function PedidoDetalleInner() {
   const [sync, setSync] = useState<"idle" | "saving" | "error">("idle")
   const [eliminando, setEliminando] = useState(false)
   const cantTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const [zoomFoto, setZoomFoto] = useState<string | null>(null)
+
+  // "Atrás" físico: primero cierra la foto ampliada
+  useBackTrap(() => {
+    if (zoomFoto) { setZoomFoto(null); return true }
+    return false
+  })
 
   const cargar = useCallback(async () => {
     try {
@@ -341,57 +478,14 @@ function PedidoDetalleInner() {
           </div>
 
           {itemsVenta.map((i) => (
-            <div key={i.id} className="bg-white rounded-xl border border-gray-200 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold text-gray-900 text-sm leading-snug">
-                    {i.articulos?.descripcion || "Artículo"}
-                  </p>
-                  <p className="text-gray-400 text-xs mt-0.5">
-                    {i.articulos?.sku ? `SKU ${i.articulos.sku}` : ""}
-                    {i.articulos?.unidades_por_bulto ? ` · ${i.articulos.unidades_por_bulto} u/bulto` : ""}
-                  </p>
-                  {(Number(i.descuento_propio_pct) > 0 || Number(i.bonif_general_pct) > 0 || Number(i.bonif_viajante_pct) > 0) && (
-                    <p className="text-[11px] mt-0.5 text-gray-500">
-                      {i.precio_lista ? `Lista ${formatCurrency(i.precio_lista)}` : ""}
-                      {Number(i.descuento_propio_pct) > 0 ? ` · oferta −${Number(i.descuento_propio_pct)}%` : ""}
-                      {Number(i.bonif_general_pct) > 0 ? ` · gral. −${Number(i.bonif_general_pct)}%` : ""}
-                      {Number(i.bonif_viajante_pct) > 0 ? <span className="text-orange-600 font-bold"> · viajante −{Number(i.bonif_viajante_pct)}%</span> : ""}
-                    </p>
-                  )}
-                </div>
-                {editable && (
-                  <button onClick={() => quitar(i)} className="text-red-500 text-xl leading-none px-1">
-                    ✕
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center justify-between mt-2">
-                {editable ? (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setCantidad(i, Math.max(1, i.cantidad - 1))}
-                      className="w-10 h-10 rounded-lg bg-gray-100 text-xl font-bold text-gray-700"
-                    >
-                      −
-                    </button>
-                    <span className="w-10 text-center font-bold text-lg">{i.cantidad}</span>
-                    <button
-                      onClick={() => setCantidad(i, i.cantidad + 1)}
-                      className="w-10 h-10 rounded-lg bg-gray-100 text-xl font-bold text-gray-700"
-                    >
-                      +
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-gray-600 font-bold">× {i.cantidad}</p>
-                )}
-                <div className="text-right">
-                  <p className="text-gray-400 text-xs">{formatCurrency(i.precio_final || 0)} c/u</p>
-                  <p className="font-bold text-gray-900">{formatCurrency((i.precio_final || 0) * i.cantidad)}</p>
-                </div>
-              </div>
-            </div>
+            <FilaItemPedido
+              key={i.id}
+              item={i}
+              editable={editable}
+              onCantidad={(u) => setCantidad(i, u)}
+              onQuitar={() => quitar(i)}
+              onZoom={() => i.articulos?.imagen_url && setZoomFoto(i.articulos.imagen_url)}
+            />
           ))}
 
           {itemsBonif.length > 0 && (
@@ -470,6 +564,14 @@ function PedidoDetalleInner() {
           </button>
         )}
       </div>
+
+      {/* Foto ampliada */}
+      {zoomFoto && (
+        <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4" onClick={() => setZoomFoto(null)}>
+          <img src={zoomFoto} alt="" className="max-w-full max-h-[85dvh] object-contain rounded-xl" />
+          <button className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-xl leading-none">✕</button>
+        </div>
+      )}
 
       {/* Total fijo */}
       <div className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 p-4">

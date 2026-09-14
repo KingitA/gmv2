@@ -107,7 +107,7 @@ function FilaArticulo({
   onQuitar,
 }: {
   a: Articulo
-  precio?: { precio: number; precioNeto: number; especial: { bruto: number; oferta_pct: number } | null }
+  precio?: { precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null }
   /** Unidades ya en el pedido (undefined = no está) */
   enCarrito?: number
   onAbrir: () => void
@@ -169,8 +169,18 @@ function FilaArticulo({
           <span className="font-mono">{a.sku || "—"}</span>
           {a.marca ? ` · ${a.marca}` : ""}
           {a.unidades_por_bulto ? ` · x${a.unidades_por_bulto}` : ""}
-          {" · "}
-          <span className="font-bold text-gray-700">{precio ? formatCurrency(precio.especial ? precio.precioNeto : precio.precio) : "…"}</span>
+        </p>
+        <p className="text-[11px] truncate">
+          {!precio ? (
+            <span className="text-gray-400">$ …</span>
+          ) : precio.especial ? (
+            <span className="font-bold text-gray-700">{formatCurrency(precio.precioNeto)} <span className="text-orange-500">+IVA</span></span>
+          ) : (
+            <>
+              <span className="font-bold text-gray-700">CC {formatCurrency(precio.precio)}</span>
+              <span className="font-bold text-emerald-700"> · Ctdo {formatCurrency(precio.contado)}</span>
+            </>
+          )}
         </p>
       </button>
       {/* Cantidad (verde si ya está en el pedido) + bultos + acción */}
@@ -1480,93 +1490,23 @@ function NuevoPedidoInner() {
   }
 
   // ── Tarjeta de artículo (compartida por todas las listas) ───────────
-  const ArticuloCard = ({ a }: { a: Articulo }) => {
-    const enCarrito = cart.find((i) => i.articulo.id === a.id)
-    const p = precios[a.id]
-    // Artículo sin precio (en prueba/carga): no se muestra ni se vende
-    if (p && p.precio <= 0) return null
+  // Fila estándar de artículo: MISMO formato en todos los listados (árbol,
+  // categorías, proveedor, filtros y búsqueda) — miniatura, datos, CC/Ctdo,
+  // cantidad editable en verde, bultos y quitar.
+  const filaDe = (a: Articulo) => {
+    const linea = cart.find((i) => i.articulo.id === a.id)
     return (
-      <button
-        onClick={() => abrirArticulo(a)}
-        className={`w-full bg-white rounded-xl shadow-sm border p-3 text-left active:scale-[0.98] ${
-          enCarrito ? "border-emerald-500 border-2" : "border-gray-200"
-        }`}
-      >
-        <div className="flex items-start gap-3">
-          {a.imagen_url ? (
-            <img
-              src={a.imagen_url}
-              alt=""
-              loading="lazy"
-              className="w-12 h-12 rounded-lg object-cover bg-gray-100 shrink-0"
-            />
-          ) : null}
-          <div className="min-w-0 flex-1">
-            <p className="font-bold text-gray-900 text-sm leading-snug">{a.descripcion}</p>
-            <p className="text-gray-500 text-xs mt-0.5">
-              {[a.marca, a.proveedor].filter(Boolean).join(" · ")}
-            </p>
-            <p className="text-gray-400 text-xs">
-              {a.unidades_por_bulto ? `${a.unidades_por_bulto} u/bulto · ` : ""}
-              Stock: {a.stock_disponible}
-              {a.veces_pedido ? ` · pedido ${a.veces_pedido}×` : ""}
-            </p>
-            {enCarrito && (
-              <span className="inline-block bg-emerald-600 text-white px-2 py-0.5 rounded-full text-xs font-bold mt-1">
-                🛒 En pedido: {enCarrito.cantidad} u
-              </span>
-            )}
-          </div>
-          <div className="text-right shrink-0">
-            {p ? (
-              p.especial ? (
-                <>
-                  {p.especial.oferta_pct > 0 && (
-                    <p className="text-xs text-gray-400 leading-tight">
-                      <span className="line-through">{formatCurrency(p.especial.bruto)}</span>{" "}
-                      <span className="text-red-600 font-bold no-underline">-{p.especial.oferta_pct}%</span>
-                    </p>
-                  )}
-                  <p className="font-bold text-gray-900 leading-tight">{formatCurrency(p.precioNeto)}</p>
-                  <p className="text-[10px] font-bold text-orange-500">+ 21% IVA</p>
-                  <span className="inline-block bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1">
-                    ESPECIAL
-                  </span>
-                </>
-              ) : (
-                <>
-                  <p className="font-bold text-gray-900 leading-tight">
-                    <span className="text-[10px] text-gray-400 font-medium">CC </span>
-                    {formatCurrency(p.precio)}
-                  </p>
-                  <p className="font-bold text-emerald-700 text-sm leading-tight">
-                    <span className="text-[10px] text-emerald-500 font-medium">Ctdo </span>
-                    {formatCurrency(p.contado)}
-                  </p>
-                  <p className={`text-[10px] font-bold ${p.ivaIncluido ? "text-gray-400" : "text-orange-500"}`}>
-                    {p.ivaIncluido ? "IVA incluido" : "sin IVA"}
-                  </p>
-                </>
-              )
-            ) : (
-              <p className="text-gray-300 text-xs">$ …</p>
-            )}
-            {!p?.especial && a.descuento_propio > 0 && (
-              <span className="inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-bold mt-1">
-                -{a.descuento_propio}%
-              </span>
-            )}
-            {(p?.bonifViajantePct || 0) > 0 && (
-              <span
-                className="inline-block bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ml-1"
-                title="Bonificación viajante del cliente, ya aplicada en el precio"
-              >
-                viaj. −{p!.bonifViajantePct}%
-              </span>
-            )}
-          </div>
-        </div>
-      </button>
+      <FilaArticulo
+        key={a.id}
+        a={a}
+        precio={precios[a.id]}
+        enCarrito={linea?.cantidad}
+        onAbrir={() => abrirArticulo(a)}
+        onZoom={() => a.imagen_url && setZoomFoto(a.imagen_url)}
+        onAgregar={(u) => agregarRapido(a, u)}
+        onActualizar={(u) => linea && setCantidadItem(linea.detalleId, u)}
+        onQuitar={() => linea && quitarItem(linea.detalleId)}
+      />
     )
   }
 
@@ -1597,6 +1537,29 @@ function NuevoPedidoInner() {
           : `${ctxLabel(nav.ctx)} · ${cliente.nombre}`
 
   // ── Pantalla principal de armado ────────────────────────────────────
+  // ── Chip lista + método del header (cortito: "NECO FINAL") ──────────
+  const METODO_CORTO: Record<string, string> = { Factura: "C/IVA", Final: "FINAL", Presupuesto: "PRES" }
+  const nombreListaPorId = (id: string | null | undefined) => catFicha?.listas_precio.find((l) => l.id === id)?.nombre
+  const listaChip =
+    (cond.lista ? nombreListaPorId(cond.lista) : cliente.lista?.nombre || nombreListaPorId(cliente.lista_precio_id)) || "STD"
+  const metodoRawChip = cond.metodo || cliente.metodo_facturacion || ""
+  const chipListaMetodo = `${listaChip.toUpperCase()} ${METODO_CORTO[metodoRawChip] || metodoRawChip.toUpperCase() || "—"}`
+
+  // Abre el panel del cliente con los selectores en lo vigente (override del
+  // pedido si hay, si no la ficha) — lo usan el chip y el botón 👤
+  const abrirPanelCliente = () => {
+    setMetodoSel(cond.metodo || cliente.metodo_facturacion || "")
+    setListaSel(cond.lista || cliente.lista_precio_id || "")
+    const init: Record<string, string> = {}
+    for (const tipo of ["viajante", "mercaderia"] as const)
+      for (const s of SEGS) {
+        const v = cond.bonif?.[tipo]?.[s] ?? bonifCliente?.[tipo]?.[s] ?? 0
+        init[`${tipo}.${s}`] = v ? String(v) : ""
+      }
+    setBonifSel(init)
+    setVerCliente(true)
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* Input trampa: recibe el escaneo de la colectora en Android aunque no
@@ -1640,20 +1603,20 @@ function NuevoPedidoInner() {
               {sync === "saving" ? "Guardando…" : sync === "error" ? "⚠ Sin guardar" : "✓ Guardado"}
             </span>
           )}
+          {/* Chip lista + método vigentes (cortito): NECO FINAL, NECO C/IVA... */}
           <button
-            onClick={() => {
-              setMetodoSel(cond.metodo || cliente.metodo_facturacion || "")
-              setListaSel(cond.lista || cliente.lista_precio_id || "")
-              // Arranca con lo vigente: override del pedido si hay, si no la ficha
-              const init: Record<string, string> = {}
-              for (const tipo of ["viajante", "mercaderia"] as const)
-                for (const s of SEGS) {
-                  const v = cond.bonif?.[tipo]?.[s] ?? bonifCliente?.[tipo]?.[s] ?? 0
-                  init[`${tipo}.${s}`] = v ? String(v) : ""
-                }
-              setBonifSel(init)
-              setVerCliente(true)
-            }}
+            onClick={abrirPanelCliente}
+            className={`shrink-0 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border active:scale-95 ${
+              cond.metodo || cond.lista
+                ? "bg-amber-400 text-amber-950 border-amber-300"
+                : "bg-emerald-600 text-white border-emerald-500"
+            }`}
+            title="Lista y método de facturación vigentes (tap para cambiar)"
+          >
+            {chipListaMetodo}
+          </button>
+          <button
+            onClick={abrirPanelCliente}
             className="w-10 h-10 rounded-xl bg-emerald-600 border border-emerald-500 flex items-center justify-center text-lg shrink-0 active:scale-95"
             title="Cliente: ficha, cuenta corriente y método"
           >
@@ -1717,9 +1680,7 @@ function NuevoPedidoInner() {
                 <p className="text-gray-400 text-xs">{resultados.length} resultados</p>
                 <OrdenSelector value={orden} onChange={setOrden} />
               </div>
-              {resultadosOrdenados.map((a) => (
-                <ArticuloCard key={a.id} a={a} />
-              ))}
+              {resultadosOrdenados.map(filaDe)}
             </div>
           )
         ) : nav.s === "home" ? (
@@ -1785,21 +1746,7 @@ function NuevoPedidoInner() {
                 <CatalogoArbol<Articulo>
                   rubros={catalogo}
                   cargarCategoria={cargarCategoriaArbol}
-                  renderArticulo={(a) => {
-                    const linea = cart.find((i) => i.articulo.id === a.id)
-                    return (
-                      <FilaArticulo
-                        a={a}
-                        precio={precios[a.id]}
-                        enCarrito={linea?.cantidad}
-                        onAbrir={() => abrirArticulo(a)}
-                        onZoom={() => a.imagen_url && setZoomFoto(a.imagen_url)}
-                        onAgregar={(u) => agregarRapido(a, u)}
-                        onActualizar={(u) => linea && setCantidadItem(linea.detalleId, u)}
-                        onQuitar={() => linea && quitarItem(linea.detalleId)}
-                      />
-                    )
-                  }}
+                  renderArticulo={filaDe}
                   ordenar={(arts) => ordenarArticulos(arts, orden, precioOrden, ventas)}
                   onVerRubro={(r) => abrirRubro(r as CatalogoRubro)}
                   tinte={(nombre) => {
@@ -2000,9 +1947,7 @@ function NuevoPedidoInner() {
               </div>
             ) : (
               <div className="space-y-2">
-                {articulosVisibles.map((a) => (
-                  <ArticuloCard key={a.id} a={a} />
-                ))}
+                {articulosVisibles.map(filaDe)}
               </div>
             )}
           </div>
