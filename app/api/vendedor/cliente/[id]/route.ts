@@ -4,6 +4,7 @@ import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
+import { MARCA_CONTADO } from "@/lib/constants"
 
 // GET /api/vendedor/cliente/[id]
 // Ficha del cliente + cuenta corriente: comprobantes con saldo pendiente
@@ -73,6 +74,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // vendedor puede cobrar dos veces el mismo comprobante.
     const compIds = (comprobantes || []).map((c: any) => c.id)
     const enCobroPorComp = new Map<string, number>()
+    // Parte del "en cobro" que viajó marcada [10% CONTADO]: si esas entregas
+    // más lo de hoy completan el comprobante, el 10% bonifica el total.
+    const enCobroContadoPorComp = new Map<string, number>()
     if (compIds.length) {
       const { data: impPend } = await supabase
         .from("imputaciones")
@@ -81,19 +85,30 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         .eq("estado", "pendiente")
       const pagoIdsPend = [...new Set((impPend || []).map((i: any) => i.pago_id).filter(Boolean))]
       const estadoPago = new Map<string, string>()
+      const contadoPago = new Set<string>()
       if (pagoIdsPend.length) {
-        const { data: pgs } = await supabase.from("pagos_clientes").select("id, estado").in("id", pagoIdsPend)
-        for (const p of pgs || []) estadoPago.set(p.id, p.estado)
+        const { data: pgs } = await supabase
+          .from("pagos_clientes")
+          .select("id, estado, observaciones")
+          .in("id", pagoIdsPend)
+        for (const p of pgs || []) {
+          estadoPago.set(p.id, p.estado)
+          if ((p.observaciones || "").includes(MARCA_CONTADO)) contadoPago.add(p.id)
+        }
       }
       for (const i of impPend || []) {
         const est = estadoPago.get(i.pago_id)
-        if (est === "pendiente" || est === "pendiente_rendicion")
+        if (est === "pendiente" || est === "pendiente_rendicion") {
           enCobroPorComp.set(i.comprobante_id, (enCobroPorComp.get(i.comprobante_id) || 0) + Number(i.monto_imputado))
+          if (contadoPago.has(i.pago_id))
+            enCobroContadoPorComp.set(i.comprobante_id, (enCobroContadoPorComp.get(i.comprobante_id) || 0) + Number(i.monto_imputado))
+        }
       }
     }
     const comprobantesConReserva = (comprobantes || []).map((c: any) => ({
       ...c,
       en_cobro: Math.round((enCobroPorComp.get(c.id) || 0) * 100) / 100,
+      en_cobro_contado: Math.round((enCobroContadoPorComp.get(c.id) || 0) * 100) / 100,
     }))
 
     // Pedidos cobrables sin facturar (anticipo, mismo criterio que el ERP):

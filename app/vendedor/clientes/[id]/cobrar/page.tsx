@@ -32,6 +32,8 @@ interface Comprobante {
   saldo_pendiente: number
   /** Reservado por cobros ya registrados sin confirmar (imputaciones pendientes) */
   en_cobro?: number
+  /** Parte del en_cobro cuyas entregas viajaron marcadas [10% CONTADO] */
+  en_cobro_contado?: number
   pedido_id: string | null
 }
 
@@ -295,7 +297,18 @@ export default function VendedorCobrarPage() {
     let bonif = 0
     for (const cp of comprobantes) {
       const imp = imputaciones[cp.id]
-      if (imp !== undefined && Math.abs(imp - cp.saldo_pendiente) < 0.01) bonif += cp.total_factura * 0.1
+      if (imp === undefined) continue
+      const cobrable = saldoCobrable(cp)
+      // Completo con plata de HOY…
+      const completoHoy = Math.abs(imp - cp.saldo_pendiente) < 0.01
+      // …o completo CONTANDO lo ya en cobro sin confirmar, siempre que esas
+      // entregas también hayan sido contado ([10% CONTADO]): hoy se cobra
+      // todo el cobrable y entre ambas partes el comprobante queda saldado.
+      const completoConEnCobro =
+        Math.abs(imp - cobrable) < 0.01 &&
+        (cp.en_cobro || 0) > 0.005 &&
+        cobrable + (cp.en_cobro_contado || 0) >= cp.saldo_pendiente - 0.01
+      if (completoHoy || completoConEnCobro) bonif += cp.total_factura * 0.1
     }
     for (const [key, monto] of Object.entries(credSel)) {
       if (key.startsWith("nc:") && cred10[key] && monto > 0) bonif -= monto * 0.1
@@ -917,7 +930,8 @@ export default function VendedorCobrarPage() {
                       <span className="text-emerald-700"> — NC proyectada {formatCurrency(bonificacionEstimada)}</span>
                     )}
                     <span className="block text-xs text-gray-400">
-                      La NC/REV real la emite la oficina al confirmar el pago. Aplica a comprobantes seleccionados completos.
+                      La NC/REV real la emite la oficina al confirmar el pago. Aplica a comprobantes que quedan completos:
+                      con lo de hoy, o sumando entregas en cobro que también fueron contado.
                     </span>
                   </span>
                 </label>
