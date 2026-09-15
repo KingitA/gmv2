@@ -17,6 +17,7 @@ interface Movimiento {
 interface BilleteraData {
   balance: number
   desglose: { efectivo: number; cheques: number; transferencias: number }
+  cheques_cantidad?: number
   pagos_sin_rendir: number
   en_viaje: { total: number; cantidad: number }
   deuda_rendiciones?: number
@@ -267,28 +268,23 @@ function VendedorBilleteraInner() {
       <div className="p-4 space-y-4 max-w-2xl mx-auto">
         {/* Saldo */}
         <section className="bg-emerald-700 text-white rounded-2xl shadow-md p-6 text-center">
-          <p className="text-emerald-200 text-sm">Plata en la calle</p>
+          <p className="text-emerald-200 text-sm">💵 Efectivo en la calle</p>
           <p className="text-4xl font-bold mt-1">{formatCurrency(data.balance)}</p>
+          {(data.cheques_cantidad || 0) > 0 && (
+            <p className="text-emerald-100 text-sm mt-1 font-medium">
+              🧾 {data.cheques_cantidad} {data.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano
+            </p>
+          )}
           <p className="text-emerald-200 text-xs mt-1">
             {data.pagos_sin_rendir
               ? `${data.pagos_sin_rendir} ${data.pagos_sin_rendir === 1 ? "cobro" : "cobros"} sin rendir a oficina`
               : "No tenés cobros sin rendir"}
           </p>
-          <div className="grid grid-cols-3 gap-2 mt-4 text-sm">
-            <div className="bg-emerald-600/60 rounded-xl px-2 py-2">
-              <p className="text-emerald-200 text-xs">💵 Efectivo</p>
-              <p className="font-bold text-sm">{formatCurrency(data.desglose.efectivo)}</p>
-            </div>
-            <div className="bg-emerald-600/60 rounded-xl px-2 py-2">
-              <p className="text-emerald-200 text-xs">🧾 Cheques</p>
-              <p className="font-bold text-sm">{formatCurrency(data.desglose.cheques)}</p>
-            </div>
-            <div className="bg-emerald-800/50 rounded-xl px-2 py-2 border border-emerald-500/40">
-              <p className="text-emerald-200 text-xs">🏦 Transf. directas</p>
-              <p className="font-bold text-sm">{formatCurrency(data.desglose.transferencias)}</p>
-              <p className="text-emerald-300/80 text-[10px]">al banco · no suma</p>
-            </div>
-          </div>
+          {data.desglose.transferencias > 0 && (
+            <p className="text-emerald-300/80 text-xs mt-1">
+              🏦 {formatCurrency(data.desglose.transferencias)} transferido directo al banco
+            </p>
+          )}
           {data.en_viaje?.total > 0 && (
             <div className="bg-amber-400/20 border border-amber-300/40 rounded-xl px-3 py-2 mt-3 text-sm">
               <p className="text-amber-100">

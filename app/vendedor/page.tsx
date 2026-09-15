@@ -28,7 +28,7 @@ interface MeData {
   vendedores: { id: string; nombre: string }[]
   total_clientes: number
   ultimos_pedidos: PedidoResumen[]
-  billetera?: { saldo: number; comisiones_pendientes: number }
+  billetera?: { saldo: number; cheques_cantidad?: number; comisiones_pendientes: number }
   proximas_zonas?: ZonaProxima[]
 }
 
@@ -133,8 +133,13 @@ export default function VendedorHomePage() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-emerald-200 text-sm">💰 Plata en la calle</p>
+              <p className="text-emerald-200 text-sm">💵 Efectivo en la calle</p>
               <p className="text-3xl font-bold mt-1">{formatCurrency(data?.billetera?.saldo ?? 0)}</p>
+              {(data?.billetera?.cheques_cantidad || 0) > 0 && (
+                <p className="text-emerald-200 text-xs mt-0.5">
+                  🧾 {data!.billetera!.cheques_cantidad} {data!.billetera!.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano
+                </p>
+              )}
             </div>
             <div className="text-right">
               <p className="text-emerald-200 text-sm">Comisiones pend.</p>

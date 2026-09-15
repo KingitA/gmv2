@@ -53,17 +53,22 @@ export async function GET() {
         .in("rendicion_id", rendAbiertas.map((r) => r.id))
       for (const it of items || []) declarados.add(it.pago_id)
     }
+    // Saldo = SOLO efectivo; los cheques van como cantidad de papeles en mano
     let billeteraSaldo = 0
+    let chequesCantidad = 0
     for (const p of pagosSinRendir || []) {
       if (declarados.has(p.id)) continue
       const detalles: any[] = (p as any).pagos_detalle || []
       if (detalles.length) {
         for (const d of detalles) {
           const tipo = (d.tipo_pago || "").toLowerCase()
-          if (tipo === "efectivo" || tipo === "cheque") billeteraSaldo += Number(d.monto)
+          if (tipo === "efectivo") billeteraSaldo += Number(d.monto)
+          else if (tipo === "cheque") chequesCantidad += 1
         }
-      } else if (((p as any).forma_pago || "").toLowerCase() !== "transferencia") {
-        billeteraSaldo += Number(p.monto)
+      } else {
+        const forma = ((p as any).forma_pago || "").toLowerCase()
+        if (forma === "cheque") chequesCantidad += 1
+        else if (forma !== "transferencia") billeteraSaldo += Number(p.monto)
       }
     }
     billeteraSaldo = Math.round(billeteraSaldo * 100) / 100
@@ -110,7 +115,7 @@ export async function GET() {
       vendedores: session.vendedores,
       total_clientes: totalClientes ?? 0,
       ultimos_pedidos: ultimosPedidos || [],
-      billetera: { saldo: billeteraSaldo, comisiones_pendientes: comisionesPendientes },
+      billetera: { saldo: billeteraSaldo, cheques_cantidad: chequesCantidad, comisiones_pendientes: comisionesPendientes },
       proximas_zonas: proximasZonas,
     })
   } catch (error: any) {

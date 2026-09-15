@@ -51,6 +51,7 @@ export async function GET(request: Request) {
 
     let efectivo = 0
     let cheques = 0
+    let chequesCantidad = 0
     let transferencias = 0
     for (const p of enCalle) {
       const detalles: any[] = (p as any).pagos_detalle || []
@@ -58,22 +59,22 @@ export async function GET(request: Request) {
         for (const d of detalles) {
           const tipo = (d.tipo_pago || "").toLowerCase()
           if (tipo === "efectivo") efectivo += Number(d.monto)
-          else if (tipo === "cheque") cheques += Number(d.monto)
+          else if (tipo === "cheque") { cheques += Number(d.monto); chequesCantidad += 1 }
           else transferencias += Number(d.monto)
         }
       } else {
         // pagos viejos sin detalle: clasificar por forma_pago
         const forma = ((p as any).forma_pago || "").toLowerCase()
-        if (forma === "cheque") cheques += Number(p.monto)
+        if (forma === "cheque") { cheques += Number(p.monto); chequesCantidad += 1 }
         else if (forma === "transferencia") transferencias += Number(p.monto)
         else efectivo += Number(p.monto)
       }
     }
 
-    // PLATA EN LA CALLE = lo que el vendedor tiene FÍSICAMENTE encima:
-    // efectivo + cheques. Las transferencias van directas a la cuenta de la
-    // empresa (nunca pasan por sus manos) — se muestran aparte, no suman.
-    const balance = Math.round((efectivo + cheques) * 100) / 100
+    // El SALDO de la billetera es SOLO el efectivo. Los cheques van aparte
+    // como cantidad de papeles en mano (su monto es informativo: no es plata
+    // hasta que se acreditan). Las transferencias van directas al banco.
+    const balance = Math.round(efectivo * 100) / 100
     const desglose = { efectivo, cheques, transferencias }
     const cantidadSinRendir = enCalle.length
     const enViajeTotal = enViaje.reduce((s, p) => s + Number(p.monto), 0)
@@ -140,6 +141,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       balance,
       desglose,
+      cheques_cantidad: chequesCantidad,
       pagos_sin_rendir: cantidadSinRendir,
       en_viaje: { total: enViajeTotal, cantidad: enViaje.length },
       deuda_rendiciones: deudaRendiciones,
