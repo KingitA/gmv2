@@ -70,7 +70,10 @@ export async function GET(request: Request) {
       }
     }
 
-    const balance = enCalle.reduce((s, p) => s + Number(p.monto), 0)
+    // PLATA EN LA CALLE = lo que el vendedor tiene FÍSICAMENTE encima:
+    // efectivo + cheques. Las transferencias van directas a la cuenta de la
+    // empresa (nunca pasan por sus manos) — se muestran aparte, no suman.
+    const balance = Math.round((efectivo + cheques) * 100) / 100
     const desglose = { efectivo, cheques, transferencias }
     const cantidadSinRendir = enCalle.length
     const enViajeTotal = enViaje.reduce((s, p) => s + Number(p.monto), 0)

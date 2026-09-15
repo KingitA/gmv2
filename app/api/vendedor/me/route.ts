@@ -31,12 +31,42 @@ export async function GET() {
       .order("fecha", { ascending: false })
       .limit(5)
 
-    // Resumen de billetera (plata en la calle + comisiones pendientes)
-    const { data: movs } = await supabase
-      .from("billetera_movimientos")
-      .select("monto")
-      .in("viajante_id", session.vendedorIds)
-    const billeteraSaldo = (movs || []).reduce((s, m) => s + Number(m.monto), 0)
+    // Resumen de billetera: PLATA EN LA CALLE = efectivo + cheques que el
+    // vendedor tiene físicamente (pagos sin rendir, desde pagos_detalle).
+    // Las transferencias van directas al banco: no suman. Mismo criterio que
+    // /api/vendedor/billetera (excluye lo ya declarado en rendición abierta).
+    const { data: pagosSinRendir } = await supabase
+      .from("pagos_clientes")
+      .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto)")
+      .in("vendedor_id", session.vendedorIds)
+      .eq("estado", "pendiente_rendicion")
+    const declarados = new Set<string>()
+    const { data: rendAbiertas } = await supabase
+      .from("rendiciones")
+      .select("id")
+      .in("cobrador_id", session.vendedorIds)
+      .eq("estado", "abierta")
+    if (rendAbiertas?.length) {
+      const { data: items } = await supabase
+        .from("rendicion_items")
+        .select("pago_id")
+        .in("rendicion_id", rendAbiertas.map((r) => r.id))
+      for (const it of items || []) declarados.add(it.pago_id)
+    }
+    let billeteraSaldo = 0
+    for (const p of pagosSinRendir || []) {
+      if (declarados.has(p.id)) continue
+      const detalles: any[] = (p as any).pagos_detalle || []
+      if (detalles.length) {
+        for (const d of detalles) {
+          const tipo = (d.tipo_pago || "").toLowerCase()
+          if (tipo === "efectivo" || tipo === "cheque") billeteraSaldo += Number(d.monto)
+        }
+      } else if (((p as any).forma_pago || "").toLowerCase() !== "transferencia") {
+        billeteraSaldo += Number(p.monto)
+      }
+    }
+    billeteraSaldo = Math.round(billeteraSaldo * 100) / 100
 
     const { data: comisiones } = await supabase
       .from("comisiones")

@@ -283,9 +283,10 @@ function VendedorBilleteraInner() {
               <p className="text-emerald-200 text-xs">🧾 Cheques</p>
               <p className="font-bold text-sm">{formatCurrency(data.desglose.cheques)}</p>
             </div>
-            <div className="bg-emerald-600/60 rounded-xl px-2 py-2">
-              <p className="text-emerald-200 text-xs">🏦 Transf.</p>
+            <div className="bg-emerald-800/50 rounded-xl px-2 py-2 border border-emerald-500/40">
+              <p className="text-emerald-200 text-xs">🏦 Transf. directas</p>
               <p className="font-bold text-sm">{formatCurrency(data.desglose.transferencias)}</p>
+              <p className="text-emerald-300/80 text-[10px]">al banco · no suma</p>
             </div>
           </div>
           {data.en_viaje?.total > 0 && (
