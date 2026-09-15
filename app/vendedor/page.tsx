@@ -133,7 +133,7 @@ export default function VendedorHomePage() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-emerald-200 text-sm">💵 Efectivo en la calle</p>
+              <p className="text-emerald-200 text-sm">💰 Saldo en billetera</p>
               <p className="text-3xl font-bold mt-1">{formatCurrency(data?.billetera?.saldo ?? 0)}</p>
               {(data?.billetera?.cheques_cantidad || 0) > 0 && (
                 <p className="text-emerald-200 text-xs mt-0.5">

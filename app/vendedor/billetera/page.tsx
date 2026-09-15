@@ -16,6 +16,8 @@ interface Movimiento {
 
 interface BilleteraData {
   balance: number
+  /** Saldo cuenta corriente: efectivo en calle + saldos de rendiciones */
+  saldo?: number
   desglose: { efectivo: number; cheques: number; transferencias: number }
   cheques_cantidad?: number
   pagos_sin_rendir: number
@@ -268,8 +270,13 @@ function VendedorBilleteraInner() {
       <div className="p-4 space-y-4 max-w-2xl mx-auto">
         {/* Saldo */}
         <section className="bg-emerald-700 text-white rounded-2xl shadow-md p-6 text-center">
-          <p className="text-emerald-200 text-sm">💵 Efectivo en la calle</p>
-          <p className="text-4xl font-bold mt-1">{formatCurrency(data.balance)}</p>
+          <p className="text-emerald-200 text-sm">💰 Saldo en billetera</p>
+          <p className="text-4xl font-bold mt-1">{formatCurrency(data.saldo ?? data.balance)}</p>
+          {Math.abs((data.saldo ?? data.balance) - data.balance) > 0.005 && (
+            <p className="text-emerald-200 text-xs mt-0.5">
+              💵 {formatCurrency(data.balance)} en efectivo en la calle
+            </p>
+          )}
           {(data.cheques_cantidad || 0) > 0 && (
             <p className="text-emerald-100 text-sm mt-1 font-medium">
               🧾 {data.cheques_cantidad} {data.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano
@@ -292,21 +299,15 @@ function VendedorBilleteraInner() {
                 ({data.en_viaje.cantidad} {data.en_viaje.cantidad === 1 ? "cobro" : "cobros"}) — esperando
                 confirmación
               </p>
-              {(data.faltante_declarado ?? 0) > 0.005 && (
-                <p className="text-red-100 font-semibold mt-1">
-                  ⚠ Declaraste llevar {formatCurrency(data.faltante_declarado!)} menos de lo cobrado en efectivo: te queda
-                  como deuda con oficina.
-                </p>
-              )}
             </div>
           )}
           {Math.abs(data.deuda_rendiciones ?? 0) > 0.005 && (
             <div className={`rounded-xl px-3 py-2 mt-3 text-sm border ${(data.deuda_rendiciones ?? 0) > 0 ? "bg-red-400/20 border-red-300/40" : "bg-sky-400/20 border-sky-300/40"}`}>
               <p className="text-white">
                 {(data.deuda_rendiciones ?? 0) > 0 ? (
-                  <>⚠ Faltante de rendiciones: <span className="font-bold">{formatCurrency(data.deuda_rendiciones!)}</span> — lo seguís debiendo a oficina, se descuenta en tu próxima rendición.</>
+                  <>📒 Saldo de rendiciones: <span className="font-bold">{formatCurrency(data.deuda_rendiciones!)}</span> en tu cuenta — lo debés a oficina (retenciones y diferencias).</>
                 ) : (
-                  <>✔ Entregaste de más en rendiciones: <span className="font-bold">{formatCurrency(Math.abs(data.deuda_rendiciones!))}</span> a tu favor.</>
+                  <>✔ Saldo de rendiciones a tu favor: <span className="font-bold">{formatCurrency(Math.abs(data.deuda_rendiciones!))}</span> (entregaste de más).</>
                 )}
               </p>
             </div>

@@ -71,6 +71,13 @@ export async function GET() {
         else if (forma !== "transferencia") billeteraSaldo += Number(p.monto)
       }
     }
+    // + cuenta corriente de rendiciones (retenciones declaradas y diferencias)
+    const { data: difsCC } = await supabase
+      .from("billetera_movimientos")
+      .select("monto")
+      .in("viajante_id", session.vendedorIds)
+      .in("referencia_tipo", ["rendicion_diferencia", "rendicion_saldo_declarado"])
+    billeteraSaldo += (difsCC ?? []).reduce((s: number, m: any) => s + Number(m.monto), 0)
     billeteraSaldo = Math.round(billeteraSaldo * 100) / 100
 
     const { data: comisiones } = await supabase

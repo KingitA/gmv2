@@ -30,14 +30,11 @@ export async function GET(request: Request) {
     const declarados = new Set<string>()
     const { data: abiertas } = await supabase
       .from("rendiciones")
-      .select("id, efectivo_declarado, efectivo_registrado")
+      .select("id")
       .in("cobrador_id", session.vendedorIds)
       .eq("estado", "abierta")
-    // Faltante ya declarado (cobró X en efectivo, dijo que lleva menos):
-    // se muestra de entrada como deuda, sin esperar a que oficina confirme.
-    const faltanteDeclarado = Math.round(
-      (abiertas ?? []).reduce((s, r: any) => s + Math.max(0, Number(r.efectivo_registrado) - Number(r.efectivo_declarado)), 0) * 100,
-    ) / 100
+    // (El saldo que retiene al declarar ya queda como movimiento
+    // 'rendicion_saldo_declarado' en su cuenta corriente — rendicion_crear v2)
     if (abiertas?.length) {
       const { data: items } = await supabase
         .from("rendicion_items")
@@ -91,14 +88,15 @@ export async function GET(request: Request) {
 
     const totalPendiente = comisionesPendientes.reduce((s, c) => s + Number(c.monto), 0)
 
-    // Deuda por rendiciones: la billetera es una cuenta corriente. Si cobró
-    // $100 y entregó $90, los $10 quedan acá (movimientos 'rendicion_diferencia',
-    // positivo = debe, negativo = se le debe).
+    // Cuenta corriente de la billetera: saldos de rendiciones (positivo =
+    // debe, negativo = a favor). Dos orígenes:
+    //  · 'rendicion_saldo_declarado': lo que retuvo/entregó de más AL DECLARAR
+    //  · 'rendicion_diferencia': declaró X y oficina contó Y (al confirmar)
     const { data: difs } = await supabase
       .from("billetera_movimientos")
       .select("monto")
       .in("viajante_id", session.vendedorIds)
-      .eq("referencia_tipo", "rendicion_diferencia")
+      .in("referencia_tipo", ["rendicion_diferencia", "rendicion_saldo_declarado"])
     const deudaRendiciones = Math.round((difs ?? []).reduce((s: number, m: any) => s + Number(m.monto), 0) * 100) / 100
 
     const { data: historial, count } = await supabase
@@ -140,12 +138,14 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       balance,
+      // Saldo de la CUENTA CORRIENTE: efectivo en calle + saldos de rendiciones
+      // (retenciones declaradas, diferencias). Es EL número de la billetera.
+      saldo: Math.round((balance + deudaRendiciones) * 100) / 100,
       desglose,
       cheques_cantidad: chequesCantidad,
       pagos_sin_rendir: cantidadSinRendir,
       en_viaje: { total: enViajeTotal, cantidad: enViaje.length },
       deuda_rendiciones: deudaRendiciones,
-      faltante_declarado: faltanteDeclarado,
       comisiones_pendientes: comisionesPendientes,
       total_pendiente_comisiones: totalPendiente,
       historial: historialEnriquecido,
