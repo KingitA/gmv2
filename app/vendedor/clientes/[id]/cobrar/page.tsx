@@ -30,8 +30,15 @@ interface Comprobante {
   fecha: string
   total_factura: number
   saldo_pendiente: number
+  /** Reservado por cobros ya registrados sin confirmar (imputaciones pendientes) */
+  en_cobro?: number
   pedido_id: string | null
 }
+
+// Saldo realmente cobrable HOY: el del libro menos lo que ya está en un cobro
+// registrado sin confirmar — evita cobrar dos veces el mismo comprobante.
+const saldoCobrable = (cp: Comprobante) =>
+  Math.max(0, Math.round((cp.saldo_pendiente - (cp.en_cobro || 0)) * 100) / 100)
 
 interface PedidoCobro {
   id: string
@@ -175,7 +182,9 @@ export default function VendedorCobrarPage() {
   // TILDABLES igual que el sistema viejo de Recibos — el crédito elegido
   // descuenta del total a saldar y se aplica al confirmarse el cobro.
   const [creditos, setCreditos] = useState<{ id: string; tipo_comprobante: string; numero_comprobante: string; saldo_pendiente: number }[]>([])
-  const [aCuenta, setACuenta] = useState<{ pago_id: string; fecha: string; disponible: number }[]>([])
+  const [aCuenta, setACuenta] = useState<{ pago_id: string; fecha: string; disponible: number; estado?: string; monto?: number; mia?: boolean }[]>([])
+  // ¿Qué lista se ve? Facturados (lo que existe de verdad) o pedidos en curso
+  const [tab, setTab] = useState<"fact" | "pend">("fact")
   const [totalAFavor, setTotalAFavor] = useState(0)
   // credSel: clave "nc:<id>" | "ac:<id>" → monto a usar de ese crédito
   const [credSel, setCredSel] = useState<Record<string, number>>({})
@@ -256,6 +265,17 @@ export default function VendedorCobrarPage() {
     [pedidos, compsPorPedido]
   )
 
+  // Pestañas: FACTURADOS = lo que existe de verdad (pedidos con comprobantes
+  // emitidos); PENDIENTES = pedidos levantados aún sin facturar (anticipo)
+  const pedidosFacturados = useMemo(
+    () => pedidosVisibles.filter((p) => compsPorPedido.has(p.id)),
+    [pedidosVisibles, compsPorPedido]
+  )
+  const pedidosSinFacturar = useMemo(
+    () => pedidosVisibles.filter((p) => !compsPorPedido.has(p.id)),
+    [pedidosVisibles, compsPorPedido]
+  )
+
   // ── Totales (patrón /caja: métodos + NC 10% proyectada = cubierto) ──
   const totalImputado = Object.values(imputaciones).reduce((s, m) => s + (m || 0), 0)
   const totalPedidos = Object.values(pedidosSel).reduce((s, m) => s + (m || 0), 0)
@@ -292,7 +312,7 @@ export default function VendedorCobrarPage() {
     setImputaciones((prev) => {
       const next = { ...prev }
       if (next[cp.id] !== undefined) delete next[cp.id]
-      else next[cp.id] = cp.saldo_pendiente
+      else next[cp.id] = saldoCobrable(cp)
       return next
     })
   }
@@ -308,7 +328,7 @@ export default function VendedorCobrarPage() {
         const next = { ...prev }
         for (const cp of comps) {
           if (activo) delete next[cp.id]
-          else next[cp.id] = cp.saldo_pendiente
+          else if (saldoCobrable(cp) > 0.005) next[cp.id] = saldoCobrable(cp)
         }
         return next
       })
@@ -555,13 +575,18 @@ export default function VendedorCobrarPage() {
             <p className="text-gray-400 text-xs">
               {cp.fecha ? `${cp.fecha.slice(0, 10).split("-").reverse().join("/")} · ` : ""}saldo {formatCurrency(cp.saldo_pendiente)}
             </p>
+            {(cp.en_cobro || 0) > 0.005 && (
+              <p className="text-sky-600 text-xs font-bold">
+                🔒 {formatCurrency(cp.en_cobro!)} en cobro sin confirmar → cobrable {formatCurrency(saldoCobrable(cp))}
+              </p>
+            )}
           </div>
         </button>
         {activo && (
           <MontoInput
             valor={imputaciones[cp.id]}
             onCommit={(v) =>
-              setImputaciones((prev) => ({ ...prev, [cp.id]: Math.min(Math.max(0, v), cp.saldo_pendiente) }))
+              setImputaciones((prev) => ({ ...prev, [cp.id]: Math.min(Math.max(0, v), saldoCobrable(cp)) }))
             }
           />
         )}
@@ -593,13 +618,39 @@ export default function VendedorCobrarPage() {
         <section>
           <h2 className="text-lg font-bold text-gray-700 mb-2">¿Qué está pagando?</h2>
 
-          {pedidosVisibles.length === 0 && compsSueltos.length === 0 && devoluciones.length === 0 ? (
+          {/* Facturados (lo que existe) / Pedidos pendientes (en desarrollo) */}
+          <div className="grid grid-cols-2 gap-1 bg-gray-200/70 rounded-xl p-1 mb-2">
+            <button
+              onClick={() => setTab("fact")}
+              className={`rounded-lg py-2 text-sm font-bold ${tab === "fact" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-500"}`}
+            >
+              Facturados{pedidosFacturados.length + compsSueltos.length > 0 ? ` · ${pedidosFacturados.length + compsSueltos.length}` : ""}
+            </button>
+            <button
+              onClick={() => setTab("pend")}
+              className={`rounded-lg py-2 text-sm font-bold ${tab === "pend" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-500"}`}
+            >
+              Pedidos pendientes{pedidosSinFacturar.length > 0 ? ` · ${pedidosSinFacturar.length}` : ""}
+            </button>
+          </div>
+          {tab === "pend" && (
+            <p className="text-amber-700 text-xs bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-2">
+              Pedidos levantados que la oficina todavía no facturó. Cobrarlos registra un <b>anticipo</b> (queda a cuenta
+              y se imputa cuando salga la factura).
+            </p>
+          )}
+
+          {(tab === "fact"
+            ? pedidosFacturados.length === 0 && compsSueltos.length === 0 && devoluciones.length === 0 && creditos.length === 0 && aCuenta.length === 0
+            : pedidosSinFacturar.length === 0) ? (
             <div className="bg-white rounded-xl border border-gray-200 p-4 text-center text-gray-500">
-              Sin pedidos ni comprobantes pendientes. Lo que cobres queda como pago a cuenta.
+              {tab === "fact"
+                ? "Sin comprobantes facturados pendientes. Lo que cobres queda como pago a cuenta."
+                : "No hay pedidos sin facturar."}
             </div>
           ) : (
             <div className="space-y-2">
-              {pedidosVisibles.map((p) => {
+              {(tab === "fact" ? pedidosFacturados : pedidosSinFacturar).map((p) => {
                 const comps = compsPorPedido.get(p.id) || []
                 const estado = p.facturado
                   ? { label: "FACTURADO", cls: "bg-green-100 text-green-700" }
@@ -692,7 +743,7 @@ export default function VendedorCobrarPage() {
                 )
               })}
 
-              {compsSueltos.length > 0 && (
+              {tab === "fact" && compsSueltos.length > 0 && (
                 <div className="space-y-1.5 pt-1">
                   <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400 px-1">Otros comprobantes</p>
                   {compsSueltos.map((cp) => (
@@ -704,10 +755,10 @@ export default function VendedorCobrarPage() {
               {/* Créditos del cliente (NC/REV + plata a cuenta): TILDABLES como
                   en el sistema viejo de Recibos — descuentan del total a saldar
                   y se aplican a los comprobantes al confirmarse el cobro. */}
-              {totalAFavor > 0.005 && (
+              {tab === "fact" && (totalAFavor > 0.005 || aCuenta.length > 0 || creditos.length > 0) && (
                 <div className="space-y-1.5 pt-1">
                   <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-600 px-1">
-                    Créditos a favor — tildá los que descuentan de este cobro
+                    Créditos y entregas a cuenta — tildá lo que descuenta de este cobro
                   </p>
                   {creditos.map((c) => {
                     const key = `nc:${c.id}`
@@ -761,9 +812,24 @@ export default function VendedorCobrarPage() {
                     const key = `ac:${p.pago_id}`
                     const disp = round2(p.disponible)
                     const activo = credSel[key] !== undefined
+                    const rechazada = p.estado === "rechazado"
+                    // Dónde está la plata: el vendedor lo ve de un vistazo
+                    const seguimiento = rechazada
+                      ? { label: "⛔ Rechazada por oficina — NO descuenta", cls: "text-red-600" }
+                      : p.estado === "pendiente_rendicion"
+                        ? { label: p.mia ? "🧍 En tu poder · sin rendir" : "🧍 En poder del vendedor · sin rendir", cls: "text-amber-700" }
+                        : p.estado === "pendiente"
+                          ? { label: "🏢 En oficina · sin confirmar", cls: "text-sky-700" }
+                          : { label: "✅ Confirmada por oficina", cls: "text-emerald-700" }
                     return (
-                      <div key={p.pago_id} className={`rounded-xl border-2 px-3 py-2 flex items-center gap-2 ${activo ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
+                      <div
+                        key={p.pago_id}
+                        className={`rounded-xl border-2 px-3 py-2 flex items-center gap-2 ${
+                          rechazada ? "border-red-200 bg-red-50/50 opacity-80" : activo ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"
+                        }`}
+                      >
                         <button
+                          disabled={rechazada}
                           onClick={() => setCredSel((prev) => {
                             const next = { ...prev }
                             if (next[key] !== undefined) delete next[key]
@@ -772,13 +838,22 @@ export default function VendedorCobrarPage() {
                           })}
                           className="flex items-center gap-2 min-w-0 flex-1 text-left"
                         >
-                          <span className="text-lg shrink-0">{activo ? "☑" : "☐"}</span>
+                          <span className="text-lg shrink-0">{rechazada ? "•" : activo ? "☑" : "☐"}</span>
                           <div className="min-w-0">
-                            <p className="font-bold text-gray-900 text-sm">Entrega a cuenta {p.fecha?.split("-").reverse().join("/")}</p>
-                            <p className="text-emerald-600 text-xs">disponible {formatCurrency(disp)}</p>
+                            <p className="font-bold text-gray-900 text-sm">
+                              Entrega a cuenta {p.fecha?.split("-").reverse().join("/")}
+                              {p.monto ? ` · ${formatCurrency(p.monto)}` : ""}
+                            </p>
+                            <p className={`text-xs font-bold ${seguimiento.cls}`}>{seguimiento.label}</p>
+                            {!rechazada && (
+                              <p className="text-emerald-600 text-xs">
+                                disponible {formatCurrency(disp)}
+                                {p.monto && disp < p.monto - 0.005 ? ` de ${formatCurrency(p.monto)} (el resto ya está aplicado)` : ""}
+                              </p>
+                            )}
                           </div>
                         </button>
-                        {activo && (
+                        {activo && !rechazada && (
                           <MontoInput
                             valor={credSel[key]}
                             onCommit={(v) => setCredSel((prev) => ({ ...prev, [key]: Math.min(Math.max(0, v), disp) }))}
@@ -796,7 +871,7 @@ export default function VendedorCobrarPage() {
               )}
 
               {/* Devoluciones descontables */}
-              {devoluciones.length > 0 && (
+              {tab === "fact" && devoluciones.length > 0 && (
                 <div className="space-y-1.5 pt-1">
                   <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-600 px-1">
                     🔄 Devoluciones a descontar

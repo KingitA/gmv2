@@ -120,7 +120,12 @@ export async function validarCreditos(
         .single()
       if (!pg) throw new Error("Pago a cuenta inexistente")
       if (pg.cliente_id !== clienteId) throw new Error("El pago a cuenta no es de este cliente")
-      if (pg.estado !== "confirmado") throw new Error("El pago a cuenta no está confirmado")
+      // Vale también la entrega que sigue en viaje (sin rendir) o en oficina
+      // (sin confirmar): el movimiento existe y reservarlo acá evita cobrar
+      // dos veces. Si oficina después la rechaza, la imputación pendiente de
+      // ese pago muere con él (nunca llegó al libro mayor).
+      if (!["confirmado", "pendiente", "pendiente_rendicion"].includes(pg.estado))
+        throw new Error(`El pago a cuenta está ${pg.estado} y no se puede usar como crédito`)
       const { data: imps } = await supabase
         .from("imputaciones")
         .select("monto_imputado, estado")
@@ -219,11 +224,22 @@ export async function ejecutarCreditosDePago(
           estado: "pendiente",
         })
         if (insErr) throw new Error(insErr.message)
-        const { error: confErr } = await supabase.rpc("cobranza_confirmar", {
-          p_pago_id: p.credito_id,
-          p_usuario_id: null,
-        })
-        if (confErr) throw new Error(confErr.message)
+        // Solo se re-confirma el pago viejo si YA está confirmado (aplica la
+        // imputación nueva, idempotente). Si sigue pendiente / sin rendir, la
+        // imputación queda pendiente pegada al pago y se aplica cuando ese
+        // pago pase por su propia confirmación de oficina.
+        const { data: pgViejo } = await supabase
+          .from("pagos_clientes")
+          .select("estado")
+          .eq("id", p.credito_id)
+          .maybeSingle()
+        if (pgViejo?.estado === "confirmado") {
+          const { error: confErr } = await supabase.rpc("cobranza_confirmar", {
+            p_pago_id: p.credito_id,
+            p_usuario_id: null,
+          })
+          if (confErr) throw new Error(confErr.message)
+        }
       }
     } catch (e: any) {
       avisos.push(`Crédito ${p.credito_id.slice(0, 8)} → ${p.debito_id.slice(0, 8)} por $${p.monto}: ${e.message}`)

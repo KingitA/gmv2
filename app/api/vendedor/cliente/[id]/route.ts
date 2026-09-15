@@ -67,6 +67,35 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .is("anulado_en", null)
       .order("fecha", { ascending: true })
 
+    // ── EN COBRO: imputaciones PENDIENTES de pagos vivos sobre estos
+    // comprobantes (cobros ya registrados que la oficina aún no confirmó).
+    // El front las resta del saldo mostrado/seleccionable: sin esto el
+    // vendedor puede cobrar dos veces el mismo comprobante.
+    const compIds = (comprobantes || []).map((c: any) => c.id)
+    const enCobroPorComp = new Map<string, number>()
+    if (compIds.length) {
+      const { data: impPend } = await supabase
+        .from("imputaciones")
+        .select("comprobante_id, monto_imputado, pago_id")
+        .in("comprobante_id", compIds)
+        .eq("estado", "pendiente")
+      const pagoIdsPend = [...new Set((impPend || []).map((i: any) => i.pago_id).filter(Boolean))]
+      const estadoPago = new Map<string, string>()
+      if (pagoIdsPend.length) {
+        const { data: pgs } = await supabase.from("pagos_clientes").select("id, estado").in("id", pagoIdsPend)
+        for (const p of pgs || []) estadoPago.set(p.id, p.estado)
+      }
+      for (const i of impPend || []) {
+        const est = estadoPago.get(i.pago_id)
+        if (est === "pendiente" || est === "pendiente_rendicion")
+          enCobroPorComp.set(i.comprobante_id, (enCobroPorComp.get(i.comprobante_id) || 0) + Number(i.monto_imputado))
+      }
+    }
+    const comprobantesConReserva = (comprobantes || []).map((c: any) => ({
+      ...c,
+      en_cobro: Math.round((enCobroPorComp.get(c.id) || 0) * 100) / 100,
+    }))
+
     // Pedidos cobrables sin facturar (anticipo, mismo criterio que el ERP):
     // sin comprobantes emitidos, sin anticipo previo, y ya confirmados (no en_venta)
     const { data: pedidosCliente } = await supabase
@@ -107,12 +136,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .neq("estado_pago", "anulado")
       .order("fecha", { ascending: true })
 
-    // b) Entregas a cuenta: pagos confirmados sin imputar (fórmula única)
+    // b) Entregas a cuenta con disponible sin imputar. No solo confirmadas:
+    // también las que están EN VIAJE (sin rendir) o EN OFICINA (sin confirmar)
+    // — el movimiento existe y el vendedor debe poder tildarlo para no cobrar
+    // dos veces. Las rechazadas de los últimos 30 días se listan informativas
+    // (NO descuentan).
     const { data: pagosConfirmados } = await supabase
       .from("pagos_clientes")
-      .select("id, monto, fecha_pago")
+      .select("id, monto, fecha_pago, estado, vendedor_id, creado_por")
       .eq("cliente_id", id)
-      .eq("estado", "confirmado")
+      .in("estado", ["confirmado", "pendiente", "pendiente_rendicion", "rechazado"])
     const confIds = (pagosConfirmados || []).map((p: any) => p.id)
     const impsPorPagoConf = new Map<string, any[]>()
     if (confIds.length) {
@@ -125,10 +158,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         impsPorPagoConf.get(i.pago_id)!.push(i)
       }
     }
+    const cutoffRechazadas = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
     const aCuenta = (pagosConfirmados || [])
       .map((p: any) => ({
         pago_id: p.id,
         fecha: p.fecha_pago,
+        estado: p.estado as string,
+        monto: Number(p.monto) || 0,
+        // ¿La tiene este usuario? (para el rótulo "en tu poder")
+        mia: session.vendedorIds.includes(p.vendedor_id) || p.creado_por === session.user.id,
         disponible: disponibleDePago(
           p.monto,
           (impsPorPagoConf.get(p.id) || []).map((i: any) => ({
@@ -138,10 +176,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           })),
         ),
       }))
-      .filter((p: any) => p.disponible > 0.005)
+      .filter((p: any) =>
+        p.estado === "rechazado"
+          ? (p.fecha || "") >= cutoffRechazadas
+          : p.disponible > 0.005
+      )
     const totalAFavor = Math.round((
       (creditosVivos || []).reduce((s: number, c: any) => s + Math.abs(Number(c.saldo_pendiente)), 0)
-      + aCuenta.reduce((s: number, p: any) => s + p.disponible, 0)
+      + aCuenta.filter((p: any) => p.estado !== "rechazado").reduce((s: number, p: any) => s + p.disponible, 0)
     ) * 100) / 100
 
     // Devoluciones sin confirmar (todavía no tienen NC/reversa emitida), con
@@ -204,7 +246,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         actualizado_at: actualizadoAt,
         actualizado_por_nombre: actualizadoPorNombre,
       },
-      comprobantes: comprobantes || [],
+      comprobantes: comprobantesConReserva,
       creditos: creditosVivos || [],
       a_cuenta: aCuenta,
       total_a_favor: totalAFavor,
