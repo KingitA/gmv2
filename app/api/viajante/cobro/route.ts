@@ -348,20 +348,30 @@ export async function POST(request: NextRequest) {
       }
 
       // ── Billetera (el trigger actualiza el saldo) ──
-      const medioDominante = metodos.length === 1
-        ? (metodos[0].tipo === "cheque" ? "cheque" : metodos[0].tipo === "transferencia" ? "transferencia" : "efectivo")
-        : null
-      await supabase.from("billetera_movimientos").insert({
-        viajante_id: vendedorId,
-        tipo: "cobro_cliente",
-        medio: medioDominante,
-        monto: montoPago,
-        concepto: `Cobro ${nombreDe.get(c.cliente_id) || "cliente"}`,
-        referencia_id: pago.id,
-        referencia_tipo: "pago_cliente",
-        fecha: new Date().toISOString(),
-        creado_por: session.user.id,
-      })
+      // Un movimiento POR MEDIO, no uno solo mezclado: un cobro de efectivo +
+      // transferencia genera dos registros con su medio y monto reales, así el
+      // historial refleja lo mismo que pagos_detalle (de donde salen el
+      // desglose de la billetera y la rendición). Σ movimientos = monto del pago.
+      const porMedio = new Map<string, number>()
+      for (const d of detalles) {
+        const medio = d.tipo_pago === "cheque" ? "cheque" : d.tipo_pago === "transferencia" ? "transferencia" : "efectivo"
+        porMedio.set(medio, Math.round(((porMedio.get(medio) || 0) + d.monto) * 100) / 100)
+      }
+      if (!porMedio.size) porMedio.set("efectivo", montoPago)
+      const nombreCliente = nombreDe.get(c.cliente_id) || "cliente"
+      await supabase.from("billetera_movimientos").insert(
+        [...porMedio.entries()].map(([medio, monto]) => ({
+          viajante_id: vendedorId,
+          tipo: "cobro_cliente",
+          medio,
+          monto,
+          concepto: porMedio.size > 1 ? `Cobro ${nombreCliente} · ${medio}` : `Cobro ${nombreCliente}`,
+          referencia_id: pago.id,
+          referencia_tipo: "pago_cliente",
+          fecha: new Date().toISOString(),
+          creado_por: session.user.id,
+        }))
+      )
 
       pagosCreados.push({
         pago_id: pago.id,
