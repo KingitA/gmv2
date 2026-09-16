@@ -300,7 +300,17 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
       {/* Comprobantes sin pedido asociado */}
       {sinPedido.length > 0 && (
         <div className="border rounded-lg">
-          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b">Otros comprobantes</div>
+          <div className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-muted-foreground border-b">
+            <Checkbox
+              checked={sinPedido.every((c) => seleccionados[c.id] !== undefined)}
+              onCheckedChange={() => togglePedidoCompleto(sinPedido)}
+              title="Seleccionar todos"
+            />
+            <span>Otros comprobantes</span>
+            <span className="ml-auto font-mono text-orange-600">
+              saldo ${fmtARS(sinPedido.reduce((s, c) => s + Number(c.saldo_pendiente), 0))}
+            </span>
+          </div>
           {sinPedido.map((comp) => {
             const checked = seleccionados[comp.id] !== undefined
             return (
