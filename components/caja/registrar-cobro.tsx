@@ -2,7 +2,9 @@
 
 // Barra de registro rápido de la Caja del Día — misma experiencia de
 // imputación que choferes/vendedores (ComprobantesSelector: pedidos completos,
-// comprobantes dentro del pedido, anticipos con 10% contado, chip "Dto. ctdo"),
+// comprobantes dentro del pedido, anticipos con 10% contado, chip "Dto. ctdo").
+// Al elegir cliente se muestra directo su resumen de cuenta (switch
+// Facturados / Todos) para imputar o dejar el cobro pendiente de imputación,
 // más bonificación 10% por pago contado y fotos de comprobantes con carga,
 // cámara o PEGAR captura (Ctrl+V).
 // Backend: POST /api/pagos-clientes (metodos + imputaciones + pedidos_contado
@@ -17,13 +19,15 @@ import {
   ComprobantesSelector,
   PEDIDO_PREFIX,
   type Comprobante,
+  type ModoPedidos,
+  type ResumenCuenta,
 } from "@/components/pagos/ComprobantesSelector"
 import { BcraDeudorMulti } from "@/components/pagos/BcraDeudorChip"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
-import { Camera, ChevronDown, ChevronUp, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
+import { Camera, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
 
 export interface CuentaFondos {
   cuenta_tipo: string
@@ -80,8 +84,13 @@ export function RegistrarCobro({
   const [montoConfirmado, setMontoConfirmado] = useState(0)
   // Cartel "Falta pagar $X": ajuste por redondeo vs dejar saldo pendiente
   const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
-  // Imputación (selector de pedidos/comprobantes, igual que choferes/vendedores)
-  const [imputarAbierto, setImputarAbierto] = useState(false)
+  // Resumen de cuenta del cliente (selector de pedidos/comprobantes, igual que
+  // choferes/vendedores) — siempre visible al elegir cliente. Arranca en
+  // "Facturados" (lo cobrable); el switch pasa a "Todos" (facturados, sin
+  // facturar → anticipo, y saldados como historial). Imputar es opcional: sin
+  // selección el cobro queda pendiente de imputación.
+  const [modoPedidos, setModoPedidos] = useState<ModoPedidos>("facturados")
+  const [resumen, setResumen] = useState<ResumenCuenta | null>(null)
   const [seleccionados, setSeleccionados] = useState<Record<string, number>>({})
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
@@ -114,7 +123,8 @@ export function RegistrarCobro({
   useEffect(() => {
     setSeleccionados({})
     setAplicarContado(false)
-    setImputarAbierto(false)
+    setModoPedidos("facturados")
+    setResumen(null)
   }, [cliente?.id])
 
   const totalSeleccionado = useMemo(
@@ -242,7 +252,8 @@ export function RegistrarCobro({
     setCliente(null)
     limpiarMetodoActual()
     setMetodosAgregados([])
-    setImputarAbierto(false)
+    setModoPedidos("facturados")
+    setResumen(null)
     setSeleccionados({})
     setAplicarContado(false)
     setArchivos([])
@@ -638,41 +649,74 @@ export function RegistrarCobro({
         ))}
       </div>
 
-      {/* ── Imputación: pedidos y comprobantes, igual que choferes/vendedores ── */}
+      {/* ── Resumen de cuenta del cliente: pedidos facturados / todos ── */}
       {cliente && (
         <div className="mt-2 border-t border-slate-100 pt-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <button
-              onClick={() => setImputarAbierto((v) => !v)}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
-            >
-              {imputarAbierto ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              Imputar a pedidos / comprobantes (opcional — si no, queda pendiente de imputación)
-            </button>
-            {imputarAbierto && (
-              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
-                <input
-                  type="checkbox"
-                  checked={aplicarContado}
-                  onChange={(e) => setAplicarContado(e.target.checked)}
-                  className="h-3.5 w-3.5"
-                />
-                10% descuento pago contado
-              </label>
-            )}
-          </div>
-          {imputarAbierto && (
-            <div className="mt-2">
-              <ComprobantesSelector
-                clienteId={cliente.id}
-                seleccionados={seleccionados}
-                onChange={setSeleccionados}
-                onComprobantesLoaded={setComprobantes}
-                onDtosHechosLoaded={setDtosHechos}
-                onContadoPedidosChange={setContadoPedidos}
-              />
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="text-[11px] font-bold uppercase text-slate-400">Resumen de cuenta</span>
+              <div className="inline-flex rounded-lg bg-slate-200 p-0.5" role="tablist" aria-label="Pedidos a mostrar">
+                {(
+                  [
+                    { key: "facturados", label: "Facturados" },
+                    { key: "todos", label: "Todos" },
+                  ] as { key: ModoPedidos; label: string }[]
+                ).map((m) => (
+                  <button
+                    key={m.key}
+                    role="tab"
+                    aria-selected={modoPedidos === m.key}
+                    onClick={() => setModoPedidos(m.key)}
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                      modoPedidos === m.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              {resumen && (
+                <span className="text-xs text-slate-500">
+                  Saldo a cobrar <b className="text-slate-800" style={NUM}>$ {fmt(resumen.saldoACobrar)}</b>
+                  <span className="text-slate-300"> · </span>
+                  {resumen.pedidosFacturados} facturado{resumen.pedidosFacturados === 1 ? "" : "s"}
+                  {resumen.otrosComprobantes > 0 && ` + ${resumen.otrosComprobantes} sin pedido`}
+                  <span className="text-slate-300"> · </span>
+                  {resumen.pedidosSinFacturar} sin facturar
+                  {resumen.pedidosSaldados > 0 && (
+                    <>
+                      <span className="text-slate-300"> · </span>
+                      {resumen.pedidosSaldados} saldado{resumen.pedidosSaldados === 1 ? "" : "s"}
+                    </>
+                  )}
+                </span>
+              )}
+              <span className="text-[11px] text-slate-400">
+                {totalSeleccionado > 0 ? "Se imputa a lo tildado" : "Sin tildar nada, queda pendiente de imputación"}
+              </span>
             </div>
-          )}
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+              <input
+                type="checkbox"
+                checked={aplicarContado}
+                onChange={(e) => setAplicarContado(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              10% descuento pago contado
+            </label>
+          </div>
+          <div className="mt-2">
+            <ComprobantesSelector
+              clienteId={cliente.id}
+              seleccionados={seleccionados}
+              onChange={setSeleccionados}
+              onComprobantesLoaded={setComprobantes}
+              onDtosHechosLoaded={setDtosHechos}
+              onContadoPedidosChange={setContadoPedidos}
+              modo={modoPedidos}
+              onResumenLoaded={setResumen}
+            />
+          </div>
         </div>
       )}
 

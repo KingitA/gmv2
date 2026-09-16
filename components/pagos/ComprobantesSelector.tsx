@@ -28,12 +28,20 @@ interface Pedido {
   estado: string
 }
 
+export type ModoPedidos = "facturados" | "todos"
+
 interface Props {
   clienteId: string
   seleccionados: Record<string, number>  // { comprobante_id | "pedido:<id>": monto }
   onChange: (next: Record<string, number>) => void
   onComprobantesLoaded?: (comps: Comprobante[]) => void
   onDtosHechosLoaded?: (dtosHechos: Set<string>) => void
+  // Qué pedidos listar (default "todos" = comportamiento histórico):
+  //  - "facturados": solo pedidos con comprobantes a cobrar (+ otros comprobantes)
+  //  - "todos": facturados a cobrar + sin facturar (anticipo) + ya saldados (solo lectura)
+  modo?: ModoPedidos
+  // Resumen de lo cargado (para cabeceras tipo "resumen de cuenta")
+  onResumenLoaded?: (r: ResumenCuenta) => void
   // Pedidos (sin facturar) anticipados con 10% contado: se cobra el 90% y al
   // facturar se genera la NC del 10%. Emite el set de pedido_id marcados.
   onContadoPedidosChange?: (pedidoIds: Set<string>) => void
@@ -42,9 +50,17 @@ interface Props {
 // Prefijo de clave para anticipos a pedidos sin facturar (quedan como pago a cuenta).
 export const PEDIDO_PREFIX = "pedido:"
 
+export interface ResumenCuenta {
+  saldoACobrar: number        // suma de saldos pendientes de comprobantes cobrables
+  pedidosFacturados: number   // pedidos con comprobantes a cobrar
+  pedidosSinFacturar: number  // pedidos sin ningún comprobante (anticipo)
+  pedidosSaldados: number     // pedidos facturados sin saldo (historial)
+  otrosComprobantes: number   // comprobantes cobrables sin pedido vivo
+}
+
 const fmtARS = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })
 
-export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange }: Props) {
+export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange, modo = "todos", onResumenLoaded }: Props) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [pedidosFacturados, setPedidosFacturados] = useState<Set<string>>(new Set())
@@ -104,6 +120,19 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
       for (const c of lista) if (ncsObs.some((o) => o.includes(c.numero_comprobante))) dtos.add(c.id)
       setConDtoHecho(dtos)
       onDtosHechosLoaded?.(dtos)
+      if (onResumenLoaded) {
+        const pedList = (peds || []) as Pedido[]
+        const vivos = new Set(pedList.map((p) => p.id))
+        const conSaldo = new Set(lista.filter((c) => c.pedido_id && vivos.has(c.pedido_id)).map((c) => c.pedido_id as string))
+        const factSet = new Set((facturados || []).map((f: any) => f.pedido_id).filter(Boolean))
+        onResumenLoaded({
+          saldoACobrar: lista.reduce((s, c) => s + Number(c.saldo_pendiente || 0), 0),
+          pedidosFacturados: conSaldo.size,
+          pedidosSinFacturar: pedList.filter((p) => !factSet.has(p.id)).length,
+          pedidosSaldados: pedList.filter((p) => factSet.has(p.id) && !conSaldo.has(p.id)).length,
+          otrosComprobantes: lista.filter((c) => !(c.pedido_id && vivos.has(c.pedido_id))).length,
+        })
+      }
       setLoading(false)
     })
   }, [clienteId])
@@ -165,12 +194,24 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
 
   if (loading) return <div className="text-sm text-muted-foreground py-4">Cargando…</div>
 
-  // Pedidos a mostrar: los que tienen comprobantes pendientes (a cobrar), o los
-  // SIN facturar (sin ningún comprobante) → anticipo. Los facturados y ya pagados no se muestran.
-  const pedidosVisibles = pedidos.filter((p) => compsPorPedido.has(p.id) || !pedidosFacturados.has(p.id))
+  // Pedidos a mostrar según modo:
+  //  - facturados: solo los que tienen comprobantes a cobrar.
+  //  - todos: además los SIN facturar (anticipo) y los facturados ya saldados
+  //    (solo lectura, para ver la cuenta completa).
+  const esSaldado = (p: Pedido) => pedidosFacturados.has(p.id) && !compsPorPedido.has(p.id)
+  const pedidosVisibles =
+    modo === "facturados"
+      ? pedidos.filter((p) => compsPorPedido.has(p.id))
+      : pedidos
 
   if (pedidosVisibles.length === 0 && sinPedido.length === 0)
-    return <div className="text-sm text-muted-foreground py-4 text-center">No hay pedidos ni comprobantes pendientes para este cliente</div>
+    return (
+      <div className="text-sm text-muted-foreground py-4 text-center">
+        {modo === "facturados"
+          ? "No hay pedidos facturados con saldo para este cliente"
+          : "No hay pedidos ni comprobantes pendientes para este cliente"}
+      </div>
+    )
 
   return (
     <div className="space-y-2">
@@ -181,6 +222,20 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
         const todosCompsSel = facturado && comps.every((c) => seleccionados[c.id] !== undefined)
         const algunoSel = comps.some((c) => seleccionados[c.id] !== undefined)
         const abierto = expandido[ped.id] ?? false
+
+        if (esSaldado(ped))
+          return (
+            <div key={ped.id} className="border rounded-lg border-slate-100 bg-slate-50/60 text-slate-400">
+              <div className="flex items-center gap-2 p-2.5">
+                <span className="w-4" />
+                <span className="w-4" />
+                <span className="font-semibold text-sm">Pedido #{ped.numero_pedido}</span>
+                <span className="text-xs">{formatDateAR(ped.fecha)}</span>
+                <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">Saldado</Badge>
+                <span className="ml-auto font-mono text-sm">${fmtARS(Number(ped.total))}</span>
+              </div>
+            </div>
+          )
 
         return (
           <div key={ped.id} className={`border rounded-lg ${anticipoSel || algunoSel ? "border-blue-300 bg-blue-50/40" : ""}`}>
