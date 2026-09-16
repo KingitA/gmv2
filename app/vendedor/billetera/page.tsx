@@ -176,11 +176,11 @@ function VendedorBilleteraInner() {
           <div className="min-w-0 flex-1">
             <p className="font-bold text-gray-900 text-sm leading-snug">{a.descripcion}</p>
             <p className="text-gray-400 text-xs mt-0.5">
-              SKU {a.sku} · {a.categoria} · ×{a.cantidad} · {formatCurrency(a.precio_unitario)} c/u
+              SKU {a.sku} · {a.categoria} · ×{a.cantidad} · {formatCurrency(a.precio_unitario)} c/u s/IVA
             </p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-gray-500 text-xs">{formatCurrency(a.subtotal)}</p>
+            <p className="text-gray-500 text-xs">{formatCurrency(a.subtotal)} <span className="text-gray-300">s/IVA</span></p>
             <p className="text-emerald-700 font-bold text-sm">
               {a.comision_pct ? `${a.comision_pct}% · ` : ""}
               {formatCurrency(a.comision_monto)}
@@ -212,6 +212,11 @@ function VendedorBilleteraInner() {
         </header>
 
         <div className="p-4 space-y-3 max-w-2xl mx-auto">
+          {/* Todos los montos de esta pantalla van SIN IVA: la comisión se
+              calcula sobre el neto, así % × precio = comisión cierra a ojo */}
+          <p className="text-gray-400 text-xs text-center">
+            Precios y subtotales <b>sin IVA</b> — tu % de comisión se aplica sobre estos montos.
+          </p>
           {detalleLoading ? (
             <div className="text-center py-12">
               <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
@@ -440,7 +445,7 @@ function VendedorBilleteraInner() {
                         </p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-gray-500 text-xs">{formatCurrency(p.total_monto)}</p>
+                        <p className="text-gray-500 text-xs">{formatCurrency(p.total_monto)} <span className="text-gray-300">s/IVA</span></p>
                         <p className="text-emerald-700 font-bold">{formatCurrency(p.total_comision)}</p>
                         {(p.total_debito_contado || 0) > 0 && (
                           <p className="text-amber-600 text-[10px] leading-tight">

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { getPrecioNeto } from "@/lib/comisiones/calcular"
 
 // GET /api/vendedor/comisiones?tipo=cobrada|vendida
 // Comisiones del vendedor. REGLA DE ORO: el vendedor solo ve plata que
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
       supabase
         .from("kardex")
         .select(
-          "id, pedido_id, numero_pedido, cliente_id, fecha, fecha_comprobante_cobrado, articulo_id, subtotal_total, comision_viajante_monto, descuento_financiero_pct, comprobante_cobrado"
+          "id, pedido_id, numero_pedido, cliente_id, fecha, fecha_comprobante_cobrado, articulo_id, subtotal_neto, metodo_facturacion, articulo_iva_ventas, comision_viajante_monto, descuento_financiero_pct, comprobante_cobrado"
         )
         .eq("tipo_movimiento", "venta")
         .not("comision_viajante_monto", "is", null)
@@ -102,7 +103,11 @@ export async function GET(req: NextRequest) {
       const agg = aggMap.get(pid)!
       const bruto = Number(k.comision_viajante_monto ?? 0)
       const neto = netoLinea(k)
-      agg.total_monto += Number(k.subtotal_total ?? 0)
+      // Monto SIN IVA: la misma base sobre la que se calcula la comisión
+      // (subtotal_neto; en presupuesto de artículo blanco se quita además el
+      // IVA implícito ÷1,21 — regla getPrecioNeto del motor). Así el % del
+      // vendedor cierra a ojo contra lo que muestra la pantalla.
+      agg.total_monto += getPrecioNeto(Number(k.subtotal_neto ?? 0), k.metodo_facturacion, k.articulo_iva_ventas)
       // El número que ve el vendedor es SIEMPRE el neto; el débito va aparte
       // para poder mostrar el porqué ("pactada X − débito 10% = neto").
       agg.total_comision += neto
@@ -128,7 +133,7 @@ export async function GET(req: NextRequest) {
         cliente_nombre: clienteMap.get(agg.cliente_id ?? "") ?? "—",
         fecha: agg.fecha,
         fecha_cobro: agg.fecha_cobro,
-        total_monto: agg.total_monto,
+        total_monto: Math.round(agg.total_monto * 100) / 100,
         total_comision: Math.round(agg.total_comision * 100) / 100,
         total_debito_contado: Math.round(agg.total_debito_contado * 100) / 100,
         cantidad_skus: agg.skus.size,

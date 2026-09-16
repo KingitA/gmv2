@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { getPrecioNeto } from "@/lib/comisiones/calcular"
 
 // GET /api/vendedor/comisiones/detalle?pedido_id=&tipo=cobrada|vendida
 // Drill-down de un pedido: artículos con precio, % comisión y comisión.
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
       let q = supabase
         .from("kardex")
         .select(
-          "id, articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, cantidad, subtotal_total, precio_unitario_final, comision_viajante_pct, comision_viajante_monto, descuento_financiero_pct, comprobante_venta_id, fecha_comprobante_cobrado, comprobante_cobrado"
+          "id, articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, cantidad, subtotal_neto, metodo_facturacion, articulo_iva_ventas, comision_viajante_pct, comision_viajante_monto, descuento_financiero_pct, comprobante_venta_id, fecha_comprobante_cobrado, comprobante_cobrado"
         )
         .eq("pedido_id", pedidoId)
         .eq("tipo_movimiento", "venta")
@@ -40,19 +41,27 @@ export async function GET(req: NextRequest) {
     // Si el comprobante se cobró con bonificación contado, la línea trae
     // descuento_financiero_pct y la comisión neta = pactada × (1 − pct/100).
     // La pactada y el débito viajan aparte para explicar el porqué.
+    // PRECIOS SIN IVA: la comisión se calcula sobre el neto, así que precio
+    // unitario y subtotal se muestran netos para que % × precio = comisión
+    // cierre a ojo. Con IVA incluido, un 5% sobre $1.000 mostraría $41,32 y
+    // parecería mal calculado. Se usa la MISMA base que el motor de comisiones
+    // (getPrecioNeto): subtotal_neto, y en presupuesto de artículo blanco
+    // además se le quita el IVA implícito (÷1,21).
     const mapArticulo = (r: any) => {
       const pactada = Number(r.comision_viajante_monto ?? 0)
       const descPct = Number(r.descuento_financiero_pct ?? 0)
       const neta = descPct > 0 ? Math.round(pactada * (1 - descPct / 100) * 100) / 100 : pactada
+      const cantidad = Number(r.cantidad ?? 0)
+      const subtotalNeto = Math.round(getPrecioNeto(Number(r.subtotal_neto ?? 0), r.metodo_facturacion, r.articulo_iva_ventas) * 100) / 100
       return {
         kardex_id: r.id,
         articulo_id: r.articulo_id,
         sku: r.articulo_sku ?? "—",
         descripcion: r.articulo_descripcion ?? r.articulo_id ?? "—",
         categoria: r.articulo_categoria ?? "—",
-        cantidad: Number(r.cantidad ?? 0),
-        precio_unitario: Number(r.precio_unitario_final ?? 0),
-        subtotal: Number(r.subtotal_total ?? 0),
+        cantidad,
+        precio_unitario: cantidad > 0 ? Math.round((subtotalNeto / cantidad) * 100) / 100 : 0,
+        subtotal: subtotalNeto,
         comision_pct: Number(r.comision_viajante_pct ?? 0),
         comision_monto: neta, // neto: lo que efectivamente cobra
         comision_pactada: pactada,
