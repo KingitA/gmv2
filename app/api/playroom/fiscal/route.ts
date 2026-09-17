@@ -57,7 +57,10 @@ export async function GET(req: NextRequest) {
       // Los documentos de APERTURA (saldos migrados del sistema anterior) no
       // son emisiones propias: ya fueron declarados por el sistema viejo y no
       // deben aparecer en el control fiscal (sí en cobranzas/aging).
-      .not('observaciones', 'ilike', 'APERTURA GM%')
+      // OJO: `not ilike` solo NO alcanza — con observaciones NULL la condición
+      // da NULL y la fila desaparece (ocultaba 18 de 39 comprobantes, incluida
+      // la FA 0007-00000005 del 17/09). Hay que incluir explícitamente los NULL.
+      .or('observaciones.is.null,observaciones.not.ilike.APERTURA GM%')
       .order('fecha', { ascending: true })
       .order('numero_comprobante', { ascending: true }))
 
