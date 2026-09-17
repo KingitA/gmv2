@@ -6,6 +6,7 @@
 import { downloadAttachment, downloadDriveFileAndExport, downloadPublicDriveFile, type ParsedEmail } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
 import { processOrder, processOrderText, processOrderTextMulti, type ParseResult } from '@/lib/actions/ai-order-import'
+import { GEMINI_MODEL } from './gemini-model'
 import Anthropic from '@anthropic-ai/sdk'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
@@ -552,7 +553,7 @@ Respondé SOLO con el ID del cliente (el UUID) o "NONE" si no podés identificar
                 const geminiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ''
                 if (geminiKey) {
                     const genAI = new GoogleGenerativeAI(geminiKey)
-                    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', generationConfig: { temperature: 0.1, responseMimeType: 'application/json', maxOutputTokens: 64 } })
+                    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { temperature: 0.1, responseMimeType: 'application/json', maxOutputTokens: 64 } })
                     const prompt = `Analizá si el viajante está pidiendo una forma de facturación ESPECÍFICA para este pedido.
 Mensaje: "${fullTextContext}"
 

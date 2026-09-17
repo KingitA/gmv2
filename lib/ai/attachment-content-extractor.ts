@@ -6,6 +6,7 @@
 
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GEMINI_MODEL } from './gemini-model'
 import { getSupabaseAdmin } from './supabase-admin'
 
 // SEGURIDAD: Solo usar variables server-side. NUNCA usar NEXT_PUBLIC_ para API keys.
@@ -157,7 +158,7 @@ export async function extractAttachmentContents(
 // ─── Image OCR with Gemini ─────────────────────────────
 
 async function extractTextFromImage(buffer: Buffer, mimeType: string): Promise<string> {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
     const base64Data = buffer.toString('base64')
 
     const prompt = `Extraé TODO el texto visible en esta imagen. 
@@ -186,7 +187,7 @@ async function extractTextFromImage(buffer: Buffer, mimeType: string): Promise<s
 // ─── PDF Text Extraction with Gemini ───────────────────
 
 async function extractTextFromPDF(buffer: Buffer): Promise<string> {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
     const base64Data = buffer.toString('base64')
 
     const prompt = `Extraé TODO el texto de este documento PDF.

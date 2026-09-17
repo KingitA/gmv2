@@ -1,6 +1,7 @@
 "use server"
 
 import { GoogleGenerativeAI } from "@google/generative-ai"
+import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK } from "@/lib/ai/gemini-model"
 import Anthropic from "@anthropic-ai/sdk"
 import { searchProductsByVector } from "./embeddings"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -193,12 +194,15 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
 
     // 2. Processing Images/PDFs
     const base64Data = buffer.toString("base64")
+    // 16k tokens de salida: un PDF de ~80 renglones ya superaba los 4k y el JSON
+    // llegaba cortado ("el pedido es demasiado grande"). Además el prompt pide
+    // JSON compacto (sin campos null) para que cada renglón cueste menos.
     const generationConfig = {
-        maxOutputTokens: 4096,
+        maxOutputTokens: 16384,
         temperature: 0.1,
         responseMimeType: "application/json",
     }
-    let model = genAI.getGenerativeModel({ model: "gemini-2.0-flash", generationConfig })
+    let model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig })
 
     const prompt = `
     Analyze this order image/document.
@@ -210,6 +214,7 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
     3. If there is a number like 12 or 120, check if it's the requested amount or just the packaging size. 
     4. Try to detect the customer name (e.g. next to "cliente:" or at the top of the page). If you cannot find a clear name, set "customer" to null.
     5. Return ONLY a JSON list of items found and the customer name.
+    6. Be COMPACT: omit any field whose value would be null or empty (only "quantity" is mandatory; include "code" and/or "description" when present). Do not add whitespace or line breaks. Never skip items: a list of 100 lines must return 100 items.
 
     JSON Structure:
     {
@@ -227,31 +232,33 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
             { inlineData: { data: base64Data, mimeType: mimeType } },
         ]))
     } catch (e: any) {
-        console.warn("Gemini 2.0 Flash failed for non-XLSX, trying fallbacks...", e.message)
-        try {
-            model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-001", generationConfig })
-            result = await withGeminiRetry(() => model.generateContent([
-                prompt,
-                { inlineData: { data: base64Data, mimeType: mimeType } },
-            ]))
-        } catch (e2) {
-            console.warn("Gemini 2.0 Flash 001 failed for non-XLSX, trying gemini-flash-latest...", e2)
-            model = genAI.getGenerativeModel({ model: "gemini-flash-latest", generationConfig })
-            result = await withGeminiRetry(() => model.generateContent([
-                prompt,
-                { inlineData: { data: base64Data, mimeType: mimeType } },
-            ]))
-        }
+        // Google retira modelos sin aviso (404 "no longer available"): un solo
+        // fallback al alias estable, no una cadena de nombres muertos.
+        console.warn(`Gemini ${GEMINI_MODEL} failed for non-XLSX, trying ${GEMINI_MODEL_FALLBACK}...`, e.message)
+        model = genAI.getGenerativeModel({ model: GEMINI_MODEL_FALLBACK, generationConfig })
+        result = await withGeminiRetry(() => model.generateContent([
+            prompt,
+            { inlineData: { data: base64Data, mimeType: mimeType } },
+        ]))
     }
 
     const response = await result.response
     const text = response.text()
 
+    // Respuesta cortada por el tope de tokens: NO se acepta un pedido a medias.
+    // (tryParseJson "arregla" un JSON truncado y antes podía entrar un pedido
+    // incompleto sin ningún aviso.)
+    const finishReason = response.candidates?.[0]?.finishReason
+    if (finishReason === "MAX_TOKENS") {
+        console.error(`Gemini cortó la respuesta (MAX_TOKENS) para ${fileName}; largo: ${text.length}`)
+        throw new Error("El pedido es demasiado grande: la lectura se cortó antes del final. Dividí el archivo en dos partes y subilas por separado.")
+    }
+
     const parsedData = tryParseJson(text)
 
     if (!parsedData) {
         console.error("Failed to parse Gemini JSON for non-XLSX. Raw text sample:", text.substring(0, 500))
-        throw new Error("El pedido es demasiado grande o la respuesta de la IA se cortó. Por favor intenta subirlo en partes si es posible o revisa los artículos cargados.")
+        throw new Error("No se pudo interpretar la respuesta de la IA para este archivo. Probá de nuevo o subilo en partes.")
     }
 
     console.log("Gemini Extracted:", parsedData)
@@ -387,11 +394,11 @@ export interface MultiOrderParseResult {
  */
 export async function processOrderTextMulti(text: string): Promise<MultiOrderParseResult> {
     const generationConfig = {
-        maxOutputTokens: 8192,
+        maxOutputTokens: 16384,
         temperature: 0.1,
         responseMimeType: "application/json",
     }
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash", generationConfig })
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig })
 
     const prompt = `
     Analyze this email/message content. It may contain MULTIPLE separate orders for DIFFERENT customers.
@@ -617,7 +624,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                                 if (geminiKey) {
                                     const genAI = new GoogleGenerativeAI(geminiKey)
                                     const model = genAI.getGenerativeModel({
-                                        model: "gemini-2.0-flash",
+                                        model: GEMINI_MODEL,
                                         generationConfig: { temperature: 0.1, responseMimeType: "application/json", maxOutputTokens: 64 }
                                     })
                                     const candidateList = filteredCandidates.map((c: any, i: number) =>
@@ -661,7 +668,7 @@ export async function processMatches(parsedData: any): Promise<ParseResult> {
                         if (geminiKey) {
                             const genAI = new GoogleGenerativeAI(geminiKey)
                             const model = genAI.getGenerativeModel({
-                                model: "gemini-2.0-flash",
+                                model: GEMINI_MODEL,
                                 generationConfig: { temperature: 0.1, responseMimeType: "application/json", maxOutputTokens: 128 }
                             })
                             const prompt = `Extraé los atributos clave del artículo comercial: "${originalTextForFrontend}".

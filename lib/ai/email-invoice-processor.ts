@@ -6,6 +6,7 @@
 import { downloadAttachment, type ParsedEmail } from './gmail'
 import { analyzeXlsxInvoice } from './claude-xlsx-analyzer'
 import type { AttachmentContent } from './attachment-content-extractor'
+import { GEMINI_MODEL } from './gemini-model'
 import { getSupabaseAdmin } from './supabase-admin'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { MatchingEngine } from '@/lib/matching/matcher'
@@ -664,7 +665,7 @@ async function parseInvoiceWithGemini(
     filename: string,
     mimeType: string
 ): Promise<ParsedInvoiceData | null> {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
     const base64Data = buffer.toString('base64')
     const geminiMime = mimeType.startsWith('image/') ? mimeType : 'application/pdf'
@@ -717,7 +718,7 @@ Si no es una factura/comprobante fiscal, respondé: {"error": "No es un comproba
 
 // ── Parse invoice data from email body text ────────────
 async function parseInvoiceFromText(bodyText: string): Promise<ParsedInvoiceData | null> {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
     const prompt = `Analizá este texto de email y extraé datos de factura/comprobante si los hay.
 
