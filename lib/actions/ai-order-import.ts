@@ -192,6 +192,33 @@ export async function processOrder(buffer: Buffer, fileName: string, mimeType: s
         }
     }
 
+    // 2a. PDF con capa de texto → SIN visión. Un modelo "leyendo" 80 códigos de
+    // 6 dígitos a ojo inventa dígitos y corre cantidades de fila (17/09/2026:
+    // 001018 → 000017, 336909 → 332489). Si el PDF tiene texto:
+    //   - tabla "código cantidad" → parseo determinístico (cero IA);
+    //   - otro texto → IA de TEXTO (caracteres exactos, no píxeles).
+    // Solo un PDF escaneado (sin texto) sigue yendo a visión.
+    const isPdf = mimeType.includes("pdf") || fileNameLower.endsWith(".pdf")
+    if (isPdf) {
+        const { extraerTextoPdf, parsearTablaCodigoCantidad } = await import("@/lib/import/pdf-texto")
+        const textoPdf = await extraerTextoPdf(buffer)
+        if (textoPdf) {
+            const tabla = parsearTablaCodigoCantidad(textoPdf)
+            if (tabla) {
+                console.log(`[processOrder] PDF "${fileName}": tabla código/cantidad parseada sin IA — ${tabla.length} renglones`)
+                return await processMatches({
+                    customer: null,
+                    items: tabla.map(t => ({ description: null, quantity: t.quantity, code: t.code, brand: null, color: null })),
+                })
+            }
+            if (textoPdf.length >= 150) {
+                console.log(`[processOrder] PDF "${fileName}": texto extraído (${textoPdf.length} chars) → IA de texto`)
+                return await processOrderText(textoPdf)
+            }
+        }
+        console.log(`[processOrder] PDF "${fileName}": sin capa de texto → visión`)
+    }
+
     // 2. Processing Images/PDFs
     const base64Data = buffer.toString("base64")
     // 16k tokens de salida: un PDF de ~80 renglones ya superaba los 4k y el JSON
