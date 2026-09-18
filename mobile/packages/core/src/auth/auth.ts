@@ -52,13 +52,35 @@ export class Auth {
 
   async iniciar(): Promise<EstadoAuth> {
     try {
-      const raw = await this.almacen.get(CLAVE)
-      this._sesion = raw ? (JSON.parse(raw) as SesionMovil) : null
-    } catch {
+      this._sesion = await this.leerSesionGuardada()
+    } catch (e) {
+      // El almacén falló las N veces (no es "no hay sesión"): no hay forma de
+      // operar sin identidad, pero queda registrado para diagnosticar.
+      console.error("[auth] no se pudo leer la sesión guardada", e)
       this._sesion = null
     }
     this.set(this._sesion ? "autenticado" : "anonimo")
     return this._estado
+  }
+
+  /**
+   * Lee la sesión del almacén seguro. Distingue "no hay sesión" (null) de "falló
+   * la lectura" (reintenta): tras reiniciar, el Keystore de equipos de gama baja
+   * puede tardar o fallar las primeras operaciones, y un error NUNCA debe
+   * desloguear a un operario que está sin señal (MOBILE.md §7).
+   */
+  private async leerSesionGuardada(intentos = 4): Promise<SesionMovil | null> {
+    let ultimo: unknown
+    for (let i = 0; i < intentos; i++) {
+      try {
+        const raw = await this.almacen.get(CLAVE)
+        return raw ? (JSON.parse(raw) as SesionMovil) : null
+      } catch (e) {
+        ultimo = e
+        await new Promise((r) => setTimeout(r, 250 * (i + 1)))
+      }
+    }
+    throw ultimo
   }
 
   async ingresar(email: string, password: string): Promise<void> {
