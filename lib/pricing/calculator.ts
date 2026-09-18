@@ -5,7 +5,7 @@
 // + bonificación/recargo ocasional
 // + sistema de fórmulas configurables por lista/grupo/iva (listas_precio_reglas)
 
-import { evaluarFormula } from "@/lib/pricing/formula-evaluator"
+import { evaluarFormula } from "./formula-evaluator"
 
 export interface DescuentoTipado {
   tipo: "comercial" | "financiero" | "promocional"

@@ -30,78 +30,23 @@ import {
   motivoBloqueo,
   ESTADO_LABEL,
 } from "@/lib/pedidos/estados"
-
-function toMetodoFacturacion(raw: string | null | undefined): MetodoFacturacion {
-  if (!raw) return "Final"
-  if (raw === "Factura (21% IVA)" || raw === "Factura") return "Factura"
-  if (raw === "Presupuesto") return "Presupuesto"
-  return "Final"
-}
-
-// Resuelve qué listaId + metodoRaw usar para un segmento dado
-// Jerarquía: override pedido → default cliente → fallback general
-// Centinelas de UI que NUNCA deben llegar como lista/método concretos: si el
-// usuario eligió "por segmento", el valor general queda vacío y resuelve por segmento.
-const CENTINELAS_SEGMENTO = new Set(["PorSegmento", "porsegmento", "__por_segmento__", "por_segmento"])
-function limpiarCentinela(v?: string | null): string | undefined {
-  return v && !CENTINELAS_SEGMENTO.has(v) ? v : undefined
-}
-
-function resolverListaSegmento(
-  segmento: Segmento,
-  overrides: {
-    lista_limpieza_pedido_id?: string; metodo_limpieza_pedido?: string
-    lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
-    lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
-    lista_precio_pedido_id?: string;   metodo_facturacion_pedido?: string
-  },
-  cliente: {
-    lista_limpieza_id?: string; metodo_limpieza?: string
-    lista_perf0_id?: string;    metodo_perf0?: string
-    lista_perf_plus_id?: string; metodo_perf_plus?: string
-    lista_precio_id?: string;   metodo_facturacion?: string
-  },
-): { listaId: string | null; metodoRaw: string } {
-  const lc = limpiarCentinela
-  const general = {
-    listaId: lc(overrides.lista_precio_pedido_id) || lc(cliente.lista_precio_id) || null,
-    metodoRaw: lc(overrides.metodo_facturacion_pedido) || lc(cliente.metodo_facturacion) || "Final",
-  }
-
-  if (segmento === "limpieza") {
-    return {
-      listaId: lc(overrides.lista_limpieza_pedido_id) || lc(cliente.lista_limpieza_id) || general.listaId,
-      metodoRaw: lc(overrides.metodo_limpieza_pedido) || lc(cliente.metodo_limpieza) || general.metodoRaw,
-    }
-  }
-  if (segmento === "perf0") {
-    return {
-      listaId: lc(overrides.lista_perf0_pedido_id) || lc(cliente.lista_perf0_id) || general.listaId,
-      metodoRaw: lc(overrides.metodo_perf0_pedido) || lc(cliente.metodo_perf0) || general.metodoRaw,
-    }
-  }
-  // perf_plus
-  return {
-    listaId: lc(overrides.lista_perf_plus_pedido_id) || lc(cliente.lista_perf_plus_id) || general.listaId,
-    metodoRaw: lc(overrides.metodo_perf_plus_pedido) || lc(cliente.metodo_perf_plus) || general.metodoRaw,
-  }
-}
-
-// ─── Condiciones por proveedor (Feature 1) ───────────────────────────────────
-// El proveedor sólo identifica QUÉ mercadería (articulos.proveedor_id) recibe estas
-// condiciones para este cliente. lista/método se aplican al precio; los 3 descuentos
-// se aplican como líneas en el comprobante (general/viajante) o como bonificada (mercadería).
-// Condición de segmento (lista/método/descuentos). El segmento se identifica por
-// proveedor o por marca. Marca gana sobre proveedor cuando un artículo cae en ambos.
-export type CondicionSegmento = {
-  lista_precio_id: string | null
-  metodo_facturacion: string | null
-  dto_general_pct: number | null
-  dto_viajante_pct: number | null
-  dto_mercaderia_pct: number | null
-}
-export type CondicionProveedor = CondicionSegmento & { proveedor_id: string }
-export type CondicionMarca = CondicionSegmento & { marca_id: string }
+// Resolución lista/método/bonificaciones: módulo puro compartido con las apps
+// móviles (lib/pricing/resolver.ts). Ver MOBILE.md → "Precios".
+import {
+  toMetodoFacturacion,
+  resolverListaSegmento,
+  mergeCondicionesProveedor,
+  mergeCondicionesMarca,
+  resolverCondSegmento,
+  mezclarOverride,
+  resolverBonifItem,
+  type CondicionSegmento,
+  type CondicionProveedor,
+  type CondicionMarca,
+} from "@/lib/pricing/resolver"
+export type { CondicionSegmento, CondicionProveedor, CondicionMarca } from "@/lib/pricing/resolver"
+import { prepararMotorCliente, precioArticuloParaCliente, descuentosPorArticulo } from "@/lib/pricing/motor"
+import { cargarInsumosCliente, ARTICULO_PRECIO_COLS } from "@/lib/pricing/cargar-insumos"
 
 const CONDICION_PROVEEDOR_COLS =
   "proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct"
@@ -152,38 +97,6 @@ async function fetchCondicionesMarca(
   return map
 }
 
-// Combina las condiciones del cliente con overrides de formulario (al crear el pedido,
-// cuando todavía no existe pedido_proveedor_condicion).
-function mergeCondicionesProveedor(
-  base: Map<string, CondicionProveedor>,
-  overrides?: CondicionProveedor[] | null,
-): Map<string, CondicionProveedor> {
-  const map = new Map(base)
-  for (const o of overrides || []) if (o?.proveedor_id) map.set(o.proveedor_id, o)
-  return map
-}
-
-function mergeCondicionesMarca(
-  base: Map<string, CondicionMarca>,
-  overrides?: CondicionMarca[] | null,
-): Map<string, CondicionMarca> {
-  const map = new Map(base)
-  for (const o of overrides || []) if (o?.marca_id) map.set(o.marca_id, o)
-  return map
-}
-
-// Resuelve la condición de segmento de un artículo: MARCA gana sobre PROVEEDOR.
-function resolverCondSegmento(
-  articulo: { proveedor_id?: string | null; marca_id?: string | null },
-  condProvMap: Map<string, CondicionProveedor>,
-  condMarcaMap: Map<string, CondicionMarca>,
-): { cond: CondicionSegmento | null; segKey: string | null } {
-  const marcaCond = (articulo.marca_id && condMarcaMap.get(articulo.marca_id)) || null
-  if (marcaCond) return { cond: marcaCond, segKey: `marca:${articulo.marca_id}` }
-  const provCond = (articulo.proveedor_id && condProvMap.get(articulo.proveedor_id)) || null
-  if (provCond) return { cond: provCond, segKey: `prov:${articulo.proveedor_id}` }
-  return { cond: null, segKey: null }
-}
 
 // ─── Helper: fetch todas las reglas de fórmulas (una sola vez por request) ────
 async function fetchFormulasReglas(
@@ -301,36 +214,6 @@ async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
 
 function round2(n: number) { return Math.round(n * 100) / 100 }
 
-/**
- * Devuelve el descuento_viajante (%) aplicable al segmento dado.
- * Prioriza segmento específico sobre segmento NULL (todos).
- */
-function getDescuentoViajante(
-  bonifs: Array<{ segmento: string | null; porcentaje: number }>,
-  segmento: Segmento,
-): number {
-  const key = SEGMENTO_BONIF[segmento]
-  const especifico = bonifs.find(b => b.segmento === key)
-  if (especifico) return especifico.porcentaje
-  const general = bonifs.find(b => b.segmento === null || b.segmento === "")
-  return general?.porcentaje ?? 0
-}
-
-/**
- * Devuelve la bonificación general (%) aplicable al segmento dado.
- * Misma resolución que viajante: segmento específico > segmento NULL (todos).
- */
-function getDescuentoGeneral(
-  bonifs: Array<{ segmento: string | null; porcentaje: number }>,
-  segmento: Segmento,
-): number {
-  const key = SEGMENTO_BONIF[segmento]
-  const especifico = bonifs.find(b => b.segmento === key)
-  if (especifico) return especifico.porcentaje
-  const general = bonifs.find(b => b.segmento === null || b.segmento === "")
-  return general?.porcentaje ?? 0
-}
-
 /** Trae las bonificaciones general + viajante activas de un cliente. */
 // `pedidoOverrides.bonif_pedido` (columna pedidos.bonif_pedido jsonb o override
 // en memoria del preview): { viajante: {limpieza_bazar, perf0, perf_plus} }.
@@ -358,40 +241,6 @@ async function fetchBonifGeneralViajante(
   }
 }
 
-// Override por segmento del pedido sobre la ficha: los segmentos definidos en
-// el override pisan; el resto queda como en la ficha. Vale para general y viajante.
-function mezclarOverride(
-  ficha: Array<{ segmento: string | null; porcentaje: number }>,
-  bonifPedido: BonifPedido | null | undefined,
-  tipo: "general" | "viajante",
-): Array<{ segmento: string | null; porcentaje: number }> {
-  const ovr = normalizarBonifPedido(bonifPedido)?.[tipo]
-  if (!ovr) return ficha
-  const filasOvr = bonifSegAFilas(ovr)
-  const segsOvr = new Set(filasOvr.map((f) => f.segmento))
-  // La fila "sin segmento" de la ficha sigue valiendo para los segmentos no pisados,
-  // pero una fila específica pisada se reemplaza.
-  return [...filasOvr, ...ficha.filter((f) => !segsOvr.has(f.segmento))]
-}
-
-/**
- * Resuelve los % de general/viajante para un ítem.
- * Con condición por proveedor/marca: cada % que la condición DEFINE (no null) pisa;
- * el que deja en null se hereda de la resolución normal (override del pedido > ficha).
- * Antes un null se tomaba como 0 y se perdía, p. ej., el viajante "solo este pedido"
- * en la mercadería de un proveedor con condición que solo fijaba el general.
- */
-function resolverBonifItem(
-  cond: CondicionSegmento | null,
-  general: Array<{ segmento: string | null; porcentaje: number }>,
-  viajante: Array<{ segmento: string | null; porcentaje: number }>,
-  segmento: Segmento,
-): { generalPct: number; viajantePct: number } {
-  const definido = (v: number | null | undefined) => v !== null && v !== undefined && Number.isFinite(Number(v))
-  const generalPct = cond && definido(cond.dto_general_pct) ? Number(cond.dto_general_pct) : getDescuentoGeneral(general, segmento)
-  const viajantePct = cond && definido(cond.dto_viajante_pct) ? Number(cond.dto_viajante_pct) : getDescuentoViajante(viajante, segmento)
-  return { generalPct, viajantePct }
-}
 
 // buildKardexDescuentos vive en lib/kardex/descuentos.ts (la comparte el
 // sincronizador de kardex desde los renglones: lib/kardex/sincronizar-pedido.ts).
@@ -416,64 +265,26 @@ export async function previewPrecioArticulo(
 ): Promise<{ precio: number; precioNeto: number; contado: number; especial: { bruto: number; oferta_pct: number } | null; descripcion: string; sku: string; unidades_por_bulto: number; bonifViajantePct: number }> {
   const supabase = await createClient()
 
-  // Todo lo que depende solo de (cliente, artículo) se trae en paralelo: una
-  // sola ida y vuelta a la DB en vez de siete en serie.
-  const [clienteRes, articuloRes, formulasReglas, condProvBase, condMarcaBase, bonifs] = await Promise.all([
-    supabase.from("clientes").select(`
-      id, vendedor_id, metodo_facturacion, lista_precio_id,
-      lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0,
-      lista_perf_plus_id, metodo_perf_plus
-    `).eq("id", clienteId).single(),
+  // Insumos del cliente + artículo en paralelo; el precio sale del motor
+  // isomórfico (lib/pricing/motor.ts), el mismo que ejecutan las apps móviles.
+  const [insumos, articulo] = await Promise.all([
+    cargarInsumosCliente(supabase, clienteId),
     fetchArticuloConDescuentos(supabase, articuloId),
-    fetchFormulasReglas(supabase),
-    fetchCondicionesProveedor(supabase, clienteId),
-    fetchCondicionesMarca(supabase, clienteId),
-    fetchBonifGeneralViajante(supabase, clienteId, overrides),
   ])
-
-  if (!clienteRes.data) throw new Error("Cliente no encontrado")
-  const clienteInfo = clienteRes.data
-  const articulo = articuloRes
-  const artMeta = articulo
-  const listasCache: Record<string, DatosLista> = {}
-
-  // Condición por proveedor + marca (del cliente + override del formulario). Marca gana.
-  const condicionesProveedor = mergeCondicionesProveedor(condProvBase, overrides.condiciones_proveedor)
-  const condicionesMarca = mergeCondicionesMarca(condMarcaBase, overrides.condiciones_marca)
-  const { cond } = resolverCondSegmento(articulo, condicionesProveedor, condicionesMarca)
-
-  const segmento = detectarSegmento(articulo)
-  let listaId: string | null
-  let metodoRaw: string
-  if (cond) {
-    listaId = cond.lista_precio_id
-    metodoRaw = cond.metodo_facturacion || "Final"
-  } else {
-    const resuelto = resolverListaSegmento(segmento, overrides, clienteInfo)
-    listaId = resuelto.listaId
-    metodoRaw = resuelto.metodoRaw
-  }
-  const { general, viajante } = bonifs
-  const bonif = resolverBonifItem(cond, general, viajante, segmento)
-  const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
-  const metodo = toMetodoFacturacion(metodoRaw)
-
-  const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
+  const p = precioArticuloParaCliente(insumos, articulo, overrides)
 
   return {
-    precio: precio.precioAlCliente,
-    precioNeto: precio.precioNeto,
+    precio: p.precio,
+    precioNeto: p.precioNeto,
     // Contado = 10% menos (regla de la NC de pago contado).
     // Lista Especial NO tiene precio contado: es neto fijo + IVA.
-    contado: precio.esListaEspecial ? precio.precioAlCliente : round2(precio.precioAlCliente * 0.9),
-    especial: precio.esListaEspecial
-      ? { bruto: precio.precioBrutoEspecial, oferta_pct: precio.ofertaEspecialPct }
-      : null,
-    descripcion: artMeta?.descripcion || "",
-    sku: artMeta?.sku || "",
-    unidades_por_bulto: artMeta?.unidades_por_bulto || 1,
+    contado: p.contado,
+    especial: p.especial,
+    descripcion: articulo?.descripcion || "",
+    sku: articulo?.sku || "",
+    unidades_por_bulto: articulo?.unidades_por_bulto || 1,
     // Ya aplicada en `precio`; se expone para que la app del vendedor lo muestre
-    bonifViajantePct: precio.bonifViajantePct,
+    bonifViajantePct: p.bonifViajantePct,
   }
 }
 
@@ -578,22 +389,9 @@ export async function previewPreciosArticulos(
   const ids = [...new Set(articuloIds)].slice(0, 600)
   const supabase = await createClient()
 
-  const { data: clienteInfo } = await supabase
-    .from("clientes")
-    .select(`
-      id, vendedor_id, metodo_facturacion, lista_precio_id,
-      lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0,
-      lista_perf_plus_id, metodo_perf_plus
-    `)
-    .eq("id", clienteId)
-    .single()
-  if (!clienteInfo) throw new Error("Cliente no encontrado")
-
-  const [{ data: articulos }, { data: descuentosDB }] = await Promise.all([
-    supabase
-      .from("articulos")
-      .select("id,proveedor_id,marca_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)")
-      .in("id", ids),
+  const [insumos, { data: articulos }, { data: descuentosDB }] = await Promise.all([
+    cargarInsumosCliente(supabase, clienteId),
+    supabase.from("articulos").select(ARTICULO_PRECIO_COLS).in("id", ids),
     supabase
       .from("articulos_descuentos")
       .select("articulo_id,tipo,porcentaje,orden")
@@ -601,52 +399,22 @@ export async function previewPreciosArticulos(
       .order("orden"),
   ])
 
-  const descPorArt = new Map<string, DescuentoTipado[]>()
-  for (const d of descuentosDB || []) {
-    const list = descPorArt.get(d.articulo_id) || []
-    list.push({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden })
-    descPorArt.set(d.articulo_id, list)
-  }
-
-  const formulasReglas = await fetchFormulasReglas(supabase)
-  const listasCache: Record<string, DatosLista> = {}
-  const condicionesProveedor = await fetchCondicionesProveedor(supabase, clienteId)
-  const condicionesMarca = await fetchCondicionesMarca(supabase, clienteId)
-  const { general, viajante } = await fetchBonifGeneralViajante(supabase, clienteId, overrides)
+  const descPorArt = descuentosPorArticulo(descuentosDB || [])
+  // Misma resolución que previewPrecioArticulo: motor isomórfico (lib/pricing/motor.ts)
+  const motor = prepararMotorCliente(insumos, overrides)
 
   const out: Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }> = []
   for (const art of articulos || []) {
     try {
-      const articulo = { ...art, descuentos: descPorArt.get(art.id) || [] }
-      const segmento = detectarSegmento(articulo)
-      const { cond } = resolverCondSegmento(articulo, condicionesProveedor, condicionesMarca)
-      let listaId: string | null
-      let metodoRaw: string
-      if (cond) {
-        listaId = cond.lista_precio_id
-        metodoRaw = cond.metodo_facturacion || "Final"
-      } else {
-        const r = resolverListaSegmento(segmento, overrides, clienteInfo)
-        listaId = r.listaId
-        metodoRaw = r.metodoRaw
-      }
-      const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
-      const metodo = toMetodoFacturacion(metodoRaw)
-      const bonif = resolverBonifItem(cond, general, viajante, segmento)
-      const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
+      const p = motor.precio({ ...art, descuentos: descPorArt.get(art.id) || [] })
       out.push({
         articulo_id: art.id,
-        precio: precio.precioAlCliente,
-        precioNeto: precio.precioNeto,
-        // Contado = 10% menos (misma regla que la NC de pago contado / precio_base_contado).
-        // Lista Especial NO tiene precio contado: es neto fijo + IVA.
-        contado: precio.esListaEspecial ? precio.precioAlCliente : round2(precio.precioAlCliente * 0.9),
-        // precio > neto → el precio mostrado lleva IVA incluido; iguales → sin IVA (presupuesto)
-        ivaIncluido: Math.abs(precio.precioAlCliente - precio.precioNeto) > 0.01,
-        especial: precio.esListaEspecial
-          ? { bruto: precio.precioBrutoEspecial, oferta_pct: precio.ofertaEspecialPct }
-          : null,
-        bonifViajantePct: precio.bonifViajantePct,
+        precio: p.precio,
+        precioNeto: p.precioNeto,
+        contado: p.contado,
+        ivaIncluido: p.ivaIncluido,
+        especial: p.especial,
+        bonifViajantePct: p.bonifViajantePct,
       })
     } catch {
       // artículo sin precio calculable: se omite de la respuesta

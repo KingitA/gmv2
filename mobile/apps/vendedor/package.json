@@ -1,0 +1,24 @@
+{
+  "name": "@gm/app-vendedor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p . && vite build",
+    "typecheck": "tsc --noEmit -p .",
+    "cap:sync": "cap sync android"
+  },
+  "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor/android": "8.5.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/network": "^8.0.1",
+    "@gm/capacitor-lector": "*",
+    "@gm/core": "*",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router": "^8.4.0"
+  }
+}

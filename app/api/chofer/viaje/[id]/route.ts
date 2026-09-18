@@ -22,7 +22,7 @@ export async function GET(
       .select(`
         id, nombre, fecha, estado, vehiculo, chofer_id,
         dinero_nafta, gastos_peon, gastos_hotel, gastos_adicionales,
-        observaciones, zona_id, zonas(nombre)
+        observaciones, zona_id, zonas!zona_id(nombre)
       `)
       .eq("id", id)
       .single()

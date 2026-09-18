@@ -1,0 +1,33 @@
+{
+  "name": "gm-mobile",
+  "private": true,
+  "type": "module",
+  "description": "Apps Android (Capacitor) de GMV2: vendedor, chofer, deposito. Ver ../MOBILE.md",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run test -w @gm/core",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev:chofer": "npm run dev -w @gm/app-chofer",
+    "dev:vendedor": "npm run dev -w @gm/app-vendedor",
+    "dev:deposito": "npm run dev -w @gm/app-deposito",
+    "build:apks": "node scripts/build-apks.mjs",
+    "keystores": "node scripts/crear-keystores.mjs"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.20.3",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^27.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}

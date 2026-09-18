@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GM Chofer</string>
+    <string name="title_activity_main">GM Chofer</string>
+    <string name="package_name">com.gm.chofer</string>
+    <string name="custom_url_scheme">com.gm.chofer</string>
+</resources>
