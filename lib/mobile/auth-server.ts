@@ -24,12 +24,22 @@ export function habilitado(app: AppMovil, roles: string[]) {
   return ROLES_APP[app].some((r) => roles.includes(r))
 }
 
-export function aSesionMovil(session: any, roles: string[]): SesionMovil {
+/** Nombre legible del usuario (tabla usuarios), o null. */
+export async function nombreDe(userId: string): Promise<string | null> {
+  try {
+    const { data } = await createAdminClient().from("usuarios").select("nombre").eq("id", userId).maybeSingle()
+    return data?.nombre ?? null
+  } catch {
+    return null
+  }
+}
+
+export function aSesionMovil(session: any, roles: string[], nombre: string | null = null): SesionMovil {
   return {
     access_token: session.access_token,
     refresh_token: session.refresh_token,
     expires_at: session.expires_at ?? Math.floor(Date.now() / 1000) + (session.expires_in ?? 3600),
-    user: { id: session.user.id, email: session.user.email ?? null },
+    user: { id: session.user.id, email: session.user.email ?? null, nombre },
     roles,
   }
 }

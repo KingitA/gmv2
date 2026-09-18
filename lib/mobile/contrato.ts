@@ -20,7 +20,8 @@ export interface SesionMovil {
   refresh_token: string
   /** epoch segundos */
   expires_at: number
-  user: { id: string; email: string | null }
+  /** nombre: tabla usuarios (lo muestran las apps; opcional por compatibilidad) */
+  user: { id: string; email: string | null; nombre?: string | null }
   roles: string[]
 }
 

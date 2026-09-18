@@ -13,6 +13,8 @@ export interface OpcionesApi {
 export interface OpcionesRequest {
   method?: string
   body?: unknown
+  /** multipart (fotos): se manda tal cual, sin Content-Type (lo pone el navegador). Solo operaciones online-only. */
+  form?: FormData
   /** default true: manda Authorization: Bearer */
   auth?: boolean
   timeoutMs?: number
@@ -61,13 +63,22 @@ export class Api {
     return this.request<T>(path, { ...o, method: "POST", body })
   }
 
+  /** POST multipart (subir una foto). Online-only: nunca pasa por el outbox. */
+  postForm<T = any>(path: string, form: FormData, o: Omit<OpcionesRequest, "method" | "body" | "form"> = {}) {
+    return this.request<T>(path, { timeoutMs: 120_000, ...o, method: "POST", form })
+  }
+
+  delete<T = any>(path: string, body?: unknown, o: Omit<OpcionesRequest, "method" | "body"> = {}) {
+    return this.request<T>(path, { ...o, method: "DELETE", body })
+  }
+
   private async enviar(path: string, o: OpcionesRequest): Promise<Response> {
     const headers: Record<string, string> = {
       "X-Device-Id": this.opts.deviceId,
       "X-App-Version": this.opts.appVersion,
       ...o.headers,
     }
-    if (o.body !== undefined) headers["Content-Type"] = "application/json"
+    if (o.body !== undefined && !o.form) headers["Content-Type"] = "application/json"
     if (o.auth !== false && this.auth) {
       const token = await this.auth.accessToken()
       if (token) headers.Authorization = `Bearer ${token}`
@@ -78,7 +89,7 @@ export class Api {
       return await (this.opts.fetch ?? fetch)(this.opts.base + path, {
         method: o.method ?? "GET",
         headers,
-        body: o.body !== undefined ? JSON.stringify(o.body) : undefined,
+        body: o.form ?? (o.body !== undefined ? JSON.stringify(o.body) : undefined),
         signal: ctrl.signal,
         cache: "no-store",
       })

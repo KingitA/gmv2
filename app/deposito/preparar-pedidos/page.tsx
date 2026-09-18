@@ -28,7 +28,7 @@ interface Pedido {
   fecha: string
   prioridad: number
   clientes: { nombre: string; razon_social?: string } | null
-  pedidos_detalle: any[]
+  pedidos_detalle?: any[] // el listado ya no los recibe (solo progreso)
   progreso: { total: number; resueltos: number }
 }
 
@@ -53,7 +53,10 @@ export default function PrepararPedidosPage() {
     try {
       const r = await fetch("/api/deposito/pedidos")
       const data = await r.json()
-      if (Array.isArray(data)) {
+      // Un error del servidor NO es "no hay pedidos": antes la cola se veía vacía sin aviso
+      if (!Array.isArray(data)) { setError(data?.error || "No se pudo cargar la cola de pedidos. Tocá ↻ para reintentar."); return }
+      setError("")
+      {
         // Check for newly urgent pedidos
         const prev = prevPedidosRef.current
         if (prev.length > 0) {
@@ -95,7 +98,7 @@ export default function PrepararPedidosPage() {
         if (updated.prioridad === 1 && !dismissedUrgents.has(updated.id)) {
           // Fetch client name
           supabase.from("clientes").select("nombre, razon_social").eq("id", updated.cliente_id).single()
-            .then(({ data: cli }) => {
+            .then(({ data: cli }: { data: { nombre?: string | null; razon_social?: string | null } | null }) => {
               setUrgentModal({
                 pedidoId: updated.id,
                 numeroPedido: updated.numero_pedido,

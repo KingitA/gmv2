@@ -20,6 +20,8 @@ export function configApp(appDir: string, puerto: number): UserConfigFnObject {
           // Motor de precios y contrato HTTP: el MISMO código que usa el ERP web
           "@gm/pricing": resolve(RAIZ_REPO, "lib/pricing/isomorfico.ts"),
           "@gm/contrato": resolve(RAIZ_REPO, "lib/mobile/contrato.ts"),
+          // Reglas puras de depósito (bonificados, estados de renglón): mismas que el servidor
+          "@gm/deposito": resolve(RAIZ_REPO, "lib/deposito/bonificados.ts"),
         },
       },
       define: {

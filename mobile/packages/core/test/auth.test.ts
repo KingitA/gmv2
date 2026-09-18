@@ -70,4 +70,37 @@ describe("Sesión persistente", () => {
     await auth.accessToken()
     expect(auth.estado).toBe("anonimo")
   })
+
+  it("cambio de turno: aparcar deja la sesión utilizable solo para el outbox y se descarta al reingresar", async () => {
+    const disco = new Map<string, string>()
+    const almacen: AlmacenSeguro = {
+      get: async (k) => disco.get(k) ?? null,
+      set: async (k, v) => void disco.set(k, v),
+      remove: async (k) => void disco.delete(k),
+    }
+    const vencida = { ...SESION, user: { id: "u1", email: "a@test", nombre: "Ana" }, expires_at: Math.floor(Date.now() / 1000) - 10 }
+    const { api, llamadas } = apiFalsa(({ path, body }) => {
+      if (path === "/api/mobile/auth/login") return { status: 200, body: { ...SESION, user: { id: body.email === "a@test" ? "u1" : "u2", email: body.email } } }
+      if (path === "/api/mobile/auth/refresh") return body.refresh_token === "r" ? { status: 200, body: { ...vencida, access_token: "a2", refresh_token: "r2", expires_at: Math.floor(Date.now() / 1000) + 3600 } } : { status: 401, body: { error: "no" } }
+      return { status: 200, body: {} }
+    })
+    disco.set("gm.sesion", JSON.stringify(vencida))
+    const auth = new Auth(api, almacen, "deposito")
+    await auth.iniciar()
+    await auth.aparcar()
+    expect(auth.estado).toBe("anonimo")
+    expect(await auth.aparcadas()).toEqual([{ id: "u1", nombre: "Ana" }])
+    expect(llamadas.some((l) => l.path.endsWith("/logout"))).toBe(false) // aparcar NO revoca
+
+    await auth.ingresar("b@test", "x") // entra el turno siguiente
+    expect(await auth.tokenAparcado("u1")).toBe("a2") // vencida ⇒ se renovó con su refresh token
+    expect(await auth.tokenAparcado("u1")).toBe("a2") // ya vigente ⇒ sin otro refresh
+    expect(llamadas.filter((l) => l.path.endsWith("/refresh")).length).toBe(1)
+    expect(await auth.tokenAparcado("u9")).toBeNull()
+
+    await auth.salir()
+    await auth.ingresar("a@test", "x") // vuelve Ana: su sesión aparcada se descarta
+    expect(await auth.aparcadas()).toEqual([])
+    expect(await auth.tokenAparcado("u1")).toBeNull()
+  })
 })

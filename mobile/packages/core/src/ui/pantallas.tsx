@@ -5,9 +5,31 @@ import { useItemsOutbox, useRuntime } from "../react/contexto"
 import { Boton, Encabezado } from "./componentes"
 import { fechaHoraCorta } from "./formato"
 
-/** Login de dispositivo: se ve UNA vez (la sesión queda guardada en el Keystore). */
+const CLAVE_RECIENTES = "gm.login.recientes"
+function emailsRecientes(): string[] {
+  try {
+    const l = JSON.parse(localStorage.getItem(CLAVE_RECIENTES) || "[]")
+    return Array.isArray(l) ? l.filter((x) => typeof x === "string").slice(0, 6) : []
+  } catch {
+    return []
+  }
+}
+function recordarEmail(email: string) {
+  try {
+    localStorage.setItem(CLAVE_RECIENTES, JSON.stringify([email, ...emailsRecientes().filter((e) => e !== email)].slice(0, 6)))
+  } catch {
+    /* sin storage: no pasa nada */
+  }
+}
+
+/**
+ * Login de dispositivo: se ve UNA vez (la sesión queda guardada en el Keystore).
+ * En equipos compartidos (depósito) recuerda los emails usados en ESTE equipo:
+ * el cambio de turno es tocar el nombre y tipear solo la contraseña.
+ */
 export function PantallaLogin({ nombreApp }: { nombreApp: string }) {
   const { auth } = useRuntime()
+  const [recientes] = useState(emailsRecientes)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -19,6 +41,7 @@ export function PantallaLogin({ nombreApp }: { nombreApp: string }) {
     setEnviando(true)
     try {
       await auth.ingresar(email.trim(), password)
+      recordarEmail(email.trim().toLowerCase())
     } catch (err) {
       setError(
         err instanceof ErrorRed
@@ -39,6 +62,18 @@ export function PantallaLogin({ nombreApp }: { nombreApp: string }) {
           <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">GM</div>
           <h1 className="text-2xl font-bold">{nombreApp}</h1>
         </div>
+        {recientes.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {recientes.map((e) => (
+              <button
+                key={e} type="button" onClick={() => setEmail(e)}
+                className={`h-11 rounded-full border px-3 text-sm font-semibold ${email === e ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-slate-50 text-slate-700"}`}
+              >
+                {e.split("@")[0]}
+              </button>
+            ))}
+          </div>
+        )}
         <label className="block">
           <span className="text-sm font-medium">Email</span>
           <input

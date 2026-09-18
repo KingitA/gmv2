@@ -17,7 +17,8 @@
     "types": ["vite/client"],
     "paths": {
       "@gm/pricing": ["../lib/pricing/isomorfico.ts"],
-      "@gm/contrato": ["../lib/mobile/contrato.ts"]
+      "@gm/contrato": ["../lib/mobile/contrato.ts"],
+      "@gm/deposito": ["../lib/deposito/bonificados.ts"]
     }
   }
 }

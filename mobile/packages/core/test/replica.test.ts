@@ -98,4 +98,21 @@ describe("Replica", () => {
     expect(await r.todas("uno")).toEqual([])
     expect((await r.todas("dos")).length).toBe(2)
   })
+
+  it("parchear: aplica filas del servidor sin mover el cursor ni la frescura (R3/R6)", async () => {
+    const db = await dbNueva()
+    const r = new Replica(db, apiFalsa(() => ({ status: 500, body: {} })).api)
+    await r.aplicar("ds", snap([{ id: "a", v: 1 }, { id: "b", v: 1 }], "d:7:h"))
+    const antes = (await r.meta("ds"))!
+    let avisos = 0
+    r.suscribir("ds", () => avisos++)
+    await r.parchear("ds", [{ id: "a", v: 2 }], ["b"])
+    expect(await r.todas<any>("ds")).toEqual([{ id: "a", v: 2 }])
+    const despues = (await r.meta("ds"))!
+    expect(despues.cursor).toBe(antes.cursor)
+    expect(despues.generadoAt).toBe(antes.generadoAt)
+    expect(despues.count).toBe(1)
+    expect(avisos).toBe(1)
+  })
 })
+

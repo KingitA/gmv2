@@ -8,6 +8,8 @@ export default defineConfig({
     alias: {
       "@gm/pricing": r("../../../lib/pricing/isomorfico.ts"),
       "@gm/contrato": r("../../../lib/mobile/contrato.ts"),
+      "@gm/deposito": r("../../../lib/deposito/bonificados.ts"),
+      "@gm/core": r("./src/index.ts"),
     },
   },
   test: {

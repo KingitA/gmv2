@@ -159,6 +159,74 @@ describe("Outbox", () => {
     expect((await ob.item(deU1.key))!.estado).toBe("enviado")
   })
 
+  it("O8 (turnos): lo que capturó otro usuario se envía con SU sesión aparcada, sin frenar al actual", async () => {
+    const db = await dbNueva()
+    const tokens: string[] = []
+    const srv = servidor()
+    const { api } = apiFalsa((req) => {
+      tokens.push(req.headers.Authorization || "(sesión activa)")
+      return srv.manejador(req)
+    })
+    const usuario = { id: "u1" as string | null }
+    const aparcadas = new Map<string, string | null>([["u1", "token-u1"], ["u3", null]])
+    const ob = new Outbox(
+      db, api,
+      { app: "deposito", deviceId: "d", appVersion: "t", autoEnviar: false, usuarioActual: () => usuario.id, tokenDe: async (uid) => aparcadas.get(uid) ?? null },
+      () => 1_000_000,
+    )
+    const deU1 = await ob.encolar({ tipo: "t", payload: { de: "u1" } })
+    usuario.id = "u3"
+    const deU3 = await ob.encolar({ tipo: "t", payload: { de: "u3" } })
+    usuario.id = "u2" // cambio de turno: u1 y u3 dejaron pendientes
+    const deU2 = await ob.encolar({ tipo: "t", payload: { de: "u2" } })
+    await ob.enviar()
+    expect((await ob.item(deU1.key))!.estado).toBe("enviado") // con su sesión aparcada
+    expect((await ob.item(deU2.key))!.estado).toBe("enviado") // el actual no quedó frenado
+    expect((await ob.item(deU3.key))!.estado).toBe("pendiente") // sin sesión aparcada: espera a que vuelva
+    expect(tokens).toEqual(["Bearer token-u1", "(sesión activa)"])
+    expect(await ob.usuariosConPendientes()).toEqual(new Set(["u3"]))
+  })
+
+  it("O9: el parche de réplica (onAplicado) corre ANTES de marcar el item enviado", async () => {
+    const db = await dbNueva()
+    const { ob } = crear(db, servidor().manejador)
+    const it1 = await ob.encolar({ tipo: "t", payload: {} })
+    let estadoDurante: string | undefined
+    ob.onAplicado(async (item) => {
+      await new Promise((r) => setTimeout(r, 5))
+      estadoDurante = (await ob.item(item.key))!.estado
+    })
+    await ob.enviar()
+    expect(estadoDurante).toBe("enviando")
+    expect((await ob.item(it1.key))!.estado).toBe("enviado")
+    expect(ob.noEnviadosSync).toEqual([])
+  })
+
+  it("noEnviados: pendientes y rechazados en orden, sin los enviados", async () => {
+    const db = await dbNueva()
+    const srv = servidor({ fallar: (_n, body) => (body.payload.x === 2 ? 422 : body.payload.x === 3 ? 503 : null) })
+    const { ob } = crear(db, srv.manejador)
+    for (const x of [1, 2, 3, 4]) await ob.encolar({ tipo: "t", payload: { x } })
+    await ob.enviar()
+    expect((await ob.noEnviados()).map((i) => [(i.payload as any).x, i.estado])).toEqual([[2, "rechazado"], [3, "pendiente"], [4, "pendiente"]])
+    expect(ob.noEnviadosSync.length).toBe(3)
+  })
+
+  it("forzar: al volver la señal no se espera el backoff acumulado (y sin forzar, sí)", async () => {
+    const db = await dbNueva()
+    let caida = true
+    const srv = servidor({ fallar: () => (caida ? "red" : null) })
+    const { ob, reloj } = crear(db, srv.manejador)
+    const item = await ob.encolar({ tipo: "t", payload: {} })
+    for (let i = 0; i < 6; i++) { reloj.t += 10 * 60_000; await ob.enviar() } // 6 intentos fallidos ⇒ backoff largo
+    caida = false
+    await ob.enviar()
+    expect((await ob.item(item.key))!.estado).toBe("pendiente") // respeta el backoff
+    await ob.enviar({ forzar: true })
+    expect((await ob.item(item.key))!.estado).toBe("enviado")
+    expect(srv.aplicadas.size).toBe(1)
+  })
+
   it("backoff crece exponencial con tope de 5 min", () => {
     expect(backoffMs(1, 0.5)).toBe(2000)
     expect(backoffMs(2, 0.5)).toBe(4000)
