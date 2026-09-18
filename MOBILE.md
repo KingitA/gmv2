@@ -463,7 +463,7 @@ Por app: typecheck → `vite build` → `cap sync android` → `gradlew assemble
 
 ### Instalar / actualizar en el handheld
 ```bash
-"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r dist-apks\chofer-v0.1.0.apk
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r dist-apks\chofer-v0.1.1.apk
 ```
 (o copiar el APK al equipo y abrirlo). Actualizar encima conserva sesión, réplica y
 outbox. **Atención**: el equipo tiene instalado un `com.gm.vendedor` v1.1 viejo
