@@ -1,0 +1,15 @@
+{
+  "nota": "Archivos que DEBEN tener 0 errores de tipo (MOBILE.md §14). Terminado en / = carpeta. Cada sesión de app agrega acá todo archivo del ERP que toque.",
+  "rutas": [
+    "lib/pricing/",
+    "lib/mobile/",
+    "lib/supabase/",
+    "lib/actions/pedidos.ts",
+    "app/api/mobile/",
+    "app/api/precios-programados/",
+    "app/tablas/precios-programados/",
+    "app/api/chofer/me/route.ts",
+    "app/api/chofer/viaje/[id]/route.ts",
+    "app/api/vendedor/me/route.ts"
+  ]
+}

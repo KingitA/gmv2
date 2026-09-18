@@ -9,6 +9,7 @@ npm run dev       # Start dev server (uses webpack bundler)
 npm run build     # Production build
 npm run lint      # ESLint check
 npm run start     # Run production server
+npm run typecheck:movil  # MANDATORY before commit/merge (next build ignores type errors — see MOBILE.md §14)
 ```
 
 There are no tests in the web ERP. The mobile apps (`mobile/`) have their own tests: `cd mobile && npm test`.

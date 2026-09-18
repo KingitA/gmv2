@@ -26,6 +26,10 @@
    precio "estimado" (§5).
 7. Build: `npm run build:apks -- --apps <app> --notas "qué cambió"` ⇒
    `dist-apks/<app>-v<versión>.apk` (§13).
+8. **OBLIGATORIO antes de cada commit/merge: `npm run typecheck:movil` en verde**
+   (raíz del repo). Si tocás un archivo del ERP, agregalo primero a
+   `scripts/typecheck-movil.alcance.json` (§14). `next build` NO detecta errores de
+   tipo: así llegó a producción el `ReferenceError` del 18/09.
 
 ---
 
@@ -499,7 +503,30 @@ soporta encriptación con clave propia).
 - `cd mobile && npm test` — invariantes de réplica (R1–R6), outbox (O1–O8), backoff,
   lector wedge, botón atrás, motor de precios (casos dorados + isomorfismo
   dispositivo/servidor + vigencia programada) y frontera del paquete de precios.
-- Typecheck: `npm run typecheck` (core + 3 apps, `strict`).
+- **`npm run typecheck:movil` (raíz) — CHEQUEO OBLIGATORIO**, antes de cada commit
+  y de pedir cualquier merge a `main`. Falla si:
+  1. hay **cualquier** error de tipo en el **alcance móvil**
+     (`scripts/typecheck-movil.alcance.json`: `lib/pricing/`, `lib/mobile/`,
+     `lib/supabase/`, `lib/actions/pedidos.ts`, `app/api/mobile/`, precios
+     programados y los endpoints chofer/vendedor corregidos);
+  2. algún archivo del resto del repo tiene **más** errores que su base
+     (`scripts/typecheck-movil.base.json`: 76 errores preexistentes en 36 archivos; la
+     base **solo puede bajar**);
+  3. el `tsc` del ERP **aborta** (sin memoria, señal, exit inesperado): nunca cuenta
+     como verde;
+  4. el typecheck `strict` de `mobile/` (core + 3 apps) tiene errores.
+
+  **Reglas para las sesiones:**
+  - Todo archivo del ERP que la sesión cree o modifique se agrega a
+    `scripts/typecheck-movil.alcance.json` **en el mismo commit** (queda protegido en
+    cero de ahí en más). Si arrastraba errores viejos, se arreglan ahí.
+  - Si la base baja (se arregló algo viejo): `npm run typecheck:movil --
+    --actualizar-base` y commitear el JSON. Nunca editar la base a mano para subirla.
+  - Tarda ~1 min (tsc completo con 8 GB de heap; lo configura el script).
+  - Verificado que detecta el incidente real: quitar el import de
+    `limpiarCentinela` en `pedidos.ts` ⇒ ✗ con los 7 usos; un error nuevo fuera del
+    alcance ⇒ ✗ "la base solo puede bajar".
+- Typecheck solo de las apps: `cd mobile && npm run typecheck` (ya incluido arriba).
 - ERP: `npm run build` en la raíz debe seguir pasando.
 - Aceptación en equipo (checklist): ver §15.
 
@@ -551,8 +578,9 @@ se crearon pedidos. Causa de fondo: `ignoreBuildErrors: true` + el `tsc` complet
 repo se quedaba sin memoria (incluía `mobile/node_modules`) y abortaba sin reportar
 errores. Ahora `tsconfig.json` excluye `mobile/` y `tsc` termina (~55 s con
 `NODE_OPTIONS=--max-old-space-size=8192`). Línea base: **76 errores de tipo
-preexistentes, ninguno de la fundación**. **Regla para las sesiones por app: `tsc`
-en cero para todo archivo que toquen** (y no sumar errores al resto); ver §16.
+preexistentes, ninguno de la fundación**. Para que no se repita quedó el chequeo
+obligatorio **`npm run typecheck:movil`** (§14): alcance móvil en cero + base del
+resto que solo puede bajar + un tsc que aborta nunca cuenta como verde.
 
 ### Validación en equipo (18/09/2026, NuStar 65-sp, Android 14)
 
@@ -591,15 +619,19 @@ Cerrar desde recientes o reiniciar el equipo.
 ## 16. Riesgos y decisiones abiertas
 
 0. **Chequeo de tipos**: `next.config.mjs` sigue con `ignoreBuildErrors: true` (76
-   errores preexistentes). Propuesta pendiente de aprobación: script
-   `typecheck:movil` que falle con cualquier error en `lib/pricing/**`,
-   `lib/mobile/**`, `app/api/mobile/**`, `lib/actions/pedidos.ts`,
-   `lib/supabase/**` y lo que toque cada sesión, más línea base del resto que solo
-   puede bajar. Referencias rotas preexistentes detectadas (fuera de la fundación,
-   fallan si se usan): `app/api/articulos/[id]/packaging` y `app/api/articulos/mappings`
-   (`createClient`), `app/ordenes-compra/page.tsx` (`supabase`),
-   `lib/actions/clientes.ts` (`updateClienteEmbedding`), `lib/pricing.ts`
-   (`calcularPrecioVentaOffline`, `calcularPrecioFinalOffline`).
+   errores preexistentes), mitigado con el chequeo obligatorio `npm run
+   typecheck:movil` (§14). Activar la verificación de tipos en el build de Next
+   queda para cuando la base llegue a cero.
+   **Pendiente documentado (decisión del dueño: no tocar en la Sesión 0):**
+   referencias rotas PREEXISTENTES, fuera de la fundación, que dan `ReferenceError`
+   si alguien usa esa función/pantalla:
+   - `app/api/articulos/[id]/packaging/route.ts` y `app/api/articulos/mappings/route.ts`
+     → `createClient` no importado;
+   - `app/ordenes-compra/page.tsx` → `supabase` no definido (2 usos);
+   - `lib/actions/clientes.ts` → `updateClienteEmbedding` no definido;
+   - `lib/pricing.ts` (motor legacy de pedidos manuales) → `calcularPrecioVentaOffline`,
+     `calcularPrecioFinalOffline` no definidos.
+   Están en la base de `typecheck:movil`; al arreglarlas, bajar la base.
 1. **Introspección de la base bloqueada** en esta sesión (permiso del entorno): el
    esquema se infirió de `supabase/migrations/` y `scripts/`, que están incompletos
    (tablas centrales creadas fuera de migraciones). Ya confirmado en producción: las

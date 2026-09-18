@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev --webpack",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "typecheck:movil": "node scripts/typecheck-movil.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai": "2.0.56",
