@@ -619,7 +619,7 @@ Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo ind
 | Pipeline de build firmado + keystores + CHANGELOG | ✅ las 3 apps v0.1.1 (versionCode 2) firmadas y verificadas |
 | Chofer v0.1.1 **release** en el NuStar contra gmv2.vercel.app | ✅ login, viajes reales, reloj 2 s de desfasaje |
 | Vendedor viejo v1.1 (`com.gm.vendedor`, otra firma) | ✅ desinstalado del NuStar |
-| **App Depósito completa** (Sesión 3, rama `apk-deposito`) | ✅ código, tests (64) y APK `deposito-v0.2.0` · 🟡 falta desplegar el backend en `main` y probar contra el ERP real (§17) |
+| **App Depósito completa** (Sesión 3) | ✅ **CERRADA 18/09/2026**: en `main` (merge `3862a9a`), migraciones aplicadas, APK `deposito-v0.2.0` en el NuStar, checklist contra producción superado y base verificada idéntica (§17). Pendientes del mes de prueba: §17 |
 | Datasets/handlers y pantallas de vendedor y chofer | ⏳ sesiones por app |
 
 ### Validación en producción (18/09/2026)
@@ -885,21 +885,59 @@ gracias a `lib/deposito/cola.ts`, pero son 1.286 filas que nadie va a preparar).
 4. **Prevención.** Decidir con el dueño qué paso del circuito saca un pedido de `impreso`
    (hoy solo el picking digital lo hace); con la app en uso, los pedidos se cierran solos.
 
-### Puesta en marcha (requiere OK del dueño — producción sale de `main`)
-1. Mergear `apk-deposito` → `main` y esperar el deploy (los cambios del ERP son
-   retrocompatibles: `/deposito` web sigue igual; `npm run build` y `typecheck:movil` pasan).
-2. Aplicar `supabase/migrations/20260919_mobile_deposito.sql` y
-   `20260919_idx_pedidos_detalle_pedido.sql` (aditivas; **seguras con el código actual de
-   producción corriendo**: solo agregan triggers de log que nunca bloquean una escritura,
-   una tabla nueva y un índice). Opcionales: sin la primera la cola del handheld tarda hasta
-   45 s en enterarse de un cambio; sin la segunda la cola web tarda unos segundos en cargar.
-3. El NuStar ya tiene `deposito-v0.2.0` instalado (encima del esqueleto, sin
-   desinstalar). Ingresar con un usuario con rol `deposito`.
-4. **Checklist pendiente contra el ERP real** (hoy hecho contra el mock y el equipo):
-   sincronizar la cola → modo avión → pickear con y sin lector → salir y volver →
-   finalizar → reconectar ⇒ el pedido queda `pendiente_facturacion` una sola vez;
-   dos equipos sobre el mismo renglón; matar la app a mitad de un picking; recepción
-   completa (verificar que el stock subió una vez) y una foto con OCR.
+### Puesta en marcha — HECHA (18/09/2026)
+1. ✅ `apk-deposito` → `main` (merge `3862a9a`, autorizado por el dueño tras verificar el preview); deploy OK.
+2. ✅ Migraciones aplicadas por el dueño en el SQL Editor, en este orden:
+   `20260919_idx_pedidos_detalle_pedido.sql` (contar renglones de 100 pedidos: ~4.000 ms → 222 ms;
+   la consulta vieja que daba timeout: 427 ms) y `20260919_mobile_deposito.sql` (log de cambios
+   de `pedidos` activo; `deposito_ajustes_movil` creada).
+3. ✅ Cola web verificada por el dueño en producción (antes del merge estaba VACÍA: el error
+   silencioso estaba vivo).
+4. ✅ NuStar con `deposito-v0.2.0` (instalado encima del esqueleto) y sesión de un usuario `deposito`.
+
+### Checklist contra PRODUCCIÓN en el NuStar 65-sp (18/09/2026) — SUPERADO
+Datos de prueba creados por el dueño desde el ERP y marcados `TEST-DEPOSITO`: cliente, pedido
+001566 (3 renglones) y OC-000010 (1 renglón, HALEON). Foto de solo lectura antes y después
+(`scripts/foto-deposito.cjs`: filas de 18 tablas, numeración, stock de los 3.271 artículos).
+
+| Prueba | Resultado |
+|---|---|
+| Cola real en el equipo | ✅ 98 pedidos (alcance 7 días), 001566 incluido |
+| Ruta: abrir con red → **modo avión real** → renglón por búsqueda manual, faltante por swipe, salir a la cola y volver → reconectar | ✅ a los 14 s las 2 operaciones aplicadas **1 vez**; `picking_items` a nombre del operario |
+| Interrupción: matada desde recientes en modo avión | ✅ reabre sin login en 500 ms; "En progreso · ⇪ 2 sin enviar" |
+| Concurrencia: NuStar sin red marca un renglón; otro usuario (web) marca el mismo; reconectar | ✅ gana la web; al NuStar le vuelve **rechazado** "Ya lo preparó FABIAN…" con "Entendido", contador rojo; servidor sin duplicar |
+| Cierre del pedido | ✅ `pendiente_facturacion` una vez; sale de la cola del equipo (98 → 97) |
+| Recepción empezada y terminada sin red (la recepción no existía en el servidor): bultos 1/1, conteo, finalizar | ✅ aplicada 1 vez: stock 100 → 101, 1 kardex, 1 movimiento, OC `recibida_completa` |
+| **Reintento del cierre de recepción** (bug del stock duplicado) | ✅ 2 reintentos con la misma función del handler ⇒ `ya_finalizada`; stock 101, 1 kardex, 1 movimiento |
+| Limpieza | ✅ borrado por id (3 picking_items, 2 sesiones, 5 kardex, 1 movimiento, recepción+item, OC+detalle, pedido+3 renglones, cliente, 9 de `mobile_idempotencia`) y stock 101 → 100 con compare-and-set. **Foto final: IDÉNTICA** en las 18 tablas, numeración (`001565` / `OC-000009`) y stock; 0 residuos por texto. Queda solo lo no reversible: entradas del log `mobile_cambios` (se purgan a los 30 días) y `updated_at` del artículo |
+
+Aprendido en la prueba: crear un pedido desde el ERP escribe 3 filas "venta" en kardex pero
+**no** descuenta `stock_actual`; crear una OC escribe una fila "compra" en estado pendiente
+ligada por `orden_compra_id` (hay que contarlas al limpiar datos de prueba).
+
+### PENDIENTES DEL MES DE PRUEBA (no bloquean el uso)
+1. **Gatillo del lector físico.** El NuStar de pruebas no tiene servicio de escaneo (el dueño
+   está averiguando con el proveedor si este equipo trae lector). `adb input text` no emula bien
+   la ráfaga (a veces la detecta, a veces no). Validar con un lector real: abrir la cantidad
+   desde la lista, **segundo gatillo = confirmar**, código de otro artículo = error sin perder
+   nada, y que la ráfaga no ensucie el campo de cantidad ni el buscador (`useCampoSinRafaga`).
+   Si el firmware usa broadcast: `configurarBroadcast(accion, extra)` (§11).
+2. **Pantalla de fotos de recepción con documentos reales**: sacar foto de remito/factura
+   (cámara del equipo), OCR, abrir con el ojito (URL firmada al servir) y eliminar. La OC de
+   prueba no tenía documentos; la firma de URLs se verificó en la web (9 de 12 fotos abren; las
+   otras 3 no tienen archivo).
+3. **Devoluciones con el flujo real de chofer** (ver abajo).
+4. Gestos con el dedo (swipe, objetivos táctiles): los prueba el depósito; acá se hicieron por adb.
+5. Detalles vistos en el equipo: en Buscar, con el teclado abierto, la lista de resultados queda
+   chica (los botones del pie ocupan lugar); en la cola, "⇪ N sin enviar" se parte en dos líneas.
+6. Tarea aparte ya anotada: depuración de los `impreso` viejos (arriba).
+
+### Devoluciones: FUERA del checklist contra producción (decisión del dueño, 18/09/2026)
+No hay devoluciones cargadas en el sistema (0 filas). El flujo de la app (listado, buscar por
+artículo, confirmar vendible / no vendible, `devolucion.recibir` idempotente) quedó probado solo
+contra el mock. Se valida en el **mes de prueba con el flujo real**: el chofer registra la
+devolución y depósito la recibe. Verificar ahí: que aparece en el handheld, que al confirmar
+el stock de lo vendible sube UNA vez y que la devolución queda `confirmado`.
 
 ### Resultados de las pruebas de esta sesión (18/09/2026)
 | Prueba | Dónde | Resultado |
