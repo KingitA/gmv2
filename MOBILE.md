@@ -10,7 +10,7 @@
 
 ## 0. TL;DR para la próxima sesión
 
-1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (44 tests).
+1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (64 tests).
 2. Tu app vive en `mobile/apps/<app>/src`. Todo lo compartido está en
    `mobile/packages/core` (`@gm/core`, `@gm/core/ui`). **No dupliques** lógica: si dos
    apps la necesitan, va al core.
@@ -180,7 +180,11 @@ O1 persiste antes de devolver · O2 la clave nunca cambia · O3 FIFO estricto (u
 transitorio frena a los siguientes) · O4 rechazo no bloquea · O5 single-flight ·
 O6 crash en "enviando" ⇒ pendiente (reenvío resuelto como duplicado) · O7 sin sesión
 no envía · O8 cada item solo se envía con la sesión del usuario que lo capturó
-(y no se puede cerrar sesión con pendientes).
+(la activa, o la suya **aparcada** tras un cambio de turno: §7) · O9 el parche de
+réplica (`resultado.replica`) se aplica ANTES de marcar el item enviado. El FIFO es
+**por usuario**. `enviar({forzar:true})` ignora el backoff: lo usa el sincronizador
+cuando sabe que el servidor responde (volvió la red / primer plano / el sondeo
+contestó), así lo acumulado sin señal sale en segundos y no en "hasta 5 min".
 
 Servidor (`app/api/mobile/outbox/route.ts`): reserva la clave en `mobile_idempotencia`
 (`procesando`) → handler → `aplicado|rechazado` guardando el resultado; error
@@ -198,6 +202,15 @@ transitorio ⇒ libera la reserva. Reserva huérfana (> 2 min) se re-toma con CA
   web (extraerla a `lib/` si hoy vive dentro del route handler o de una server action).
 - `m.capturado_at` es la hora (corregida contra el servidor, ver `Reloj`) en que el
   operario hizo la operación: usala para todo lo que dependa del momento (precios).
+
+**Parche de réplica** (desde la sesión Depósito, genérico): si el handler devuelve
+`{ ..., replica: [{ dataset, upserts, deletes }] }`, el dispositivo vuelca esas filas
+a su réplica (`Replica.parchear`, sin mover cursor ni frescura) antes de dar la
+operación por enviada. Con eso la pantalla nunca "vuelve atrás" entre el envío y el
+próximo sync. **Overlay optimista**: `useNoEnviados()` (lectura sincrónica, por
+índice) da las operaciones pendientes/rechazadas; cada app superpone las suyas sobre
+la réplica con funciones puras (ver `apps/deposito/src/datos/overlay.ts`). Un
+rechazo dispara un re-sync inmediato.
 
 UI: contador de pendientes **siempre visible** en el `Encabezado` (ámbar = pendientes,
 rojo = rechazadas); `/pendientes` lista cada operación con su estado.
@@ -290,6 +303,15 @@ validación con las mismas reglas que la web, `capturado_at` como momento de neg
 - CORS solo para orígenes de las apps (`https://localhost`, `capacitor://localhost`,
   dev de Vite) en `lib/supabase/middleware.ts`; sin credenciales.
 - El APK contiene **cero** secretos (ni siquiera la anon key): solo la URL del ERP.
+- **Equipos compartidos entre turnos** (`runtime.cambiarUsuario()`): si el que se va
+  tiene operaciones sin enviar, su sesión queda **aparcada** en el Keystore
+  (`Auth.aparcar`); el outbox la usa SOLO para enviar lo que ese usuario capturó
+  (`tokenAparcado`, con refresh propio) y se descarta y revoca sola cuando ya no le
+  queda nada pendiente, o cuando el mismo usuario vuelve a ingresar. No se puede
+  "retomar" sin contraseña. Sin pendientes es un logout normal. El login recuerda
+  los emails usados en el equipo (chips). `SesionMovil.user.nombre` viene en el login.
+  `ConfigApp.replicaPorUsuario: false` (depósito) evita re-descargar la réplica al
+  cambiar de usuario cuando los datasets no dependen de quién mira.
 
 **Matriz de autenticación**: todas las llamadas de las apps van a API routes con
 Bearer. supabase-js directo: **ninguna** (sin RLS verificada no es seguro). Las 4
@@ -329,11 +351,7 @@ La flecha del `Encabezado` usa la misma decisión.
 | `chofer/[viajeId]/cliente/[clienteId]` | `showCobroSheet`, `showDevolucionSheet` | `?ver=cobro`, `?ver=devolucion` |
 | `chofer/billetera` | `showGastoSheet` | `?ver=gasto` |
 | `chofer/[viajeId]` | `showConfirmFinalizar` | `?ver=finalizar` |
-| `deposito/recibir-mercaderia/[id]` | `vistaFaltantes` | `/recibir/:id/faltantes` |
-| `deposito/preparar-pedidos/[id]` | `vistaFaltantes` | `/preparar/:id/faltantes` |
-| `deposito/devoluciones` | `vista` | rutas por vista |
-| `deposito` (home) | `selected` | `/articulos/:id` |
-| `deposito/ajustar-stock` | `panelFiltro` | `?ver=filtro` |
+| `deposito/*` | ✅ migrado — ver "Depósito → Navegación" (§17) | |
 
 `lib/vendedor/use-back-trap.ts` queda para la web; **no se usa en las apps**.
 
@@ -377,17 +395,18 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
 | GET `billetera` · POST `billetera/gasto` | billetera_movimientos | R · O `gasto.registrar` |
 | GET `articulo/precio-historico` | kardex, comprobantes_venta_detalle | R (último precio por cliente×artículo del viaje) |
 
-### Depósito
-| Endpoint | Tablas | Estrategia |
+### Depósito ✅ (implementado — detalle en §17)
+| Endpoint web | Tablas | Estrategia en la app |
 |---|---|---|
-| GET `pedidos` · GET `picking` | pedidos, articulos | R `deposito_pedidos` |
-| GET/PATCH/POST `picking/item` · POST `picking` | picking_sesiones, picking_items, pedidos_detalle, kardex, listas_precio | R + O `picking.item` (absoluto) / `picking.cerrar` |
-| GET/POST/PATCH `recepciones` | recepciones, recepciones_items, ordenes_compra(_detalle), movimientos_stock, articulos | R + O `recepcion.item` / `recepcion.cerrar` |
-| POST `recepciones/documento`, `/api/recepciones/[id]/ocr` | documentos | L (archivo + IA) |
-| GET/POST `devoluciones` | devoluciones, devoluciones_detalle, movimientos_stock | R + O `devolucion.recibir` |
-| GET/POST `ajustes-stock` | deposito_ajustes_stock, articulos | R + O `stock.ajustar` (conteo) |
-| server actions `lib/actions/deposito` (home) | articulos | R `deposito_articulos` (EAN/SKU, stock) |
-| `/api/articulos/buscar`, `/api/clientes/buscar` | articulos, clientes | búsqueda local sobre la réplica |
+| GET `pedidos` · POST `picking` (abrir) | pedidos, pedidos_detalle, picking_sesiones, picking_items | R `deposito_pedidos` (delta) · O `picking.abrir` |
+| PATCH/POST `picking/item` | pedidos_detalle, picking_items, picking_sesiones, kardex, listas_precio | O `picking.item` (absoluto, renglón de un solo operario) · O `picking.cerrar` (idempotente) |
+| GET `picking?q=` (búsqueda) · `buscarArticulosDeposito` | articulos | búsqueda LOCAL sobre R `deposito_articulos` (delta) |
+| GET/POST/PATCH `recepciones` | ordenes_compra(_detalle), recepciones, recepciones_items, articulos, movimientos_stock, kardex | R `deposito_recepciones` · O `recepcion.iniciar` / `.conformidad` / `.item` (absoluto) / `.cerrar` (idempotente) |
+| `/api/recepciones/[id]/ocr` (POST/DELETE) | recepciones_documentos + IA | **L** (foto + OCR): `api.postForm` / `api.delete`, deshabilitado sin señal |
+| `/api/transportes`, proveedores, tipos de bulto/fracción | transportes, proveedores, tipos_* | R `deposito_catalogos` |
+| GET/POST `devoluciones` | devoluciones(_detalle), articulos, movimientos_stock | R `deposito_devoluciones` · O `devolucion.recibir` (idempotente) |
+| server actions `lib/actions/deposito` (stock, datos, INEXISTENTE, listados, adyacente) | articulos | R `deposito_articulos` + O `stock.ajustar` / `articulo.datos` (CAS por campo) / `articulo.inexistente`; listados y anterior/siguiente calculados localmente |
+| GET/POST `ajustes-stock`, POST `recepciones/documento` | — | no los usa ninguna pantalla web hoy: sin portar |
 
 ---
 
@@ -398,6 +417,21 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
 - `lib/pricing/{resolver,motor,vigencia,isomorfico,cargar-insumos}.ts`; `lib/actions/pedidos.ts` usa el resolver extraído y el motor en los previews (mismas salidas).
 - `app/api/mobile/*`, `lib/mobile/*`, `app/api/precios-programados`, `app/tablas/precios-programados`.
 - Migración `supabase/migrations/20260918_mobile_fundacion.sql` — **aditiva, idempotente, verificada con el parser de Postgres (libpg_query)**. Crea: `mobile_cambios` (+ trigger en articulos, articulos_descuentos, listas_precio, listas_precio_reglas, clientes, bonificaciones, cliente_proveedor_condicion, cliente_marca_condicion, precios_programados), `precio_insumos_historial` (+ trigger y versión base), `precios_programados` + `aplicar_precios_programados()`, `mobile_idempotencia`, `mobile_dispositivos`, `mobile_alertas_integridad`, `mobile_pruebas_sync`. Los triggers **nunca** bloquean una escritura del ERP (EXCEPTION → WARNING). Si hay pg_cron, agenda la materialización (cada minuto) y la purga (diaria).
+
+**Sesión Depósito** (retrocompatibles; la web `/deposito` usa las mismas funciones y devuelve lo mismo):
+- `lib/deposito/{picking,recepciones,devoluciones,articulos,bonificados}.ts`: lógica extraída de
+  las routes y server actions. `bonificados.ts` es puro y lo importa la app (`@gm/deposito`).
+- Picking: el renglón se **reclama antes** de escribir la cantidad (`ux_picking_items_renglon`,
+  23505 ⇒ "Ya lo preparó X"); cerrar dos veces = una. Recepción: finalizar con candado por
+  `fecha_fin` + guarda por kardex (reintentar nunca duplica stock); get-or-create de la tanda.
+  Devolución: confirmar idempotente (guarda por `movimientos_stock`).
+- `lib/mobile/sync/deposito.ts` (5 datasets), `lib/mobile/outbox/deposito.ts` (11 handlers),
+  `lib/mobile/outbox/tipos.ts`. Motor: `DatasetDef.requiereLogDe` (delta solo si el trigger existe).
+- Migración `supabase/migrations/20260919_mobile_deposito.sql` — **aditiva, idempotente, PENDIENTE
+  de aplicar en producción**: triggers de log en pedidos, pedidos_detalle, ordenes_compra,
+  recepciones, recepciones_items, devoluciones + tabla `deposito_ajustes_movil`. La app funciona
+  sin ella (snapshot + refresco periódico de 45 s); con ella la cola se entera en segundos.
+- `typecheck:movil`: `lib/deposito/`, `app/api/deposito/` y `lib/actions/deposito.ts` pasan al alcance en cero.
 
 **Pendientes por sesión de app**:
 - Datasets y handlers de la tabla §9 (cada uno reusando la lógica existente; extraer a `lib/` lo que hoy vive en route handlers/server actions).
@@ -487,6 +521,34 @@ cd android && gradlew assembleDebug && adb install -r app/build/outputs/apk/debu
 ```
 (el APK debug usa otra firma: desinstalar el release antes, y viceversa).
 
+### Cómo publicar una actualización (ciclo del mes de prueba: 4-5 releases por app)
+
+1. **Rama**: trabajar en la rama de la app (`apk-deposito`, …) partiendo de `main` al día.
+2. **Cambiar y probar sin backend**: `node mobile/scripts/mock-deposito.mjs` +
+   `VITE_API_BASE=http://localhost:3999` (`apps/deposito/.env.development.local`) +
+   `npm run dev:deposito` → http://localhost:5175 (cualquier email, contraseña "x").
+   El mock tiene idempotencia real y atajos (`/__mock/red?on=0&usuario=juan`,
+   `/__mock/urgente?id=p1`, `/__mock/estado`) para repetir las pruebas de ruta,
+   interrupción y concurrencia en minutos.
+3. **Chequeos obligatorios**: `cd mobile && npm test` y, en la raíz, `npm run typecheck:movil`.
+4. **¿El cambio toca el servidor?** (`lib/`, `app/api/`, migraciones) ⇒ primero se
+   mergea a `main` **con OK del dueño** y se espera el deploy; recién después se
+   reparte el APK. Una app nueva contra un servidor viejo ve "Operación desconocida"
+   (queda rechazada, nada se pierde); un servidor nuevo con apps viejas funciona siempre
+   (los cambios de protocolo son aditivos).
+5. **Build**: `cd mobile && npm run build:apks -- --apps deposito --notas "qué cambió, en palabras del operario"`
+   (`--bump patch` por defecto: arreglos; `--bump minor`: función nueva). Sale
+   `dist-apks/deposito-v<versión>.apk`, firmado y verificado.
+6. **Completar `apps/<app>/CHANGELOG.md`** (el script deja una línea) y commitear
+   `version.json` + `CHANGELOG.md`. Push de la rama.
+7. **Instalar encima** en cada handheld: `adb install -r dist-apks\deposito-v<versión>.apk`
+   (o copiar el APK y abrirlo). Conserva sesión, réplica y operaciones sin enviar.
+   Nunca desinstalar para actualizar: se perdería el outbox pendiente.
+8. **Verificar en el equipo**: abre sin login, el contador ⇪ sigue igual, la versión
+   nueva figura al pie del inicio.
+9. Si algo sale mal: reinstalar el APK anterior **no** funciona encima (Android no deja
+   bajar de versionCode): se publica un patch nuevo con el arreglo.
+
 ### Actualización OTA del bundle (propuesta, no implementada)
 Viable sin infra paga: `@capgo/capacitor-updater` en modo **self-hosted**
 (open source): el build sube `dist.zip` a Supabase Storage (bucket público de solo
@@ -557,7 +619,8 @@ Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo ind
 | Pipeline de build firmado + keystores + CHANGELOG | ✅ las 3 apps v0.1.1 (versionCode 2) firmadas y verificadas |
 | Chofer v0.1.1 **release** en el NuStar contra gmv2.vercel.app | ✅ login, viajes reales, reloj 2 s de desfasaje |
 | Vendedor viejo v1.1 (`com.gm.vendedor`, otra firma) | ✅ desinstalado del NuStar |
-| Datasets/handlers de cada módulo, pantallas reales | ⏳ sesiones por app |
+| **App Depósito completa** (Sesión 3, rama `apk-deposito`) | ✅ código, tests (64) y APK `deposito-v0.2.0` · 🟡 falta desplegar el backend en `main` y probar contra el ERP real (§17) |
+| Datasets/handlers y pantallas de vendedor y chofer | ⏳ sesiones por app |
 
 ### Validación en producción (18/09/2026)
 
@@ -646,3 +709,137 @@ Cerrar desde recientes o reiniciar el equipo.
    nunca tuvo red desde que se cambió la hora usa el último desfasaje conocido.
 5. **pg_cron**: activo y verificado (materializó un programado a la hora exacta).
 6. `.env.vercel`: sacado del repo y en `.gitignore` (queda en el historial de git).
+
+---
+
+## 17. Depósito (com.gm.deposito) — Sesión 3
+
+Réplica fiel de `app/deposito/` (sin funciones nuevas), offline-tolerante. Código:
+`mobile/apps/deposito/src` (`datasets.ts`, `datos/` = búsqueda local + overlay + hooks,
+`pantallas/`, `rutas.tsx`). Servidor: `lib/deposito/*`, `lib/mobile/{sync,outbox}/deposito.ts`.
+
+### Datos
+| Dataset | Modo | Refresco | Contenido |
+|---|---|---|---|
+| `deposito_pedidos` | delta (`pedidos`, `pedidos_detalle`) · invalidable | segundos (sondeo 15 s) + 45 s | pedidos `pendiente/en_preparacion/impreso` con renglones, artículo (EAN, bulto, `orden_deposito`), quién tomó cada renglón y lo necesario para recalcular bonificados |
+| `deposito_recepciones` | snapshot | 60 s + al entrar | = GET web: OCs pendientes + última recepción |
+| `deposito_devoluciones` | snapshot | 2 min + al entrar | = GET web |
+| `deposito_articulos` | delta (`articulos`) · invalidable | segundos | catálogo activo: códigos, stock, orden, proveedor, categoría, fracción, marca |
+| `deposito_catalogos` | snapshot | 30 min | proveedores, tipos de bulto/fracción, transportes |
+
+Ninguno depende del usuario ⇒ `replicaPorUsuario: false`. Todo stock mostrado sale de la
+réplica con su `<Frescura>` (ámbar a los 10 min); lo ajustado sin enviar lleva la marca
+"⇪ sin enviar". `orden_deposito`: hoy la web **no** ordena el picking por él (la lista
+sale en el orden del pedido) y la app lo respeta; sí lo usa, igual que la web, el
+recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la réplica).
+
+### Picking offline y política de concurrencia
+- **Progreso persistente**: cada renglón marcado es una operación del outbox (durable
+  al instante). La pantalla = réplica + operaciones sin enviar (overlay), así un picking
+  a medias sobrevive a cerrar la app, cambiar de pantalla o perder WiFi, sin guardar nada
+  aparte. Finalizar sin señal saca el pedido de la cola ("N finalizados sin enviar").
+- **Bonificados**: se recalculan en el equipo con `lib/deposito/bonificados.ts`, la
+  misma función que usa el servidor ⇒ offline se ven (y se confirman) las mismas unidades.
+- **Política (la del backend web, ahora blindada)**: un pedido lo preparan VARIOS
+  operarios a la vez; **un renglón es de quien lo marca primero**. Otro operario lo ve
+  con 🔒 y el nombre, y no puede tocarlo; devolverlo a pendiente lo libera. No hay lock
+  de pedido.
+  - Servidor: el reclamo se inserta en `picking_items` ANTES de escribir la cantidad
+    (índice único `ux_picking_items_renglon`); el que pierde la carrera recibe 409 y su
+    cantidad **no** se escribe ⇒ nunca hay picking duplicado ni pisado.
+  - Dos equipos sin señal sobre el mismo renglón: gana el primero que sincroniza; al
+    otro la operación le vuelve **rechazada** ("Ya lo preparó Ana…"), visible en la
+    pantalla del pedido con "Entendido", y la lista se re-sincroniza sola.
+  - Valores ABSOLUTOS por renglón + clave de idempotencia ⇒ reenviar es inocuo.
+    `picking.cerrar` es idempotente (dos operarios finalizando = un cierre); si al
+    cerrar quedan renglones pendientes (otro los liberó) ⇒ rechazo y el pedido vuelve a la cola.
+  - Renglón sobre pedido ya cerrado ⇒ rechazo ("El pedido ya se cerró").
+- **Recepción**: todo se direcciona por la OC (la recepción se crea sola en el servidor:
+  se puede empezar a contar sin señal). Conteo absoluto por artículo (último escritor
+  gana), primer control de bultos registrado vale, finalizar idempotente con candado.
+- **Stock**: el ajuste es un conteo del operario y se aplica siempre; si el stock cambió
+  entre el conteo y el sync queda una alerta `stock_conteo` en `mobile_alertas_integridad`.
+  `deposito_ajustes_movil` audita cada ajuste (incluye el motivo) y evita la doble suma.
+- **Datos de artículo**: compare-and-set por campo; lo que otro cambió no se pisa y
+  vuelve como rechazo explicando qué campo.
+
+### Lector
+`useLector` en toda pantalla donde hoy se identifica un artículo. En la lista del
+pedido / recepción el gatillo abre la cantidad del renglón; **un segundo gatillo sobre
+el mismo artículo confirma** la cantidad mostrada (sin tocar la pantalla); otro código
+ahí da error y no pierde nada. Buscar y tocar es siempre posible (mercadería sin
+etiqueta). `useCampoSinRafaga`: el lector-teclado tipea en el input con foco; al
+detectarse la lectura se restaura el valor previo (bug real encontrado en el NuStar:
+un segundo escaneo dejaba la cantidad en 0). Cantidades de 7+ cifras se rechazan.
+
+### Navegación — matriz del botón atrás (verificada en navegador y con el botón físico del NuStar)
+| Pantalla | Ruta | Atrás va a |
+|---|---|---|
+| Inicio | `/` | minimiza (el proceso y el outbox siguen vivos) |
+| Cambiar de usuario (hoja) | `/?ver=salir` | cierra la hoja |
+| Cola de pedidos | `/preparar` (`?plegados=` replace) | Inicio |
+| Pedido (lista) | `/preparar/:id` | Cola — **el progreso queda "en curso"** |
+| Buscar artículo | `/preparar/:id/buscar` (`?q=` replace) | Pedido |
+| Cantidad | `/preparar/:id/item/:detId` | Pedido (desde Buscar se entra con replace; "Volver al scanner" = replace a Buscar) |
+| Faltantes | `/preparar/:id/faltantes` | Pedido |
+| Finalizar con bonificados (hoja) | `?ver=finalizar` | cierra la hoja · confirmar ⇒ Cola |
+| Aviso de pedido urgente | `?urgente=<id>` sobre la pantalla actual | cierra el aviso · "¡Preparar!" = replace al pedido |
+| Órdenes a recibir | `/recibir` | Inicio |
+| Recepción (control de bultos o lista) | `/recibir/:id` | Órdenes |
+| Buscar / Cantidad / Faltantes | `/recibir/:id/{buscar,item/:articuloId,faltantes}` | Recepción (mismas reglas que picking) |
+| Documentos (online-only) | `/recibir/:id/documentos` | Recepción |
+| Devoluciones | `/devoluciones` | Inicio |
+| Buscar artículo del camión | `/devoluciones/buscar` | Devoluciones |
+| Devoluciones con ese artículo | `/devoluciones/articulo/:artId` | Devoluciones ("Buscar otro" = replace a Buscar) |
+| Confirmar devolución | `/devoluciones/:id` | la pantalla desde la que se abrió |
+| Modificación de artículos | `/articulos` (`?q= ?prov= ?cat=` replace) | Inicio |
+| Filtro proveedor / categoría (hoja) | `?ver=prov` · `?ver=cat` | cierra la hoja |
+| Listado navegable | `/articulos/lista?rec=…` | Modificación de artículos |
+| Editor de artículo | `/articulos/:id?rec=…` (`?tab=` y Anterior/Siguiente = replace) | Listado (o búsqueda), con autoguardado de datos |
+| Enviar a INEXISTENTE (hoja) | `?ver=inexistente` | cierra la hoja |
+| Operaciones pendientes | `/pendientes` | la pantalla anterior |
+
+### Usuarios y turnos
+El módulo trabaja con **un usuario por operario** (el picking registra quién preparó
+cada renglón). Cambiar de usuario (ícono del inicio) es inmediato: sin borrar la
+réplica y sin perder lo pendiente del anterior (sesión aparcada, §7). Medido: 54 ms
+hasta el inicio del operario siguiente; lo pendiente del anterior salió a su nombre.
+
+### Diferencias con la web (impuestas por navegación / offline / plataforma)
+- Encabezado del core (atrás, "En línea/Sin red", contador ⇪) en lugar del header web.
+- El aviso de urgente sale de la réplica (no hay Realtime ni keys en el APK).
+- Fotos + OCR de recepción: botón único "📷 Documentos" → pantalla online-only.
+- `confirm()` nativos ⇒ hojas con historial. "Cambiar a Chofer" no existe (es otro APK).
+- La búsqueda es local (todas las palabras, sin acentos) en vez del motor trigram/vector.
+- Inicio con contadores por módulo. Fecha de la OC sin corrimiento de huso.
+
+### Puesta en marcha (requiere OK del dueño — producción sale de `main`)
+1. Mergear `apk-deposito` → `main` y esperar el deploy (los cambios del ERP son
+   retrocompatibles: `/deposito` web sigue igual; `npm run build` y `typecheck:movil` pasan).
+2. Aplicar `supabase/migrations/20260919_mobile_deposito.sql` (aditiva). Opcional pero
+   recomendada: sin ella la cola tarda hasta 45 s en enterarse de un cambio.
+3. El NuStar ya tiene `deposito-v0.2.0` instalado (encima del esqueleto, sin
+   desinstalar). Ingresar con un usuario con rol `deposito`.
+4. **Checklist pendiente contra el ERP real** (hoy hecho contra el mock y el equipo):
+   sincronizar la cola → modo avión → pickear con y sin lector → salir y volver →
+   finalizar → reconectar ⇒ el pedido queda `pendiente_facturacion` una sola vez;
+   dos equipos sobre el mismo renglón; matar la app a mitad de un picking; recepción
+   completa (verificar que el stock subió una vez) y una foto con OCR.
+
+### Resultados de las pruebas de esta sesión (18/09/2026)
+| Prueba | Dónde | Resultado |
+|---|---|---|
+| Ruta: cola con red → sin red: gatillo, 2º gatillo confirma, búsqueda manual + parcial, faltante → **recarga** → progreso intacto → finalizar → reconectar | navegador + mock | ✅ 7 operaciones, cada una aplicada **1 vez**; pedido cerrado 1 vez; servidor = pantalla |
+| Concurrencia: Juan (sin señal) y Ana (con señal) marcan el mismo renglón | 2 instancias + mock | ✅ gana Ana; a Juan le vuelve rechazado con motivo y "Entendido"; su otro renglón entra; 🔒 en ambas pantallas; sin duplicados |
+| Bonificados offline (10 %) | navegador + mock | ✅ 4 u calculadas en el equipo = 4 u que fijó el servidor |
+| Recepción iniciada y terminada sin señal (bultos, fuera de OC, artículo sin EAN por búsqueda manual, finalizar) | navegador + mock | ✅ 12 operaciones aplicadas 1 vez; OC cerrada 1 vez |
+| Cambio de usuario con 2 pendientes | navegador + mock | ✅ 54 ms; lo de Juan se envió **como Juan** con Pedro logueado; sesión aparcada descartada |
+| Aviso de urgente en otra pantalla | navegador + mock | ✅ 3 s; atrás lo cierra |
+| Lista de 6.000 artículos | navegador | ✅ 15 filas en el DOM; abre en ~20 ms |
+| Arranque en frío | **NuStar 65-sp** | ✅ 457–598 ms |
+| Interrupción: picking sin red → **matar desde recientes** → abrir | **NuStar 65-sp** | ✅ abre sin login, progreso y contador ⇪ intactos |
+| Atrás físico: teclado → Buscar → Pedido → Cola → Inicio → minimiza | **NuStar 65-sp** | ✅ proceso vivo al minimizar |
+| Reconexión | **NuStar 65-sp** | ✅ todo aplicado 1 vez al volver a primer plano |
+| Lector físico | — | 🟡 este equipo no tiene servicio de escaneo; ráfaga simulada con `adb input text` (tiempos irregulares). Validar el doble gatillo con un lector real |
+| Backend real (handlers contra Supabase) | — | 🟡 tipado y build en verde; sin ejecutar: necesita el deploy en `main` y un usuario `deposito` |
+
