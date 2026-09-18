@@ -11,7 +11,9 @@ npm run lint      # ESLint check
 npm run start     # Run production server
 ```
 
-There are no tests in this project.
+There are no tests in the web ERP. The mobile apps (`mobile/`) have their own tests: `cd mobile && npm test`.
+
+**Mobile apps (vendedor / chofer / deposito APKs):** read `MOBILE.md` first — it is the source of truth for the offline engine, pricing engine, navigation and build pipeline.
 
 ## Architecture Overview
 
