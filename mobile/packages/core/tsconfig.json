@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "types": ["vite/client", "node"] },
+  "include": ["src", "test", "../../../lib/pricing/isomorfico.ts", "../../../lib/mobile/contrato.ts"]
+}

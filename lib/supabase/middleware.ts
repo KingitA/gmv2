@@ -37,7 +37,12 @@ export async function updateSession(request: NextRequest) {
 
   // API routes manejan su propia auth con requireAuth()
   if (pathname.startsWith("/api/")) {
-    return NextResponse.next({ request: { headers: requestHeaders } })
+    const cors = corsHeaders(request)
+    // Preflight de las apps móviles (Authorization + Content-Type ⇒ siempre hay preflight)
+    if (request.method === "OPTIONS" && cors) return new NextResponse(null, { status: 204, headers: cors })
+    const res = NextResponse.next({ request: { headers: requestHeaders } })
+    if (cors) for (const [k, v] of Object.entries(cors)) res.headers.set(k, v)
+    return res
   }
 
   // Rutas públicas que no requieren autenticación
@@ -79,6 +84,31 @@ export async function updateSession(request: NextRequest) {
   }
 
   return applyResponse(NextResponse.next({ request: { headers: requestHeaders } }), cookiesToSet)
+}
+
+// Orígenes de las apps Capacitor (Android sirve el bundle local en https://localhost)
+// + el dev server de Vite. Solo estos reciben CORS; la web es same-origin y no lo
+// necesita. Las apps autentican con Bearer (sin cookies) ⇒ sin Allow-Credentials.
+// Ver MOBILE.md → "Auth de dispositivo".
+const MOBILE_ORIGINS = new Set([
+  "https://localhost",
+  "capacitor://localhost",
+  "http://localhost",
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+])
+
+function corsHeaders(request: NextRequest): Record<string, string> | null {
+  const origin = request.headers.get("origin")
+  if (!origin || !MOBILE_ORIGINS.has(origin)) return null
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, X-Device-Id, X-App-Version",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  }
 }
 
 function applyResponse(response: NextResponse, cookiesToSet: { name: string; value: string; options: any }[]) {

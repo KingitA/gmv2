@@ -16,7 +16,7 @@ import {
   type DatosLista,
   type MetodoFacturacion,
   type DescuentoTipado,
-} from "@/lib/pricing/calculator"
+} from "./calculator"
 
 export interface ArticuloPrecioInput {
   id: string

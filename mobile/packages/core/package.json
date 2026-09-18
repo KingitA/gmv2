@@ -1,0 +1,31 @@
+{
+  "name": "@gm/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fundación compartida de las apps móviles: réplica offline, outbox, auth de dispositivo, navegación, lector de códigos, UI base.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui/index.ts",
+    "./styles.css": "./src/ui/styles.css"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/network": "^8.0.1",
+    "@tanstack/react-virtual": "^3.14.13",
+    "idb": "^8.0.3"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router": "^8.4.0"
+  }
+}

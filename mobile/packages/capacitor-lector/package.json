@@ -1,0 +1,10 @@
+{
+  "name": "@gm/capacitor-lector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plugin Capacitor: recibe lecturas del escáner del handheld por broadcast intent. Ver ../../../MOBILE.md",
+  "main": "index.js",
+  "files": ["android/src", "android/build.gradle", "index.js"],
+  "capacitor": { "android": { "src": "android" } },
+  "peerDependencies": { "@capacitor/core": ">=8.0.0" }
+}
