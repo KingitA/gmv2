@@ -1,8 +1,10 @@
 # MOBILE.md — Apps Android de GMV2 (vendedor · chofer · depósito)
 
 > **Fuente de verdad** para las sesiones que portan cada módulo a su APK. Leé esto
-> entero antes de tocar `mobile/`. Rama de trabajo: `apks-fundacion` (nunca `main`
-> sin confirmación del dueño: producción se despliega desde `main`).
+> entero antes de tocar `mobile/`. La fundación (Sesión 0) está en `main` y validada
+> en producción (§15). Cada sesión trabaja en su propia rama desde `main` y **nunca
+> hace push a `main` sin confirmación explícita del dueño**: producción se despliega
+> desde `main`.
 
 ---
 
@@ -466,8 +468,8 @@ Por app: typecheck → `vite build` → `cap sync android` → `gradlew assemble
 "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r dist-apks\chofer-v0.1.1.apk
 ```
 (o copiar el APK al equipo y abrirlo). Actualizar encima conserva sesión, réplica y
-outbox. **Atención**: el equipo tiene instalado un `com.gm.vendedor` v1.1 viejo
-firmado con otra clave: hay que **desinstalarlo** antes de instalar el nuevo vendedor.
+outbox. Un APK firmado con otra clave (como el `com.gm.vendedor` v1.1 viejo, ya
+desinstalado del NuStar el 18/09) hay que desinstalarlo antes de instalar el nuevo.
 
 ### Probar contra un Next local (sin desplegar)
 ```bash
@@ -505,25 +507,52 @@ soporta encriptación con clave propia).
 
 ## 15. Estado
 
-Rama `apks-fundacion`. Leyenda: ✅ hecho y verificado · 🟡 hecho, falta verificar en
-equipo/producción · ⏳ pendiente.
+> **SESIÓN 0 (FUNDACIÓN): CERRADA Y VALIDADA EN PRODUCCIÓN — 18/09/2026.**
+> En `main` desde el merge `b5a08ce` + hotfix `c3b0978` (deploy gmv2.vercel.app).
+> Las sesiones por app arrancan desde `main`.
+
+Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo indicado) ·
+⏳ trabajo de las sesiones por app.
 
 | Ítem | Estado |
 |---|---|
 | Auditoría (endpoints→tablas, subpantallas, cambios de backend, riesgos) | ✅ (§8, §9, §10, §16) |
 | Workspace `mobile/` con 3 proyectos Capacitor (`com.gm.vendedor/chofer/deposito`) | ✅ compilan; typecheck strict limpio |
-| Motor offline: réplica + outbox + sincronizador + reloj, con tests | ✅ 44/44 tests |
-| Motor de precios isomórfico extraído, ERP usando el mismo código | ✅ (ERP `npm run build` pasa) |
-| Migración `20260918_mobile_fundacion.sql` | ✅ aplicada en producción (18/09); log de cambios, idempotencia e historial verificados en vivo |
-| Vigencia programada (ERP + dispositivo + materialización) | 🟡 código y tests ✅; falta una prueba real con un cambio programado (y confirmar pg_cron) |
-| Historial de insumos + re-verificación de precios | 🟡 tests ✅; se ejercita con `pedido.crear` (sesión vendedor) |
-| Auth de dispositivo (Keystore, refresh, revocación) + Bearer en servidor | ✅ probado en equipo (login, reinicio offline, logout con revocación) |
-| Navegación: convención + hooks + botón atrás | ✅ probado en equipo |
-| Lector: wedge + broadcast (plugin nativo) | ✅ compila; 🟡 el equipo no tiene lector habilitado |
+| Motor offline: réplica + outbox + sincronizador + reloj, con tests | ✅ 44/44 tests; validado en equipo |
+| Motor de precios isomórfico extraído, ERP usando el mismo código | ✅ en producción (preview verificado por el dueño + flujos de pedido probados) |
+| Migración `20260918_mobile_fundacion.sql` | ✅ aplicada en producción; log de cambios, idempotencia e historial verificados en vivo |
+| Vigencia programada (ERP + dispositivo + materialización) | ✅ probada en producción: aplicada por **pg_cron** a la hora exacta (ver abajo) |
+| Historial de insumos | ✅ versión cerrada/abierta exactamente en la vigencia programada |
+| Re-verificación de precios de pedidos offline (`verificarPreciosCapturados`) | 🟡 tests ✅; se ejercita en real con `pedido.crear` (sesión vendedor) |
+| Auth de dispositivo (Keystore, refresh, revocación) + Bearer en servidor | ✅ en equipo y **contra producción** (chofer v0.1.1 release) |
+| Navegación: convención + hooks + botón atrás | ✅ en equipo |
+| Lector: wedge + broadcast (plugin nativo) | ✅ compila; 🟡 el NuStar conectado no tiene servicio de escaneo habilitado |
 | Pipeline de build firmado + keystores + CHANGELOG | ✅ las 3 apps v0.1.1 (versionCode 2) firmadas y verificadas |
-| APK esqueleto (chofer) en el NuStar: arranque en frío 0,44 s (release) | ✅ |
-| Prueba end-to-end en equipo | ✅ ver abajo |
+| Chofer v0.1.1 **release** en el NuStar contra gmv2.vercel.app | ✅ login, viajes reales, reloj 2 s de desfasaje |
+| Vendedor viejo v1.1 (`com.gm.vendedor`, otra firma) | ✅ desinstalado del NuStar |
 | Datasets/handlers de cada módulo, pantallas reales | ⏳ sesiones por app |
+
+### Validación en producción (18/09/2026)
+
+| Prueba | Resultado |
+|---|---|
+| Deploy del merge | ✅ activo ~165 s después del push; rutas públicas/protegidas sanas; CORS de apps OK |
+| Precio programado de prueba (SKU 100651, inactivo, sin pedidos): 4576.174634 → 4800, vigencia 11:38:00 | ✅ aplicado **11:38:00.07** por pg_cron (70 ms, sin ningún dispositivo logueado); historial `2998` cerrado y `4781` abierto a las 11:38:00; log `seq 8` |
+| Reversión | ✅ precio de nuevo en **4576.174634**; programado, versiones de historial y log de la prueba borrados; historial original `2998` reabierto. Único rastro no reversible: `articulos.updated_at` = 18/09 11:38 (lo fija un trigger) |
+| Chofer v0.1.1 release contra producción | ✅ login, viaje activo y últimos viajes reales |
+| Flujos de pedido tras el hotfix (clientes/pedidos TEST-FUNDACION, luego borrados) | ✅ importación IA, pedido desde ERP, ítem bonificado, módulo vendedor web (comisión 5 % correcta) |
+| Datos de prueba | ✅ 0 residuos (verificado por id y por texto). Números de pedido 001554–001556 consumidos (saltos en la numeración) |
+
+**Incidente post-merge (resuelto):** la refactorización de precios dejó dos llamadas
+al nombre viejo (`limpiarCentinela`, `getDescuentoViajante`) → `ReferenceError` en
+`createPedido` y `agregarItemBonificado` (importación de pedidos en 500 entre 11:25 y
+12:01). Hotfix `c3b0978`. Sin pérdida de datos: en esa ventana no entraron mails ni
+se crearon pedidos. Causa de fondo: `ignoreBuildErrors: true` + el `tsc` completo del
+repo se quedaba sin memoria (incluía `mobile/node_modules`) y abortaba sin reportar
+errores. Ahora `tsconfig.json` excluye `mobile/` y `tsc` termina (~55 s con
+`NODE_OPTIONS=--max-old-space-size=8192`). Línea base: **76 errores de tipo
+preexistentes, ninguno de la fundación**. **Regla para las sesiones por app: `tsc`
+en cero para todo archivo que toquen** (y no sumar errores al resto); ver §16.
 
 ### Validación en equipo (18/09/2026, NuStar 65-sp, Android 14)
 
@@ -561,18 +590,27 @@ Cerrar desde recientes o reiniciar el equipo.
 
 ## 16. Riesgos y decisiones abiertas
 
+0. **Chequeo de tipos**: `next.config.mjs` sigue con `ignoreBuildErrors: true` (76
+   errores preexistentes). Propuesta pendiente de aprobación: script
+   `typecheck:movil` que falle con cualquier error en `lib/pricing/**`,
+   `lib/mobile/**`, `app/api/mobile/**`, `lib/actions/pedidos.ts`,
+   `lib/supabase/**` y lo que toque cada sesión, más línea base del resto que solo
+   puede bajar. Referencias rotas preexistentes detectadas (fuera de la fundación,
+   fallan si se usan): `app/api/articulos/[id]/packaging` y `app/api/articulos/mappings`
+   (`createClient`), `app/ordenes-compra/page.tsx` (`supabase`),
+   `lib/actions/clientes.ts` (`updateClienteEmbedding`), `lib/pricing.ts`
+   (`calcularPrecioVentaOffline`, `calcularPrecioFinalOffline`).
 1. **Introspección de la base bloqueada** en esta sesión (permiso del entorno): el
    esquema se infirió de `supabase/migrations/` y `scripts/`, que están incompletos
-   (tablas centrales creadas fuera de migraciones). Verificar con la base real:
-   columnas `id` en tablas con trigger, RLS efectiva, pg_cron.
-2. **RLS**: si en producción las tablas centrales no tienen RLS, la anon key del
-   bundle web da acceso amplio. Las apps no dependen de RLS (todo por API), pero es
-   un riesgo del ERP a revisar aparte.
+   (tablas centrales creadas fuera de migraciones). Ya confirmado en producción: las
+   tablas con trigger tienen `id`, pg_cron activo, `viajes`/`pedidos` sin RLS
+   efectiva para anon (ver 2).
+2. **RLS (confirmado)**: con la anon key pública (la del bundle web) se leen filas de
+   `viajes`, `pedidos` y `usuarios` sin sesión. Las apps no dependen de RLS (todo por
+   API con Bearer), pero es un riesgo del ERP a resolver aparte.
 3. **Keystore del chofer viejo perdido**: el APK viejo `com.gm.chofer` (si está en
    algún equipo) debe desinstalarse antes del nuevo.
 4. **Reloj del handheld**: mitigado con `Reloj` (desfasaje medido). Un equipo que
    nunca tuvo red desde que se cambió la hora usa el último desfasaje conocido.
-5. **pg_cron**: sin él, la materialización de programados depende del sondeo de
-   dispositivos (ver §5).
-6. `.env.vercel` está versionado en el repo (contiene `VERCEL_OIDC_TOKEN`, de vida
-   corta); conviene sacarlo del control de versiones.
+5. **pg_cron**: activo y verificado (materializó un programado a la hora exacta).
+6. `.env.vercel`: sacado del repo y en `.gitignore` (queda en el historial de git).
