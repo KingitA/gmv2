@@ -11,6 +11,7 @@
  */
 
 import { insertarKardex } from "@/lib/kardex/insertar-kardex"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { nowArgentina } from "@/lib/utils"
 import { estadoLineaRecepcion } from "./bonificados"
 import { ErrorDeposito } from "./picking"
@@ -29,6 +30,37 @@ async function ultimaTanda(supabase: any, orden_compra_id: string) {
     .limit(1)
     .maybeSingle()
   return data as any | null
+}
+
+/**
+ * Fotos de remitos/facturas: viven en el bucket PRIVADO `comprobantes`. Lo que queda
+ * guardado en `url_imagen` es una URL firmada por 7 días (o una URL "public" que un
+ * bucket privado nunca sirve): pasada la semana, desde depósito no abría ninguna foto.
+ * Igual que /api/ordenes-compra/[id]/documentos, se firma de nuevo AL SERVIR.
+ * Devuelve los documentos con `url_imagen` lista para abrir (1 h).
+ */
+export async function firmarDocumentosRecepcion<T extends { url_imagen?: string | null; storage_path?: string | null }>(docs: T[] | null | undefined): Promise<T[]> {
+  const lista = (docs || []).filter(Boolean)
+  if (lista.length === 0) return []
+  const storage = createAdminClient().storage.from("comprobantes")
+  return Promise.all(
+    lista.map(async (doc) => {
+      const ruta = doc.storage_path || doc.url_imagen?.match(/\/comprobantes\/(.+?)(\?|$)/)?.[1] || null
+      if (!ruta) return doc
+      try {
+        const { data } = await storage.createSignedUrl(decodeURIComponent(ruta), 3600)
+        return data?.signedUrl ? { ...doc, url_imagen: data.signedUrl } : doc
+      } catch {
+        return doc
+      }
+    }),
+  )
+}
+
+/** La recepción tal como la devuelve POST /api/deposito/recepciones, con las fotos abribles. */
+export async function conFotosFirmadas<R extends { recepciones_documentos?: any[] | null }>(recepcion: R): Promise<R> {
+  if (!recepcion?.recepciones_documentos?.length) return recepcion
+  return { ...recepcion, recepciones_documentos: await firmarDocumentosRecepcion(recepcion.recepciones_documentos) }
 }
 
 /**

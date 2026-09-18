@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { ErrorDeposito } from "@/lib/deposito/picking"
-import { aplicarItemRecepcion, cargarOrdenesPendientes, finalizarRecepcion, guardarConformidad, obtenerOCrearRecepcion } from "@/lib/deposito/recepciones"
+import { aplicarItemRecepcion, cargarOrdenesPendientes, conFotosFirmadas, finalizarRecepcion, guardarConformidad, obtenerOCrearRecepcion } from "@/lib/deposito/recepciones"
 
 // GET: Órdenes de compra pendientes de recibir
 export async function GET() {
@@ -29,7 +29,8 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const { orden_compra_id } = await request.json()
-    return NextResponse.json(await obtenerOCrearRecepcion(supabase, orden_compra_id, auth.user?.id))
+    // Las fotos se firman al servir (bucket privado): ver firmarDocumentosRecepcion
+    return NextResponse.json(await conFotosFirmadas(await obtenerOCrearRecepcion(supabase, orden_compra_id, auth.user?.id)))
   } catch (error: any) {
     if (error instanceof ErrorDeposito) return NextResponse.json({ error: error.message, ...error.extra }, { status: error.status })
     console.error("[deposito] Error POST recepcion:", error)

@@ -1,0 +1,13 @@
+-- =====================================================================
+-- Índice de pedidos_detalle por pedido — ADITIVA, idempotente, sin cambios de datos.
+--
+-- Incidente 18/09/2026: la cola de /deposito/preparar-pedidos aparecía VACÍA. La
+-- consulta (pedidos + renglones embebidos) superaba el statement timeout de 8 s:
+-- contar los renglones de 100 pedidos tardaba ~4 s (recorrido completo de los
+-- ~64.000 renglones por cada pedido). Con este índice, cualquier pantalla que lea
+-- los renglones de un pedido (ERP, vendedor, chofer, depósito) pasa a milisegundos.
+--
+-- 64.000 filas: se crea en menos de un segundo. El código NO depende de este índice
+-- (lib/deposito/cola.ts ya evita la consulta pesada); solo lo hace más rápido.
+-- =====================================================================
+CREATE INDEX IF NOT EXISTS idx_pedidos_detalle_pedido_id ON public.pedidos_detalle (pedido_id);

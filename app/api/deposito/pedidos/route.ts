@@ -1,7 +1,12 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { cargarColaResumen } from "@/lib/deposito/cola"
+
+// GET: cola de pedidos a preparar, con su progreso.
+// No embebe los renglones: con la cola real (1.285 pedidos / 53.867 renglones) esa
+// consulta superaba el statement timeout y la respuesta pesaba 21 MB. Ver lib/deposito/cola.ts.
+export const maxDuration = 30
 
 export async function GET() {
   const auth = await requireAuth()
@@ -9,32 +14,9 @@ export async function GET() {
 
   try {
     const supabase = await createClient()
-
-    const pedidos = await fetchAllRows(() => supabase
-      .from("pedidos")
-      .select(`
-        id, numero_pedido, estado, fecha, prioridad, observaciones, created_at,
-        clientes(id, nombre, razon_social, direccion, localidad),
-        pedidos_detalle(
-          id, cantidad, articulo_id, cantidad_preparada, estado_item,
-          articulos(id, sku, descripcion, ean13, proveedores(nombre))
-        )
-      `)
-      .in("estado", ["pendiente", "en_preparacion", "impreso"])
-      .neq("estado", "eliminado")
-      .order("created_at", { ascending: true }))
-
-    const pedidosConProgreso = pedidos.map(p => {
-      const detalles = p.pedidos_detalle || []
-      const total = detalles.length
-      const resueltos = detalles.filter((d: any) =>
-        d.estado_item && d.estado_item !== "PENDIENTE"
-      ).length
-      return { ...p, progreso: { total, resueltos } }
-    })
-
-    return NextResponse.json(pedidosConProgreso)
+    return NextResponse.json(await cargarColaResumen(supabase))
   } catch (error: any) {
+    console.error("[deposito] Error GET pedidos:", error?.message || error)
     return NextResponse.json({ error: "Error al obtener pedidos" }, { status: 500 })
   }
 }

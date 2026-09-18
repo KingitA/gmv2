@@ -13,6 +13,7 @@
     "app/api/vendedor/me/route.ts",
     "lib/deposito/",
     "app/api/deposito/",
-    "lib/actions/deposito.ts"
+    "lib/actions/deposito.ts",
+    "app/deposito/preparar-pedidos/page.tsx"
   ]
 }

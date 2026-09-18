@@ -813,11 +813,48 @@ hasta el inicio del operario siguiente; lo pendiente del anterior salió a su no
 - La búsqueda es local (todas las palabras, sin acentos) en vez del motor trigram/vector.
 - Inicio con contadores por módulo. Fecha de la OC sin corrimiento de huso.
 
+### Incidente del preview (18/09/2026): cola vacía y fotos que no abren — causas PREEXISTENTES
+Revisando el preview de la rama, el dueño vio la cola de `/deposito` vacía y no pudo abrir
+las fotos de facturas. **Ninguna de las dos venía de la rama ni de la migración** (la web
+no depende de `20260919_mobile_deposito.sql`); las dos están igual en producción:
+
+1. **Cola vacía** — `GET /api/deposito/pedidos` (sin tocar por la rama) hacía
+   `pedidos + pedidos_detalle embebido + ORDER BY + LIMIT`. Postgres arma los renglones de
+   TODOS los pedidos de la cola antes de ordenar; con **1.285 pedidos / 53.867 renglones**
+   (1.267 `impreso` acumulados desde abril) supera el statement timeout de 8 s — medido:
+   hasta una página de 20 muere a los 8 s, sin `ORDER` tarda 0,5 s. La route devolvía 500
+   y la pantalla, al no recibir un array, mostraba "0 pedidos" **sin ningún error**. Aunque
+   terminara, la respuesta pesaba **21 MB** (Vercel corta en 4,5 MB).
+   *Fix:* `lib/deposito/cola.ts` — pedidos sin embeber + conteos por tandas (1.286 pedidos
+   en 0,51 MB); la pantalla ahora muestra el error si la API falla. Migración
+   `20260919_idx_pedidos_detalle_pedido.sql` (índice por `pedido_id`: contar los renglones
+   de 100 pedidos tardaba ~4 s) — opcional, acelera todo el ERP.
+2. **Fotos** — viven en el bucket **privado** `comprobantes`; `url_imagen` guarda una URL
+   firmada por 7 días (o una "public" que un bucket privado nunca sirve). Pasada la semana
+   no abre ninguna desde depósito (la pantalla de OC del ERP sí, porque re-firma al leer).
+   *Fix:* `firmarDocumentosRecepcion()` firma al servir (POST `/api/deposito/recepciones`,
+   que usan la web y la app). Verificado: 9 de 12 abren; las 3 restantes son registros sin
+   archivo (`mock-storage.com`, una subida fallida `error-upload/…`, un `null`, de mayo/junio).
+
+**Regla que queda:** nunca embeber una tabla de renglones en un listado con `ORDER`/`LIMIT`;
+y un listado que recibe un error lo muestra (un "vacío" silencioso tapó esto).
+
+### Alcance de la cola en el handheld (PROVISORIO — decide el dueño)
+La cola completa (21 MB) no se puede replicar. `DIAS_IMPRESO = 7` en
+`lib/mobile/sync/deposito.ts`: se replican todos los `pendiente` y `en_preparacion`, los
+`impreso` de los últimos 7 días y cualquier pedido con picking empezado (hoy: 97 pedidos,
+3.832 renglones, 1,95 MB, 2,5 s). La web sigue mostrando los 1.286. Pendiente de decidir:
+la ventana (7/15/30 días) o depurar en el ERP los `impreso` viejos que ya se entregaron.
+En delta, un `impreso` que envejece no genera evento: sale del equipo en el próximo snapshot.
+
 ### Puesta en marcha (requiere OK del dueño — producción sale de `main`)
 1. Mergear `apk-deposito` → `main` y esperar el deploy (los cambios del ERP son
    retrocompatibles: `/deposito` web sigue igual; `npm run build` y `typecheck:movil` pasan).
-2. Aplicar `supabase/migrations/20260919_mobile_deposito.sql` (aditiva). Opcional pero
-   recomendada: sin ella la cola tarda hasta 45 s en enterarse de un cambio.
+2. Aplicar `supabase/migrations/20260919_mobile_deposito.sql` y
+   `20260919_idx_pedidos_detalle_pedido.sql` (aditivas; **seguras con el código actual de
+   producción corriendo**: solo agregan triggers de log que nunca bloquean una escritura,
+   una tabla nueva y un índice). Opcionales: sin la primera la cola del handheld tarda hasta
+   45 s en enterarse de un cambio; sin la segunda la cola web tarda unos segundos en cargar.
 3. El NuStar ya tiene `deposito-v0.2.0` instalado (encima del esqueleto, sin
    desinstalar). Ingresar con un usuario con rol `deposito`.
 4. **Checklist pendiente contra el ERP real** (hoy hecho contra el mock y el equipo):
