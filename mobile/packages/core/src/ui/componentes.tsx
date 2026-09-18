@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { useRef, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useLocation, useNavigate } from "react-router"
 import { decidirAtras, indiceHistorial } from "../nav/atras"
 import { useContadoresOutbox, useMetaDataset, useOnline, useRuntime } from "../react/contexto"
@@ -96,29 +96,49 @@ export function Frescura({ dataset, etiqueta = "Datos al", viejoTrasMin = 60 }: 
   )
 }
 
-/** Lista virtualizada (miles de filas sin trabar el handheld). Altura fija por fila. */
+/**
+ * Lista virtualizada (miles de filas sin trabar el handheld). Altura fija por fila,
+ * o por tipo de fila con `altoDe` (ej. encabezados de grupo más bajos).
+ * `indiceInicial`: fila que tiene que quedar a la vista al montar (volver de un
+ * detalle a la misma altura de la lista).
+ */
 export function ListaVirtual<T>({
   items,
   alto = 64,
+  altoDe,
+  indiceInicial,
   render,
   vacio = "No hay nada para mostrar.",
   clave,
 }: {
   items: T[]
   alto?: number
+  altoDe?: (item: T, i: number) => number
+  indiceInicial?: number
   render: (item: T, i: number) => ReactNode
   vacio?: ReactNode
   clave: (item: T) => string
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const v = useVirtualizer({ count: items.length, getScrollElement: () => ref.current, estimateSize: () => alto, overscan: 6 })
+  const v = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => ref.current,
+    estimateSize: (i) => (altoDe ? altoDe(items[i]!, i) : alto),
+    overscan: 6,
+  })
+  const posicionado = useRef(false)
+  useEffect(() => {
+    if (posicionado.current || indiceInicial === undefined || indiceInicial < 0 || indiceInicial >= items.length) return
+    posicionado.current = true
+    v.scrollToIndex(indiceInicial, { align: "center" })
+  }, [indiceInicial, items.length, v])
   if (!items.length) return <div className="p-8 text-center text-slate-500">{vacio}</div>
   return (
     <div ref={ref} className="min-h-0 flex-1 overflow-auto">
       <div style={{ height: v.getTotalSize(), position: "relative" }}>
         {v.getVirtualItems().map((vi) => (
-          <div key={clave(items[vi.index])} style={{ position: "absolute", top: 0, left: 0, right: 0, height: vi.size, transform: `translateY(${vi.start}px)` }}>
-            {render(items[vi.index], vi.index)}
+          <div key={clave(items[vi.index]!)} style={{ position: "absolute", top: 0, left: 0, right: 0, height: vi.size, transform: `translateY(${vi.start}px)` }}>
+            {render(items[vi.index]!, vi.index)}
           </div>
         ))}
       </div>

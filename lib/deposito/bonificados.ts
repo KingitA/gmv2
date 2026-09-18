@@ -13,7 +13,7 @@ export interface LineaBonificable {
   id: string
   cantidad: number | null
   cantidad_preparada: number | null
-  precio_base: number | null
+  precio_base?: number | null
   es_bonificado?: boolean | null
   /** true si el renglón es de la lista "especial" (no entra en la base) */
   excluye_bonif?: boolean | null
