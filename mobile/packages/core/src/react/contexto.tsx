@@ -45,6 +45,17 @@ export function useItemsOutbox(): ItemOutbox[] {
   return items
 }
 
+/**
+ * Operaciones NO enviadas (pendiente / enviando / rechazado), en orden. Es la base
+ * del "overlay" optimista: la pantalla muestra la réplica + estas operaciones
+ * encima, así lo que el operario marcó sin señal se ve al instante y sobrevive a
+ * cerrar la app (sale del outbox, que es durable).
+ */
+export function useNoEnviados(): ItemOutbox[] {
+  const { outbox } = useRuntime()
+  return useSyncExternalStore(outbox.suscribir, () => outbox.noEnviadosSync)
+}
+
 export function useMetaDataset(ds: string): MetaDataset | null {
   const { replica } = useRuntime()
   const sub = useCallback((fn: () => void) => replica.suscribir(ds, fn), [replica, ds])

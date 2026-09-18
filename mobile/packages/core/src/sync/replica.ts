@@ -123,6 +123,32 @@ export class Replica {
     this.emisor(ds).emitir()
   }
 
+  /**
+   * Parche local: filas ya actualizadas que devuelve el servidor al aplicar una
+   * operación del outbox (resultado.replica). NO toca el cursor ni la frescura
+   * (R3/R6 intactos: el próximo sync sigue desde donde estaba y re-trae lo mismo,
+   * los upserts son idempotentes). Sirve para que la pantalla no "vuelva atrás"
+   * entre que se envía la operación y llega el siguiente sync.
+   */
+  async parchear(ds: string, upserts: FilaReplica[], deletes: string[] = []): Promise<void> {
+    if (!upserts.length && !deletes.length) return
+    const tx = this.db.transaction(["rows", "meta"], "readwrite")
+    const rows = tx.objectStore("rows")
+    for (const f of upserts) {
+      if (typeof f?.id === "string" && f.id) await rows.put({ ds, id: f.id, data: f })
+    }
+    for (const id of deletes) await rows.delete([ds, id])
+    const meta = await tx.objectStore("meta").get(ds)
+    if (meta) {
+      const count = await rows.index("ds").count(IDBKeyRange.only(ds))
+      await tx.objectStore("meta").put({ ...meta, count })
+      this.metas.set(ds, { ...meta, count })
+    }
+    await tx.done
+    this.cache.delete(ds)
+    this.emisor(ds).emitir()
+  }
+
   private async registrarError(ds: string, previo: MetaDataset | null, error: string) {
     const meta: MetaDataset = previo
       ? { ...previo, error }

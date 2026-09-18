@@ -12,6 +12,12 @@ export interface ContextoOutbox {
   usuarioActual: () => string | null
   /** Enviar apenas se encola (default true; los tests lo apagan para controlar el orden) */
   autoEnviar?: boolean
+  /**
+   * Token de OTRO usuario del mismo equipo cuya sesión quedó aparcada (cambio de
+   * turno con pendientes, ver Auth.aparcar). null ⇒ sus operaciones esperan a que
+   * vuelva a ingresar. Sin esta función, solo se envía lo del usuario logueado.
+   */
+  tokenDe?: (usuarioId: string, forzar?: boolean) => Promise<string | null>
 }
 
 export interface ContadoresOutbox {
@@ -45,13 +51,18 @@ export function backoffMs(intentos: number, azar = Math.random()): number {
  *  O6. Tras un crash, los "enviando" vuelven a "pendiente" (misma clave ⇒ si el
  *      servidor ya la había aplicado, responde "duplicado" y queda enviado).
  *  O7. Error de sesión (401 sin poder renovar) detiene el envío sin tocar los items.
- *  O8. Cada item guarda el usuario que lo capturó y solo se envía con ESA sesión.
+ *  O8. Cada item guarda el usuario que lo capturó y solo se envía con la sesión
+ *      de ESE usuario: la activa, o la suya aparcada (ctx.tokenDe). El FIFO es
+ *      por usuario: lo trabado de uno no frena lo de otro.
+ *  O9. Los callbacks onAplicado (parche de réplica) corren ANTES de marcar el
+ *      item "enviado": la UI nunca ve el item enviado sin su efecto en la réplica.
  */
 export class Outbox {
   private emisor = new Emisor()
   private enVuelo: Promise<void> | null = null
   private _contadores: ContadoresOutbox = { pendientes: 0, rechazados: 0, enviando: false }
-  private alAplicar = new Set<(item: ItemOutbox) => void>()
+  private _noEnviados: ItemOutbox[] = []
+  private alAplicar = new Set<(item: ItemOutbox) => void | Promise<void>>()
 
   constructor(
     private db: Db,
@@ -64,9 +75,13 @@ export class Outbox {
   get contadores() {
     return this._contadores
   }
+  /** Copia en memoria de noEnviados() (se refresca en cada cambio): lectura sincrónica para la UI. */
+  get noEnviadosSync(): ItemOutbox[] {
+    return this._noEnviados
+  }
 
   /** Se llama con cada item aplicado en el servidor (p. ej. para re-sincronizar un dataset). */
-  onAplicado(fn: (item: ItemOutbox) => void) {
+  onAplicado(fn: (item: ItemOutbox) => void | Promise<void>) {
     this.alAplicar.add(fn)
     return () => void this.alAplicar.delete(fn)
   }
@@ -116,6 +131,22 @@ export class Outbox {
     return this.db.getAllFromIndex("outbox", "seq")
   }
 
+  /** Todo lo que NO está enviado (pendiente, enviando, rechazado), en orden. Barato: va por índice. */
+  async noEnviados(): Promise<ItemOutbox[]> {
+    const tx = this.db.transaction("outbox", "readonly")
+    const idx = tx.store.index("estado")
+    const [a, b, c] = await Promise.all([idx.getAll("pendiente"), idx.getAll("enviando"), idx.getAll("rechazado")])
+    await tx.done
+    return [...a, ...b, ...c].sort((x, y) => x.seq - y.seq)
+  }
+
+  /** Usuarios con operaciones sin enviar (para saber qué sesiones aparcadas siguen haciendo falta). */
+  async usuariosConPendientes(): Promise<Set<string>> {
+    const out = new Set<string>()
+    for (const i of await this.noEnviados()) if (i.estado !== "rechazado" && i.usuarioId) out.add(i.usuarioId)
+    return out
+  }
+
   async item(key: string) {
     return (await this.db.get("outbox", key)) ?? null
   }
@@ -141,21 +172,36 @@ export class Outbox {
   }
 
   private async bucle(): Promise<void> {
+    // FIFO por usuario (O3 + O8): el primer pendiente de cada usuario frena a los
+    // siguientes DE ESE usuario, no a los de otro.
+    const frenados = new Set<string>()
     for (;;) {
       const usuario = this.ctx.usuarioActual()
       if (!usuario) return // O7: sin sesión no se envía
-      // O8: solo las operaciones del usuario logueado (otro usuario en el mismo
-      // equipo nunca envía lo que capturó el anterior)
-      const siguiente = (await this.lista()).find((i) => i.estado === "pendiente" && i.usuarioId === usuario)
+      const siguiente = (await this.noEnviados()).find((i) => i.estado === "pendiente" && !frenados.has(i.usuarioId ?? ""))
       if (!siguiente) return
-      if (siguiente.proximoIntentoAt > this.ahora()) return // O3: espera su backoff
-      const seguir = await this.enviarUno(siguiente)
-      if (!seguir) return
+      const duenio = siguiente.usuarioId ?? ""
+      if (siguiente.proximoIntentoAt > this.ahora()) {
+        frenados.add(duenio) // O3: espera su backoff
+        continue
+      }
+      let token: string | null | undefined
+      if (duenio !== usuario) {
+        // O8: lo capturó otro usuario ⇒ solo con SU sesión aparcada
+        token = this.ctx.tokenDe ? await this.ctx.tokenDe(duenio).catch(() => null) : null
+        if (!token) {
+          frenados.add(duenio)
+          continue
+        }
+      }
+      const seguir = await this.enviarUno(siguiente, token ?? undefined)
+      if (!seguir) frenados.add(duenio)
+      await this.recontar() // la UI ve bajar el contador operación por operación
     }
   }
 
   /** true = seguir con el próximo; false = cortar el bucle (transitorio) */
-  private async enviarUno(it: ItemOutbox): Promise<boolean> {
+  private async enviarUno(it: ItemOutbox, tokenAparcado?: string): Promise<boolean> {
     await this.db.put("outbox", { ...it, estado: "enviando" })
     const m: MutacionOutbox = {
       idempotency_key: it.key, // O2
@@ -167,7 +213,21 @@ export class Outbox {
       app_version: this.ctx.appVersion,
     }
     try {
-      const r = await this.api.post<ResultadoOutbox>("/api/mobile/outbox", m, { timeoutMs: 45_000 })
+      const post = (token?: string) =>
+        this.api.post<ResultadoOutbox>("/api/mobile/outbox", m, {
+          timeoutMs: 45_000,
+          ...(token ? { auth: false, headers: { Authorization: `Bearer ${token}` } } : {}),
+        })
+      let r: ResultadoOutbox
+      try {
+        r = await post(tokenAparcado)
+      } catch (e) {
+        // Sesión aparcada con el token vencido: renovar una vez y reintentar
+        if (!(tokenAparcado && e instanceof ErrorHttp && e.status === 401 && this.ctx.tokenDe && it.usuarioId)) throw e
+        const nuevo = await this.ctx.tokenDe(it.usuarioId, true)
+        if (!nuevo) throw new ErrorSesion("Se enviará cuando ese usuario vuelva a ingresar")
+        r = await post(nuevo)
+      }
       const final: ItemOutbox = {
         ...it,
         estado: "enviado",
@@ -176,14 +236,15 @@ export class Outbox {
         resultado: r && "resultado" in r ? r.resultado : null,
         enviadoAt: new Date(this.ahora()).toISOString(),
       }
-      await this.db.put("outbox", final)
+      // O9: primero el efecto en la réplica, después "enviado"
       for (const fn of this.alAplicar) {
         try {
-          fn(final)
+          await fn(final)
         } catch (e) {
           console.error(e)
         }
       }
+      await this.db.put("outbox", final)
       return true
     } catch (e: any) {
       const definitivo = e instanceof ErrorHttp && !e.reintentable && e.status !== 401
@@ -205,7 +266,7 @@ export class Outbox {
 
   /** ms hasta el próximo reintento programado (para el scheduler), o null */
   async proximoReintentoEn(): Promise<number | null> {
-    const p = (await this.lista()).find((i) => i.estado === "pendiente")
+    const p = (await this.noEnviados()).find((i) => i.estado === "pendiente")
     if (!p) return null
     return Math.max(0, p.proximoIntentoAt - this.ahora())
   }
@@ -213,10 +274,12 @@ export class Outbox {
   private async recontar() {
     let pendientes = 0
     let rechazados = 0
-    for (const i of await this.lista()) {
+    const lista = await this.noEnviados()
+    for (const i of lista) {
       if (i.estado === "pendiente" || i.estado === "enviando") pendientes++
       else if (i.estado === "rechazado") rechazados++
     }
+    this._noEnviados = lista
     this._contadores = { pendientes, rechazados, enviando: !!this.enVuelo }
     this.emisor.emitir()
   }

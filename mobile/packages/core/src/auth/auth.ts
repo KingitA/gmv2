@@ -13,6 +13,14 @@ export interface AlmacenSeguro {
 export type EstadoAuth = "cargando" | "anonimo" | "autenticado"
 
 const CLAVE = "gm.sesion"
+/** Sesiones aparcadas (cambio de turno con operaciones sin enviar). Ver aparcar(). */
+const CLAVE_APARCADAS = "gm.sesiones.aparcadas"
+const claveAparcada = (uid: string) => `gm.sesion.aparcada.${uid}`
+
+export interface UsuarioAparcado {
+  id: string
+  nombre: string
+}
 /** Renovar el access token si vence en menos de esto */
 const MARGEN_RENOVACION_S = 120
 
@@ -33,6 +41,7 @@ export class Auth {
   private _estado: EstadoAuth = "cargando"
   private _sesion: SesionMovil | null = null
   private renovando: Promise<boolean> | null = null
+  private renovandoAparcada = new Map<string, Promise<string | null>>()
 
   constructor(
     private api: Api,
@@ -85,6 +94,8 @@ export class Auth {
 
   async ingresar(email: string, password: string): Promise<void> {
     const s = await this.api.post<SesionMovil>("/api/mobile/auth/login", { email, password, app: this.app }, { auth: false })
+    // Volvió a ingresar alguien que tenía la sesión aparcada: la nueva la reemplaza
+    await this.descartarAparcada(s.user.id)
     await this.guardar(s)
     this.set("autenticado")
   }
@@ -96,6 +107,94 @@ export class Auth {
       await this.api.post("/api/mobile/auth/logout", {}, { auth: false, headers: { Authorization: `Bearer ${token}` }, timeoutMs: 5000 }).catch(() => {})
     }
     await this.sesionInvalida()
+  }
+
+  // ─── Sesiones aparcadas (handheld compartido entre turnos) ────────────────
+  //
+  // Un operario deja el equipo con operaciones sin enviar (estaba sin señal) y
+  // otro necesita ingresar YA. En vez de bloquear la salida, la sesión del que
+  // se va queda "aparcada" en el almacén seguro: el outbox la usa SOLO para
+  // enviar lo que ESE usuario capturó (invariante O8) y se descarta sola cuando
+  // ya no le queda nada pendiente. Nunca se puede "retomar" sin contraseña.
+
+  async aparcadas(): Promise<UsuarioAparcado[]> {
+    try {
+      const raw = await this.almacen.get(CLAVE_APARCADAS)
+      return raw ? (JSON.parse(raw) as UsuarioAparcado[]) : []
+    } catch {
+      return []
+    }
+  }
+
+  /** Sale al login SIN revocar la sesión: queda aparcada para terminar de enviar su outbox. */
+  async aparcar(): Promise<void> {
+    const s = this._sesion
+    if (!s) return
+    await this.almacen.set(claveAparcada(s.user.id), JSON.stringify(s))
+    const lista = (await this.aparcadas()).filter((u) => u.id !== s.user.id)
+    lista.push({ id: s.user.id, nombre: s.user.nombre || s.user.email || "Operario" })
+    await this.almacen.set(CLAVE_APARCADAS, JSON.stringify(lista))
+    this._sesion = null
+    await this.almacen.remove(CLAVE).catch(() => {})
+    this.set("anonimo")
+  }
+
+  /** Borra una sesión aparcada (ya no tiene nada pendiente, o el servidor la rechazó). */
+  async descartarAparcada(uid: string, revocar = false): Promise<void> {
+    const lista = await this.aparcadas()
+    if (!lista.some((u) => u.id === uid)) return
+    if (revocar) {
+      const raw = await this.almacen.get(claveAparcada(uid)).catch(() => null)
+      const token = raw ? (JSON.parse(raw) as SesionMovil).access_token : null
+      if (token) {
+        await this.api.post("/api/mobile/auth/logout", {}, { auth: false, headers: { Authorization: `Bearer ${token}` }, timeoutMs: 5000 }).catch(() => {})
+      }
+    }
+    await this.almacen.remove(claveAparcada(uid)).catch(() => {})
+    await this.almacen.set(CLAVE_APARCADAS, JSON.stringify(lista.filter((u) => u.id !== uid))).catch(() => {})
+  }
+
+  /**
+   * Access token de una sesión aparcada (renovado si hace falta). null = no hay
+   * sesión aparcada de ese usuario o el servidor la rechazó: sus operaciones
+   * esperan a que vuelva a ingresar.
+   */
+  tokenAparcado(uid: string, forzar = false): Promise<string | null> {
+    let p = this.renovandoAparcada.get(uid)
+    if (!p) {
+      p = this.hacerTokenAparcado(uid, forzar).finally(() => this.renovandoAparcada.delete(uid))
+      this.renovandoAparcada.set(uid, p)
+    }
+    return p
+  }
+
+  private async hacerTokenAparcado(uid: string, forzar: boolean): Promise<string | null> {
+    let s: SesionMovil | null = null
+    try {
+      const raw = await this.almacen.get(claveAparcada(uid))
+      s = raw ? (JSON.parse(raw) as SesionMovil) : null
+    } catch {
+      return null
+    }
+    if (!s) return null
+    const vence = s.expires_at - Date.now() / 1000
+    if (!forzar && vence >= MARGEN_RENOVACION_S) return s.access_token
+    try {
+      const nueva = await this.api.post<SesionMovil>(
+        "/api/mobile/auth/refresh",
+        { refresh_token: s.refresh_token, app: this.app },
+        { auth: false, timeoutMs: 15_000 },
+      )
+      await this.almacen.set(claveAparcada(uid), JSON.stringify(nueva))
+      return nueva.access_token
+    } catch (e) {
+      if (e instanceof ErrorHttp && e.status === 401) {
+        await this.descartarAparcada(uid)
+        return null
+      }
+      // Sin red / transitorio: usar el token que hay si todavía no venció
+      return vence > 0 && !forzar ? s.access_token : null
+    }
   }
 
   /** El servidor rechazó la sesión: borrar y volver al login. */
