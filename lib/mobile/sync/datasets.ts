@@ -12,6 +12,7 @@ import {
 } from "@/lib/pricing/cargar-insumos"
 import type { FilaReplica } from "../contrato"
 import type { CtxSync, DatasetDef } from "./motor"
+import { DATASETS_DEPOSITO } from "./deposito"
 import { GET as choferMeGET } from "@/app/api/chofer/me/route"
 import { GET as choferViajeGET } from "@/app/api/chofer/viaje/[id]/route"
 
@@ -215,6 +216,7 @@ const REGISTRO: DatasetDef[] = [
   preciosReglas,
   preciosProgramados,
   preciosClientes,
+  ...DATASETS_DEPOSITO,
 ]
 
 export const DATASETS = new Map(REGISTRO.map((d) => [d.nombre, d]))

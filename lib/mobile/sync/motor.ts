@@ -32,6 +32,13 @@ export interface DatasetDef {
    * Sin tablas ⇒ solo snapshot.
    */
   tablas?: string[]
+  /**
+   * Tablas cuyo trigger de log llegó en una migración POSTERIOR a la fundación.
+   * Si el log no tiene ninguna entrada de estas tablas (migración sin aplicar, o
+   * 30 días sin movimiento) no se puede confiar en el delta ⇒ snapshot. Sin esto,
+   * un dataset delta sin trigger respondería "sin cambios" para siempre.
+   */
+  requiereLogDe?: string[]
   /** Carga filas del dataset. ids undefined ⇒ todas las del alcance del usuario. */
   cargar(ctx: CtxSync, ids?: string[]): Promise<FilaReplica[]>
 }
@@ -87,6 +94,11 @@ export async function responderSync(ctx: CtxSync, def: DatasetDef, cursorCliente
 
   const m = cursorCliente ? /^d:(\d+):(.*)$/.exec(cursorCliente) : null
   if (!def.tablas?.length || seq === null || !m) return snapshot(ctx, def, cursorCliente, seq)
+
+  if (def.requiereLogDe?.length) {
+    const { data: hay, error: errLog } = await admin.from("mobile_cambios").select("seq").in("tabla", def.requiereLogDe).limit(1)
+    if (errLog || !hay?.length) return snapshot(ctx, def, cursorCliente, seq)
+  }
 
   const desde = m[1]
   // El log se purga (30 días): si el cursor quedó antes del seq más viejo

@@ -10,6 +10,9 @@
     "app/tablas/precios-programados/",
     "app/api/chofer/me/route.ts",
     "app/api/chofer/viaje/[id]/route.ts",
-    "app/api/vendedor/me/route.ts"
+    "app/api/vendedor/me/route.ts",
+    "lib/deposito/",
+    "app/api/deposito/",
+    "lib/actions/deposito.ts"
   ]
 }

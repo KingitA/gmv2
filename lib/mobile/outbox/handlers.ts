@@ -10,30 +10,11 @@
 //   devolver la fila existente. Así un crash entre "aplicar" y "completar la
 //   reserva" no duplica nada.
 
-import type { MutacionOutbox } from "../contrato"
-import type { SesionMobile } from "../sesion"
+import { HANDLERS_DEPOSITO } from "./deposito"
+import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
 
-export class RechazoNegocio extends Error {
-  constructor(message: string, public codigo?: string) {
-    super(message)
-  }
-}
-
-export interface CtxOutbox {
-  request: Request
-  supabase: any
-  admin: any
-  sesion: SesionMobile
-}
-
-export interface HandlerDef<P = any> {
-  tipo: string
-  /** Roles que pueden ejecutarla (admin siempre) */
-  roles: string[]
-  /** Validación de forma; devolver string = rechazo definitivo */
-  validar?(payload: P): string | null
-  aplicar(ctx: CtxOutbox, m: MutacionOutbox<P>): Promise<unknown>
-}
+export { RechazoNegocio }
+export type { CtxOutbox, HandlerDef }
 
 // ─── Mutación de prueba de la fundación ──────────────────────────────────────
 // Escritura inocua que usa el APK esqueleto para probar el circuito offline
@@ -66,7 +47,7 @@ const pruebaRegistrar: HandlerDef<{ texto: string }> = {
   },
 }
 
-const REGISTRO: HandlerDef[] = [pruebaRegistrar]
+const REGISTRO: HandlerDef[] = [pruebaRegistrar, ...HANDLERS_DEPOSITO]
 
 export const HANDLERS = new Map(REGISTRO.map((h) => [h.tipo, h]))
 

@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 import { padEan13 } from "@/lib/utils/ean"
-import { getUsuarioActual, getOCrearSesion, getPreparadoresPedido } from "@/lib/deposito/preparadores"
+import { abrirPicking, ErrorDeposito } from "@/lib/deposito/picking"
 
 // POST: Iniciar o retomar sesión de picking para un pedido
 export async function POST(request: NextRequest) {
@@ -19,44 +19,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "pedido_id requerido" }, { status: 400 })
     }
 
-    // Obtener pedido con sus detalles (usando campos reales de pedidos_detalle)
-    const { data: pedido, error: pedidoError } = await supabase
-      .from("pedidos")
-      .select(`
-        id, numero_pedido, estado,
-        clientes(id, nombre, razon_social),
-        pedidos_detalle(
-          id, cantidad, articulo_id,
-          cantidad_preparada, estado_item, es_bonificado,
-          articulos(id, sku, descripcion, ean13, unidades_por_bulto, proveedores(nombre))
-        )
-      `)
-      .eq("id", pedido_id)
-      .in("estado", ["pendiente", "en_preparacion", "impreso"])
-      .single()
-
-    if (pedidoError || !pedido) {
-      return NextResponse.json(
-        { error: `Pedido no encontrado: ${pedidoError?.message}` },
-        { status: 404 }
-      )
-    }
-
-    // Sesión de picking POR PERSONA: un pedido lo pueden preparar varios usuarios,
-    // cada uno con su sesión (antes había una sola por pedido y el primero que lo
-    // abría figuraba como "el" preparador).
-    const usuario = await getUsuarioActual(supabase)
-    await getOCrearSesion(supabase, pedido_id, usuario)
-    if (pedido.estado !== "en_preparacion") {
-      await supabase.from("pedidos").update({ estado: "en_preparacion" }).eq("id", pedido_id)
-    }
-
-    // Quién preparó cada renglón (para mostrar badges y bloquear los tomados por otro)
-    const preparadores = await getPreparadoresPedido(supabase, pedido_id)
-
-    return NextResponse.json({ pedido, preparadores, usuario: { id: usuario.id, nombre: usuario.nombre } })
+    // La lógica vive en lib/deposito/picking.ts (la comparte el outbox de la app)
+    return NextResponse.json(await abrirPicking(supabase, pedido_id))
 
   } catch (error: any) {
+    if (error instanceof ErrorDeposito) return NextResponse.json({ error: error.message, ...error.extra }, { status: error.status })
     return NextResponse.json({ error: `Error: ${error?.message}` }, { status: 500 })
   }
 }

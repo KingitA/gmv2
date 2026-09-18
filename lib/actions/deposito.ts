@@ -1,10 +1,11 @@
 "use server"
 
 import { createAdminClient } from "@/lib/supabase/admin"
-import { padEan13, padEanArray } from "@/lib/utils/ean"
+import { padEan13 } from "@/lib/utils/ean"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 import { buscarConFiltros } from "@/lib/search/buscar-con-filtros"
 import { cargarTiposArticulo } from "@/lib/catalogos/tipos-articulo"
+import { aplicarAjusteStock, enviarArticuloAInexistente, normalizarDatosArticulo, proveedorInexistenteId } from "@/lib/deposito/articulos"
 
 /** Opciones de Tipo de bulto / Tipo de fracción (tablas tipos_bulto / tipos_fraccion) para los selects de depósito. */
 export async function getTiposArticulo() {
@@ -117,11 +118,7 @@ export async function actualizarDatosArticulo(id: string, datos: {
   cantidad_fraccion?: number | null
 }) {
   const sb = createAdminClient()
-  const normalized = {
-    ...datos,
-    ean13: datos.ean13 ? padEanArray(datos.ean13) : datos.ean13,
-    codigo_bulto: datos.codigo_bulto ? padEan13(datos.codigo_bulto) : datos.codigo_bulto,
-  }
+  const normalized = normalizarDatosArticulo(datos)
   const { error } = await sb.from("articulos").update(normalized).eq("id", id)
   if (error) throw new Error(error.message)
   return { success: true }
@@ -141,10 +138,7 @@ export async function getArticuloExtra(id: string) {
 // Recorrido de artículos sin EAN13 asignado, agrupados por marca.
 // Excluye los del proveedor INEXISTENTE (descartados a la espera de eliminación).
 
-async function getProveedorInexistenteId(sb: any): Promise<string | null> {
-  const { data } = await sb.from("proveedores").select("id").ilike("nombre", "inexistente").limit(1)
-  return data?.[0]?.id ?? null
-}
+const getProveedorInexistenteId = proveedorInexistenteId
 
 // Clave de orden del recorrido sin código: marca (sin marca al final) → descripción → id
 const marcaKey = (m: string | null | undefined) => (m ? m.toUpperCase() : "￿")
@@ -179,11 +173,11 @@ async function cargarSinCodigo(sb: any): Promise<any[]> {
 
 // Cambia el proveedor del artículo a INEXISTENTE (descarte para futura eliminación).
 export async function enviarAInexistente(articuloId: string) {
-  const sb = createAdminClient()
-  const inexistenteId = await getProveedorInexistenteId(sb)
-  if (!inexistenteId) throw new Error('No existe el proveedor "INEXISTENTE" en la base')
-  const { error } = await sb.from("articulos").update({ proveedor_id: inexistenteId }).eq("id", articuloId)
-  if (error) throw new Error(error.message)
+  try {
+    await enviarArticuloAInexistente(createAdminClient(), articuloId)
+  } catch (e: any) {
+    throw new Error(e?.message || "Error al cambiar el proveedor")
+  }
   return { success: true }
 }
 
@@ -326,24 +320,7 @@ export async function ajustarStock(
   tipo: "correccion" | "entrada" | "salida",
   motivo: string
 ) {
-  const sb = createAdminClient()
-  const { data: art, error: fetchErr } = await sb
-    .from("articulos")
-    .select("stock_actual")
-    .eq("id", articuloId)
-    .single()
-  if (fetchErr) throw new Error(fetchErr.message)
-
-  let nuevoStock: number
-  const stockActual = art.stock_actual ?? 0
-  if (tipo === "correccion") nuevoStock = cantidad
-  else if (tipo === "entrada") nuevoStock = stockActual + cantidad
-  else nuevoStock = stockActual - cantidad
-
-  const { error } = await sb
-    .from("articulos")
-    .update({ stock_actual: nuevoStock })
-    .eq("id", articuloId)
-  if (error) throw new Error(error.message)
-  return { success: true, nuevoStock }
+  // Lógica en lib/deposito/articulos.ts (la comparte el outbox de la app Depósito)
+  const { success, nuevoStock } = await aplicarAjusteStock(createAdminClient(), articuloId, cantidad, tipo)
+  return { success, nuevoStock }
 }

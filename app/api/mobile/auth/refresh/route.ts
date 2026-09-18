@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { authClient, aSesionMovil, habilitado, rolesDe, tocarDispositivo } from "@/lib/mobile/auth-server"
+import { authClient, aSesionMovil, habilitado, nombreDe, rolesDe, tocarDispositivo } from "@/lib/mobile/auth-server"
 import type { AppMovil } from "@/lib/mobile/contrato"
 
 // POST /api/mobile/auth/refresh  { refresh_token, app }
@@ -31,5 +31,5 @@ export async function POST(request: Request) {
   })
   if (revocado) return NextResponse.json({ error: "Este dispositivo fue dado de baja." }, { status: 401 })
 
-  return NextResponse.json(aSesionMovil(data.session, roles))
+  return NextResponse.json(aSesionMovil(data.session, roles, await nombreDe(data.user.id)))
 }
