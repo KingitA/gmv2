@@ -28,7 +28,7 @@ export function toMetodoFacturacion(raw: string | null | undefined): MetodoFactu
 // Centinelas de UI que NUNCA deben llegar como lista/método concretos: si el
 // usuario eligió "por segmento", el valor general queda vacío y resuelve por segmento.
 const CENTINELAS_SEGMENTO = new Set(["PorSegmento", "porsegmento", "__por_segmento__", "por_segmento"])
-function limpiarCentinela(v?: string | null): string | undefined {
+export function limpiarCentinela(v?: string | null): string | undefined {
   return v && !CENTINELAS_SEGMENTO.has(v) ? v : undefined
 }
 

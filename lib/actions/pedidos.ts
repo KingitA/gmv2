@@ -34,6 +34,8 @@ import {
 // móviles (lib/pricing/resolver.ts). Ver MOBILE.md → "Precios".
 import {
   toMetodoFacturacion,
+  limpiarCentinela,
+  getDescuentoViajante,
   resolverListaSegmento,
   mergeCondicionesProveedor,
   mergeCondicionesMarca,
@@ -45,7 +47,7 @@ import {
   type CondicionMarca,
 } from "@/lib/pricing/resolver"
 export type { CondicionSegmento, CondicionProveedor, CondicionMarca } from "@/lib/pricing/resolver"
-import { prepararMotorCliente, precioArticuloParaCliente, descuentosPorArticulo } from "@/lib/pricing/motor"
+import { prepararMotorCliente, precioArticuloParaCliente, descuentosPorArticulo, type ArticuloMotor } from "@/lib/pricing/motor"
 import { cargarInsumosCliente, ARTICULO_PRECIO_COLS } from "@/lib/pricing/cargar-insumos"
 
 const CONDICION_PROVEEDOR_COLS =
@@ -406,7 +408,8 @@ export async function previewPreciosArticulos(
   const out: Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }> = []
   for (const art of articulos || []) {
     try {
-      const p = motor.precio({ ...art, descuentos: descPorArt.get(art.id) || [] })
+      // supabase-js tipa los joins to-one (rubros, proveedor) como arrays; en runtime son objetos
+      const p = motor.precio({ ...art, descuentos: descPorArt.get(art.id) || [] } as unknown as ArticuloMotor)
       out.push({
         articulo_id: art.id,
         precio: p.precio,

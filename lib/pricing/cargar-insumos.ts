@@ -6,10 +6,10 @@
 import type { InsumosCliente, ListaPrecioRow, ReglaPrecioRow } from "./motor"
 import type { CondicionMarca, CondicionProveedor } from "./resolver"
 
+// Los selects son literales únicos (sin "+"): así supabase-js infiere el tipo de
+// las filas. Concatenados, el tipo cae a GenericStringError y tsc lo marca.
 export const CLIENTE_LISTAS_COLS =
-  "id, vendedor_id, metodo_facturacion, lista_precio_id, " +
-  "lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, " +
-  "lista_perf_plus_id, metodo_perf_plus"
+  "id, vendedor_id, metodo_facturacion, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus"
 
 export const LISTA_PRECIO_COLS = "id,codigo,recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_blanco"
 export const REGLA_PRECIO_COLS = "grupo_precio,iva_compras,iva_ventas,formulas"
@@ -20,9 +20,7 @@ export const CONDICION_MARCA_COLS =
 
 /** Columnas de `articulos` que necesita el motor (mismo select que usaba pedidos.ts). */
 export const ARTICULO_PRECIO_COLS =
-  "id,proveedor_id,marca_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial," +
-  "oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas," +
-  "descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)"
+  "id,proveedor_id,marca_id,precio_compra,precio_base,precio_base_contado,precio_lista_especial,oferta_lista_especial,porcentaje_ganancia,bonif_recargo,categoria,iva_compras,iva_ventas,descuento_propio,segmento_precio,rubros:rubro_id(slug),proveedor:proveedores(tipo_descuento)"
 
 /**
  * Insumos de un cliente. Lanza "Cliente no encontrado" si no existe (mismo
