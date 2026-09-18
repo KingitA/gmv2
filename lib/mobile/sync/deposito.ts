@@ -34,7 +34,7 @@ const DETALLE_COLS =
   "id, pedido_id, cantidad, articulo_id, cantidad_preparada, estado_item, es_bonificado, precio_base, lista_precio_id, articulos(id, sku, descripcion, ean13, codigo_bulto, unidades_por_bulto, orden_deposito, proveedores(nombre), marca:marca_id(descripcion))"
 
 /**
- * ALCANCE de la cola que se replica en el handheld (PROVISORIO — decisión del dueño,
+ * ALCANCE de la cola que se replica en el handheld (decidido por el dueño el 18/09/2026,
  * ver MOBILE.md §17 "Alcance de la cola"). La cola web completa son 1.285 pedidos /
  * 53.867 renglones = 21 MB (1.267 "impreso" que vienen desde abril): no entra en una
  * respuesta (Vercel corta en 4,5 MB) ni tiene sentido llevarla en el bolsillo.

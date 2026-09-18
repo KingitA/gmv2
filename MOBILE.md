@@ -839,13 +839,51 @@ no depende de `20260919_mobile_deposito.sql`); las dos están igual en producci�
 **Regla que queda:** nunca embeber una tabla de renglones en un listado con `ORDER`/`LIMIT`;
 y un listado que recibe un error lo muestra (un "vacío" silencioso tapó esto).
 
-### Alcance de la cola en el handheld (PROVISORIO — decide el dueño)
+### Alcance de la cola en el handheld (DECIDIDO por el dueño, 18/09/2026)
 La cola completa (21 MB) no se puede replicar. `DIAS_IMPRESO = 7` en
 `lib/mobile/sync/deposito.ts`: se replican todos los `pendiente` y `en_preparacion`, los
-`impreso` de los últimos 7 días y cualquier pedido con picking empezado (hoy: 97 pedidos,
-3.832 renglones, 1,95 MB, 2,5 s). La web sigue mostrando los 1.286. Pendiente de decidir:
-la ventana (7/15/30 días) o depurar en el ERP los `impreso` viejos que ya se entregaron.
+`impreso` de los últimos **7 días** y cualquier pedido con picking empezado (medido: 97
+pedidos, 3.832 renglones, 1,95 MB, 2,5 s). La web sigue mostrando la cola completa.
 En delta, un `impreso` que envejece no genera evento: sale del equipo en el próximo snapshot.
+
+### PENDIENTE (tarea aparte, DESPUÉS de cerrar esta app): depurar los `impreso` viejos
+**No se tocó ningún pedido.** Propuesta para la limpieza pre-producción; se ejecuta solo con
+OK del dueño, paso por paso.
+
+*Foto del 18/09/2026 (solo lectura):* pedidos por estado — impreso 1.268 · eliminado 269 ·
+en_preparacion 13 · facturado 6 · pendiente 5 · en_viaje 3 · en_venta 1. De los impresos,
+**1.189 tienen más de 7 días**: ninguno con viaje asignado; 6 con comprobante de venta, 2 con
+remito, 211 con movimientos en kardex, 1 con sesión de picking ⇒ **214 con alguna evidencia
+de haberse despachado** y **975 sin ninguna** (abr 82 · may 219 · jun 167 · jul 196 · ago 189 ·
+sep 122). Mientras sigan en `impreso`, la cola web crece sin techo (hoy carga en segundos
+gracias a `lib/deposito/cola.ts`, pero son 1.286 filas que nadie va a preparar).
+
+1. **Qué pedidos exactamente.** Solo `estado = 'impreso'` con `created_at` anterior a una
+   fecha de corte que fija el dueño, y **sin** picking empezado (`picking_sesiones`
+   EN_PROGRESO) ni renglones con `estado_item` distinto de PENDIENTE. Antes de tocar nada se
+   exporta el listado (número, cliente, fecha, total, evidencia) para que el dueño lo revise
+   y saque a mano los que sí haya que preparar. Se tratan como DOS grupos:
+   - *A — con evidencia* (comprobante / remito / kardex): ya salieron del depósito.
+   - *B — sin evidencia*: hay que decidir uno por uno o por período (¿se entregaron por fuera
+     del sistema?, ¿son pruebas de la carga inicial?, ¿nunca se hicieron?).
+2. **A qué estado pasarían.** A decidir con el dueño, porque define reportes y cuenta
+   corriente: grupo A ⇒ el estado que el ERP ya usa para lo despachado (`facturado` si tiene
+   comprobante; si no, el que corresponda al circuito real — hoy hay solo 6 `facturado`, así
+   que ese circuito todavía no es la norma). Grupo B ⇒ **no** inventar un estado nuevo ni usar
+   `eliminado` a ciegas (la purga nocturna `/api/cron/purge-deleted-orders` los borraría de
+   verdad): o pasan al mismo estado que A si el dueño confirma que se entregaron, o quedan
+   como están. Un UPDATE de `estado` no mueve stock ni kardex (verificar triggers de
+   `pedidos` antes: `trg_mobile_cambios` solo loguea).
+3. **Cómo se revierte.** Antes del UPDATE: tabla de respaldo
+   `pedidos_depuracion_20260918 (pedido_id PK, estado_anterior, depurado_at, lote)` poblada
+   con el mismo filtro dentro de la misma transacción. Revertir un lote =
+   `UPDATE pedidos p SET estado = d.estado_anterior FROM pedidos_depuracion_… d WHERE p.id =
+   d.pedido_id AND d.lote = X AND p.estado = <estado nuevo>` (la última condición evita pisar
+   un pedido que alguien tocó después). Se hace por lotes chicos (un mes por vez), verificando
+   después de cada uno: conteo por estado, la cola de depósito, saldos de cuenta corriente y
+   comisiones sin cambios. La tabla de respaldo se conserva hasta el cierre de la limpieza.
+4. **Prevención.** Decidir con el dueño qué paso del circuito saca un pedido de `impreso`
+   (hoy solo el picking digital lo hace); con la app en uso, los pedidos se cierran solos.
 
 ### Puesta en marcha (requiere OK del dueño — producción sale de `main`)
 1. Mergear `apk-deposito` → `main` y esperar el deploy (los cambios del ERP son
