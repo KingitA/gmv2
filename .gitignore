@@ -86,3 +86,7 @@ comprobantes_distribuidora*.html
 
 # APKs generados (mobile/scripts/build-apks.mjs)
 dist-apks/
+
+# Archivos generados por Vercel CLI (pueden contener tokens)
+.env.vercel
+.env.vercel*
