@@ -1,7 +1,7 @@
-import { useRef, useState, type ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 import { esQrOUrl, lecturaError, lecturaOk, useLector } from "@gm/core"
 import { eansDe, lineaInfo, padEan13, sufijoMarca, type Buscable } from "../../datos/busqueda"
-import { C } from "../../ui"
+import { C, useCampoSinRafaga } from "../../ui"
 
 /**
  * Pantalla de cantidad (en la web: el "modal" que reemplaza toda la vista). Es una
@@ -22,7 +22,7 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
   onVolverBuscar: () => void
   mostrar: (m: string, t?: "ok" | "err") => void
 }) {
-  const [valor, setValor] = useState(inicial)
+  const { valor, cambiar, restaurar } = useCampoSinRafaga(inicial, 130)
   const montadoAt = useRef(Date.now())
   const hecho = useRef(false)
   const una = (fn: () => void) => () => {
@@ -30,12 +30,28 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
     hecho.current = true
     fn()
   }
-  const confirmar = una(() => onConfirmar(parseFloat(valor) || 0))
+  /** Una cantidad de 7+ cifras no es una cantidad: es un código que el lector tipeó en el campo. */
+  const cantidadValida = (txt: string): number | null => {
+    const n = parseFloat(txt) || 0
+    if (n < 0 || n >= 1_000_000) {
+      cambiar("")
+      mostrar("Esa cantidad no es válida (¿se leyó un código en el campo?). Cargala de nuevo.", "err")
+      return null
+    }
+    return n
+  }
+  const confirmar = () => {
+    const n = cantidadValida(valor)
+    if (n !== null) una(() => onConfirmar(n))()
+  }
 
   useLector({
     ignorarConInputEnfocado: false, // el campo de cantidad tiene foco: la ráfaga no debe quedar tipeada ahí
+    // Acá nadie tipea 8 cifras seguidas a mano: se puede ser más tolerante con lectores lentos
+    minLength: 8,
+    maxInterKeyMs: 110,
     onCodigo: (codigo) => {
-      setValor((v) => (v.endsWith(codigo) ? v.slice(0, -codigo.length) : v))
+      const cantidad = restaurar() // la ráfaga se tipeó en el campo: volver a lo que había
       if (esQrOUrl(codigo)) { lecturaError(); return }
       const codigos = new Set([...eansDe(articulo), articulo.codigo_bulto || ""].filter(Boolean).flatMap((c) => [c, padEan13(c)]))
       if (!codigos.has(codigo) && !codigos.has(padEan13(codigo))) {
@@ -46,8 +62,8 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
       // Rebote del gatillo apenas se abrió la pantalla: ignorar
       if (Date.now() - montadoAt.current < 900) return
       lecturaOk()
-      const limpio = valor.endsWith(codigo) ? valor.slice(0, -codigo.length) : valor
-      una(() => onConfirmar(parseFloat(limpio) || 0))()
+      const n = cantidadValida(cantidad)
+      if (n !== null) una(() => onConfirmar(n))()
     },
   })
 
@@ -63,7 +79,7 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
         <div style={{ color: C.sub, fontSize: 14, marginBottom: 10 }}>{etiquetaInput}</div>
         <input
           type="number" inputMode="decimal" value={valor} autoFocus
-          onChange={(e) => setValor(e.target.value)}
+          onChange={(e) => cambiar(e.target.value)}
           onFocus={(e) => e.target.select()}
           style={{ width: "100%", background: C.bg, color: C.text, fontSize: 48, fontWeight: 800, textAlign: "center", borderRadius: 16, padding: 16, border: `2px solid ${C.border}`, outline: "none", boxSizing: "border-box" }}
         />

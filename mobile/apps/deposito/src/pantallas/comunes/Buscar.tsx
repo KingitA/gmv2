@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, type ReactNode } from "react"
 import { esQrOUrl, lecturaError, useLector, useParamEstado } from "@gm/core"
 import { ListaVirtual } from "@gm/core/ui"
 import type { Articulo } from "../../datasets"
 import { buscar, lineaInfo, sufijoMarca } from "../../datos/busqueda"
 import { useArticulos } from "../../datos/hooks"
-import { C } from "../../ui"
+import { C, useCampoSinRafaga } from "../../ui"
 
 /**
  * Pantalla "Buscar artículo" (en la web: scannerOpen). El flujo MANUAL es de primera:
@@ -12,7 +12,7 @@ import { C } from "../../ui"
  * La búsqueda corre sobre la réplica local (sin red) y el texto vive en ?q= (no
  * agrega historial: atrás sale de la pantalla).
  */
-export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, mostrar, filtrar, sinTexto }: {
+export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, mostrar, filtrar, sinTexto, priorizar }: {
   placeholder: string
   vacio: { icono: string; texto: ReactNode }
   /** Estado del artículo en el pedido/OC (color y leyenda) */
@@ -23,13 +23,15 @@ export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, m
   mostrar: (m: string, t?: "ok" | "err") => void
   /** Restringe los resultados (filtros de proveedor / categoría) */
   filtrar?: (a: Articulo) => boolean
+  /** Artículos que van primero en los resultados (los del pedido / la OC en curso) */
+  priorizar?: (a: Articulo) => boolean
   /** Qué listar cuando todavía no hay texto (ej. los artículos del filtro activo) */
   sinTexto?: Articulo[]
 }) {
   // El texto se tipea contra estado local (respuesta inmediata) y se refleja en ?q=
   // con un respiro: si el operario entra a un artículo y vuelve, la búsqueda sigue ahí.
   const [qUrl, setQUrl] = useParamEstado("q")
-  const [q, setQ] = useState(qUrl)
+  const { valor: q, cambiar: setQ, restaurar } = useCampoSinRafaga(qUrl)
   useEffect(() => {
     if (q === qUrl) return
     const t = setTimeout(() => setQUrl(q), 250)
@@ -38,15 +40,20 @@ export function PanelBuscar({ placeholder, vacio, decorar, onElegir, onCodigo, m
   const { indice, articulos, cargando } = useArticulos()
   const resultados = useMemo(() => {
     if (q.trim().length < 2) return sinTexto ?? []
-    return filtrar ? buscar(indice, q, 5000).filter(filtrar).slice(0, 50) : buscar(indice, q)
-  }, [indice, q, filtrar, sinTexto])
+    if (!filtrar && !priorizar) return buscar(indice, q)
+    let r = buscar(indice, q, 5000)
+    if (filtrar) r = r.filter(filtrar)
+    // sort estable: lo del pedido/OC arriba, el resto conserva su relevancia
+    if (priorizar) r = [...r].sort((x, y) => Number(priorizar(y)) - Number(priorizar(x)))
+    return r.slice(0, 50)
+  }, [indice, q, filtrar, sinTexto, priorizar])
 
   useLector({
     // El buscador tiene foco: igual se intercepta la ráfaga del lector (si no, el
     // código quedaría tipeado en el buscador y habría que tocar la pantalla)
     ignorarConInputEnfocado: false,
     onCodigo: (codigo) => {
-      if (q.endsWith(codigo)) setQ(q.slice(0, -codigo.length))
+      restaurar() // la ráfaga quedó tipeada en el buscador: volver a lo que había
       if (esQrOUrl(codigo)) { lecturaError(); mostrar("QR ignorado — escaneá el código de barras", "err"); return }
       onCodigo(codigo)
     },

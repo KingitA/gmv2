@@ -212,6 +212,21 @@ describe("Outbox", () => {
     expect(ob.noEnviadosSync.length).toBe(3)
   })
 
+  it("forzar: al volver la señal no se espera el backoff acumulado (y sin forzar, sí)", async () => {
+    const db = await dbNueva()
+    let caida = true
+    const srv = servidor({ fallar: () => (caida ? "red" : null) })
+    const { ob, reloj } = crear(db, srv.manejador)
+    const item = await ob.encolar({ tipo: "t", payload: {} })
+    for (let i = 0; i < 6; i++) { reloj.t += 10 * 60_000; await ob.enviar() } // 6 intentos fallidos ⇒ backoff largo
+    caida = false
+    await ob.enviar()
+    expect((await ob.item(item.key))!.estado).toBe("pendiente") // respeta el backoff
+    await ob.enviar({ forzar: true })
+    expect((await ob.item(item.key))!.estado).toBe("enviado")
+    expect(srv.aplicadas.size).toBe(1)
+  })
+
   it("backoff crece exponencial con tope de 5 min", () => {
     expect(backoffMs(1, 0.5)).toBe(2000)
     expect(backoffMs(2, 0.5)).toBe(4000)

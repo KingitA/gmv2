@@ -60,7 +60,7 @@ export function Inicio() {
           Sale <b style={{ color: C.text }}>{yo.nombre}</b> para que ingrese otro operario.
           {c.pendientes > 0 && (
             <>
-              {" "}Hay <b style={{ color: C.yellow }}>{c.pendientes} operación{c.pendientes > 1 ? "es" : ""} sin enviar</b>: quedan guardadas en el equipo y se envían solas,
+              {" "}Hay <b style={{ color: C.yellow }}>{c.pendientes} {c.pendientes > 1 ? "operaciones" : "operación"} sin enviar</b>: quedan guardadas en el equipo y se envían solas,
               a nombre de quien las hizo, apenas haya señal. No se pierde nada.
             </>
           )}

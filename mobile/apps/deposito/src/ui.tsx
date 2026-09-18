@@ -176,3 +176,33 @@ export function useVolver() {
     [navigate, location.pathname],
   )
 }
+
+/**
+ * Campo de texto a prueba del lector. El lector en modo teclado "tipea" el código
+ * en el input que tenga foco (y si el texto estaba seleccionado, lo PISA). Este hook
+ * recuerda el valor previo a cada ráfaga de teclas (< 80 ms entre cambios = lector,
+ * no un dedo) para poder restaurarlo cuando el detector confirma que fue una lectura.
+ * Encontrado en el NuStar: un segundo escaneo dejaba la cantidad en 0.
+ */
+export function useCampoSinRafaga(inicial: string, gapMs = 80) {
+  const [valor, setValor] = useState(inicial)
+  const ref = useRef({ actual: inicial, antesDeRafaga: inicial, ultimoCambio: 0 })
+  const cambiar = useCallback((v: string) => {
+    const r = ref.current
+    const ahora = performance.now()
+    if (ahora - r.ultimoCambio > gapMs) r.antesDeRafaga = r.actual // empieza una (posible) ráfaga
+    r.ultimoCambio = ahora
+    r.actual = v
+    setValor(v)
+  }, [gapMs])
+  /** Llamar cuando el detector reporta una lectura: deshace lo que la ráfaga tipeó. Devuelve el valor restaurado. */
+  const restaurar = useCallback(() => {
+    const r = ref.current
+    if (performance.now() - r.ultimoCambio < 400) {
+      r.actual = r.antesDeRafaga
+      setValor(r.antesDeRafaga)
+    }
+    return r.actual
+  }, [])
+  return { valor, cambiar, restaurar }
+}

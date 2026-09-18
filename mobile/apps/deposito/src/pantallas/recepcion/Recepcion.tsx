@@ -12,6 +12,12 @@ import { PanelCantidad } from "../comunes/Cantidad"
 const DATASET = DS.recepciones
 type Mostrar = (m: string, t?: "ok" | "err") => void
 
+/** Fecha sin corrimiento de huso: "2026-09-15" es el 15, no el 14 a las 21 h. */
+const fechaAR = (f: string) => {
+  const [a, m, d] = (f || "").slice(0, 10).split("-")
+  return d ? `${Number(d)}/${Number(m)}/${a}` : f
+}
+
 const resumen = (r: RecepcionVista) => {
   const ok = r.lineas.filter((l) => l.estado_linea === "ok").length
   const faltantes = r.lineas.filter((l) => l.estado_linea === "faltante").length
@@ -37,7 +43,7 @@ export function Recepciones() {
       <Rechazos items={rechazados} ayuda="La orden sigue en la lista: abrila y resolvé lo que falta antes de finalizarla de nuevo." />
       <div style={{ padding: 16 }}>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: C.text }}>{ordenes.length} orden{ordenes.length !== 1 ? "es" : ""} pendiente{ordenes.length !== 1 ? "s" : ""}</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: C.text }}>{ordenes.length} {ordenes.length === 1 ? "orden pendiente" : "órdenes pendientes"}</div>
           <div style={{ fontSize: 13, color: C.sub }}>Seleccioná una orden para recibir</div>
         </div>
         {!cargando && ordenes.length === 0 && <Vacio icono="🚚">No hay órdenes pendientes</Vacio>}
@@ -61,7 +67,7 @@ export function Recepciones() {
                 </div>
                 <div style={{ display: "flex", gap: 16, fontSize: 13, color: C.sub, marginBottom: enProgreso ? 10 : 14 }}>
                   <span>📦 {total} artículos</span>
-                  <span>📅 {new Date(o.fecha_orden).toLocaleDateString("es-AR")}</span>
+                  <span>📅 {fechaAR(o.fecha_orden)}</span>
                 </div>
                 {enProgreso && (
                   <div style={{ marginBottom: 12 }}>
@@ -373,6 +379,7 @@ export function RecepcionBuscar() {
         placeholder="Escanear EAN o buscar artículo..."
         vacio={{ icono: "📱", texto: <>Escaneá el código de barras<br />o escribí para buscar</> }}
         mostrar={mostrar}
+        priorizar={(art) => r.lineas.some((x) => x.articulo_id === art.id)}
         decorar={(art) => {
           const l = r.lineas.find((x) => x.articulo_id === art.id)
           if (!l) return null

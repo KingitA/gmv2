@@ -107,7 +107,7 @@ export class Sincronizador {
   async todo(): Promise<void> {
     if (!this.red.online) return
     try {
-      await this.outbox.enviar()
+      await this.outbox.enviar({ forzar: true }) // hay red: no esperar el backoff acumulado sin señal
       await this.sondear(false)
       const orden = [...this.opts.datasets].sort((a, b) => a.prioridad - b.prioridad)
       for (const d of orden) await this.dataset(d.nombre)
@@ -141,7 +141,8 @@ export class Sincronizador {
         }
       }
       // Hay red: aprovechar para empujar el outbox si quedó algo
-      if (this.outbox.contadores.pendientes > 0) void this.outbox.enviar()
+      // El servidor acaba de responder: empujar el outbox ya, sin esperar su backoff
+      if (this.outbox.contadores.pendientes > 0) void this.outbox.enviar({ forzar: true })
     } catch {
       /* sin red: el próximo tick reintenta */
     }

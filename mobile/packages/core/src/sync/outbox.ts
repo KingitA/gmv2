@@ -158,12 +158,18 @@ export class Outbox {
     await this.recontar()
   }
 
-  /** Envía todo lo pendiente en orden. Seguro de llamar muchas veces (O5). */
-  enviar(): Promise<void> {
+  /**
+   * Envía todo lo pendiente en orden. Seguro de llamar muchas veces (O5).
+   * `forzar`: ignora el backoff en esta pasada. Lo usa el sincronizador cuando
+   * SABE que el servidor responde (volvió la red, la app volvió a primer plano, el
+   * sondeo contestó): tras 10 minutos sin señal en un pasillo el backoff llega a
+   * 5 min, y el operario no tiene por qué esperarlo al recuperar el WiFi.
+   */
+  enviar(opts: { forzar?: boolean } = {}): Promise<void> {
     if (!this.enVuelo) {
       this._contadores = { ...this._contadores, enviando: true }
       this.emisor.emitir()
-      this.enVuelo = this.bucle().finally(async () => {
+      this.enVuelo = this.bucle(!!opts.forzar).finally(async () => {
         this.enVuelo = null
         await this.recontar()
       })
@@ -171,7 +177,7 @@ export class Outbox {
     return this.enVuelo
   }
 
-  private async bucle(): Promise<void> {
+  private async bucle(forzar = false): Promise<void> {
     // FIFO por usuario (O3 + O8): el primer pendiente de cada usuario frena a los
     // siguientes DE ESE usuario, no a los de otro.
     const frenados = new Set<string>()
@@ -181,7 +187,7 @@ export class Outbox {
       const siguiente = (await this.noEnviados()).find((i) => i.estado === "pendiente" && !frenados.has(i.usuarioId ?? ""))
       if (!siguiente) return
       const duenio = siguiente.usuarioId ?? ""
-      if (siguiente.proximoIntentoAt > this.ahora()) {
+      if (!forzar && siguiente.proximoIntentoAt > this.ahora()) {
         frenados.add(duenio) // O3: espera su backoff
         continue
       }

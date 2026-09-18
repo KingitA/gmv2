@@ -120,6 +120,7 @@ export function DevolucionesArticulo() {
   const { devoluciones } = useDevoluciones()
   const { indice } = useArticulos()
   const { toast, mostrar } = useToast()
+  useAvisoEntrante(mostrar)
   useLector({ onCodigo: useEscaneoDevolucion(mostrar, true) })
   const art = artId ? indice.porId.get(artId) : undefined
   const coincidencias = devoluciones.flatMap((dev) => dev.devoluciones_detalle.filter((det) => det.articulos?.id === artId).map((detalle) => ({ dev, detalle })))

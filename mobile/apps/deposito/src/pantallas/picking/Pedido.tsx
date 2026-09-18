@@ -151,6 +151,7 @@ export function PedidoBuscar() {
   if (!pedido || pedido.cierrePendiente) return <Marco titulo="Buscar artículo">{toast}<PedidoNoDisponible cargando={cargando} finalizado={pedido?.cierrePendiente} /></Marco>
   const { progreso } = pedido
   const lineaDe = (articuloId: string) => pedido.pedidos_detalle.find((i) => i.articulo_id === articuloId)
+  const enPedido = new Set(pedido.pedidos_detalle.map((i) => i.articulo_id))
 
   return (
     <Marco titulo="Buscar artículo">
@@ -163,6 +164,7 @@ export function PedidoBuscar() {
         placeholder="Escanear EAN o buscar artículo..."
         vacio={{ icono: "📱", texto: <>Escaneá el código de barras<br />o escribí para buscar</> }}
         mostrar={mostrar}
+        priorizar={(art) => enPedido.has(art.id)}
         decorar={(art) => {
           const l = lineaDe(art.id)
           if (!l) return null
