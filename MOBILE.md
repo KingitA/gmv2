@@ -8,7 +8,7 @@
 
 ## 0. TL;DR para la próxima sesión
 
-1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (39 tests).
+1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (44 tests).
 2. Tu app vive en `mobile/apps/<app>/src`. Todo lo compartido está en
    `mobile/packages/core` (`@gm/core`, `@gm/core/ui`). **No dupliques** lógica: si dos
    apps la necesitan, va al core.
@@ -512,20 +512,50 @@ equipo/producción · ⏳ pendiente.
 |---|---|
 | Auditoría (endpoints→tablas, subpantallas, cambios de backend, riesgos) | ✅ (§8, §9, §10, §16) |
 | Workspace `mobile/` con 3 proyectos Capacitor (`com.gm.vendedor/chofer/deposito`) | ✅ compilan; typecheck strict limpio |
-| Motor offline: réplica + outbox + sincronizador + reloj, con tests | ✅ 39/39 tests |
+| Motor offline: réplica + outbox + sincronizador + reloj, con tests | ✅ 44/44 tests |
 | Motor de precios isomórfico extraído, ERP usando el mismo código | ✅ (ERP `npm run build` pasa) |
-| Vigencia programada (ERP + dispositivo + materialización) | 🟡 requiere migración aplicada |
-| Historial de insumos + re-verificación de precios | 🟡 requiere migración; la usa `pedido.crear` (sesión vendedor) |
-| Auth de dispositivo (Keystore, refresh, revocación) + Bearer en servidor | 🟡 |
-| Navegación: convención + hooks + botón atrás | ✅ tests de decisión; 🟡 en equipo |
+| Migración `20260918_mobile_fundacion.sql` | ✅ aplicada en producción (18/09); log de cambios, idempotencia e historial verificados en vivo |
+| Vigencia programada (ERP + dispositivo + materialización) | 🟡 código y tests ✅; falta una prueba real con un cambio programado (y confirmar pg_cron) |
+| Historial de insumos + re-verificación de precios | 🟡 tests ✅; se ejercita con `pedido.crear` (sesión vendedor) |
+| Auth de dispositivo (Keystore, refresh, revocación) + Bearer en servidor | ✅ probado en equipo (login, reinicio offline, logout con revocación) |
+| Navegación: convención + hooks + botón atrás | ✅ probado en equipo |
 | Lector: wedge + broadcast (plugin nativo) | ✅ compila; 🟡 el equipo no tiene lector habilitado |
-| Pipeline de build firmado + keystores + CHANGELOG | ✅ `chofer-v0.1.0.apk` firmado y verificado |
-| APK esqueleto (chofer) instalado en el NuStar, arranque en frío 0,44 s | ✅ |
-| Prueba end-to-end en equipo (login, réplica offline, outbox, atrás) | 🟡 ver "Validación en equipo" abajo |
+| Pipeline de build firmado + keystores + CHANGELOG | ✅ las 3 apps v0.1.1 (versionCode 2) firmadas y verificadas |
+| APK esqueleto (chofer) en el NuStar: arranque en frío 0,44 s (release) | ✅ |
+| Prueba end-to-end en equipo | ✅ ver abajo |
 | Datasets/handlers de cada módulo, pantallas reales | ⏳ sesiones por app |
 
-### Validación en equipo
-(se completa con el resultado de la prueba end-to-end)
+### Validación en equipo (18/09/2026, NuStar 65-sp, Android 14)
+
+Contra un Next local (`adb reverse`) con la base de **producción**. Todo dato creado
+se marcó `TEST-FUNDACION` y se borró al terminar (verificado: 0 residuos).
+
+| Criterio | Resultado |
+|---|---|
+| Instala y corre en el NuStar | ✅ |
+| Modo avión + **reinicio del equipo**: abre con la sesión guardada, sin login | ✅ (tras el fix de abajo) |
+| Modo avión: muestra datos de la réplica con frescura | ✅ "Datos al 18/9 10:34 (hace 19 min)" |
+| Modo avión: acepta una escritura y la marca pendiente | ✅ contador 1, "Pendiente de enviar" |
+| Al reconectar sincroniza solo, sin duplicar | ✅ 1 POST, 1 fila; reenvío de la misma clave ⇒ `duplicado`; misma clave con otro payload ⇒ `conflicto` |
+| Atrás: hoja → detalle → listado → inicio → minimiza | ✅ (los filtros con `replace` no agregan pasos) |
+| Borrado en el servidor se propaga a la réplica | ✅ (el viaje de prueba desapareció al volver a primer plano) |
+
+**Bugs encontrados y corregidos durante la prueba:**
+1. *Sesión perdida en arranque en frío* (app): el prefijo del almacén seguro se
+   aplicaba sin `await`; el primer `get` buscaba `capacitor-storage_gm.sesion` y
+   mostraba el login. Fix en `platform/almacen-seguro.ts` + reintentos de lectura en
+   `Auth` (el Keystore del NuStar tarda >500 ms tras reiniciar). Tests de regresión en
+   `test/auth.test.ts`.
+2. *Chofer sin viajes* (ERP, **existente en producción**): `/api/chofer/me`,
+   `/api/chofer/viaje/[id]` y `/api/vendedor/me` hacían `zonas(nombre)` desde
+   `viajes`, ambiguo desde que existe `viaje_zonas` ("more than one relationship
+   was found"); el error se ignoraba y el módulo chofer mostraba 0 viajes. Fix:
+   `zonas!zona_id(...)` (misma forma de respuesta). **Afecta también a la web
+   actual en `main`.**
+
+**Nota de prueba**: no usar `adb shell am force-stop` para simular cierres: en este
+equipo deja el renderer del WebView marcado "process is bad" hasta reiniciar.
+Cerrar desde recientes o reiniciar el equipo.
 
 ---
 

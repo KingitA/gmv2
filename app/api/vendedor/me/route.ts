@@ -93,7 +93,7 @@ export async function GET() {
     const hoy = new Date().toISOString().slice(0, 10)
     const { data: viajes } = await supabase
       .from("viajes")
-      .select("id, nombre, fecha, estado, zona_id, zonas(id, nombre, descripcion)")
+      .select("id, nombre, fecha, estado, zona_id, zonas!zona_id(id, nombre, descripcion)")
       .or(`fecha.gte.${hoy},estado.eq.en_curso`)
       .order("fecha", { ascending: true })
       .limit(5)

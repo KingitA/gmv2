@@ -22,7 +22,7 @@ export async function GET() {
     // Viaje activo: estado='en_viaje' asignado a este chofer
     const { data: viajeActivo } = await supabase
       .from("viajes")
-      .select("id, nombre, fecha, estado, zona_id, zonas(nombre)")
+      .select("id, nombre, fecha, estado, zona_id, zonas!zona_id(nombre)")
       .eq("chofer_id", userId)
       .eq("estado", "en_curso")
       .order("fecha", { ascending: false })
@@ -32,7 +32,7 @@ export async function GET() {
     // Historial: viajes completados/en_rendicion del chofer
     const { data: historial } = await supabase
       .from("viajes")
-      .select("id, nombre, fecha, estado, zona_id, zonas(nombre)")
+      .select("id, nombre, fecha, estado, zona_id, zonas!zona_id(nombre)")
       .eq("chofer_id", userId)
       .in("estado", ["completado", "en_rendicion"])
       .order("fecha", { ascending: false })
