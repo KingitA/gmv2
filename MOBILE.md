@@ -1152,7 +1152,7 @@ solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos 
 |---|---|---|
 | Búsqueda global hasta pintar (50 filas) | **NuStar 65-sp**, bundle de producción | ✅ **53–185 ms** ("shampoo" 101 · "deterg" 58 · error de tipeo "lavandna" 185 · sin resultados 160). Motor de búsqueda puro: 1–30 ms |
 | Filtro activo: "shampoo" dentro de Kenvue | navegador, datos reales | ✅ 13 resultados, todos Kenvue; 0 de Algabo (que tiene 10) |
-| Arranque en frío (proceso muerto desde recientes) | **NuStar 65-sp** | ✅ 1,09–1,31 s (APK de prueba debug), sin login |
+| Arranque en frío (proceso muerto desde recientes) | **NuStar 65-sp** | ✅ **0,84 s** con el release v0.2.0 firmado · 1,09–1,31 s con el APK de prueba (debug), sin login |
 | Ruta sin servidor: buscar → precio → 2 artículos → confirmar → matar la app → reabrir → reconectar | **NuStar 65-sp** | ✅ pendiente intacto tras matar; al reconectar sincronizó en 3 s, **1 aplicación**, total servidor = total equipo = $ 98.800,80 |
 | Interrupción a mitad de pedido | **NuStar 65-sp** y navegador | ✅ "Pedido a medio cargar" con sus 2 artículos |
 | Cambio de precio con el equipo sin señal a mitad de pedido | navegador | ✅ el pedido viajó con `precios_al` anterior al cambio y al precio que vio el vendedor; después el equipo recibió el precio nuevo |
