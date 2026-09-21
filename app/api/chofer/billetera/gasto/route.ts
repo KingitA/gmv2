@@ -22,6 +22,24 @@ export async function POST(request: NextRequest) {
     const categoriasValidas = ["nafta", "hotel", "peon", "cubierta", "peaje", "comida", "otro"]
     const cat = categoriasValidas.includes(categoria) ? categoria : "otro"
 
+    // Gasto de un VIAJE: baja la billetera del titular (aunque lo cargue el
+    // acompañante) y queda en viajes_gastos para que oficina lo apruebe.
+    if (viaje_id) {
+      const { data, error: rpcErr } = await supabase.rpc("viaje_gasto_registrar", {
+        p_viaje_id: viaje_id,
+        p_usuario_id: auth.user.id,
+        p_categoria: cat,
+        p_monto: Number(monto),
+        p_observaciones: observaciones || null,
+        p_foto_url: body.foto_url || null,
+        p_idempotency: body.idempotency_key || null,
+      })
+      if (rpcErr) {
+        return NextResponse.json({ error: rpcErr.message.replace(/^viaje_gasto_registrar:\s*/, "") }, { status: 400 })
+      }
+      return NextResponse.json({ success: true, ...(data as any), monto: -Math.abs(Number(monto)) })
+    }
+
     const concepto = `Gasto - ${cat.charAt(0).toUpperCase() + cat.slice(1)}${observaciones ? `: ${observaciones}` : ""}`
 
     const { data: movimiento, error } = await supabase

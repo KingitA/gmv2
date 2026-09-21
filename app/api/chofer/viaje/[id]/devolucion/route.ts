@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { esTripulante } from "@/lib/viajes/chofer"
 
 // POST /api/chofer/viaje/[id]/devolucion
 // El chofer registra una devolución durante el reparto.
@@ -35,7 +36,7 @@ export async function POST(
       .eq("id", viajeId)
       .single()
 
-    if (!viaje || viaje.chofer_id !== auth.user.id) {
+    if (!viaje || !(await esTripulante(supabase, viajeId, auth.user.id, viaje.chofer_id))) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
     if (viaje.estado !== "en_curso") {

@@ -103,9 +103,15 @@ export default function ChoferHomePage() {
                     </p>
                   )}
                 </div>
-                <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-bold">
-                  EN CURSO
-                </span>
+                {data.viaje_activo.estado === "despachado" ? (
+                  <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-sm font-bold">
+                    LISTO PARA SALIR
+                  </span>
+                ) : (
+                  <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-bold">
+                    EN CURSO
+                  </span>
+                )}
               </div>
               <div className="mt-4 bg-blue-50 rounded-xl px-4 py-3 text-blue-700 font-medium text-center">
                 Tocar para gestionar el viaje →
