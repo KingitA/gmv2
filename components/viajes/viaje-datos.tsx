@@ -34,7 +34,6 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
   const [titularId, setTitularId] = useState("")
   const [acompananteIds, setAcompananteIds] = useState<string[]>([])
   const [vehiculoId, setVehiculoId] = useState("")
-  const [presupuesto, setPresupuesto] = useState({ dinero_nafta: "", gastos_peon: "", gastos_hotel: "", gastos_adicionales: "" })
   const [observaciones, setObservaciones] = useState("")
 
   useEffect(() => {
@@ -42,7 +41,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
       const [v, z, ch, ve, tr] = await Promise.all([
         supabase
           .from("viajes")
-          .select("nombre, fecha, tipo_transporte, transporte_id, vehiculo_id, chofer_id, dinero_nafta, gastos_peon, gastos_hotel, gastos_adicionales, observaciones, viaje_zonas(zona_id), viajes_choferes(usuario_id, rol)")
+          .select("nombre, fecha, tipo_transporte, transporte_id, vehiculo_id, chofer_id, observaciones, viaje_zonas(zona_id), viajes_choferes(usuario_id, rol)")
           .eq("id", viajeId)
           .single(),
         supabase.from("zonas").select("id, nombre").order("nombre"),
@@ -65,12 +64,6 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
         setTitularId(d.chofer_id || "")
         setAcompananteIds((d.viajes_choferes || []).filter((c: any) => c.rol !== "titular").map((c: any) => c.usuario_id))
         setVehiculoId(d.vehiculo_id || "")
-        setPresupuesto({
-          dinero_nafta: String(Number(d.dinero_nafta) || ""),
-          gastos_peon: String(Number(d.gastos_peon) || ""),
-          gastos_hotel: String(Number(d.gastos_hotel) || ""),
-          gastos_adicionales: String(Number(d.gastos_adicionales) || ""),
-        })
         setObservaciones(d.observaciones || "")
       }
       setZonas(z.data || [])
@@ -99,7 +92,6 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
                 chofer_id: titularId || null,
                 acompanante_ids: acompananteIds,
                 vehiculo_id: vehiculoId || null,
-                ...presupuesto,
                 observaciones,
               }
             : { observaciones },
@@ -117,8 +109,6 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
   }
 
   if (cargando) return <p className="py-8 text-center text-sm text-muted-foreground">Cargando…</p>
-
-  const presupuestoTotal = Object.values(presupuesto).reduce((s, v) => s + (Number(v) || 0), 0)
 
   return (
     <div className="space-y-6">
@@ -230,35 +220,6 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
           </div>
         )}
       </div>
-
-      {!porTransporte && (
-        <div>
-          <Label>Presupuesto de gastos (estimado, informativo)</Label>
-          <div className="mt-1 grid grid-cols-2 gap-3 md:grid-cols-5">
-            {([
-              ["dinero_nafta", "Nafta"],
-              ["gastos_peon", "Peón"],
-              ["gastos_hotel", "Hotel"],
-              ["gastos_adicionales", "Otros"],
-            ] as const).map(([campo, etiqueta]) => (
-              <div key={campo}>
-                <span className="text-xs text-muted-foreground">{etiqueta}</span>
-                <Input
-                  type="number"
-                  min="0"
-                  disabled={!editable}
-                  value={presupuesto[campo]}
-                  onChange={(e) => setPresupuesto((p) => ({ ...p, [campo]: e.target.value }))}
-                />
-              </div>
-            ))}
-            <div>
-              <span className="text-xs text-muted-foreground">Total</span>
-              <div className="flex h-9 items-center font-semibold">$ {presupuestoTotal.toLocaleString("es-AR")}</div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div>
         <Label>Observaciones</Label>

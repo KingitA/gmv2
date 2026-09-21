@@ -4,8 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
-import { ArrowUp, ArrowDown, Lock, Trash2, Search, Package, Phone } from "lucide-react"
+import { ArrowUp, ArrowDown, ChevronDown, Lock, Trash2, Search, Package, Phone } from "lucide-react"
 import { toast } from "sonner"
 import { formatCurrency } from "@/lib/utils"
 import type { HojaRuta, ParadaHoja } from "@/lib/viajes/hoja-ruta"
@@ -78,15 +77,17 @@ export function ViajeHoja({
   const t = hoja.totales
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Totales */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-        <Dato etiqueta="Paradas" valor={String(t.paradas)} />
-        <Dato etiqueta="Pedidos" valor={String(t.pedidos)} />
-        <Dato etiqueta="Bultos" valor={String(t.bultos)} />
-        <Dato etiqueta="Este viaje" valor={formatCurrency(t.total_viaje)} />
-        {conCobranza && <Dato etiqueta="Saldos anteriores" valor={formatCurrency(t.saldo_anterior)} />}
-        {conCobranza && <Dato etiqueta="Cobrar sí o sí" valor={formatCurrency(t.minimo_exigido)} destacado />}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-md border bg-white px-3 py-2 text-sm">
+        <span><b>{t.paradas}</b> clientes</span>
+        <span><b>{t.pedidos}</b> pedidos</span>
+        <span><b>{t.bultos}</b> bultos</span>
+        <span>Este viaje <b>{formatCurrency(t.total_viaje)}</b></span>
+        {conCobranza && <span>Saldos anteriores <b>{formatCurrency(t.saldo_anterior)}</b></span>}
+        {conCobranza && <span>Total <b>{formatCurrency(t.total_a_cobrar)}</b></span>}
+        {conCobranza && t.minimo_exigido > 0 && <span className="text-red-700">Cobrar sí o sí <b>{formatCurrency(t.minimo_exigido)}</b></span>}
+        {t.resueltas > 0 && <span className="text-green-700"><b>{t.resueltas}</b>/{t.paradas} resueltas · cobrado <b>{formatCurrency(t.cobrado)}</b></span>}
       </div>
 
       {(t.pedidos_sin_facturar > 0 || t.pedidos_sin_remito > 0) && (
@@ -102,20 +103,38 @@ export function ViajeHoja({
         </p>
       )}
 
-      {hoja.paradas.map((p, i) => (
-        <Parada
-          key={p.id}
-          parada={p}
-          indice={i}
-          ultimo={i === hoja.paradas.length - 1}
-          ordenEditable={ordenEditable}
-          instruccionesEditables={instruccionesEditables}
-          conCobranza={conCobranza}
-          ocupado={ocupado}
-          onMover={mover}
-          onPatch={patch}
-        />
-      ))}
+      {hoja.paradas.length > 0 && (
+        <div className="overflow-x-auto rounded-md border bg-white">
+          <div className="min-w-[980px]">
+            <div className={`grid ${conCobranza ? GRID_COBRANZA : GRID_TRANSPORTE} items-center gap-x-3 border-b bg-slate-50 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
+              <span />
+              <span>Cliente</span>
+              <span>Pedidos</span>
+              <span className="text-right">Bultos</span>
+              <span className="text-right">Este viaje</span>
+              {conCobranza && <span className="text-right">Saldo ant.</span>}
+              {conCobranza && <span className="text-right">Total</span>}
+              {conCobranza && <span>Instrucción</span>}
+              <span>Estado</span>
+              <span />
+            </div>
+            {hoja.paradas.map((p, i) => (
+              <Parada
+                key={p.id}
+                parada={p}
+                indice={i}
+                ultimo={i === hoja.paradas.length - 1}
+                ordenEditable={ordenEditable}
+                instruccionesEditables={instruccionesEditables}
+                conCobranza={conCobranza}
+                ocupado={ocupado}
+                onMover={mover}
+                onPatch={patch}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Parada sin pedido: pasar solo a cobrar */}
       {ordenEditable && conCobranza && (
@@ -154,14 +173,9 @@ export function ViajeHoja({
   )
 }
 
-function Dato({ etiqueta, valor, destacado }: { etiqueta: string; valor: string; destacado?: boolean }) {
-  return (
-    <div className={`rounded-md border px-3 py-2 ${destacado ? "border-red-200 bg-red-50" : "bg-white"}`}>
-      <p className="text-xs text-muted-foreground">{etiqueta}</p>
-      <p className={`text-lg font-semibold ${destacado ? "text-red-700" : ""}`}>{valor}</p>
-    </div>
-  )
-}
+// # | cliente | pedidos | bultos | este viaje | saldo ant | total | instrucción | estado | abrir
+const GRID_COBRANZA = "grid-cols-[64px_minmax(180px,1.6fr)_minmax(110px,1fr)_52px_104px_104px_112px_218px_104px_24px]"
+const GRID_TRANSPORTE = "grid-cols-[64px_minmax(200px,2fr)_minmax(140px,1.4fr)_60px_120px_110px_24px]"
 
 function Parada({
   parada: p, indice, ultimo, ordenEditable, instruccionesEditables, conCobranza, ocupado, onMover, onPatch,
@@ -176,104 +190,135 @@ function Parada({
   onMover: (i: number, delta: number) => void
   onPatch: (body: any, silencioso?: boolean) => void
 }) {
+  const [abierta, setAbierta] = useState(false)
   const [nota, setNota] = useState(p.nota_oficina || "")
   const [motivoBloqueo, setMotivoBloqueo] = useState(p.motivo_bloqueo || "")
   const est = ESTADO_PARADA[p.estado] || ESTADO_PARADA.pendiente
+  const bloqueado = !instruccionesEditables || ocupado
+
+  const pill = (activo: boolean, rojo = false) =>
+    `rounded border px-1.5 py-0.5 text-[11px] font-medium leading-4 transition-colors disabled:opacity-50 ${
+      activo
+        ? rojo ? "border-red-600 bg-red-600 text-white" : "border-slate-900 bg-slate-900 text-white"
+        : "border-slate-300 bg-white text-slate-500 hover:border-slate-500"
+    }`
 
   return (
-    <div className={`rounded-lg border bg-white ${p.bloquear_entrega ? "border-red-300" : ""}`}>
-      <div className="flex items-start gap-3 p-3">
+    <div className={`border-b last:border-b-0 ${p.bloquear_entrega ? "bg-red-50/60" : p.estado !== "pendiente" ? "bg-slate-50/70" : ""}`}>
+      <div className={`grid ${conCobranza ? GRID_COBRANZA : GRID_TRANSPORTE} items-center gap-x-3 px-2 py-1 text-sm`}>
         {/* Orden */}
-        <div className="flex flex-col items-center gap-0.5 pt-0.5">
-          <Button variant="ghost" size="icon" className="h-6 w-6" disabled={!ordenEditable || ocupado || indice === 0} onClick={() => onMover(indice, -1)}>
+        <div className="flex items-center">
+          <button className="text-slate-400 hover:text-slate-800 disabled:opacity-20" disabled={!ordenEditable || ocupado || indice === 0} onClick={() => onMover(indice, -1)}>
             <ArrowUp className="h-3.5 w-3.5" />
-          </Button>
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">{indice + 1}</span>
-          <Button variant="ghost" size="icon" className="h-6 w-6" disabled={!ordenEditable || ocupado || ultimo} onClick={() => onMover(indice, 1)}>
+          </button>
+          <button className="text-slate-400 hover:text-slate-800 disabled:opacity-20" disabled={!ordenEditable || ocupado || ultimo} onClick={() => onMover(indice, 1)}>
             <ArrowDown className="h-3.5 w-3.5" />
-          </Button>
+          </button>
+          <span className="ml-1 w-5 text-right text-xs font-bold text-slate-700">{indice + 1}</span>
         </div>
 
-        <div className="min-w-0 flex-1 space-y-2">
-          {/* Cliente */}
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate font-semibold">{p.cliente_nombre}</p>
-              <p className="text-sm text-muted-foreground">
-                {[p.direccion, p.localidad].filter(Boolean).join(" · ") || "Sin dirección"}
-                {p.telefono && <span className="ml-2 inline-flex items-center gap-1"><Phone className="h-3 w-3" />{p.telefono}</span>}
-              </p>
-              {p.vendedores.length > 0 && <p className="text-xs text-muted-foreground">Vendedor: {p.vendedores.join(", ")}</p>}
-            </div>
-            <div className="flex items-center gap-2">
-              {p.bloquear_entrega && <Badge className="bg-red-600 text-white"><Lock className="mr-1 h-3 w-3" />NO ENTREGAR SIN COBRAR</Badge>}
-              <Badge className={est.cls}>{est.label}</Badge>
-              {ordenEditable && p.pedidos.length === 0 && (
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-red-600" onClick={() => onPatch({ quitar_parada_id: p.id })}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </div>
+        {/* Cliente */}
+        <button className="min-w-0 text-left" onClick={() => setAbierta(!abierta)}>
+          <span className="block truncate font-medium leading-5">{p.cliente_nombre}</span>
+          <span className="block truncate text-xs leading-4 text-muted-foreground">
+            {p.localidad || "Sin localidad"}
+            {p.nota_oficina && <span className="ml-1.5 text-amber-700">📝 {p.nota_oficina}</span>}
+          </span>
+        </button>
 
-          {/* Pedidos */}
-          {p.pedidos.length > 0 ? (
+        {/* Pedidos */}
+        <span className="min-w-0 truncate text-xs text-slate-600" title={p.pedidos.map((x) => `#${x.numero} ${ESTADO_LABEL[x.estado] || x.estado}`).join(" · ")}>
+          {p.pedidos.length === 0 ? (
+            <i className="text-muted-foreground">solo cobro</i>
+          ) : (
+            p.pedidos.map((x) => (
+              <span key={x.id} className={`mr-1.5 ${x.remitos.length === 0 || x.comprobantes.length === 0 ? "text-amber-700" : ""}`}>
+                #{x.numero}
+              </span>
+            ))
+          )}
+        </span>
+
+        <span className="text-right font-medium tabular-nums">{p.bultos}</span>
+        <span className="text-right tabular-nums">{formatCurrency(p.total_viaje)}</span>
+        {conCobranza && (
+          <span className={`text-right tabular-nums ${p.saldo_anterior > 0.01 ? "font-medium text-red-700" : "text-slate-400"}`}>
+            {Math.abs(p.saldo_anterior) > 0.01 ? formatCurrency(p.saldo_anterior) : "—"}
+          </span>
+        )}
+        {conCobranza && <span className="text-right font-semibold tabular-nums">{formatCurrency(p.total_a_cobrar)}</span>}
+
+        {/* Instrucción: cobrar sí o sí lo anterior / este viaje · candado */}
+        {conCobranza && (
+          <div className="flex items-center gap-1">
+            <button
+              className={pill(p.exigir_cobro_anterior)} disabled={bloqueado} title="Cobrar sí o sí lo anterior"
+              onClick={() => onPatch({ parada_id: p.id, exigir_cobro_anterior: !p.exigir_cobro_anterior }, true)}
+            >
+              Cobrar ant.
+            </button>
+            <button
+              className={pill(p.exigir_cobro_actual)} disabled={bloqueado} title="Cobrar sí o sí lo de este viaje"
+              onClick={() => onPatch({ parada_id: p.id, exigir_cobro_actual: !p.exigir_cobro_actual }, true)}
+            >
+              Cobrar viaje
+            </button>
+            <button
+              className={pill(p.bloquear_entrega, true)} disabled={bloqueado} title="No entregar sin cobrar"
+              onClick={() => {
+                onPatch({ parada_id: p.id, bloquear_entrega: !p.bloquear_entrega }, true)
+                if (!p.bloquear_entrega) setAbierta(true)
+              }}
+            >
+              <Lock className="inline h-3 w-3" />
+            </button>
+          </div>
+        )}
+
+        <span><Badge className={`${est.cls} px-1.5 py-0 text-[10px]`}>{est.label}</Badge></span>
+
+        <button className="text-slate-400 hover:text-slate-800" onClick={() => setAbierta(!abierta)} title="Detalle, nota y resultado">
+          <ChevronDown className={`h-4 w-4 transition-transform ${abierta ? "rotate-180" : ""}`} />
+        </button>
+      </div>
+
+      {/* Detalle */}
+      {abierta && (
+        <div className="space-y-2 border-t border-dashed bg-slate-50 px-3 py-2 pl-[76px] text-sm">
+          <p className="text-xs text-muted-foreground">
+            {[p.direccion, p.localidad].filter(Boolean).join(" · ") || "Sin dirección"}
+            {p.telefono && <span className="ml-2 inline-flex items-center gap-1"><Phone className="h-3 w-3" />{p.telefono}</span>}
+            {p.vendedores.length > 0 && <span className="ml-2">Vendedor: {p.vendedores.join(", ")}</span>}
+          </p>
+
+          {p.pedidos.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {p.pedidos.map((ped) => (
-                <span key={ped.id} className="inline-flex items-center gap-1.5 rounded border bg-slate-50 px-2 py-0.5 text-xs">
+                <span key={ped.id} className="inline-flex items-center gap-1.5 rounded border bg-white px-2 py-0.5 text-xs">
                   <span className="font-semibold">#{ped.numero}</span>
                   <span className="text-muted-foreground">{ESTADO_LABEL[ped.estado] || ped.estado}</span>
                   <span className="inline-flex items-center gap-0.5"><Package className="h-3 w-3" />{ped.bultos}</span>
                   {ped.comprobantes.map((c) => <span key={c.id} className="text-slate-500">{c.tipo} {c.numero}</span>)}
-                  {ped.remitos.length === 0 && <span className="text-amber-600">sin remito</span>}
+                  {ped.comprobantes.length === 0 && <span className="text-amber-700">sin facturar</span>}
+                  {ped.remitos.length === 0 && <span className="text-amber-700">sin remito</span>}
                 </span>
               ))}
             </div>
-          ) : (
-            <p className="text-xs italic text-muted-foreground">Sin mercadería: pasar solo a cobrar</p>
           )}
 
-          {/* Importes */}
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm md:grid-cols-5">
-            <Importe etiqueta="Bultos" valor={String(p.bultos)} />
-            <Importe etiqueta="Este viaje" valor={formatCurrency(p.total_viaje)} />
-            {conCobranza && <Importe etiqueta="Saldo anterior" valor={formatCurrency(p.saldo_anterior)} alerta={p.saldo_anterior > 0.01} />}
-            {conCobranza && <Importe etiqueta="Total a cobrar" valor={formatCurrency(p.total_a_cobrar)} />}
-            {conCobranza && p.minimo_exigido > 0 && <Importe etiqueta="Cobrar sí o sí" valor={formatCurrency(p.minimo_exigido)} alerta />}
-          </div>
-
-          {/* Instrucción de oficina */}
           {conCobranza && (
-            <div className="space-y-2 rounded-md bg-slate-50 p-2.5">
-              <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
-                <label className="flex cursor-pointer items-center gap-2">
-                  <Checkbox
-                    disabled={!instruccionesEditables || ocupado}
-                    checked={p.exigir_cobro_anterior}
-                    onCheckedChange={(c) => onPatch({ parada_id: p.id, exigir_cobro_anterior: Boolean(c) }, true)}
-                  />
-                  Cobrar sí o sí lo anterior
-                </label>
-                <label className="flex cursor-pointer items-center gap-2">
-                  <Checkbox
-                    disabled={!instruccionesEditables || ocupado}
-                    checked={p.exigir_cobro_actual}
-                    onCheckedChange={(c) => onPatch({ parada_id: p.id, exigir_cobro_actual: Boolean(c) }, true)}
-                  />
-                  Cobrar sí o sí lo de este viaje
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-red-700">
-                  <Checkbox
-                    disabled={!instruccionesEditables || ocupado}
-                    checked={p.bloquear_entrega}
-                    onCheckedChange={(c) => onPatch({ parada_id: p.id, bloquear_entrega: Boolean(c), motivo_bloqueo: motivoBloqueo }, true)}
-                  />
-                  Bloquear entrega sin cobro
-                </label>
-              </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <Input
+                className="h-8 bg-white text-sm"
+                disabled={!instruccionesEditables}
+                value={nota}
+                onChange={(e) => setNota(e.target.value)}
+                onBlur={() => nota !== (p.nota_oficina || "") && onPatch({ parada_id: p.id, nota_oficina: nota }, true)}
+                placeholder="Nota para el chofer (horario, por dónde entrar…)"
+              />
               {p.bloquear_entrega && (
                 <Input
-                  className="h-8 bg-white text-sm"
+                  className="h-8 border-red-300 bg-white text-sm"
                   disabled={!instruccionesEditables}
                   value={motivoBloqueo}
                   onChange={(e) => setMotivoBloqueo(e.target.value)}
@@ -281,41 +326,31 @@ function Parada({
                   placeholder="Motivo del bloqueo (lo ve el chofer)"
                 />
               )}
-              <Input
-                className="h-8 bg-white text-sm"
-                disabled={!instruccionesEditables}
-                value={nota}
-                onChange={(e) => setNota(e.target.value)}
-                onBlur={() => nota !== (p.nota_oficina || "") && onPatch({ parada_id: p.id, nota_oficina: nota }, true)}
-                placeholder="Nota para el chofer (horario, por dónde entrar, con quién hablar…)"
-              />
             </div>
           )}
 
-          {/* Resultado en la calle */}
+          {conCobranza && p.minimo_exigido > 0 && (
+            <p className="text-xs font-medium text-red-700">Cobrar sí o sí: {formatCurrency(p.minimo_exigido)}</p>
+          )}
+
           {p.estado !== "pendiente" && (
-            <div className="rounded-md border border-slate-200 p-2.5 text-sm">
-              <p>
-                <span className="font-medium">Resultado:</span> {est.label}
-                {p.bultos_entregados != null && <> · {p.bultos_entregados}/{p.bultos} bultos</>}
-                {conCobranza && <> · cobrado {formatCurrency(p.cobrado)}</>}
-                {p.devuelto > 0 && <> · devolución {formatCurrency(p.devuelto)}</>}
-              </p>
-              {p.motivo_no_entrega && <p className="text-amber-700">No se entregó: {p.motivo_no_entrega}</p>}
-              {p.motivo_no_cobro && <p className="text-red-700">No se cobró lo exigido: {p.motivo_no_cobro}</p>}
-            </div>
+            <p className="text-xs">
+              <b>Resultado:</b> {est.label}
+              {p.bultos_entregados != null && <> · {p.bultos_entregados}/{p.bultos} bultos</>}
+              {conCobranza && <> · cobrado {formatCurrency(p.cobrado)}</>}
+              {p.devuelto > 0 && <> · devolución {formatCurrency(p.devuelto)}</>}
+              {p.motivo_no_entrega && <span className="text-amber-700"> · No se entregó: {p.motivo_no_entrega}</span>}
+              {p.motivo_no_cobro && <span className="text-red-700"> · No se cobró lo exigido: {p.motivo_no_cobro}</span>}
+            </p>
+          )}
+
+          {ordenEditable && p.pedidos.length === 0 && (
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-red-600" onClick={() => onPatch({ quitar_parada_id: p.id })}>
+              <Trash2 className="mr-1 h-3.5 w-3.5" /> Quitar de la hoja
+            </Button>
           )}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function Importe({ etiqueta, valor, alerta }: { etiqueta: string; valor: string; alerta?: boolean }) {
-  return (
-    <div>
-      <span className="text-xs text-muted-foreground">{etiqueta}</span>
-      <p className={`font-medium ${alerta ? "text-red-700" : ""}`}>{valor}</p>
+      )}
     </div>
   )
 }

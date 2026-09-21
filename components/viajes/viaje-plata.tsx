@@ -105,10 +105,9 @@ export function ViajePlata({ hoja, onCambio }: { hoja: HojaRuta; onCambio: () =>
   return (
     <div className="space-y-6">
       {/* Referencias para decidir el monto */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-3 gap-3">
         <Dato etiqueta="Total del viaje" valor={formatCurrency(totales.total_viaje)} />
         <Dato etiqueta="Referencia 3%" valor={formatCurrency(Math.round(totales.total_viaje * 0.03))} />
-        <Dato etiqueta="Presupuesto cargado" valor={formatCurrency(viaje.presupuesto.total)} />
         <Dato etiqueta="Billetera del titular hoy" valor={formatCurrency(dinero.saldo_billetera_titular)} />
       </div>
 
