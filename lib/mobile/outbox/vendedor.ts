@@ -117,6 +117,12 @@ interface ItemPedido {
   precio: number
   /** Renglón existente (al editar un pedido que ya está en el servidor) */
   detalle_id?: string | null
+  /**
+   * true = el equipo mostró el precio YA GUARDADO del renglón (pedido confirmado que se
+   * edita sin cambiar condiciones: la web tampoco lo re-precia). No se verifica contra
+   * el motor: ese precio lo fijó el servidor cuando se tomó el renglón.
+   */
+  precio_fijo?: boolean
 }
 
 interface CondPedido {
@@ -139,6 +145,11 @@ interface PayloadPedido {
    * VIEJA de sus datasets precios_*. Ver MOBILE.md §18 "Vigencia de precios".
    */
   precios_al?: string | null
+  /**
+   * false = solo guardar renglones (edición de cantidades desde el detalle del pedido:
+   * la web tampoco confirma ahí). Default true = "Confirmar pedido" / "Guardar cambios".
+   */
+  confirmar?: boolean
 }
 
 function validarPedido(p: PayloadPedido): string | null {
@@ -240,7 +251,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     clienteId: p.cliente_id,
     capturadoAt: vigenciaAt,
     overrides,
-    items: p.items.map((i) => ({ articulo_id: i.articulo_id, precio: Number(i.precio) })),
+    items: p.items.filter((i) => !i.precio_fijo).map((i) => ({ articulo_id: i.articulo_id, precio: Number(i.precio) })),
     contexto: { usuarioId: ctx.sesion.user.id, deviceId: m.device_id, idempotencyKey: m.idempotency_key, tipo: m.tipo },
     precargado: reconstruido,
   })
@@ -275,6 +286,10 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
       bonif_pedido: p.cond?.bonif_pedido || null,
     })
     await reconciliarRenglones(ctx, pedidoId, p.items)
+    if (p.confirmar === false) {
+      const { data: ped } = await ctx.supabase.from("pedidos").select("numero_pedido, total").eq("id", pedidoId).maybeSingle()
+      return { numero_pedido: (ped?.numero_pedido ?? null) as string | null, total: Number(ped?.total) || 0 }
+    }
     const r = await confirmarPedidoVendedor(pedidoId, {
       observaciones: p.observaciones ?? "",
       metodo_facturacion_pedido: p.cond?.metodo_facturacion_pedido || "",

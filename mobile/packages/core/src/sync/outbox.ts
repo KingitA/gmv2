@@ -159,6 +159,24 @@ export class Outbox {
   }
 
   /**
+   * Retira una operación que TODAVÍA NO SALIÓ para que el usuario la corrija (un pedido
+   * "pendiente de enviar" es editable hasta que sincroniza). Solo pendiente o rechazada:
+   * una que está viajando no se toca (devuelve null). La corrección se encola como
+   * operación NUEVA (clave nueva, O2 intacto). Si un envío anterior llegó al servidor
+   * y se perdió la respuesta, quien evita el duplicado es el id lógico del payload
+   * (p. ej. pedido.local_id ⇒ pedidos.movil_local_id UNIQUE), no esta clave.
+   */
+  async retirar(key: string): Promise<ItemOutbox | null> {
+    const tx = this.db.transaction("outbox", "readwrite")
+    const it = await tx.store.get(key)
+    const ok = !!it && (it.estado === "pendiente" || it.estado === "rechazado")
+    if (ok) await tx.store.delete(key)
+    await tx.done
+    await this.recontar()
+    return ok ? it! : null
+  }
+
+  /**
    * Envía todo lo pendiente en orden. Seguro de llamar muchas veces (O5).
    * `forzar`: ignora el backoff en esta pasada. Lo usa el sincronizador cuando
    * SABE que el servidor responde (volvió la red, la app volvió a primer plano, el

@@ -227,6 +227,25 @@ describe("Outbox", () => {
     expect(srv.aplicadas.size).toBe(1)
   })
 
+  it("retirar: una operación que no salió se retira para corregirla; una enviada no", async () => {
+    const db = await dbNueva()
+    const srv = servidor()
+    const { ob } = crear(db, srv.manejador)
+    const a = await ob.encolar({ tipo: "pedido.crear", payload: { local_id: "L1", n: 1 } })
+    const b = await ob.encolar({ tipo: "pedido.crear", payload: { local_id: "L2", n: 1 } })
+    const retirada = await ob.retirar(a.key)
+    expect(retirada?.key).toBe(a.key)
+    expect(ob.contadores.pendientes).toBe(1)
+    await ob.enviar()
+    expect(srv.aplicadas.has(a.key)).toBe(false) // nunca viajó
+    expect(srv.aplicadas.has(b.key)).toBe(true)
+    expect(await ob.retirar(b.key)).toBeNull() // ya enviada: no se toca
+    expect((await ob.item(b.key))?.estado).toBe("enviado")
+    // La corrección es una operación NUEVA (clave nueva) con el mismo id lógico
+    const a2 = await ob.encolar({ tipo: "pedido.crear", payload: { local_id: "L1", n: 2 } })
+    expect(a2.key).not.toBe(a.key)
+  })
+
   it("backoff crece exponencial con tope de 5 min", () => {
     expect(backoffMs(1, 0.5)).toBe(2000)
     expect(backoffMs(2, 0.5)).toBe(4000)
