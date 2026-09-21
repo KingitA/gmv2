@@ -68,6 +68,8 @@ function reset() {
     for (const x of f.bonificaciones[id] || []) if (b[x.tipo]) for (const s of x.segmento ? [x.segmento] : Object.keys(b[x.tipo])) b[x.tipo][s] = Number(x.porcentaje)
     return b
   }
+  // Sin deuda real en el fixture no se puede probar Cobrar: se les inventa a algunos
+  if (!f.clientes.some((c) => c.saldo_actual > 0)) f.clientes.forEach((c, k) => { if (k % 9 === 0) c.saldo_actual = r2(48000 + k * 1234.56) })
   const clientes = f.clientes.map((c) => ({ razon_social: null, cuit: null, codigo_cliente: null, ...c, saldo_proyectado: c.saldo_actual, pagos_sin_rendir: 0, bonificaciones: bonifDe(c.id) }))
   // Cuenta corriente sintética: a los clientes con saldo se les arma una factura por ese saldo
   const cc = new Map(clientes.map((c, k) => [c.id, {
