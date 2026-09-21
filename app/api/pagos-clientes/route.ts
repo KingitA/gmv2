@@ -257,13 +257,15 @@ export async function POST(request: NextRequest) {
     }
     // Ajuste por redondeo: tope 1% de los débitos seleccionados; viaja como
     // promesa ([AJUSTE:x]) y se asienta en la confirmación.
+    // Con signo: positivo = falta (crédito), negativo = sobrante (débito, no
+    // queda a favor). Tope 1% en ambos sentidos.
     const montoAjuste = Math.round(Number(ajuste_redondeo || 0) * 100) / 100
-    if (montoAjuste > 0.005) {
+    if (Math.abs(montoAjuste) > 0.005) {
       const totalDebitosSel = ((imputaciones as any[]) || []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0)
       const tope = topeAjuste(totalDebitosSel)
-      if (montoAjuste > tope + 0.005) {
+      if (Math.abs(montoAjuste) > tope + 0.005) {
         return NextResponse.json(
-          { error: `El ajuste por redondeo ($${montoAjuste.toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados ($${tope.toFixed(2)}). Dejá el saldo pendiente.` },
+          { error: `El ajuste por redondeo ($${Math.abs(montoAjuste).toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados ($${tope.toFixed(2)}). ${montoAjuste > 0 ? "Dejá el saldo pendiente." : "Dejá el sobrante a cuenta."}` },
           { status: 400 },
         )
       }

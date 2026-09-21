@@ -84,6 +84,8 @@ export function RegistrarCobro({
   const [montoConfirmado, setMontoConfirmado] = useState(0)
   // Cartel "Falta pagar $X": ajuste por redondeo vs dejar saldo pendiente
   const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
+  // Cartel "Sobran $X": ajustar (débito, no queda a favor) vs dejar a cuenta
+  const [dialogoSobra, setDialogoSobra] = useState<number | null>(null)
   // Resumen de cuenta del cliente (selector de pedidos/comprobantes, igual que
   // choferes/vendedores) — siempre visible al elegir cliente. Arranca en
   // "Facturados" (lo cobrable); el switch pasa a "Todos" (facturados, sin
@@ -313,8 +315,9 @@ export function RegistrarCobro({
   const restaSaldar = round2(netoACobrar - totalCobroConfirmado)
   const mostrarResumen = totalSeleccionado > 0 && (totalCobroConfirmado > 0 || aplicarContado)
 
-  const registrar = async (modoDiferencia?: "saldo" | "ajuste") => {
+  const registrar = async (modoDiferencia?: "saldo" | "ajuste" | "sobra_ajuste" | "sobra_cuenta") => {
     setDialogoFalta(null)
+    setDialogoSobra(null)
     if (!cliente) {
       toast({ variant: "destructive", title: "Falta el cliente", description: "Buscalo por nombre o CUIT" })
       return
@@ -375,6 +378,14 @@ export function RegistrarCobro({
       // modoDiferencia === "ajuste": imputaciones completas; el ajuste crédito
       // por `falta` se registra después de crear el pago.
     }
+    // SOBRA plata para lo seleccionado (típico: la NC del 10% pasa la deuda
+    // por centavos). El operador decide: ajustar (débito, no queda a favor,
+    // tope 1%) o dejar a cuenta. Solo pregunta si se está imputando algo.
+    const sobra = round2(-falta)
+    if (sobra > 0.01 && imputaciones.length && !modoDiferencia) {
+      setDialogoSobra(sobra)
+      return
+    }
     const obsAnticipo = anticipos.length
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace(PEDIDO_PREFIX, "")).join(", ")}`
       : undefined
@@ -405,7 +416,13 @@ export function RegistrarCobro({
           idempotency_key: idemKeyRef.current,
           // Ajuste por redondeo: viaja adentro del cobro y se asienta al
           // confirmarse (en el acto si es efectivo). Tope 1% (server valida).
-          ajuste_redondeo: modoDiferencia === "ajuste" && falta > 0.01 ? falta : 0,
+          // positivo = falta (crédito) · negativo = sobrante (débito)
+          ajuste_redondeo:
+            modoDiferencia === "ajuste" && falta > 0.01
+              ? falta
+              : modoDiferencia === "sobra_ajuste" && sobra > 0.01
+                ? -sobra
+                : 0,
         }),
       })
       const data = await res.json()
@@ -427,7 +444,11 @@ export function RegistrarCobro({
       const ajusteMsg =
         modoDiferencia === "ajuste" && falta > 0.01
           ? ` Diferencia de $ ${fmt(falta)} como ajuste por redondeo${esEfectivo ? "." : " (se asienta al confirmar el valor)."}`
-          : ""
+          : modoDiferencia === "sobra_ajuste" && sobra > 0.01
+            ? ` Sobrante de $ ${fmt(sobra)} ajustado — no queda a favor${esEfectivo ? "." : " (se asienta al confirmar el valor)."}`
+            : modoDiferencia === "sobra_cuenta" && sobra > 0.01
+              ? ` Sobrante de $ ${fmt(sobra)} a cuenta del cliente.`
+              : ""
 
       const recorteMsg = recorte > 0.01 ? ` Pago parcial: quedan $ ${fmt(recorte)} de saldo en el comprobante.` : ""
       toast({
@@ -755,9 +776,57 @@ export function RegistrarCobro({
               </span>
             ) : (
               <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-bold text-blue-700" style={NUM}>
-                Sobran $ {fmt(-restaSaldar)} → a cuenta
+                Sobran $ {fmt(-restaSaldar)} → al registrar elegís: ajustar o a cuenta
               </span>
             ))}
+        </div>
+      )}
+
+      {/* ── Cartel: SOBRA plata — ¿ajustar (no queda a favor) o a cuenta? ── */}
+      {dialogoSobra != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDialogoSobra(null)}>
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-slate-900">
+              Sobran <span style={NUM}>$ {fmt(dialogoSobra)}</span>
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Lo entregado{aplicarContado ? " (más la NC del 10%)" : ""} supera lo seleccionado.
+              ¿Qué hacemos con el resto?
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              {dialogoSobra <= topeAjuste(totalSeleccionado) + 0.005 ? (
+                <button
+                  onClick={() => registrar("sobra_ajuste")}
+                  className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700"
+                >
+                  Ajustar por redondeo — no queda a favor
+                  <span className="block text-[11px] font-normal opacity-80">
+                    La cuenta queda en cero; los $ {fmt(dialogoSobra)} se asientan como ajuste (débito)
+                  </span>
+                </button>
+              ) : (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Supera el tope de ajuste por redondeo (1% de lo seleccionado = $ {fmt(topeAjuste(totalSeleccionado))}).
+                  Un sobrante así de grande queda a cuenta del cliente (o revisá los montos).
+                </p>
+              )}
+              <button
+                onClick={() => registrar("sobra_cuenta")}
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Dejar a cuenta
+                <span className="block text-[11px] font-normal text-slate-400">
+                  Los $ {fmt(dialogoSobra)} quedan a favor del cliente para su próxima compra
+                </span>
+              </button>
+              <button
+                onClick={() => setDialogoSobra(null)}
+                className="w-full rounded-lg px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

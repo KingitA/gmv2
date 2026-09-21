@@ -28,17 +28,19 @@ export function topeAjuste(totalDebitos: number): number {
 
 const MARCA = "[AJUSTE:"
 
+// Con signo: positivo = faltó plata (crédito al cliente), negativo = SOBRÓ
+// (débito: el sobrante no queda a favor). Mismo tope 1% en ambos sentidos.
 export function marcaAjuste(monto: number): string {
-  return monto > 0.005 ? `${MARCA}${r2(monto).toFixed(2)}]` : ""
+  return Math.abs(monto) > 0.005 ? `${MARCA}${r2(monto).toFixed(2)}]` : ""
 }
 
 export function parsearMarcaAjuste(obs: string | null | undefined): number {
-  const m = (obs || "").match(/\[AJUSTE:([0-9]+(?:\.[0-9]+)?)\]/)
+  const m = (obs || "").match(/\[AJUSTE:(-?[0-9]+(?:\.[0-9]+)?)\]/)
   return m ? r2(Number(m[1])) : 0
 }
 
 export function quitarMarcaAjuste(obs: string): string {
-  return obs.replace(/\s*\[AJUSTE:[0-9]+(?:\.[0-9]+)?\]/, "").trim()
+  return obs.replace(/\s*\[AJUSTE:-?[0-9]+(?:\.[0-9]+)?\]/, "").trim()
 }
 
 /**
@@ -51,7 +53,8 @@ export async function ejecutarAjusteDePago(
   supabase: SupabaseClient,
   { pagoId, clienteId, monto, usuarioId }: { pagoId: string; clienteId: string; monto: number; usuarioId: string | null },
 ): Promise<string | null> {
-  if (!(monto > 0.005)) return null
+  if (Math.abs(monto) <= 0.005) return null
+  if (monto < 0) return ejecutarAjusteSobrante(supabase, { pagoId, clienteId, monto: Math.abs(monto), usuarioId })
 
   const { data: yaHecho } = await supabase
     .from("cuenta_corriente_clientes")
@@ -94,6 +97,62 @@ export async function ejecutarAjusteDePago(
     await supabase
       .from("comprobantes_venta")
       .update({ saldo_pendiente: nuevoSaldo, estado_pago: nuevoSaldo <= 0.009 ? "pagado" : "parcial" })
+      .eq("id", target.id)
+  }
+  return null
+}
+
+/**
+ * SOBRANTE: se entregó (o cubrió con la NC del 10%) más que la deuda y el
+ * operador eligió "ajustar" — el resto no queda a favor: débito en el libro.
+ * Si el sobrante vive como resto de un crédito (típico: la REV del 10% superó
+ * la deuda por centavos), ese crédito se salda para que documentos y libro
+ * cuenten lo mismo. Idempotente por [pago:].
+ */
+async function ejecutarAjusteSobrante(
+  supabase: SupabaseClient,
+  { pagoId, clienteId, monto, usuarioId }: { pagoId: string; clienteId: string; monto: number; usuarioId: string | null },
+): Promise<string | null> {
+  const { data: yaHecho } = await supabase
+    .from("cuenta_corriente_clientes")
+    .select("id")
+    .eq("cliente_id", clienteId)
+    .eq("referencia_tipo", "ajuste_manual")
+    .ilike("observaciones", `%[pago:${pagoId}]%`)
+    .limit(1)
+  if (yaHecho?.length) return null
+
+  // ¿El sobrante quedó como resto de un crédito (NC/REV con saldo a favor)?
+  const { data: creditos } = await supabase
+    .from("comprobantes_venta")
+    .select("id, saldo_pendiente, tipo_comprobante, numero_comprobante")
+    .eq("cliente_id", clienteId)
+    .is("anulado_en", null)
+    .lt("saldo_pendiente", -0.005)
+    .order("created_at", { ascending: false })
+    .limit(1)
+  const target = creditos?.[0] || null
+
+  let concepto = `Ajuste por redondeo (sobrante) del cobro ${pagoId.slice(0, 8)}`
+  if (target) concepto += ` (ref. ${target.tipo_comprobante} ${target.numero_comprobante})`
+  concepto += ` [pago:${pagoId}]`
+  if (target) concepto += ` [saldo:${target.id}]`
+
+  const { error } = await supabase.rpc("cc_ajuste_manual", {
+    p_cliente_id: clienteId,
+    p_tipo: "debito",
+    p_monto: r2(monto),
+    p_concepto: concepto,
+    p_usuario_id: usuarioId,
+  })
+  if (error) return `Ajuste por sobrante de $${r2(monto)} no se pudo asentar: ${error.message}`
+
+  if (target) {
+    // saldo negativo = a favor; el débito lo acerca a 0 (nunca lo pasa)
+    const nuevoSaldo = Math.min(0, r2(Number(target.saldo_pendiente) + r2(monto)))
+    await supabase
+      .from("comprobantes_venta")
+      .update({ saldo_pendiente: nuevoSaldo, estado_pago: Math.abs(nuevoSaldo) <= 0.009 ? "pagado" : "parcial" })
       .eq("id", target.id)
   }
   return null
