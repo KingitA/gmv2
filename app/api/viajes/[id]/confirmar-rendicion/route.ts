@@ -108,21 +108,35 @@ export async function POST(
       )
     }
 
-    // ── 1. Crear la rendición ──
-    const { data: creada, error: crearErr } = await supabase.rpc("rendicion_crear", {
-      p_cobrador_id: viaje.chofer_id,
-      p_cobrador_tipo: "chofer",
-      p_pago_ids: pagoIds,
-      p_efectivo_declarado: Number(efectivo_declarado) || 0,
-      p_viaje_id: viajeId,
-      p_observaciones: observaciones || null,
-      p_usuario_id: auth.user.id,
-    })
-    if (crearErr) return NextResponse.json({ error: crearErr.message }, { status: 400 })
+    // ── 1. Crear la rendición (o reusar la que el chofer ya declaró al
+    // finalizar el viaje — desde el fix del 21/09 "finalizar" la crea abierta) ──
+    let rendicionId: string | null = null
+    const { data: yaAbierta } = await admin
+      .from("rendiciones")
+      .select("id")
+      .eq("viaje_id", viajeId)
+      .eq("estado", "abierta")
+      .limit(1)
+      .maybeSingle()
+    if (yaAbierta) {
+      rendicionId = yaAbierta.id
+    } else {
+      const { data: creada, error: crearErr } = await supabase.rpc("rendicion_crear", {
+        p_cobrador_id: viaje.chofer_id,
+        p_cobrador_tipo: "chofer",
+        p_pago_ids: pagoIds,
+        p_efectivo_declarado: Number(efectivo_declarado) || 0,
+        p_viaje_id: viajeId,
+        p_observaciones: observaciones || null,
+        p_usuario_id: auth.user.id,
+      })
+      if (crearErr) return NextResponse.json({ error: crearErr.message }, { status: 400 })
+      rendicionId = creada.rendicion_id
+    }
 
     // ── 2. Confirmar (segunda firma en lote) ──
     const { data: confirmada, error: confErr } = await supabase.rpc("rendicion_confirmar", {
-      p_rendicion_id: creada.rendicion_id,
+      p_rendicion_id: rendicionId,
       p_caja_destino_tipo: cajaTipo,
       p_caja_destino_id: cajaId,
       p_usuario_id: auth.user.id,
@@ -134,7 +148,7 @@ export async function POST(
       // diferencia de efectivo sin forzar → 409 para que la UI pida confirmación
       const esDiferencia = confErr.message?.includes("diferencia de efectivo")
       return NextResponse.json(
-        { error: confErr.message, requiere_forzar: esDiferencia, rendicion_id: creada.rendicion_id },
+        { error: confErr.message, requiere_forzar: esDiferencia, rendicion_id: rendicionId },
         { status: esDiferencia ? 409 : 400 }
       )
     }
@@ -188,7 +202,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       viaje_id: viajeId,
-      rendicion_id: creada.rendicion_id,
+      rendicion_id: rendicionId,
       pagos_confirmados: confirmada.confirmados,
       pagos_omitidos: confirmada.omitidos,
       transferencias_a_conciliar: confirmada.a_conciliar,

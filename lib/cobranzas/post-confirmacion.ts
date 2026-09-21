@@ -135,7 +135,7 @@ export async function procesarPostConfirmacion(
   // Se asienta recién ahora (cobro confirmado), después de la NC del 10% y
   // antes de las comisiones: salda el comprobante que quedó con los centavos.
   const montoAjuste = parsearMarcaAjuste(pago.observaciones)
-  if (montoAjuste > 0.005) {
+  if (Math.abs(montoAjuste) > 0.005) {
     const aviso = await ejecutarAjusteDePago(supabase, {
       pagoId,
       clienteId: pago.cliente_id,
