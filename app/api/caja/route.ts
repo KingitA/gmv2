@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
           supabase
             .from("kardex_contable")
             .select(
-              "id, fecha, created_at, tipo_movimiento, concepto, monto, gastos, color, metodo, origen_tipo, origen_id, destino_tipo, destino_id, referencia_tipo, referencia_id, pago_id, cheque_id, cliente_id, verificado"
+              "id, fecha, created_at, tipo_movimiento, concepto, monto, gastos, color, metodo, origen_tipo, origen_id, destino_tipo, destino_id, referencia_tipo, referencia_id, pago_id, cheque_id, cliente_id, cobrador_id, verificado"
             )
             .gte("fecha", desde)
             .lte("fecha", hasta)
@@ -332,7 +332,10 @@ export async function GET(request: NextRequest) {
         }
         case "RENDICION_VIAJE": {
           base.categoria = "rendicion"
-          base.quien = `RENDICIÓN · ${cobradorNombre.get(k.cobrador_id) ?? k.concepto ?? "cobrador"}`
+          {
+            const nombreCobrador = k.cobrador_id ? cobradorNombre.get(k.cobrador_id) : null
+            base.quien = nombreCobrador ? `Rendición (${nombreCobrador})` : "Rendición"
+          }
           base.sub = "Rendición confirmada"
           base.medio = `💵 Efectivo → ${cuenta(k.destino_tipo, k.destino_id)}`
           base.entrada = monto
