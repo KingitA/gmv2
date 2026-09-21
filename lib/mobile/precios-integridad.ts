@@ -83,7 +83,10 @@ export async function insumosAFecha(admin: any, clienteId: string, articuloIds: 
   const at = <T extends { id: string }>(tabla: string, actuales: T[], hist: VersionHistorial<any>[]) =>
     aplicarProgramados(reconstruirAFecha(actuales, hist, fecha), programados, tabla, fecha)
 
-  const cliente = at("clientes", cliRes.data, hCli)[0]
+  // Cliente dado de alta DESPUÉS de la vigencia (alta offline desde la app: el pedido se
+  // tomó con precios anteriores a que el cliente existiera en la base): no hay una
+  // configuración más vieja que reconstruir, vale la ficha con la que nació.
+  const cliente = at("clientes", cliRes.data, hCli)[0] ?? cliRes.data?.[0]
   if (!cliente) throw new Error("Cliente inexistente a la fecha de captura")
 
   const insumos: InsumosCliente = {
@@ -128,10 +131,12 @@ export async function verificarPreciosCapturados(
     overrides: OverridesPedido
     items: ItemCapturado[]
     contexto: { usuarioId: string; deviceId: string | null; idempotencyKey: string; tipo: string }
+    /** Insumos ya reconstruidos a `capturadoAt` (el handler los reusa para crear el pedido) */
+    precargado?: Awaited<ReturnType<typeof insumosAFecha>>
   },
 ): Promise<Verificacion> {
   const ids = [...new Set(args.items.map((i) => i.articulo_id))]
-  const { insumos, articulos } = await insumosAFecha(admin, args.clienteId, ids, args.capturadoAt)
+  const { insumos, articulos } = args.precargado ?? (await insumosAFecha(admin, args.clienteId, ids, args.capturadoAt))
   const motor = prepararMotorCliente(insumos, args.overrides)
   const porId = new Map(articulos.map((a: any) => [a.id, a]))
 

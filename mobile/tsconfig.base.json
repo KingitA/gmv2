@@ -18,7 +18,8 @@
     "paths": {
       "@gm/pricing": ["../lib/pricing/isomorfico.ts"],
       "@gm/contrato": ["../lib/mobile/contrato.ts"],
-      "@gm/deposito": ["../lib/deposito/bonificados.ts"]
+      "@gm/deposito": ["../lib/deposito/bonificados.ts"],
+      "@gm/vendedor": ["../lib/vendedor/isomorfico.ts"]
     }
   }
 }

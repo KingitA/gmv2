@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { esUuid } from "@/lib/mobile/uuid"
 import { requireVendedor } from "@/lib/vendedor/session"
 
 // GET /api/vendedor/viajes — viajes de levantamiento del vendedor
@@ -63,6 +64,9 @@ export async function POST(request: Request) {
     const { data: viaje, error } = await supabase
       .from("viajes")
       .insert({
+        // `id` opcional: la app Vendedor genera el UUID en el equipo (alta offline) para que
+        // reenviar la operación no duplique y lo capturado después ya lo referencie (MOBILE.md → Vendedor)
+        ...(esUuid(body.id) ? { id: body.id } : {}),
         nombre: nombreFinal,
         tipo: "levantamiento",
         vendedor_id: session.vendedorIds[0],

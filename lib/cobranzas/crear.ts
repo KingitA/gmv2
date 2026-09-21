@@ -1,3 +1,4 @@
+import { errorDeRpcCobranza } from "./errores"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 /**
@@ -77,7 +78,8 @@ export async function crearCobranza(
   params: CrearCobranzaParams,
 ): Promise<{ pago_id: string; dedup: boolean }> {
   const { data, error } = await supabase.rpc("cobranza_crear", { p_payload: params })
-  if (error) throw new Error(`cobranza_crear: ${error.message}`)
+  // Regla de negocio (RAISE de la RPC) ⇒ ErrorReglaCobranza: definitivo, no reintentable
+  if (error) throw errorDeRpcCobranza("cobranza_crear", error)
   return { pago_id: data.pago_id as string, dedup: Boolean(data.dedup) }
 }
 

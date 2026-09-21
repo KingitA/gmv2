@@ -22,6 +22,8 @@ export function configApp(appDir: string, puerto: number): UserConfigFnObject {
           "@gm/contrato": resolve(RAIZ_REPO, "lib/mobile/contrato.ts"),
           // Reglas puras de depósito (bonificados, estados de renglón): mismas que el servidor
           "@gm/deposito": resolve(RAIZ_REPO, "lib/deposito/bonificados.ts"),
+          // Reglas puras del módulo vendedor (orden de listados, búsqueda local, estados de pedido)
+          "@gm/vendedor": resolve(RAIZ_REPO, "lib/vendedor/isomorfico.ts"),
         },
       },
       define: {

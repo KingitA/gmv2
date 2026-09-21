@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { resolverColorPendientes, type ColorCheque } from "@/lib/actions/color-cheque"
+import { errorDeRpcCobranza } from "@/lib/cobranzas/errores"
 
 export interface ConfirmarCobranzaResult {
   numero_recibo: string | null
@@ -75,7 +76,7 @@ export async function anularCobranza(
     p_usuario_id: usuarioId,
     p_motivo: motivo || null,
   })
-  if (error) throw new Error(`cobranza_anular: ${error.message}`)
+  if (error) throw errorDeRpcCobranza("cobranza_anular", error)
 
   // Liberar las devoluciones que este pago había descontado (vuelven a estar
   // disponibles para otro cobro). Best-effort: no voltea la anulación.

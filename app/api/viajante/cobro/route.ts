@@ -4,6 +4,7 @@ import { requireVendedor } from "@/lib/vendedor/session"
 import { todayArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
 import { topeAjuste, marcaAjuste } from "@/lib/cobranzas/ajuste"
 import { MARCA_CONTADO } from "@/lib/constants"
@@ -405,6 +406,16 @@ export async function POST(request: NextRequest) {
     )
   } catch (error: any) {
     console.error("[viajante/cobro] error:", error)
+    // Rechazo por REGLA DE NEGOCIO de la RPC (comprobante anulado, no es del cliente…):
+    // respuesta DEFINITIVA. 422 y no 500 para que quien reintenta solo (la app Vendedor,
+    // que encola los cobros hechos sin señal) no lo repita para siempre ni trabe lo que
+    // viene detrás. La web muestra `error` igual que antes.
+    if (error instanceof ErrorReglaCobranza) {
+      return NextResponse.json(
+        { error: error.message, mensaje: mensajeParaUsuario(error), codigo: error.codigo, reintentable: false },
+        { status: 422 },
+      )
+    }
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { frecuenciaHabituales } from "@/lib/vendedor/habituales"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
@@ -35,30 +36,7 @@ export async function GET(request: Request) {
         .maybeSingle()
       if (!cliente) return NextResponse.json({ error: "Cliente no asignado a vos." }, { status: 404 })
 
-      // Últimos 30 pedidos del cliente → frecuencia por artículo
-      const { data: pedidos } = await supabase
-        .from("pedidos")
-        .select("id")
-        .eq("cliente_id", clienteId)
-        .is("eliminado_at", null)
-        .order("fecha", { ascending: false })
-        .limit(30)
-
-      const pedidoIds = (pedidos || []).map((p) => p.id)
-      if (!pedidoIds.length) return NextResponse.json({ articulos: [] })
-
-      const { data: detalle } = await supabase
-        .from("pedidos_detalle")
-        .select("articulo_id, cantidad")
-        .in("pedido_id", pedidoIds)
-
-      const frecuencia = new Map<string, { veces: number; ultCantidad: number }>()
-      for (const d of detalle || []) {
-        if (!d.articulo_id) continue
-        const f = frecuencia.get(d.articulo_id)
-        if (f) f.veces += 1
-        else frecuencia.set(d.articulo_id, { veces: 1, ultCantidad: Number(d.cantidad) || 1 })
-      }
+      const frecuencia = await frecuenciaHabituales(supabase, clienteId)
 
       const topIds = [...frecuencia.entries()]
         .sort((a, b) => b[1].veces - a[1].veces)

@@ -90,3 +90,6 @@ dist-apks/
 # Archivos generados por Vercel CLI (pueden contener tokens)
 .env.vercel
 .env.vercel*
+
+# Fixture del mock de la app Vendedor (datos reales de clientes: nunca al repo)
+mobile/scripts/.fixture-vendedor.json

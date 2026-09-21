@@ -10,7 +10,7 @@
 
 ## 0. TL;DR para la próxima sesión
 
-1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (64 tests).
+1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (93 tests).
 2. Tu app vive en `mobile/apps/<app>/src`. Todo lo compartido está en
    `mobile/packages/core` (`@gm/core`, `@gm/core/ui`). **No dupliques** lógica: si dos
    apps la necesitan, va al core.
@@ -153,6 +153,11 @@ recuperar red, sondeo de `/sync/estado` cada 15 s en primer plano (si cambió
 `cambios_seq` ⇒ re-sync de datasets `invalidable`), periódico por dataset (`cadaMs`).
 Orden: **primero se envía el outbox, después se lee.**
 
+**Refresco parcial** (desde la sesión Vendedor, aditivo): `GET /api/mobile/sync/<ds>?ids=a,b`
+→ `RespuestaParcial { dataset, generado_at, upserts, deletes }` para los datasets que declaran
+`porIds` (caros por fila: cuenta corriente de un cliente, detalle de un viaje). El cliente lo
+aplica como parche (`replica.refrescarIds`): no mueve cursor ni frescura. Máx. 25 ids.
+
 **Agregar un dataset** (sesión de cada app):
 1. Servidor: `DatasetDef` en `lib/mobile/sync/datasets.ts` (`nombre`, `roles`,
    `tablas` si es delta, `cargar(ctx, ids?)`). Si ya existe un GET del módulo con la
@@ -212,6 +217,12 @@ próximo sync. **Overlay optimista**: `useNoEnviados()` (lectura sincrónica, po
 la réplica con funciones puras (ver `apps/deposito/src/datos/overlay.ts`). Un
 rechazo dispara un re-sync inmediato.
 
+**Retirar** (desde la sesión Vendedor): `outbox.retirar(key)` saca del outbox una operación
+que TODAVÍA NO SALIÓ (pendiente o rechazada; una que está viajando no se toca) para que el
+usuario la corrija. La corrección es una operación NUEVA (O2 intacto). Si un envío anterior
+llegó y se perdió la respuesta, el duplicado lo evita el id LÓGICO del payload
+(`pedido.local_id` ⇒ `pedidos.movil_local_id` UNIQUE), no la clave del outbox.
+
 UI: contador de pendientes **siempre visible** en el `Encabezado` (ámbar = pendientes,
 rojo = rechazadas); `/pendientes` lista cada operación con su estado.
 
@@ -239,9 +250,20 @@ que el servidor.
   descuentos tipados), `precios_listas`, `precios_reglas`, `precios_programados`,
   `precios_clientes` (listas/métodos de la ficha + condiciones por proveedor/marca +
   bonificaciones activas). Todos `invalidable` (se refrescan en segundos).
-- **Regla de facturación**: el pedido se factura a los precios vigentes en
-  `capturado_at`. Al sincronizar, el handler `pedido.crear` (sesión vendedor) debe
-  llamar `verificarPreciosCapturados()` (`lib/mobile/precios-integridad.ts`):
+- **Regla de facturación**: el pedido se factura a los precios que el vendedor TENÍA A
+  LA VISTA al capturarlo: los vigentes a `min(capturado_at, precios_al)`, donde
+  `precios_al` es la frescura más vieja de los datasets `precios_*` del equipo (viaja en
+  el pedido). Es una precisión de la sesión Vendedor sobre la regla original ("vigentes en
+  `capturado_at`"): con esa sola, un cambio hecho en el ERP mientras el equipo no tiene
+  señal daba SIEMPRE diferencia (el equipo no puede conocer un cambio que no recibió) y
+  el pedido se facturaba a un precio distinto del que vio el cliente, que es justo lo que
+  el requisito prohíbe. Así el recálculo da idéntico por construcción y una diferencia
+  vuelve a significar bug o dato corrupto (detalle en §18). **Tope (decisión del dueño,
+  21/09/2026): si al capturar hacía MÁS DE 24 HS que el equipo no actualizaba precios, la
+  garantía se pierde** — rige el precio del sistema cuando INGRESA el pedido, no hay alerta
+  de integridad (la diferencia es esperable) y la app muestra un cartel fijo. Regla pura y
+  compartida: `lib/vendedor/vigencia-precios.ts`. Al sincronizar,
+  el handler `pedido.crear` llama `verificarPreciosCapturados()` (`lib/mobile/precios-integridad.ts`):
   reconstruye los insumos a esa hora (`precio_insumos_historial` + programados),
   recalcula y compara. **Diferencia ⇒ alerta en `mobile_alertas_integridad` para el
   admin** y se factura con el precio del servidor (el dispositivo nunca dicta
@@ -343,11 +365,7 @@ La flecha del `Encabezado` usa la misma decisión.
 
 | Pantalla web | Estado actual | En la app |
 |---|---|---|
-| `vendedor/billetera` | `tab`, `pedidoSel`, `detalle` | `?tab=`; `/billetera/comisiones/:pedidoId` |
-| `vendedor/pedido/nuevo` | `nav` (catálogo), `sel`, `verCarrito`, `verCliente`, `subSel`, `zoomFoto`, `buscarFoto` | `/pedido/nuevo/catalogo/:rubro/:cat`, `?ver=articulo:<id>`, `?ver=carrito`, `?ver=cliente`, `?ver=foto` |
-| `vendedor/precios` | `catSel`, `subSel`, `verAgregar`, `zoomFoto` | rutas por categoría + overlays |
-| `vendedor/clientes/[id]/cobrar` | `tab`, `abierto` | `?tab=`; `?ver=comprobante:<id>` |
-| `vendedor/clientes/[id]/devolucion` | `modoCatalogo` | `/clientes/:id/devolucion/catalogo` |
+| `vendedor/*` | ✅ migrado — ver "Vendedor → Navegación" (§18) | |
 | `chofer/[viajeId]/cliente/[clienteId]` | `showCobroSheet`, `showDevolucionSheet` | `?ver=cobro`, `?ver=devolucion` |
 | `chofer/billetera` | `showGastoSheet` | `?ver=gasto` |
 | `chofer/[viajeId]` | `showConfirmFinalizar` | `?ver=finalizar` |
@@ -362,26 +380,27 @@ La flecha del `Encabezado` usa la misma decisión.
 R = réplica (dataset) · O = outbox (tipo) · L = online-only. Tablas según el código
 de cada route (introspección de la base bloqueada en esta sesión; verificar).
 
-### Vendedor
-| Endpoint | Tablas | Estrategia |
-|---|---|---|
-| GET `me` | usuarios, clientes, pedidos, pagos_clientes, rendiciones, rendicion_items, billetera_movimientos, comisiones, viajes | R `vendedor_me` (envolver GET) |
-| GET `clientes`, `cliente/[id]` | clientes, v_saldo_clientes, pagos_clientes, comprobantes_venta, pedidos, devoluciones, imputaciones, listas_precio, vendedores, profiles | R `vendedor_clientes` (lista + ficha); saldos: snapshot |
-| POST `clientes` | clientes | O `cliente.crear` |
-| PATCH `cliente/[id]` | clientes | O `cliente.editar` (CAS por campo) |
-| GET/PUT `cliente/[id]/bonificaciones` | bonificaciones, clientes | R `precios_clientes` ✅ / O `cliente.bonificaciones` |
-| GET `cliente/[id]/comprados` | comprobantes_venta_detalle, articulos, clientes | R (por cliente, snapshot) |
-| GET `articulos`, `catalogo`, `proveedores`, `articulos-ventas` | articulos, rubros, categorias, subcategorias, proveedores, v_articulos_ventas, pedidos_detalle | R `vendedor_catalogo` (+ `precios_articulos` ✅) |
-| GET `precios-listas`, `catalogos-ficha`, `zonas`, `cuentas-bancarias` | listas_precio, zonas, localidades, condiciones_*, cuentas_bancarias | R (snapshot, chicos) |
-| POST `zonas`, `localidades` | zonas, clientes_zonas, localidades | O |
-| GET `pedidos`, `pedidos/[id]` | pedidos, comprobantes_venta, remitos, condiciones, bonificaciones | R `vendedor_pedidos` |
-| **server actions** `createPedido`, `agregarItemPedido`, `actualizarCantidadItem`, `eliminarItemPedido`, `aplicarCondicionesPedidoVendedor`, `confirmarPedidoVendedor`, `previewPrecio*` | pedidos, pedidos_detalle, kardex, comisiones, condiciones | O `pedido.crear` / `pedido.editar` (armar el pedido completo en el equipo y enviarlo en UNA mutación); previews ⇒ motor local |
-| GET `billetera`, `comisiones`, `comisiones/detalle`, `pagos-pendientes`, `estadisticas` | billetera_movimientos, comisiones, kardex, pagos_clientes, rendiciones | R (snapshot) |
-| GET/POST/PATCH `viajes`, `viajes/[id]` | viajes, viaje_zonas, viajes_clientes, clientes_zonas | R / O `viaje.*` |
-| POST `buscar-foto`, `buscar-foto/confirmar` | articulos, articulos_alias, marcas | L (IA) |
-| `/api/viajante/cobro`, `cobro/[id]`, `devolucion` | pagos_clientes, pagos_detalle, devoluciones | O `cobro.registrar`, `cobro.anular`, `devolucion.registrar` |
-| `/api/viajante/rendir`, `rendiciones` | rendiciones | L |
-| `/api/pagos-clientes/ocr`, `/api/bcra/deudor/*`, `/api/transportes` | — | L |
+### Vendedor ✅ (implementado — detalle en §18)
+| Endpoint web | Estrategia en la app |
+|---|---|
+| GET `me` | R `vendedor_me` (envuelve el GET) |
+| GET `clientes` | R `vendedor_clientes` (lista + campos de ficha + bonificaciones, por lote); búsqueda y filtros LOCALES |
+| GET `cliente/[id]`, `cliente/[id]/bonificaciones`, `cliente/[id]/comprados`, `articulos?vista=habituales` | R `vendedor_cc` (una fila por cliente; refresco parcial `?ids=` al abrir la ficha con señal) |
+| POST `clientes` | O `cliente.crear` (id generado en el equipo) |
+| PATCH `cliente/[id]` | O `cliente.editar` (CAS por campo; también reasignar vendedor) |
+| PUT `cliente/[id]/bonificaciones` | O `cliente.bonificaciones` |
+| GET `articulos` (6 vistas), `catalogo`, `proveedores`, `articulos-ventas`, `precios-listas`, `catalogos-ficha`, `zonas`, `cuentas-bancarias` | R `vendedor_articulos` (delta) + R `vendedor_catalogos`; vistas y búsqueda LOCALES |
+| POST `zonas`, `localidades` | **L** (dedupe contra toda la base; alta rara) — antes figuraban como O |
+| GET `pedidos`, `pedidos/[id]` | R `vendedor_pedidos` (delta; 90 días + vivos, tope 250) |
+| server actions `createPedido`, `agregarItemPedido`, `actualizarCantidadItem`, `eliminarItemPedido`, `aplicarCondicionesPedidoVendedor`, `confirmarPedidoVendedor` | borrador LOCAL durable + O `pedido.crear` / `pedido.editar` (una operación con el estado final) |
+| server action `softDeletePedido` *(no estaba en la matriz)* | O `pedido.eliminar` (idempotente) |
+| server actions `previewPrecioArticulo`, `previewPreciosArticulos`, `previewPreciosListas` *(la última no estaba)* | motor local (`@gm/pricing`) sobre `precios_*` |
+| GET `billetera`, `comisiones`, `comisiones/detalle`, `pagos-pendientes`, `estadisticas`, `/api/viajante/rendiciones` | R `vendedor_billetera` (filas por id; detalle de comisión de los 150 pedidos más recientes; el resto **L** con estado vacío) |
+| GET/POST `viajes`, GET/PATCH `viajes/[id]` *(el PATCH tiene dos acciones)* | R `vendedor_viajes` · O `viaje.crear`, `viaje.cliente_no_va` (absoluto), `viaje.estado` (idempotente) |
+| `/api/viajante/cobro`, `cobro/[id]`, `devolucion` | O `cobro.registrar`, `cobro.anular`, `devolucion.registrar` (id generado en el equipo) |
+| `/api/viajante/rendir` | **L** (RPC atómica de plata) |
+| POST `buscar-foto` | código de barras: LOCAL (BarcodeDetector + catálogo) · identificar por foto: **L** (IA) |
+| `/api/pagos-clientes/ocr`, `/api/bcra/deudor/*`, PDF de comprobantes y remitos | **L** |
 
 ### Chofer
 | Endpoint | Tablas | Estrategia |
@@ -433,9 +452,26 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
   sin ella (snapshot + refresco periódico de 45 s); con ella la cola se entera en segundos.
 - `typecheck:movil`: `lib/deposito/`, `app/api/deposito/` y `lib/actions/deposito.ts` pasan al alcance en cero.
 
+**Sesión Vendedor** (retrocompatibles; la web `/vendedor` usa las mismas funciones y devuelve lo mismo):
+- `lib/vendedor/{ficha-cliente,detalle-pedido,bonificaciones,comprados,habituales,comisiones-detalle}.ts`:
+  lógica extraída de las routes (la route llama a la misma función). `lib/vendedor/isomorfico.ts`
+  = frontera de lo que importa la app (`@gm/vendedor`: orden de listados, búsqueda local, estados).
+- `lib/mobile/sync/vendedor.ts` (8 datasets), `lib/mobile/outbox/vendedor.ts` (12 handlers),
+  `lib/mobile/contexto-captura.ts` (precios a la captura; ver §18), `lib/mobile/uuid.ts`.
+- `lib/actions/pedidos.ts`: sus 6 helpers de LECTURA de insumos consultan `capturaActual()`.
+  Sin contexto (toda la web) devuelven lo de siempre; el contexto solo lo abre el handler del
+  outbox (AsyncLocalStorage: un cliente remoto no lo puede fijar).
+- POST `/api/vendedor/clientes`, `/api/vendedor/viajes`, `/api/viajante/devolucion`: aceptan un
+  `id` (UUID) opcional generado en el equipo. Motor de sync: `DatasetDef.porIds` + `?ids=`.
+- `precios-integridad.ts`: un cliente creado DESPUÉS de la vigencia (alta offline) usa su ficha actual.
+- Migración `supabase/migrations/20260921_mobile_vendedor.sql` — **aditiva, idempotente,
+  OBLIGATORIA para enviar pedidos desde la app**: `pedidos.movil_local_id UUID` + índice UNIQUE
+  parcial. Sin ella el pedido queda PENDIENTE en el equipo (nada se pierde) hasta aplicarla.
+- `lib/cobranzas/errores.ts` + 422 en `/api/viajante/cobro` (POST/DELETE) para rechazos de negocio (§18).
+- `typecheck:movil`: `lib/vendedor/`, `app/api/vendedor/`, `app/api/viajante/cobro/`, `lib/cobranzas/{crear,errores}.ts` y `lib/actions/cobranzas.ts` pasan al alcance en cero.
+
 **Pendientes por sesión de app**:
 - Datasets y handlers de la tabla §9 (cada uno reusando la lógica existente; extraer a `lib/` lo que hoy vive en route handlers/server actions).
-- `pedido.crear` debe usar `verificarPreciosCapturados()` y guardar `idempotency_key` en `pedidos` (columna nueva + UNIQUE) — migración de la sesión vendedor.
 - Pantalla de admin para `mobile_alertas_integridad` y `mobile_dispositivos` (revocar equipo).
 - Si pg_cron no está habilitado: habilitarlo (Database → Extensions) y re-correr el bloque de jobs de la migración.
 
@@ -607,12 +643,12 @@ Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo ind
 |---|---|
 | Auditoría (endpoints→tablas, subpantallas, cambios de backend, riesgos) | ✅ (§8, §9, §10, §16) |
 | Workspace `mobile/` con 3 proyectos Capacitor (`com.gm.vendedor/chofer/deposito`) | ✅ compilan; typecheck strict limpio |
-| Motor offline: réplica + outbox + sincronizador + reloj, con tests | ✅ 44/44 tests; validado en equipo |
+| Motor offline: réplica + outbox + sincronizador + reloj, con tests | ✅ 81 tests (core + depósito + vendedor); validado en equipo |
 | Motor de precios isomórfico extraído, ERP usando el mismo código | ✅ en producción (preview verificado por el dueño + flujos de pedido probados) |
 | Migración `20260918_mobile_fundacion.sql` | ✅ aplicada en producción; log de cambios, idempotencia e historial verificados en vivo |
 | Vigencia programada (ERP + dispositivo + materialización) | ✅ probada en producción: aplicada por **pg_cron** a la hora exacta (ver abajo) |
 | Historial de insumos | ✅ versión cerrada/abierta exactamente en la vigencia programada |
-| Re-verificación de precios de pedidos offline (`verificarPreciosCapturados`) | 🟡 tests ✅; se ejercita en real con `pedido.crear` (sesión vendedor) |
+| Re-verificación de precios de pedidos offline (`verificarPreciosCapturados`) | 🟡 tests ✅; cableada en `pedido.crear` / `pedido.editar`; se ejercita en real al probar la app Vendedor contra el backend |
 | Auth de dispositivo (Keystore, refresh, revocación) + Bearer en servidor | ✅ en equipo y **contra producción** (chofer v0.1.1 release) |
 | Navegación: convención + hooks + botón atrás | ✅ en equipo |
 | Lector: wedge + broadcast (plugin nativo) | ✅ compila; 🟡 el NuStar conectado no tiene servicio de escaneo habilitado |
@@ -620,7 +656,8 @@ Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo ind
 | Chofer v0.1.1 **release** en el NuStar contra gmv2.vercel.app | ✅ login, viajes reales, reloj 2 s de desfasaje |
 | Vendedor viejo v1.1 (`com.gm.vendedor`, otra firma) | ✅ desinstalado del NuStar |
 | **App Depósito completa** (Sesión 3) | ✅ **CERRADA 18/09/2026**: en `main` (merge `3862a9a`), migraciones aplicadas, APK `deposito-v0.2.0` en el NuStar, checklist contra producción superado y base verificada idéntica (§17). Pendientes del mes de prueba: §17 |
-| Datasets/handlers y pantallas de vendedor y chofer | ⏳ sesiones por app |
+| **App Vendedor completa** (Sesión 1) | 🟡 en la rama `apk-vendedor`: app, servidor, mock y tests ✅; probada en navegador y en el equipo contra el mock. **Falta** (requiere al dueño): aplicar la migración, merge a `main` y prueba contra el backend real con un usuario vendedor (§18) |
+| Datasets/handlers y pantallas de chofer | ⏳ sesión Chofer (hoy solo el esqueleto de la fundación) |
 
 ### Validación en producción (18/09/2026)
 
@@ -956,3 +993,227 @@ el stock de lo vendible sube UNA vez y que la devolución queda `confirmado`.
 | Lector físico | — | 🟡 este equipo no tiene servicio de escaneo; ráfaga simulada con `adb input text` (tiempos irregulares). Validar el doble gatillo con un lector real |
 | Backend real (handlers contra Supabase) | — | 🟡 tipado y build en verde; sin ejecutar: necesita el deploy en `main` y un usuario `deposito` |
 
+---
+
+## 18. Vendedor (com.gm.vendedor) — Sesión 1
+
+Réplica fiel de `app/vendedor/` (sin funciones nuevas), offline-first. Código:
+`mobile/apps/vendedor/src` (`datasets.ts`, `datos/` = búsqueda local · motor de precios ·
+borrador · overlay · hooks, `pantallas/`, `rutas.tsx`). Servidor: `lib/vendedor/*`,
+`lib/mobile/{sync,outbox}/vendedor.ts`, `lib/mobile/contexto-captura.ts`.
+
+### Datos
+| Dataset | Modo | Refresco | Contenido |
+|---|---|---|---|
+| `precios_*` (5, de la fundación) | delta · invalidable | **segundos** (sondeo 15 s) + al abrir + 5–10 min | insumos del motor: nunca un precio calculado |
+| `vendedor_articulos` | delta (`articulos`) · invalidable | segundos | catálogo vendible con la forma de la web + `proveedor_id`, `created_at`, `codigo_bulto`, `sigla` (lo que el servidor usaba para resolver vistas y códigos) |
+| `vendedor_catalogos` | snapshot | 30 min | 7 filas = los GET de la web: taxonomía, proveedores, ventas 180 d, listas permitidas, catálogos de ficha, cuentas bancarias, zonas |
+| `vendedor_clientes` | snapshot (por lote) | 3 min + al entrar | cartera: fila del listado + campos de la ficha + bonificaciones + saldos real/proyectado |
+| `vendedor_cc` | snapshot + **parcial** | 15 min · al abrir la ficha con señal se re-lee SOLO ese cliente | = GET `cliente/[id]` + comprados (devoluciones) + habituales |
+| `vendedor_pedidos` | delta (`pedidos`, `pedidos_detalle`) · invalidable | segundos | 90 días + todos los vivos (tope 250), cada uno = GET `pedidos/[id]` |
+| `vendedor_billetera` | snapshot | 10 min + tras cada cobro/pedido aplicado | billetera, comisiones ×2, detalle de comisión de los 150 pedidos más recientes, pagos por rendir, rendiciones, estadísticas |
+| `vendedor_viajes` | snapshot + parcial | 10 min | listado + detalle de los viajes en curso y los 5 últimos |
+| `vendedor_me` | snapshot | 5 min | = GET `me` |
+
+Dependen del vendedor ⇒ `replicaPorUsuario` default (otro usuario en el equipo limpia la réplica).
+Medido con la cartera más grande (86 clientes) y el catálogo real (1.841 artículos vendibles,
+2.015 con insumos de precio): el fixture completo pesa 3,1 MB.
+
+### Pedido sin señal
+- **Borrador durable.** En la web el carrito ES un pedido `en_venta` guardado ítem a ítem en la
+  base; sin señal eso no existe. Acá es un borrador por cliente en IndexedDB
+  (`datos/borradores.ts`), persistido en cada cambio: matar la app a mitad de un pedido no
+  pierde nada ("Pedido a medio cargar" en el inicio y en Mis pedidos). Guarda artículos y
+  cantidades, **nunca precios**.
+- **Una operación.** Confirmar = `pedido.crear` (o `pedido.editar`) con el estado FINAL de los
+  renglones, condiciones, observaciones y `precios_al`. El borrador se suelta recién después de
+  que la operación quedó durable en el outbox.
+- **Pendiente de enviar.** Se ve en Mis pedidos (sin número: lo da la oficina) con su detalle
+  completo. **Editable y descartable hasta que sincroniza** (`outbox.retirar`): editar lo devuelve
+  al borrador con el MISMO `local_id`; al reconfirmar viaja una operación nueva. Si el envío
+  anterior había llegado y se perdió la respuesta, el servidor lo encuentra por
+  `pedidos.movil_local_id` y lo lleva al estado final en vez de duplicar.
+- **Servidor** (`aplicarPedido`): valida cliente (activo, asignado), pedido editable
+  (`esPedidoEditable` ⇒ si pasó a facturación, rechazo con `motivoBloqueo`), reconstruye insumos,
+  verifica precios, y ejecuta las MISMAS server actions que la web (`createPedido` /
+  `aplicarCondicionesPedidoVendedor` + reconciliar renglones con `agregarItemPedido` /
+  `actualizarCantidadItem` / `eliminarItemPedido` + `confirmarPedidoVendedor`). `createPedido` no es
+  transaccional: si se corta a mitad, el reintento entra por `movil_local_id` y completa lo que falte.
+- **Editar un pedido ya confirmado**: los renglones que ya tenía conservan SU precio mientras no
+  cambien las condiciones (la web tampoco los re-precia) ⇒ viajan con `precio_fijo` y no se
+  re-verifican; los nuevos y los de un `en_venta` salen del motor. Desde el detalle del pedido
+  las cantidades se guardan solas (una `pedido.editar` con `confirmar:false`; la pendiente
+  anterior del mismo pedido se reemplaza).
+- **"Guardar en la ficha"** desde el panel 👤: encola `cliente.editar` + `cliente.bonificaciones`
+  Y deja esos valores como condiciones del pedido en curso. Motivo: sin señal la ficha cambia
+  recién al sincronizar, y el servidor reconstruye la ficha a `precios_al` (anterior): si no
+  viajaran en el pedido, el pedido saldría con las condiciones viejas.
+
+### Precios: vigencia = lo que el vendedor tenía a la vista (decisión de esta sesión)
+`precios_al` = frescura (hora del SERVIDOR) más vieja de los 5 datasets `precios_*` al confirmar.
+El servidor recalcula con los insumos vigentes a `min(capturado_at, precios_al)`.
+- **Por qué**: con "vigentes a `capturado_at`" a secas, un cambio de precio hecho en el ERP con
+  el equipo sin señal produce SIEMPRE diferencia (el equipo no puede conocerlo), se factura a un
+  precio que el cliente no vio y la "alerta de integridad" pasa a ser ruido diario. Con
+  `precios_al` el recálculo da idéntico por construcción; una diferencia vuelve a ser bug o dato
+  corrupto ⇒ alerta al admin y se factura el precio del servidor, sin avisarle al vendedor.
+- **Regla CONFIRMADA por el dueño (21/09/2026), con tope de 24 hs.** Un equipo unas horas sin
+  señal vende con la lista de esa mañana, como la lista impresa que usaban (a la vista:
+  `<Frescura>` "Precios al dd/mm hh:mm", ámbar pasados 30 min). Pero si al tomar el pedido hacía
+  **más de 24 hs** que el equipo no actualizaba precios (`capturado_at − precios_al > 24 h`):
+  - el servidor NO honra el precio del equipo: usa los insumos vigentes **al ingresar el pedido**
+    (`vigenciaDelPedido()` → `garantizada: false`), no corre `verificarPreciosCapturados` (una
+    diferencia es esperable, no una alerta) y devuelve `precios_garantizados: false`;
+  - la app muestra, mientras dure, el cartel rojo fijo **"HACE MAS DE 24HS NO SE ACTUALIZAN
+    DATOS, LA EMPRESA NO SE RESPONSABILIZA POR DIFERENCIA DE PRECIOS"** en el inicio, todo el
+    catálogo, el carrito (que además aclara que el total es orientativo) y Precios
+    (`usePreciosVencidos`, se re-evalúa cada minuto y desaparece apenas entra un sync).
+  - Cuenta la antigüedad **al capturar**, no lo que tardó en sincronizar: un pedido tomado con
+    precios frescos que sale 3 días después se respeta.
+  - Una sola definición para servidor y app: `lib/vendedor/vigencia-precios.ts` (`@gm/vendedor`).
+- **Cómo se inyecta sin tocar el camino web**: los 6 helpers de lectura de insumos de
+  `lib/actions/pedidos.ts` consultan `capturaActual()` (AsyncLocalStorage). Un parámetro en una
+  server action lo podría fijar un cliente remoto; un contexto en memoria del proceso, no.
+- Cambios **programados**: el equipo los aplica solo a la hora exacta aun sin red
+  (`useInsumosBase` re-renderiza en `proximaVigencia`).
+- Medido: motor sobre los 2.015 artículos reales = 50 ms (0,025 ms por artículo).
+
+### Búsqueda
+Local sobre la réplica (`datos/busqueda.ts`), mismo orden que `hybridSearchIds`: código (exacto
+sku/EAN/bulto → prefijo de sku) → texto (todas las palabras, sin acentos, también pegadas, con
+el puntaje de `search_articulos`) → tolerancia a errores de tipeo por trigramas si lo exacto trae
+menos de 4. **No está** la pata vectorial (embeddings, necesita red) ni los alias de proveedor.
+**Prioridad por filtro activo** = la de la web: dentro de un filtro / proveedor / categoría se
+busca SOLO en ese listado (`filtrarLocal`), y "Buscar en todo el catálogo" es explícito.
+El texto de búsqueda vive en estado local y se guarda en la URL con 250 ms de retardo
+(`useBusqueda`): escribir cada tecla en la URL re-renderizaba todo el árbol de rutas.
+
+### Navegación — matriz del botón atrás
+Verificada en navegador (`history.back()`) y con el **botón físico del NuStar** (flujo de pedido).
+Replace = no agrega historial (atrás sale de la pantalla).
+
+| Pantalla | Ruta | Atrás va a |
+|---|---|---|
+| Inicio | `/` | **minimiza** (proceso y outbox vivos). No existe ruta del ERP |
+| Cerrar sesión (hoja) | `/?ver=salir` | cierra la hoja |
+| Billetera | `/billetera` (`?tab=` `?comTipo=` replace) | pantalla anterior |
+| Detalle de comisión | `/billetera/comisiones/:pedidoId?tipo=` | **Billetera en la pestaña comisiones** (abierto sin historial: `/billetera?tab=comisiones`) |
+| Rendiciones | `/rendiciones` (`?abierta=` replace) · `?ver=confirmar` | Billetera · cierra la hoja |
+| Mis pedidos | `/pedidos` (`?estado=` replace) | pantalla anterior |
+| Pedido | `/pedidos/:id` (`local:<id>` = pendiente de enviar) | Mis pedidos (o la pantalla desde la que se abrió) |
+| …quitar renglón / eliminar / descartar / foto | `?ver=quitar:<id>` · `?ver=eliminar` · `?ver=descartar` · `?foto=` | cierra la hoja · confirmar eliminar/descartar ⇒ Mis pedidos |
+| Elegir cliente | `/pedido/nuevo` (`?q=` replace) | pantalla anterior. Elegir = **replace** (como la web): atrás desde el catálogo NO vuelve al selector |
+| Catálogo | `/pedido/nuevo/:clienteId` (`?q=` replace) | pantalla anterior — **el pedido en curso queda guardado** |
+| Proveedores | `…/proveedores` | Catálogo |
+| Árbol de un proveedor | `…/proveedor/:provId` (`?q=` replace) | Proveedores |
+| Novedades / Ofertas / Habituales | `…/filtro/:tipo` (`?q=` replace) | Catálogo |
+| Rubro (tarjetas) | `…/rubro/:rubroId` | Catálogo |
+| Categoría (lista) | `…/rubro/:rubroId/:catId` (`?q=` `?sub=` replace) | Rubro |
+| Ficha del artículo | `?ver=articulo:<id>` sobre cualquier nivel | cierra la ficha (mismo nivel del catálogo) |
+| Foto grande | `?foto=<url>` | la ficha / el listado |
+| Panel del cliente (condiciones) | `?ver=cliente` | cierra el panel · "Ficha" y "Cuenta corriente" = replace |
+| Buscar con la cámara | `?ver=buscar-foto` | cierra · elegir = replace a la ficha del artículo |
+| Carrito | `…/carrito` | el nivel del catálogo donde estaba |
+| Descartar pedido (hoja) | `…/carrito?ver=descartar` | cierra · confirmar ⇒ 2 atrás (el catálogo) |
+| Pedido confirmado | `…/listo` (**replace** del carrito) | el catálogo, vacío (= "nuevo pedido para X"): nunca a un carrito ya enviado |
+| Clientes | `/clientes` (`?q=` `?filtro=` `?localidad=` replace) | pantalla anterior |
+| Cliente nuevo | `/clientes/nuevo` · `?ver=localidad` · `?ver=duplicado` | Clientes · cierra la hoja · guardar = replace a la ficha / al pedido |
+| Ficha | `/clientes/:id` · `?ver=editar` · `?ver=bonif` · `?hoja=localidad` · `?conf=reasignar\|eliminar` | pantalla anterior · cada hoja se cierra sola |
+| Cobrar | `/clientes/:id/cobrar` (`?tab=` `?abierto=` `?metodo=` replace) · `?ver=falta` | Ficha · cierra el diálogo · registrar = replace a la ficha |
+| Devolución | `/clientes/:id/devolucion` (`?q=` replace; `?ok=1` replace) | Ficha |
+| Devolución · catálogo | `/clientes/:id/devolucion/catalogo` | Devolución (la lista en curso sobrevive: sessionStorage) |
+| Pago | `/pago` (`?q=` `?deuda=` replace) | Inicio |
+| Estadísticas | `/estadisticas` | Inicio |
+| Viajes · nuevo · detalle | `/viajes` · `/viajes/nuevo` (crear = replace al detalle) · `/viajes/:id` · `?ver=completar` | Inicio · Viajes · Viajes · cierra la hoja |
+| Precios | `/precios` (`?q=` `?orden=` `?c=` replace) · `?ver=agregar` · `?foto=` | Inicio · cierra la hoja |
+| Operaciones pendientes | `/pendientes` (core) | la pantalla anterior |
+
+### Políticas de conflicto (complementa §6)
+- `pedido.crear` / `pedido.editar`: arriba. Cliente dado de baja o reasignado ⇒ rechazo con motivo.
+- `pedido.eliminar`: ya eliminado ⇒ éxito; con comprobante vivo o fuera de estado editable ⇒ rechazo.
+- `cliente.crear`: el `id` lo genera el equipo ⇒ reenviar no duplica, y un pedido tomado al
+  cliente nuevo (FIFO: va después) ya lo referencia. CUIT existente ⇒ rechazo indicando cuál.
+  El equipo reproduce la regla de lista del servidor (la del viajante si la impone) para que el
+  precio offline coincida.
+- `cliente.editar`: CAS por campo; lo aplicable se aplica y lo pisado por otro vuelve como rechazo
+  listando los campos.
+- **Cobro rechazado ≠ error transitorio** (corregido en esta rama). Las RPC `cobranza_crear` /
+  `cobranza_anular` rechazan por regla de negocio con `RAISE EXCEPTION` ⇒ SQLSTATE **P0001**
+  (comprobante anulado, no es del cliente, lo imputado supera el pago…). Antes la route lo devolvía
+  como **500**: la app lo reintentaba para siempre y, por FIFO, TRABABA todo lo cargado después.
+  Ahora `lib/cobranzas/errores.ts` lo clasifica (`ErrorReglaCobranza`) y
+  `/api/viajante/cobro` (POST y DELETE) responde **422** `{ error, mensaje, codigo:
+  "regla_negocio", reintentable:false }`; cualquier otro error sigue siendo 500 = transitorio.
+  Retrocompatible: `error` lleva el mismo texto y la web ya trataba todo `!res.ok` igual; los
+  otros llamadores de `crearCobranza` / `anularCobranza` reciben el mismo `message`. En la app el
+  cobro queda **rechazado** (sale de la cola, lo de atrás se envía), deja de reservar el
+  comprobante, y el motivo se ve en el **inicio**, en la ficha y en Cobrar hasta tocar "Entendido".
+  Limitación preexistente de la web: un cobro a VARIOS clientes no es transaccional entre clientes
+  (la app siempre cobra de a uno).
+- `cobro.registrar`: payload = body de la web; la clave de idempotencia del outbox es la que la
+  route ya usaba (`cobranza_crear` deduplica). Lo cobrado sin señal RESERVA los comprobantes en el
+  equipo (overlay = `en_cobro` del servidor): no se puede cobrar dos veces lo mismo.
+- `cobro.anular`: ya anulado ⇒ éxito. `devolucion.registrar` / `viaje.crear`: id del equipo.
+  `viaje.cliente_no_va`: valor absoluto. `viaje.estado`: transición idempotente.
+
+### Diferencias con la web (impuestas por navegación / offline / plataforma)
+- Encabezado del core (atrás · En línea/Sin red · ⇪) + `<Frescura>`; los subtítulos van en una
+  franja debajo. `alert()`/`confirm()` ⇒ toast y hojas con historial.
+- El carrito guarda en el equipo y envía al confirmar (la web autoguardaba ítem a ítem); por eso
+  existe "Descartar este pedido" y el aviso "Pedido a medio cargar".
+- Logout: `runtime.salir()` (no deja salir con operaciones sin enviar).
+- Alta de zona/localidad, rendir, OCR de comprobantes, BCRA, PDF de comprobantes/remitos e
+  identificar un producto por foto: **online-only**, deshabilitados sin red con el motivo a la
+  vista. La foto del **código de barras** sí funciona sin señal (se lee en el equipo).
+- Un viaje creado sin señal muestra sus clientes recién cuando se envía (la zona de cada cliente
+  la resuelve el servidor).
+- Los tres mapas de estados de pedido de la web (distintos entre sí) quedaron en uno (`ui.tsx`).
+- Conocido: si se reasigna el vendedor de un cliente sin señal, la lista que impone el nuevo
+  viajante se ve recién al sincronizar.
+
+### Resultados de las pruebas (21/09/2026)
+Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
+solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.
+
+| Prueba | Dónde | Resultado |
+|---|---|---|
+| Búsqueda global hasta pintar (50 filas) | **NuStar 65-sp**, bundle de producción | ✅ **53–185 ms** ("shampoo" 101 · "deterg" 58 · error de tipeo "lavandna" 185 · sin resultados 160). Motor de búsqueda puro: 1–30 ms |
+| Filtro activo: "shampoo" dentro de Kenvue | navegador, datos reales | ✅ 13 resultados, todos Kenvue; 0 de Algabo (que tiene 10) |
+| Arranque en frío (proceso muerto desde recientes) | **NuStar 65-sp** | ✅ **0,84 s** con el release v0.2.0 firmado · 1,09–1,31 s con el APK de prueba (debug), sin login |
+| Ruta sin servidor: buscar → precio → 2 artículos → confirmar → matar la app → reabrir → reconectar | **NuStar 65-sp** | ✅ pendiente intacto tras matar; al reconectar sincronizó en 3 s, **1 aplicación**, total servidor = total equipo = $ 98.800,80 |
+| Interrupción a mitad de pedido | **NuStar 65-sp** y navegador | ✅ "Pedido a medio cargar" con sus 2 artículos |
+| Cambio de precio con el equipo sin señal a mitad de pedido | navegador | ✅ el pedido viajó con `precios_al` anterior al cambio y al precio que vio el vendedor; después el equipo recibió el precio nuevo |
+| Editar un pedido pendiente (3 → 5 u) antes de sincronizar | navegador | ✅ llega UNA vez con 5 u (mismo `local_id`, 1 creación) |
+| Cobro sin señal por el total de una factura | navegador | ✅ "✓ Cuadra", saldo proyectado $ 0 con el real a la vista, pago "⇪ Sin enviar", 1 aplicación; atrás no vuelve al formulario enviado |
+| Atrás físico: panel cliente → ficha artículo → árbol proveedor → proveedores → catálogo → inicio → minimiza | **NuStar 65-sp** | ✅ (proceso vivo al minimizar) |
+| Atrás: detalle de comisión → pestaña comisiones → inicio; pestañas sin historial | navegador | ✅ |
+| Tope de 24 hs: precios envejecidos 25 h sin red → cartel en inicio, catálogo y carrito → pedido → reconectar | navegador | ✅ cartel con el texto exacto; el pedido llegó marcado `precios_garantizados: false`; al sincronizar el cartel desapareció |
+| Cobro rechazado por regla de negocio con un pedido encolado DETRÁS | navegador | ✅ pedido → cobro **rechazado** → pedido siguiente aplicado; contador rojo "1 rechazada", motivo visible en el inicio ("el comprobante … está anulado — no se puede cobrar"), "Entendido" lo saca |
+| Tests | `cd mobile && npm test` | ✅ 93 (28 de esta sesión: búsqueda, carrito, overlays, `outbox.retirar`, vigencia con tope de 24 hs, clasificación P0001 / transitorio, cola que no se traba + regresión del 500) |
+| `npm run typecheck:movil` | raíz | ✅ alcance 0 · mobile 0 · base 75/75 |
+| Modo avión con el interruptor del equipo | — | 🟡 "sin señal" se simuló cortando el túnel `adb reverse` (servidor inalcanzable de verdad) para no tocar ajustes del equipo. El camino "red caída según Android" es el de la fundación, ya validado con Chofer y Depósito |
+| Backend real (datasets y handlers contra Supabase) | — | 🟡 tipado y tests en verde; **sin ejecutar**: necesita la migración, el deploy en `main` y un usuario vendedor. La re-verificación de precios contra el historial real se ejercita ahí |
+
+### Puesta en marcha — PENDIENTE (requiere al dueño)
+1. Revisar la rama `apk-vendedor` (preview de Vercel) y autorizar el merge a `main`.
+2. Aplicar `supabase/migrations/20260921_mobile_vendedor.sql` (aditiva: una columna + un índice).
+3. Instalar `dist-apks/vendedor-v0.2.0.apk` e ingresar con un usuario vendedor.
+4. Checklist contra producción con datos `TEST-VENDEDOR` (mismo método que Depósito, con foto
+   antes/después): pedido sin señal → 1 pedido, total al centavo, 0 filas en
+   `mobile_alertas_integridad`; cambio de precio real con el equipo en modo avión; cobro y
+   devolución; alta de cliente + pedido sin señal; rechazo por pedido ya facturado.
+5. En esa prueba, verificar el rechazo real: anular un comprobante desde el ERP con un cobro
+   suyo sin enviar en el equipo ⇒ al reconectar debe volver RECHAZADO con el motivo (confirma que
+   PostgREST entrega `code: "P0001"` para los `RAISE` de `cobranza_crear`; si llegara otro código,
+   se ajusta `SQLSTATE_REGLA_NEGOCIO` en `lib/cobranzas/errores.ts`).
+
+### Probar sin backend
+`cd mobile && node scripts/fixture-vendedor.mjs` (una vez; solo lectura; el JSON tiene datos reales
+de clientes y está en `.gitignore`) → `node scripts/mock-vendedor.mjs` (3998) →
+`apps/vendedor/.env.development.local` con `VITE_API_BASE=http://localhost:3998` →
+`npm run dev:vendedor` → http://localhost:5174 (cualquier email, contraseña "x"). Atajos:
+`/__mock/red?on=0|1`, `/__mock/precio?sku=&base=`, `/__mock/estado-pedido?numero=&estado=`,
+`/__mock/estado`, `/__mock/reset`. En el equipo: `VITE_API_BASE=http://localhost:3998 npx vite build`,
+`GM_DEV_HTTP=1 npx cap sync android`, `gradlew assembleDebug`, `adb reverse tcp:3998 tcp:3998`,
+`adb install`. Con `GM_DEV_HTTP=1` el WebView queda inspeccionable (chrome://inspect); el script de
+release borra esa variable: un release nunca lo lleva.

@@ -46,6 +46,14 @@ export interface RespuestaSync {
   deletes: string[]
 }
 
+/** GET /api/mobile/sync/<dataset>?ids=a,b — refresco parcial (no mueve el cursor). */
+export interface RespuestaParcial {
+  dataset: string
+  generado_at: string
+  upserts: FilaReplica[]
+  deletes: string[]
+}
+
 export interface EstadoSync {
   server_time: string
   /** Último seq del log de cambios (null si el log no existe todavía) */

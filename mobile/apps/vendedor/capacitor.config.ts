@@ -11,7 +11,8 @@ const config: CapacitorConfig = {
     // Solo para probar contra un Next local por http (GM_DEV_HTTP=1 npx cap sync).
     // build-apks.mjs sincroniza SIN esta variable: los release nunca lo tienen.
     allowMixedContent: process.env.GM_DEV_HTTP === "1",
-    webContentsDebuggingEnabled: false,
+    // Inspección del WebView (chrome://inspect) SOLO en el APK de prueba; release: nunca.
+    webContentsDebuggingEnabled: process.env.GM_DEV_HTTP === "1",
   },
   server: {
     androidScheme: "https",

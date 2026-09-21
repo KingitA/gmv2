@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 import { SEGMENTOS_BONIF, type SegmentoBonif } from "@/lib/pricing/segmento"
+import { leerBonificaciones } from "@/lib/vendedor/bonificaciones"
 
 // Bonificaciones del cliente por SEGMENTO y TIPO (tabla bonificaciones):
 //  - viajante:   descuento que el viajante concede sobre el neto de cada línea
@@ -32,26 +33,6 @@ async function clienteDelUsuario(supabase: any, session: any, id: string) {
     .in("vendedor_id", session.vendedorIds)
     .maybeSingle()
   return data
-}
-
-async function leerBonificaciones(supabase: any, clienteId: string): Promise<Record<Tipo, PorSeg>> {
-  const { data } = await supabase
-    .from("bonificaciones")
-    .select("tipo, segmento, porcentaje")
-    .eq("cliente_id", clienteId)
-    .in("tipo", TIPOS as unknown as string[])
-    .eq("activo", true)
-  const out: Record<Tipo, PorSeg> = { viajante: vacio(), mercaderia: vacio() }
-  const general: Record<Tipo, number> = { viajante: 0, mercaderia: 0 }
-  for (const b of data || []) {
-    const tipo = b.tipo as Tipo
-    if (!TIPOS.includes(tipo)) continue
-    if (b.segmento && SEGMENTOS_BONIF.includes(b.segmento)) out[tipo][b.segmento as SegmentoBonif] = Number(b.porcentaje)
-    else if (!b.segmento) general[tipo] = Number(b.porcentaje)
-  }
-  // Una bonificación sin segmento aplica a todos los que no tengan la suya
-  for (const tipo of TIPOS) for (const s of SEGMENTOS_BONIF) if (!out[tipo][s] && general[tipo]) out[tipo][s] = general[tipo]
-  return out
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {

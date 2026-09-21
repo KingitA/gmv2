@@ -1,4 +1,4 @@
-import type { FilaReplica, RespuestaSync } from "@gm/contrato"
+import type { FilaReplica, RespuestaSync, RespuestaParcial } from "@gm/contrato"
 import type { Db, MetaDataset } from "../db/idb"
 import { Emisor } from "../emitter"
 import type { Api } from "../net/api"
@@ -147,6 +147,24 @@ export class Replica {
     await tx.done
     this.cache.delete(ds)
     this.emisor(ds).emitir()
+  }
+
+  /**
+   * Refresco PARCIAL: re-lee del servidor solo esas filas (GET …?ids=) y las vuelca
+   * como parche (no mueve cursor ni frescura). Para datasets caros por fila: al abrir
+   * la ficha de un cliente con señal se actualiza ese cliente y nada más. Sin red o
+   * con error no hace nada: la pantalla sigue con lo que tenía (R4).
+   */
+  async refrescarIds(ds: string, ids: string[]): Promise<boolean> {
+    if (!ids.length) return false
+    try {
+      const r = await this.api.get<RespuestaParcial>(`/api/mobile/sync/${encodeURIComponent(ds)}?ids=${ids.map(encodeURIComponent).join(",")}`, { timeoutMs: 30_000 })
+      if (!r || r.dataset !== ds || !Array.isArray(r.upserts) || !Array.isArray(r.deletes)) return false
+      await this.parchear(ds, r.upserts, r.deletes)
+      return true
+    } catch {
+      return false
+    }
   }
 
   private async registrarError(ds: string, previo: MetaDataset | null, error: string) {
