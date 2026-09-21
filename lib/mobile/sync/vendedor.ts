@@ -190,7 +190,12 @@ const clientes: DatasetDef = {
 export async function cargarCuentaCliente(supabase: any, sesion: { vendedorIds: string[]; user: { id: string } }, id: string): Promise<FilaReplica | null> {
   const ficha = await cargarFichaCliente(supabase, sesion, id)
   if (!ficha) return null
-  const [comprados, frecuencia] = await Promise.all([cargarComprados(supabase, id), frecuenciaHabituales(supabase, id)])
+  // Comprados y habituales son ACCESORIOS de la cuenta corriente: si una consulta falla, el
+  // vendedor igual tiene que poder ver la deuda y cobrar (no tumban toda la fila).
+  const [comprados, frecuencia] = await Promise.all([
+    cargarComprados(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] comprados:", e?.message || e); return [] as Awaited<ReturnType<typeof cargarComprados>> }),
+    frecuenciaHabituales(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] habituales:", e?.message || e); return new Map<string, { veces: number; ultCantidad: number }>() }),
+  ])
   const habituales = [...frecuencia.entries()]
     .sort((a, b) => b[1].veces - a[1].veces)
     .slice(0, TOPE_HABITUALES)
