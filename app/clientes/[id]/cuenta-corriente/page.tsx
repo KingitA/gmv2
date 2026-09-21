@@ -150,6 +150,9 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     const [isLoading, setIsLoading] = useState(true);
     // Vista: "saldos" (default — solo lo que tiene saldo) | "detallada" (desglose + filtro fechas)
     const [vista, setVista] = useState<"saldos" | "detallada">("saldos");
+    // Pagos rechazados/anulados: ocultos por defecto (ruido); el toggle los
+    // muestra, pero solo los del último año — después desaparecen de la ficha.
+    const [verRechazados, setVerRechazados] = useState(false);
     const [fechaDesde, setFechaDesde] = useState("");
     const [fechaHasta, setFechaHasta] = useState("");
 
@@ -223,8 +226,15 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             });
         });
 
-        // Add pagos as rows
-        data.pagos.forEach((pago) => {
+        // Add pagos as rows. Rechazados/anulados: no afectan saldos — ocultos
+        // salvo toggle, y nunca los de más de un año.
+        const haceUnAnio = Date.now() - 365 * 24 * 60 * 60 * 1000;
+        data.pagos.filter((pago) => {
+            const muerto = pago.estado === "rechazado" || pago.estado === "anulado";
+            if (!muerto) return true;
+            if (new Date(pago.fecha_pago).getTime() < haceUnAnio) return false;
+            return verRechazados;
+        }).forEach((pago) => {
             const metodoPago = pago.detalles.map(d => d.tipo_pago).join(" + ");
             documentos.push({
                 id: pago.id,
@@ -525,6 +535,18 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                 </button>
                             )}
                         </div>
+                    )}
+                    {vista === "detallada" && (
+                        <label className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-500">
+                            <input
+                                type="checkbox"
+                                checked={verRechazados}
+                                onChange={(e) => setVerRechazados(e.target.checked)}
+                                className="h-3.5 w-3.5"
+                            />
+                            Ver rechazados/anulados
+                            <span className="text-xs text-gray-400">(último año)</span>
+                        </label>
                     )}
                 </div>
 
