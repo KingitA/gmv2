@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
+import { esTripulante } from "@/lib/viajes/chofer"
+import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
 
 // GET /api/chofer/viaje/[id]
 // Retorna el viaje con sus pedidos, estado de cobro por cliente, y resumen
@@ -31,8 +33,8 @@ export async function GET(
       return NextResponse.json({ error: "Viaje no encontrado" }, { status: 404 })
     }
 
-    // Chofer solo puede ver sus propios viajes
-    if (viaje.chofer_id !== auth.user.id) {
+    // Solo la tripulación del viaje (titular o acompañante)
+    if (!(await esTripulante(supabase, id, auth.user.id, viaje.chofer_id))) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
 
@@ -145,7 +147,7 @@ export async function GET(
     const { data: gastos } = await supabase
       .from("billetera_movimientos")
       .select("monto, concepto, fecha")
-      .eq("viajante_id", auth.user.id)
+      .eq("viajante_id", viaje.chofer_id)
       .eq("tipo", "debito")
       .eq("referencia_tipo", "viaje")
       .eq("referencia_id", id)
@@ -153,11 +155,18 @@ export async function GET(
     const total_gastos = gastos?.reduce((s, g) => s + Math.abs(Number(g.monto)), 0) || 0
     const total_cobrado = Array.from(pagosPorCliente.values()).reduce((s, v) => s + v, 0)
 
+    // Hoja de ruta (paradas con instrucción de oficina + plata del viaje)
+    const hoja = await armarHojaRuta(supabase, id)
+
     return NextResponse.json({
       viaje: {
         ...viaje,
         zona_nombre: (viaje as any).zonas?.nombre || "",
+        es_titular: viaje.chofer_id === auth.user.id,
       },
+      paradas: hoja?.paradas || [],
+      dinero: hoja?.dinero || null,
+      tripulacion: hoja?.viaje.choferes || [],
       pedidos: pedidosConDatos,
       resumen: {
         total_pedidos: pedidosConDatos.length,

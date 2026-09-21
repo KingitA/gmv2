@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { esTripulante } from "@/lib/viajes/chofer"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
@@ -47,7 +48,7 @@ export async function POST(
       .eq("id", viajeId)
       .single()
 
-    if (!viaje || viaje.chofer_id !== auth.user.id) {
+    if (!viaje || !(await esTripulante(supabase, viajeId, auth.user.id, viaje.chofer_id))) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
     // Fase C: el chofer puede registrar/corregir cobros también durante
@@ -213,7 +214,7 @@ export async function POST(
 
     // Registrar en billetera del chofer
     await supabase.from("billetera_movimientos").insert({
-      viajante_id: auth.user.id,
+      viajante_id: viaje.chofer_id, // titular: el acompañante cobra contra su billetera
       tipo: "cobro_cliente",
       medio:
         metodos[0]?.tipo === "efectivo"

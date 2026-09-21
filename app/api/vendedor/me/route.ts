@@ -93,10 +93,13 @@ export async function GET() {
     const hoy = new Date().toISOString().slice(0, 10)
     const { data: viajes } = await supabase
       .from("viajes")
-      .select("id, nombre, fecha, estado, zona_id, zonas!zona_id(id, nombre, descripcion)")
+      .select("id, nombre, fecha, estado, zona_id, zonas!zona_id(id, nombre, descripcion), viaje_zonas(zona_id)")
+      // Calendario de REPARTO vigente (los viajes se programan a fin del mes anterior)
+      .eq("tipo", "reparto")
+      .in("estado", ["programado", "despachado", "en_curso"])
       .or(`fecha.gte.${hoy},estado.eq.en_curso`)
       .order("fecha", { ascending: true })
-      .limit(5)
+      .limit(8)
 
     let proximasZonas: any[] = viajes || []
     if (proximasZonas.length) {
@@ -113,7 +116,10 @@ export async function GET() {
       }
       proximasZonas = proximasZonas.map((v) => ({
         ...v,
-        mis_clientes_en_zona: v.zona_id ? clientesPorZona.get(v.zona_id) || 0 : 0,
+        // Un viaje puede cubrir varias zonas (viaje_zonas); zona_id es la principal
+        mis_clientes_en_zona: [...new Set([v.zona_id, ...((v.viaje_zonas || []).map((z: any) => z.zona_id))])]
+          .filter(Boolean)
+          .reduce((s: number, z: string) => s + (clientesPorZona.get(z) || 0), 0),
       }))
     }
 

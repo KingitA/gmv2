@@ -126,6 +126,15 @@ export async function GET(request: NextRequest) {
         billeteraIds
       )
       for (const v of vend) nombreCuenta.set(`BILLETERA:${v.id}`, `Billetera ${v.nombre}`)
+      // Las billeteras de choferes son por usuario, no por vendedor ("a cuenta viaje")
+      const sinNombre = billeteraIds.filter((id) => !nombreCuenta.has(`BILLETERA:${id}`))
+      if (sinNombre.length) {
+        const usr = await fetchByIds<any>(
+          (chunk) => supabase.from("usuarios").select("id, nombre").in("id", chunk),
+          sinNombre
+        )
+        for (const u of usr) nombreCuenta.set(`BILLETERA:${u.id}`, `Billetera ${u.nombre}`)
+      }
     }
     const cuenta = (tipo?: string | null, id?: string | null) => {
       if (!tipo) return ""
@@ -393,7 +402,12 @@ export async function GET(request: NextRequest) {
           base.quien = k.concepto || "Egreso"
           base.sub = k.tipo_movimiento === "GASTO_BANCARIO" ? "Gasto bancario" : "Egreso"
           base.medio = `💵 ${cuenta(k.origen_tipo, k.origen_id)}`
-          base.salida = monto
+          // Gasto de viaje: lo pagó el chofer de su billetera (la plata ya salió
+          // de la caja con el "a cuenta viaje"): informativo, no otra salida.
+          if (k.origen_tipo === "BILLETERA") {
+            base.sub = "Gasto de viaje"
+            base.neutro = monto
+          } else base.salida = monto
           base.estado = { tipo: "info", texto: "✓ Registrado" }
           break
         }

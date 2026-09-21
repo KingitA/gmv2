@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
+import { requireOficina, errorJson, guardarChoferes, guardarZonas } from '@/lib/viajes/servidor'
+import { viajeEditable } from '@/lib/viajes/estados'
 
 export async function GET(
   request: NextRequest,
@@ -154,5 +156,104 @@ export async function GET(
       { error: "Error al obtener viaje" },
       { status: 500 }
     )
+  }
+}
+
+// PATCH /api/viajes/[id] — editar un viaje (oficina).
+// Mientras está 'programado' se edita todo: nombre, fecha, zonas, transporte o
+// chofer + acompañantes, vehículo, presupuesto de gastos, observaciones.
+// Despachado en adelante solo observaciones (la hoja de ruta ya salió).
+// { accion: "cancelar" }: solo programado; libera sus pedidos.
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireOficina()
+  if (auth.error) return auth.error
+
+  try {
+    const supabase = await createClient()
+    const { id } = await params
+    const body = await request.json()
+
+    const { data: viaje } = await supabase
+      .from("viajes")
+      .select("id, estado, tipo, tipo_transporte, chofer_id")
+      .eq("id", id)
+      .single()
+    if (!viaje) return errorJson("Viaje no encontrado", 404)
+    if (viaje.tipo !== "reparto") return errorJson("Este viaje no es de reparto")
+
+    if (body.accion === "cancelar") {
+      if (!viajeEditable(viaje.estado)) return errorJson("Solo se cancela un viaje programado")
+      const { error: pErr } = await supabase.from("pedidos").update({ viaje_id: null }).eq("viaje_id", id)
+      if (pErr) throw pErr
+      await supabase.from("viajes_paradas").delete().eq("viaje_id", id)
+      const { error } = await supabase.from("viajes").update({ estado: "cancelado" }).eq("id", id)
+      if (error) throw error
+      return NextResponse.json({ success: true, estado: "cancelado" })
+    }
+
+    if (!viajeEditable(viaje.estado)) {
+      if (body.observaciones === undefined) return errorJson("El viaje ya fue despachado: solo se editan las observaciones")
+      const { error } = await supabase.from("viajes").update({ observaciones: body.observaciones || null }).eq("id", id)
+      if (error) throw error
+      return NextResponse.json({ success: true })
+    }
+
+    const cambios: Record<string, any> = {}
+    if (body.nombre !== undefined && String(body.nombre).trim()) cambios.nombre = String(body.nombre).trim()
+    if (body.fecha !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(body.fecha)) return errorJson("fecha inválida (AAAA-MM-DD)")
+      cambios.fecha = body.fecha
+    }
+    if (body.observaciones !== undefined) cambios.observaciones = body.observaciones || null
+    for (const campo of ["porcentaje_flete", "dinero_nafta", "gastos_peon", "gastos_hotel", "gastos_adicionales"]) {
+      if (body[campo] !== undefined) cambios[campo] = Number(body[campo]) || 0
+    }
+
+    const tipoTransporte = body.tipo_transporte ?? viaje.tipo_transporte
+    const porTransporte = tipoTransporte === "transporte"
+    if (body.tipo_transporte !== undefined) cambios.tipo_transporte = porTransporte ? "transporte" : "chofer_propio"
+    if (porTransporte) {
+      if (body.transporte_id !== undefined) cambios.transporte_id = body.transporte_id || null
+      if (body.tipo_transporte !== undefined) cambios.vehiculo_id = null
+    } else {
+      if (body.vehiculo_id !== undefined) cambios.vehiculo_id = body.vehiculo_id || null
+      if (body.tipo_transporte !== undefined) cambios.transporte_id = null
+    }
+
+    if (Array.isArray(body.zona_ids)) {
+      const zonaIds: string[] = body.zona_ids.filter(Boolean)
+      if (!zonaIds.length) return errorJson("Elegí al menos una zona")
+      cambios.zona_id = zonaIds[0]
+      await guardarZonas(supabase, id, zonaIds)
+    }
+
+    if (Object.keys(cambios).length) {
+      const { error } = await supabase.from("viajes").update(cambios).eq("id", id)
+      if (error) throw error
+    }
+
+    if (porTransporte) {
+      if (body.tipo_transporte !== undefined) await guardarChoferes(supabase, id, null, [])
+    } else if (body.chofer_id !== undefined || body.acompanante_ids !== undefined) {
+      let acompanantes: string[] = body.acompanante_ids
+      if (!Array.isArray(acompanantes)) {
+        const { data: actuales } = await supabase
+          .from("viajes_choferes")
+          .select("usuario_id")
+          .eq("viaje_id", id)
+          .eq("rol", "acompanante")
+        acompanantes = (actuales || []).map((a: any) => a.usuario_id)
+      }
+      const titular = body.chofer_id !== undefined ? body.chofer_id || null : viaje.chofer_id
+      await guardarChoferes(supabase, id, titular, acompanantes)
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (error: any) {
+    console.error("[viajes] Error en PATCH /api/viajes/[id]:", error)
+    return NextResponse.json({ error: error.message || "Error al editar el viaje" }, { status: 500 })
   }
 }

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { viajesDelChofer } from "@/lib/viajes/chofer"
 
 // GET /api/chofer/me
 // Retorna el usuario actual + viaje activo + historial de viajes del chofer
@@ -19,24 +20,31 @@ export async function GET() {
       .eq("id", userId)
       .single()
 
-    // Viaje activo: estado='en_viaje' asignado a este chofer
-    const { data: viajeActivo } = await supabase
-      .from("viajes")
-      .select("id, nombre, fecha, estado, zona_id, zonas!zona_id(nombre)")
-      .eq("chofer_id", userId)
-      .eq("estado", "en_curso")
-      .order("fecha", { ascending: false })
-      .limit(1)
-      .maybeSingle()
+    // Viajes donde es titular o acompañante
+    const misViajes = await viajesDelChofer(supabase, userId)
 
-    // Historial: viajes completados/en_rendicion del chofer
-    const { data: historial } = await supabase
-      .from("viajes")
-      .select("id, nombre, fecha, estado, zona_id, zonas!zona_id(nombre)")
-      .eq("chofer_id", userId)
-      .in("estado", ["completado", "en_rendicion"])
-      .order("fecha", { ascending: false })
-      .limit(20)
+    // Viaje activo: despachado (listo para iniciar) o en curso. Primero el en_curso.
+    let viajeActivo: any = null
+    let historial: any[] = []
+    if (misViajes.length) {
+      const [{ data: activos }, { data: hist }] = await Promise.all([
+        supabase
+          .from("viajes")
+          .select("id, nombre, fecha, estado, chofer_id, zona_id, zonas!zona_id(nombre)")
+          .in("id", misViajes)
+          .in("estado", ["despachado", "en_curso"])
+          .order("fecha", { ascending: true }),
+        supabase
+          .from("viajes")
+          .select("id, nombre, fecha, estado, chofer_id, zona_id, zonas!zona_id(nombre)")
+          .in("id", misViajes)
+          .in("estado", ["completado", "en_rendicion"])
+          .order("fecha", { ascending: false })
+          .limit(20),
+      ])
+      viajeActivo = (activos || []).find((v: any) => v.estado === "en_curso") || (activos || [])[0] || null
+      historial = hist || []
+    }
 
     return NextResponse.json({
       usuario: usuario || { id: userId, nombre: auth.user.email, email: auth.user.email },

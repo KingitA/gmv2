@@ -33,9 +33,22 @@ export async function POST(
       return NextResponse.json({ error: "El viaje no está en curso" }, { status: 400 })
     }
 
+    // La hoja de ruta se cierra completa: cada parada entregada / no entregada
+    const { data: pendientes } = await supabase
+      .from("viajes_paradas")
+      .select("id")
+      .eq("viaje_id", viajeId)
+      .eq("estado", "pendiente")
+    if (pendientes?.length) {
+      return NextResponse.json(
+        { error: `Quedan ${pendientes.length} parada(s) sin resolver: marcá cada una como entregada o no entregada.` },
+        { status: 400 },
+      )
+    }
+
     const { error } = await supabase
       .from("viajes")
-      .update({ estado: "en_rendicion" })
+      .update({ estado: "en_rendicion", finalizado_at: new Date().toISOString() })
       .eq("id", viajeId)
 
     if (error) throw error

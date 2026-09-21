@@ -15,6 +15,7 @@ import {
   Building2,
   Boxes,
   Grid2x2,
+  CarFront,
 } from "lucide-react"
 
 const TABLAS = [
@@ -31,6 +32,13 @@ const TABLAS = [
     color: "orange",
     title: "Transportes",
     desc: "Empresas de transporte",
+  },
+  {
+    href: "/tablas/vehiculos",
+    icon: CarFront,
+    color: "orange",
+    title: "Vehículos",
+    desc: "Camiones y utilitarios propios para los viajes",
   },
   {
     href: "/tablas/zonas",

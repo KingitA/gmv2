@@ -14,6 +14,11 @@
     "lib/deposito/",
     "app/api/deposito/",
     "lib/actions/deposito.ts",
-    "app/deposito/preparar-pedidos/page.tsx"
+    "app/deposito/preparar-pedidos/page.tsx",
+    "lib/viajes/",
+    "app/api/chofer/viaje/[id]/iniciar/route.ts",
+    "app/api/chofer/viaje/[id]/parada/route.ts",
+    "app/api/chofer/viaje/[id]/finalizar/route.ts",
+    "app/api/chofer/billetera/gasto/route.ts"
   ]
 }

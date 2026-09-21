@@ -80,7 +80,7 @@ async function getDashboardData() {
       .select("id, nombre, fecha, estado, chofer")
       .gte("fecha", fechaHoy)
       .lte("fecha", new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0])
-      .in("estado", ["programado", "en_preparacion", "pendiente"])
+      .in("estado", ["programado", "despachado", "en_curso"])
       .order("fecha", { ascending: true })
       .limit(5),
 
