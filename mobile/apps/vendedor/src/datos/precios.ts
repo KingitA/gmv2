@@ -4,7 +4,8 @@
 // sync (o un cambio PROGRAMADO cuya hora llegó, aun sin red) se ve al instante.
 
 import { useEffect, useMemo, useState } from "react"
-import { useDataset, useRuntime, type Runtime } from "@gm/core"
+import { useDataset, useMetaDataset, useRuntime, type Runtime } from "@gm/core"
+import { preciosVencidos } from "@gm/vendedor"
 import {
   aplicarProgramados,
   prepararMotorCliente,
@@ -54,6 +55,28 @@ export function preciosAl(runtime: Runtime): string | null {
     if (!min || g < min) min = g
   }
   return min
+}
+
+/**
+ * true = hace más de 24 hs que este equipo no actualiza los precios: lo que muestra ya no
+ * está garantizado (el pedido se factura al precio del sistema cuando ingresa). Se
+ * re-evalúa solo cada minuto y apenas llega un sync. false si nunca se descargaron
+ * (ese caso tiene su propio estado vacío).
+ */
+export function usePreciosVencidos(): boolean {
+  const { reloj } = useRuntime()
+  const metas = [useMetaDataset(DS_PRECIOS[0]), useMetaDataset(DS_PRECIOS[1]), useMetaDataset(DS_PRECIOS[2]), useMetaDataset(DS_PRECIOS[3]), useMetaDataset(DS_PRECIOS[4])]
+  const [, setTic] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setTic((n) => n + 1), 60_000)
+    return () => clearInterval(t)
+  }, [])
+  let al: string | null = null
+  for (const m of metas) {
+    if (!m?.generadoAt) return false
+    if (!al || m.generadoAt < al) al = m.generadoAt
+  }
+  return preciosVencidos(al, reloj.ahora())
 }
 
 /** Insumos comunes a todos los clientes, con los cambios programados ya vigentes aplicados. */

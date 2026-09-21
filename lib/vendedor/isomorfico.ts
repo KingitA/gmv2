@@ -5,3 +5,4 @@
 export * from "./orden-articulos"
 export * from "../search/local-match"
 export * from "../pedidos/estados"
+export * from "./vigencia-precios"

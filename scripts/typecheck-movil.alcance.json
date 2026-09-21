@@ -16,6 +16,10 @@
     "app/deposito/preparar-pedidos/page.tsx",
     "lib/vendedor/",
     "app/api/vendedor/",
-    "app/api/viajante/devolucion/route.ts"
+    "app/api/viajante/devolucion/route.ts",
+    "lib/cobranzas/errores.ts",
+    "lib/cobranzas/crear.ts",
+    "lib/actions/cobranzas.ts",
+    "app/api/viajante/cobro/"
   ]
 }

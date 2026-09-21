@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router"
 import { decidirAtras, indiceHistorial, useOnline, useRuntime, type ItemOutbox } from "@gm/core"
 import { Encabezado, Frescura, Hoja } from "@gm/core/ui"
+import { CARTEL_PRECIOS_VENCIDOS } from "@gm/vendedor"
 
 // UI compartida de la app Vendedor. Mismos textos, colores y jerarquía que el módulo
 // web /vendedor (los viajantes ya lo conocen); lo único propio de la app es el
@@ -20,12 +21,15 @@ export function fechaCorta(f: string | null | undefined, opts: Intl.DateTimeForm
 export const fechaAR = (f: string | null | undefined) => fechaCorta(f, { day: "2-digit", month: "2-digit", year: "numeric" })
 
 /** Marco de toda pantalla: encabezado del core + (opcional) frescura del dataset que se muestra. */
-export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = 60, pie, children, fondo = "bg-gray-50" }: {
+export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = 60, pie, children, fondo = "bg-gray-50", preciosVencidos = false }: {
   titulo: string; atras?: boolean; derecha?: ReactNode; dataset?: string; etiquetaFrescura?: string; viejoTrasMin?: number; pie?: ReactNode; children: ReactNode; fondo?: string
+  /** Pantallas que muestran PRECIOS: cartel fijo si hace más de 24 hs que no se actualizan */
+  preciosVencidos?: boolean
 }) {
   return (
     <div className={`flex h-dvh flex-col ${fondo} text-gray-900`}>
       <Encabezado titulo={titulo} atras={atras} derecha={derecha} />
+      <CartelPreciosVencidos visible={preciosVencidos} />
       {dataset && <Frescura dataset={dataset} etiqueta={etiquetaFrescura} viejoTrasMin={viejoTrasMin} />}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
       {pie}
@@ -51,6 +55,16 @@ export function NecesitaConexion({ que }: { que: string }) {
 export function SinDescargar({ que }: { que: string }) {
   const online = useOnline()
   return <Vacio icono={online ? "⏳" : "📡"}>{online ? `Descargando ${que}…` : `Todavía no se descargó ${que} en este equipo. Conectate una vez para tenerlo sin señal.`}</Vacio>
+}
+
+/** Cartel fijo (texto del dueño) cuando hace más de 24 hs que el equipo no actualiza precios. */
+export function CartelPreciosVencidos({ visible }: { visible: boolean }) {
+  if (!visible) return null
+  return (
+    <div role="alert" className="border-b-2 border-red-700 bg-red-600 px-3 py-2 text-center text-[13px] font-extrabold leading-snug text-white">
+      ⚠ {CARTEL_PRECIOS_VENCIDOS}
+    </div>
+  )
 }
 
 export const SinEnviar = ({ texto = "sin enviar" }: { texto?: string }) => (

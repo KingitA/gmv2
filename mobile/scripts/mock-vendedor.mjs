@@ -152,6 +152,8 @@ const PARCIALES = new Set(["vendedor_clientes", "vendedor_cc", "vendedor_viajes"
 
 // ─── Operaciones ─────────────────────────────────────────────────────────────
 const EDITABLES = ["en_venta", "pendiente", "impreso", "en_preparacion"]
+// Rechazo de negocio a pedido, para probar el caso "la RPC rechazó el cobro" (POST /__mock/rechazar-cobros?on=1)
+let RECHAZAR_COBROS = false
 const parchePedido = (id) => { const p = S.pedidos.find((x) => x.id === id && x.estado !== "eliminado"); return { dataset: "vendedor_pedidos", upserts: p ? [filaPedido(p)] : [], deletes: p ? [] : [id] } }
 const parcheCliente = (id) => { const c = clienteDe(id); return [{ dataset: "vendedor_clientes", upserts: c ? [c] : [], deletes: c ? [] : [id] }, { dataset: "vendedor_cc", upserts: c ? [filaCC(id)] : [], deletes: c ? [] : [id] }] }
 const parcheViaje = (id) => { const v = S.viajes.find((x) => x.id === id); return { dataset: "vendedor_viajes", upserts: v ? [filaViaje(v)] : [], deletes: v ? [] : [id] } }
@@ -180,6 +182,8 @@ function aplicarPedido(p, capturadoAt) {
   if (p.confirmar !== false) { ped.observaciones = p.observaciones || null; if (ped.estado === "en_venta") ped.estado = "pendiente" }
   ped.total = r2(ped.detalle.reduce((s, d) => s + d.subtotal, 0))
   ped.precios_al = p.precios_al
+  // = lib/vendedor/vigencia-precios.ts: precios de más de 24 hs al capturar ⇒ no garantizados
+  ped.precios_garantizados = !(p.precios_al && Date.parse(capturadoAt) - Date.parse(p.precios_al) > 24 * 3600e3)
   ped.capturado_at = capturadoAt
   return { pedido_id: ped.id, numero_pedido: ped.numero_pedido, total: ped.total, creado, precios_verificados: true, replica: [parchePedido(ped.id), ...parcheCliente(p.cliente_id)] }
 }
@@ -229,6 +233,7 @@ const HANDLERS = {
     return { replica: parcheCliente(c.id) }
   },
   "cobro.registrar": (u, p, m) => {
+    if (RECHAZAR_COBROS) throw new Rechazo("el comprobante 0001-00001072 está anulado — no se puede cobrar")
     const totalMetodos = r2(p.metodos.reduce((s, x) => s + Number(x.monto || 0), 0))
     if (totalMetodos <= 0) throw new Rechazo("El cobro no tiene importe.")
     const suma = (l) => (l || []).reduce((s, x) => s + Number(x.monto || 0), 0)
@@ -310,6 +315,7 @@ createServer(async (req, res) => {
   if (url.pathname.startsWith("/__mock/")) {
     if (url.pathname === "/__mock/red") S.red = url.searchParams.get("on") !== "0"
     if (url.pathname === "/__mock/reset") reset()
+    if (url.pathname === "/__mock/rechazar-cobros") RECHAZAR_COBROS = url.searchParams.get("on") !== "0"
     if (url.pathname === "/__mock/precio") {
       const a = S.f.precios_articulos.find((x) => x.sku === url.searchParams.get("sku"))
       if (a) { a.precio_base = Number(url.searchParams.get("base")); S.seq++ }
@@ -317,7 +323,7 @@ createServer(async (req, res) => {
     if (url.pathname === "/__mock/estado-pedido") { const p = S.pedidos.find((x) => x.numero_pedido === url.searchParams.get("numero")); if (p) { p.estado = url.searchParams.get("estado"); S.seq++ } }
     return json(200, {
       red: S.red, seq: S.seq,
-      pedidos: S.pedidos.map((p) => ({ numero: p.numero_pedido, local_id: p.local_id, estado: p.estado, cliente: clienteDe(p.cliente_id)?.nombre, total: p.total, creaciones: p.creaciones, precios_al: p.precios_al, capturado_at: p.capturado_at, renglones: p.detalle.map((d) => `${d.cantidad} x ${d.precio_final}`) })),
+      pedidos: S.pedidos.map((p) => ({ numero: p.numero_pedido, local_id: p.local_id, estado: p.estado, cliente: clienteDe(p.cliente_id)?.nombre, total: p.total, creaciones: p.creaciones, precios_garantizados: p.precios_garantizados, precios_al: p.precios_al, capturado_at: p.capturado_at, renglones: p.detalle.map((d) => `${d.cantidad} x ${d.precio_final}`) })),
       cobros: [...S.cc.entries()].flatMap(([cid, k]) => k.pagos.map((p) => ({ cliente: clienteDe(cid)?.nombre, monto: p.monto, estado: p.estado, forma: p.forma_pago }))),
       devoluciones: [...S.cc.values()].flatMap((k) => k.devoluciones.map((d) => ({ numero: d.numero_devolucion, total: d.monto_total, restante: d.restante, altas: d.altas }))),
       viajes: S.viajes.map((v) => ({ nombre: v.nombre, estado: v.estado, no_va: [...v.no_va].length })),

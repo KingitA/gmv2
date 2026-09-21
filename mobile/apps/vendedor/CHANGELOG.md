@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.2.1 (versionCode 4) — 2026-09-21
+
+- Cartel cuando hace mas de 24 hs que no se actualizan los precios; un cobro rechazado por la oficina se ve en el inicio y ya no traba lo cargado despues
+
 ## v0.2.0 (versionCode 3) — 2026-09-21
 
 - App Vendedor completa: pedidos, clientes, cobros, devoluciones, billetera, viajes y precios, funcionando sin señal

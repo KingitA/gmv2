@@ -29,6 +29,7 @@ import {
 } from "@/lib/actions/pedidos"
 import { esPedidoEditable, motivoBloqueo } from "@/lib/pedidos/estados"
 import type { BonifPedido } from "@/lib/pricing/segmento"
+import { vigenciaDelPedido } from "@/lib/vendedor/vigencia-precios"
 import type { FilaReplica } from "../contrato"
 import { conCaptura, type CapturaPedido } from "../contexto-captura"
 import { insumosAFecha, verificarPreciosCapturados } from "../precios-integridad"
@@ -66,7 +67,7 @@ async function llamarRuta(
   const res = await handler(req, { params: Promise.resolve(o.params || {}) })
   const body = await res.json().catch(() => null)
   if (res.ok) return body
-  if (res.status >= 400 && res.status < 500) throw new RechazoNegocio(o.rechazo?.(res.status, body) || body?.error || `Rechazado (${res.status})`)
+  if (res.status >= 400 && res.status < 500) throw new RechazoNegocio(o.rechazo?.(res.status, body) || body?.mensaje || body?.error || `Rechazado (${res.status})`, body?.codigo)
   throw new Error(body?.error || `HTTP ${res.status}`)
 }
 
@@ -169,14 +170,6 @@ function validarPedido(p: PayloadPedido): string | null {
   return null
 }
 
-/** Vigencia de los precios del pedido: lo que el vendedor tenía a la vista (nunca el futuro). */
-function vigenciaDe(capturadoAt: string, preciosAl?: string | null): string {
-  const cap = Date.parse(capturadoAt)
-  const al = preciosAl ? Date.parse(preciosAl) : NaN
-  const t = Number.isFinite(al) ? Math.min(cap, al) : cap
-  return new Date(Math.min(t, Date.now())).toISOString()
-}
-
 const fechaArgentina = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
 
 const overridesDe = (c?: CondPedido | null) => ({
@@ -240,14 +233,17 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     if (!esPedidoEditable(ped.estado)) throw new RechazoNegocio(motivoBloqueo(ped.estado) || "El pedido ya no se puede modificar.")
   }
 
-  // Precios: los vigentes cuando el vendedor los vio. Mismo motor, insumos reconstruidos.
-  const vigenciaAt = vigenciaDe(m.capturado_at, p.precios_al)
+  // Precios: los vigentes cuando el vendedor los vio (mismo motor, insumos reconstruidos).
+  // TOPE de 24 hs: con precios más viejos que eso al capturar, rige el precio del sistema
+  // al INGRESAR el pedido y la diferencia con lo que mostró el equipo es esperable (la app
+  // se lo avisó con un cartel): no es una alerta de integridad. lib/vendedor/vigencia-precios.ts
+  const { vigenciaAt, garantizada } = vigenciaDelPedido(m.capturado_at, p.precios_al)
   const articuloIds = [...new Set(p.items.map((i) => i.articulo_id))]
   const reconstruido = await insumosAFecha(ctx.admin, p.cliente_id, articuloIds, vigenciaAt)
   const faltan = articuloIds.filter((id) => !reconstruido.articulos.some((a: any) => a.id === id))
   if (faltan.length) throw new RechazoNegocio("Hay artículos del pedido que ya no existen en el catálogo.")
   const overrides = overridesDe(p.cond)
-  const verificacion = await verificarPreciosCapturados(ctx.admin, {
+  const verificacion = !garantizada ? null : await verificarPreciosCapturados(ctx.admin, {
     clienteId: p.cliente_id,
     capturadoAt: vigenciaAt,
     overrides,
@@ -302,7 +298,8 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     numero_pedido: resultado.numero_pedido,
     total: resultado.total,
     creado,
-    precios_verificados: verificacion.ok,
+    precios_garantizados: garantizada,
+    precios_verificados: verificacion ? verificacion.ok : null,
     replica: await parches(
       () => parchePedido(ctx, pedidoId!),
       () => parcheCliente(ctx, p.cliente_id),

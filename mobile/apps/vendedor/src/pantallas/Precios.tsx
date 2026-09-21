@@ -5,7 +5,7 @@ import { ordenarArticulos, type OrdenArticulos } from "@gm/vendedor"
 import { DS, type Articulo, type ListaPrecio } from "../datasets"
 import { buscarCatalogo } from "../datos/busqueda"
 import { useCatalogo, useListasPermitidas, useTaxonomia, useVentas } from "../datos/hooks"
-import { useMotoresLista } from "../datos/precios"
+import { useMotoresLista, usePreciosVencidos } from "../datos/precios"
 import { formatCurrency, Pantalla, SinDescargar, useBusqueda, useFotoZoom, ZoomFoto } from "../ui"
 import { CatalogoArbol, OrdenSelector } from "./pedido-nuevo/piezas"
 
@@ -24,6 +24,7 @@ export function Precios() {
   const { listas, metodos } = useListasPermitidas()
   const foto = useFotoZoom()
   const agregar = useOverlay("agregar")
+  const vencidos = usePreciosVencidos()
   const [q, setQ] = useBusqueda("q")
   const [orden, setOrden] = useParamEstado("orden", "default")
   const [combosParam, setCombosParam] = useParamEstado("c")
@@ -93,7 +94,7 @@ export function Precios() {
   )
 
   return (
-    <Pantalla titulo="💲 Precios" dataset={DS.preciosArticulos} etiquetaFrescura="Precios al" viejoTrasMin={30}>
+    <Pantalla titulo="💲 Precios" preciosVencidos={vencidos} dataset={DS.preciosArticulos} etiquetaFrescura="Precios al" viejoTrasMin={30}>
       <div className="bg-slate-900 px-4 pb-3">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar artículo, SKU o código de barras..." inputMode="search" className="w-full rounded-xl border-0 bg-white px-4 py-2.5 text-gray-900 placeholder:text-gray-400" />
         <div className="mt-2 flex flex-wrap items-center gap-1.5">

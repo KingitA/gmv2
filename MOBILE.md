@@ -10,7 +10,7 @@
 
 ## 0. TL;DR para la próxima sesión
 
-1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (81 tests).
+1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (93 tests).
 2. Tu app vive en `mobile/apps/<app>/src`. Todo lo compartido está en
    `mobile/packages/core` (`@gm/core`, `@gm/core/ui`). **No dupliques** lógica: si dos
    apps la necesitan, va al core.
@@ -258,7 +258,11 @@ que el servidor.
   señal daba SIEMPRE diferencia (el equipo no puede conocer un cambio que no recibió) y
   el pedido se facturaba a un precio distinto del que vio el cliente, que es justo lo que
   el requisito prohíbe. Así el recálculo da idéntico por construcción y una diferencia
-  vuelve a significar bug o dato corrupto (detalle y trade-off en §18). Al sincronizar,
+  vuelve a significar bug o dato corrupto (detalle en §18). **Tope (decisión del dueño,
+  21/09/2026): si al capturar hacía MÁS DE 24 HS que el equipo no actualizaba precios, la
+  garantía se pierde** — rige el precio del sistema cuando INGRESA el pedido, no hay alerta
+  de integridad (la diferencia es esperable) y la app muestra un cartel fijo. Regla pura y
+  compartida: `lib/vendedor/vigencia-precios.ts`. Al sincronizar,
   el handler `pedido.crear` llama `verificarPreciosCapturados()` (`lib/mobile/precios-integridad.ts`):
   reconstruye los insumos a esa hora (`precio_insumos_historial` + programados),
   recalcula y compara. **Diferencia ⇒ alerta en `mobile_alertas_integridad` para el
@@ -463,7 +467,8 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
 - Migración `supabase/migrations/20260921_mobile_vendedor.sql` — **aditiva, idempotente,
   OBLIGATORIA para enviar pedidos desde la app**: `pedidos.movil_local_id UUID` + índice UNIQUE
   parcial. Sin ella el pedido queda PENDIENTE en el equipo (nada se pierde) hasta aplicarla.
-- `typecheck:movil`: `lib/vendedor/` y `app/api/vendedor/` pasan al alcance en cero.
+- `lib/cobranzas/errores.ts` + 422 en `/api/viajante/cobro` (POST/DELETE) para rechazos de negocio (§18).
+- `typecheck:movil`: `lib/vendedor/`, `app/api/vendedor/`, `app/api/viajante/cobro/`, `lib/cobranzas/{crear,errores}.ts` y `lib/actions/cobranzas.ts` pasan al alcance en cero.
 
 **Pendientes por sesión de app**:
 - Datasets y handlers de la tabla §9 (cada uno reusando la lógica existente; extraer a `lib/` lo que hoy vive en route handlers/server actions).
@@ -1052,11 +1057,20 @@ El servidor recalcula con los insumos vigentes a `min(capturado_at, precios_al)`
   precio que el cliente no vio y la "alerta de integridad" pasa a ser ruido diario. Con
   `precios_al` el recálculo da idéntico por construcción; una diferencia vuelve a ser bug o dato
   corrupto ⇒ alerta al admin y se factura el precio del servidor, sin avisarle al vendedor.
-- **Trade-off (lo decide el dueño)**: un equipo muchas horas sin señal vende con la lista de
-  esa mañana, como la lista impresa que usaban. Está a la vista: `<Frescura>` "Precios al
-  dd/mm hh:mm" en todo el catálogo y el carrito, ámbar pasados 30 min. Si se quisiera un tope
-  (p. ej. no aceptar pedidos con precios de más de N horas) es un `if` en `vigenciaDe()`
-  (`lib/mobile/outbox/vendedor.ts`); hoy NO hay tope.
+- **Regla CONFIRMADA por el dueño (21/09/2026), con tope de 24 hs.** Un equipo unas horas sin
+  señal vende con la lista de esa mañana, como la lista impresa que usaban (a la vista:
+  `<Frescura>` "Precios al dd/mm hh:mm", ámbar pasados 30 min). Pero si al tomar el pedido hacía
+  **más de 24 hs** que el equipo no actualizaba precios (`capturado_at − precios_al > 24 h`):
+  - el servidor NO honra el precio del equipo: usa los insumos vigentes **al ingresar el pedido**
+    (`vigenciaDelPedido()` → `garantizada: false`), no corre `verificarPreciosCapturados` (una
+    diferencia es esperable, no una alerta) y devuelve `precios_garantizados: false`;
+  - la app muestra, mientras dure, el cartel rojo fijo **"HACE MAS DE 24HS NO SE ACTUALIZAN
+    DATOS, LA EMPRESA NO SE RESPONSABILIZA POR DIFERENCIA DE PRECIOS"** en el inicio, todo el
+    catálogo, el carrito (que además aclara que el total es orientativo) y Precios
+    (`usePreciosVencidos`, se re-evalúa cada minuto y desaparece apenas entra un sync).
+  - Cuenta la antigüedad **al capturar**, no lo que tardó en sincronizar: un pedido tomado con
+    precios frescos que sale 3 días después se respeta.
+  - Una sola definición para servidor y app: `lib/vendedor/vigencia-precios.ts` (`@gm/vendedor`).
 - **Cómo se inyecta sin tocar el camino web**: los 6 helpers de lectura de insumos de
   `lib/actions/pedidos.ts` consultan `capturaActual()` (AsyncLocalStorage). Un parámetro en una
   server action lo podría fijar un cliente remoto; un contexto en memoria del proceso, no.
@@ -1123,6 +1137,19 @@ Replace = no agrega historial (atrás sale de la pantalla).
   precio offline coincida.
 - `cliente.editar`: CAS por campo; lo aplicable se aplica y lo pisado por otro vuelve como rechazo
   listando los campos.
+- **Cobro rechazado ≠ error transitorio** (corregido en esta rama). Las RPC `cobranza_crear` /
+  `cobranza_anular` rechazan por regla de negocio con `RAISE EXCEPTION` ⇒ SQLSTATE **P0001**
+  (comprobante anulado, no es del cliente, lo imputado supera el pago…). Antes la route lo devolvía
+  como **500**: la app lo reintentaba para siempre y, por FIFO, TRABABA todo lo cargado después.
+  Ahora `lib/cobranzas/errores.ts` lo clasifica (`ErrorReglaCobranza`) y
+  `/api/viajante/cobro` (POST y DELETE) responde **422** `{ error, mensaje, codigo:
+  "regla_negocio", reintentable:false }`; cualquier otro error sigue siendo 500 = transitorio.
+  Retrocompatible: `error` lleva el mismo texto y la web ya trataba todo `!res.ok` igual; los
+  otros llamadores de `crearCobranza` / `anularCobranza` reciben el mismo `message`. En la app el
+  cobro queda **rechazado** (sale de la cola, lo de atrás se envía), deja de reservar el
+  comprobante, y el motivo se ve en el **inicio**, en la ficha y en Cobrar hasta tocar "Entendido".
+  Limitación preexistente de la web: un cobro a VARIOS clientes no es transaccional entre clientes
+  (la app siempre cobra de a uno).
 - `cobro.registrar`: payload = body de la web; la clave de idempotencia del outbox es la que la
   route ya usaba (`cobranza_crear` deduplica). Lo cobrado sin señal RESERVA los comprobantes en el
   equipo (overlay = `en_cobro` del servidor): no se puede cobrar dos veces lo mismo.
@@ -1160,7 +1187,9 @@ solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos 
 | Cobro sin señal por el total de una factura | navegador | ✅ "✓ Cuadra", saldo proyectado $ 0 con el real a la vista, pago "⇪ Sin enviar", 1 aplicación; atrás no vuelve al formulario enviado |
 | Atrás físico: panel cliente → ficha artículo → árbol proveedor → proveedores → catálogo → inicio → minimiza | **NuStar 65-sp** | ✅ (proceso vivo al minimizar) |
 | Atrás: detalle de comisión → pestaña comisiones → inicio; pestañas sin historial | navegador | ✅ |
-| Tests | `cd mobile && npm test` | ✅ 81 (16 nuevos: búsqueda, carrito, overlays de pedidos / clientes / cuenta corriente / viajes, `outbox.retirar`) |
+| Tope de 24 hs: precios envejecidos 25 h sin red → cartel en inicio, catálogo y carrito → pedido → reconectar | navegador | ✅ cartel con el texto exacto; el pedido llegó marcado `precios_garantizados: false`; al sincronizar el cartel desapareció |
+| Cobro rechazado por regla de negocio con un pedido encolado DETRÁS | navegador | ✅ pedido → cobro **rechazado** → pedido siguiente aplicado; contador rojo "1 rechazada", motivo visible en el inicio ("el comprobante … está anulado — no se puede cobrar"), "Entendido" lo saca |
+| Tests | `cd mobile && npm test` | ✅ 93 (28 de esta sesión: búsqueda, carrito, overlays, `outbox.retirar`, vigencia con tope de 24 hs, clasificación P0001 / transitorio, cola que no se traba + regresión del 500) |
 | `npm run typecheck:movil` | raíz | ✅ alcance 0 · mobile 0 · base 75/75 |
 | Modo avión con el interruptor del equipo | — | 🟡 "sin señal" se simuló cortando el túnel `adb reverse` (servidor inalcanzable de verdad) para no tocar ajustes del equipo. El camino "red caída según Android" es el de la fundación, ya validado con Chofer y Depósito |
 | Backend real (datasets y handlers contra Supabase) | — | 🟡 tipado y tests en verde; **sin ejecutar**: necesita la migración, el deploy en `main` y un usuario vendedor. La re-verificación de precios contra el historial real se ejercita ahí |
@@ -1173,11 +1202,10 @@ solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos 
    antes/después): pedido sin señal → 1 pedido, total al centavo, 0 filas en
    `mobile_alertas_integridad`; cambio de precio real con el equipo en modo avión; cobro y
    devolución; alta de cliente + pedido sin señal; rechazo por pedido ya facturado.
-5. Riesgo a mirar en esa prueba: `/api/viajante/cobro` devuelve **500** cuando la RPC
-   `cobranza_crear` rechaza por regla de negocio (p. ej. comprobante anulado entre captura y
-   sync). La app lo trata como transitorio y reintenta: el cobro NO se pierde pero traba la cola
-   de ese vendedor hasta que alguien mire. Si aparece, hacer que la route devuelva 4xx para los
-   errores de negocio de la RPC.
+5. En esa prueba, verificar el rechazo real: anular un comprobante desde el ERP con un cobro
+   suyo sin enviar en el equipo ⇒ al reconectar debe volver RECHAZADO con el motivo (confirma que
+   PostgREST entrega `code: "P0001"` para los `RAISE` de `cobranza_crear`; si llegara otro código,
+   se ajusta `SQLSTATE_REGLA_NEGOCIO` en `lib/cobranzas/errores.ts`).
 
 ### Probar sin backend
 `cd mobile && node scripts/fixture-vendedor.mjs` (una vez; solo lectura; el JSON tiene datos reales

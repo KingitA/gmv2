@@ -6,7 +6,7 @@ import { localMatch } from "@gm/vendedor"
 import { DS, type Articulo, type CatalogoRubro, type OpPedido } from "../../datasets"
 import { buscarCatalogo, filtrarLocal, vistaHabituales, vistaNovedades, vistaOfertas } from "../../datos/busqueda"
 import { useCatalogosFicha, useClientes, useCuenta, useEncolar, useProveedores, useTaxonomia } from "../../datos/hooks"
-import { preciosAl } from "../../datos/precios"
+import { preciosAl, usePreciosVencidos } from "../../datos/precios"
 import { formatCurrency, HojaConfirmar, Pantalla, SinDescargar, useBusqueda, useFotoZoom, useVolver, Vacio } from "../../ui"
 import { IconoCategoria, TINTE_HABITUALES, TINTE_NOVEDADES, TINTE_OFERTAS, tinteRubro, type Tinte } from "./catalogo-ui"
 import { usePedidoEnCurso, useVer } from "./contexto"
@@ -73,6 +73,7 @@ function PantallaCatalogo({ titulo, subtitulo, children }: { titulo: string; sub
   const listaChip = (p.cond.lista ? nombreLista(p.cond.lista) : p.cliente?.lista?.nombre || nombreLista(p.cliente?.lista_precio_id)) || "STD"
   const metodoRaw = p.cond.metodo || p.cliente?.metodo_facturacion || ""
   const chip = `${listaChip.toUpperCase()} ${METODO_CORTO[metodoRaw] || metodoRaw.toUpperCase() || "—"}`
+  const vencidos = usePreciosVencidos()
   if (!p.cliente) {
     return (
       <Pantalla titulo="Nuevo pedido">
@@ -86,6 +87,7 @@ function PantallaCatalogo({ titulo, subtitulo, children }: { titulo: string; sub
       dataset={DS.preciosArticulos}
       etiquetaFrescura="Precios al"
       viejoTrasMin={30}
+      preciosVencidos={vencidos}
       derecha={
         <>
           {/* Chip lista + método vigentes (cortito: NECO FINAL). Ámbar = "solo este pedido" */}
@@ -412,6 +414,7 @@ export function Carrito() {
   const catFicha = useCatalogosFicha()
   const descartar = useOverlay("descartar")
   const [confirmando, setConfirmando] = useState(false)
+  const vencidos = usePreciosVencidos()
   const editandoExistente = !!p.borrador?.pedidoId && p.borrador.estadoPedido !== "en_venta"
   const sinPrecio = p.lineas.filter((l) => !l.precio || l.precio.precio <= 0)
   const bonif = p.cond.bonif
@@ -448,6 +451,7 @@ export function Carrito() {
   return (
     <Pantalla
       titulo={editandoExistente ? "Guardar cambios" : "Confirmar pedido"}
+      preciosVencidos={vencidos}
       dataset={DS.preciosArticulos}
       etiquetaFrescura="Precios al"
       viejoTrasMin={30}
@@ -458,6 +462,7 @@ export function Carrito() {
               <span className="text-gray-500">Total ({p.totalItems} ítems)</span>
               <span className="text-2xl font-bold text-gray-900">{formatCurrency(p.total)}</span>
             </div>
+            {vencidos && <p className="text-xs font-bold text-red-700">Precios sin actualizar hace más de 24 hs: el total es orientativo. El pedido se factura al precio del sistema cuando ingrese.</p>}
             {sinPrecio.length > 0 && <p className="text-sm font-medium text-red-600">Hay {sinPrecio.length} artículo(s) sin precio en este equipo: quitalos para poder confirmar.</p>}
             <button onClick={() => void confirmar()} disabled={confirmando || !p.lineas.length || sinPrecio.length > 0} className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white disabled:bg-gray-300">
               {confirmando ? "Guardando..." : editandoExistente ? "Guardar cambios" : "Confirmar pedido"}
