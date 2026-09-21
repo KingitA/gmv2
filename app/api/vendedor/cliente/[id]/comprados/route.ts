@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
-import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { cargarComprados } from "@/lib/vendedor/comprados"
 
 // GET /api/vendedor/cliente/[id]/comprados?q=
 // Artículos que el cliente COMPRÓ (facturados en comprobantes_venta), con el
@@ -27,74 +27,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: "Cliente inexistente o no asignado a vos." }, { status: 404 })
     }
 
-    // Líneas facturadas del cliente (excluye NC/REV: solo lo que se le vendió)
-    const rows = await fetchAllRows(() =>
-      supabase
-        .from("comprobantes_venta_detalle")
-        .select(
-          "articulo_id, cantidad, precio_unitario, comprobante:comprobante_venta_id!inner(id, cliente_id, fecha, tipo_comprobante, numero_comprobante, anulado_en)"
-        )
-        .eq("comprobante.cliente_id", id)
-        .in("comprobante.tipo_comprobante", ["FA", "FB", "FC", "PRES"])
-        .is("comprobante.anulado_en", null)
-    )
-
-    // Última factura por artículo + cantidad acumulada
-    type Compra = {
-      articulo_id: string
-      ultimo_precio: number
-      ultima_fecha: string
-      comprobante_venta_id: string
-      numero_comprobante: string
-      tipo_comprobante: string
-      cantidad_total: number
-    }
-    const porArticulo = new Map<string, Compra>()
-    for (const r of rows as any[]) {
-      if (!r.articulo_id) continue
-      const fecha = r.comprobante?.fecha || ""
-      const actual = porArticulo.get(r.articulo_id)
-      if (!actual || fecha > actual.ultima_fecha) {
-        porArticulo.set(r.articulo_id, {
-          articulo_id: r.articulo_id,
-          ultimo_precio: Number(r.precio_unitario || 0),
-          ultima_fecha: fecha,
-          comprobante_venta_id: r.comprobante?.id,
-          numero_comprobante: r.comprobante?.numero_comprobante || "—",
-          tipo_comprobante: r.comprobante?.tipo_comprobante || "",
-          cantidad_total: (actual?.cantidad_total || 0) + Number(r.cantidad || 0),
-        })
-      } else {
-        actual.cantidad_total += Number(r.cantidad || 0)
-      }
-    }
-
-    if (!porArticulo.size) return NextResponse.json({ comprados: [] })
-
-    const { data: articulos } = await supabase
-      .from("articulos")
-      .select("id, sku, ean13, descripcion, imagen_url, unidades_por_bulto")
-      .in("id", [...porArticulo.keys()])
-
-    let comprados = (articulos || []).map((a: any) => ({
-      ...porArticulo.get(a.id)!,
-      sku: a.sku,
-      ean13: a.ean13,
-      descripcion: a.descripcion,
-      imagen_url: a.imagen_url,
-      unidades_por_bulto: a.unidades_por_bulto,
-    }))
+    let comprados = await cargarComprados(supabase, id)
+    if (!comprados.length) return NextResponse.json({ comprados: [] })
 
     if (q) {
       comprados = comprados.filter(
-        (c) =>
+        (c: any) =>
           c.descripcion?.toLowerCase().includes(q) ||
           c.sku?.toLowerCase?.().includes(q) ||
           (Array.isArray(c.ean13) ? c.ean13.some((e: string) => e?.includes(q)) : String(c.ean13 || "").includes(q))
       )
     }
 
-    comprados.sort((a, b) => (b.ultima_fecha || "").localeCompare(a.ultima_fecha || ""))
+    comprados.sort((a: any, b: any) => (b.ultima_fecha || "").localeCompare(a.ultima_fecha || ""))
     return NextResponse.json({ comprados: comprados.slice(0, 100) })
   } catch (error: any) {
     console.error("[vendedor] Error en GET /api/vendedor/cliente/[id]/comprados:", error)

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { esUuid } from "@/lib/mobile/uuid"
 
 /**
  * POST /api/viajante/devolucion — devolución registrada en la calle (Fase E).
@@ -66,6 +67,9 @@ export async function POST(request: NextRequest) {
       const { data, error: devErr } = await supabase
         .from("devoluciones")
         .insert({
+          // `id` opcional: la app Vendedor genera el UUID en el equipo para que reenviar
+          // la operación no duplique la devolución (MOBILE.md → Vendedor)
+          ...(esUuid(body.id) ? { id: body.id } : {}),
           numero_devolucion: numeroDevolucion,
           cliente_id,
           vendedor_id: vendedorId,

@@ -10,7 +10,7 @@
 //   cae a snapshot: el cliente siempre queda consistente.
 
 import { createHash } from "node:crypto"
-import type { FilaReplica, RespuestaSync } from "../contrato"
+import type { FilaReplica, RespuestaParcial, RespuestaSync } from "../contrato"
 import type { SesionMobile } from "../sesion"
 
 export interface CtxSync {
@@ -41,6 +41,23 @@ export interface DatasetDef {
   requiereLogDe?: string[]
   /** Carga filas del dataset. ids undefined ⇒ todas las del alcance del usuario. */
   cargar(ctx: CtxSync, ids?: string[]): Promise<FilaReplica[]>
+  /**
+   * Refresco PARCIAL a pedido del dispositivo (GET …/sync/<ds>?ids=a,b): recarga solo
+   * esas filas, sin mover el cursor. Para datasets caros por fila (cuenta corriente
+   * de un cliente): al abrir la ficha con señal se re-lee ese cliente y nada más.
+   * Las filas pedidas que no vuelven se informan como borradas (salieron del alcance).
+   */
+  porIds?(ctx: CtxSync, ids: string[]): Promise<FilaReplica[]>
+}
+
+/** Máximo de filas por refresco parcial */
+export const MAX_IDS_PARCIAL = 25
+
+export async function responderParcial(ctx: CtxSync, def: DatasetDef, ids: string[]): Promise<RespuestaParcial> {
+  const pedidos = [...new Set(ids)].slice(0, MAX_IDS_PARCIAL)
+  const filas = await def.porIds!(ctx, pedidos)
+  const presentes = new Set(filas.map((f) => f.id))
+  return { dataset: def.nombre, generado_at: new Date().toISOString(), upserts: filas, deletes: pedidos.filter((id) => !presentes.has(id)) }
 }
 
 /** Máximo de cambios a procesar en delta antes de preferir un snapshot */

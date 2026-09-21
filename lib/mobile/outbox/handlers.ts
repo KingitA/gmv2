@@ -11,6 +11,7 @@
 //   reserva" no duplica nada.
 
 import { HANDLERS_DEPOSITO } from "./deposito"
+import { HANDLERS_VENDEDOR } from "./vendedor"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
 
 export { RechazoNegocio }
@@ -47,7 +48,7 @@ const pruebaRegistrar: HandlerDef<{ texto: string }> = {
   },
 }
 
-const REGISTRO: HandlerDef[] = [pruebaRegistrar, ...HANDLERS_DEPOSITO]
+const REGISTRO: HandlerDef[] = [pruebaRegistrar, ...HANDLERS_DEPOSITO, ...HANDLERS_VENDEDOR]
 
 export const HANDLERS = new Map(REGISTRO.map((h) => [h.tipo, h]))
 

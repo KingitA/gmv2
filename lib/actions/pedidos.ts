@@ -47,7 +47,10 @@ import {
   type CondicionMarca,
 } from "@/lib/pricing/resolver"
 export type { CondicionSegmento, CondicionProveedor, CondicionMarca } from "@/lib/pricing/resolver"
-import { prepararMotorCliente, precioArticuloParaCliente, descuentosPorArticulo, type ArticuloMotor } from "@/lib/pricing/motor"
+import { prepararMotorCliente, precioArticuloParaCliente, descuentosPorArticulo, formulasReglasDesdeFilas, datosListaDesdeFila, type ArticuloMotor } from "@/lib/pricing/motor"
+// Pedidos tomados en un dispositivo: insumos de precio vigentes a la captura
+// (solo existe dentro del handler del outbox; en la web siempre es null). Ver el archivo.
+import { capturaActual, clienteCapturado } from "@/lib/mobile/contexto-captura"
 import { cargarInsumosCliente, ARTICULO_PRECIO_COLS } from "@/lib/pricing/cargar-insumos"
 
 const CONDICION_PROVEEDOR_COLS =
@@ -62,10 +65,13 @@ async function fetchCondicionesProveedor(
   pedidoId?: string | null,
 ): Promise<Map<string, CondicionProveedor>> {
   const map = new Map<string, CondicionProveedor>()
-  const { data: cli } = await supabase
-    .from("cliente_proveedor_condicion")
-    .select(CONDICION_PROVEEDOR_COLS)
-    .eq("cliente_id", clienteId)
+  const captura = capturaActual(clienteId)
+  const { data: cli } = captura
+    ? { data: captura.insumos.condicionesProveedor }
+    : await supabase
+        .from("cliente_proveedor_condicion")
+        .select(CONDICION_PROVEEDOR_COLS)
+        .eq("cliente_id", clienteId)
   for (const r of cli || []) map.set(r.proveedor_id, r as CondicionProveedor)
   if (pedidoId) {
     const { data: ped } = await supabase
@@ -84,10 +90,13 @@ async function fetchCondicionesMarca(
   pedidoId?: string | null,
 ): Promise<Map<string, CondicionMarca>> {
   const map = new Map<string, CondicionMarca>()
-  const { data: cli } = await supabase
-    .from("cliente_marca_condicion")
-    .select(CONDICION_MARCA_COLS)
-    .eq("cliente_id", clienteId)
+  const captura = capturaActual(clienteId)
+  const { data: cli } = captura
+    ? { data: captura.insumos.condicionesMarca }
+    : await supabase
+        .from("cliente_marca_condicion")
+        .select(CONDICION_MARCA_COLS)
+        .eq("cliente_id", clienteId)
   for (const r of cli || []) map.set(r.marca_id, r as CondicionMarca)
   if (pedidoId) {
     const { data: ped } = await supabase
@@ -104,6 +113,8 @@ async function fetchCondicionesMarca(
 async function fetchFormulasReglas(
   supabase: any,
 ): Promise<Record<string, Record<string, string>>> {
+  const captura = capturaActual()
+  if (captura) return formulasReglasDesdeFilas(captura.insumos.reglas)
   const { data } = await supabase
     .from("listas_precio_reglas")
     .select("grupo_precio,iva_compras,iva_ventas,formulas")
@@ -126,6 +137,11 @@ async function fetchListaDatos(
   const empty: DatosLista = { recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }
   if (!listaId) return empty
   if (cache[listaId]) return cache[listaId]
+  const captura = capturaActual()
+  if (captura) {
+    const fila = captura.insumos.listas.find((l) => l.id === listaId)
+    return (cache[listaId] = fila ? datosListaDesdeFila(fila, formulasReglas) : empty)
+  }
   const { data } = await supabase
     .from("listas_precio")
     .select("codigo,recargo_limpieza_bazar,recargo_perfumeria_negro,recargo_perfumeria_blanco")
@@ -193,7 +209,7 @@ async function resolverListaMetodoItem(
     listaId = cond.lista_precio_id
     metodoRaw = cond.metodo_facturacion || "Final"
   } else {
-    const r = resolverListaSegmento(segmento, pedidoOverrides, clienteInfo)
+    const r = resolverListaSegmento(segmento, pedidoOverrides, clienteCapturado(clienteInfo))
     listaId = r.listaId
     metodoRaw = r.metodoRaw
   }
@@ -211,6 +227,9 @@ async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
   ])
   if (!articulo) throw new Error("Artículo no encontrado")
   const descuentos: DescuentoTipado[] = (descuentosDB || []).map((d: any) => ({ tipo: d.tipo, porcentaje: d.porcentaje, orden: d.orden }))
+  // Pedido de un dispositivo: columnas de precio y descuentos vigentes a la captura
+  const capturado = capturaActual()?.articulos.get(productoId)
+  if (capturado) return { ...articulo, ...capturado, descuentos: (capturado.descuentos || []) as DescuentoTipado[] } as typeof articulo & { descuentos: DescuentoTipado[] }
   return { ...articulo, descuentos }
 }
 
@@ -230,12 +249,15 @@ async function fetchBonifGeneralViajante(
   general: Array<{ segmento: string | null; porcentaje: number }>
   viajante: Array<{ segmento: string | null; porcentaje: number }>
 }> {
-  const { data } = await supabase
-    .from("bonificaciones")
-    .select("tipo, segmento, porcentaje")
-    .eq("cliente_id", clienteId)
-    .eq("activo", true)
-    .in("tipo", ["general", "viajante"])
+  const captura = capturaActual(clienteId)
+  const { data } = captura
+    ? { data: captura.insumos.bonificaciones }
+    : await supabase
+        .from("bonificaciones")
+        .select("tipo, segmento, porcentaje")
+        .eq("cliente_id", clienteId)
+        .eq("activo", true)
+        .in("tipo", ["general", "viajante"])
   const rows = data ?? []
   return {
     general:  mezclarOverride(rows.filter((b: any) => b.tipo === "general"),  pedidoOverrides?.bonif_pedido, "general"),
@@ -596,6 +618,8 @@ export async function createPedido(data: {
     .eq("id", data.cliente_id)
     .single()
   if (clienteError || !clienteInfo) throw new Error(`Cliente no encontrado: ${clienteError?.message || data.cliente_id}`)
+  // Pedido tomado en un dispositivo (null en la web): ver lib/mobile/contexto-captura.ts
+  const captura = capturaActual(data.cliente_id)
 
   // Cache de listas para evitar múltiples queries a la misma lista
   const listasCache: Record<string, DatosLista> = {}
@@ -607,6 +631,8 @@ export async function createPedido(data: {
   let bonifData: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
   if (data.bonificaciones_pedido && data.bonificaciones_pedido.length > 0) {
     bonifData = data.bonificaciones_pedido
+  } else if (captura) {
+    bonifData = captura.insumos.bonificaciones
   } else {
     const { data: bonifTabla } = await supabase
       .from("bonificaciones")
@@ -699,7 +725,7 @@ export async function createPedido(data: {
       listaId = cond.lista_precio_id
       metodoRaw = cond.metodo_facturacion || "Final"
     } else {
-      const resuelto = resolverListaSegmento(segmento, segmentoOverrides, clienteInfo)
+      const resuelto = resolverListaSegmento(segmento, segmentoOverrides, clienteCapturado(clienteInfo))
       listaId = resuelto.listaId
       metodoRaw = resuelto.metodoRaw
     }
@@ -739,7 +765,8 @@ export async function createPedido(data: {
       numero_pedido: numeroPedido,
       cliente_id: data.cliente_id,
       vendedor_id: clienteInfo.vendedor_id,
-      fecha: todayArgentina(),
+      fecha: captura?.fecha || todayArgentina(),
+      ...(captura?.localId ? { movil_local_id: captura.localId } : {}),
       estado: data.estado_inicial === "en_venta" ? "en_venta" : "pendiente",
       subtotal: total,
       descuento_general: 0,

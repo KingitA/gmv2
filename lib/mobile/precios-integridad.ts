@@ -128,10 +128,12 @@ export async function verificarPreciosCapturados(
     overrides: OverridesPedido
     items: ItemCapturado[]
     contexto: { usuarioId: string; deviceId: string | null; idempotencyKey: string; tipo: string }
+    /** Insumos ya reconstruidos a `capturadoAt` (el handler los reusa para crear el pedido) */
+    precargado?: Awaited<ReturnType<typeof insumosAFecha>>
   },
 ): Promise<Verificacion> {
   const ids = [...new Set(args.items.map((i) => i.articulo_id))]
-  const { insumos, articulos } = await insumosAFecha(admin, args.clienteId, ids, args.capturadoAt)
+  const { insumos, articulos } = args.precargado ?? (await insumosAFecha(admin, args.clienteId, ids, args.capturadoAt))
   const motor = prepararMotorCliente(insumos, args.overrides)
   const porId = new Map(articulos.map((a: any) => [a.id, a]))
 
