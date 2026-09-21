@@ -32,11 +32,13 @@ export function esReglaDeNegocio(error: { code?: string | null } | null | undefi
  * de siempre (`<rpc>: <mensaje>`): lo único nuevo es la CLASE cuando es regla de negocio.
  */
 export function errorDeRpcCobranza(nombre: string, error: { code?: string | null; message?: string | null }): Error {
-  const mensaje = `${nombre}: ${error.message || "error desconocido"}`
+  // Los RAISE de las RPC ya traen el prefijo "<rpc>: " (verificado contra producción): no duplicarlo
+  const crudo = error.message || "error desconocido"
+  const mensaje = crudo.startsWith(`${nombre}:`) ? crudo : `${nombre}: ${crudo}`
   return esReglaDeNegocio(error) ? new ErrorReglaCobranza(mensaje) : new Error(mensaje)
 }
 
 /** Texto para el vendedor: sin el prefijo técnico de la RPC. */
 export function mensajeParaUsuario(e: Error): string {
-  return e.message.replace(/^cobranza_(crear|anular):\s*/, "")
+  return e.message.replace(/^(cobranza_(crear|anular):\s*)+/, "")
 }
