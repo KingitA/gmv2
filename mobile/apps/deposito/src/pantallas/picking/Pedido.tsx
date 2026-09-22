@@ -1,13 +1,21 @@
+import { useMemo } from "react"
 import { useNavigate, useParams } from "react-router"
 import { useLector, useOverlay } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
 import { useEncolar, usePedido } from "../../datos/hooks"
 import { estadoDe, tomadoPorOtro } from "../../datos/overlay"
-import { BarraProgreso, C, Contadores, dejarAviso, Marco, Rechazos, useAvisoEntrante, useToast, useVolver } from "../../ui"
+import { BarraProgreso, C, Contadores, dejarAviso, Marco, Rechazos, TITULO_GRUPO, useAvisoEntrante, useToast, useVolver } from "../../ui"
 import { PanelBuscar } from "../comunes/Buscar"
+import { FichaArticulo, useAbrirFicha, useFichaAbierta, type DatosFicha } from "../comunes/FichaArticulo"
 import { PanelCantidad } from "../comunes/Cantidad"
 import { DATASET, PedidoNoDisponible, RenglonPedido, usePicking } from "./comun"
 import type { PedidoVista } from "../../datos/overlay"
+
+/** Datos para la ficha de un artículo que no esté en el catálogo replicado. */
+const respaldoDe = (p: PedidoVista | null) => (articuloId: string): DatosFicha | undefined => {
+  const a = p?.pedidos_detalle.find((d) => d.articulo_id === articuloId)?.articulos
+  return a ? { id: articuloId, descripcion: a.descripcion, sku: a.sku, marca: a.marca?.descripcion ?? null, unidades_por_bulto: a.unidades_por_bulto, ean13: a.ean13 } : undefined
+}
 
 const clienteDe = (p: PedidoVista) => p.clientes?.razon_social || p.clientes?.nombre || "Sin cliente"
 const AYUDA_RECHAZO = "La lista ya muestra el estado real del servidor. Si hace falta, volvé a marcar el renglón."
@@ -68,9 +76,13 @@ export function Pedido() {
   useAvisoEntrante(mostrar)
   const { marcar, resolverCodigo, abrirItem } = usePicking(pedido, mostrar)
   const fin = useFinalizar(pedido, mostrar)
+  const abrirFicha = useAbrirFicha()
+  const fichaAbierta = useFichaAbierta()
+  const respaldoFicha = useMemo(() => respaldoDe(pedido), [pedido])
 
-  // Gatillo del lector desde la lista: abre la cantidad del renglón sin tocar la pantalla
-  useLector({ enabled: !!pedido, onCodigo: (c) => { const det = resolverCodigo(c); if (det) abrirItem(det) } })
+  // Gatillo del lector desde la lista: abre la cantidad del renglón sin tocar la pantalla.
+  // Con la ficha abierta, la cantidad la reemplaza: atrás vuelve a la lista, no a la ficha.
+  useLector({ enabled: !!pedido, onCodigo: (c) => { const det = resolverCodigo(c); if (det) abrirItem(det, { replace: fichaAbierta }) } })
 
   if (!pedido || pedido.cierrePendiente) {
     return <Marco titulo="Preparar Pedidos" dataset={DATASET}>{toast}<PedidoNoDisponible cargando={cargando} finalizado={pedido?.cierrePendiente} /></Marco>
@@ -88,15 +100,20 @@ export function Pedido() {
     <Marco titulo="Preparar Pedidos" dataset={DATASET}>
       {toast}
       <Rechazos items={pedido.rechazos} ayuda={AYUDA_RECHAZO} />
-      <div style={{ background: C.white, borderBottom: `1px solid ${C.border}`, padding: "16px 18px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: C.text, lineHeight: 1.2 }}>{clienteDe(pedido)}</div>
-            <div style={{ color: C.sub, fontSize: 13, marginTop: 4, lineHeight: 1.4 }}>{[pedido.clientes?.direccion, pedido.clientes?.localidad].filter(Boolean).join(" · ")}</div>
-            <div style={{ color: C.light, fontSize: 12, marginTop: 2, fontFamily: "monospace" }}>{pedido.numero_pedido}</div>
+      {/* Cabecera compacta: lo que se gana en alto son renglones de artículo a la vista */}
+      <div style={{ background: C.white, borderBottom: `1px solid ${C.border}`, padding: "10px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: C.text, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clienteDe(pedido)}</div>
+            <div style={{ color: C.light, fontSize: 12, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ fontFamily: "monospace" }}>{pedido.numero_pedido}</span>
+              {[pedido.clientes?.direccion, pedido.clientes?.localidad].filter(Boolean).length > 0 && (
+                <span style={{ color: C.sub }}> · {[pedido.clientes?.direccion, pedido.clientes?.localidad].filter(Boolean).join(" · ")}</span>
+              )}
+            </div>
           </div>
           {progreso.faltantes > 0 && (
-            <button onClick={() => navigate(`/preparar/${pedido.id}/faltantes`)} style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 12, padding: "7px 14px", minHeight: 44, fontSize: 13, fontWeight: 700, color: C.red, whiteSpace: "nowrap" }}>
+            <button onClick={() => navigate(`/preparar/${pedido.id}/faltantes`)} style={{ background: C.redL, border: `1.5px solid ${C.redB}`, borderRadius: 12, padding: "0 12px", minHeight: 44, fontSize: 13, fontWeight: 700, color: C.red, whiteSpace: "nowrap", flexShrink: 0 }}>
               ✕ {progreso.faltantes} faltante{progreso.faltantes > 1 ? "s" : ""}
             </button>
           )}
@@ -104,28 +121,30 @@ export function Pedido() {
         <BarraProgreso resueltos={progreso.resueltos} total={progreso.total} pendientes={progreso.pendientes} ok={progreso.completos} faltantes={progreso.faltantes} />
       </div>
 
-      {pendientes.length > 0 && (
-        <div style={{ background: C.orangeL, borderBottom: `1px solid ${C.orangeB}`, padding: "10px 18px", display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 16 }}>👈</span>
-          <span style={{ fontSize: 13, color: C.orange, fontWeight: 600 }}>Swipeá para marcar faltante · Escaneá para registrar cantidad</span>
+      {/* La ayuda del swipe solo mientras el pedido no se empezó: después estorba */}
+      {pendientes.length > 0 && progreso.resueltos === 0 && (
+        <div style={{ background: C.orangeL, borderBottom: `1px solid ${C.orangeB}`, padding: "5px 14px", display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 13 }}>👈</span>
+          <span style={{ fontSize: 12, color: C.orange, fontWeight: 600 }}>Swipeá para faltante · Escaneá para cantidad · Tocá para ver la ficha</span>
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: "auto", padding: "12px 14px 0" }}>
+      <div style={{ flex: 1, overflow: "auto", padding: "10px 14px 0" }}>
         {pendientes.length > 0 && (
           <>
-            <div style={{ fontSize: 12, fontWeight: 700, color: C.light, textTransform: "uppercase", letterSpacing: "0.1em", padding: "2px 2px 10px" }}>Pendientes ({pendientes.length})</div>
-            {pendientes.map((item) => <RenglonPedido key={item.id} pedido={pedido} item={item} accion={aFaltante(item)} />)}
+            <div style={TITULO_GRUPO}>Pendientes ({pendientes.length})</div>
+            {pendientes.map((item) => <RenglonPedido key={item.id} pedido={pedido} item={item} accion={aFaltante(item)} onAbrir={() => abrirFicha(item.articulo_id)} />)}
           </>
         )}
         {completos.length > 0 && (
           <>
-            <div style={{ fontSize: 12, fontWeight: 700, color: C.light, textTransform: "uppercase", letterSpacing: "0.1em", padding: "8px 2px 10px" }}>Preparados ({completos.length})</div>
-            {completos.map((item) => <RenglonPedido key={item.id} pedido={pedido} item={item} accion={aFaltante(item)} />)}
+            <div style={{ ...TITULO_GRUPO, paddingTop: 8 }}>Preparados ({completos.length})</div>
+            {completos.map((item) => <RenglonPedido key={item.id} pedido={pedido} item={item} accion={aFaltante(item)} onAbrir={() => abrirFicha(item.articulo_id)} />)}
           </>
         )}
         <div style={{ height: 16 }} />
       </div>
+      <FichaArticulo respaldo={respaldoFicha} />
 
       <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 12 }}>
         <button onClick={() => navigate(`/preparar/${pedido.id}/buscar`)} style={{ flex: 2, background: C.white, color: C.text, fontWeight: 700, fontSize: 18, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
@@ -242,6 +261,8 @@ export function PedidoFaltantes() {
   const { toast, mostrar } = useToast()
   const { marcar, resolverCodigo, abrirItem } = usePicking(pedido, mostrar)
   const volver = useVolver()
+  const abrirFicha = useAbrirFicha()
+  const respaldoFicha = useMemo(() => respaldoDe(pedido), [pedido])
   useLector({ enabled: !!pedido, onCodigo: (c) => { const det = resolverCodigo(c); if (det) abrirItem(det, { replace: true }) } })
 
   if (!pedido || pedido.cierrePendiente) return <Marco titulo="Faltantes">{toast}<PedidoNoDisponible cargando={cargando} finalizado={pedido?.cierrePendiente} /></Marco>
@@ -257,7 +278,7 @@ export function PedidoFaltantes() {
         {faltantes.length === 0 && <div style={{ textAlign: "center", padding: "40px 0", color: C.light, fontSize: 16 }}>No hay faltantes</div>}
         {faltantes.map((item) => (
           <RenglonPedido
-            key={item.id} pedido={pedido} item={item}
+            key={item.id} pedido={pedido} item={item} onAbrir={() => abrirFicha(item.articulo_id)}
             accion={{ fondo: C.green, icono: "↩", etiqueta: "Pendiente", onConfirmar: () => void marcar(item, 0, false).then((ok) => ok && mostrar("Devuelto a pendientes")) }}
           />
         ))}
@@ -265,6 +286,7 @@ export function PedidoFaltantes() {
           ← Volver a la lista
         </button>
       </div>
+      <FichaArticulo respaldo={respaldoFicha} />
     </Marco>
   )
 }
