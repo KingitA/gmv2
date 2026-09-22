@@ -6,12 +6,15 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 /** Sin filtrar ni ordenar (la route y la app aplican búsqueda, orden y tope). */
 export async function cargarComprados(supabase: any, id: string) {
+  // La FK de comprobantes_venta_detalle es `comprobante_id` (NO `comprobante_venta_id`, que es el
+  // nombre en kardex/devoluciones): con el nombre equivocado PostgREST devolvía error y esta lista
+  // fallaba siempre (bug encontrado al probar la app Vendedor contra producción, 21/09/2026).
   // Líneas facturadas del cliente (excluye NC/REV: solo lo que se le vendió)
   const rows = await fetchAllRows(() =>
     supabase
       .from("comprobantes_venta_detalle")
       .select(
-        "articulo_id, cantidad, precio_unitario, comprobante:comprobante_venta_id!inner(id, cliente_id, fecha, tipo_comprobante, numero_comprobante, anulado_en)"
+        "articulo_id, cantidad, precio_unitario, comprobante:comprobante_id!inner(id, cliente_id, fecha, tipo_comprobante, numero_comprobante, anulado_en)"
       )
       .eq("comprobante.cliente_id", id)
       .in("comprobante.tipo_comprobante", ["FA", "FB", "FC", "PRES"])

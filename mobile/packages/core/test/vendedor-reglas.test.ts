@@ -62,6 +62,13 @@ describe("Cobranzas · rechazo de negocio vs error transitorio", () => {
     expect(mensajeParaUsuario(e)).toBe("el comprobante 0001-00001072 está anulado — no se puede cobrar")
   })
 
+  it("el RAISE real ya trae el prefijo de la RPC (verificado contra producción): no se duplica", () => {
+    const e = errorDeRpcCobranza("cobranza_crear", { code: "P0001", message: "cobranza_crear: el monto debe ser mayor a 0" })
+    expect(e.message).toBe("cobranza_crear: el monto debe ser mayor a 0")
+    expect(mensajeParaUsuario(e)).toBe("el monto debe ser mayor a 0")
+    expect(mensajeParaUsuario(new Error("cobranza_crear: cobranza_crear: x"))).toBe("x")
+  })
+
   it("todo lo demás es transitorio (se reintenta): timeout, deadlock, serialización, PostgREST caído, sin código", () => {
     for (const code of ["57014", "40P01", "40001", "PGRST301", "08006", "", undefined, null]) {
       const e = errorDeRpcCobranza("cobranza_crear", { code, message: "x" })

@@ -77,16 +77,23 @@ async function sesionVendedor(ctx: CtxOutbox) {
   return { vendedorIds, user: { id: ctx.sesion.user.id } }
 }
 
+/**
+ * Cartera y cuenta corriente son parches INDEPENDIENTES: si uno no se puede armar, el otro
+ * viaja igual (visto contra producción: una consulta rota de la cuenta corriente dejaba al
+ * equipo sin enterarse del cliente recién creado). Lo que falte llega en el próximo sync.
+ */
 async function parcheCliente(ctx: CtxOutbox, clienteId: string): Promise<ParcheReplica[]> {
   const sesion = await sesionVendedor(ctx)
-  const [fila, cc] = await Promise.all([
+  const [fila, cc] = await Promise.allSettled([
     cargarClientesVendedor(ctx, [clienteId]),
     cargarCuentaCliente(ctx.supabase, sesion, clienteId),
   ])
-  return [
-    { dataset: "vendedor_clientes", upserts: fila, deletes: fila.length ? [] : [clienteId] },
-    { dataset: "vendedor_cc", upserts: cc ? [cc] : [], deletes: cc ? [] : [clienteId] },
-  ]
+  const out: ParcheReplica[] = []
+  if (fila.status === "fulfilled") out.push({ dataset: "vendedor_clientes", upserts: fila.value, deletes: fila.value.length ? [] : [clienteId] })
+  else console.error("[outbox/vendedor] parche vendedor_clientes:", fila.reason)
+  if (cc.status === "fulfilled") out.push({ dataset: "vendedor_cc", upserts: cc.value ? [cc.value] : [], deletes: cc.value ? [] : [clienteId] })
+  else console.error("[outbox/vendedor] parche vendedor_cc:", cc.reason)
+  return out
 }
 
 async function parchePedido(ctx: CtxOutbox, pedidoId: string): Promise<ParcheReplica> {

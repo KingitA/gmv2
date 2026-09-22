@@ -17,6 +17,10 @@ void montarApp({
       void rt.sync.dataset(DS.billetera).catch(() => {})
       void rt.sync.dataset(DS.me).catch(() => {})
     }
-    if (item.tipo === "cliente.crear") void rt.sync.dataset(DS.preciosClientes).catch(() => {})
+    if (item.tipo.startsWith("cliente.")) {
+      void rt.sync.dataset(DS.preciosClientes).catch(() => {})
+      // Cinturón y tiradores: si el parche de réplica no trajo la fila, la trae el sync
+      void rt.sync.dataset(DS.clientes).catch(() => {})
+    }
   })
 })
