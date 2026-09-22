@@ -24,16 +24,39 @@ const PUERTO = Number(process.env.PORT || 3999)
 const N_ARTICULOS = Number(process.env.ARTICULOS || 6000)
 
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
+// Descripciones con el largo y el estilo de las reales (mediana 33 caracteres, máx 59):
+// así se ve de verdad cuánto entra en un renglón del picking.
+const DESCRIPCIONES = [
+  "PROTECTOR ANATÓMICO S/D ROSA x20u",
+  "PROTECTOR ANATÓMICO C/D VERDE x40u",
+  "JABON LIQUIDO DOY PACK RELAX FLORAL 200ml",
+  "DESTAPACAÑERIAS C/MICROESFERAS X 1 LT   MERCLIN x6",
+  "ACONDICIONADOR FRAGANCIA PROLONGADA x200ml (576988)",
+  "ALFOMBRA VENTOSA DECO MR TRAPO x120b",
+  "PROTECTOR SOLAR CON VALVULA EMULSION FPS 40 x380ml",
+  "TRAPO GRIS MR x120",
+  "FAC LECHE LIMP 200ML X12B",
+  "DESODORANTE EROSOL KEVIN BLACK x250ml",
+]
+/** Foto de mentira (SVG embebido): no necesita red ni archivos en el repo. */
+const fotoDemo = (i) => {
+  const color = ["#fde68a", "#bbf7d0", "#bfdbfe", "#e9d5ff", "#fecaca"][i % 5]
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="${color}"/><text x="150" y="150" font-family="sans-serif" font-size="34" font-weight="bold" text-anchor="middle" fill="#334155">FOTO #${i}</text><text x="150" y="195" font-family="sans-serif" font-size="20" text-anchor="middle" fill="#64748b">artículo de prueba</text></svg>`
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+}
 let S
 function reset() {
   const articulos = []
   for (let i = 1; i <= N_ARTICULOS; i++) {
     articulos.push({
-      id: uid(i), sku: String(100000 + i), descripcion: `${["Lavandina", "Detergente", "Jabón líquido", "Esponja", "Trapo de piso", "Desodorante"][i % 6]} ${["Ayudín", "Magistral", "Ala", "Mortimer", "Media Naranja"][i % 5]} ${250 + (i % 8) * 250}ml #${i}`,
+      id: uid(i), sku: String(100000 + i), descripcion: `${DESCRIPCIONES[i % DESCRIPCIONES.length]} #${i}`,
       ean13: i % 9 === 0 ? null : [String(7790000000000 + i)], codigo_bulto: i % 4 === 0 ? String(17790000000000 + i) : null,
       stock_actual: (i * 7) % 120, unidades_por_bulto: [6, 12, 24][i % 3], unidad_de_medida: "UN", orden_deposito: i % 5 === 0 ? null : i,
       proveedor_id: uid(900 + (i % 4)), categoria: ["LIMPIEZA", "PERFUMERIA", "BAZAR"][i % 3], tipo_fraccion: null, cantidad_fraccion: null,
       marca: i % 7 === 0 ? null : ["Ayudín", "Magistral", "Ala", "Mortimer", "Media Naranja"][i % 5],
+      // Fotos: como en producción las tienen ~4 de cada 10. Una de cada 20 apunta a una
+      // URL que no resuelve, para ver el mensaje de "no se pudo cargar" sin apagar la red.
+      imagen_url: i % 20 === 0 ? "https://no-existe.gmv2.invalid/foto.jpg" : i % 5 < 2 ? fotoDemo(i) : null,
     })
   }
   const artDe = (i) => {

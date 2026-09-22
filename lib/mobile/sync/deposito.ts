@@ -135,8 +135,11 @@ export async function cargarRecepcionDeposito(supabase: any, ordenId: string): P
 
 // ─── Catálogo de artículos ───────────────────────────────────────────────────
 
+// imagen_url: foto del artículo para la ficha que abre el operario desde el picking.
+// Vive en el bucket PÚBLICO `articulos-imagenes` (no vence, no hay que firmarla); la
+// tienen ~42 % de los artículos y suma ~133 KB al dataset.
 export const ARTICULO_DEPOSITO_COLS =
-  "id, sku, descripcion, ean13, codigo_bulto, stock_actual, unidades_por_bulto, unidad_de_medida, orden_deposito, proveedor_id, categoria, tipo_fraccion, cantidad_fraccion, activo, marca:marca_id(descripcion)"
+  "id, sku, descripcion, ean13, codigo_bulto, stock_actual, unidades_por_bulto, unidad_de_medida, orden_deposito, proveedor_id, categoria, tipo_fraccion, cantidad_fraccion, activo, imagen_url, marca:marca_id(descripcion)"
 
 export async function cargarArticulosDeposito(supabase: any, ids?: string[]): Promise<FilaReplica[]> {
   const arts: any[] = ids

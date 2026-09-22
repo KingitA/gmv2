@@ -5,7 +5,7 @@ import { DS, type DetallePedido, type OpPickingItem } from "../../datasets"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
 import { useArticulos, useEncolar, useYo } from "../../datos/hooks"
 import { estadoDe, tomadoPorOtro, type PedidoVista } from "../../datos/overlay"
-import { C, SinEnviar, TarjetaSwipe } from "../../ui"
+import { C, DESCRIPCION, META, SinEnviar, TarjetaSwipe } from "../../ui"
 
 export const DATASET = DS.pedidos
 
@@ -77,11 +77,20 @@ export function usePicking(pedido: PedidoVista | null, mostrar: (m: string, t?: 
   return { yo, marcar, resolverCodigo, abrirItem }
 }
 
-/** Renglón del pedido (swipe ← para la acción). Mismo aspecto que la web. */
-export function RenglonPedido({ pedido, item, accion }: {
+/**
+ * Renglón del pedido (swipe ← para la acción, toque = ficha del artículo).
+ *
+ * La descripción usa DOS líneas: con una sola y 22 px se cortaba a los ~14 caracteres
+ * ("PROTECTOR ANATÓMICO S/D ROSA x20u" quedaba en "PROTECTOR ANAT") y el operario no
+ * podía distinguir dos variantes del mismo artículo. En la base, la mediana son 33
+ * caracteres y el 90 % entra en 45: dos líneas a 17 px cubren casi todo el catálogo
+ * sin que un renglón ocupe más alto que antes.
+ */
+export function RenglonPedido({ pedido, item, accion, onAbrir }: {
   pedido: PedidoVista
   item: DetallePedido
   accion: { fondo: string; icono: string; etiqueta: string; onConfirmar: () => void }
+  onAbrir?: () => void
 }) {
   const yo = useYo()
   const estado = estadoDe(item)
@@ -90,32 +99,34 @@ export function RenglonPedido({ pedido, item, accion }: {
   const prep = pedido.preparadores[item.id]
   const esOtro = !!tomadoPorOtro(pedido, item.id, yo)
   return (
-    <TarjetaSwipe bg={ok ? C.greenL : faltante ? C.redL : C.white} borde={ok ? C.greenB : faltante ? C.redB : C.border} accion={accion} bloqueado={esOtro}>
-      <div style={{ width: 13, height: 13, borderRadius: "50%", background: ok ? C.green : faltante ? C.red : "#fbbf24", flexShrink: 0 }} />
+    <TarjetaSwipe bg={ok ? C.greenL : faltante ? C.redL : C.white} borde={ok ? C.greenB : faltante ? C.redB : C.border} accion={accion} bloqueado={esOtro} onAbrir={onAbrir}>
+      <div style={{ width: 10, height: 10, borderRadius: "50%", background: ok ? C.green : faltante ? C.red : "#fbbf24", flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ color: C.text, fontWeight: 700, fontSize: 22, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.articulos?.descripcion}</span>
+        <div style={DESCRIPCION}>{item.articulos?.descripcion}</div>
+        <div style={META}>
+          <span style={{ color: C.light, fontSize: 13, fontFamily: "monospace", flexShrink: 0 }}>{item.articulos?.sku}</span>
+          {item.articulos?.proveedores?.nombre && (
+            <span style={{ color: C.orange, fontSize: 13, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {item.articulos.proveedores.nombre}
+            </span>
+          )}
           {item.es_bonificado && <span style={{ background: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d", fontSize: 10, fontWeight: 800, padding: "1px 6px", borderRadius: 6, flexShrink: 0 }}>BONIF</span>}
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 5, flexWrap: "wrap" }}>
-          <span style={{ color: C.light, fontSize: 15, fontFamily: "monospace" }}>{item.articulos?.sku}</span>
-          {item.articulos?.proveedores?.nombre && <span style={{ color: C.orange, fontSize: 15, fontWeight: 600 }}>{item.articulos.proveedores.nombre}</span>}
-          {item.es_bonificado && <span style={{ color: "#b45309", fontSize: 14, fontWeight: 600 }}>Bonificado — agregar como ítem normal</span>}
           {prep && (
-            <span style={{ background: esOtro ? C.indigoL : C.greenL, color: esOtro ? C.indigo : C.green, border: `1px solid ${esOtro ? C.indigoB : C.greenB}`, fontSize: 12, fontWeight: 700, padding: "2px 8px", borderRadius: 999, flexShrink: 0 }}>
+            <span style={{ background: esOtro ? C.indigoL : C.greenL, color: esOtro ? C.indigo : C.green, border: `1px solid ${esOtro ? C.indigoB : C.greenB}`, fontSize: 12, fontWeight: 700, padding: "1px 7px", borderRadius: 999, flexShrink: 0 }}>
               {esOtro ? "🔒 " : "👤 "}{prep.usuario_nombre}
             </span>
           )}
           {pedido.sinEnviar.has(item.id) && <SinEnviar />}
         </div>
+        {item.es_bonificado && <div style={{ color: "#b45309", fontSize: 12, fontWeight: 600, marginTop: 2 }}>Bonificado — agregar como ítem normal</div>}
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         {ok ? (
-          <><div style={{ color: C.green, fontWeight: 800, fontSize: 27 }}>{item.cantidad_preparada}</div><div style={{ color: C.light, fontSize: 15 }}>de {item.cantidad}</div></>
+          <><div style={{ color: C.green, fontWeight: 800, fontSize: 24, lineHeight: 1.1 }}>{item.cantidad_preparada}</div><div style={{ color: C.light, fontSize: 12 }}>de {item.cantidad}</div></>
         ) : faltante ? (
-          <div style={{ color: C.red, fontWeight: 700, fontSize: 16 }}>FALTANTE</div>
+          <div style={{ color: C.red, fontWeight: 800, fontSize: 13 }}>FALTANTE</div>
         ) : (
-          <><div style={{ color: C.text, fontWeight: 800, fontSize: 27 }}>{item.cantidad}</div><div style={{ color: C.light, fontSize: 15 }}>unidades</div></>
+          <><div style={{ color: C.text, fontWeight: 800, fontSize: 24, lineHeight: 1.1 }}>{item.cantidad}</div><div style={{ color: C.light, fontSize: 12 }}>unidades</div></>
         )}
       </div>
     </TarjetaSwipe>
