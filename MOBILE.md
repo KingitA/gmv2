@@ -800,6 +800,39 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
 - **Datos de artículo**: compare-and-set por campo; lo que otro cambió no se pisa y
   vuelve como rechazo explicando qué campo.
 
+### Renglón del artículo y ficha (22/09/2026, pedido del dueño tras el primer uso)
+**Problema:** la descripción iba en UNA línea a 22 px y se cortaba a los ~14 caracteres:
+"PROTECTOR ANATÓMICO S/D ROSA x20u" se leía "PROTECTOR ANAT" y no se distinguía de
+"…C/D VERDE x40u". Medido en el mock con datos del largo real (360×800):
+
+| | antes | ahora |
+|---|---|---|
+| caracteres visibles | 13–15 (de 39–54) | 36–44 |
+| alto del renglón | 105 px | 90 px |
+| renglones en pantalla | 3 | 4 |
+
+**Cómo:** descripción en DOS líneas a 17 px (`DESCRIPCION` en `ui.tsx`, line-clamp 2) y
+alto ganado en el resto: `Encabezado` 56 → 44 px y `Frescura` más fina (props `compacto`
+**opt-in** del core: chofer y vendedor quedan igual), cabecera del pedido/recepción en dos
+renglones, barra de progreso más fina y la ayuda del swipe solo mientras el pedido no se
+empezó. El catálogo real tiene mediana 33 caracteres y p90 45: entran casi todos; lo que
+no entra se lee en la ficha.
+
+**Ficha del artículo** (`pantallas/comunes/FichaArticulo.tsx`): un TOQUE en el renglón la
+abre (picking y recepción) con foto, descripción completa, SKU, marca, unidades por bulto
+y EAN. Es un overlay `?ficha=<articulo_id>`: el botón atrás la cierra sin salir de la
+pantalla, y si el operario escanea con la ficha abierta, la pantalla de cantidad REEMPLAZA
+la entrada (atrás vuelve a la lista, no a la ficha).
+- El swipe para marcar faltante no cambia: en `TarjetaSwipe`, un dedo que se movió más de
+  6 px (swipe o scroll) nunca cuenta como toque.
+- Los datos salen de la réplica (`deposito_articulos`), así que la ficha abre sin señal.
+  La FOTO es lo único que viaja por red: `articulos.imagen_url`, bucket **público**
+  `articulos-imagenes` (no vence, no hay que firmarla), la tienen ~42 % de los artículos y
+  suma ~133 KB a la réplica. Sin foto cargada, sin señal o si la URL no resuelve, la ficha
+  dice el motivo en vez de mostrar una imagen rota. **Pendiente del mes de prueba:** un
+  artículo que nunca se vio con WiFi no muestra la foto offline (el WebView solo cachea lo
+  ya visto); si molesta, habría que guardar las fotos en la réplica.
+
 ### Lector
 `useLector` en toda pantalla donde hoy se identifica un artículo. En la lista del
 pedido / recepción el gatillo abre la cantidad del renglón; **un segundo gatillo sobre
@@ -965,8 +998,10 @@ ligada por `orden_compra_id` (hay que contarlas al limpiar datos de prueba).
    otras 3 no tienen archivo).
 3. **Devoluciones con el flujo real de chofer** (ver abajo).
 4. Gestos con el dedo (swipe, objetivos táctiles): los prueba el depósito; acá se hicieron por adb.
+   Incluye el TOQUE que abre la ficha del artículo y que el swipe siga saliendo natural.
 5. Detalles vistos en el equipo: en Buscar, con el teclado abierto, la lista de resultados queda
    chica (los botones del pie ocupan lugar); en la cola, "⇪ N sin enviar" se parte en dos líneas.
+   Resuelto el 22/09: la descripción del artículo se cortaba a los ~14 caracteres (ver arriba).
 6. Tarea aparte ya anotada: depuración de los `impreso` viejos (arriba).
 
 ### Devoluciones: FUERA del checklist contra producción (decisión del dueño, 18/09/2026)
