@@ -33,6 +33,8 @@ const apps = (arg("apps", TODAS.join(",")) || "").split(",").map((s) => s.trim()
 const bump = arg("bump", "patch")
 const notas = arg("notas", "")
 const debug = args.includes("--debug")
+/** Diagnóstico de un equipo ya instalado: abre el socket de DevTools del WebView. */
+const devtools = args.includes("--devtools")
 for (const a of apps) if (!TODAS.includes(a)) throw new Error(`App desconocida: ${a}`)
 if (!["patch", "minor", "major", "none"].includes(bump)) throw new Error(`--bump inválido: ${bump}`)
 
@@ -41,6 +43,8 @@ const JAVA_HOME = javaHome()
 const ANDROID_HOME = androidHome()
 const env = { ...process.env, JAVA_HOME, ANDROID_HOME, ANDROID_SDK_ROOT: ANDROID_HOME }
 delete env.GM_DEV_HTTP // un release jamás lleva allowMixedContent
+delete env.GM_DEBUG_WEBVIEW // ni DevTools abierto, salvo que se pida con --devtools
+if (devtools) env.GM_DEBUG_WEBVIEW = "1"
 env.PATH = `${join(JAVA_HOME, "bin")}${ES_WINDOWS ? ";" : ":"}${env.PATH}`
 
 function run(cmd, argv, cwd) {

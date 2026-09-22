@@ -166,6 +166,15 @@ aplica como parche (`replica.refrescarIds`): no mueve cursor ni frescura. Máx. 
    (id de la fila del dataset). Agregalo en una migración nueva con el mismo patrón.
 3. App: `{ nombre, prioridad, invalidable?, cadaMs? }` en `DATASETS`.
 
+**Agregar una COLUMNA a un dataset delta ⇒ subir `version`** (trampa encontrada el
+22/09/2026 con `imagen_url` en `deposito_articulos`). Un dataset delta solo reenvía las
+filas que **cambiaron**: los equipos que ya tienen cursor nunca reciben la columna nueva
+—sus filas no cambiaron— y la pantalla muestra el campo vacío para siempre, mientras en
+la base el dato está. `DatasetDef.version` (número opcional) viaja dentro del cursor: si
+el cursor del equipo es de otra versión, el próximo sync es un **snapshot completo**, que
+reemplaza el dataset entero (R2). Un dataset sin `version` se comporta igual que antes.
+Verificado en el NuStar: cursor `d:2048:v2-…`, 2015 artículos rebajados, foto visible.
+
 ### 4.2 Outbox (escrituras)
 
 `POST /api/mobile/outbox` con `MutacionOutbox`:
@@ -556,6 +565,25 @@ set VITE_API_BASE=http://localhost:3000&& set GM_DEV_HTTP=1&& npx vite build && 
 cd android && gradlew assembleDebug && adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 (el APK debug usa otra firma: desinstalar el release antes, y viceversa).
+
+### Diagnosticar un equipo YA instalado sin borrarle los datos
+```bash
+cd mobile && npm run build:apks -- --apps deposito --devtools --notas "diagnostico"
+adb install -r ..\dist-apks\deposito-v0.2.2.apk        # misma firma ⇒ conserva outbox y réplica
+adb forward tcp:9222 localabstract:webview_devtools_remote_<pid de la app>
+curl http://127.0.0.1:9222/json                        # y hablar CDP por el webSocketDebuggerUrl
+```
+`--devtools` es lo único que pone `GM_DEBUG_WEBVIEW=1`; `build-apks.mjs` la borra del
+entorno en cualquier otro build, igual que `GM_DEV_HTTP`. **Siempre recompilar e instalar
+después un release limpio** (se verifica con `cat /proc/net/unix | grep webview_devtools`:
+no debe aparecer el pid de la app). Así se leyó la réplica del NuStar para confirmar que
+`imagen_url` había llegado.
+
+**Pantalla blanca después de que Android actualiza el WebView** (visto el 22/09/2026):
+la app abre, el proceso queda al 0 % de CPU, el renderer no responde ni a CDP y el
+logcat solo muestra `cr_ChildProcessConn: Failed to establish the service connection`
+con dos `versionName` distintos de `com.google.android.webview`. **No es la app: se
+arregla reiniciando el equipo** (no hace falta borrar datos ni reinstalar).
 
 ### Cómo publicar una actualización (ciclo del mes de prueba: 4-5 releases por app)
 
