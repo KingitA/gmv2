@@ -20,6 +20,11 @@
     "lib/cobranzas/errores.ts",
     "lib/cobranzas/crear.ts",
     "lib/actions/cobranzas.ts",
-    "app/api/viajante/cobro/"
+    "app/api/viajante/cobro/",
+    "lib/viajes/",
+    "app/api/chofer/viaje/[id]/iniciar/route.ts",
+    "app/api/chofer/viaje/[id]/parada/route.ts",
+    "app/api/chofer/viaje/[id]/finalizar/route.ts",
+    "app/api/chofer/billetera/gasto/route.ts"
   ]
 }

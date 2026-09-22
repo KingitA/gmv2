@@ -13,8 +13,8 @@
  * - Después de facturado lo único editable es la forma de entrega
  *   (condicion_entrega y el estado listo_para_retirar / listo_para_enviar).
  * - Los cambios manuales de estado siguen el flujo; nunca se vuelve atrás de
- *   facturado. Facturado lo pone la emisión de comprobantes, en_viaje la
- *   asignación de viaje, entregado el chofer / mostrador.
+ *   facturado. Facturado lo pone la emisión de comprobantes, en_viaje el
+ *   despacho del viaje, entregado el chofer / mostrador.
  */
 
 export const ESTADOS_EDITABLES = ["en_venta", "pendiente", "impreso", "en_preparacion"] as const
@@ -50,9 +50,13 @@ export function puedeEditarEntrega(estado: string | null | undefined): boolean {
   return ["pendiente_facturacion", "facturado", "listo_para_retirar", "listo_para_enviar"].includes(estado || "")
 }
 
-/** Un viaje se asigna recién con el pedido facturado / listo. */
+/**
+ * Un pedido se sube a un viaje programado en cualquier estado previo a salir
+ * (los viajes se arman antes de que el pedido esté facturado). Pasa a en_viaje
+ * recién al despachar el viaje — ver lib/viajes/estados.ts.
+ */
 export function puedeAsignarViaje(estado: string | null | undefined): boolean {
-  return ["facturado", "listo_para_retirar", "listo_para_enviar"].includes(estado || "")
+  return !!estado && !["en_viaje", "entregado", "rechazado", "eliminado"].includes(estado)
 }
 
 /** Estados a los que se puede pasar A MANO desde `estado` (sin contar el actual). */

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { esTripulante } from "@/lib/viajes/chofer"
 import { anularCobranza } from "@/lib/actions/cobranzas"
 
 /**
@@ -25,7 +26,7 @@ export async function DELETE(
       .select("id, chofer_id, estado")
       .eq("id", viajeId)
       .single()
-    if (!viaje || viaje.chofer_id !== auth.user.id) {
+    if (!viaje || !(await esTripulante(supabase, viajeId, auth.user.id, viaje.chofer_id))) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
 

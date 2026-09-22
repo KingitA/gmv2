@@ -402,7 +402,8 @@ export default function ClientesPedidosPage() {
       const { data, error } = await supabase
         .from("viajes")
         .select("*, zonas (nombre)")
-        .in("estado", ["pendiente", "en_curso"])
+        .eq("tipo", "reparto")
+        .eq("estado", "programado")
         .order("fecha", { ascending: true })
 
       if (error) throw error
@@ -461,24 +462,28 @@ export default function ClientesPedidosPage() {
   }
 
   const asignarViaje = async (pedidoId: string, viajeId: string) => {
-    // Un viaje se asigna recién con el pedido facturado / listo (pasa a en_viaje).
+    // El pedido se sube a un viaje PROGRAMADO en cualquier estado previo a salir;
+    // pasa a en_viaje recién cuando oficina despacha el viaje.
     const estadoActual = pedidos.find(p => p.id === pedidoId)?.estado ?? pedidoSeleccionado?.estado
     if (!puedeAsignarViaje(estadoActual)) {
-      toast.error(`El pedido está ${(ESTADO_LABEL[estadoActual || ""] || estadoActual || "").toLowerCase()}: se asigna a un viaje una vez facturado.`)
+      toast.error(`El pedido está ${(ESTADO_LABEL[estadoActual || ""] || estadoActual || "").toLowerCase()}: ya no se puede asignar a un viaje.`)
       return
     }
     try {
-      const { error } = await supabase
-        .from("pedidos")
-        .update({ viaje_id: viajeId, estado: "en_viaje" })
-        .eq("id", pedidoId)
-
-      if (error) throw error
+      const res = await fetch(`/api/viajes/${viajeId}/pedidos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agregar: [pedidoId] }),
+      })
+      const r = await res.json()
+      if (!res.ok) throw new Error(r.error || "No se pudo asignar el viaje")
+      if (r.rechazados?.length) throw new Error(r.rechazados[0].motivo)
 
       await cargarPedidos()
       setViajeAsignado("")
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error asignando viaje:", error)
+      toast.error(error?.message || "No se pudo asignar el viaje")
     }
   }
 
@@ -1389,7 +1394,7 @@ export default function ClientesPedidosPage() {
                         <p className="text-xs text-purple-500">{formatDateAR(pedidoSeleccionado.viajes.fecha)}</p>
                       </div>
                     ) : !puedeAsignarViaje(pedidoSeleccionado.estado) ? (
-                      <p className="text-xs text-slate-400 italic px-1 py-2">Se asigna una vez facturado</p>
+                      <p className="text-xs text-slate-400 italic px-1 py-2">Ya salió o está cerrado: no se asigna a un viaje</p>
                     ) : (
                       <div className="flex gap-1.5">
                         <Select value={viajeAsignado} onValueChange={setViajeAsignado}>

@@ -1,96 +1,130 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { formatCurrency } from "@/lib/utils"
+import type { ParadaHoja, HojaRuta } from "@/lib/viajes/hoja-ruta"
 
-interface PedidoChofer {
-  id: string
-  numero: string
-  fecha: string
-  estado: string
-  estado_entrega: "pendiente" | "cobrado" | "devolucion_registrada"
-  cliente_id: string
-  cliente_nombre: string
-  direccion: string
-  telefono: string
-  localidad: string
-  bultos: number
-  total_pedido: number
-  saldo_anterior: number
-  total_a_cobrar: number
-  cobrado: number
-  devuelto: number
-  remitos?: Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }>
-}
+// Hoja de ruta del chofer (titular o acompañante): paradas en el orden que
+// armó oficina, con su instrucción (cobrar sí o sí / NO ENTREGAR SIN COBRAR /
+// nota). En cada parada: cobrar, devolución y el resultado de la entrega.
+// Los cobros y gastos de cualquiera de la tripulación van a la billetera del
+// TITULAR; solo él rinde el viaje.
 
 interface ViajeData {
-  viaje: {
-    id: string
-    nombre: string
-    fecha: string
-    estado: string
-    zona_nombre: string
-    dinero_nafta: number
-    gastos_peon: number
-    gastos_hotel: number
-  }
-  pedidos: PedidoChofer[]
-  resumen: {
-    total_pedidos: number
-    total_a_cobrar: number
-    total_cobrado: number
-    total_gastos: number
-    efectivo_neto: number
-    pendientes: number
-    cobrados: number
-  }
+  viaje: { id: string; nombre: string; fecha: string; estado: string; zona_nombre: string; es_titular: boolean }
+  paradas: ParadaHoja[]
+  dinero: HojaRuta["dinero"] | null
+  tripulacion: Array<{ usuario_id: string; nombre: string; rol: string }>
 }
 
-// en_rendicion ya NO es read-only: el chofer puede corregir cobros hasta que
-// oficina confirme la rendición (Fase C).
-const READONLY_ESTADOS = ["completado"]
+type Hoja = null | { tipo: "resultado"; parada: ParadaHoja } | { tipo: "gasto" } | { tipo: "rendir" }
+
+const CATEGORIAS = [
+  ["nafta", "⛽ Nafta"], ["peon", "💪 Peón"], ["hotel", "🛏 Hotel"], ["peaje", "🛣 Peaje"],
+  ["comida", "🍽 Comida"], ["cubierta", "🛞 Cubierta"], ["otro", "• Otro"],
+] as const
+
+const ESTADO_PARADA: Record<string, { label: string; cls: string }> = {
+  pendiente: { label: "PENDIENTE", cls: "bg-gray-200 text-gray-700" },
+  entregado: { label: "ENTREGADO", cls: "bg-green-600 text-white" },
+  entregado_parcial: { label: "PARCIAL", cls: "bg-amber-500 text-white" },
+  no_entregado: { label: "NO ENTREGADO", cls: "bg-red-600 text-white" },
+  solo_cobro: { label: "COBRADO", cls: "bg-blue-600 text-white" },
+}
 
 export default function ViajeDashboardPage() {
   const router = useRouter()
-  const params = useParams()
-  const viajeId = params.viajeId as string
+  const viajeId = useParams().viajeId as string
 
   const [data, setData] = useState<ViajeData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [finalizando, setFinalizando] = useState(false)
-  const [showConfirmFinalizar, setShowConfirmFinalizar] = useState(false)
+  const [hoja, setHoja] = useState<Hoja>(null)
+  const [ocupado, setOcupado] = useState(false)
+  const [aviso, setAviso] = useState("")
 
-  useEffect(() => {
-    fetch(`/api/chofer/viaje/${viajeId}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d.error) setData(d)
-      })
-      .finally(() => setLoading(false))
+  // Resultado de parada
+  const [estadoSel, setEstadoSel] = useState("entregado")
+  const [bultosEntregados, setBultosEntregados] = useState("")
+  const [motivoEntrega, setMotivoEntrega] = useState("")
+  const [motivoCobro, setMotivoCobro] = useState("")
+  // Gasto
+  const [categoria, setCategoria] = useState("nafta")
+  const [montoGasto, setMontoGasto] = useState("")
+  const [obsGasto, setObsGasto] = useState("")
+  const [claveGasto, setClaveGasto] = useState("")
+  // Rendición
+  const [efectivoEntrega, setEfectivoEntrega] = useState("")
+
+  const cargar = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/chofer/viaje/${viajeId}`)
+      const d = await r.json()
+      if (!d.error) setData(d)
+    } finally {
+      setLoading(false)
+    }
   }, [viajeId])
 
-  // "Atrás" físico: cerrar el modal de confirmación antes de salir de la página
+  useEffect(() => { cargar() }, [cargar])
+
+  // "Atrás" físico: cerrar la hoja abierta antes de salir de la página
   useBackTrap(() => {
-    if (showConfirmFinalizar) { setShowConfirmFinalizar(false); return true }
+    if (hoja) { setHoja(null); return true }
     return false
   })
 
-  const esReadOnly = READONLY_ESTADOS.includes(data?.viaje.estado || "")
-
-  const handleFinalizar = async () => {
-    setFinalizando(true)
+  const post = async (url: string, body: any, metodo = "POST") => {
+    setOcupado(true)
+    setAviso("")
     try {
-      const res = await fetch(`/api/chofer/viaje/${viajeId}/finalizar`, { method: "POST" })
+      const res = await fetch(url, { method: metodo, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       const d = await res.json()
-      if (d.success) {
-        router.push("/chofer")
-      }
+      if (!res.ok) { setAviso(d.error || "No se pudo guardar"); return null }
+      return d
+    } catch {
+      setAviso("Sin conexión: probá de nuevo")
+      return null
     } finally {
-      setFinalizando(false)
-      setShowConfirmFinalizar(false)
+      setOcupado(false)
     }
+  }
+
+  const abrirResultado = (p: ParadaHoja) => {
+    setEstadoSel(p.pedidos.length ? "entregado" : "solo_cobro")
+    setBultosEntregados("")
+    setMotivoEntrega("")
+    setMotivoCobro("")
+    setAviso("")
+    setHoja({ tipo: "resultado", parada: p })
+  }
+
+  const guardarResultado = async (p: ParadaHoja) => {
+    const d = await post(`/api/chofer/viaje/${viajeId}/parada`, {
+      parada_id: p.id,
+      estado: estadoSel,
+      bultos_entregados: Number(bultosEntregados) || 0,
+      motivo_no_entrega: motivoEntrega,
+      motivo_no_cobro: motivoCobro,
+    }, "PATCH")
+    if (d) { setHoja(null); cargar() }
+  }
+
+  const guardarGasto = async () => {
+    const monto = Number(montoGasto.replace(",", "."))
+    if (!monto || monto <= 0) { setAviso("Poné el importe del gasto"); return }
+    const d = await post("/api/chofer/billetera/gasto", {
+      viaje_id: viajeId, categoria, monto, observaciones: obsGasto, idempotency_key: claveGasto,
+    })
+    if (d) { setHoja(null); cargar() }
+  }
+
+  const rendir = async () => {
+    const d = await post(`/api/chofer/viaje/${viajeId}/finalizar`, {
+      efectivo_declarado: Number(efectivoEntrega.replace(",", ".")) || 0,
+    })
+    if (d) router.push("/chofer")
   }
 
   if (loading) {
@@ -100,7 +134,6 @@ export default function ViajeDashboardPage() {
       </div>
     )
   }
-
   if (!data) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -109,240 +142,355 @@ export default function ViajeDashboardPage() {
     )
   }
 
-  const { viaje, pedidos, resumen } = data
+  const { viaje, paradas, dinero } = data
+  const porIniciar = viaje.estado === "despachado"
+  const enCurso = viaje.estado === "en_curso"
+  // en_rendicion: todavía se pueden corregir cobros hasta que oficina confirme
+  const puedeCobrar = enCurso || viaje.estado === "en_rendicion"
+  const pendientes = paradas.filter((p) => p.estado === "pendiente")
+  const resueltas = paradas.filter((p) => p.estado !== "pendiente")
+  const totalACobrar = paradas.reduce((s, p) => s + p.total_a_cobrar, 0)
+  const totalCobrado = paradas.reduce((s, p) => s + p.cobrado, 0)
 
-  // Pedidos gestionados (cobrados / con devolución) van abajo en gris; el resto arriba.
-  const gestionado = (p: PedidoChofer) => p.estado_entrega === "cobrado" || p.estado_entrega === "devolucion_registrada"
-  const aEntregar = pedidos.filter((p) => !gestionado(p))
-  const entregados = pedidos.filter((p) => gestionado(p))
-
-  const renderPedidoCard = (pedido: PedidoChofer, gris: boolean) => (
-    <div
-      key={pedido.id}
-      onClick={() => router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}`)}
-      className={`w-full rounded-2xl shadow-sm border p-4 text-left active:scale-[0.98] transition-transform cursor-pointer ${gris ? "bg-gray-100 border-gray-200 opacity-75" : "bg-white border-gray-200"}`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <EstadoBadge estado={pedido.estado_entrega} />
-            <p className="font-bold text-gray-900 truncate">{pedido.cliente_nombre}</p>
+  const renderParada = (p: ParadaHoja, gris: boolean) => {
+    const est = ESTADO_PARADA[p.estado] || ESTADO_PARADA.pendiente
+    const remitos = p.pedidos.flatMap((ped) => ped.remitos)
+    return (
+      <div
+        key={p.id}
+        className={`w-full rounded-2xl shadow-sm border p-4 ${gris ? "bg-gray-100 border-gray-200 opacity-80" : p.bloquear_entrega ? "bg-white border-red-400 border-2" : "bg-white border-gray-200"}`}
+      >
+        <div className="flex items-start gap-3" onClick={() => router.push(`/chofer/${viajeId}/cliente/${p.cliente_id}`)}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-700 text-sm font-bold text-white">{p.orden}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <p className="truncate font-bold text-gray-900">{p.cliente_nombre}</p>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${est.cls}`}>{est.label}</span>
+            </div>
+            <p className="mt-0.5 truncate text-sm text-gray-500">📍 {[p.direccion, p.localidad].filter(Boolean).join(" · ") || "Sin dirección"}</p>
           </div>
-          <p className="text-gray-500 text-sm mt-1 truncate">📍 {pedido.direccion}</p>
-          {pedido.localidad && <p className="text-gray-400 text-xs">{pedido.localidad}</p>}
+          <span className="shrink-0 text-xl text-gray-400">›</span>
         </div>
-        <span className="text-gray-400 text-xl flex-shrink-0">›</span>
-      </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div className="bg-gray-50 rounded-lg py-2">
-          <p className="text-xs text-gray-400">Bultos</p>
-          <p className="font-bold text-gray-800">{pedido.bultos}</p>
+        {/* Instrucción de oficina */}
+        {p.bloquear_entrega && (
+          <div className="mt-3 rounded-xl bg-red-600 px-3 py-2 text-center text-sm font-bold text-white">
+            🔒 NO ENTREGAR SIN COBRAR{p.motivo_bloqueo ? ` — ${p.motivo_bloqueo}` : ""}
+          </div>
+        )}
+        {p.minimo_exigido > 0 && (
+          <div className={`mt-2 rounded-xl px-3 py-2 text-sm font-bold ${p.cobro_cumplido ? "bg-green-50 text-green-800" : "bg-red-50 text-red-700"}`}>
+            {p.cobro_cumplido ? "✓ " : "❗ "}COBRAR SÍ O SÍ {formatCurrency(p.minimo_exigido)}
+            <span className="font-medium">
+              {p.exigir_cobro_anterior && p.exigir_cobro_actual ? " (lo anterior + este viaje)" : p.exigir_cobro_anterior ? " (lo anterior)" : " (este viaje)"}
+            </span>
+          </div>
+        )}
+        {p.nota_oficina && <p className="mt-2 rounded-xl bg-yellow-50 px-3 py-2 text-sm text-yellow-900">📝 {p.nota_oficina}</p>}
+
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-lg bg-gray-50 py-2">
+            <p className="text-xs text-gray-400">Bultos</p>
+            <p className="font-bold text-gray-800">{p.bultos}</p>
+          </div>
+          <div className="rounded-lg bg-gray-50 py-2">
+            <p className="text-xs text-gray-400">Este viaje</p>
+            <p className="text-sm font-bold text-gray-800">{formatCurrency(p.total_viaje)}</p>
+          </div>
+          <div className={`rounded-lg py-2 ${p.saldo_anterior > 0 ? "bg-red-50" : "bg-gray-50"}`}>
+            <p className="text-xs text-gray-400">Debe de antes</p>
+            <p className={`text-sm font-bold ${p.saldo_anterior > 0 ? "text-red-600" : "text-gray-400"}`}>
+              {p.saldo_anterior > 0 ? formatCurrency(p.saldo_anterior) : "—"}
+            </p>
+          </div>
         </div>
-        <div className="bg-gray-50 rounded-lg py-2">
-          <p className="text-xs text-gray-400">Pedido</p>
-          <p className="font-bold text-gray-800 text-sm">{formatCurrency(pedido.total_pedido)}</p>
+
+        <div className="mt-2 flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2">
+          <span className="text-sm font-medium text-blue-700">Total a cobrar</span>
+          <span className="font-bold text-blue-800">{formatCurrency(p.total_a_cobrar)}</span>
         </div>
-        <div className={`rounded-lg py-2 ${pedido.saldo_anterior > 0 ? "bg-red-50" : "bg-gray-50"}`}>
-          <p className="text-xs text-gray-400">Saldo prev.</p>
-          <p className={`font-bold text-sm ${pedido.saldo_anterior > 0 ? "text-red-600" : "text-gray-400"}`}>
-            {pedido.saldo_anterior > 0 ? formatCurrency(pedido.saldo_anterior) : "—"}
+        {p.cobrado > 0 && (
+          <div className="mt-1 flex items-center justify-between rounded-lg bg-green-50 px-3 py-2">
+            <span className="text-sm font-medium text-green-700">Cobrado</span>
+            <span className="font-bold text-green-800">{formatCurrency(p.cobrado)}</span>
+          </div>
+        )}
+        {p.estado !== "pendiente" && (p.motivo_no_entrega || p.motivo_no_cobro || p.bultos_entregados != null) && (
+          <p className="mt-2 text-xs text-gray-500">
+            {p.bultos_entregados != null && `Bajó ${p.bultos_entregados}/${p.bultos} bultos. `}
+            {p.motivo_no_entrega && `No entregó: ${p.motivo_no_entrega}. `}
+            {p.motivo_no_cobro && `No cobró: ${p.motivo_no_cobro}.`}
           </p>
-        </div>
-      </div>
+        )}
 
-      {gris ? (
-        <div className="mt-2 bg-green-50 rounded-lg px-3 py-2 flex justify-between items-center">
-          <span className="text-green-700 text-sm font-medium">Cobrado:</span>
-          <span className="text-green-800 font-bold">{formatCurrency(pedido.cobrado)}</span>
-        </div>
-      ) : (
-        <div className="mt-2 bg-blue-50 rounded-lg px-3 py-2 flex justify-between items-center">
-          <span className="text-blue-700 text-sm font-medium">Total a cobrar:</span>
-          <span className="text-blue-800 font-bold">{formatCurrency(pedido.total_a_cobrar)}</span>
-        </div>
-      )}
+        {remitos.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {remitos.map((r) => (
+              <button
+                key={r.id}
+                disabled={r.estado_pdf !== "generado"}
+                onClick={() => window.open(`/api/remitos/${r.id}/pdf`, "_blank")}
+                className="flex-1 rounded-xl border border-sky-200 bg-sky-100 py-2 text-sm font-bold text-sky-800 active:scale-95 transition-transform disabled:opacity-50"
+              >
+                📄 Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}
+              </button>
+            ))}
+          </div>
+        )}
 
-      {(pedido.remitos?.length ?? 0) > 0 && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {pedido.remitos!.map((r) => (
+        {puedeCobrar && (
+          <div className="mt-3 grid grid-cols-2 gap-2">
             <button
-              key={r.id}
-              disabled={r.estado_pdf !== "generado"}
-              onClick={(e) => { e.stopPropagation(); window.open(`/api/remitos/${r.id}/pdf`, "_blank") }}
-              className="flex-1 py-2 rounded-xl bg-sky-100 text-sky-800 font-bold text-sm border border-sky-200 active:scale-95 transition-transform disabled:opacity-50"
+              onClick={() => router.push(`/chofer/${viajeId}/cliente/${p.cliente_id}?accion=devolucion`)}
+              disabled={!enCurso}
+              className="rounded-xl border border-amber-200 bg-amber-100 py-2.5 text-sm font-bold text-amber-800 active:scale-95 transition-transform disabled:opacity-40"
             >
-              📄 Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}
+              ↩ Devolución
             </button>
-          ))}
-        </div>
-      )}
+            <button
+              onClick={() => router.push(`/chofer/${viajeId}/cliente/${p.cliente_id}?accion=cobrar`)}
+              className="rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white active:scale-95 transition-transform"
+            >
+              💵 {p.cobrado > 0 ? "Editar cobro" : "Cobrar"}
+            </button>
+          </div>
+        )}
+        {enCurso && (
+          p.estado === "pendiente" ? (
+            <button
+              onClick={() => abrirResultado(p)}
+              className="mt-2 w-full rounded-xl bg-green-600 py-3 text-sm font-bold text-white active:scale-95 transition-transform"
+            >
+              ✔ Cerrar parada (entregado / no entregado)
+            </button>
+          ) : (
+            <button
+              onClick={async () => { if (await post(`/api/chofer/viaje/${viajeId}/parada`, { parada_id: p.id, estado: "pendiente" }, "PATCH")) cargar() }}
+              className="mt-2 w-full rounded-xl border border-gray-300 py-2 text-sm font-medium text-gray-600 active:scale-95"
+            >
+              Reabrir parada
+            </button>
+          )
+        )}
+      </div>
+    )
+  }
 
-      {!esReadOnly && (
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button
-            onClick={(e) => { e.stopPropagation(); router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}?accion=devolucion`) }}
-            className="py-2.5 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm border border-amber-200 active:scale-95 transition-transform"
-          >
-            ↩ Devolución
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); router.push(`/chofer/${viajeId}/cliente/${pedido.cliente_id}?accion=cobrar`) }}
-            className="py-2.5 rounded-xl bg-blue-600 text-white font-bold text-sm active:scale-95 transition-transform"
-          >
-            💵 {gris ? "Editar cobro" : "Cobrar"}
-          </button>
-        </div>
-      )}
-    </div>
-  )
+  const paradaSel = hoja?.tipo === "resultado" ? hoja.parada : null
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-blue-700 text-white px-5 py-4 sticky top-0 z-10 shadow-md">
-        <button
-          onClick={() => router.push("/chofer")}
-          className="text-blue-200 text-sm mb-1 flex items-center gap-1"
-        >
-          ← Inicio
-        </button>
-        <div className="flex items-start justify-between">
+      <header className="sticky top-0 z-10 bg-blue-700 px-5 py-4 text-white shadow-md">
+        <button onClick={() => router.push("/chofer")} className="mb-1 flex items-center gap-1 text-sm text-blue-200">← Inicio</button>
+        <div className="flex items-start justify-between gap-2">
           <div>
             <h1 className="text-xl font-bold">{viaje.nombre}</h1>
-            <p className="text-blue-200 text-sm">
-              {new Date(viaje.fecha).toLocaleDateString("es-AR", {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-              })}
-              {viaje.zona_nombre ? ` — ${viaje.zona_nombre}` : ""}
+            <p className="text-sm text-blue-200">
+              {new Date(viaje.fecha).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}
+              {!viaje.es_titular && " · acompañante"}
             </p>
           </div>
-          {esReadOnly && (
-            <span className="bg-gray-500 text-white text-xs px-3 py-1 rounded-full font-bold">
-              {viaje.estado === "en_rendicion" ? "EN RENDICIÓN" : "FINALIZADO"}
-            </span>
-          )}
+          <button
+            onClick={() => window.open(`/api/viajes/${viajeId}/hoja-ruta/pdf`, "_blank")}
+            className="shrink-0 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold"
+          >
+            📄 Hoja PDF
+          </button>
         </div>
       </header>
 
-      {/* Banner modo lectura */}
-      {esReadOnly && (
-        <div className="bg-amber-50 border-b border-amber-200 px-5 py-3 text-amber-800 text-sm text-center font-medium">
-          Viaje finalizado — solo consulta
+      {viaje.estado === "en_rendicion" && (
+        <div className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-center text-sm font-medium text-amber-800">
+          Viaje rendido — oficina está controlando la plata. Todavía podés corregir un cobro.
+        </div>
+      )}
+      {viaje.estado === "completado" && (
+        <div className="border-b border-gray-200 bg-gray-100 px-5 py-3 text-center text-sm font-medium text-gray-600">Viaje finalizado — solo consulta</div>
+      )}
+
+      {aviso && !hoja && <div className="mx-4 mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{aviso}</div>}
+
+      {/* Resumen */}
+      <div className="grid grid-cols-3 gap-3 p-4">
+        <div className="rounded-xl bg-white p-3 text-center shadow-sm">
+          <p className="text-2xl font-bold text-gray-800">{paradas.length}</p>
+          <p className="text-xs text-gray-500">Clientes</p>
+        </div>
+        <div className="rounded-xl bg-white p-3 text-center shadow-sm">
+          <p className="text-2xl font-bold text-green-600">{resueltas.length}</p>
+          <p className="text-xs text-gray-500">Resueltos</p>
+        </div>
+        <div className="rounded-xl bg-white p-3 text-center shadow-sm">
+          <p className="text-2xl font-bold text-amber-600">{paradas.reduce((s, p) => s + (p.estado === "pendiente" ? p.bultos : 0), 0)}</p>
+          <p className="text-xs text-gray-500">Bultos por bajar</p>
+        </div>
+      </div>
+
+      {/* Plata del viaje */}
+      {dinero && (
+        <div className="mx-4 mb-4 rounded-2xl bg-blue-700 p-4 text-white">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div><p className="text-blue-200">Total a cobrar</p><p className="text-lg font-bold">{formatCurrency(totalACobrar)}</p></div>
+            <div><p className="text-blue-200">Cobrado</p><p className="text-lg font-bold text-green-300">{formatCurrency(totalCobrado)}</p></div>
+            <div><p className="text-blue-200">A cuenta del viaje</p><p className="text-lg font-bold">{formatCurrency(dinero.fondo_entregado)}</p></div>
+            <div><p className="text-blue-200">Gastos</p><p className="text-lg font-bold text-red-300">{formatCurrency(dinero.gastos_total)}</p></div>
+          </div>
+          <div className="mt-3 flex items-center justify-between border-t border-blue-500 pt-3">
+            <span className="text-blue-100">Efectivo en mano</span>
+            <span className="text-xl font-bold text-yellow-200">{formatCurrency(dinero.efectivo_en_mano)}</span>
+          </div>
+          {(enCurso || porIniciar) && (
+            <button
+              onClick={() => { setCategoria("nafta"); setMontoGasto(""); setObsGasto(""); setClaveGasto(crypto.randomUUID()); setAviso(""); setHoja({ tipo: "gasto" }) }}
+              className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold active:scale-95 transition-transform"
+            >
+              ⛽ Cargar un gasto
+            </button>
+          )}
         </div>
       )}
 
-      {/* Resumen estadísticas */}
-      <div className="p-4 grid grid-cols-3 gap-3">
-        <div className="bg-white rounded-xl p-3 text-center shadow-sm">
-          <p className="text-2xl font-bold text-gray-800">{resumen.total_pedidos}</p>
-          <p className="text-xs text-gray-500">Clientes</p>
-        </div>
-        <div className="bg-white rounded-xl p-3 text-center shadow-sm">
-          <p className="text-2xl font-bold text-green-600">{resumen.cobrados}</p>
-          <p className="text-xs text-gray-500">Cobrados</p>
-        </div>
-        <div className="bg-white rounded-xl p-3 text-center shadow-sm">
-          <p className="text-2xl font-bold text-amber-600">{resumen.pendientes}</p>
-          <p className="text-xs text-gray-500">Pendientes</p>
-        </div>
-      </div>
-
-      {/* Resumen financiero */}
-      <div className="mx-4 bg-blue-700 rounded-2xl p-4 text-white mb-4">
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-blue-200">Total a cobrar</p>
-            <p className="text-lg font-bold">{formatCurrency(resumen.total_a_cobrar)}</p>
-          </div>
-          <div>
-            <p className="text-blue-200">Cobrado</p>
-            <p className="text-lg font-bold text-green-300">{formatCurrency(resumen.total_cobrado)}</p>
-          </div>
-          <div>
-            <p className="text-blue-200">Gastos</p>
-            <p className="text-lg font-bold text-red-300">{formatCurrency(resumen.total_gastos)}</p>
-          </div>
-          <div>
-            <p className="text-blue-200">Efectivo neto</p>
-            <p className="text-lg font-bold text-yellow-200">{formatCurrency(resumen.efectivo_neto)}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Lista de clientes */}
-      <div className="px-4 space-y-3 pb-32">
-        {aEntregar.length > 0 && (
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide px-1">A entregar ({aEntregar.length})</p>
-        )}
-        {aEntregar.map((pedido) => renderPedidoCard(pedido, false))}
-
-        {entregados.length > 0 && (
-          <>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide px-1 pt-4">Entregados ({entregados.length})</p>
-            {entregados.map((pedido) => renderPedidoCard(pedido, true))}
-          </>
-        )}
-
-        {pedidos.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
-            <p className="text-4xl mb-2">📦</p>
-            <p>No hay pedidos en este viaje</p>
-          </div>
+      {/* Paradas */}
+      <div className="space-y-3 px-4 pb-32">
+        {pendientes.length > 0 && <p className="px-1 text-xs font-bold uppercase tracking-wide text-gray-500">Por visitar ({pendientes.length})</p>}
+        {pendientes.map((p) => renderParada(p, false))}
+        {resueltas.length > 0 && <p className="px-1 pt-4 text-xs font-bold uppercase tracking-wide text-gray-400">Resueltos ({resueltas.length})</p>}
+        {resueltas.map((p) => renderParada(p, true))}
+        {paradas.length === 0 && (
+          <div className="py-12 text-center text-gray-400"><p className="mb-2 text-4xl">📦</p><p>No hay clientes en este viaje</p></div>
         )}
       </div>
 
-      {/* Botón finalizar viaje (solo si activo) */}
-      {!esReadOnly && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 shadow-lg">
+      {/* Acción principal */}
+      {porIniciar && (
+        <div className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white p-4 shadow-lg">
           <button
-            onClick={() => setShowConfirmFinalizar(true)}
-            className="w-full bg-orange-500 text-white py-4 rounded-2xl text-lg font-bold active:scale-95 transition-transform"
+            disabled={ocupado}
+            onClick={async () => { if (await post(`/api/chofer/viaje/${viajeId}/iniciar`, {})) cargar() }}
+            className="w-full rounded-2xl bg-green-600 py-4 text-lg font-bold text-white active:scale-95 transition-transform disabled:opacity-50"
           >
-            🏁 Rendir Viaje
+            ▶ Iniciar viaje
           </button>
         </div>
       )}
+      {enCurso && (
+        <div className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white p-4 shadow-lg">
+          {viaje.es_titular ? (
+            <button
+              onClick={() => { setEfectivoEntrega(String(Math.max(0, dinero?.efectivo_en_mano || 0))); setAviso(""); setHoja({ tipo: "rendir" }) }}
+              className="w-full rounded-2xl bg-orange-500 py-4 text-lg font-bold text-white active:scale-95 transition-transform"
+            >
+              🏁 Rendir viaje{pendientes.length > 0 ? ` (faltan ${pendientes.length} paradas)` : ""}
+            </button>
+          ) : (
+            <p className="py-2 text-center text-sm text-gray-500">El viaje lo rinde el chofer titular.</p>
+          )}
+        </div>
+      )}
 
-      {/* Modal confirmar finalizar */}
-      {showConfirmFinalizar && (
-        <div className="fixed inset-0 bg-black/50 flex items-end z-50">
-          <div className="bg-white rounded-t-3xl p-6 w-full space-y-4">
-            <h3 className="text-xl font-bold text-center">¿Rendir el viaje?</h3>
-            <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Total cobrado</span>
-                <span className="font-bold">{formatCurrency(resumen.total_cobrado)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Gastos del viaje</span>
-                <span className="font-bold text-red-600">−{formatCurrency(resumen.total_gastos)}</span>
-              </div>
-              <div className="border-t pt-2 flex justify-between font-bold">
-                <span>Efectivo a entregar</span>
-                <span className="text-green-700">{formatCurrency(resumen.efectivo_neto)}</span>
-              </div>
-            </div>
-            <p className="text-gray-500 text-sm text-center">
-              Los cobros quedarán pendientes hasta que el administrador los confirme.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setShowConfirmFinalizar(false)}
-                className="py-4 rounded-2xl border-2 border-gray-300 font-bold text-gray-600 active:scale-95"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleFinalizar}
-                disabled={finalizando}
-                className="py-4 rounded-2xl bg-orange-500 text-white font-bold active:scale-95 disabled:opacity-50"
-              >
-                {finalizando ? "Enviando..." : "Confirmar"}
-              </button>
-            </div>
+      {/* Hojas inferiores */}
+      {hoja && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/50" onClick={() => setHoja(null)}>
+          <div className="max-h-[90vh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+            {paradaSel && (
+              <>
+                <h3 className="text-center text-xl font-bold">{paradaSel.cliente_nombre}</h3>
+                <div className="grid grid-cols-1 gap-2">
+                  {(paradaSel.pedidos.length
+                    ? [["entregado", `✔ Entregué todo (${paradaSel.bultos} bultos)`], ["entregado_parcial", "◐ Entregué una parte"], ["no_entregado", "✕ No entregué"]]
+                    : [["solo_cobro", "✔ Pasé a cobrar"], ["no_entregado", "✕ No pude pasar / no estaba"]]
+                  ).map(([valor, texto]) => (
+                    <button
+                      key={valor}
+                      onClick={() => setEstadoSel(valor)}
+                      className={`rounded-xl border-2 py-3 text-left px-4 font-bold ${estadoSel === valor ? "border-blue-600 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-700"}`}
+                    >
+                      {texto}
+                    </button>
+                  ))}
+                </div>
+                {estadoSel === "entregado_parcial" && (
+                  <input
+                    type="number" inputMode="numeric" value={bultosEntregados} onChange={(e) => setBultosEntregados(e.target.value)}
+                    placeholder={`Bultos que bajaste (de ${paradaSel.bultos})`}
+                    className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
+                  />
+                )}
+                {["entregado_parcial", "no_entregado"].includes(estadoSel) && (
+                  <textarea
+                    value={motivoEntrega} onChange={(e) => setMotivoEntrega(e.target.value)} rows={2}
+                    placeholder="¿Por qué no se entregó todo? (cerrado, rechazó mercadería, faltante…)"
+                    className="w-full rounded-xl border-2 border-gray-200 px-4 py-3"
+                  />
+                )}
+                {!paradaSel.cobro_cumplido && (
+                  <div className="space-y-2 rounded-xl bg-red-50 p-3">
+                    <p className="text-sm font-bold text-red-700">
+                      Oficina pidió cobrar sí o sí {formatCurrency(paradaSel.minimo_exigido)} y hay cobrado {formatCurrency(paradaSel.cobrado)}.
+                    </p>
+                    <textarea
+                      value={motivoCobro} onChange={(e) => setMotivoCobro(e.target.value)} rows={2}
+                      placeholder="¿Por qué no se cobró? (obligatorio)"
+                      className="w-full rounded-xl border-2 border-red-200 bg-white px-4 py-3"
+                    />
+                  </div>
+                )}
+                {aviso && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{aviso}</p>}
+                <Botones ocupado={ocupado} onCancelar={() => setHoja(null)} onConfirmar={() => guardarResultado(paradaSel)} texto="Guardar" />
+              </>
+            )}
+
+            {hoja.tipo === "gasto" && (
+              <>
+                <h3 className="text-center text-xl font-bold">Cargar un gasto</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {CATEGORIAS.map(([valor, texto]) => (
+                    <button
+                      key={valor}
+                      onClick={() => setCategoria(valor)}
+                      className={`rounded-xl border-2 py-3 font-bold ${categoria === valor ? "border-blue-600 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-700"}`}
+                    >
+                      {texto}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number" inputMode="decimal" value={montoGasto} onChange={(e) => setMontoGasto(e.target.value)} placeholder="Importe"
+                  className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
+                />
+                <input
+                  value={obsGasto} onChange={(e) => setObsGasto(e.target.value)} placeholder="Detalle (opcional)"
+                  className="w-full rounded-xl border-2 border-gray-200 px-4 py-3"
+                />
+                <p className="text-center text-xs text-gray-500">Guardá el ticket: oficina aprueba cada gasto al rendir.</p>
+                {aviso && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{aviso}</p>}
+                <Botones ocupado={ocupado} onCancelar={() => setHoja(null)} onConfirmar={guardarGasto} texto="Guardar gasto" />
+              </>
+            )}
+
+            {hoja.tipo === "rendir" && dinero && (
+              <>
+                <h3 className="text-center text-xl font-bold">Rendir el viaje</h3>
+                <div className="space-y-2 rounded-xl bg-gray-50 p-4 text-sm">
+                  <Linea etiqueta="A cuenta del viaje" valor={formatCurrency(dinero.fondo_entregado)} />
+                  <Linea etiqueta="+ Cobrado en efectivo" valor={formatCurrency(dinero.cobrado_efectivo)} />
+                  <Linea etiqueta="− Gastos" valor={formatCurrency(dinero.gastos_total)} rojo />
+                  <div className="border-t pt-2"><Linea etiqueta="Efectivo en mano" valor={formatCurrency(dinero.efectivo_en_mano)} fuerte /></div>
+                  {dinero.cobrado_cheques > 0 && <Linea etiqueta="Cheques" valor={formatCurrency(dinero.cobrado_cheques)} />}
+                  {dinero.cobrado_transferencias > 0 && <Linea etiqueta="Transferencias" valor={formatCurrency(dinero.cobrado_transferencias)} />}
+                </div>
+                <div>
+                  <p className="mb-1 text-sm font-bold text-gray-700">Efectivo que entregás en oficina</p>
+                  <input
+                    type="number" inputMode="decimal" value={efectivoEntrega} onChange={(e) => setEfectivoEntrega(e.target.value)}
+                    className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-xl font-bold"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Lo que no entregues queda anotado en tu billetera.</p>
+                </div>
+                {aviso && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{aviso}</p>}
+                <Botones ocupado={ocupado} onCancelar={() => setHoja(null)} onConfirmar={rendir} texto="Rendir" naranja />
+              </>
+            )}
           </div>
         </div>
       )}
@@ -350,12 +498,26 @@ export default function ViajeDashboardPage() {
   )
 }
 
-function EstadoBadge({ estado }: { estado: string }) {
-  if (estado === "cobrado") {
-    return <span className="w-3 h-3 rounded-full bg-green-500 flex-shrink-0" />
-  }
-  if (estado === "devolucion_registrada") {
-    return <span className="w-3 h-3 rounded-full bg-amber-500 flex-shrink-0" />
-  }
-  return <span className="w-3 h-3 rounded-full bg-gray-300 flex-shrink-0" />
+function Linea({ etiqueta, valor, fuerte, rojo }: { etiqueta: string; valor: string; fuerte?: boolean; rojo?: boolean }) {
+  return (
+    <div className={`flex justify-between ${fuerte ? "text-base font-bold" : ""}`}>
+      <span className="text-gray-500">{etiqueta}</span>
+      <span className={rojo ? "font-bold text-red-600" : "font-bold"}>{valor}</span>
+    </div>
+  )
+}
+
+function Botones({ ocupado, onCancelar, onConfirmar, texto, naranja }: { ocupado: boolean; onCancelar: () => void; onConfirmar: () => void; texto: string; naranja?: boolean }) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <button onClick={onCancelar} className="rounded-2xl border-2 border-gray-300 py-4 font-bold text-gray-600 active:scale-95">Cancelar</button>
+      <button
+        onClick={onConfirmar}
+        disabled={ocupado}
+        className={`rounded-2xl py-4 font-bold text-white active:scale-95 disabled:opacity-50 ${naranja ? "bg-orange-500" : "bg-blue-600"}`}
+      >
+        {ocupado ? "Guardando…" : texto}
+      </button>
+    </div>
+  )
 }

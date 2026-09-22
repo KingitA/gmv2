@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { esTripulante } from "@/lib/viajes/chofer"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 
 // GET /api/chofer/viaje/[id]/cliente/[clienteId]
@@ -23,7 +24,7 @@ export async function GET(
       .eq("id", viajeId)
       .single()
 
-    if (!viaje || viaje.chofer_id !== auth.user.id) {
+    if (!viaje || !(await esTripulante(supabase, viajeId, auth.user.id, viaje.chofer_id))) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
 

@@ -145,15 +145,46 @@ export function marcaCreditos(pares: ParCredito[]): string {
   return `${MARCA_INICIO}${JSON.stringify(pares.map((p) => [p.tipo, p.credito_id, p.debito_id, p.monto, p.aplicar_10 ? 1 : 0]))}]`
 }
 
+/**
+ * Encuentra los límites del JSON de la marca balanceando corchetes.
+ * (El bug del 15/09: se buscaba el primer "]]" y se cortaba un carácter antes
+ * — el JSON `[["ac",...,0]]` + el `]` de cierre de la marca terminan en `]]]`
+ * y el recorte dejaba el array exterior sin cerrar: JSON.parse tiraba SIEMPRE
+ * y los créditos tildados nunca se aplicaban.)
+ */
+function limitesMarca(s: string): { desde: number; jsonDesde: number; jsonHasta: number; hasta: number } | null {
+  const i = s.indexOf(MARCA_INICIO)
+  if (i < 0) return null
+  const start = i + MARCA_INICIO.length
+  let depth = 0
+  let enString = false
+  for (let k = start; k < s.length; k++) {
+    const ch = s[k]
+    if (enString) {
+      if (ch === "\\") k++
+      else if (ch === '"') enString = false
+      continue
+    }
+    if (ch === '"') enString = true
+    else if (ch === "[") depth++
+    else if (ch === "]") {
+      depth--
+      if (depth === 0) {
+        // k = cierre del JSON; k+1 debería ser el `]` que cierra la marca
+        const cierre = s[k + 1] === "]" ? k + 2 : k + 1
+        return { desde: i, jsonDesde: start, jsonHasta: k + 1, hasta: cierre }
+      }
+    }
+  }
+  return null
+}
+
 /** Extrae y parsea la marca [CREDITOS:...] de unas observaciones. */
 export function parsearMarcaCreditos(obs: string | null | undefined): ParCredito[] {
-  const s = obs || ""
-  const i = s.indexOf(MARCA_INICIO)
-  if (i < 0) return []
-  const j = s.indexOf("]]", i)
-  if (j < 0) return []
+  const lim = limitesMarca(obs || "")
+  if (!lim) return []
   try {
-    const arr = JSON.parse(s.slice(i + MARCA_INICIO.length, j + 1))
+    const arr = JSON.parse((obs || "").slice(lim.jsonDesde, lim.jsonHasta))
     return (arr as any[]).map((p) => ({ tipo: p[0], credito_id: p[1], debito_id: p[2], monto: Number(p[3]), aplicar_10: p[4] === 1 }))
   } catch {
     return []
@@ -161,11 +192,9 @@ export function parsearMarcaCreditos(obs: string | null | undefined): ParCredito
 }
 
 export function quitarMarcaCreditos(obs: string): string {
-  const i = obs.indexOf(MARCA_INICIO)
-  if (i < 0) return obs
-  const j = obs.indexOf("]]", i)
-  if (j < 0) return obs
-  return (obs.slice(0, i) + obs.slice(j + 2)).trim()
+  const lim = limitesMarca(obs)
+  if (!lim) return obs
+  return (obs.slice(0, lim.desde) + obs.slice(lim.hasta)).trim()
 }
 
 /**
@@ -216,11 +245,22 @@ export async function ejecutarCreditosDePago(
           }
         }
       } else {
+        // Tope al saldo ACTUAL del débito: entre que se tildó el crédito y que
+        // se ejecuta pudieron pasar la NC del 10% u otros pagos — imputar el
+        // monto planificado a ciegas sobre-imputa. Lo que no haga falta queda
+        // a cuenta del cliente (disponible), que es la verdad.
+        const { data: deb } = await supabase
+          .from("comprobantes_venta")
+          .select("saldo_pendiente")
+          .eq("id", p.debito_id)
+          .maybeSingle()
+        const aplicar = Math.round(Math.min(p.monto, Math.max(0, Number(deb?.saldo_pendiente ?? p.monto))) * 100) / 100
+        if (aplicar <= 0.005) continue // el débito ya está saldado: nada que aplicar
         const { error: insErr } = await supabase.from("imputaciones").insert({
           pago_id: p.credito_id,
           comprobante_id: p.debito_id,
           tipo_comprobante: "venta",
-          monto_imputado: p.monto,
+          monto_imputado: aplicar,
           estado: "pendiente",
         })
         if (insErr) throw new Error(insErr.message)
