@@ -155,6 +155,9 @@ const depositoArticulos: DatasetDef = {
   nombre: "deposito_articulos",
   roles: ROLES,
   tablas: ["articulos"],
+  // v2 (22/09/2026): se agregó imagen_url. Al ser delta, los equipos con cursor viejo
+  // nunca habrían recibido la columna: subir la versión los obliga a un snapshot.
+  version: 2,
   // service role, igual que las server actions web de depósito (lib/actions/deposito.ts)
   cargar: (ctx, ids) => cargarArticulosDeposito(ctx.admin, ids),
 }

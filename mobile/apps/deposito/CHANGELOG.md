@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.2.1 (versionCode 4) — 2026-09-22
+
+- Descripción del artículo en dos líneas (antes se cortaba) y ficha del artículo al tocar el renglón: foto, SKU, marca y unidades por bulto
+
 ## v0.2.0 (versionCode 3) — 2026-09-18
 
 Primera versión completa: réplica fiel del módulo web `/deposito`, offline-tolerante.
