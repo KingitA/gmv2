@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { previewPrecioArticulo } from "@/lib/actions/pedidos"
 
 // GET /api/chofer/articulo/precio-historico?clienteId=&articuloId=
 // Retorna el último precio de venta de un artículo para un cliente específico.
@@ -65,6 +66,14 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    // Nunca se le facturó: el precio al que le iría facturado hoy (motor de
+    // precios del cliente: lista, método, bonificaciones).
+    try {
+      const p = await previewPrecioArticulo(clienteId, articuloId)
+      return NextResponse.json({ precio: p.precio, fecha: null, comprobante: null, fuente: "vigente" })
+    } catch (e: any) {
+      console.error("[chofer] precio vigente:", e?.message)
+    }
     return NextResponse.json({
       precio: null,
       mensaje: "No se encontraron ventas previas de este artículo al cliente",

@@ -26,7 +26,7 @@ export async function PATCH(
     const { acceso, error: accErr } = await accesoViajeChofer(supabase, id, auth.user.id)
     if (accErr) return accErr
 
-    if (acceso.viaje.estado !== "en_curso") {
+    if (!["despachado", "en_curso"].includes(acceso.viaje.estado)) {
       return NextResponse.json({ error: "El viaje no está en curso" }, { status: 400 })
     }
     if (!body.parada_id || !ESTADOS.includes(body.estado)) {

@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { ArrowUp, ArrowDown, ChevronDown, Lock, Trash2, Search, Package, Phone } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "sonner"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, formatDateTimeAR } from "@/lib/utils"
 import type { HojaRuta, ParadaHoja } from "@/lib/viajes/hoja-ruta"
 import { ESTADO_LABEL } from "@/lib/pedidos/estados"
 
@@ -78,18 +79,6 @@ export function ViajeHoja({
 
   return (
     <div className="space-y-3">
-      {/* Totales */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-md border bg-white px-3 py-2 text-sm">
-        <span><b>{t.paradas}</b> clientes</span>
-        <span><b>{t.pedidos}</b> pedidos</span>
-        <span><b>{t.bultos}</b> bultos</span>
-        <span>Este viaje <b>{formatCurrency(t.total_viaje)}</b></span>
-        {conCobranza && <span>Saldos anteriores <b>{formatCurrency(t.saldo_anterior)}</b></span>}
-        {conCobranza && <span>Total <b>{formatCurrency(t.total_a_cobrar)}</b></span>}
-        {conCobranza && t.minimo_exigido > 0 && <span className="text-red-700">Cobrar sí o sí <b>{formatCurrency(t.minimo_exigido)}</b></span>}
-        {t.resueltas > 0 && <span className="text-green-700"><b>{t.resueltas}</b>/{t.paradas} resueltas · cobrado <b>{formatCurrency(t.cobrado)}</b></span>}
-      </div>
-
       {(t.pedidos_sin_facturar > 0 || t.pedidos_sin_remito > 0) && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           {t.pedidos_sin_facturar > 0 && <>⚠ {t.pedidos_sin_facturar} pedido(s) todavía sin facturar. </>}
@@ -105,7 +94,7 @@ export function ViajeHoja({
 
       {hoja.paradas.length > 0 && (
         <div className="overflow-x-auto rounded-md border bg-white">
-          <div className="min-w-[980px]">
+          <div className="min-w-[1080px]">
             <div className={`grid ${conCobranza ? GRID_COBRANZA : GRID_TRANSPORTE} items-center gap-x-3 border-b bg-slate-50 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
               <span />
               <span>Cliente</span>
@@ -115,6 +104,7 @@ export function ViajeHoja({
               {conCobranza && <span className="text-right">Saldo ant.</span>}
               {conCobranza && <span className="text-right">Total</span>}
               {conCobranza && <span>Instrucción</span>}
+              {conCobranza && <span className="text-right">Cobrado</span>}
               <span>Estado</span>
               <span />
             </div>
@@ -173,8 +163,63 @@ export function ViajeHoja({
   )
 }
 
+// Qué cobró el chofer en esta parada: métodos, a qué comprobantes se aplicó
+// (de este viaje o anteriores), plata a cuenta, 10% contado y ajustes. Si no
+// cobró y entregó, se ve la firma/entrega sin pago.
+function DetalleCobro({ parada: p }: { parada: ParadaHoja }) {
+  const TIPO: Record<string, string> = { efectivo: "Efectivo", cheque: "Cheque", transferencia: "Transferencia", deposito: "Depósito" }
+  if (!p.pagos.length) {
+    return (
+      <div className="space-y-1">
+        <p className="font-semibold">{p.cliente_nombre}</p>
+        {p.estado === "pendiente" ? (
+          <p className="text-muted-foreground">Todavía no se cobró ni se cerró la parada.</p>
+        ) : (
+          <p className="text-muted-foreground">
+            {p.estado === "no_entregado" ? "No se entregó" : "Entregado"} sin cobro
+            {p.resuelto_at && ` · ${formatDateTimeAR(p.resuelto_at)}`}
+            {p.motivo_no_cobro && <span className="block text-red-700">Motivo: {p.motivo_no_cobro}</span>}
+            {p.motivo_no_entrega && <span className="block text-amber-700">{p.motivo_no_entrega}</span>}
+          </p>
+        )}
+        {p.devuelto > 0 && <p>Devolución registrada: {formatCurrency(p.devuelto)}</p>}
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      <p className="font-semibold">{p.cliente_nombre} · cobrado {formatCurrency(p.cobrado)}</p>
+      {p.pagos.map((pg) => (
+        <div key={pg.id} className="rounded border p-2">
+          <p className="flex justify-between text-xs text-muted-foreground">
+            <span>{formatDateTimeAR(pg.fecha)}{pg.cargado_por && ` · ${pg.cargado_por}`}</span>
+            <span>{pg.estado === "confirmado" ? "confirmado" : "pendiente de rendición"}</span>
+          </p>
+          <ul className="mt-1">
+            {pg.metodos.map((m, i) => (
+              <li key={i} className="flex justify-between"><span>{TIPO[m.tipo] || m.tipo}{m.detalle && <span className="text-muted-foreground"> · {m.detalle}</span>}</span><span className="tabular-nums">{formatCurrency(m.monto)}</span></li>
+            ))}
+          </ul>
+          <div className="mt-1 border-t pt-1 text-xs">
+            {pg.imputaciones.map((i, k) => (
+              <div key={k} className="flex justify-between">
+                <span>{i.comprobante} <span className={i.de_este_viaje ? "text-blue-700" : "text-amber-700"}>{i.de_este_viaje ? "(este viaje)" : "(anterior)"}</span></span>
+                <span className="tabular-nums">{formatCurrency(i.monto)}</span>
+              </div>
+            ))}
+            {pg.a_cuenta > 0.01 && <div className="flex justify-between"><span>A cuenta (sin aplicar)</span><span className="tabular-nums">{formatCurrency(pg.a_cuenta)}</span></div>}
+            {pg.contado_10 && <p className="text-amber-700">10% contado: la NC sale al confirmar</p>}
+            {Math.abs(pg.ajuste) > 0.005 && <p className="text-amber-700">Ajuste por redondeo {formatCurrency(pg.ajuste)}</p>}
+          </div>
+        </div>
+      ))}
+      <p className="text-xs text-muted-foreground">Aplicado a este viaje {formatCurrency(p.cobrado_viaje)} · a lo anterior {formatCurrency(p.cobrado_anterior)}</p>
+    </div>
+  )
+}
+
 // # | cliente | pedidos | bultos | este viaje | saldo ant | total | instrucción | estado | abrir
-const GRID_COBRANZA = "grid-cols-[64px_minmax(180px,1.6fr)_minmax(110px,1fr)_52px_104px_104px_112px_218px_104px_24px]"
+const GRID_COBRANZA = "grid-cols-[64px_minmax(180px,1.6fr)_minmax(100px,1fr)_52px_100px_100px_108px_206px_104px_104px_24px]"
 const GRID_TRANSPORTE = "grid-cols-[64px_minmax(200px,2fr)_minmax(140px,1.4fr)_60px_120px_110px_24px]"
 
 function Parada({
@@ -275,6 +320,21 @@ function Parada({
           </div>
         )}
 
+        {conCobranza && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                className={`text-right font-semibold tabular-nums hover:underline ${p.cobrado > 0 ? "text-green-700" : p.estado !== "pendiente" ? "text-slate-400" : "text-slate-300"}`}
+                title="Ver qué se cobró y a qué se aplicó"
+              >
+                {p.cobrado > 0 ? formatCurrency(p.cobrado) : p.estado !== "pendiente" ? "sin cobro" : "—"}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-96 text-sm">
+              <DetalleCobro parada={p} />
+            </PopoverContent>
+          </Popover>
+        )}
         <span><Badge className={`${est.cls} px-1.5 py-0 text-[10px]`}>{est.label}</Badge></span>
 
         <button className="text-slate-400 hover:text-slate-800" onClick={() => setAbierta(!abierta)} title="Detalle, nota y resultado">

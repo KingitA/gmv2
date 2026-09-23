@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { topeAjuste, marcaAjuste } from "@/lib/cobranzas/ajuste"
+import { MARCA_CONTADO } from "@/lib/constants"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
@@ -31,6 +33,8 @@ export async function POST(
       comprobante_urls, // [{url, nombre}] fotos de comprobantes
       cobros_extra,     // [{ cliente_id, monto, metodos, imputaciones }] otros clientes en la misma cobranza
       pedidos_contado,  // string[] pedidos sin facturar anticipados con 10% contado
+      contado_general,  // bool: 10% contado sobre los comprobantes saldados (NC al confirmar)
+      ajuste_redondeo,  // número con signo: +falta (crédito) / −sobra (débito), tope 1%
       idempotency_key,  // uuid del front: reintentos/doble tap devuelven el MISMO pago
     } = body
 
@@ -53,7 +57,7 @@ export async function POST(
     }
     // Fase C: el chofer puede registrar/corregir cobros también durante
     // 'en_rendicion' (hasta que oficina confirme la rendición).
-    if (!["en_curso", "en_rendicion"].includes(viaje.estado)) {
+    if (!["despachado", "en_curso", "en_rendicion"].includes(viaje.estado)) {
       return NextResponse.json({ error: "El viaje no está activo" }, { status: 400 })
     }
 
@@ -93,12 +97,28 @@ export async function POST(
     // ── Alta transaccional del pago (pendiente_rendicion) ──
     // Σ imputaciones se recorta al monto: el excedente queda como saldo del
     // comprobante hasta que lo cubra la NC (devolución/10%) o un pago futuro.
-    const impsRecortadas = recortarImputaciones(
-      ((imputaciones as any[]) || [])
-        .filter((i: any) => i?.comprobante_id)
-        .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto_imputado) })),
-      Number(monto_total),
-    )
+    const impsCompletas = ((imputaciones as any[]) || [])
+      .filter((i: any) => i?.comprobante_id)
+      .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto_imputado) }))
+
+    // Ajuste por redondeo: TOPE 1% de los comprobantes tildados (más es perdonar
+    // plata → oficina). Viaja como marca y se asienta al confirmar la rendición.
+    const montoAjuste = Math.round(Number(ajuste_redondeo || 0) * 100) / 100
+    if (Math.abs(montoAjuste) > 0.005) {
+      const tope = topeAjuste(impsCompletas.reduce((x, i) => x + i.monto_imputado, 0))
+      if (Math.abs(montoAjuste) > tope + 0.005) {
+        return NextResponse.json(
+          { error: `El ajuste (${Math.abs(montoAjuste).toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados (${tope.toFixed(2)}). Dejá el saldo pendiente: lo resuelve la oficina.` },
+          { status: 400 },
+        )
+      }
+    }
+    const conContado = Boolean(contado_general)
+    const obsPago = [observaciones, conContado ? MARCA_CONTADO : "", marcaAjuste(montoAjuste)].filter(Boolean).join(" · ") || null
+
+    // Con 10% contado el recorte es proporcional (cada comprobante recibe su
+    // 90%; la NC del 10% lo salda al confirmar). Sin contado, secuencial.
+    const impsRecortadas = recortarImputaciones(impsCompletas, Number(monto_total), conContado ? "proporcional" : "secuencial")
 
     const { pago_id, dedup } = await crearCobranza(supabase, {
       idempotency_key: idempotency_key || null,
@@ -108,7 +128,7 @@ export async function POST(
       cobrador_tipo: "chofer",
       monto: Number(monto_total),
       fecha_pago: todayArgentina(),
-      observaciones: observaciones || null,
+      observaciones: obsPago,
       estado: "pendiente_rendicion",
       creado_por: auth.user.id,
       detalles,

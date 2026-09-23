@@ -4,244 +4,151 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { formatCurrency } from "@/lib/utils"
+import { GastoSheet } from "@/components/chofer/gasto-sheet"
 
-interface Movimiento {
-  id: string
-  tipo: string
-  medio: string | null
-  monto: number
-  concepto: string | null
-  referencia_id: string | null
-  referencia_tipo: string | null
-  fecha: string
-}
+// Billetera del chofer: efectivo en mano (cobros sin rendir + plata a cuenta
+// del viaje − gastos) y cheques en mano. Cada cobro muestra cliente y método.
 
+interface Cobro { id: string; fecha: string; cliente: string; viaje: string; monto: number; metodos: string[]; estado: "en_mano" | "en_rendicion" | "rendido" }
+interface Gasto { id: string; viaje: string; categoria: string; monto: number; estado: string; observaciones: string | null; created_at: string }
+interface Fondo { id: string; viaje: string; monto: number; created_at: string }
 interface BilleteraData {
-  saldo: number
-  desglose: {
-    cobros: number
-    fondos_recibidos: number
-    gastos: number
-  }
-  movimientos: Movimiento[]
+  efectivo: number
+  desglose: { cobros_efectivo: number; fondo_viaje: number; gastos: number; cheques_monto: number; transferencias: number; en_rendicion: number }
+  cheques_cantidad: number
+  saldo_cuenta_corriente: number
+  cobros: Cobro[]
+  gastos: Gasto[]
+  fondos: Fondo[]
 }
 
-const CATEGORIAS_GASTO = [
-  { key: "nafta", label: "Nafta", emoji: "⛽" },
-  { key: "hotel", label: "Hotel", emoji: "🏨" },
-  { key: "peon", label: "Peón", emoji: "👤" },
-  { key: "cubierta", label: "Cubierta", emoji: "🔧" },
-  { key: "peaje", label: "Peaje", emoji: "🛣️" },
-  { key: "comida", label: "Comida", emoji: "🍽️" },
-  { key: "otro", label: "Otro", emoji: "📝" },
-]
+const ESTADO_COBRO: Record<string, { label: string; cls: string }> = {
+  en_mano: { label: "EN MANO", cls: "bg-green-100 text-green-700" },
+  en_rendicion: { label: "RENDIDO · ESPERANDO OFICINA", cls: "bg-amber-100 text-amber-700" },
+  rendido: { label: "CONFIRMADO", cls: "bg-gray-100 text-gray-500" },
+}
+
+const fecha = (v: string) => new Date(v).toLocaleDateString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
 
 export default function BilleteraPage() {
   const router = useRouter()
   const [data, setData] = useState<BilleteraData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [showGastoSheet, setShowGastoSheet] = useState(false)
+  const [tab, setTab] = useState<"cobros" | "gastos">("cobros")
+  const [gastoAbierto, setGastoAbierto] = useState(false)
+  const [viajeActivo, setViajeActivo] = useState<string | null>(null)
 
-  // Estado del formulario de gasto
-  const [categoria, setCategoria] = useState("nafta")
-  const [monto, setMonto] = useState("")
-  const [observaciones, setObservaciones] = useState("")
-  const [guardando, setGuardando] = useState(false)
-
-  const cargarDatos = () => {
-    setLoading(true)
+  const cargar = () => {
     fetch("/api/chofer/billetera")
       .then((r) => r.json())
       .then((d) => { if (!d.error) setData(d) })
       .finally(() => setLoading(false))
   }
+  useEffect(() => {
+    cargar()
+    fetch("/api/chofer/me").then((r) => r.json()).then((d) => setViajeActivo(d?.viaje_activo?.id || null)).catch(() => {})
+  }, [])
 
-  useEffect(() => { cargarDatos() }, [])
-
-  // "Atrás" físico: cerrar el sheet de gasto antes de salir de la página
   useBackTrap(() => {
-    if (showGastoSheet) { setShowGastoSheet(false); return true }
+    if (gastoAbierto) { setGastoAbierto(false); return true }
     return false
   })
 
-  const guardarGasto = async () => {
-    if (!monto || Number(monto) <= 0) return
-    setGuardando(true)
-    try {
-      const res = await fetch("/api/chofer/billetera/gasto", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ monto: Number(monto), categoria, observaciones }),
-      })
-      const d = await res.json()
-      if (d.success) {
-        setShowGastoSheet(false)
-        setMonto("")
-        setObservaciones("")
-        setCategoria("nafta")
-        cargarDatos()
-      }
-    } finally {
-      setGuardando(false)
-    }
-  }
-
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
       </div>
     )
   }
+  if (!data) return <div className="p-6 text-red-500">No se pudo cargar la billetera.</div>
 
-  const tipoLabel: Record<string, string> = {
-    cobro_cliente: "Cobro",
-    credito: "Fondo recibido",
-    debito: "Gasto",
-    retiro_comision: "Retiro",
-  }
+  const cobrosEnMano = data.cobros.filter((c) => c.estado === "en_mano")
+  const otros = data.cobros.filter((c) => c.estado !== "en_mano")
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-blue-700 text-white px-5 py-4 sticky top-0 z-10 shadow-md">
-        <button onClick={() => router.push("/chofer")} className="text-blue-200 text-sm mb-1">
-          ← Inicio
-        </button>
-        <h1 className="text-xl font-bold">Mi Billetera</h1>
+      <header className="sticky top-0 z-10 bg-blue-700 px-5 py-4 text-white shadow-md">
+        <button onClick={() => router.push("/chofer")} className="mb-1 text-sm text-blue-200">← Inicio</button>
+        <h1 className="text-xl font-bold">Mi billetera</h1>
       </header>
 
-      <div className="p-4 space-y-4 pb-36">
-        {/* Saldo principal */}
-        <div className="bg-blue-700 rounded-2xl p-6 text-white text-center">
-          <p className="text-blue-200 mb-1">Saldo actual</p>
-          <p className="text-5xl font-bold">{formatCurrency(data?.saldo || 0)}</p>
-        </div>
-
-        {/* Desglose */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white rounded-2xl p-4 text-center shadow-sm">
-            <p className="text-green-600 font-bold text-lg">{formatCurrency(data?.desglose.cobros || 0)}</p>
-            <p className="text-xs text-gray-500 mt-1">Cobros</p>
+      <div className="space-y-4 p-4 pb-36">
+        <div className="rounded-2xl bg-blue-700 p-5 text-white">
+          <p className="text-sm text-blue-200">Efectivo en mano</p>
+          <p className="text-4xl font-bold">{formatCurrency(data.efectivo)}</p>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+            <div><p className="text-blue-200">Cobros</p><p className="font-bold">{formatCurrency(data.desglose.cobros_efectivo)}</p></div>
+            <div><p className="text-blue-200">A cuenta viaje</p><p className="font-bold">{formatCurrency(data.desglose.fondo_viaje)}</p></div>
+            <div><p className="text-blue-200">Gastos</p><p className="font-bold text-red-200">−{formatCurrency(data.desglose.gastos)}</p></div>
           </div>
-          <div className="bg-white rounded-2xl p-4 text-center shadow-sm">
-            <p className="text-blue-600 font-bold text-lg">{formatCurrency(data?.desglose.fondos_recibidos || 0)}</p>
-            <p className="text-xs text-gray-500 mt-1">Fondos</p>
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-blue-500 pt-3 text-sm">
+            <span className="rounded-full bg-blue-600 px-3 py-1">🧾 {data.cheques_cantidad} {data.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano · {formatCurrency(data.desglose.cheques_monto)}</span>
+            {data.desglose.en_rendicion > 0 && <span className="rounded-full bg-amber-500/80 px-3 py-1">📦 {formatCurrency(data.desglose.en_rendicion)} camino a oficina</span>}
           </div>
-          <div className="bg-white rounded-2xl p-4 text-center shadow-sm">
-            <p className="text-red-500 font-bold text-lg">{formatCurrency(data?.desglose.gastos || 0)}</p>
-            <p className="text-xs text-gray-500 mt-1">Gastos</p>
-          </div>
-        </div>
-
-        {/* Movimientos */}
-        <section>
-          <h2 className="font-bold text-gray-700 mb-3">Movimientos</h2>
-          {(!data?.movimientos || data.movimientos.length === 0) ? (
-            <div className="text-center py-8 text-gray-400">
-              <p className="text-3xl mb-2">📋</p>
-              <p>Sin movimientos registrados</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {data.movimientos.map((m) => (
-                <div key={m.id} className="bg-white rounded-xl px-4 py-3 flex items-center justify-between shadow-sm border border-gray-100">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-800 text-sm truncate">
-                      {m.concepto || tipoLabel[m.tipo] || m.tipo}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {new Date(m.fecha).toLocaleDateString("es-AR", {
-                        day: "numeric",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
-                  <p className={`font-bold text-lg ml-3 flex-shrink-0 ${Number(m.monto) >= 0 ? "text-green-600" : "text-red-500"}`}>
-                    {Number(m.monto) >= 0 ? "+" : ""}{formatCurrency(Number(m.monto))}
-                  </p>
-                </div>
-              ))}
-            </div>
+          {Math.abs(data.saldo_cuenta_corriente) > 0.01 && (
+            <p className={`mt-2 text-sm ${data.saldo_cuenta_corriente < 0 ? "text-red-200" : "text-green-200"}`}>
+              {data.saldo_cuenta_corriente < 0 ? `Debés ${formatCurrency(-data.saldo_cuenta_corriente)} de rendiciones anteriores` : `Tenés ${formatCurrency(data.saldo_cuenta_corriente)} a favor de rendiciones anteriores`}
+            </p>
           )}
-        </section>
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={() => setTab("cobros")} className={`flex-1 rounded-xl py-2 text-sm font-bold ${tab === "cobros" ? "bg-blue-600 text-white" : "border border-gray-200 bg-white text-gray-600"}`}>Cobros</button>
+          <button onClick={() => setTab("gastos")} className={`flex-1 rounded-xl py-2 text-sm font-bold ${tab === "gastos" ? "bg-blue-600 text-white" : "border border-gray-200 bg-white text-gray-600"}`}>Gastos y plata recibida</button>
+        </div>
+
+        {tab === "cobros" ? (
+          <div className="space-y-2">
+            {data.cobros.length === 0 && <p className="py-8 text-center text-gray-400">Sin cobros todavía.</p>}
+            {[...cobrosEnMano, ...otros].map((c) => {
+              const est = ESTADO_COBRO[c.estado]
+              return (
+                <div key={c.id} className={`rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm ${c.estado === "rendido" ? "opacity-60" : ""}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-gray-800">{c.cliente}</p>
+                      <p className="text-xs text-gray-500">{c.metodos.join(" + ") || "Efectivo"}{c.viaje ? ` · ${c.viaje}` : ""}</p>
+                      <p className="text-xs text-gray-400">{fecha(c.fecha)}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-lg font-bold text-green-600">{formatCurrency(c.monto)}</p>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${est.cls}`}>{est.label}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {data.fondos.map((f) => (
+              <div key={f.id} className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                <div><p className="text-sm font-bold text-gray-800">A cuenta viaje {f.viaje}</p><p className="text-xs text-gray-400">{fecha(f.created_at)}</p></div>
+                <p className="text-lg font-bold text-blue-600">+{formatCurrency(f.monto)}</p>
+              </div>
+            ))}
+            {data.gastos.map((g) => (
+              <div key={g.id} className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold capitalize text-gray-800">{g.categoria}{g.observaciones ? <span className="font-normal text-gray-500"> · {g.observaciones}</span> : null}</p>
+                  <p className="text-xs text-gray-400">{g.viaje} · {fecha(g.created_at)} · {g.estado === "aprobado" ? "aprobado" : "a revisar en oficina"}</p>
+                </div>
+                <p className="text-lg font-bold text-red-500">−{formatCurrency(g.monto)}</p>
+              </div>
+            ))}
+            {data.fondos.length === 0 && data.gastos.length === 0 && <p className="py-8 text-center text-gray-400">Sin gastos ni plata recibida.</p>}
+          </div>
+        )}
       </div>
 
-      {/* Botón registrar gasto */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 shadow-lg">
-        <button
-          onClick={() => setShowGastoSheet(true)}
-          className="w-full py-4 rounded-2xl bg-red-500 text-white font-bold text-lg active:scale-95 transition-transform"
-        >
-          💸 Registrar Gasto
+      <div className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white p-4 shadow-lg">
+        <button onClick={() => setGastoAbierto(true)} className="w-full rounded-2xl bg-red-500 py-4 text-lg font-bold text-white active:scale-95 transition-transform">
+          💸 Cargar un gasto
         </button>
       </div>
 
-      {/* Sheet: Registrar gasto */}
-      {showGastoSheet && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end">
-          <div className="bg-white rounded-t-3xl w-full">
-            <div className="px-5 py-4 border-b flex items-center justify-between">
-              <h2 className="text-xl font-bold">Registrar Gasto</h2>
-              <button onClick={() => setShowGastoSheet(false)} className="text-gray-400 text-2xl">×</button>
-            </div>
-            <div className="p-5 space-y-5">
-              {/* Categoría */}
-              <div>
-                <label className="text-sm font-medium text-gray-600 mb-3 block">Categoría</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {CATEGORIAS_GASTO.map((cat) => (
-                    <button
-                      key={cat.key}
-                      onClick={() => setCategoria(cat.key)}
-                      className={`flex flex-col items-center justify-center min-h-[68px] py-3 rounded-xl border-2 transition-colors ${
-                        categoria === cat.key ? "bg-red-50 border-red-500 text-red-700" : "border-gray-200 text-gray-500"
-                      }`}
-                    >
-                      <span className="text-2xl">{cat.emoji}</span>
-                      <span className="text-xs mt-1 font-medium">{cat.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Monto */}
-              <div>
-                <label className="text-sm font-medium text-gray-600 mb-2 block">Monto</label>
-                <input
-                  type="number"
-                  value={monto}
-                  onChange={(e) => setMonto(e.target.value)}
-                  placeholder="0.00"
-                  inputMode="decimal"
-                  className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 text-3xl font-bold text-center focus:border-red-500 focus:outline-none"
-                />
-              </div>
-
-              {/* Observaciones */}
-              <div>
-                <label className="text-sm font-medium text-gray-600 mb-2 block">Observación (opcional)</label>
-                <input
-                  type="text"
-                  value={observaciones}
-                  onChange={(e) => setObservaciones(e.target.value)}
-                  placeholder="ej: Carga en YPF ruta 8..."
-                  className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:border-red-500 focus:outline-none"
-                />
-              </div>
-
-              <button
-                onClick={guardarGasto}
-                disabled={guardando || !monto || Number(monto) <= 0}
-                className="w-full py-5 bg-red-500 text-white rounded-2xl text-xl font-bold active:scale-95 disabled:opacity-50"
-              >
-                {guardando ? "Guardando..." : `Registrar ${monto ? formatCurrency(Number(monto)) : "Gasto"}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {gastoAbierto && <GastoSheet viajeId={viajeActivo} onClose={() => setGastoAbierto(false)} onGuardado={cargar} />}
     </div>
   )
 }

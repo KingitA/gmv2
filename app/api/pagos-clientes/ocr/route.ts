@@ -91,6 +91,17 @@ interface OCRResultMetodo {
   }>
 }
 
+/** CUIT argentino válido: 11 dígitos y dígito verificador (mod 11). */
+function cuitValido(v: string | null | undefined): boolean {
+  const d = String(v || "").replace(/\D/g, "")
+  if (d.length !== 11) return false
+  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+  const suma = pesos.reduce((s, p, i) => s + p * Number(d[i]), 0)
+  const resto = suma % 11
+  const dv = resto === 0 ? 0 : resto === 1 ? 9 : 11 - resto
+  return dv === Number(d[10])
+}
+
 async function processPaymentOCR(base64: string, mimeType: string): Promise<{ resultados: OCRResultMetodo[]; raw_text?: string }> {
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurado")
 
@@ -112,7 +123,7 @@ CHEQUE:
 - fecha_emision: fecha de emisión (formato YYYY-MM-DD)
 - fecha_cheque: fecha de pago/vencimiento (formato YYYY-MM-DD)
 - monto: importe numérico sin simbolos de moneda, tene en cuenta que va a estar escrito con letras y numeros, deben coincidir, devolve el monto en numeros. Debes interpretar teniendo en cuenta que un importe puede estar separando decimales con coma y miles con punto, o viceversa.
-- cuit_emisor: CUIT del titular del cheque. BUSCALO CON PRIORIDAD ALTA — es un número de 11 dígitos que puede aparecer en cualquiera de estos formatos: "CUIT: 20-12345678-9", "C.U.I.T.: 20-12345678-9", "CT: 20-12345678-9", "CT 20-12345678-9", o sin guiones como "20123456789". También puede estar en la línea inferior del cheque junto al número de cuenta. Normalmente empieza con 20, 23, 24, 27 (persona física) o 30, 33, 34 (empresa). Devolvé SIEMPRE en formato XX-XXXXXXXX-X con guiones (ej: "20-12345678-9"). Si aparece sin guiones (11 dígitos seguidos), convertilo al formato con guiones.
+- cuit_emisor: CUIT del titular del cheque. BUSCALO CON PRIORIDAD ALTA — es un número de 11 dígitos que puede aparecer en cualquiera de estos formatos: "CUIT: 20-12345678-9", "C.U.I.T.: 20-12345678-9", "CT: 20-12345678-9", "CT 20-12345678-9", o sin guiones como "20123456789". También puede estar en la línea inferior del cheque junto al número de cuenta. Normalmente empieza con 20, 23, 24, 27 (persona física) o 30, 33, 34 (empresa). Devolvé SIEMPRE en formato XX-XXXXXXXX-X con guiones (ej: "20-12345678-9"). Si aparece sin guiones (11 dígitos seguidos), convertilo al formato con guiones. COPIÁ LOS 11 DÍGITOS TAL CUAL SE LEEN, sin completar ni corregir: si no se leen los 11 con claridad, devolvé null.
 - cuits_titulares: array con TODOS los CUITs que aparecen impresos en el cheque. Las cuentas conjuntas tienen DOS titulares y el cheque muestra los dos CUITs (uno debajo del otro, generalmente junto a los nombres de los titulares) — devolvé ambos en el mismo formato XX-XXXXXXXX-X. Si hay un solo CUIT, devolvé un array con ese único CUIT.
 - localidad: ciudad/localidad del cheque si es visible
 - color_cheque: "ECHEQ" únicamente si es un cheque electrónico; si es cheque en papel devolvé null (el color NO se determina por la imagen)
@@ -161,6 +172,14 @@ Devolvé SOLO este JSON:
   }
   const resultados: OCRResultMetodo[] = parsed.resultados || []
 
+  // Un CUIT solo vale si sus 11 dígitos cierran con el verificador (mod 11):
+  // el modelo a veces "completa" dígitos que no ve y devuelve un CUIT inventado.
+  for (const r of resultados) {
+    if (r.tipo !== "cheque") continue
+    if (r.cuit_emisor && !cuitValido(r.cuit_emisor)) r.cuit_emisor = undefined
+    r.cuits_titulares = (r.cuits_titulares || []).filter(cuitValido)
+  }
+
   // Fallback regex: busca CUIT con guiones O sin guiones (11 dígitos que empiezan con 20/23/24/27/30/33/34)
   const cuitConGuiones = /\b(\d{2}-\d{8}-\d)\b/g
   const cuitSinGuiones = /\b((?:20|23|24|27|30|33|34)\d{9})\b/g
@@ -170,7 +189,7 @@ Devolvé SOLO este JSON:
     const n = m[1]
     return `${n.slice(0, 2)}-${n.slice(2, 10)}-${n.slice(10)}`
   })
-  const todosLosCuits = [...cuitsConG, ...cuitsSinG]
+  const todosLosCuits = [...cuitsConG, ...cuitsSinG].filter(cuitValido)
 
   for (const r of resultados) {
     if (r.tipo === "cheque" && !r.cuit_emisor && todosLosCuits.length > 0) {

@@ -194,14 +194,25 @@ export async function PATCH(
       return NextResponse.json({ success: true, estado: "cancelado" })
     }
 
+    const auditoria = { actualizado_por: auth.user.id, actualizado_at: new Date().toISOString() }
+
     if (!viajeEditable(viaje.estado)) {
-      if (body.observaciones === undefined) return errorJson("El viaje ya fue despachado: solo se editan las observaciones")
-      const { error } = await supabase.from("viajes").update({ observaciones: body.observaciones || null }).eq("id", id)
+      // Despachado en adelante: solo observaciones y, hasta que salga, la fecha
+      // (reprogramar arrastrando en el calendario).
+      const cambios: Record<string, any> = { ...auditoria }
+      if (body.observaciones !== undefined) cambios.observaciones = body.observaciones || null
+      if (body.fecha !== undefined) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(body.fecha)) return errorJson("fecha inválida (AAAA-MM-DD)")
+        if (viaje.estado !== "despachado") return errorJson("El viaje ya salió: no se cambia la fecha")
+        cambios.fecha = body.fecha
+      }
+      if (Object.keys(cambios).length === 2) return errorJson("El viaje ya fue despachado: solo se editan la fecha y las observaciones")
+      const { error } = await supabase.from("viajes").update(cambios).eq("id", id)
       if (error) throw error
       return NextResponse.json({ success: true })
     }
 
-    const cambios: Record<string, any> = {}
+    const cambios: Record<string, any> = { ...auditoria }
     if (body.nombre !== undefined && String(body.nombre).trim()) cambios.nombre = String(body.nombre).trim()
     if (body.fecha !== undefined) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(body.fecha)) return errorJson("fecha inválida (AAAA-MM-DD)")
@@ -230,7 +241,7 @@ export async function PATCH(
       await guardarZonas(supabase, id, zonaIds)
     }
 
-    if (Object.keys(cambios).length) {
+    {
       const { error } = await supabase.from("viajes").update(cambios).eq("id", id)
       if (error) throw error
     }
