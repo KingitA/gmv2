@@ -3,6 +3,21 @@
 @import "tailwindcss";
 @source "../";
 
+/* Colores de "marca" de la cáscara compartida (barra superior, login, botón primario e
+   indicadores de red/cola). Los valores por defecto son EXACTAMENTE los de siempre
+   (slate-900, slate-700, emerald-600, amber-500): Depósito y Chofer se ven igual.
+   Cada app puede redefinirlos en su propia hoja (ej. apps/vendedor/src/tema.css). */
+@theme {
+  --color-barra: oklch(20.8% 0.042 265.755);
+  --color-barra-activo: oklch(37.2% 0.044 257.287);
+  --color-en-linea: oklch(59.6% 0.145 163.225);
+  --color-en-linea-texto: #fff;
+  --color-sin-red: oklch(76.9% 0.188 70.08);
+  --color-sin-red-texto: oklch(20.8% 0.042 265.755);
+  --color-en-cola: oklch(76.9% 0.188 70.08);
+  --color-en-cola-texto: oklch(20.8% 0.042 265.755);
+}
+
 html,
 body,
 #root {

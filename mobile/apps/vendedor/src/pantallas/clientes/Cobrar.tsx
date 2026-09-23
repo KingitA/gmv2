@@ -732,7 +732,7 @@ export function Cobrar() {
                         ? { label: p.mia ? "🧍 En tu poder · sin rendir" : "🧍 En poder del vendedor · sin rendir", cls: "text-amber-700" }
                         : p.estado === "pendiente"
                           ? { label: "🏢 En oficina · sin confirmar", cls: "text-sky-700" }
-                          : { label: "✅ Confirmada por oficina", cls: "text-emerald-700" }
+                          : { label: "✅ Confirmada por oficina", cls: "text-green-700" }
                     return (
                       <div key={p.pago_id} className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 ${rechazada ? "border-red-200 bg-red-50/50 opacity-80" : activo ? "border-emerald-400 bg-emerald-50" : "border-gray-200 bg-white"}`}>
                         <button

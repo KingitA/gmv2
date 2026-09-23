@@ -56,7 +56,7 @@ export function PantallaLogin({ nombreApp }: { nombreApp: string }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center bg-slate-900 p-6">
+    <div className="flex min-h-dvh flex-col justify-center bg-barra p-6">
       <form onSubmit={enviar} className="space-y-4 rounded-2xl bg-white p-6 shadow-xl">
         <div>
           <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">GM</div>
@@ -67,7 +67,7 @@ export function PantallaLogin({ nombreApp }: { nombreApp: string }) {
             {recientes.map((e) => (
               <button
                 key={e} type="button" onClick={() => setEmail(e)}
-                className={`h-11 rounded-full border px-3 text-sm font-semibold ${email === e ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-slate-50 text-slate-700"}`}
+                className={`h-11 rounded-full border px-3 text-sm font-semibold ${email === e ? "border-barra bg-barra text-white" : "border-slate-300 bg-slate-50 text-slate-700"}`}
               >
                 {e.split("@")[0]}
               </button>

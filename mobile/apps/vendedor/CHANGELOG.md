@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## Sin publicar
+
+- Colores nuevos (sistema Megasur): barra azul, fondos claros, ofertas en ámbar, "sin enviar" en lavanda. Mismas pantallas y funciones
+
 ## v0.2.2 (versionCode 5) — 2026-09-23
 
 - Validada contra producción: el alta de un cliente se ve en la cartera al instante; la lista de artículos comprados (devoluciones) vuelve a cargar

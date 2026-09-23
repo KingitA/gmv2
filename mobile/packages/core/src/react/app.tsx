@@ -25,7 +25,7 @@ function ErrorRuta() {
     <div className="p-6">
       <h1 className="text-lg font-semibold">Algo salió mal en esta pantalla</h1>
       <p className="mt-2 text-sm text-slate-600">Los datos cargados y las operaciones pendientes están a salvo.</p>
-      <button className="mt-4 h-12 rounded-lg bg-slate-900 px-4 font-semibold text-white" onClick={() => location.replace("/")}>
+      <button className="mt-4 h-12 rounded-lg bg-barra px-4 font-semibold text-white" onClick={() => location.replace("/")}>
         Volver al inicio
       </button>
     </div>

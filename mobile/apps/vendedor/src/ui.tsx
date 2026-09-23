@@ -67,8 +67,9 @@ export function CartelPreciosVencidos({ visible }: { visible: boolean }) {
   )
 }
 
-export const SinEnviar = ({ texto = "sin enviar" }: { texto?: string }) => (
-  <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-px text-[11px] font-extrabold text-amber-700">⇪ {texto}</span>
+/** Guardado en el equipo y todavía sin enviar: lavanda (Megasur: "sin sincronizar"). Rechazado: rojo. */
+export const SinEnviar = ({ texto = "sin enviar", rechazado = false }: { texto?: string; rechazado?: boolean }) => (
+  <span className={`shrink-0 rounded-full border px-2 py-px text-[11px] font-extrabold ${rechazado ? "border-red-200 bg-red-50 text-red-700" : "border-lavanda-200 bg-lavanda-50 text-lavanda-700"}`}>⇪ {texto}</span>
 )
 
 /** Operaciones que el servidor rechazó, visibles donde importan, con el motivo y una salida clara. */
@@ -150,7 +151,7 @@ export function useToast() {
   }, [])
   useEffect(() => () => clearTimeout(timer.current), [])
   const nodo = toast ? (
-    <div className={`fixed left-1/2 top-[72px] z-[300] max-w-[92vw] -translate-x-1/2 rounded-2xl px-5 py-3 text-center text-[15px] font-semibold text-white shadow-lg ${toast.tipo === "ok" ? "bg-emerald-600" : "bg-red-600"}`}>
+    <div className={`fixed left-1/2 top-[72px] z-[300] max-w-[92vw] -translate-x-1/2 rounded-2xl px-5 py-3 text-center text-[15px] font-semibold text-white shadow-lg ${toast.tipo === "ok" ? "bg-green-600" : "bg-red-600"}`}>
       {toast.msg}
     </div>
   ) : null
@@ -293,18 +294,24 @@ export function useEnterCierraTeclado() {
 // ─── Estados de pedido (una sola tabla: en la web había tres copias distintas) ─
 
 export const ESTADO_BADGE: Record<string, string> = {
-  en_venta: "bg-amber-100 text-amber-800",
-  pendiente: "bg-yellow-100 text-yellow-800",
-  impreso: "bg-green-100 text-green-800",
-  en_preparacion: "bg-blue-100 text-blue-800",
-  en_viaje: "bg-purple-100 text-purple-800",
-  confirmado: "bg-blue-100 text-blue-800",
-  facturado: "bg-emerald-100 text-emerald-800",
-  entregado: "bg-emerald-100 text-emerald-800",
-  cancelado: "bg-red-100 text-red-800",
+  // Chips Megasur: fondo tono 50 + texto tono 700/800 + punto de color
+  en_venta: "bg-neutro-100 text-neutro-700",
+  pendiente: "bg-alerta-50 text-alerta-700",
+  impreso: "bg-azul-50 text-azul-700",
+  en_preparacion: "bg-azul-50 text-azul-700",
+  en_viaje: "bg-azul-100 text-azul-800",
+  confirmado: "bg-azul-50 text-azul-700",
+  facturado: "bg-cian-50 text-cian-800",
+  entregado: "bg-exito-50 text-exito-700",
+  cancelado: "bg-error-50 text-error-700",
 }
 const ESTADO_TEXTO: Record<string, string> = { en_venta: "EN VENTA", pendiente: "PENDIENTE", impreso: "IMPRESO", en_preparacion: "EN PREPARACIÓN", en_viaje: "EN VIAJE" }
 export const estadoTexto = (e: string) => ESTADO_TEXTO[e] || e.toUpperCase()
 export function BadgeEstado({ estado }: { estado: string }) {
-  return <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${ESTADO_BADGE[estado] || "bg-gray-100 text-gray-700"}`}>{estadoTexto(estado)}</span>
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold ${ESTADO_BADGE[estado] || "bg-gray-100 text-gray-700"}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
+      {estadoTexto(estado)}
+    </span>
+  )
 }

@@ -172,7 +172,7 @@ function HojaArticulo({ a, onCerrar, onZoom, onAgregado }: { a: Articulo; onCerr
           {a.unidades_por_bulto ? <span>{a.unidades_por_bulto} u/bulto</span> : null}
           {(a.cantidad_fraccion || 0) > 1 ? <span>{labelFraccion()} ×{a.cantidad_fraccion}</span> : null}
           <span className={a.stock_disponible > 0 ? "font-medium text-green-600" : "font-medium text-red-600"}>Stock: {a.stock_disponible}</span>
-          {a.descuento_propio > 0 && !precio?.especial && <span className="font-bold text-red-600">Oferta -{a.descuento_propio}%</span>}
+          {a.descuento_propio > 0 && !precio?.especial && <span className="rounded bg-ambar-400 px-1.5 font-bold text-azul-900">Oferta -{a.descuento_propio}%</span>}
         </div>
 
         <div className="rounded-xl bg-gray-50 p-4 text-center">
@@ -181,7 +181,7 @@ function HojaArticulo({ a, onCerrar, onZoom, onAgregado }: { a: Articulo; onCerr
               <>
                 <span className="mb-1 inline-block rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-bold text-violet-700">LISTA ESPECIAL</span>
                 {precio.especial.oferta_pct > 0 && (
-                  <p className="text-sm text-gray-400"><span className="line-through">{formatCurrency(precio.especial.bruto)}</span> <span className="font-bold text-red-600">-{precio.especial.oferta_pct}%</span></p>
+                  <p className="text-sm text-gray-400"><span className="line-through">{formatCurrency(precio.especial.bruto)}</span> <span className="rounded bg-ambar-400 px-1.5 font-bold text-azul-900">-{precio.especial.oferta_pct}%</span></p>
                 )}
                 <p className="text-3xl font-bold text-gray-900">{formatCurrency(precio.precioNeto)}<span className="text-sm font-medium text-gray-400"> neto</span></p>
                 <p className="mt-1 text-sm text-gray-500">+ 21% IVA = {formatCurrency(precio.precio)} · sin precio contado</p>

@@ -68,10 +68,10 @@ function PedidoLocal({ vista }: { vista: Vista }) {
     <Pantalla titulo="Pedido sin enviar">
       {toast}
       <div className="mx-auto w-full max-w-2xl space-y-3 p-4">
-        <div className={`rounded-2xl border p-4 ${local.estado === "rechazado" ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>
+        <div className={`rounded-2xl border p-4 ${local.estado === "rechazado" ? "border-red-200 bg-red-50" : "border-lavanda-200 bg-lavanda-50"}`}>
           <div className="flex items-center gap-2">
             <p className="flex-1 font-bold text-gray-900">{p.vista.cliente_nombre}</p>
-            <SinEnviar texto={local.estado === "enviando" ? "enviando…" : local.estado === "rechazado" ? "no se pudo enviar" : "pendiente de enviar"} />
+            <SinEnviar rechazado={local.estado === "rechazado"} texto={local.estado === "enviando" ? "enviando…" : local.estado === "rechazado" ? "no se pudo enviar" : "pendiente de enviar"} />
           </div>
           <p className="mt-1 text-sm text-gray-600">
             {local.estado === "rechazado"
@@ -221,7 +221,7 @@ function PedidoServidor({ vista }: { vista: Vista }) {
     <Pantalla
       titulo={pedido.numero_pedido ? `Pedido Nº ${pedido.numero_pedido}` : "Pedido"}
       dataset={DS.pedidos}
-      derecha={<span className="mr-1">{local ? <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-[10px] font-bold text-white">Guardando…</span> : <BadgeEstado estado={pedido.estado} />}</span>}
+      derecha={<span className="mr-1">{local ? <span className="rounded-full bg-lavanda-700 px-2.5 py-1 text-[10px] font-bold text-white">Guardando…</span> : <BadgeEstado estado={pedido.estado} />}</span>}
       pie={
         <div className="border-t border-gray-200 bg-white px-4 py-3">
           <div className="mx-auto flex max-w-2xl items-center justify-between">

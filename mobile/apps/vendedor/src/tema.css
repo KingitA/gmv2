@@ -1,0 +1,259 @@
+/* Tema visual de la app Vendedor: sistema de color Megasur (v1).
+   SOLO colores: no cambia medidas, pantallas ni comportamiento.
+
+   Cómo funciona: la app sigue escribiendo las clases de Tailwind de siempre y acá se
+   redefinen las familias que usa, así cada una toma su equivalente Megasur:
+     emerald (la "marca" de la app) → Azul Megasur     gray / slate → neutros tintados de azul
+     green → éxito       red → error       amber / orange / yellow → alerta
+     blue / sky → cian (info, "el sistema")     violet / purple / indigo → lavanda
+   Ámbar Oferta queda reservado a lo comercial (ofertas) y "sin enviar" es lavanda: esos
+   dos se usan con sus nombres propios (bg-ambar-*, bg-lavanda-*).
+   Depósito y Chofer no importan esta hoja: no cambian. */
+@import "@gm/core/styles.css";
+
+@theme {
+  /* Cáscara compartida (tokens definidos en packages/core/src/ui/styles.css) */
+  --color-barra: #33378E;
+  --color-barra-activo: #2A2E77;
+  --color-en-linea: #13A6CB;
+  --color-en-linea-texto: #171A45;
+  --color-sin-red: #E8711A;
+  --color-sin-red-texto: #171A45;
+  --color-en-cola: #8B8FDB;
+  --color-en-cola-texto: #171A45;
+
+  /* Paleta Megasur (nombres propios, para usar explícitamente) */
+  --color-azul-50: #EEEEF6;
+  --color-azul-100: #CFD0E4;
+  --color-azul-200: #B0B1D3;
+  --color-azul-300: #9093C2;
+  --color-azul-400: #7174B1;
+  --color-azul-500: #52569F;
+  --color-azul-600: #33378E;
+  --color-azul-700: #2A2E77;
+  --color-azul-800: #222561;
+  --color-azul-900: #171A45;
+  --color-cian-50: #E9F7FA;
+  --color-cian-100: #BEE7F1;
+  --color-cian-200: #93D6E7;
+  --color-cian-300: #69C6DE;
+  --color-cian-400: #3EB6D4;
+  --color-cian-500: #13A6CB;
+  --color-cian-600: #128BAE;
+  --color-cian-700: #106F90;
+  --color-cian-800: #0F5473;
+  --color-cian-900: #0D3955;
+  --color-lavanda-50: #F2F3FB;
+  --color-lavanda-100: #D9DAF3;
+  --color-lavanda-200: #BFC1EB;
+  --color-lavanda-300: #A5A8E3;
+  --color-lavanda-400: #8B8FDB;
+  --color-lavanda-500: #787BC0;
+  --color-lavanda-600: #6468A4;
+  --color-lavanda-700: #515489;
+  --color-lavanda-800: #3D406D;
+  --color-lavanda-900: #2A2D52;
+  --color-ambar-50: #FFF7E6;
+  --color-ambar-100: #FFE7B4;
+  --color-ambar-200: #FFD881;
+  --color-ambar-300: #FFC84F;
+  --color-ambar-400: #FFB81C;
+  --color-ambar-500: #E6A418;
+  --color-ambar-600: #CD9014;
+  --color-ambar-700: #B47C0F;
+  --color-ambar-800: #9B670B;
+  --color-ambar-900: #825307;
+  --color-neutro-50: #F7F8FC;
+  --color-neutro-100: #F0F1F7;
+  --color-neutro-200: #E3E5EF;
+  --color-neutro-300: #CDD0DF;
+  --color-neutro-400: #8187A1;
+  --color-neutro-500: #5E6480;
+  --color-neutro-600: #454A63;
+  --color-neutro-700: #31354A;
+  --color-neutro-800: #20233A;
+  --color-neutro-900: #171A45;
+  --color-exito-50: #E6F4EE;
+  --color-exito-100: #C5E6D7;
+  --color-exito-200: #9DD3BA;
+  --color-exito-300: #6BBB97;
+  --color-exito-400: #3FA276;
+  --color-exito-500: #1F8F62;
+  --color-exito-600: #15805A;
+  --color-exito-700: #126E4D;
+  --color-exito-800: #0F5A3F;
+  --color-exito-900: #0B4430;
+  --color-alerta-50: #FDF0E6;
+  --color-alerta-100: #FADCC2;
+  --color-alerta-200: #F6C196;
+  --color-alerta-300: #F1A566;
+  --color-alerta-400: #EC8A3E;
+  --color-alerta-500: #E8711A;
+  --color-alerta-600: #B8560F;
+  --color-alerta-700: #9C490D;
+  --color-alerta-800: #7D3A0A;
+  --color-alerta-900: #5E2C08;
+  --color-error-50: #FBEBED;
+  --color-error-100: #F6D0D5;
+  --color-error-200: #EFB0B9;
+  --color-error-300: #E68594;
+  --color-error-400: #DC5A6D;
+  --color-error-500: #D84459;
+  --color-error-600: #D2364B;
+  --color-error-700: #B02A3D;
+  --color-error-800: #8C2231;
+  --color-error-900: #6A1A25;
+
+  /* Familias de Tailwind que ya usa la app → su equivalente Megasur */
+  /* emerald */
+  --color-emerald-50: #EEEEF6;
+  --color-emerald-100: #CFD0E4;
+  --color-emerald-200: #B0B1D3;
+  --color-emerald-300: #9093C2;
+  --color-emerald-400: #7174B1;
+  --color-emerald-500: #52569F;
+  --color-emerald-600: #33378E;
+  --color-emerald-700: #2A2E77;
+  --color-emerald-800: #222561;
+  --color-emerald-900: #171A45;
+  --color-emerald-950: #12142A;
+  /* gray */
+  --color-gray-50: #F7F8FC;
+  --color-gray-100: #F0F1F7;
+  --color-gray-200: #E3E5EF;
+  --color-gray-300: #CDD0DF;
+  --color-gray-400: #8187A1;
+  --color-gray-500: #5E6480;
+  --color-gray-600: #454A63;
+  --color-gray-700: #31354A;
+  --color-gray-800: #20233A;
+  --color-gray-900: #171A45;
+  --color-gray-950: #12142A;
+  /* slate */
+  --color-slate-50: #F7F8FC;
+  --color-slate-100: #F0F1F7;
+  --color-slate-200: #E3E5EF;
+  --color-slate-300: #CDD0DF;
+  --color-slate-400: #8187A1;
+  --color-slate-500: #5E6480;
+  --color-slate-600: #454A63;
+  --color-slate-700: #31354A;
+  --color-slate-800: #20233A;
+  --color-slate-900: #171A45;
+  --color-slate-950: #12142A;
+  /* green */
+  --color-green-50: #E6F4EE;
+  --color-green-100: #C5E6D7;
+  --color-green-200: #9DD3BA;
+  --color-green-300: #6BBB97;
+  --color-green-400: #3FA276;
+  --color-green-500: #1F8F62;
+  --color-green-600: #15805A;
+  --color-green-700: #126E4D;
+  --color-green-800: #0F5A3F;
+  --color-green-900: #0B4430;
+  /* red */
+  --color-red-50: #FBEBED;
+  --color-red-100: #F6D0D5;
+  --color-red-200: #EFB0B9;
+  --color-red-300: #E68594;
+  --color-red-400: #DC5A6D;
+  --color-red-500: #D84459;
+  --color-red-600: #D2364B;
+  --color-red-700: #B02A3D;
+  --color-red-800: #8C2231;
+  --color-red-900: #6A1A25;
+  /* amber */
+  --color-amber-50: #FDF0E6;
+  --color-amber-100: #FADCC2;
+  --color-amber-200: #F6C196;
+  --color-amber-300: #F1A566;
+  --color-amber-400: #EC8A3E;
+  --color-amber-500: #E8711A;
+  --color-amber-600: #B8560F;
+  --color-amber-700: #9C490D;
+  --color-amber-800: #7D3A0A;
+  --color-amber-900: #5E2C08;
+  /* orange */
+  --color-orange-50: #FDF0E6;
+  --color-orange-100: #FADCC2;
+  --color-orange-200: #F6C196;
+  --color-orange-300: #F1A566;
+  --color-orange-400: #EC8A3E;
+  --color-orange-500: #E8711A;
+  --color-orange-600: #B8560F;
+  --color-orange-700: #9C490D;
+  --color-orange-800: #7D3A0A;
+  --color-orange-900: #5E2C08;
+  /* yellow */
+  --color-yellow-50: #FDF0E6;
+  --color-yellow-100: #FADCC2;
+  --color-yellow-200: #F6C196;
+  --color-yellow-300: #F1A566;
+  --color-yellow-400: #EC8A3E;
+  --color-yellow-500: #E8711A;
+  --color-yellow-600: #B8560F;
+  --color-yellow-700: #9C490D;
+  --color-yellow-800: #7D3A0A;
+  --color-yellow-900: #5E2C08;
+  /* blue */
+  --color-blue-50: #E9F7FA;
+  --color-blue-100: #BEE7F1;
+  --color-blue-200: #93D6E7;
+  --color-blue-300: #69C6DE;
+  --color-blue-400: #3EB6D4;
+  --color-blue-500: #13A6CB;
+  --color-blue-600: #128BAE;
+  --color-blue-700: #106F90;
+  --color-blue-800: #0F5473;
+  --color-blue-900: #0D3955;
+  /* sky */
+  --color-sky-50: #E9F7FA;
+  --color-sky-100: #BEE7F1;
+  --color-sky-200: #93D6E7;
+  --color-sky-300: #69C6DE;
+  --color-sky-400: #3EB6D4;
+  --color-sky-500: #13A6CB;
+  --color-sky-600: #128BAE;
+  --color-sky-700: #106F90;
+  --color-sky-800: #0F5473;
+  --color-sky-900: #0D3955;
+  /* violet */
+  --color-violet-50: #F2F3FB;
+  --color-violet-100: #D9DAF3;
+  --color-violet-200: #BFC1EB;
+  --color-violet-300: #A5A8E3;
+  --color-violet-400: #8B8FDB;
+  --color-violet-500: #787BC0;
+  --color-violet-600: #6468A4;
+  --color-violet-700: #515489;
+  --color-violet-800: #3D406D;
+  --color-violet-900: #2A2D52;
+  /* purple */
+  --color-purple-50: #F2F3FB;
+  --color-purple-100: #D9DAF3;
+  --color-purple-200: #BFC1EB;
+  --color-purple-300: #A5A8E3;
+  --color-purple-400: #8B8FDB;
+  --color-purple-500: #787BC0;
+  --color-purple-600: #6468A4;
+  --color-purple-700: #515489;
+  --color-purple-800: #3D406D;
+  --color-purple-900: #2A2D52;
+  /* indigo */
+  --color-indigo-50: #F2F3FB;
+  --color-indigo-100: #D9DAF3;
+  --color-indigo-200: #BFC1EB;
+  --color-indigo-300: #A5A8E3;
+  --color-indigo-400: #8B8FDB;
+  --color-indigo-500: #787BC0;
+  --color-indigo-600: #6468A4;
+  --color-indigo-700: #515489;
+  --color-indigo-800: #3D406D;
+  --color-indigo-900: #2A2D52;
+}
+
+body {
+  background: #F7F8FC;
+  color: #171A45;
+}
