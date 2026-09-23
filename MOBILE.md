@@ -1283,9 +1283,9 @@ solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos 
 | Modo avión con el interruptor del equipo | — | 🟡 "sin señal" se simuló cortando el túnel `adb reverse` (servidor inalcanzable de verdad) para no tocar ajustes del equipo. El camino "red caída según Android" es el de la fundación, ya validado con Chofer y Depósito |
 | Backend real (datasets y handlers contra Supabase) | — | 🟡 tipado y tests en verde; **sin ejecutar**: necesita la migración, el deploy en `main` y un usuario vendedor. La re-verificación de precios contra el historial real se ejercita ahí |
 
-### Cheques: foto, OCR y BCRA (23/09/2026 — rama `cheques-ocr-bcra`, PENDIENTE DE APK)
+### Cheques: foto, OCR y BCRA (23/09/2026 — en `main`, validado en el preview con cheques reales; PENDIENTE DE APK)
 
-Cambio en la rama, retrocompatible con la v0.2.3 instalada (misma ruta de OCR y misma
+Retrocompatible con la v0.2.3 instalada (misma ruta de OCR y misma
 `cobro.registrar`; los campos nuevos son opcionales). Sale en la próxima actualización
 batcheada. Lógica compartida en `lib/cheques/` (alias `@gm/cheques`; tests en
 `test/cheques.test.ts`), la misma para chofer web, vendedor web y la app.
