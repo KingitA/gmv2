@@ -656,7 +656,7 @@ Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo ind
 | Chofer v0.1.1 **release** en el NuStar contra gmv2.vercel.app | ✅ login, viajes reales, reloj 2 s de desfasaje |
 | Vendedor viejo v1.1 (`com.gm.vendedor`, otra firma) | ✅ desinstalado del NuStar |
 | **App Depósito completa** (Sesión 3) | ✅ **CERRADA 18/09/2026**: en `main` (merge `3862a9a`), migraciones aplicadas, APK `deposito-v0.2.0` en el NuStar, checklist contra producción superado y base verificada idéntica (§17). Pendientes del mes de prueba: §17 |
-| **App Vendedor completa** (Sesión 1) | 🟡 en la rama `apk-vendedor`: app, servidor, mock y tests ✅; probada en navegador y en el equipo contra el mock. **Falta** (requiere al dueño): aplicar la migración, merge a `main` y prueba contra el backend real con un usuario vendedor (§18) |
+| **App Vendedor completa** (Sesión 1) | ✅ **CERRADA 23/09/2026**: en `main`, migración aplicada, `vendedor-v0.2.2` en el NuStar, checklist contra producción superado (§18) |
 | Datasets/handlers y pantallas de chofer | ⏳ sesión Chofer (hoy solo el esqueleto de la fundación) |
 
 ### Validación en producción (18/09/2026)
@@ -1194,18 +1194,38 @@ solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos 
 | Modo avión con el interruptor del equipo | — | 🟡 "sin señal" se simuló cortando el túnel `adb reverse` (servidor inalcanzable de verdad) para no tocar ajustes del equipo. El camino "red caída según Android" es el de la fundación, ya validado con Chofer y Depósito |
 | Backend real (datasets y handlers contra Supabase) | — | 🟡 tipado y tests en verde; **sin ejecutar**: necesita la migración, el deploy en `main` y un usuario vendedor. La re-verificación de precios contra el historial real se ejercita ahí |
 
-### Puesta en marcha — PENDIENTE (requiere al dueño)
-1. Revisar la rama `apk-vendedor` (preview de Vercel) y autorizar el merge a `main`.
-2. Aplicar `supabase/migrations/20260921_mobile_vendedor.sql` (aditiva: una columna + un índice).
-3. Instalar `dist-apks/vendedor-v0.2.0.apk` e ingresar con un usuario vendedor.
-4. Checklist contra producción con datos `TEST-VENDEDOR` (mismo método que Depósito, con foto
-   antes/después): pedido sin señal → 1 pedido, total al centavo, 0 filas en
-   `mobile_alertas_integridad`; cambio de precio real con el equipo en modo avión; cobro y
-   devolución; alta de cliente + pedido sin señal; rechazo por pedido ya facturado.
-5. En esa prueba, verificar el rechazo real: anular un comprobante desde el ERP con un cobro
-   suyo sin enviar en el equipo ⇒ al reconectar debe volver RECHAZADO con el motivo (confirma que
-   PostgREST entrega `code: "P0001"` para los `RAISE` de `cobranza_crear`; si llegara otro código,
-   se ajusta `SQLSTATE_REGLA_NEGOCIO` en `lib/cobranzas/errores.ts`).
+### Puesta en marcha — HECHA (21–23/09/2026)
+1. ✅ Preview `37b72ed` verificada por el dueño (importación IA, pedido ERP, bonificados, vendedor web, cobro/anulación) → merge a `main` (`a4371c4`).
+2. ✅ Migración `20260921_mobile_vendedor.sql` aplicada por el dueño (`pedidos.movil_local_id` + índice UNIQUE).
+3. ✅ Correcciones encontradas contra producción, mergeadas con OK del dueño (`1682a26`): lista de artículos
+   comprados (devoluciones) con la FK correcta — **bug preexistente de la web** (`comprobante_venta_id` no existe
+   en `comprobantes_venta_detalle`: la lista devolvía 500); parches de réplica de cartera y cuenta corriente
+   independientes; mensaje de rechazo sin prefijo duplicado.
+4. ✅ NuStar con el release `vendedor-v0.2.2` (arranque en frío 0,83 s). El dueño ingresa una vez.
+
+### Checklist contra PRODUCCIÓN en el NuStar 65-sp (21–23/09/2026) — SUPERADO
+Usuario vendedor real del dueño; APK de prueba apuntando a producción (inspeccionable por CDP). Datos marcados
+`TEST-VENDEDOR`, registrados por id y borrados al final. Foto de solo lectura: `scripts/foto-vendedor.cjs`.
+
+| Prueba | Resultado |
+|---|---|
+| Código real de rechazo de `cobranza_crear` | ✅ PostgREST entrega `code: "P0001"` (mensaje con prefijo de la RPC) |
+| Réplica real (13 datasets) | ✅ tras el fix de comprados: 11 cuentas corrientes, comprados reales (p. ej. 73 artículos en un cliente) |
+| Alta de cliente desde la app | ✅ id generado en el equipo, vendedor y lista Neco correctos |
+| Pedido online 001584 | ✅ total equipo = servidor al centavo (renglón por renglón), 0 alertas de integridad (recálculo contra el historial real) |
+| **Reintento del pedido** (misma clave, y clave nueva con el mismo `local_id`) | ✅ `duplicado` / `creado:false`: 1 pedido, 2 renglones, 2 kardex, 2 comisiones; stock sin cambios |
+| **Modo avión con el interruptor del equipo**: pedido A → cobro de un presupuesto de $ 1.000 → pedido B; matar la app desde recientes; reabrir | ✅ 3 operaciones pendientes intactas; reabrió en frío (0,95 s) sin login |
+| Presupuesto anulado en el ERP mientras el equipo estaba sin señal; reconectar | ✅ pedido A (001614) y pedido B (001615) entraron **1 vez**, al centavo, precios verificados, 0 alertas |
+| **Cobro rechazado contra la base real** | ✅ rechazado al primer intento ("el comprobante … está anulado — no se puede cobrar"), 0 pagos; **la cola no se trabó** (el pedido B, detrás, entró); aviso rojo en el inicio y contador "1 rechazada" |
+| **Limpieza** | ✅ 25 filas borradas por id; foto antes/después de la limpieza: la diferencia es EXACTAMENTE lo borrado (stock de cada artículo, saldo de cada cliente y saldos financieros idénticos); 0 rastros de `TEST-VENDEDOR` |
+
+La foto "antes" original (21/09) no puede coincidir literalmente: entre el 21 y el 23 hubo actividad real (28
+pedidos de otros, altas de artículos, bancos, un movimiento de billetera legítimo "a cuenta viaje BAHIA"). Por eso la
+prueba de limpieza compara la foto de justo antes de borrar con la de después.
+Queda solo lo no reversible: entradas del log `mobile_cambios` (se purgan a los 30 días) y el número de pedido
+001584 consumido (salto en la numeración; 001614/001615 se vuelven a usar porque la numeración toma el máximo).
+Nota del dato de prueba: el presupuesto se insertó sin asiento en el libro mayor, por eso el saldo proyectado del
+cliente de prueba se vio en −$ 1.000 mientras el cobro estuvo sin enviar (esperable con ese dato artificial).
 
 ### Probar sin backend
 `cd mobile && node scripts/fixture-vendedor.mjs` (una vez; solo lectura; el JSON tiene datos reales
