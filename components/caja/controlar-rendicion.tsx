@@ -284,6 +284,40 @@ export function ControlarRendicion({
               </div>
             )}
 
+            {/* Se declaró mal (p.ej. efectivo 0): vuelve al cobrador para que
+                rinda de nuevo, sin tocar los cobros. */}
+            {pagosDeclarados.length > 0 && (
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-600">
+                  ¿Declaró mal? Devolvésela: los cobros quedan en su mano y vuelve a rendir con el arqueo correcto.
+                </p>
+                <button
+                  onClick={async () => {
+                    const motivo = prompt("¿Por qué se devuelve? (lo ve el cobrador)") ?? ""
+                    if (!motivo.trim()) return
+                    setGuardando(true)
+                    try {
+                      const res = await fetch(`/api/finanzas/rendiciones/${rendicionId}/devolver`, {
+                        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ motivo }),
+                      })
+                      const data = await res.json()
+                      if (!res.ok) throw new Error(data.error || "No se pudo devolver")
+                      toast({ title: "Rendición devuelta al cobrador", description: "Los cobros siguen en su billetera; el viaje volvió a en curso." })
+                      onListo()
+                    } catch (e: any) {
+                      toast({ variant: "destructive", title: "Error", description: e.message })
+                    } finally {
+                      setGuardando(false)
+                    }
+                  }}
+                  disabled={guardando}
+                  className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                >
+                  Devolver al cobrador
+                </button>
+              </div>
+            )}
+
             {/* Pagos declarados: qué cobros trae, con opción de rechazar uno */}
             {pagosDeclarados.length > 0 && (
               <div className="mt-4">
