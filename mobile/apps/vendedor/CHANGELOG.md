@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.2.2 (versionCode 5) — 2026-09-23
+
+- Validada contra producción: el alta de un cliente se ve en la cartera al instante; la lista de artículos comprados (devoluciones) vuelve a cargar
+
 ## v0.2.1 (versionCode 4) — 2026-09-21
 
 - Cartel cuando hace mas de 24 hs que no se actualizan los precios; un cobro rechazado por la oficina se ve en el inicio y ya no traba lo cargado despues
