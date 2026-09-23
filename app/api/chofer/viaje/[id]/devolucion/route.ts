@@ -39,7 +39,7 @@ export async function POST(
     if (!viaje || !(await esTripulante(supabase, viajeId, auth.user.id, viaje.chofer_id))) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
-    if (viaje.estado !== "en_curso") {
+    if (!["despachado", "en_curso"].includes(viaje.estado)) {
       return NextResponse.json({ error: "El viaje no está activo" }, { status: 400 })
     }
 

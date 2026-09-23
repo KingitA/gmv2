@@ -7,6 +7,7 @@ import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
+import { topeAjuste } from "@/lib/cobranzas/ajuste"
 
 // ─── Tipos ────────────────────────────────────────────────────
 
@@ -119,6 +120,10 @@ export default function ClienteEntregaPage() {
   // Clientes adicionales para cobrar en la misma cobranza (cobro conjunto en la calle)
   const [cobrosExtra, setCobrosExtra] = useState<Array<{ cliente: any; saldo: number; monto: number }>>([])
   const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())  // anticipos con 10% contado
+  const [contadoGeneral, setContadoGeneral] = useState(false)                    // 10% sobre comprobantes saldados
+  const [compsCargados, setCompsCargados] = useState<any[]>([])
+  const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
+  const [dialogoDiff, setDialogoDiff] = useState<number | null>(null)             // +falta / −sobra
 
   const esReadOnly = READONLY_ESTADOS.includes(data?.viaje_estado || "")
 
@@ -262,7 +267,8 @@ export default function ClienteEntregaPage() {
         articulo_id: articuloId,
         sku,
         descripcion,
-        cantidad: 1,
+        // Del pedido: por defecto vuelve TODO lo facturado (se corrige si es parcial)
+        cantidad: origen === "pedido" ? (cantidadMax ?? enPedido?.cantidad ?? 1) : 1,
         precio_venta_original: precio,
         motivo: "otro",
         condicion: "vendible",
@@ -297,28 +303,46 @@ export default function ClienteEntregaPage() {
   }
 
   // ─── Cobro ────────────────────────────────────────────────────
+  // NC 10% contado proyectada: 10% del total de cada comprobante saldado
+  // completo hoy (FA/FB/FC/PRES sin el descuento ya hecho). El servidor recorta
+  // las imputaciones al 90% y la NC real sale al confirmar la rendición.
+  const bonificacionEstimada = () => {
+    if (!contadoGeneral) return 0
+    let b = 0
+    for (const cp of compsCargados) {
+      const imp = comprobantesSeleccionados[cp.id]
+      if (imp === undefined || dtosHechos.has(cp.id)) continue
+      if (!["FA", "FB", "FC", "PRES"].includes(String(cp.tipo_comprobante || "").toUpperCase())) continue
+      if (Math.abs(imp - Number(cp.saldo_pendiente)) < 0.01) b += Number(cp.total_factura) * 0.1
+    }
+    return Math.round(b * 100) / 100
+  }
+  const totalImputado = () => Object.values(comprobantesSeleccionados).reduce((s, v) => s + v, 0)
   const totalCobro = () => {
-    const compTotal = Object.values(comprobantesSeleccionados).reduce((s, v) => s + v, 0)
     const devTotal = incluirDevoluciones
       ? (data?.devoluciones || []).filter((d) => d.estado === "pendiente").reduce((s: number, d: any) => s + Number(d.monto_total), 0)
       : 0
-    return Math.max(0, compTotal - devTotal)
+    return Math.max(0, Math.round((totalImputado() - devTotal - bonificacionEstimada()) * 100) / 100)
   }
 
-  const guardarCobro = async () => {
-    // Total NETO a cobrar = comprobantes/anticipos seleccionados − devoluciones incluidas.
+  const guardarCobro = async (modoDiferencia?: "ajuste" | "saldo") => {
+    // Total NETO a cobrar = comprobantes/anticipos seleccionados − devoluciones − NC 10%.
     const totalNeto = totalCobro()
-    const totalMetodos = metodosPago.reduce((s, m) => s + Number(m.monto), 0)
+    const totalMetodos = Math.round(metodosPago.reduce((s, m) => s + Number(m.monto), 0) * 100) / 100
     if (totalMetodos <= 0) {
       alert("Ingresá al menos un método de pago con monto.")
       return
     }
-    // Se permite cobrar a cuenta (sin comprobantes) o de más: el excedente queda
-    // como saldo a favor. Solo se bloquea si el pago no cubre el neto a cobrar.
-    if (totalMetodos + 1 < totalNeto) {
-      alert(`El pago (${formatCurrency(totalMetodos)}) no cubre el total a cobrar neto de devoluciones (${formatCurrency(totalNeto)}).`)
-      return
+    // Diferencia (mismo criterio que viajante / ERP): si no da al centavo, se
+    // ajusta por redondeo (tope 1% de lo imputado, oficina lo confirma al
+    // rendir) o se deja saldo pendiente / a cuenta.
+    const diff = Math.round((totalMetodos - totalNeto) * 100) / 100
+    let ajusteRedondeo = 0
+    if (Math.abs(diff) > 0.01 && totalImputado() > 0) {
+      if (!modoDiferencia) { setDialogoDiff(diff); return }
+      if (modoDiferencia === "ajuste") ajusteRedondeo = -diff // +falta = crédito, −sobra = débito
     }
+    setDialogoDiff(null)
     setGuardandoCobro(true)
     try {
       // Imputaciones = solo comprobantes reales. Las claves "pedido:<id>" son anticipos
@@ -340,6 +364,8 @@ export default function ClienteEntregaPage() {
           devolucion_ids: devPendientes,
           comprobante_urls: comprobanteArchivos,
           pedidos_contado: [...contadoPedidos],
+          contado_general: contadoGeneral && bonificacionEstimada() > 0,
+          ajuste_redondeo: ajusteRedondeo,
           cobros_extra: cobrosExtra
             .filter((c) => c.monto > 0)
             .map((c) => ({ cliente_id: c.cliente.id, metodos: [{ tipo: "efectivo", monto: c.monto }], imputaciones: [] })),
@@ -347,7 +373,7 @@ export default function ClienteEntregaPage() {
         }),
       })
       const d = await res.json()
-      if (d.success) { idemKeyRef.current = crypto.randomUUID(); setShowCobroSheet(false); setCobrosExtra([]); setComprobanteArchivos([]); setContadoPedidos(new Set()); setComprobantesSeleccionados({}); cargarDatos() }
+      if (d.success) { idemKeyRef.current = crypto.randomUUID(); setShowCobroSheet(false); setCobrosExtra([]); setComprobanteArchivos([]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({}); cargarDatos() }
       else alert(d.error || "Error al registrar cobro")
     } finally { setGuardandoCobro(false) }
   }
@@ -629,6 +655,14 @@ export default function ClienteEntregaPage() {
           clienteId={clienteId}
           onContadoPedidosChange={setContadoPedidos}
           onClose={() => setShowCobroSheet(false)}
+          contadoGeneral={contadoGeneral}
+          onContadoGeneralChange={setContadoGeneral}
+          onComprobantesLoaded={setCompsCargados}
+          onDtosHechosLoaded={setDtosHechos}
+          bonificacion={bonificacionEstimada()}
+          dialogoDiff={dialogoDiff}
+          setDialogoDiff={setDialogoDiff}
+          topeAjusteActual={topeAjuste(totalImputado())}
         />
       )}
     </div>
@@ -658,6 +692,14 @@ function CobroSheet({
   clienteId,
   onContadoPedidosChange,
   onClose,
+  contadoGeneral,
+  onContadoGeneralChange,
+  onComprobantesLoaded,
+  onDtosHechosLoaded,
+  bonificacion,
+  dialogoDiff,
+  setDialogoDiff,
+  topeAjusteActual,
 }: {
   comprobantes_pendientes: any[]
   devoluciones: any[]
@@ -668,7 +710,7 @@ function CobroSheet({
   metodosPago: MetodoPago[]
   setMetodosPago: React.Dispatch<React.SetStateAction<MetodoPago[]>>
   totalCobro: () => number
-  guardarCobro: () => void
+  guardarCobro: (modo?: "ajuste" | "saldo") => void
   guardandoCobro: boolean
   procesandoOCR: boolean
   ocrMsg: string | null
@@ -679,6 +721,14 @@ function CobroSheet({
   clienteId: string
   onContadoPedidosChange: (s: Set<string>) => void
   onClose: () => void
+  contadoGeneral: boolean
+  onContadoGeneralChange: (v: boolean) => void
+  onComprobantesLoaded: (c: any[]) => void
+  onDtosHechosLoaded: (d: Set<string>) => void
+  bonificacion: number
+  dialogoDiff: number | null
+  setDialogoDiff: (d: number | null) => void
+  topeAjusteActual: number
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const totalMet = metodosPago.reduce((s, m) => s + Number(m.monto), 0)
@@ -724,7 +774,17 @@ function CobroSheet({
               seleccionados={comprobantesSeleccionados}
               onChange={setComprobantesSeleccionados}
               onContadoPedidosChange={onContadoPedidosChange}
+              seleccionTotal
+              contadoGeneral={contadoGeneral}
+              onContadoGeneralChange={onContadoGeneralChange}
+              onComprobantesLoaded={onComprobantesLoaded}
+              onDtosHechosLoaded={onDtosHechosLoaded}
             />
+            {bonificacion > 0 && (
+              <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                10% contado: −{formatCurrency(bonificacion)} (la NC sale al confirmar la rendición)
+              </p>
+            )}
           </div>
 
           {/* Agregar cliente para cobrar (cobro conjunto en la calle) */}
@@ -865,14 +925,38 @@ function CobroSheet({
           </div>
 
           {/* Diferencia */}
-          {Math.abs(diff) > 0.5 && (
+          {Math.abs(diff) > 0.01 && (
             <div className={`rounded-xl px-4 py-3 text-center font-medium ${diff < 0 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
-              {diff < 0 ? `Faltan ${formatCurrency(Math.abs(diff))}` : `Vuelto / excedente: ${formatCurrency(diff)}`}
+              {diff < 0 ? `Faltan ${formatCurrency(Math.abs(diff))}` : `Sobran ${formatCurrency(diff)}`}
+              <span className="block text-xs font-normal opacity-80">Al registrar elegís: ajuste por redondeo o dejar el saldo.</span>
+            </div>
+          )}
+
+          {dialogoDiff !== null && (
+            <div className="fixed inset-0 z-[60] flex items-end bg-black/60" onClick={() => setDialogoDiff(null)}>
+              <div className="w-full space-y-3 rounded-t-3xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-center text-lg font-bold">
+                  {dialogoDiff < 0 ? `Faltan ${formatCurrency(Math.abs(dialogoDiff))}` : `Sobran ${formatCurrency(dialogoDiff)}`}
+                </h3>
+                {Math.abs(dialogoDiff) <= topeAjusteActual + 0.005 ? (
+                  <button onClick={() => guardarCobro("ajuste")} disabled={guardandoCobro} className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:opacity-50">
+                    Ajuste por redondeo {dialogoDiff < 0 ? "(se le perdona)" : "(no queda a favor)"} — oficina lo confirma al rendir
+                  </button>
+                ) : (
+                  <p className="rounded-xl bg-amber-50 px-3 py-2 text-center text-sm text-amber-800">
+                    La diferencia supera el 1% de lo imputado ({formatCurrency(topeAjusteActual)}): no se ajusta desde la calle.
+                  </p>
+                )}
+                <button onClick={() => guardarCobro("saldo")} disabled={guardandoCobro} className="w-full rounded-2xl border-2 border-gray-300 py-4 font-bold text-gray-700 disabled:opacity-50">
+                  {dialogoDiff < 0 ? "Dejar el saldo pendiente" : "Dejar el sobrante a cuenta del cliente"}
+                </button>
+                <button onClick={() => setDialogoDiff(null)} className="w-full py-2 text-sm text-gray-400">Volver</button>
+              </div>
             </div>
           )}
 
           <button
-            onClick={guardarCobro}
+            onClick={() => guardarCobro()}
             disabled={guardandoCobro || totalMet <= 0}
             className="w-full py-5 bg-blue-600 text-white rounded-2xl text-xl font-bold active:scale-95 disabled:opacity-50"
           >

@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { formatCurrency } from "@/lib/utils"
 import type { ParadaHoja, HojaRuta } from "@/lib/viajes/hoja-ruta"
+import { GastoSheet } from "@/components/chofer/gasto-sheet"
 
 // Hoja de ruta del chofer (titular o acompañante): paradas en el orden que
 // armó oficina, con su instrucción (cobrar sí o sí / NO ENTREGAR SIN COBRAR /
@@ -20,11 +21,6 @@ interface ViajeData {
 }
 
 type Hoja = null | { tipo: "resultado"; parada: ParadaHoja } | { tipo: "gasto" } | { tipo: "rendir" }
-
-const CATEGORIAS = [
-  ["nafta", "⛽ Nafta"], ["peon", "💪 Peón"], ["hotel", "🛏 Hotel"], ["peaje", "🛣 Peaje"],
-  ["comida", "🍽 Comida"], ["cubierta", "🛞 Cubierta"], ["otro", "• Otro"],
-] as const
 
 const ESTADO_PARADA: Record<string, { label: string; cls: string }> = {
   pendiente: { label: "PENDIENTE", cls: "bg-gray-200 text-gray-700" },
@@ -49,11 +45,6 @@ export default function ViajeDashboardPage() {
   const [bultosEntregados, setBultosEntregados] = useState("")
   const [motivoEntrega, setMotivoEntrega] = useState("")
   const [motivoCobro, setMotivoCobro] = useState("")
-  // Gasto
-  const [categoria, setCategoria] = useState("nafta")
-  const [montoGasto, setMontoGasto] = useState("")
-  const [obsGasto, setObsGasto] = useState("")
-  const [claveGasto, setClaveGasto] = useState("")
   // Rendición
   const [efectivoEntrega, setEfectivoEntrega] = useState("")
 
@@ -111,15 +102,6 @@ export default function ViajeDashboardPage() {
     if (d) { setHoja(null); cargar() }
   }
 
-  const guardarGasto = async () => {
-    const monto = Number(montoGasto.replace(",", "."))
-    if (!monto || monto <= 0) { setAviso("Poné el importe del gasto"); return }
-    const d = await post("/api/chofer/billetera/gasto", {
-      viaje_id: viajeId, categoria, monto, observaciones: obsGasto, idempotency_key: claveGasto,
-    })
-    if (d) { setHoja(null); cargar() }
-  }
-
   const rendir = async () => {
     const d = await post(`/api/chofer/viaje/${viajeId}/finalizar`, {
       efectivo_declarado: Number(efectivoEntrega.replace(",", ".")) || 0,
@@ -143,11 +125,12 @@ export default function ViajeDashboardPage() {
   }
 
   const { viaje, paradas, dinero } = data
-  const porIniciar = viaje.estado === "despachado"
-  const enCurso = viaje.estado === "en_curso"
+  const enCurso = viaje.estado === "en_curso" || viaje.estado === "despachado"
   // en_rendicion: todavía se pueden corregir cobros hasta que oficina confirme
   const puedeCobrar = enCurso || viaje.estado === "en_rendicion"
-  const pendientes = paradas.filter((p) => p.estado === "pendiente")
+  const visitada = (p: ParadaHoja) => p.cobrado > 0 || p.devuelto > 0
+  const pendientes = paradas.filter((p) => p.estado === "pendiente" && !visitada(p))
+  const visitadas = paradas.filter((p) => p.estado === "pendiente" && visitada(p))
   const resueltas = paradas.filter((p) => p.estado !== "pendiente")
   const totalACobrar = paradas.reduce((s, p) => s + p.total_a_cobrar, 0)
   const totalCobrado = paradas.reduce((s, p) => s + p.cobrado, 0)
@@ -339,9 +322,9 @@ export default function ViajeDashboardPage() {
             <span className="text-blue-100">Efectivo en mano</span>
             <span className="text-xl font-bold text-yellow-200">{formatCurrency(dinero.efectivo_en_mano)}</span>
           </div>
-          {(enCurso || porIniciar) && (
+          {enCurso && (
             <button
-              onClick={() => { setCategoria("nafta"); setMontoGasto(""); setObsGasto(""); setClaveGasto(crypto.randomUUID()); setAviso(""); setHoja({ tipo: "gasto" }) }}
+              onClick={() => { setAviso(""); setHoja({ tipo: "gasto" }) }}
               className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold active:scale-95 transition-transform"
             >
               ⛽ Cargar un gasto
@@ -354,7 +337,9 @@ export default function ViajeDashboardPage() {
       <div className="space-y-3 px-4 pb-32">
         {pendientes.length > 0 && <p className="px-1 text-xs font-bold uppercase tracking-wide text-gray-500">Por visitar ({pendientes.length})</p>}
         {pendientes.map((p) => renderParada(p, false))}
-        {resueltas.length > 0 && <p className="px-1 pt-4 text-xs font-bold uppercase tracking-wide text-gray-400">Resueltos ({resueltas.length})</p>}
+        {visitadas.length > 0 && <p className="px-1 pt-4 text-xs font-bold uppercase tracking-wide text-amber-600">Visitados · falta cerrar la parada ({visitadas.length})</p>}
+        {visitadas.map((p) => renderParada(p, false))}
+        {resueltas.length > 0 && <p className="px-1 pt-4 text-xs font-bold uppercase tracking-wide text-gray-400">Entregados / cerrados ({resueltas.length})</p>}
         {resueltas.map((p) => renderParada(p, true))}
         {paradas.length === 0 && (
           <div className="py-12 text-center text-gray-400"><p className="mb-2 text-4xl">📦</p><p>No hay clientes en este viaje</p></div>
@@ -362,17 +347,6 @@ export default function ViajeDashboardPage() {
       </div>
 
       {/* Acción principal */}
-      {porIniciar && (
-        <div className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white p-4 shadow-lg">
-          <button
-            disabled={ocupado}
-            onClick={async () => { if (await post(`/api/chofer/viaje/${viajeId}/iniciar`, {})) cargar() }}
-            className="w-full rounded-2xl bg-green-600 py-4 text-lg font-bold text-white active:scale-95 transition-transform disabled:opacity-50"
-          >
-            ▶ Iniciar viaje
-          </button>
-        </div>
-      )}
       {enCurso && (
         <div className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white p-4 shadow-lg">
           {viaje.es_titular ? (
@@ -380,7 +354,7 @@ export default function ViajeDashboardPage() {
               onClick={() => { setEfectivoEntrega(String(Math.max(0, dinero?.efectivo_en_mano || 0))); setAviso(""); setHoja({ tipo: "rendir" }) }}
               className="w-full rounded-2xl bg-orange-500 py-4 text-lg font-bold text-white active:scale-95 transition-transform"
             >
-              🏁 Rendir viaje{pendientes.length > 0 ? ` (faltan ${pendientes.length} paradas)` : ""}
+              🏁 Rendir viaje{pendientes.length + visitadas.length > 0 ? ` (faltan cerrar ${pendientes.length + visitadas.length})` : ""}
             </button>
           ) : (
             <p className="py-2 text-center text-sm text-gray-500">El viaje lo rinde el chofer titular.</p>
@@ -388,8 +362,10 @@ export default function ViajeDashboardPage() {
         </div>
       )}
 
+      {hoja?.tipo === "gasto" && <GastoSheet viajeId={viajeId} onClose={() => setHoja(null)} onGuardado={cargar} />}
+
       {/* Hojas inferiores */}
-      {hoja && (
+      {hoja && hoja.tipo !== "gasto" && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/50" onClick={() => setHoja(null)}>
           <div className="max-h-[90vh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
             {paradaSel && (
@@ -437,34 +413,6 @@ export default function ViajeDashboardPage() {
                 )}
                 {aviso && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{aviso}</p>}
                 <Botones ocupado={ocupado} onCancelar={() => setHoja(null)} onConfirmar={() => guardarResultado(paradaSel)} texto="Guardar" />
-              </>
-            )}
-
-            {hoja.tipo === "gasto" && (
-              <>
-                <h3 className="text-center text-xl font-bold">Cargar un gasto</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {CATEGORIAS.map(([valor, texto]) => (
-                    <button
-                      key={valor}
-                      onClick={() => setCategoria(valor)}
-                      className={`rounded-xl border-2 py-3 font-bold ${categoria === valor ? "border-blue-600 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-700"}`}
-                    >
-                      {texto}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="number" inputMode="decimal" value={montoGasto} onChange={(e) => setMontoGasto(e.target.value)} placeholder="Importe"
-                  className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
-                />
-                <input
-                  value={obsGasto} onChange={(e) => setObsGasto(e.target.value)} placeholder="Detalle (opcional)"
-                  className="w-full rounded-xl border-2 border-gray-200 px-4 py-3"
-                />
-                <p className="text-center text-xs text-gray-500">Guardá el ticket: oficina aprueba cada gasto al rendir.</p>
-                {aviso && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{aviso}</p>}
-                <Botones ocupado={ocupado} onCancelar={() => setHoja(null)} onConfirmar={guardarGasto} texto="Guardar gasto" />
               </>
             )}
 

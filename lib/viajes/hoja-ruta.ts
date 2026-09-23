@@ -20,6 +20,20 @@ export interface PedidoHoja {
   remitos: Array<{ id: string; tipo_remito: string; numero_remito: string; estado_pdf: string }>
 }
 
+export interface PagoHoja {
+  id: string
+  monto: number
+  estado: string
+  fecha: string
+  cargado_por: string
+  metodos: Array<{ tipo: string; monto: number; detalle: string }>
+  // A qué se aplicó: comprobantes de ESTE viaje o anteriores; el resto queda a cuenta
+  imputaciones: Array<{ comprobante: string; monto: number; de_este_viaje: boolean }>
+  a_cuenta: number
+  contado_10: boolean
+  ajuste: number
+}
+
 export interface ParadaHoja {
   id: string
   orden: number
@@ -49,8 +63,11 @@ export interface ParadaHoja {
   total_a_cobrar: number   // saldo_anterior + total_viaje
   minimo_exigido: number   // lo que oficina marcó como "cobrar sí o sí"
   cobrado: number
+  cobrado_anterior: number // parte del cobro aplicada a comprobantes anteriores
+  cobrado_viaje: number    // parte aplicada a comprobantes de este viaje
   devuelto: number
   cobro_cumplido: boolean  // cobrado >= minimo_exigido
+  pagos: PagoHoja[]
 }
 
 export interface HojaRuta {
@@ -67,6 +84,8 @@ export interface HojaRuta {
     titular_id: string | null
     choferes: Array<{ usuario_id: string; nombre: string; rol: string }>
     despachado_at: string | null
+    actualizado_por: string
+    actualizado_at: string | null
     presupuesto: { nafta: number; peon: number; hotel: number; otros: number; total: number }
   }
   paradas: ParadaHoja[]
@@ -104,6 +123,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     .from("viajes")
     .select(`
       id, nombre, fecha, estado, tipo_transporte, observaciones, chofer_id, despachado_at,
+      actualizado_por, actualizado_at,
       dinero_nafta, gastos_peon, gastos_hotel, gastos_adicionales,
       vehiculos(nombre, patente), transportes(nombre),
       viaje_zonas(zonas(nombre)),
@@ -125,9 +145,12 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
         .order("numero_pedido", { ascending: true }),
       supabase
         .from("pagos_clientes")
-        .select("id, cliente_id, monto, estado, pagos_detalle(tipo_pago, monto)")
+        .select(`id, cliente_id, monto, estado, observaciones, created_at, creado_por,
+          pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, numero_comprobante_pago),
+          imputaciones(comprobante_id, monto_imputado, comprobantes_venta(tipo_comprobante, punto_venta, numero_comprobante, pedido_id))`)
         .eq("viaje_id", viajeId)
-        .in("estado", ["pendiente_rendicion", "confirmado"]),
+        .in("estado", ["pendiente_rendicion", "confirmado"])
+        .order("created_at", { ascending: true }),
       supabase.from("devoluciones").select("cliente_id, monto_total").eq("viaje_id", viajeId),
       supabase.from("viajes_fondos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
       supabase.from("viajes_gastos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
@@ -143,6 +166,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       ...(viaje.viajes_choferes || []).map((c: any) => c.usuario_id),
       ...(fondos || []).flatMap((f: any) => [f.retirado_por, f.entregado_por]),
       ...(gastos || []).map((g: any) => g.cargado_por),
+      ...(pagos || []).map((p: any) => p.creado_por),
+      viaje.actualizado_por,
     ]),
   ].filter(Boolean) as string[]
 
@@ -203,6 +228,44 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
   }
   const cobradoPorCliente = new Map<string, number>()
   for (const p of pagos || []) cobradoPorCliente.set(p.cliente_id, (cobradoPorCliente.get(p.cliente_id) || 0) + Number(p.monto))
+  const pedidoIdSet = new Set(pedidoIds)
+  const pagosPorCliente = new Map<string, PagoHoja[]>()
+  for (const p of (pagos || []) as any[]) {
+    const obs: string = p.observaciones || ""
+    const imps = (p.imputaciones || []).map((i: any) => {
+      const c = i.comprobantes_venta
+      return {
+        comprobante: c ? `${c.tipo_comprobante} ${c.punto_venta || ""}${c.punto_venta ? "-" : ""}${c.numero_comprobante || ""}` : "comprobante",
+        monto: Number(i.monto_imputado) || 0,
+        de_este_viaje: !!c?.pedido_id && pedidoIdSet.has(c.pedido_id),
+      }
+    })
+    const impTotal = imps.reduce((s: number, i: any) => s + i.monto, 0)
+    const ajusteM = obs.match(/\[AJUSTE:(-?[0-9]+(?:\.[0-9]+)?)\]/)
+    const fila: PagoHoja = {
+      id: p.id,
+      monto: Number(p.monto) || 0,
+      estado: p.estado,
+      fecha: p.created_at,
+      cargado_por: nombreUsuario.get(p.creado_por) || "",
+      metodos: (p.pagos_detalle || []).map((d: any) => ({
+        tipo: d.tipo_pago,
+        monto: Number(d.monto) || 0,
+        detalle:
+          d.tipo_pago === "cheque"
+            ? [d.banco, d.numero_cheque, d.fecha_cheque ? `vto ${String(d.fecha_cheque).slice(8, 10)}/${String(d.fecha_cheque).slice(5, 7)}` : ""].filter(Boolean).join(" · ")
+            : d.tipo_pago === "transferencia" || d.tipo_pago === "deposito"
+              ? d.numero_comprobante_pago || ""
+              : "",
+      })),
+      imputaciones: imps,
+      a_cuenta: r2(Math.max(0, Number(p.monto) - impTotal)),
+      contado_10: obs.includes("[10% CONTADO]"),
+      ajuste: ajusteM ? Number(ajusteM[1]) : 0,
+    }
+    if (!pagosPorCliente.has(p.cliente_id)) pagosPorCliente.set(p.cliente_id, [])
+    pagosPorCliente.get(p.cliente_id)!.push(fila)
+  }
   const devueltoPorCliente = new Map<string, number>()
   for (const d of devoluciones || [])
     devueltoPorCliente.set(d.cliente_id, (devueltoPorCliente.get(d.cliente_id) || 0) + Number(d.monto_total))
@@ -240,6 +303,9 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     const saldoAnterior = r2(saldoReal - propioEnLibro)
 
     const cobrado = r2(cobradoPorCliente.get(pa.cliente_id) || 0)
+    const pagosCli = pagosPorCliente.get(pa.cliente_id) || []
+    const cobradoViaje = r2(pagosCli.flatMap((x) => x.imputaciones).filter((i) => i.de_este_viaje).reduce((s, i) => s + i.monto, 0))
+    const cobradoAnterior = r2(pagosCli.flatMap((x) => x.imputaciones).filter((i) => !i.de_este_viaje).reduce((s, i) => s + i.monto, 0))
     const minimo = r2(
       (pa.exigir_cobro_anterior ? Math.max(saldoAnterior, 0) : 0) + (pa.exigir_cobro_actual ? totalViaje : 0),
     )
@@ -270,8 +336,11 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       total_a_cobrar: r2(saldoAnterior + totalViaje),
       minimo_exigido: minimo,
       cobrado,
+      cobrado_anterior: cobradoAnterior,
+      cobrado_viaje: cobradoViaje,
       devuelto: r2(devueltoPorCliente.get(pa.cliente_id) || 0),
       cobro_cumplido: cobrado + 0.01 >= minimo,
+      pagos: pagosCli,
     }
   })
 
@@ -310,6 +379,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
         .map((c: any) => ({ usuario_id: c.usuario_id, rol: c.rol, nombre: nombreUsuario.get(c.usuario_id) || "" }))
         .sort((a: any, b: any) => (a.rol === "titular" ? -1 : b.rol === "titular" ? 1 : 0)),
       despachado_at: viaje.despachado_at,
+      actualizado_por: nombreUsuario.get(viaje.actualizado_por) || "",
+      actualizado_at: viaje.actualizado_at,
       presupuesto,
     },
     paradas: paradasHoja,

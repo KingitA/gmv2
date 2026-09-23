@@ -150,6 +150,27 @@ function ViajesCalendario() {
     return m
   }, [viajes])
 
+  // Arrastrar el viaje a otro día = cambiar la fecha (queda quién lo movió)
+  const [arrastrando, setArrastrando] = useState<string | null>(null)
+  const [sobre, setSobre] = useState<string | null>(null)
+  const moverViaje = async (viajeId: string, nuevaFecha: string) => {
+    const v = viajes.find((x) => x.id === viajeId)
+    setSobre(null)
+    setArrastrando(null)
+    if (!v || String(v.fecha).slice(0, 10) === nuevaFecha) return
+    if (!["programado", "despachado"].includes(v.estado)) { toast.error("Ese viaje ya salió: no se cambia la fecha"); return }
+    setViajes((prev) => prev.map((x) => (x.id === viajeId ? { ...x, fecha: nuevaFecha } : x)))
+    try {
+      const res = await fetch(`/api/viajes/${viajeId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fecha: nuevaFecha }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(`${v.nombre} pasa al ${nuevaFecha.slice(8)}/${nuevaFecha.slice(5, 7)}`)
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudo mover el viaje")
+    }
+    cargar(anio, mes)
+  }
+
   const quienLleva = (v: ViajeCal) =>
     v.tipo_transporte === "transporte"
       ? v.transportes?.nombre || "Transporte sin definir"
@@ -181,7 +202,10 @@ function ViajesCalendario() {
           {celdas.map((dia, i) => (
             <div
               key={i}
-              className={`group min-h-28 border-b border-r p-1.5 ${dia ? "" : "bg-slate-50/60"} ${dia === hoy ? "bg-blue-50/60" : ""}`}
+              className={`group min-h-28 border-b border-r p-1.5 ${dia ? "" : "bg-slate-50/60"} ${dia === hoy ? "bg-blue-50/60" : ""} ${sobre === dia && arrastrando ? "bg-amber-100 ring-2 ring-inset ring-amber-400" : ""}`}
+              onDragOver={(e) => { if (dia && arrastrando) { e.preventDefault(); if (sobre !== dia) setSobre(dia) } }}
+              onDragLeave={() => { if (sobre === dia) setSobre(null) }}
+              onDrop={(e) => { e.preventDefault(); if (dia && arrastrando) moverViaje(arrastrando, dia) }}
             >
               {dia && (
                 <>
@@ -202,7 +226,11 @@ function ViajesCalendario() {
                       <button
                         key={v.id}
                         onClick={() => router.push(`/viajes/${v.id}`)}
-                        className="w-full text-left rounded-md border bg-white hover:bg-slate-50 px-1.5 py-1 shadow-sm"
+                        draggable={["programado", "despachado"].includes(v.estado)}
+                        onDragStart={(e) => { setArrastrando(v.id); e.dataTransfer.effectAllowed = "move" }}
+                        onDragEnd={() => { setArrastrando(null); setSobre(null) }}
+                        title={["programado", "despachado"].includes(v.estado) ? "Arrastrá a otro día para cambiar la fecha" : undefined}
+                        className={`w-full text-left rounded-md border bg-white hover:bg-slate-50 px-1.5 py-1 shadow-sm ${["programado", "despachado"].includes(v.estado) ? "cursor-grab active:cursor-grabbing" : ""} ${arrastrando === v.id ? "opacity-40" : ""}`}
                       >
                         <div className="flex items-center gap-1.5">
                           <span className={`h-2 w-2 shrink-0 rounded-full ${ESTADO_VIAJE_COLOR[v.estado] || "bg-slate-400"}`} />

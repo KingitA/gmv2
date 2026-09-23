@@ -45,6 +45,11 @@ interface Props {
   // Pedidos (sin facturar) anticipados con 10% contado: se cobra el 90% y al
   // facturar se genera la NC del 10%. Emite el set de pedido_id marcados.
   onContadoPedidosChange?: (pedidoIds: Set<string>) => void
+  // Barra "Seleccionar todo" + "10% contado a todo" (cobro en la calle: varios
+  // pedidos de una). El contado general sobre comprobantes lo proyecta el padre.
+  seleccionTotal?: boolean
+  contadoGeneral?: boolean
+  onContadoGeneralChange?: (v: boolean) => void
 }
 
 // Prefijo de clave para anticipos a pedidos sin facturar (quedan como pago a cuenta).
@@ -60,7 +65,7 @@ export interface ResumenCuenta {
 
 const fmtARS = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })
 
-export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange, modo = "todos", onResumenLoaded }: Props) {
+export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange, modo = "todos", onResumenLoaded, seleccionTotal, contadoGeneral, onContadoGeneralChange }: Props) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [pedidosFacturados, setPedidosFacturados] = useState<Set<string>>(new Set())
@@ -190,6 +195,32 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
 
   const toggleExpand = (id: string) => setExpandido((p) => ({ ...p, [id]: !p[id] }))
 
+  // Todo lo cobrable de una: comprobantes con saldo + anticipos de pedidos sin facturar
+  const pedidosSinFacturar = pedidos.filter((p) => !compsPorPedido.has(p.id) && !pedidosFacturados.has(p.id))
+  const clavesTodas = [...comprobantes.map((c) => c.id), ...pedidosSinFacturar.map((p) => PEDIDO_PREFIX + p.id)]
+  const todoSeleccionado = clavesTodas.length > 0 && clavesTodas.every((k) => seleccionados[k] !== undefined)
+  const toggleTodo = () => {
+    if (todoSeleccionado) { onChange({}); return }
+    const next: Record<string, number> = { ...seleccionados }
+    for (const c of comprobantes) next[c.id] = Number(c.saldo_pendiente)
+    for (const p of pedidosSinFacturar) next[PEDIDO_PREFIX + p.id] = montoAnticipo(p)
+    onChange(next)
+  }
+  const toggleContadoTodo = () => {
+    const activar = !contadoGeneral
+    onContadoGeneralChange?.(activar)
+    // Pedidos sin facturar: el 10% se aplica por pedido (90% de anticipo)
+    const next = new Set<string>(activar ? pedidosSinFacturar.map((p) => p.id) : [])
+    setContado(next)
+    onContadoPedidosChange?.(next)
+    const sel = { ...seleccionados }
+    for (const p of pedidosSinFacturar) {
+      if (sel[PEDIDO_PREFIX + p.id] !== undefined)
+        sel[PEDIDO_PREFIX + p.id] = activar ? Math.round(Number(p.total) * 0.9 * 100) / 100 : Number(p.total)
+    }
+    onChange(sel)
+  }
+
   const totalSeleccionado = Object.values(seleccionados).reduce((s, v) => s + v, 0)
 
   if (loading) return <div className="text-sm text-muted-foreground py-4">Cargando…</div>
@@ -215,6 +246,18 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
 
   return (
     <div className="space-y-2">
+      {seleccionTotal && clavesTodas.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
+          <label className="flex items-center gap-2 font-semibold cursor-pointer">
+            <Checkbox checked={todoSeleccionado} onCheckedChange={toggleTodo} />
+            Seleccionar todo
+          </label>
+          <label className="ml-auto flex items-center gap-2 text-amber-800 cursor-pointer" title="Cobro contado: 10% de bonificación sobre lo saldado (NC al confirmar)">
+            <Checkbox checked={!!contadoGeneral} onCheckedChange={toggleContadoTodo} />
+            10% contado a todo
+          </label>
+        </div>
+      )}
       {pedidosVisibles.map((ped) => {
         const comps = compsPorPedido.get(ped.id) || []
         const facturado = comps.length > 0

@@ -38,6 +38,17 @@ export async function GET(
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
 
+    // El viaje arranca solo cuando la tripulación lo abre (no hay botón
+    // "Iniciar": oficina ya lo despachó). Queda el sello de inicio.
+    if (viaje.estado === "despachado") {
+      const { error: iniErr } = await supabase
+        .from("viajes")
+        .update({ estado: "en_curso", iniciado_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("estado", "despachado")
+      if (!iniErr) (viaje as any).estado = "en_curso"
+    }
+
     // Pedidos del viaje con datos del cliente
     const { data: pedidos } = await supabase
       .from("pedidos")
