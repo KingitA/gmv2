@@ -3,9 +3,9 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
-## Sin publicar
+## v0.2.3 (versionCode 6) — 2026-09-23
 
-- Colores nuevos (sistema Megasur): barra azul, fondos claros, ofertas en ámbar, "sin enviar" en lavanda. Mismas pantallas y funciones
+- Colores nuevos (sistema Megasur): barra azul, fondos claros, ofertas en ámbar, pendientes de enviar en lavanda. Mismas pantallas y funciones
 
 ## v0.2.2 (versionCode 5) — 2026-09-23
 
