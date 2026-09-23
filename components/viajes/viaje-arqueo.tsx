@@ -128,7 +128,7 @@ export function ViajeArqueo({ hoja, onCambio }: { hoja: HojaRuta; onCambio: () =
         <Linea etiqueta="− Gastos" valor={-dinero.gastos_total} />
         <div className="mt-1 border-t pt-1"><Linea etiqueta="= Efectivo que debería traer" valor={dinero.efectivo_en_mano} fuerte /></div>
         <div className="mt-2 text-muted-foreground">
-          <Linea etiqueta="Cheques cobrados" valor={dinero.cobrado_cheques} />
+          <div className="flex justify-between py-0.5"><span>Cheques</span><span>{dinero.cheques_cantidad} {dinero.cheques_cantidad === 1 ? "cheque" : "cheques"}</span></div>
           <Linea etiqueta="Transferencias / depósitos" valor={dinero.cobrado_transferencias} />
         </div>
         {dinero.efectivo_en_mano < -0.01 && (

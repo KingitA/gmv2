@@ -113,6 +113,7 @@ export interface HojaRuta {
     gastos_total: number          // declarados + aprobados (los rechazados no cuentan)
     cobrado_efectivo: number
     cobrado_cheques: number
+    cheques_cantidad: number
     cobrado_transferencias: number
     efectivo_en_mano: number      // fondo + cobrado_efectivo − gastos
     saldo_billetera_titular: number
@@ -440,6 +441,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       gastos_total: gastosTotal,
       cobrado_efectivo: cobradoEfectivo,
       cobrado_cheques: sumaTipo(["cheque"]),
+      cheques_cantidad: detalles.filter((d: any) => d.tipo_pago === "cheque").length,
       cobrado_transferencias: sumaTipo(["transferencia", "deposito"]),
       efectivo_en_mano: r2(fondoEntregado + cobradoEfectivo - gastosTotal),
       saldo_billetera_titular: r2(((saldoBill || []) as any[]).reduce((s, x) => s + Number(x.saldo), 0)),

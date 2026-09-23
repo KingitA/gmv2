@@ -424,7 +424,7 @@ export default function ViajeDashboardPage() {
                   <Linea etiqueta="+ Cobrado en efectivo" valor={formatCurrency(dinero.cobrado_efectivo)} />
                   <Linea etiqueta="− Gastos" valor={formatCurrency(dinero.gastos_total)} rojo />
                   <div className="border-t pt-2"><Linea etiqueta="Efectivo en mano" valor={formatCurrency(dinero.efectivo_en_mano)} fuerte /></div>
-                  {dinero.cobrado_cheques > 0 && <Linea etiqueta="Cheques" valor={formatCurrency(dinero.cobrado_cheques)} />}
+                  {dinero.cheques_cantidad > 0 && <Linea etiqueta="Cheques que entregás" valor={`${dinero.cheques_cantidad} ${dinero.cheques_cantidad === 1 ? "cheque" : "cheques"}`} />}
                   {dinero.cobrado_transferencias > 0 && <Linea etiqueta="Transferencias" valor={formatCurrency(dinero.cobrado_transferencias)} />}
                 </div>
                 <div>
