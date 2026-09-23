@@ -140,7 +140,10 @@ export function Cobrar() {
   // lectura con señal no fue posible. Vive en un ref: no se re-renderiza por esto.
   const fotosLocales = useRef(new Map<string, { b64: string; mime: string; nombre: string }>())
   const vivo = useRef(true)
-  useEffect(() => () => { vivo.current = false }, [])
+  useEffect(() => {
+    vivo.current = true // StrictMode monta→desmonta→monta: el cleanup solo no alcanza
+    return () => { vivo.current = false }
+  }, [])
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
   const enviandoRef = useRef(false)
