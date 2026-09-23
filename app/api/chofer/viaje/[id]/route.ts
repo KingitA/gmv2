@@ -2,13 +2,13 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
-import { esTripulante } from "@/lib/viajes/chofer"
+import { esTripulante, HEADER_SIN_INICIAR, iniciarViajeSiDespachado } from "@/lib/viajes/chofer"
 import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
 
 // GET /api/chofer/viaje/[id]
 // Retorna el viaje con sus pedidos, estado de cobro por cliente, y resumen
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await requireAuth()
@@ -39,14 +39,11 @@ export async function GET(
     }
 
     // El viaje arranca solo cuando la tripulación lo abre (no hay botón
-    // "Iniciar": oficina ya lo despachó). Queda el sello de inicio.
-    if (viaje.estado === "despachado") {
-      const { error: iniErr } = await supabase
-        .from("viajes")
-        .update({ estado: "en_curso", iniciado_at: new Date().toISOString() })
-        .eq("id", id)
-        .eq("estado", "despachado")
-      if (!iniErr) (viaje as any).estado = "en_curso"
+    // "Iniciar": oficina ya lo despachó). Queda el sello de inicio. La réplica de
+    // la app lo lee con HEADER_SIN_INICIAR (descargar ≠ abrir: el inicio lo manda
+    // la app como operación `viaje.iniciar`).
+    if (viaje.estado === "despachado" && !request.headers.get(HEADER_SIN_INICIAR)) {
+      if (await iniciarViajeSiDespachado(supabase, id)) (viaje as any).estado = "en_curso"
     }
 
     // Pedidos del viaje con datos del cliente

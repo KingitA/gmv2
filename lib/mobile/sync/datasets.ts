@@ -10,28 +10,10 @@ import {
   CONDICION_PROVEEDOR_COLS,
   LISTA_PRECIO_COLS,
 } from "@/lib/pricing/cargar-insumos"
-import type { FilaReplica } from "../contrato"
 import type { CtxSync, DatasetDef } from "./motor"
+import { DATASETS_CHOFER } from "./chofer"
 import { DATASETS_DEPOSITO } from "./deposito"
 import { DATASETS_VENDEDOR } from "./vendedor"
-import { GET as choferMeGET } from "@/app/api/chofer/me/route"
-import { GET as choferViajeGET } from "@/app/api/chofer/viaje/[id]/route"
-
-/**
- * Envuelve un GET existente del ERP como dataset snapshot: misma lógica, misma
- * forma de datos que ve la web, cero duplicación. El bearer del request original
- * llega solo (createClient lee headers()).
- */
-async function llamarGET(
-  handler: (req: any, ctx: any) => Promise<Response>,
-  ctx: CtxSync,
-  params: Record<string, string> = {},
-): Promise<any> {
-  const res = await handler(ctx.request, { params: Promise.resolve(params) })
-  const body = await res.json().catch(() => null)
-  if (!res.ok) throw Object.assign(new Error(body?.error || `HTTP ${res.status}`), { status: res.status })
-  return body
-}
 
 async function vendedorIdsDe(ctx: CtxSync): Promise<string[] | null> {
   if (ctx.sesion.roles.includes("admin")) return null // admin: sin filtro
@@ -43,40 +25,7 @@ async function vendedorIdsDe(ctx: CtxSync): Promise<string[] | null> {
   return (data || []).map((v: any) => v.id)
 }
 
-// ─── Chofer (app conejillo de la fundación) ─────────────────────────────────
-
-/** Identidad + viaje activo + historial (= GET /api/chofer/me). Fila única id "me". */
-const choferMe: DatasetDef = {
-  nombre: "chofer_me",
-  roles: ["chofer"],
-  async cargar(ctx) {
-    const me = await llamarGET(choferMeGET, ctx)
-    return [{ id: "me", ...me }]
-  },
-}
-
-/** Detalle de los viajes visibles (activo + historial) = GET /api/chofer/viaje/[id]. */
-const choferViajes: DatasetDef = {
-  nombre: "chofer_viajes",
-  roles: ["chofer"],
-  async cargar(ctx, ids) {
-    let viajeIds = ids
-    if (!viajeIds) {
-      const me = await llamarGET(choferMeGET, ctx)
-      viajeIds = [me.viaje_activo?.id, ...(me.historial || []).slice(0, 5).map((v: any) => v.id)].filter(Boolean)
-    }
-    const out: FilaReplica[] = []
-    for (const id of viajeIds || []) {
-      try {
-        const d = await llamarGET(choferViajeGET, ctx, { id })
-        out.push({ id, ...d })
-      } catch (e: any) {
-        if (e.status !== 404 && e.status !== 403) throw e
-      }
-    }
-    return out
-  },
-}
+// ─── Chofer: lib/mobile/sync/chofer.ts ───────────────────────────────────────
 
 // ─── Insumos de precio (vendedor; ver lib/pricing/motor.ts) ────────────────
 
@@ -210,8 +159,7 @@ const preciosClientes: DatasetDef = {
 // ─── Registro ───────────────────────────────────────────────────────────────
 
 const REGISTRO: DatasetDef[] = [
-  choferMe,
-  choferViajes,
+  ...DATASETS_CHOFER,
   preciosArticulos,
   preciosListas,
   preciosReglas,

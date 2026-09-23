@@ -7,6 +7,7 @@ import { esTripulante } from "@/lib/viajes/chofer"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 
 // POST /api/chofer/viaje/[id]/cobro
 // Registra un cobro del chofer con estado='pendiente_rendicion'.
@@ -258,6 +259,16 @@ export async function POST(
     })
   } catch (error: any) {
     console.error("[chofer] Error en POST cobro:", error)
+    // Rechazo por REGLA DE NEGOCIO de la RPC (comprobante anulado, no es del cliente…):
+    // respuesta DEFINITIVA. 422 y no 500 para que la app Chofer (que encola los cobros
+    // hechos sin señal) no lo reintente para siempre ni trabe lo que viene detrás.
+    // La web muestra `error` igual que antes.
+    if (error instanceof ErrorReglaCobranza) {
+      return NextResponse.json(
+        { error: error.message, mensaje: mensajeParaUsuario(error), codigo: error.codigo, reintentable: false },
+        { status: 422 },
+      )
+    }
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

@@ -36,6 +36,7 @@ import { insumosAFecha, verificarPreciosCapturados } from "../precios-integridad
 import { cargarClientesVendedor, cargarCuentaCliente, cargarPedidosVendedor, cargarViajeVendedor, vendedorIdsDe } from "../sync/vendedor"
 import { esUuid } from "../uuid"
 import { subirFotosPendientes } from "@/lib/cobranzas/fotos"
+import { llamarRuta } from "./rutas"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
 
 const ROLES = ["vendedor"]
@@ -48,29 +49,7 @@ interface ParcheReplica {
 
 // ─── Infraestructura ─────────────────────────────────────────────────────────
 
-/**
- * Ejecuta un route handler de la web con la sesión del request original (el bearer
- * llega por headers()). 2xx ⇒ body · 4xx ⇒ RechazoNegocio · 5xx ⇒ transitorio.
- */
-async function llamarRuta(
-  handler: (...a: any[]) => Promise<Response>,
-  ctx: CtxOutbox,
-  o: { ruta: string; method: string; body?: unknown; params?: Record<string, string>; rechazo?: (status: number, body: any) => string | null },
-): Promise<any> {
-  const headers = new Headers(ctx.request.headers)
-  headers.set("content-type", "application/json")
-  headers.delete("content-length")
-  const req = new Request(new URL(o.ruta, ctx.request.url), {
-    method: o.method,
-    headers,
-    body: o.body === undefined ? undefined : JSON.stringify(o.body),
-  })
-  const res = await handler(req, { params: Promise.resolve(o.params || {}) })
-  const body = await res.json().catch(() => null)
-  if (res.ok) return body
-  if (res.status >= 400 && res.status < 500) throw new RechazoNegocio(o.rechazo?.(res.status, body) || body?.mensaje || body?.error || `Rechazado (${res.status})`, body?.codigo)
-  throw new Error(body?.error || `HTTP ${res.status}`)
-}
+// llamarRuta (ejecutar un route handler de la web en proceso): lib/mobile/outbox/rutas.ts
 
 async function sesionVendedor(ctx: CtxOutbox) {
   const vendedorIds = await vendedorIdsDe(ctx.supabase, ctx.sesion.user.id)

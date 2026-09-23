@@ -27,6 +27,8 @@
     "app/api/chofer/billetera/gasto/route.ts",
     "app/api/chofer/billetera/",
     "app/api/chofer/viaje/[id]/cobro/route.ts",
+    "app/api/chofer/",
+    "lib/viajes/cliente-viaje.ts",
     "components/chofer/",
     "lib/cheques/",
     "lib/cobranzas/fotos.ts",

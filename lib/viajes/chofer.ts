@@ -70,3 +70,26 @@ export async function esTripulante(
     .maybeSingle()
   return !!data
 }
+
+/**
+ * El viaje arranca solo cuando la tripulación lo ABRE (no hay botón "Iniciar":
+ * oficina ya lo despachó). Queda el sello de inicio. Idempotente: si ya no está
+ * `despachado` no toca nada. Lo usa GET /api/chofer/viaje/[id] (la web, al abrir la
+ * hoja de ruta) y la operación `viaje.iniciar` del outbox de la app Chofer (al abrir
+ * el viaje en el equipo, con o sin señal).
+ */
+export async function iniciarViajeSiDespachado(supabase: SupabaseClient, viajeId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from("viajes")
+    .update({ estado: "en_curso", iniciado_at: new Date().toISOString() })
+    .eq("id", viajeId)
+    .eq("estado", "despachado")
+  return !error
+}
+
+/**
+ * La réplica de la app lee GET /api/chofer/viaje/[id] para DESCARGAR el viaje, no
+ * para abrirlo: con este header la lectura no cambia el estado del viaje (el inicio
+ * lo manda la app como operación aparte, cuando el chofer entra al viaje).
+ */
+export const HEADER_SIN_INICIAR = "x-gm-sin-iniciar"

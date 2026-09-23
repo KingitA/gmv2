@@ -2,10 +2,13 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { esTripulante } from "@/lib/viajes/chofer"
+import { esUuid } from "@/lib/mobile/uuid"
 
 // POST /api/chofer/viaje/[id]/devolucion
 // El chofer registra una devolución durante el reparto.
 // Reutiliza la estructura de /api/devoluciones pero fija retira_viajante=true.
+// Acepta un `id` (UUID) opcional generado en el equipo (app Chofer): si ya existe,
+// devuelve la devolución existente en vez de duplicarla (reintento tras un corte).
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -19,6 +22,7 @@ export async function POST(
     const body = await request.json()
 
     const {
+      id: idEquipo,
       cliente_id,
       pedido_id,
       items, // [{ articulo_id, cantidad, precio_venta_original, motivo, es_vendible, condicion, origen }]
@@ -27,6 +31,9 @@ export async function POST(
 
     if (!cliente_id || !items?.length) {
       return NextResponse.json({ error: "cliente_id e items son requeridos" }, { status: 400 })
+    }
+    if (idEquipo !== undefined && idEquipo !== null && !esUuid(idEquipo)) {
+      return NextResponse.json({ error: "id inválido" }, { status: 400 })
     }
 
     // Verificar que el viaje es del chofer y está activo
@@ -39,6 +46,26 @@ export async function POST(
     if (!viaje || !(await esTripulante(supabase, viajeId, auth.user.id, viaje.chofer_id))) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 })
     }
+
+    // Reintento con el mismo id: ya está registrada
+    if (idEquipo) {
+      const { data: previa } = await supabase
+        .from("devoluciones")
+        .select("id, numero_devolucion, monto_total")
+        .eq("id", idEquipo)
+        .maybeSingle()
+      if (previa) {
+        return NextResponse.json({
+          success: true,
+          devolucion_id: previa.id,
+          numero_devolucion: previa.numero_devolucion,
+          monto_total: Number(previa.monto_total),
+          dedup: true,
+          mensaje: "Devolución ya registrada (reintento detectado).",
+        })
+      }
+    }
+
     if (!["despachado", "en_curso"].includes(viaje.estado)) {
       return NextResponse.json({ error: "El viaje no está activo" }, { status: 400 })
     }
@@ -58,6 +85,7 @@ export async function POST(
     const { data: devolucion, error: devError } = await supabase
       .from("devoluciones")
       .insert({
+        ...(idEquipo ? { id: idEquipo } : {}),
         numero_devolucion: numeroDevolucion,
         cliente_id,
         vendedor_id: null,

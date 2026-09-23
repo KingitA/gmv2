@@ -55,7 +55,7 @@ async function llamarGET(handler: (...a: any[]) => Promise<Response>, ctx: CtxSy
 }
 
 /** Ejecuta `fn` sobre cada item con un tope de concurrencia (no satura PostgREST). */
-async function enParalelo<T, R>(items: T[], tope: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+export async function enParalelo<T, R>(items: T[], tope: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let i = 0
   await Promise.all(

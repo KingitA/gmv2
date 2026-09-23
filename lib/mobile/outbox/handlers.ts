@@ -10,6 +10,7 @@
 //   devolver la fila existente. Así un crash entre "aplicar" y "completar la
 //   reserva" no duplica nada.
 
+import { HANDLERS_CHOFER } from "./chofer"
 import { HANDLERS_DEPOSITO } from "./deposito"
 import { HANDLERS_VENDEDOR } from "./vendedor"
 import { bcraConsultar } from "./bcra"
@@ -49,7 +50,7 @@ const pruebaRegistrar: HandlerDef<{ texto: string }> = {
   },
 }
 
-const REGISTRO: HandlerDef[] = [pruebaRegistrar, ...HANDLERS_DEPOSITO, ...HANDLERS_VENDEDOR, bcraConsultar]
+const REGISTRO: HandlerDef[] = [pruebaRegistrar, ...HANDLERS_DEPOSITO, ...HANDLERS_VENDEDOR, ...HANDLERS_CHOFER, bcraConsultar]
 
 export const HANDLERS = new Map(REGISTRO.map((h) => [h.tipo, h]))
 
