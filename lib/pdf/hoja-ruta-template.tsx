@@ -74,7 +74,7 @@ export function HojaRutaPDF({ data }: { data: HojaRuta }) {
           <View>
             <Text style={s.titulo}>HOJA DE RUTA — {v.nombre}</Text>
             <Text style={s.sub}>
-              {fmtFecha(v.fecha)} · {v.zonas.join(' + ') || 'Sin zonas'}
+              {fmtFecha(v.fecha)}{v.dias > 1 ? ` al ${fmtFecha(v.fecha_fin)} (${v.dias} días)` : ''} · {v.zonas.join(' + ') || 'Sin zonas'}
               {porTransporte
                 ? ` · Transporte: ${v.transporte || '—'}`
                 : ` · Chofer: ${titular?.nombre || '—'}${acomp.length ? ` · Acompaña: ${acomp.map((a) => a.nombre).join(', ')}` : ''}${v.vehiculo ? ` · ${v.vehiculo}` : ''}`}

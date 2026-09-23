@@ -114,7 +114,7 @@ export default function ViajeDetallePage() {
               <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setEditando(true)}><Pencil className="mr-1 h-3.5 w-3.5" /> Editar viaje</Button>
             </div>
             <p className="text-sm text-muted-foreground">
-              {formatDateAR(v.fecha)} · {v.zonas.join(" + ") || "Sin zonas"} ·{" "}
+              {formatDateAR(v.fecha)}{v.dias > 1 && ` → ${formatDateAR(v.fecha_fin)} (${v.dias} días)`} · {v.zonas.join(" + ") || "Sin zonas"} ·{" "}
               {porTransporte
                 ? `🚛 ${v.transporte || "Transporte sin definir"}`
                 : <>{titular?.nombre || "Sin chofer"}{acompanantes.length > 0 && ` + ${acompanantes.map((a) => a.nombre).join(", ")}`}{v.vehiculo && ` · ${v.vehiculo}`}</>}

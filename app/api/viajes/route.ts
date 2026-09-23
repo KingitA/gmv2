@@ -108,7 +108,7 @@ async function listarCalendario(supabase: SupabaseClient, searchParams: URLSearc
   let q = supabase
     .from("viajes")
     .select(`
-      id, nombre, fecha, estado, tipo, tipo_transporte, observaciones,
+      id, nombre, fecha, dias, estado, tipo, tipo_transporte, observaciones,
       chofer_id, vehiculo_id, transporte_id, zona_id,
       dinero_nafta, gastos_peon, gastos_hotel, gastos_adicionales,
       despachado_at,
@@ -119,11 +119,22 @@ async function listarCalendario(supabase: SupabaseClient, searchParams: URLSearc
     `)
     .eq("tipo", tipo)
     .order("fecha", { ascending: true })
-  if (desde) q = q.gte("fecha", desde)
+  if (desde) {
+    const d = new Date(desde + "T00:00:00Z")
+    d.setUTCDate(d.getUTCDate() - 14)
+    q = q.gte("fecha", d.toISOString().slice(0, 10))
+  }
   if (hasta) q = q.lte("fecha", hasta)
 
-  const { data: viajes, error } = await q
+  const { data: viajesRaw, error } = await q
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Solo los que tocan el rango (fecha + dias − 1 >= desde)
+  const viajes = (viajesRaw || []).filter((v: any) => {
+    if (!desde) return true
+    const fin = new Date(String(v.fecha).slice(0, 10) + "T00:00:00Z")
+    fin.setUTCDate(fin.getUTCDate() + Math.max(1, Number(v.dias) || 1) - 1)
+    return fin.toISOString().slice(0, 10) >= desde
+  })
 
   const ids = (viajes || []).map((v: any) => v.id)
   const totales = new Map<string, { pedidos: number; bultos: number; total: number; clientes: Set<string> }>()
@@ -192,12 +203,14 @@ export async function POST(request: NextRequest) {
 
     const porTransporte = body.tipo_transporte === "transporte"
     const num = (v: any) => Number(v) || 0
+    const dias = Math.min(15, Math.max(1, Math.round(Number(body.dias)) || 1))
 
     const { data: viaje, error } = await supabase
       .from("viajes")
       .insert({
         nombre: (body.nombre || "").trim() || nombrePorDefecto(zonaIds.map((id) => zonas!.find((z) => z.id === id)!.nombre), body.fecha),
         fecha: body.fecha,
+        dias,
         tipo: "reparto",
         estado: "programado",
         zona_id: zonaIds[0], // principal (legado: remitos y flete la leen)
