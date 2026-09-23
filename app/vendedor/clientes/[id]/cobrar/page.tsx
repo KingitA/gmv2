@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
-import { ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
+import { ChipBcra, ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
 import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
-import { editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
+import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
@@ -145,12 +145,7 @@ function BcraFila({ fila, clienteNombre, detalle }: { fila: Metodo; clienteNombr
     if (consulta.consultando) return <ConsultandoBcra />
     return consulta.veredicto && consulta.veredicto.veredicto !== "apto" ? <VeredictoBcraCard v={consulta.veredicto} /> : null
   }
-  if (consulta.consultando) return <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin shrink-0" />
-  const v = consulta.veredicto?.veredicto
-  if (v === "apto") return <span className="text-green-600 text-lg leading-none shrink-0">✓</span>
-  if (v === "riesgo") return <span className="text-red-600 text-sm shrink-0">⛔</span>
-  if (v === "sin_respuesta") return <span className="text-amber-500 text-sm shrink-0">⚠️</span>
-  return null
+  return <ChipBcra consulta={consulta} />
 }
 
 export default function VendedorCobrarPage() {
@@ -473,6 +468,8 @@ export default function VendedorCobrarPage() {
       // El ajuste por redondeo viajó ADENTRO del cobro (ajuste_redondeo): se
       // asienta cuando la oficina lo confirma, no acá.
       idemKey.current = crypto.randomUUID()
+      // Cheques sin CUIT válido: no hubo consulta al BCRA — aviso explícito, no silencio
+      for (const m of metodos) if (m.tipo === "cheque" && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: cliente.nombre }, m.cuit_emisor || null)
       bcra.cerrarFormulario()
       alert(`✅ Cobro registrado por ${formatCurrency(totalMetodos)}. Queda pendiente de rendición.`)
       router.push(`/vendedor/clientes/${cliente.id}`)
@@ -921,7 +918,12 @@ export default function VendedorCobrarPage() {
                         <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className={clsOcr(m, "banco", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
                         <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={clsOcr(m, "numero_cheque", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
                         <input type="date" value={m.fecha_cheque} onChange={(e) => updateMetodo(idx, { fecha_cheque: e.target.value })} className={clsOcr(m, "fecha_cheque", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
-                        <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className={clsOcr(m, "cuit_emisor", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
+                        <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className={clsOcr(m, "cuit_emisor", `rounded-lg border px-3 py-2 text-sm ${m.cuit_emisor && !cuitValido(m.cuit_emisor) ? "border-red-400" : "border-gray-300"}`)} />
+                        {!cuitValido(m.cuit_emisor) && (
+                          <p className="col-span-2 text-xs font-medium text-amber-700">
+                            {m.cuit_emisor ? "⚠️ El CUIT no cierra (dígito verificador): revisalo en el cheque." : "⚠️ Sin CUIT: este cheque no se consulta en el BCRA (queda sin control de riesgo)."}
+                          </p>
+                        )}
                         <label className="flex items-center gap-2 text-sm text-gray-600 col-span-2">
                           <input type="checkbox" checked={m.es_echeq} onChange={(e) => updateMetodo(idx, { es_echeq: e.target.checked })} className="w-5 h-5" />
                           Es e-cheq

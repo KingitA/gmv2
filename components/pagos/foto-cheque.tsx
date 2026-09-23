@@ -152,6 +152,7 @@ export function EstadoFoto({ fila, onReintentar }: { fila: FilaCheque; onReinten
             <span className="rounded bg-amber-100 px-1 font-bold">OCR</span> Los campos en ámbar vinieron de la foto: revisalos y corregí lo que haga falta.
           </p>
         )}
+        {o.pista && <p className="mt-0.5 font-medium text-red-700">{o.pista}</p>}
         {(o.estado === "sin_datos" || o.estado === "fallo") && (
           <p className="text-gray-600">
             {o.detalle}

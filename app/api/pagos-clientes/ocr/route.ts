@@ -76,14 +76,14 @@ const PROMPT = `Sos un experto en documentos bancarios y de pagos argentinos.
 
 Analizá esta imagen y extraé TODOS los comprobantes de pago que aparecen (puede haber uno o varios: cheques, transferencias, depósitos).
 
-REGLA PRINCIPAL: COPIÁ, NO COMPLETES. Si un dato no se lee con claridad, devolvé null. Nunca completes dígitos que no ves ni corrijas un número para que "cierre". Un campo vacío es correcto; un campo inventado es un error grave.
+REGLA PRINCIPAL: COPIÁ, NO COMPLETES. Transcribí lo que está impreso; nunca completes dígitos que no ves ni corrijas un número para que "cierre". Si un dato no está en la imagen, null. Un campo inventado es un error grave; un campo transcripto con un dígito dudoso lo revisa el sistema.
 
 CHEQUE (tipo: "cheque"):
 - numero_cheque: número del cheque, solo dígitos.
 - banco_emisor: nombre del banco emisor (logo/leyenda a la izquierda). Si no está claro, null.
-- fecha_emision y fecha_cheque (fecha de pago/vencimiento): formato YYYY-MM-DD.
+- FECHAS (prioridad alta): un cheque común tiene UNA sola fecha impresa (arriba a la derecha, "Lugar y fecha"): devolvela en fecha_cheque Y en fecha_emision. Un cheque de pago diferido tiene dos: "fecha de emisión" → fecha_emision y "fecha de pago" → fecha_cheque. Formato YYYY-MM-DD; si está en letras ("30 de octubre de 2026") convertila. Devolvé siempre la fecha si se ve, aunque sea futura.
 - monto: importe numérico sin símbolos. En el cheque figura en números y en letras: deben coincidir. Tené en cuenta que puede usar coma decimal y punto de miles o viceversa.
-- cuit_emisor: CUIT del titular (11 dígitos). Aparece como "CUIT", "C.U.I.T." o "CT" seguido del número, con o sin guiones. Devolvé exactamente los 11 dígitos que se leen, en formato XX-XXXXXXXX-X. Si no se leen los 11 con claridad, null. NO confundas con el número de cheque, el número de cuenta ni la línea inferior del cheque.
+- cuit_emisor (prioridad alta): CUIT/CUIL del titular de la cuenta, 11 dígitos. Está impreso junto al nombre del titular (abajo a la izquierda o debajo del nombre), precedido por "CUIT", "C.U.I.T.", "CUIL" o "CT", con o sin guiones (20-12345678-6 / 20123456786). Transcribí los 11 dígitos exactamente como se leen, en formato XX-XXXXXXXX-X, aunque tengas dudas de un dígito (el sistema verifica el dígito verificador). Solo devolvé null si directamente no hay CUIT impreso o faltan dígitos. NO uses el número de cheque, el número de cuenta ni la línea inferior (MICR).
 - cuits_titulares: TODOS los CUITs impresos junto a los nombres de los titulares (cuenta conjunta = dos). Mismo formato. Si hay uno solo, array con ese único CUIT.
 - localidad: si es visible.
 - color_cheque: "ECHEQ" únicamente si es un cheque electrónico; si es papel, null.
@@ -152,6 +152,7 @@ function sanear(crudos: any[], bancos: any[], archivoIndex: number): { legacy: O
     if (!r || typeof r !== "object") continue
     if (r.tipo === "cheque") {
       const s = sanearCheque(r)
+      if (s.descartados) console.warn("[pagos-clientes/ocr] descartado por validación:", JSON.stringify({ leido: { cuit: r.cuit_emisor, fecha_cheque: r.fecha_cheque, fecha_emision: r.fecha_emision, monto: r.monto }, descartados: s.descartados }))
       const res: ResultadoOcr = { tipo: "cheque", ...s }
       if (!resultadoConDatos(res)) continue
       saneados.push(res)

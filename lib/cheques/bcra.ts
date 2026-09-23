@@ -67,7 +67,7 @@ export function esMismoBanco(entidadBcra: string, bancoEmisor: string): boolean 
   return a.includes(b) || b.includes(a)
 }
 
-export type Veredicto = "apto" | "riesgo" | "sin_respuesta"
+export type Veredicto = "apto" | "riesgo" | "sin_respuesta" | "sin_cuit"
 
 export interface VeredictoBcra {
   veredicto: Veredicto
@@ -143,6 +143,18 @@ export interface ConsultaBcraResultado {
   mismoBanco: boolean
   cheque: { banco: string | null; numero_cheque: string | null; monto: number | null; cliente_nombre: string | null }
   consultado_at: string
+}
+
+/** Aviso para un cheque que se registró SIN CUIT válido: no hubo consulta al BCRA y no puede pasar en silencio. */
+export function resultadoSinCuit(cheque: ConsultaBcraResultado["cheque"], leido?: string | null): ConsultaBcraResultado {
+  return {
+    veredicto: "sin_cuit",
+    titulo: "⚠️ Cheque sin CUIT — no se consultó el BCRA",
+    detalle: [leido ? `El CUIT cargado ("${leido}") no cierra el dígito verificador.` : "No se cargó el CUIT del emisor.", "Este cheque queda sin control de riesgo: verificalo en la oficina."],
+    mismoBanco: false,
+    cheque,
+    consultado_at: new Date().toISOString(),
+  }
 }
 
 /** Texto de UNA línea para el aviso de la app ("Cheque 12345678 · Macro · Almacén X: ✅ …"). */

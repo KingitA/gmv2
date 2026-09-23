@@ -6,6 +6,7 @@ import {
   cuitValido,
   esMismoBanco,
   normalizarCuit,
+  resultadoSinCuit,
   SITUACION_LABEL,
   veredictoBcra,
   type BcraResultado,
@@ -150,6 +151,12 @@ class AlmacenConsultas {
   quitar(id: string) {
     if (this.mapa.delete(id)) this.emitir()
   }
+  /** Cheque registrado sin CUIT válido: aviso explícito (no hubo consulta). */
+  sinCuit(id: string, ctx: ContextoCheque, leido?: string | null) {
+    const r = resultadoSinCuit({ banco: ctx.banco ?? null, numero_cheque: ctx.numero_cheque ?? null, monto: ctx.monto ?? null, cliente_nombre: ctx.cliente_nombre ?? null }, leido)
+    this.mapa.set(id, { id, ctx: { ...ctx, cuits: [] }, consultando: false, veredicto: { veredicto: "sin_cuit", titulo: r.titulo, detalle: r.detalle, mismoBanco: false, resultados: [] }, visto: false, iniciada_at: Date.now() })
+    this.emitir()
+  }
   montar(delta: number) {
     this.montajes = Math.max(0, this.montajes + delta)
     this.emitir()
@@ -169,9 +176,10 @@ export function useConsultasBcra() {
   const consultar = useCallback((id: string, ctx: ContextoCheque) => almacen.consultar(id, ctx), [])
   const quitar = useCallback((id: string) => almacen.quitar(id), [])
   const cerrarFormulario = useCallback(() => almacen.cerrarFormulario(), [])
+  const sinCuit = useCallback((id: string, ctx: ContextoCheque, leido?: string | null) => almacen.sinCuit(id, ctx, leido), [])
   const avisos = lista.filter((c) => !c.visto && c.veredicto)
   const pendientes = almacen.montajes === 0 ? lista.filter((c) => c.consultando && !c.visto) : []
-  return { consultas: lista, consultar, quitar, cerrarFormulario, avisos, pendientes }
+  return { consultas: lista, consultar, quitar, cerrarFormulario, sinCuit, avisos, pendientes }
 }
 
 /**
@@ -206,6 +214,7 @@ const CLS_POR_VEREDICTO = {
   apto: "bg-green-50 border-green-300 text-green-800",
   riesgo: "bg-red-50 border-2 border-red-400 text-red-800",
   sin_respuesta: "bg-amber-50 border-amber-300 text-amber-800",
+  sin_cuit: "bg-amber-50 border-2 border-amber-400 text-amber-900",
 } as const
 
 /** Resultado de una consulta (una sola línea + detalle si hay riesgo). */
@@ -230,6 +239,17 @@ export function ConsultandoBcra() {
       Consultando Central de Deudores (BCRA)… el cobro se puede registrar igual.
     </div>
   )
+}
+
+/** Chip compacto para la fila: BCRA ✓ (apto) · ⛔ (riesgo) · ⚠️ (sin respuesta). */
+export function ChipBcra({ consulta }: { consulta: ConsultaBcra | null }) {
+  if (!consulta) return null
+  if (consulta.consultando) return <span className="shrink-0 rounded-full border border-gray-300 px-1.5 text-[10px] font-bold text-gray-500" title="Consultando la Central de Deudores del BCRA">BCRA…</span>
+  const v = consulta.veredicto?.veredicto
+  if (v === "apto") return <span className="shrink-0 rounded-full border border-green-300 bg-green-50 px-1.5 text-[10px] font-bold text-green-700" title={consulta.veredicto!.titulo}>BCRA ✓</span>
+  if (v === "riesgo") return <span className="shrink-0 rounded-full border border-red-400 bg-red-50 px-1.5 text-[10px] font-bold text-red-700" title={consulta.veredicto!.titulo}>BCRA ⛔</span>
+  if (v === "sin_respuesta") return <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-bold text-amber-700" title={consulta.veredicto!.titulo}>BCRA ⚠️</span>
+  return null
 }
 
 /** Avisos de consultas que terminaron después de cerrar el formulario. */

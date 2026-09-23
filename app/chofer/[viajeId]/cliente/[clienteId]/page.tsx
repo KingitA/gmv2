@@ -8,7 +8,7 @@ import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
-import { editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
+import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
 import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
 import { ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
 
@@ -345,7 +345,7 @@ export default function ClienteEntregaPage() {
         }),
       })
       const d = await res.json()
-      if (d.success) { idemKeyRef.current = crypto.randomUUID(); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({}); cargarDatos() }
+      if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({}); cargarDatos() }
       else alert(d.error || "Error al registrar cobro")
     } finally { setGuardandoCobro(false) }
   }
@@ -1034,6 +1034,11 @@ function MetodoPagoCard({
                   className={`w-full border-2 rounded-xl px-4 py-3 text-base font-mono ${riesgo ? "border-red-400 bg-red-50" : clsOcr(fila, "cuit_emisor", "border-gray-200")}`}
                 />
               </div>
+              {!cuitValido(fila.cuit_emisor) && (
+                <p className="text-xs font-medium text-amber-700">
+                  {fila.cuit_emisor ? "⚠️ El CUIT no cierra (dígito verificador): revisalo en el cheque." : "⚠️ Sin CUIT: este cheque no se consulta en el BCRA (queda sin control de riesgo)."}
+                </p>
+              )}
               <label className="flex items-center gap-2 text-sm text-gray-600">
                 <input type="checkbox" checked={fila.es_echeq} onChange={(e) => onChange({ es_echeq: e.target.checked })} className="w-5 h-5" />
                 Es e-cheq

@@ -8,7 +8,7 @@
 // Los campos que vinieron del OCR quedan marcados en `ocr.deOcr` hasta que el
 // operario los pisa (la UI los resalta).
 
-import { CAMPOS_CHEQUE, type CampoCheque, type DatosCheque, type ResultadoOcr } from "./validar"
+import { CAMPOS_CHEQUE, textoDescartados, type CampoCheque, type DatosCheque, type ResultadoOcr } from "./validar"
 
 export type EstadoOcr = "sin_foto" | "leyendo" | "ok" | "sin_datos" | "fallo"
 
@@ -24,6 +24,8 @@ export interface EstadoFotoFila {
   foto_local: string | null
   /** Mensaje corto para la UI cuando estado = fallo | sin_datos */
   detalle: string | null
+  /** Pista: lo que el OCR leyó y no validó (CUIT que no cierra, fecha rara) */
+  pista?: string | null
 }
 
 export interface FilaCheque extends DatosCheque {
@@ -91,7 +93,7 @@ export function aplicarOcr(fila: FilaCheque, r: ResultadoOcr, fotoUrl: string | 
       deOcr.add(campo)
     }
   }
-  out.ocr = { ...fila.ocr, estado: "ok", deOcr: [...deOcr], editados: [...editados], foto_url: fotoUrl ?? fila.ocr.foto_url, detalle: null }
+  out.ocr = { ...fila.ocr, estado: "ok", deOcr: [...deOcr], editados: [...editados], foto_url: fotoUrl ?? fila.ocr.foto_url, detalle: null, pista: r.tipo === "cheque" ? textoDescartados(r.descartados) : null }
   return out
 }
 

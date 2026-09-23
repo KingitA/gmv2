@@ -82,6 +82,23 @@ describe("fecha y monto: por formato y rango", () => {
     expect(normalizarMonto(9e12)).toBeNull()
     expect(normalizarMonto("abc")).toBeNull()
   })
+  it("cheque común con UNA sola fecha impresa: es la fecha de pago (aunque venga como emisión y sea futura)", () => {
+    const s = sanearCheque({ fecha_emision: "2026-10-30", fecha_cheque: null }, { hoy: HOY })
+    expect(s.fecha_cheque).toBe("2026-10-30")
+    expect(s.fecha_emision).toBe("2026-10-30")
+    const d = sanearCheque({ fecha_emision: "2026-09-20", fecha_cheque: "2026-12-15" }, { hoy: HOY })
+    expect(d.fecha_cheque).toBe("2026-12-15")
+    expect(d.fecha_emision).toBe("2026-09-20")
+  })
+  it("lo leído y descartado viaja como pista (nunca como dato) y no cuenta como dato válido", () => {
+    const s = sanearCheque({ cuit_emisor: "20-12345678-9", fecha_cheque: "31/02/2026" }, { hoy: HOY })
+    expect(s.cuit_emisor).toBeUndefined()
+    expect(s.descartados).toEqual({ cuit_emisor: "20-12345678-9", fecha_cheque: "31/02/2026" })
+    expect(resultadoConDatos({ tipo: "cheque", ...s })).toBe(false)
+    const fila = aplicarOcr(filaDesdeFoto("f9", null), { tipo: "cheque", numero_cheque: "123", cuits_titulares: [], descartados: { cuit_emisor: "20-12345678-9" } }, null)
+    expect(fila.cuit_emisor).toBe("")
+    expect(fila.ocr.pista).toMatch(/20-12345678-9/)
+  })
   it("un resultado sin ningún dato válido no genera fila fantasma", () => {
     const s = sanearCheque({ cuit_emisor: "1", monto: "x", fecha_cheque: "ayer" }, { hoy: HOY })
     expect(resultadoConDatos({ tipo: "cheque", ...s })).toBe(false)

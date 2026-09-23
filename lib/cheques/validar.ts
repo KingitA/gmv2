@@ -22,6 +22,8 @@ export const CAMPOS_CHEQUE: CampoCheque[] = ["monto", "banco", "numero_cheque", 
 export interface ChequeSaneado extends Partial<DatosCheque> {
   /** CUITs válidos impresos en el cheque (cuentas conjuntas), el emisor primero. */
   cuits_titulares: string[]
+  /** Lo que el modelo leyó pero NO validó (pista para el operario; nunca se autocompleta) */
+  descartados?: Partial<Record<CampoCheque, string>>
 }
 
 export interface TransferenciaSaneada {
@@ -173,9 +175,15 @@ export function sanearCheque(r: ChequeCrudo, opts: { hoy?: string } = {}): Chequ
   if (banco) out.banco = banco
   const numero = normalizarNumeroCheque(r.numero_cheque as any)
   if (numero) out.numero_cheque = numero
+  // Fechas. Un cheque común tiene UNA sola fecha impresa y es la de pago: el modelo suele
+  // devolverla como fecha_emision (o solo una de las dos). Regla: si no hay fecha de
+  // pago válida, la de emisión es la de pago. Ambas con el mismo rango (±400 días): un
+  // cheque de pago diferido se emite hoy y se cobra hasta 360 días después, y la fecha
+  // impresa en uno común puede ser futura (posdatado).
   const venc = normalizarFecha(r.fecha_cheque as any, { hoy: opts.hoy })
+  const emision = normalizarFecha(r.fecha_emision as any, { hoy: opts.hoy })
   if (venc) out.fecha_cheque = venc
-  const emision = normalizarFecha(r.fecha_emision as any, { hoy: opts.hoy, adelanteDias: 7 })
+  else if (emision) out.fecha_cheque = emision
   if (emision) out.fecha_emision = emision
   const cuit = normalizarCuit(r.cuit_emisor as any)
   if (cuit) out.cuit_emisor = cuit
@@ -183,7 +191,28 @@ export function sanearCheque(r: ChequeCrudo, opts: { hoy?: string } = {}): Chequ
   out.cuits_titulares = [...new Set([cuit, ...titulares.map((c) => normalizarCuit(c as any))].filter((c): c is string => !!c))].slice(0, 4)
   if (!out.cuit_emisor && out.cuits_titulares.length) out.cuit_emisor = out.cuits_titulares[0]
   if (String(r.color_cheque ?? "").toUpperCase() === "ECHEQ" || r.es_echeq === true) out.es_echeq = true
+
+  // Lo que el modelo LEYÓ pero no validó: no se muestra como dato, pero sí como pista
+  // ("el OCR leyó un CUIT que no cierra: revisalo en el cheque"). Nunca se autocompleta.
+  const descartados: Partial<Record<CampoCheque, string>> = {}
+  const leidoCuit = String(r.cuit_emisor ?? "").trim()
+  if (!out.cuit_emisor && leidoCuit && !/^(null|undefined)$/i.test(leidoCuit)) descartados.cuit_emisor = leidoCuit
+  const leidaFecha = String(r.fecha_cheque ?? r.fecha_emision ?? "").trim()
+  if (!out.fecha_cheque && leidaFecha && !/^(null|undefined)$/i.test(leidaFecha)) descartados.fecha_cheque = leidaFecha
+  const leidoMonto = String(r.monto ?? "").trim()
+  if (out.monto === undefined && leidoMonto && !/^(null|undefined|0)$/i.test(leidoMonto)) descartados.monto = leidoMonto
+  if (Object.keys(descartados).length) out.descartados = descartados
   return out
+}
+
+/** Texto para la UI con lo leído y descartado ("CUIT leído 20-1234567X-9 no cierra: revisalo en el cheque"). */
+export function textoDescartados(d: Partial<Record<CampoCheque, string>> | undefined): string | null {
+  if (!d) return null
+  const partes: string[] = []
+  if (d.cuit_emisor) partes.push(`CUIT leído "${d.cuit_emisor}" no cierra el dígito verificador`)
+  if (d.fecha_cheque) partes.push(`fecha leída "${d.fecha_cheque}" inválida o fuera de rango`)
+  if (d.monto) partes.push(`importe leído "${d.monto}" inválido`)
+  return partes.length ? `El OCR leyó algo que no valida y quedó vacío: ${partes.join("; ")}. Revisalo en el cheque y cargalo a mano.` : null
 }
 
 export interface TransferenciaCruda {
@@ -214,6 +243,6 @@ export type ResultadoOcr =
 
 /** ¿Trae algún dato útil? (una foto de la que no salió nada no debe crear filas fantasma) */
 export function resultadoConDatos(r: ResultadoOcr): boolean {
-  const { tipo: _t, ...resto } = r as unknown as Record<string, unknown>
+  const { tipo: _t, descartados: _d, ...resto } = r as unknown as Record<string, unknown>
   return Object.entries(resto).some(([k, v]) => (k === "cuits_titulares" ? Array.isArray(v) && v.length > 0 : v !== undefined && v !== "" && v !== false && v !== null))
 }

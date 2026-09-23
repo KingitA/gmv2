@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router"
 import { decidirAtras, indiceHistorial, useItemsOutbox, useOnline, useRuntime, type ItemOutbox } from "@gm/core"
-import { avisosBcraPendientes } from "@gm/cheques"
+import { avisosBcraPendientes, resultadoSinCuit, type ConsultaBcraResultado } from "@gm/cheques"
 import { Encabezado, Frescura, Hoja } from "@gm/core/ui"
 import { CARTEL_PRECIOS_VENCIDOS } from "@gm/vendedor"
 
@@ -109,14 +109,43 @@ function guardarVistos(v: string[]) {
   try { localStorage.setItem(CLAVE_BCRA_VISTOS, JSON.stringify(v.slice(-200))) } catch { /* noop */ }
 }
 
+// Cheques registrados SIN CUIT válido: no hubo consulta (no hay item en el outbox), pero
+// tampoco puede pasar en silencio. Aviso local, en el equipo, hasta que se marca visto.
+const CLAVE_SIN_CUIT = "gm.vendedor.bcra.sincuit"
+type AvisoLocal = { key: string; resultado: ConsultaBcraResultado }
+const oyentesSinCuit = new Set<() => void>()
+function leerSinCuit(): AvisoLocal[] {
+  try { return JSON.parse(localStorage.getItem(CLAVE_SIN_CUIT) || "[]") } catch { return [] }
+}
+function guardarSinCuit(v: AvisoLocal[]) {
+  try { localStorage.setItem(CLAVE_SIN_CUIT, JSON.stringify(v.slice(-50))) } catch { /* noop */ }
+  for (const fn of oyentesSinCuit) fn()
+}
+export function dejarAvisoSinCuit(cheque: ConsultaBcraResultado["cheque"], leido?: string | null) {
+  guardarSinCuit([...leerSinCuit(), { key: `sincuit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, resultado: resultadoSinCuit(cheque, leido) }])
+}
+
 export function useAvisosBcra() {
   const items = useItemsOutbox()
   const [vistos, setVistos] = useState<string[]>(leerVistos)
+  const [locales, setLocales] = useState<AvisoLocal[]>(leerSinCuit)
+  useEffect(() => {
+    const fn = () => setLocales(leerSinCuit())
+    oyentesSinCuit.add(fn)
+    return () => void oyentesSinCuit.delete(fn)
+  }, [])
   const avisos = useMemo(
-    () => avisosBcraPendientes(items, vistos).map((a) => ({ ...a, item: items.find((i) => i.key === a.key)! })),
-    [items, vistos],
+    () => [
+      ...locales.map((a) => ({ ...a, item: null as ItemOutbox | null })),
+      ...avisosBcraPendientes(items, vistos).map((a) => ({ ...a, item: (items.find((i) => i.key === a.key) ?? null) as ItemOutbox | null })),
+    ],
+    [items, vistos, locales],
   )
   const marcarVisto = useCallback((key: string) => {
+    if (key.startsWith("sincuit-")) {
+      guardarSinCuit(leerSinCuit().filter((a) => a.key !== key))
+      return
+    }
     const v = [...leerVistos(), key]
     guardarVistos(v)
     setVistos(v)
@@ -132,6 +161,7 @@ export function AvisosBcra() {
     apto: "border-green-300 bg-green-50 text-green-800",
     riesgo: "border-red-400 bg-red-50 text-red-800",
     sin_respuesta: "border-amber-300 bg-amber-50 text-amber-800",
+    sin_cuit: "border-amber-400 bg-amber-50 text-amber-900",
   }
   return (
     <div className="space-y-2 px-4 pt-3">
@@ -143,7 +173,7 @@ export function AvisosBcra() {
             <p key={i} className="mt-0.5 text-xs opacity-80">{d}</p>
           ))}
           <div className="mt-2 flex gap-2">
-            {r.veredicto === "sin_respuesta" && (
+            {r.veredicto === "sin_respuesta" && item && (
               <button
                 onClick={() => {
                   void outbox.encolar({ tipo: "bcra.consultar", payload: item.payload, etiqueta: item.etiqueta ?? "BCRA" })

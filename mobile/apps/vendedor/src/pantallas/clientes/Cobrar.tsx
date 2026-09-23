@@ -21,7 +21,7 @@ import {
 import { blobABase64, comprimirFoto, urlLocal } from "@gm/cheques/foto"
 import { DS, type ComprobanteCC, type DevolucionPendiente, type PedidoCobro } from "../../datasets"
 import { rechazosDe, useCuenta, useCuentasBancarias, useEncolar, uuidv4 } from "../../datos/hooks"
-import { AvisosBcra, MontoInput, Pantalla, Rechazos, dejarAviso, formatCurrency, round2, useToast } from "../../ui"
+import { AvisosBcra, MontoInput, Pantalla, Rechazos, dejarAviso, dejarAvisoSinCuit, formatCurrency, round2, useToast } from "../../ui"
 
 // Port de app/vendedor/clientes/[id]/cobrar/page.tsx — espejo del patrón de /caja (Caja del Día):
 //  · "¿Qué paga?": pedidos con estado; tilde directa, monto editable inline que se confirma
@@ -92,6 +92,7 @@ function EstadoFoto({ fila }: { fila: Metodo }) {
           </p>
         )}
         {(o.estado === "sin_datos" || o.estado === "fallo") && <p className="text-gray-600">{o.detalle}</p>}
+        {o.pista && <p className="mt-0.5 font-medium text-red-700">{o.pista}</p>}
       </div>
     </div>
   )
@@ -463,7 +464,12 @@ export function Cobrar() {
       // BCRA en segundo plano: una consulta por cheque con CUIT válido, DESPUÉS del cobro en la
       // cola. El veredicto llega como aviso (AvisosBcra) aunque hoy no haya señal.
       for (const m of metodos) {
-        if (m.tipo !== "cheque" || !cuitValido(m.cuit_emisor)) continue
+        if (m.tipo !== "cheque") continue
+        if (!cuitValido(m.cuit_emisor)) {
+          // Sin CUIT válido no hay consulta: aviso explícito (queda sin control de riesgo)
+          dejarAvisoSinCuit({ banco: m.banco || null, numero_cheque: m.numero_cheque || null, monto: m.monto, cliente_nombre: cliente.nombre }, m.cuit_emisor || null)
+          continue
+        }
         const consulta: ConsultaBcraPayload = { cuits: [m.cuit_emisor], banco: m.banco || null, numero_cheque: m.numero_cheque || null, monto: m.monto, cliente_nombre: cliente.nombre }
         await encolar("bcra.consultar", consulta, `BCRA cheque ${m.numero_cheque || ""} ${cliente.nombre}`.trim())
       }
@@ -836,7 +842,8 @@ export function Cobrar() {
                         <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={clsOcr(m, "numero_cheque")} />
                         <input type="date" value={m.fecha_cheque} onChange={(e) => updateMetodo(idx, { fecha_cheque: e.target.value })} className={clsOcr(m, "fecha_cheque")} />
                         <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className={clsOcr(m, "cuit_emisor")} />
-                        {m.cuit_emisor && !cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs text-red-600">El CUIT no cierra (dígito verificador): revisalo. Se registra igual, pero no se consulta en el BCRA.</p>}
+                        {m.cuit_emisor && !cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs font-medium text-red-600">⚠️ El CUIT no cierra (dígito verificador): revisalo en el cheque. Se registra igual, pero no se consulta en el BCRA.</p>}
+                        {!m.cuit_emisor && <p className="col-span-2 text-xs font-medium text-amber-700">⚠️ Sin CUIT: este cheque no se consulta en el BCRA (queda sin control de riesgo).</p>}
                         {cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs text-gray-500">Al registrar, el CUIT se consulta en el BCRA en segundo plano; el resultado llega como aviso.</p>}
                         <label className="col-span-2 flex min-h-11 items-center gap-2 text-sm text-gray-600">
                           <input type="checkbox" checked={m.es_echeq} onChange={(e) => updateMetodo(idx, { es_echeq: e.target.checked })} className="h-5 w-5" />
