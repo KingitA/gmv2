@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router"
-import { decidirAtras, indiceHistorial, useOnline, useRuntime, type ItemOutbox } from "@gm/core"
+import { decidirAtras, indiceHistorial, useItemsOutbox, useOnline, useRuntime, type ItemOutbox } from "@gm/core"
+import { avisosBcraPendientes, resultadoSinCuit, type ConsultaBcraResultado } from "@gm/cheques"
 import { Encabezado, Frescura, Hoja } from "@gm/core/ui"
 import { CARTEL_PRECIOS_VENCIDOS } from "@gm/vendedor"
 
@@ -94,6 +95,102 @@ export function Rechazos({ items, ayuda, accion }: { items: ItemOutbox[]; ayuda?
   )
 }
 
+// ─── Avisos del BCRA (cheques) ───────────────────────────────────────────────
+// La consulta a la Central de Deudores va por el outbox (`bcra.consultar`, encolada
+// justo después del cobro) y contesta cuando puede: el cobro cerró sin esperarla.
+// Acá se muestra el veredicto apenas llega (esta pantalla o cualquiera que monte el
+// aviso), hasta que el vendedor lo marca como visto. Lo visto se recuerda en el equipo.
+
+const CLAVE_BCRA_VISTOS = "gm.vendedor.bcra.vistos"
+function leerVistos(): string[] {
+  try { return JSON.parse(localStorage.getItem(CLAVE_BCRA_VISTOS) || "[]") } catch { return [] }
+}
+function guardarVistos(v: string[]) {
+  try { localStorage.setItem(CLAVE_BCRA_VISTOS, JSON.stringify(v.slice(-200))) } catch { /* noop */ }
+}
+
+// Cheques registrados SIN CUIT válido: no hubo consulta (no hay item en el outbox), pero
+// tampoco puede pasar en silencio. Aviso local, en el equipo, hasta que se marca visto.
+const CLAVE_SIN_CUIT = "gm.vendedor.bcra.sincuit"
+type AvisoLocal = { key: string; resultado: ConsultaBcraResultado }
+const oyentesSinCuit = new Set<() => void>()
+function leerSinCuit(): AvisoLocal[] {
+  try { return JSON.parse(localStorage.getItem(CLAVE_SIN_CUIT) || "[]") } catch { return [] }
+}
+function guardarSinCuit(v: AvisoLocal[]) {
+  try { localStorage.setItem(CLAVE_SIN_CUIT, JSON.stringify(v.slice(-50))) } catch { /* noop */ }
+  for (const fn of oyentesSinCuit) fn()
+}
+export function dejarAvisoSinCuit(cheque: ConsultaBcraResultado["cheque"], leido?: string | null) {
+  guardarSinCuit([...leerSinCuit(), { key: `sincuit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, resultado: resultadoSinCuit(cheque, leido) }])
+}
+
+export function useAvisosBcra() {
+  const items = useItemsOutbox()
+  const [vistos, setVistos] = useState<string[]>(leerVistos)
+  const [locales, setLocales] = useState<AvisoLocal[]>(leerSinCuit)
+  useEffect(() => {
+    const fn = () => setLocales(leerSinCuit())
+    oyentesSinCuit.add(fn)
+    return () => void oyentesSinCuit.delete(fn)
+  }, [])
+  const avisos = useMemo(
+    () => [
+      ...locales.map((a) => ({ ...a, item: null as ItemOutbox | null })),
+      ...avisosBcraPendientes(items, vistos).map((a) => ({ ...a, item: (items.find((i) => i.key === a.key) ?? null) as ItemOutbox | null })),
+    ],
+    [items, vistos, locales],
+  )
+  const marcarVisto = useCallback((key: string) => {
+    if (key.startsWith("sincuit-")) {
+      guardarSinCuit(leerSinCuit().filter((a) => a.key !== key))
+      return
+    }
+    const v = [...leerVistos(), key]
+    guardarVistos(v)
+    setVistos(v)
+  }, [])
+  return { avisos, marcarVisto }
+}
+
+export function AvisosBcra() {
+  const { avisos, marcarVisto } = useAvisosBcra()
+  const { outbox } = useRuntime()
+  if (!avisos.length) return null
+  const cls: Record<string, string> = {
+    apto: "border-green-300 bg-green-50 text-green-800",
+    riesgo: "border-red-400 bg-red-50 text-red-800",
+    sin_respuesta: "border-amber-300 bg-amber-50 text-amber-800",
+    sin_cuit: "border-amber-400 bg-amber-50 text-amber-900",
+  }
+  return (
+    <div className="space-y-2 px-4 pt-3">
+      {avisos.map(({ key, resultado: r, item }) => (
+        <div key={key} className={`rounded-xl border-2 px-3 py-2 text-sm ${cls[r.veredicto] || cls.sin_respuesta}`}>
+          <p className="text-xs opacity-70">{[r.cheque.numero_cheque ? `Cheque ${r.cheque.numero_cheque}` : "Cheque", r.cheque.banco, r.cheque.cliente_nombre].filter(Boolean).join(" · ")}</p>
+          <p className={r.veredicto === "riesgo" ? "font-extrabold" : "font-bold"}>{r.titulo}</p>
+          {r.detalle.slice(0, 3).map((d, i) => (
+            <p key={i} className="mt-0.5 text-xs opacity-80">{d}</p>
+          ))}
+          <div className="mt-2 flex gap-2">
+            {r.veredicto === "sin_respuesta" && item && (
+              <button
+                onClick={() => {
+                  void outbox.encolar({ tipo: "bcra.consultar", payload: item.payload, etiqueta: item.etiqueta ?? "BCRA" })
+                  marcarVisto(key)
+                }}
+                className="min-h-11 rounded-lg bg-white/80 px-4 text-sm font-bold"
+              >
+                Reintentar
+              </button>
+            )}
+            <button onClick={() => marcarVisto(key)} className="min-h-11 rounded-lg border border-current px-4 text-sm font-bold">Visto</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 /** Volver a la pantalla anterior (misma decisión que el botón atrás físico y la flecha del encabezado). */
 export function useVolver() {
   const navigate = useNavigate()

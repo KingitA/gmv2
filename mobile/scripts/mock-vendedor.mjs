@@ -153,6 +153,8 @@ const PARCIALES = new Set(["vendedor_clientes", "vendedor_cc", "vendedor_viajes"
 // ─── Operaciones ─────────────────────────────────────────────────────────────
 const EDITABLES = ["en_venta", "pendiente", "impreso", "en_preparacion"]
 // Rechazo de negocio a pedido, para probar el caso "la RPC rechazó el cobro" (POST /__mock/rechazar-cobros?on=1)
+let MODO_BCRA = "apto" // apto | riesgo | caido
+let MODO_OCR = "ok" // ok | caido | sin_datos | lento | sin_cuit
 let RECHAZAR_COBROS = false
 const parchePedido = (id) => { const p = S.pedidos.find((x) => x.id === id && x.estado !== "eliminado"); return { dataset: "vendedor_pedidos", upserts: p ? [filaPedido(p)] : [], deletes: p ? [] : [id] } }
 const parcheCliente = (id) => { const c = clienteDe(id); return [{ dataset: "vendedor_clientes", upserts: c ? [c] : [], deletes: c ? [] : [id] }, { dataset: "vendedor_cc", upserts: c ? [filaCC(id)] : [], deletes: c ? [] : [id] }] }
@@ -255,6 +257,14 @@ const HANDLERS = {
     }
     return { success: true, pagos, replica: p.clientes.flatMap((c) => parcheCliente(c.cliente_id)) }
   },
+  // Consulta BCRA en segundo plano (lib/mobile/outbox/bcra.ts). /__mock/bcra?modo=apto|riesgo|caido
+  "bcra.consultar": (u, p) => {
+    const cheque = { banco: p.banco ?? null, numero_cheque: p.numero_cheque ?? null, monto: p.monto ?? null, cliente_nombre: p.cliente_nombre ?? null }
+    const consultado_at = new Date().toISOString()
+    if (MODO_BCRA === "caido") return { veredicto: "sin_respuesta", titulo: "⚠️ No se pudo consultar el BCRA — verificá el cheque a mano", detalle: ["El BCRA no respondió a tiempo"], mismoBanco: false, cheque, consultado_at }
+    if (MODO_BCRA === "riesgo") return { veredicto: "riesgo", titulo: "⛔ BCRA: Situación 3 — riesgo medio — evaluá si aceptás el cheque", detalle: [`DEMO SA (${(p.cuits[0] || "").replace(/D/g, "")}): Situación 3 — riesgo medio`, `🚨 La deuda (situación 3) es en BANCO MACRO S.A., el MISMO banco que emitió el cheque.`], mismoBanco: true, cheque, consultado_at }
+    return { veredicto: "apto", titulo: "✅ BCRA: se puede aceptar — sin antecedentes", detalle: [], mismoBanco: false, cheque, consultado_at }
+  },
   "cobro.anular": (u, p) => {
     const k = S.cc.get(p.cliente_id), cli = clienteDe(p.cliente_id)
     const pago = k?.pagos.find((x) => x.id === p.pago_id)
@@ -316,6 +326,8 @@ createServer(async (req, res) => {
     if (url.pathname === "/__mock/red") S.red = url.searchParams.get("on") !== "0"
     if (url.pathname === "/__mock/reset") reset()
     if (url.pathname === "/__mock/rechazar-cobros") RECHAZAR_COBROS = url.searchParams.get("on") !== "0"
+    if (url.pathname === "/__mock/bcra") MODO_BCRA = url.searchParams.get("modo") || "apto"
+    if (url.pathname === "/__mock/ocr") MODO_OCR = url.searchParams.get("modo") || "ok"
     if (url.pathname === "/__mock/precio") {
       const a = S.f.precios_articulos.find((x) => x.sku === url.searchParams.get("sku"))
       if (a) { a.precio_base = Number(url.searchParams.get("base")); S.seq++ }
@@ -376,6 +388,18 @@ createServer(async (req, res) => {
     S.claves.set(m.idempotency_key, { hash, status, body: out, aplicaciones: 1, recibidas: 1, tipo: m.tipo })
     S.log.push(`${u.nombre} ${m.tipo} → ${out.estado}${out.error ? `: ${out.error}` : ""}`)
     return json(status, out)
+  }
+  // Foto de cheque: la app crea la fila al instante y llama acá en segundo plano. /__mock/ocr?modo=ok|lento|caido|sin_datos
+  if (url.pathname === "/api/pagos-clientes/ocr") {
+    if (MODO_OCR === "caido") return json(500, { error: "GEMINI_API_KEY no configurado" })
+    await new Promise((r) => setTimeout(r, MODO_OCR === "lento" ? 8000 : 1500))
+    const foto = { url: "https://placehold.co/640x300/e2e8f0/475569.png?text=Cheque+(mock)", nombre: "cheque.jpg" }
+    if (MODO_OCR === "sin_datos") return json(200, { success: true, resultados: [], total_encontrados: 0, archivos: [foto], archivos_por_indice: [foto], saneados: [], errores: ["cheque.jpg: no se detectaron datos"] })
+    const venc = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+    const cheque = MODO_OCR === "sin_cuit"
+      ? { tipo: "cheque", monto: 421100, banco: "Santander", numero_cheque: "11400261", cuits_titulares: [], descartados: { fecha_cheque: "27 de xyz de 2026" }, no_encontrados: ["cuit_emisor"] }
+      : { tipo: "cheque", monto: 150000, banco: "Banco Macro", numero_cheque: "00098765", fecha_cheque: venc, cuit_emisor: "20-12345678-6", cuits_titulares: ["20-12345678-6"] }
+    return json(200, { success: true, resultados: [{ ...cheque, banco_emisor: cheque.banco, archivo_index: 0 }], total_encontrados: 1, archivos: [foto], archivos_por_indice: [foto], saneados: [{ ...cheque, archivo_index: 0 }] })
   }
   // Online-only
   if (url.pathname === "/api/viajante/rendir") return json(201, { success: true, rendicion_id: randomUUID(), estado: "abierta", efectivo_declarado: body?.efectivo_declarado ?? 0, efectivo_registrado: 0, diferencia: 0, cantidad_pagos: (body?.pago_ids || []).length })

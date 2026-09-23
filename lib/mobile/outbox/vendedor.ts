@@ -35,6 +35,7 @@ import { conCaptura, type CapturaPedido } from "../contexto-captura"
 import { insumosAFecha, verificarPreciosCapturados } from "../precios-integridad"
 import { cargarClientesVendedor, cargarCuentaCliente, cargarPedidosVendedor, cargarViajeVendedor, vendedorIdsDe } from "../sync/vendedor"
 import { esUuid } from "../uuid"
+import { subirFotosPendientes } from "@/lib/cobranzas/fotos"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
 
 const ROLES = ["vendedor"]
@@ -420,7 +421,12 @@ const cobroRegistrar: HandlerDef<Record<string, any>> = {
   roles: ROLES,
   validar: (p) => (Array.isArray(p?.clientes) && p.clientes.length && Array.isArray(p?.metodos) && p.metodos.length ? null : "Cobro incompleto"),
   async aplicar(ctx, m) {
-    const r = await llamarRuta(cobroPOST, ctx, { ruta: "/api/viajante/cobro", method: "POST", body: { ...m.payload, idempotency_key: m.idempotency_key } })
+    // Fotos capturadas SIN señal: viajan en base64 dentro del cobro (fotos_pendientes) y
+    // se suben acá, antes de registrar, para que queden en pago_comprobantes como las demás.
+    const { fotos_pendientes, ...resto } = m.payload
+    const subidas = await subirFotosPendientes(ctx.admin, fotos_pendientes)
+    const comprobante_urls = [...(Array.isArray(resto.comprobante_urls) ? resto.comprobante_urls : []), ...subidas.map((f) => f.url)]
+    const r = await llamarRuta(cobroPOST, ctx, { ruta: "/api/viajante/cobro", method: "POST", body: { ...resto, comprobante_urls, idempotency_key: m.idempotency_key } })
     const clienteIds: string[] = [...new Set<string>(m.payload.clientes.map((c: any) => c.cliente_id).filter(esUuid))]
     return { ...r, replica: await parches(...clienteIds.map((id) => () => parcheCliente(ctx, id))) }
   },

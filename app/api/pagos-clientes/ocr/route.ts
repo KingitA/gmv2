@@ -2,213 +2,129 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai"
+import { normalizarMonto, resultadoConDatos, sanearCheque, sanearTransferencia, type ResultadoOcr } from "@/lib/cheques/isomorfico"
+import { leerComprobantesConGemini, leerTitularConGemini } from "@/lib/cheques/ocr-gemini"
+import { subirFotoComprobante, type FotoSubida } from "@/lib/cobranzas/fotos"
 
-const BUCKET_COMPROBANTES = "comprobantes-pago"
+// POST /api/pagos-clientes/ocr — multipart `files[]` (una o varias fotos).
+//
+// Por cada foto, EN PARALELO: la sube al bucket y la lee con Gemini (lib/cheques/ocr-gemini).
+// La respuesta devuelve, por archivo, la URL de la foto y los comprobantes leídos YA
+// VALIDADOS (lib/cheques: CUIT por dígito verificador, fecha y monto por formato/rango).
+// Lo que no valida no viaja como dato: viaja como pista ("leído X, no cierra") y el
+// cliente lo carga a mano. Nunca un dato inventado.
+//
+// Si a un cheque le falta el CUIT o la fecha de pago después de la primera pasada, se
+// hace una segunda pasada corta (texto plano, foco en la línea del titular y las fechas).
+//
+// `solo_subir=1`: guarda la foto sin OCR (reintento de adjuntar cuando la lectura
+// falló, o el usuario ya cargó los datos).
+//
+// Contrato de salida (retrocompatible con la app vendedor v0.2.x y las pantallas
+// de oficina): { success, resultados[], total_encontrados, archivos[], errores? }.
+// Cada resultado trae además `archivo_index` (a qué foto pertenece).
 
-// Schema de salida: fuerza a Gemini a devolver JSON válido (cero errores de parseo).
-const OCR_SCHEMA: any = {
-  type: SchemaType.OBJECT,
-  properties: {
-    resultados: {
-      type: SchemaType.ARRAY,
-      items: {
-        type: SchemaType.OBJECT,
-        properties: {
-          tipo: { type: SchemaType.STRING, description: "cheque | transferencia | deposito" },
-          monto: { type: SchemaType.NUMBER },
-          numero_cheque: { type: SchemaType.STRING },
-          banco_emisor: { type: SchemaType.STRING },
-          fecha_emision: { type: SchemaType.STRING },
-          fecha_cheque: { type: SchemaType.STRING },
-          cuit_emisor: { type: SchemaType.STRING },
-          localidad: { type: SchemaType.STRING },
-          color_cheque: { type: SchemaType.STRING, description: "ECHEQ solo si es cheque electrónico; en papel no devolver este campo" },
-          cbu_destino: { type: SchemaType.STRING },
-          cvu_destino: { type: SchemaType.STRING },
-          fecha_transferencia: { type: SchemaType.STRING },
-          numero_comprobante: { type: SchemaType.STRING },
-          fecha_deposito: { type: SchemaType.STRING },
-          items: {
-            type: SchemaType.ARRAY,
-            items: {
-              type: SchemaType.OBJECT,
-              properties: {
-                tipo_item: { type: SchemaType.STRING, description: "efectivo | cheque" },
-                monto: { type: SchemaType.NUMBER },
-                banco_emisor: { type: SchemaType.STRING },
-                numero_cheque: { type: SchemaType.STRING },
-                fecha_pago_cheque: { type: SchemaType.STRING },
-                numero_comprobante_deposito: { type: SchemaType.STRING },
-                fecha_deposito_efectivo: { type: SchemaType.STRING },
-                nro_comprobante_deposito_ef: { type: SchemaType.STRING },
-              },
-              required: ["tipo_item", "monto"],
-            },
-          },
-        },
-        required: ["tipo"],
-      },
-    },
-  },
-  required: ["resultados"],
-}
+export const dynamic = "force-dynamic"
+export const maxDuration = 60
 
-interface OCRResultMetodo {
+/** Resultado en el formato que ya consumen los clientes viejos (nombres de campo del prompt). */
+interface OCRResultLegacy {
   tipo: "cheque" | "transferencia" | "deposito"
+  archivo_index?: number
   monto?: number
-  // cheque
   numero_cheque?: string
   banco_emisor?: string
   fecha_emision?: string
-  fecha_cheque?: string  // fecha de pago/vencimiento
+  fecha_cheque?: string
   cuit_emisor?: string
-  /** Cuentas conjuntas: TODOS los CUITs impresos en el cheque (cotitulares).
-   *  Cada uno se chequea contra la Central de Deudores del BCRA. */
   cuits_titulares?: string[]
-  localidad?: string
-  // Solo "ECHEQ" (detectable en la imagen). El color BLANCO/NEGRO no sale del
-  // OCR: lo deriva el sistema según la imputación del pago (PRES ⇒ NEGRO).
   color_cheque?: "ECHEQ"
-  // transferencia
   cbu_destino?: string
   cvu_destino?: string
   fecha_transferencia?: string
   numero_comprobante?: string
-  cuenta_bancaria_id?: string | null  // resultado del match CBU/CVU
+  cuenta_bancaria_id?: string | null
   banco_nombre?: string | null
-  // deposito
   fecha_deposito?: string
-  items?: Array<{
-    tipo_item: "efectivo" | "cheque"
-    monto: number
-    banco_emisor?: string
-    numero_cheque?: string
-    fecha_pago_cheque?: string
-    numero_comprobante_deposito?: string
-    fecha_deposito_efectivo?: string
-    nro_comprobante_deposito_ef?: string
-  }>
+  items?: any[]
 }
 
-/** CUIT argentino válido: 11 dígitos y dígito verificador (mod 11). */
-function cuitValido(v: string | null | undefined): boolean {
-  const d = String(v || "").replace(/\D/g, "")
-  if (d.length !== 11) return false
-  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
-  const suma = pesos.reduce((s, p, i) => s + p * Number(d[i]), 0)
-  const resto = suma % 11
-  const dv = resto === 0 ? 0 : resto === 1 ? 9 : 11 - resto
-  return dv === Number(d[10])
-}
-
-async function processPaymentOCR(base64: string, mimeType: string): Promise<{ resultados: OCRResultMetodo[]; raw_text?: string }> {
-  if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurado")
-
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-  // gemini-2.0-flash fue dado de baja (404); usamos el modelo vigente (igual que lib/services/ocr.ts)
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
-
-  const prompt = `Sos un experto en documentos bancarios y de pagos argentinos.
-
-Analizá esta imagen y extraé TODOS los comprobantes de pago que aparecen.
-Puede haber uno o varios comprobantes en la misma imagen: cheques, transferencias, depósitos.
-
-Para cada comprobante que encuentres, devolvé un objeto con sus datos:
-
-CHEQUE:
-- tipo: "cheque"
-- numero_cheque: número del cheque (ej: "12345678")
-- banco_emisor: nombre del banco que emite el cheque (suele encontrarse en la parte izquierda del cheque con su logo, deduci cual es sin adivinar)
-- fecha_emision: fecha de emisión (formato YYYY-MM-DD)
-- fecha_cheque: fecha de pago/vencimiento (formato YYYY-MM-DD)
-- monto: importe numérico sin simbolos de moneda, tene en cuenta que va a estar escrito con letras y numeros, deben coincidir, devolve el monto en numeros. Debes interpretar teniendo en cuenta que un importe puede estar separando decimales con coma y miles con punto, o viceversa.
-- cuit_emisor: CUIT del titular del cheque. BUSCALO CON PRIORIDAD ALTA — es un número de 11 dígitos que puede aparecer en cualquiera de estos formatos: "CUIT: 20-12345678-9", "C.U.I.T.: 20-12345678-9", "CT: 20-12345678-9", "CT 20-12345678-9", o sin guiones como "20123456789". También puede estar en la línea inferior del cheque junto al número de cuenta. Normalmente empieza con 20, 23, 24, 27 (persona física) o 30, 33, 34 (empresa). Devolvé SIEMPRE en formato XX-XXXXXXXX-X con guiones (ej: "20-12345678-9"). Si aparece sin guiones (11 dígitos seguidos), convertilo al formato con guiones. COPIÁ LOS 11 DÍGITOS TAL CUAL SE LEEN, sin completar ni corregir: si no se leen los 11 con claridad, devolvé null.
-- cuits_titulares: array con TODOS los CUITs que aparecen impresos en el cheque. Las cuentas conjuntas tienen DOS titulares y el cheque muestra los dos CUITs (uno debajo del otro, generalmente junto a los nombres de los titulares) — devolvé ambos en el mismo formato XX-XXXXXXXX-X. Si hay un solo CUIT, devolvé un array con ese único CUIT.
-- localidad: ciudad/localidad del cheque si es visible
-- color_cheque: "ECHEQ" únicamente si es un cheque electrónico; si es cheque en papel devolvé null (el color NO se determina por la imagen)
-
-TRANSFERENCIA:
-- tipo: "transferencia"
-- monto: importe numérico
-- cbu_destino: CBU de 22 dígitos si es visible
-- cvu_destino: CVU de 22 dígitos si es visible
-- fecha_transferencia: fecha de la transferencia (formato YYYY-MM-DD)
-- numero_comprobante: número de operación o comprobante
-
-DEPÓSITO (puede tener múltiples ítems dentro):
-- tipo: "deposito"
-- fecha_deposito: fecha del depósito (formato YYYY-MM-DD)
-- items: array con cada ítem del depósito:
-  Para ítem EFECTIVO:
-    { tipo_item: "efectivo", monto: NUMBER, fecha_deposito_efectivo: "YYYY-MM-DD", nro_comprobante_deposito_ef: "STRING" }
-  Para ítem CHEQUE:
-    { tipo_item: "cheque", monto: NUMBER, banco_emisor: "STRING", numero_cheque: "STRING", fecha_pago_cheque: "YYYY-MM-DD", numero_comprobante_deposito: "STRING" }
-
-IMPORTANTE:
-- Si no podés determinar un campo, usá null
-- Los montos SIEMPRE son numéricos (sin $, sin puntos de miles, con punto decimal si aplica)
-- Si hay múltiples comprobantes en la imagen, devolvé todos en el array "resultados"
-
-Devolvé SOLO este JSON:
-{
-  "resultados": [ ... ]
-}`
-
-  const result = await model.generateContent([
-    { inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } },
-    prompt,
-  ])
-
-  const text = result.response.text()
-  let parsed: any
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    // Fallback defensivo por si el modelo envolviera el JSON en texto
-    const m = text.match(/\{[\s\S]*\}/)
-    if (!m) throw new Error("No se pudo interpretar la respuesta del OCR")
-    parsed = JSON.parse(m[0])
-  }
-  const resultados: OCRResultMetodo[] = parsed.resultados || []
-
-  // Un CUIT solo vale si sus 11 dígitos cierran con el verificador (mod 11):
-  // el modelo a veces "completa" dígitos que no ve y devuelve un CUIT inventado.
-  for (const r of resultados) {
-    if (r.tipo !== "cheque") continue
-    if (r.cuit_emisor && !cuitValido(r.cuit_emisor)) r.cuit_emisor = undefined
-    r.cuits_titulares = (r.cuits_titulares || []).filter(cuitValido)
-  }
-
-  // Fallback regex: busca CUIT con guiones O sin guiones (11 dígitos que empiezan con 20/23/24/27/30/33/34)
-  const cuitConGuiones = /\b(\d{2}-\d{8}-\d)\b/g
-  const cuitSinGuiones = /\b((?:20|23|24|27|30|33|34)\d{9})\b/g
-
-  const cuitsConG = [...text.matchAll(cuitConGuiones)].map(m => m[1])
-  const cuitsSinG = [...text.matchAll(cuitSinGuiones)].map(m => {
-    const n = m[1]
-    return `${n.slice(0, 2)}-${n.slice(2, 10)}-${n.slice(10)}`
-  })
-  const todosLosCuits = [...cuitsConG, ...cuitsSinG].filter(cuitValido)
-
-  for (const r of resultados) {
-    if (r.tipo === "cheque" && !r.cuit_emisor && todosLosCuits.length > 0) {
-      r.cuit_emisor = todosLosCuits[0]
-    }
-    // Cuentas conjuntas: unión de lo que devolvió el modelo + el fallback regex
-    // (dedup). Cada CUIT se chequea después contra el BCRA.
+/**
+ * Valida cada resultado crudo del modelo. Cheques y transferencias pasan por
+ * lib/cheques (campo que no valida ⇒ no viaja). Los depósitos (solo oficina) se
+ * dejan pasar con los montos normalizados.
+ */
+function sanear(crudos: any[], bancos: any[], archivoIndex: number): { legacy: OCRResultLegacy[]; saneados: ResultadoOcr[] } {
+  const legacy: OCRResultLegacy[] = []
+  const saneados: ResultadoOcr[] = []
+  for (const r of crudos) {
+    if (!r || typeof r !== "object") continue
     if (r.tipo === "cheque") {
-      r.cuits_titulares = [
-        ...new Set(
-          [...(r.cuits_titulares || []), r.cuit_emisor, ...todosLosCuits].filter(
-            (c): c is string => !!c
-          )
-        ),
-      ].slice(0, 4)
+      const s = sanearCheque(r)
+      const res: ResultadoOcr = { tipo: "cheque", ...s }
+      if (!resultadoConDatos(res)) continue
+      saneados.push(res)
+      legacy.push({
+        tipo: "cheque",
+        archivo_index: archivoIndex,
+        monto: s.monto,
+        numero_cheque: s.numero_cheque,
+        banco_emisor: s.banco,
+        fecha_emision: s.fecha_emision,
+        fecha_cheque: s.fecha_cheque,
+        cuit_emisor: s.cuit_emisor,
+        cuits_titulares: s.cuits_titulares,
+        color_cheque: s.es_echeq ? "ECHEQ" : undefined,
+      })
+    } else if (r.tipo === "transferencia") {
+      const cbu = String(r.cbu_destino || r.cvu_destino || "").replace(/\D/g, "")
+      const match = cbu.length === 22 ? bancos.find((b: any) => (b.cbu && String(b.cbu).trim() === cbu) || (b.cvu && String(b.cvu).trim() === cbu)) : null
+      const s = sanearTransferencia({ ...r, cuenta_bancaria_id: match?.id, banco_nombre: match ? `${match.banco} — ${match.nombre}` : undefined })
+      const res: ResultadoOcr = { tipo: "transferencia", ...s }
+      if (!resultadoConDatos(res)) continue
+      saneados.push(res)
+      legacy.push({
+        tipo: "transferencia",
+        archivo_index: archivoIndex,
+        monto: s.monto,
+        cbu_destino: cbu.length === 22 ? cbu : undefined,
+        fecha_transferencia: s.fecha_transferencia,
+        numero_comprobante: s.numero_comprobante,
+        cuenta_bancaria_id: s.cuenta_bancaria_id ?? null,
+        banco_nombre: s.banco_nombre ?? null,
+      })
+    } else if (r.tipo === "deposito") {
+      const items = (Array.isArray(r.items) ? r.items : [])
+        .map((it: any) => ({ ...it, monto: normalizarMonto(it?.monto) ?? 0 }))
+        .filter((it: any) => it.monto > 0)
+      legacy.push({ tipo: "deposito", archivo_index: archivoIndex, fecha_deposito: r.fecha_deposito || undefined, items, cuenta_bancaria_id: null, banco_nombre: null })
     }
   }
+  return { legacy, saneados }
+}
 
-  return { resultados, raw_text: text }
+/**
+ * Lee una foto: pasada 1 (JSON) y, si a algún cheque le falta CUIT válido o fecha de
+ * pago, pasada 2 (texto con foco). La pasada 2 solo APORTA lo que faltaba: nunca pisa
+ * lo que la primera ya leyó bien.
+ */
+async function leerFoto(base64: string, mime: string, nombre: string): Promise<any[]> {
+  const crudos = await leerComprobantesConGemini(base64, mime)
+  const cheques = crudos.filter((r) => r?.tipo === "cheque")
+  console.log(`[pagos-clientes/ocr] lectura ${nombre}:`, JSON.stringify(cheques.map((r) => ({ numero: r.numero_cheque, banco: r.banco_emisor, monto: r.monto, fecha_emision: r.fecha_emision, fecha_cheque: r.fecha_cheque, cuit: r.cuit_emisor, titulares: r.cuits_titulares, linea_titular: r.linea_titular }))))
+  const incompletos = cheques.filter((r) => {
+    const s = sanearCheque(r)
+    return !s.cuit_emisor || !s.fecha_cheque
+  })
+  if (incompletos.length === 1) {
+    const t = await leerTitularConGemini(base64, mime)
+    console.log(`[pagos-clientes/ocr] segunda pasada ${nombre}:`, JSON.stringify(t))
+    const r = incompletos[0]
+    if (t.linea_titular) r.linea_titular = [r.linea_titular, t.linea_titular].filter(Boolean).join(" | ")
+    if (t.fecha_pago && !sanearCheque(r).fecha_cheque) r.fecha_cheque = t.fecha_pago
+    if (t.fecha_emision && !sanearCheque(r).fecha_emision) r.fecha_emision = t.fecha_emision
+  }
+  return crudos
 }
 
 export async function POST(request: NextRequest) {
@@ -218,87 +134,64 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const formData = await request.formData()
-
     const files = formData.getAll("files") as File[]
-    if (!files.length) {
-      return NextResponse.json({ error: "Se requiere al menos un archivo" }, { status: 400 })
-    }
+    if (!files.length) return NextResponse.json({ error: "Se requiere al menos un archivo" }, { status: 400 })
+    const soloSubir = ["1", "true"].includes(String(formData.get("solo_subir") || ""))
 
-    // Cargar bancos propios para hacer match por CBU/CVU
-    const { data: bancos } = await supabase
-      .from("cuentas_bancarias")
-      .select("id, nombre, banco, cbu, cvu")
-      .eq("activo", true)
-
+    const { data: bancos } = soloSubir ? { data: [] as any[] } : await supabase.from("cuentas_bancarias").select("id, nombre, banco, cbu, cvu").eq("activo", true)
     const bancosActivos = bancos || []
-
-    // Procesar cada archivo con Gemini (resiliente) + guardar la foto en el bucket
     const admin = createAdminClient()
-    const todosResultados: OCRResultMetodo[] = []
-    const archivos: { url: string; nombre: string }[] = []
+
+    const archivos: (FotoSubida | null)[] = []
+    const resultados: OCRResultLegacy[] = []
+    const saneados: (ResultadoOcr & { archivo_index: number })[] = []
     const errores: string[] = []
 
-    for (const file of files) {
-      // Leer el archivo UNA sola vez (el File se consume en la primera lectura)
-      const buffer = Buffer.from(await file.arrayBuffer())
-      const base64 = buffer.toString("base64")
+    const porArchivo = await Promise.all(
+      files.map(async (file, i) => {
+        const buffer = Buffer.from(await file.arrayBuffer())
+        const nombre = file.name || `archivo ${i + 1}`
+        // Subida y lectura EN PARALELO: la foto queda guardada aunque el OCR falle o tarde
+        const subida = subirFotoComprobante(admin, buffer, { mime: file.type, nombre: file.name }).catch((e: any) => {
+          console.error("[pagos-clientes/ocr] upload:", e?.message)
+          return null
+        })
+        const lectura = soloSubir
+          ? Promise.resolve<{ ok: true; crudos: any[] } | { ok: false; error: string }>({ ok: true, crudos: [] })
+          : leerFoto(buffer.toString("base64"), file.type, nombre)
+              .then((crudos) => ({ ok: true as const, crudos }))
+              .catch((e: any) => {
+                console.error("[pagos-clientes/ocr] archivo", nombre, e?.message)
+                return { ok: false as const, error: String(e?.message || "no se pudo leer") }
+              })
+        const [foto, r] = await Promise.all([subida, lectura])
+        return { i, foto, r, nombre }
+      }),
+    )
 
-      // Subir la foto al bucket (aunque el OCR falle, la foto queda guardada)
-      try {
-        const ext = (file.name?.split(".").pop() || "jpg").toLowerCase()
-        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-        const { error: upErr } = await admin.storage
-          .from(BUCKET_COMPROBANTES)
-          .upload(path, buffer, { contentType: file.type || "image/jpeg", upsert: false })
-        if (!upErr) {
-          const { data: pub } = admin.storage.from(BUCKET_COMPROBANTES).getPublicUrl(path)
-          if (pub?.publicUrl) archivos.push({ url: pub.publicUrl, nombre: file.name || path })
-        } else {
-          console.error("[pagos-clientes/ocr] upload:", upErr.message)
-        }
-      } catch (e: any) {
-        console.error("[pagos-clientes/ocr] upload exc:", e?.message)
+    for (const { i, foto, r, nombre } of porArchivo) {
+      archivos[i] = foto
+      if (!r.ok) {
+        errores.push(`${nombre}: ${r.error}`)
+        continue
       }
-
-      // OCR (usa el base64 ya leído, no vuelve a leer el File)
-      try {
-        const { resultados } = await processPaymentOCR(base64, file.type)
-        if (!resultados.length) errores.push(`${file.name || "archivo"}: no se detectaron datos`)
-        todosResultados.push(...resultados)
-      } catch (e: any) {
-        console.error("[pagos-clientes/ocr] archivo", file.name, e?.message)
-        errores.push(`${file.name || "archivo"}: ${e?.message || "no se pudo leer"}`)
-      }
+      const s = sanear(r.crudos, bancosActivos, i)
+      for (const x of s.saneados) if (x.tipo === "cheque" && (x.descartados || x.no_encontrados?.length)) console.warn(`[pagos-clientes/ocr] ${nombre} sin validar:`, JSON.stringify({ descartados: x.descartados, no_encontrados: x.no_encontrados }))
+      if (!soloSubir && !s.legacy.length) errores.push(`${nombre}: no se detectaron datos`)
+      resultados.push(...s.legacy)
+      saneados.push(...s.saneados.map((x) => ({ ...x, archivo_index: i })))
     }
-
-    // Match CBU/CVU con bancos propios
-    const resultadosEnriquecidos = todosResultados.map((r) => {
-      if (r.tipo === "transferencia" || r.tipo === "deposito") {
-        const cbu = r.tipo === "transferencia" ? (r.cbu_destino || r.cvu_destino) : null
-        if (cbu) {
-          const match = bancosActivos.find(
-            (b: any) =>
-              (b.cbu && b.cbu.trim() === cbu.trim()) ||
-              (b.cvu && b.cvu.trim() === cbu.trim())
-          )
-          if (match) {
-            return {
-              ...r,
-              cuenta_bancaria_id: match.id,
-              banco_nombre: `${match.banco} — ${match.nombre}`,
-            }
-          }
-        }
-        return { ...r, cuenta_bancaria_id: null, banco_nombre: null }
-      }
-      return r
-    })
 
     return NextResponse.json({
       success: true,
-      resultados: resultadosEnriquecidos,
-      total_encontrados: resultadosEnriquecidos.length,
-      archivos, // URLs de las fotos guardadas en el bucket
+      resultados,
+      total_encontrados: resultados.length,
+      /** URLs de las fotos guardadas (orden = orden de `files`; las que fallaron no figuran) */
+      archivos: archivos.filter((a): a is FotoSubida => !!a),
+      /** Misma posición que `files`: null si esa foto no se pudo guardar */
+      archivos_por_indice: archivos,
+      /** Cheques/transferencias ya validados (lib/cheques), para los clientes nuevos */
+      saneados,
       errores: errores.length ? errores : undefined,
     })
   } catch (error: any) {

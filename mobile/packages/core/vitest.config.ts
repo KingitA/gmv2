@@ -10,6 +10,7 @@ export default defineConfig({
       "@gm/contrato": r("../../../lib/mobile/contrato.ts"),
       "@gm/deposito": r("../../../lib/deposito/bonificados.ts"),
       "@gm/vendedor": r("../../../lib/vendedor/isomorfico.ts"),
+      "@gm/cheques": r("../../../lib/cheques/isomorfico.ts"),
       "@gm/core": r("./src/index.ts"),
     },
   },

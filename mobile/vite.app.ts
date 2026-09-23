@@ -24,6 +24,9 @@ export function configApp(appDir: string, puerto: number): UserConfigFnObject {
           "@gm/deposito": resolve(RAIZ_REPO, "lib/deposito/bonificados.ts"),
           // Reglas puras del módulo vendedor (orden de listados, búsqueda local, estados de pedido)
           "@gm/vendedor": resolve(RAIZ_REPO, "lib/vendedor/isomorfico.ts"),
+          // Foto de cheques: validación del OCR, fila del formulario, veredicto BCRA (mismas reglas que el ERP)
+          "@gm/cheques/foto": resolve(RAIZ_REPO, "lib/cheques/foto.ts"),
+          "@gm/cheques": resolve(RAIZ_REPO, "lib/cheques/isomorfico.ts"),
         },
       },
       define: {

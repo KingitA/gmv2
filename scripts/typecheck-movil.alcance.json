@@ -27,6 +27,17 @@
     "app/api/chofer/billetera/gasto/route.ts",
     "app/api/chofer/billetera/",
     "app/api/chofer/viaje/[id]/cobro/route.ts",
-    "components/chofer/"
+    "components/chofer/",
+    "lib/cheques/",
+    "lib/cobranzas/fotos.ts",
+    "app/api/pagos-clientes/ocr/route.ts",
+    "app/api/bcra/",
+    "components/pagos/foto-cheque.tsx",
+    "components/pagos/BcraDeudorChip.tsx",
+    "components/pagos/AvisosBcraGlobal.tsx",
+    "app/chofer/[viajeId]/cliente/[clienteId]/page.tsx",
+    "app/vendedor/clientes/[id]/cobrar/page.tsx",
+    "app/vendedor/layout.tsx",
+    "app/chofer/layout.tsx"
   ]
 }

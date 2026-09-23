@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOverlay, type ItemOutbox } from "@gm/core"
 import { DS, SEGS, SEG_LABEL, type BonifSeg, type OpBonificaciones, type OpClienteEditar, type OpCobroAnular } from "../../datasets"
 import { rechazosDe, useCatalogosFicha, useCliente, useCuenta, useEncolar } from "../../datos/hooks"
-import { HojaConfirmar, Pantalla, Rechazos, SinEnviar, formatCurrency, useAvisoEntrante, useToast } from "../../ui"
+import { AvisosBcra, HojaConfirmar, Pantalla, Rechazos, SinEnviar, formatCurrency, useAvisoEntrante, useToast } from "../../ui"
 import { HojaNuevaLocalidad, type LocalidadCreada } from "./ClienteNuevo"
 
 // Port de app/vendedor/clientes/[id]/page.tsx. Lee la cuenta del cliente de la réplica
@@ -260,6 +260,7 @@ export function ClienteFicha() {
     <Pantalla titulo={cliente.nombre} dataset={DS.cc}>
       {toast}
       <Rechazos items={rechazos} ayuda="Lo que no se aplicó quedó como estaba en el sistema. Revisá la ficha y, si hace falta, volvé a cargarlo." />
+      <AvisosBcra />
 
       <div className="mx-auto w-full max-w-2xl space-y-5 p-4">
         <p className="flex items-center gap-2 text-sm text-gray-500">
