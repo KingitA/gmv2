@@ -144,7 +144,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
   if (!v) return null
   const viaje = v as any
 
-  const [{ data: paradasRaw }, { data: pedidosRaw }, { data: pagos }, { data: devoluciones }, { data: fondos }, { data: gastos }, { data: historial }] =
+  const [{ data: paradasRaw }, { data: pedidosRaw }, { data: pagos, error: pagosErr }, { data: devoluciones }, { data: fondos }, { data: gastos }, { data: historial }] =
     await Promise.all([
       supabase.from("viajes_paradas").select("*").eq("viaje_id", viajeId).order("orden", { ascending: true }),
       supabase
@@ -157,7 +157,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
         .from("pagos_clientes")
         .select(`id, cliente_id, monto, estado, observaciones, created_at, creado_por,
           pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, numero_comprobante_pago),
-          imputaciones(comprobante_id, monto_imputado, comprobantes_venta(tipo_comprobante, punto_venta, numero_comprobante, pedido_id))`)
+          imputaciones(comprobante_id, monto_imputado, comprobantes_venta!imputaciones_comprobante_id_fkey(tipo_comprobante, punto_venta, numero_comprobante, pedido_id))`)
         .eq("viaje_id", viajeId)
         .in("estado", ["pendiente_rendicion", "confirmado"])
         .order("created_at", { ascending: true }),
@@ -166,6 +166,9 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       supabase.from("viajes_gastos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
       supabase.from("viajes_historial").select("id, usuario_id, accion, cambios, created_at").eq("viaje_id", viajeId).order("created_at", { ascending: false }).limit(100),
     ])
+
+  // Sin los pagos la hoja diría "cobrado 0" y el chofer rendiría mal: mejor cortar.
+  if (pagosErr) throw new Error("No se pudieron leer los cobros del viaje: " + pagosErr.message)
 
   const paradas = (paradasRaw || []) as any[]
   const pedidos = (pedidosRaw || []) as any[]

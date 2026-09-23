@@ -433,7 +433,11 @@ export default function ViajeDashboardPage() {
                     type="number" inputMode="decimal" value={efectivoEntrega} onChange={(e) => setEfectivoEntrega(e.target.value)}
                     className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-xl font-bold"
                   />
-                  <p className="mt-1 text-xs text-gray-500">Lo que no entregues queda anotado en tu billetera.</p>
+                  {dinero.efectivo_en_mano < -0.01 ? (
+                    <p className="mt-1 text-xs font-medium text-amber-700">Gastaste más que el fondo + lo cobrado: pusiste {formatCurrency(-dinero.efectivo_en_mano)} de tu bolsillo. Queda a tu favor y oficina te lo reintegra.</p>
+                  ) : (
+                    <p className="mt-1 text-xs text-gray-500">Lo que no entregues queda anotado en tu billetera.</p>
+                  )}
                 </div>
                 {aviso && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{aviso}</p>}
                 <Botones ocupado={ocupado} onCancelar={() => setHoja(null)} onConfirmar={rendir} texto="Rendir" naranja />
