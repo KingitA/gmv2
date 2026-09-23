@@ -23,6 +23,7 @@ type ViajeCal = {
   id: string
   nombre: string
   fecha: string
+  dias: number
   estado: string
   tipo_transporte: string | null
   zonas: { id: string; nombre: string }[]
@@ -37,6 +38,7 @@ type ViajeCal = {
 
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+const sumarDias = (f: string, n: number) => { const d = new Date(f + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
 const iso = (y: number, m: number, d: number) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
 
 function ViajesCalendario() {
@@ -54,6 +56,7 @@ function ViajesCalendario() {
   const [fecha, setFecha] = useState("")
   const [zonaIds, setZonaIds] = useState<string[]>([])
   const [porTransporte, setPorTransporte] = useState(false)
+  const [dias, setDias] = useState("1")
   const [nombre, setNombre] = useState("")
   const [guardando, setGuardando] = useState(false)
 
@@ -92,6 +95,7 @@ function ViajesCalendario() {
     setFecha(f)
     setZonaIds([])
     setPorTransporte(false)
+    setDias("1")
     setNombre("")
     setDialogo(true)
   }
@@ -110,6 +114,7 @@ function ViajesCalendario() {
           fecha,
           zona_ids: zonaIds,
           nombre,
+          dias: Number(dias) || 1,
           tipo_transporte: porTransporte ? "transporte" : "chofer_propio",
         }),
       })
@@ -140,12 +145,17 @@ function ViajesCalendario() {
     return out
   }, [anio, mes])
 
+  // Un viaje de N días aparece en cada uno de sus días (con "día i/N")
   const porDia = useMemo(() => {
-    const m = new Map<string, ViajeCal[]>()
+    const m = new Map<string, Array<ViajeCal & { dia_n: number }>>()
     for (const v of viajes) {
-      const k = String(v.fecha).slice(0, 10)
-      if (!m.has(k)) m.set(k, [])
-      m.get(k)!.push(v)
+      const inicio = String(v.fecha).slice(0, 10)
+      const n = Math.max(1, Number(v.dias) || 1)
+      for (let i = 0; i < n; i++) {
+        const k = sumarDias(inicio, i)
+        if (!m.has(k)) m.set(k, [])
+        m.get(k)!.push({ ...v, dia_n: i + 1 })
+      }
     }
     return m
   }, [viajes])
@@ -153,8 +163,10 @@ function ViajesCalendario() {
   // Arrastrar el viaje a otro día = cambiar la fecha (queda quién lo movió)
   const [arrastrando, setArrastrando] = useState<string | null>(null)
   const [sobre, setSobre] = useState<string | null>(null)
-  const moverViaje = async (viajeId: string, nuevaFecha: string) => {
+  const [desfase, setDesfase] = useState(0)
+  const moverViaje = async (viajeId: string, diaSoltado: string) => {
     const v = viajes.find((x) => x.id === viajeId)
+    const nuevaFecha = sumarDias(diaSoltado, -desfase)
     setSobre(null)
     setArrastrando(null)
     if (!v || String(v.fecha).slice(0, 10) === nuevaFecha) return
@@ -227,7 +239,7 @@ function ViajesCalendario() {
                         key={v.id}
                         onClick={() => router.push(`/viajes/${v.id}`)}
                         draggable={["programado", "despachado"].includes(v.estado)}
-                        onDragStart={(e) => { setArrastrando(v.id); e.dataTransfer.effectAllowed = "move" }}
+                        onDragStart={(e) => { setArrastrando(v.id); setDesfase(v.dia_n - 1); e.dataTransfer.effectAllowed = "move" }}
                         onDragEnd={() => { setArrastrando(null); setSobre(null) }}
                         title={["programado", "despachado"].includes(v.estado) ? "Arrastrá a otro día para cambiar la fecha" : undefined}
                         className={`w-full text-left rounded-md border bg-white hover:bg-slate-50 px-1.5 py-1 shadow-sm ${["programado", "despachado"].includes(v.estado) ? "cursor-grab active:cursor-grabbing" : ""} ${arrastrando === v.id ? "opacity-40" : ""}`}
@@ -236,6 +248,7 @@ function ViajesCalendario() {
                           <span className={`h-2 w-2 shrink-0 rounded-full ${ESTADO_VIAJE_COLOR[v.estado] || "bg-slate-400"}`} />
                           <span className="truncate text-xs font-semibold">
                             {v.zonas.map((z) => z.nombre).join(" + ") || v.nombre}
+                            {v.dias > 1 && <span className="ml-1 font-normal text-slate-400">día {v.dia_n}/{v.dias}</span>}
                           </span>
                         </div>
                         <div className="truncate text-[11px] text-slate-500">
@@ -276,7 +289,7 @@ function ViajesCalendario() {
             ) : (
               viajes.map((v) => (
                 <TableRow key={v.id} className="cursor-pointer" onClick={() => router.push(`/viajes/${v.id}`)}>
-                  <TableCell className="whitespace-nowrap">{formatDateAR(v.fecha)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatDateAR(v.fecha)}{v.dias > 1 && <span className="text-xs text-muted-foreground"> → {formatDateAR(sumarDias(String(v.fecha).slice(0, 10), v.dias - 1))}</span>}</TableCell>
                   <TableCell className="font-medium">{v.nombre}</TableCell>
                   <TableCell>
                     <span className="inline-flex items-center gap-1.5 text-sm">
@@ -314,9 +327,15 @@ function ViajesCalendario() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
-              <Label>Fecha *</Label>
-              <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+            <div className="grid grid-cols-[1fr_130px] gap-3">
+              <div>
+                <Label>Sale el *</Label>
+                <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+              </div>
+              <div>
+                <Label>Duración (días)</Label>
+                <Input type="number" min="1" max="15" value={dias} onChange={(e) => setDias(e.target.value)} />
+              </div>
             </div>
             <div>
               <Label>Zonas *</Label>

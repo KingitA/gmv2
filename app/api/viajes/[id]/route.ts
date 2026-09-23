@@ -206,6 +206,10 @@ export async function PATCH(
         if (viaje.estado !== "despachado") return errorJson("El viaje ya salió: no se cambia la fecha")
         cambios.fecha = body.fecha
       }
+      if (body.dias !== undefined && viaje.estado === "despachado") {
+        const dias = Math.min(15, Math.max(1, Math.round(Number(body.dias)) || 1))
+        cambios.dias = dias
+      }
       if (Object.keys(cambios).length === 2) return errorJson("El viaje ya fue despachado: solo se editan la fecha y las observaciones")
       const { error } = await supabase.from("viajes").update(cambios).eq("id", id)
       if (error) throw error
@@ -219,6 +223,10 @@ export async function PATCH(
       cambios.fecha = body.fecha
     }
     if (body.observaciones !== undefined) cambios.observaciones = body.observaciones || null
+    if (body.dias !== undefined) {
+      const dias = Math.min(15, Math.max(1, Math.round(Number(body.dias)) || 1))
+      cambios.dias = dias
+    }
     for (const campo of ["porcentaje_flete", "dinero_nafta", "gastos_peon", "gastos_hotel", "gastos_adicionales"]) {
       if (body[campo] !== undefined) cambios[campo] = Number(body[campo]) || 0
     }

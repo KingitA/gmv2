@@ -28,6 +28,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
 
   const [nombre, setNombre] = useState("")
   const [fecha, setFecha] = useState("")
+  const [dias, setDias] = useState("1")
   const [zonaIds, setZonaIds] = useState<string[]>([])
   const [porTransporte, setPorTransporte] = useState(false)
   const [transporteId, setTransporteId] = useState("")
@@ -41,7 +42,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
       const [v, z, ch, ve, tr] = await Promise.all([
         supabase
           .from("viajes")
-          .select("nombre, fecha, tipo_transporte, transporte_id, vehiculo_id, chofer_id, observaciones, viaje_zonas(zona_id), viajes_choferes(usuario_id, rol)")
+          .select("nombre, fecha, dias, tipo_transporte, transporte_id, vehiculo_id, chofer_id, observaciones, viaje_zonas(zona_id), viajes_choferes(usuario_id, rol)")
           .eq("id", viajeId)
           .single(),
         supabase.from("zonas").select("id, nombre").order("nombre"),
@@ -58,6 +59,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
       if (d) {
         setNombre(d.nombre || "")
         setFecha(String(d.fecha).slice(0, 10))
+        setDias(String(Math.max(1, Number(d.dias) || 1)))
         setZonaIds((d.viaje_zonas || []).map((x: any) => x.zona_id))
         setPorTransporte(d.tipo_transporte === "transporte")
         setTransporteId(d.transporte_id || "")
@@ -86,6 +88,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
             ? {
                 nombre,
                 fecha,
+                dias: Number(dias) || 1,
                 zona_ids: zonaIds,
                 tipo_transporte: porTransporte ? "transporte" : "chofer_propio",
                 transporte_id: transporteId || null,
@@ -94,7 +97,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
                 vehiculo_id: vehiculoId || null,
                 observaciones,
               }
-            : { observaciones },
+            : { observaciones, dias: Number(dias) || 1 },
         ),
       })
       const data = await res.json()
@@ -118,14 +121,18 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
         </p>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-[1fr_180px_120px]">
         <div>
           <Label>Nombre</Label>
           <Input value={nombre} onChange={(e) => setNombre(e.target.value)} disabled={!editable} />
         </div>
         <div>
-          <Label>Fecha</Label>
+          <Label>Sale el</Label>
           <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} disabled={!editable} />
+        </div>
+        <div>
+          <Label>Duración (días)</Label>
+          <Input type="number" min="1" max="15" value={dias} onChange={(e) => setDias(e.target.value)} />
         </div>
       </div>
 

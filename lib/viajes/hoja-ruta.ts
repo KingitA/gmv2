@@ -75,6 +75,8 @@ export interface HojaRuta {
     id: string
     nombre: string
     fecha: string
+    dias: number
+    fecha_fin: string
     estado: string
     tipo_transporte: string | null
     observaciones: string | null
@@ -116,13 +118,19 @@ export interface HojaRuta {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100
+/** Último día del viaje: fecha de salida + (dias − 1). */
+export function fechaFin(fecha: string, dias: number | null | undefined): string {
+  const d = new Date(String(fecha).slice(0, 10) + "T00:00:00Z")
+  d.setUTCDate(d.getUTCDate() + Math.max(1, Number(dias) || 1) - 1)
+  return d.toISOString().slice(0, 10)
+}
 const PEDIDO_FACTURADO = ["facturado", "listo_para_enviar", "listo_para_retirar", "en_viaje", "entregado"]
 
 export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): Promise<HojaRuta | null> {
   const { data: v } = await supabase
     .from("viajes")
     .select(`
-      id, nombre, fecha, estado, tipo_transporte, observaciones, chofer_id, despachado_at,
+      id, nombre, fecha, dias, estado, tipo_transporte, observaciones, chofer_id, despachado_at,
       actualizado_por, actualizado_at,
       dinero_nafta, gastos_peon, gastos_hotel, gastos_adicionales,
       vehiculos(nombre, patente), transportes(nombre),
@@ -368,6 +376,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       id: viaje.id,
       nombre: viaje.nombre,
       fecha: viaje.fecha,
+      dias: Math.max(1, Number(viaje.dias) || 1),
+      fecha_fin: fechaFin(viaje.fecha, viaje.dias),
       estado: viaje.estado,
       tipo_transporte: viaje.tipo_transporte,
       observaciones: viaje.observaciones,
