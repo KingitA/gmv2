@@ -110,7 +110,7 @@ export function Inicio() {
                   </div>
                   <div className="ml-3 shrink-0 text-right">
                     <p className="font-bold text-gray-900">{formatCurrency(p.total)}</p>
-                    {p.local ? <SinEnviar texto={p.local.estado === "rechazado" ? "no se pudo enviar" : "pendiente de enviar"} /> : <BadgeEstado estado={p.estado} />}
+                    {p.local ? <SinEnviar rechazado={p.local.estado === "rechazado"} texto={p.local.estado === "rechazado" ? "no se pudo enviar" : "pendiente de enviar"} /> : <BadgeEstado estado={p.estado} />}
                   </div>
                 </button>
               ))}

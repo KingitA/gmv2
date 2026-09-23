@@ -23,7 +23,7 @@ export function Encabezado({ titulo, atras = true, derecha, compacto = false }: 
     else if (d.accion === "padre") navigate(d.a, { replace: true })
   }
   return (
-    <header className={`sticky top-0 z-20 flex items-center gap-1 bg-slate-900 px-2 text-white shadow ${compacto ? "h-11" : "h-14"}`}>
+    <header className={`sticky top-0 z-20 flex items-center gap-1 bg-barra px-2 text-white shadow ${compacto ? "h-11" : "h-14"}`}>
       {atras && (
         <button onClick={volver} aria-label="Atrás" className="flex h-11 w-11 items-center justify-center rounded-full active:bg-white/20">
           <svg viewBox="0 0 24 24" className={compacto ? "h-5 w-5" : "h-6 w-6"} fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 18l-6-6 6-6" /></svg>
@@ -41,7 +41,7 @@ export function IndicadorRed() {
   const online = useOnline()
   return (
     <span
-      className={`mr-1 rounded-full px-2 py-0.5 text-xs font-semibold ${online ? "bg-emerald-600" : "bg-amber-500 text-slate-900"}`}
+      className={`mr-1 rounded-full px-2 py-0.5 text-xs font-semibold ${online ? "bg-en-linea text-en-linea-texto" : "bg-sin-red text-sin-red-texto"}`}
       aria-live="polite"
     >
       {online ? "En línea" : "Sin red"}
@@ -59,7 +59,7 @@ export function IndicadorPendientes() {
       onClick={() => navigate("/pendientes")}
       aria-label={`${c.pendientes} pendientes de enviar, ${c.rechazados} rechazadas`}
       className={`flex h-9 min-w-9 items-center justify-center gap-1 rounded-full px-2 text-sm font-bold ${
-        c.rechazados ? "bg-red-600" : c.pendientes ? "bg-amber-500 text-slate-900" : "bg-white/15"
+        c.rechazados ? "bg-red-600" : c.pendientes ? "bg-en-cola text-en-cola-texto" : "bg-white/15"
       }`}
     >
       {c.enviando && c.pendientes > 0 ? "↻" : "⇪"} {hay}
@@ -152,7 +152,7 @@ export function ListaVirtual<T>({
 
 export function Boton({ children, variante = "primario", className = "", ...p }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variante?: "primario" | "secundario" | "peligro" }) {
   const v = {
-    primario: "bg-slate-900 text-white active:bg-slate-700",
+    primario: "bg-barra text-white active:bg-barra-activo",
     secundario: "bg-white text-slate-900 border border-slate-300 active:bg-slate-100",
     peligro: "bg-red-600 text-white active:bg-red-700",
   }[variante]

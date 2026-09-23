@@ -1,4 +1,4 @@
-import "@gm/core/styles.css"
+import "./tema.css"
 import { montarApp } from "@gm/core"
 import { DATASETS, DS } from "./datasets"
 import { rutas } from "./rutas"

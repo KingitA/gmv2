@@ -14,7 +14,7 @@ import { condParaServidor, fmtSeg } from "./Marco"
 import { agruparEnArbol, BuscadorLocal, CatalogoArbol, claveSubcategoria, FilaArticulo, OrdenSelector, posicionSubcategorias } from "./piezas"
 
 type Filtro = "novedades" | "ofertas" | "habituales"
-const TINTE_PROVEEDORES: Tinte = { bg: "#E8EDF4", bgSoft: "#F4F7FA", ink: "#33475E", accent: "#5B7A9D", border: "#D4DEE9" }
+const TINTE_PROVEEDORES: Tinte = { bg: "#F0F1F7", bgSoft: "#F7F8FC", ink: "#31354A", accent: "#5E6480", border: "#E3E5EF" }
 const FILTROS: Record<Filtro, { label: string; sub: string; tinte: Tinte; icono: string }> = {
   novedades: { label: "Novedades", sub: "Últimos ingresos", tinte: TINTE_NOVEDADES, icono: "✨" },
   ofertas: { label: "Ofertas", sub: "Con descuento", tinte: TINTE_OFERTAS, icono: "🏷" },

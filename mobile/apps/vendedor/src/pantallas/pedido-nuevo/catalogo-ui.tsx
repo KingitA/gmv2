@@ -2,7 +2,7 @@
 // ── Sistema visual del catálogo del vendedor ─────────────────────────
 // Cada rubro tiene su tinte propio que acompaña toda la navegación:
 // tarjeta de rubro → tarjetas de categoría → chips de subcategoría.
-// Perfumería = malva · Limpieza = aqua · Bazar = arena/terracota.
+// Paleta Megasur: Perfumería = lavanda · Limpieza = cian · Bazar = arena (tono cálido suave).
 
 export interface Tinte {
   bg: string
@@ -13,12 +13,12 @@ export interface Tinte {
 }
 
 const TINTES: Record<string, Tinte> = {
-  perfumeria: { bg: "#F2EBF7", bgSoft: "#F9F5FB", ink: "#5C3F70", accent: "#9B72B0", border: "#E3D3EC" },
-  limpieza: { bg: "#E3F2EF", bgSoft: "#F2FAF8", ink: "#1F5F55", accent: "#4BA396", border: "#CDE7E1" },
-  bazar: { bg: "#F8EFE2", bgSoft: "#FCF7EE", ink: "#7C5327", accent: "#C68A52", border: "#EDDFC8" },
+  perfumeria: { bg: "#E6E7F7", bgSoft: "#F2F3FB", ink: "#3D406D", accent: "#6468A4", border: "#D9DAF3" },
+  limpieza: { bg: "#DDF2F8", bgSoft: "#E9F7FA", ink: "#0F5473", accent: "#106F90", border: "#BEE7F1" },
+  bazar: { bg: "#FBE9DA", bgSoft: "#FDF4EC", ink: "#7D3A0A", accent: "#9C490D", border: "#F6D3B6" },
 }
 
-const TINTE_NEUTRO: Tinte = { bg: "#EEF0F2", bgSoft: "#F7F8F9", ink: "#3F4A54", accent: "#6B7A87", border: "#DFE3E7" }
+const TINTE_NEUTRO: Tinte = { bg: "#F0F1F7", bgSoft: "#F7F8FC", ink: "#31354A", accent: "#5E6480", border: "#E3E5EF" }
 
 function normalizar(s: string) {
   return (s || "")
@@ -35,10 +35,10 @@ export function tinteRubro(nombreOrSlug: string | null | undefined): Tinte {
   return TINTE_NEUTRO
 }
 
-// Tintes de las tres vistas transversales (banners)
-export const TINTE_NOVEDADES: Tinte = { bg: "#E4F2E9", bgSoft: "#F2FAF5", ink: "#1D6B44", accent: "#3E9467", border: "#CFE6D8" }
-export const TINTE_OFERTAS: Tinte = { bg: "#FCE9E4", bgSoft: "#FDF4F1", ink: "#A63B22", accent: "#D2603F", border: "#F4D6CC" }
-export const TINTE_HABITUALES: Tinte = { bg: "#FAF1DC", bgSoft: "#FCF8EE", ink: "#8A6314", accent: "#C0932F", border: "#EFE1BF" }
+// Tintes de las tres vistas transversales (banners). Ofertas = Ámbar Oferta (lo único comercial)
+export const TINTE_NOVEDADES: Tinte = { bg: "#E6F4EE", bgSoft: "#F2FAF6", ink: "#0F5A3F", accent: "#15805A", border: "#C5E6D7" }
+export const TINTE_OFERTAS: Tinte = { bg: "#FFEFC9", bgSoft: "#FFF7E6", ink: "#825307", accent: "#9B670B", border: "#FFD881" }
+export const TINTE_HABITUALES: Tinte = { bg: "#E4E5F1", bgSoft: "#EEEEF6", ink: "#222561", accent: "#52569F", border: "#CFD0E4" }
 
 // ── Ilustraciones line-art por rubro ─────────────────────────────────
 

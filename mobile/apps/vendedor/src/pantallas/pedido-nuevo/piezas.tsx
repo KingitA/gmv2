@@ -62,7 +62,7 @@ export function FilaArticulo({ a, precio, enCarrito, onAbrir, onZoom, onAgregar,
       <button onClick={onAbrir} className="min-w-0 flex-1 text-left active:opacity-70">
         <p className="text-[13px] font-bold leading-snug text-gray-900">
           {a.descripcion}
-          {a.descuento_propio > 0 && <span className="ml-1.5 inline-block rounded bg-red-100 px-1.5 align-middle text-[10px] font-bold text-red-700">-{a.descuento_propio}%</span>}
+          {a.descuento_propio > 0 && <span className="ml-1.5 inline-block rounded bg-ambar-400 px-1.5 align-middle text-[10px] font-bold text-azul-900">-{a.descuento_propio}%</span>}
         </p>
         <p className="truncate text-[11px] text-gray-400">
           <span className="font-mono">{a.sku || "—"}</span>
@@ -182,7 +182,7 @@ export function CatalogoArbol({ clave, rubros, articulosDe, renderArticulo, orde
                 <span className="w-5 text-center text-lg" style={t ? { color: t.accent } : undefined}>{abierto ? "▾" : "▸"}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-lg font-bold leading-tight text-gray-900">{r.nombre}</p>
-                  <p className="text-xs" style={t ? { color: t.accent } : { color: "#6b7280" }}>{r.categorias.length} categorías · {totalArts} artículos</p>
+                  <p className="text-xs" style={t ? { color: t.accent } : { color: "#5E6480" }}>{r.categorias.length} categorías · {totalArts} artículos</p>
                 </div>
               </button>
               {onVerRubro && <button onClick={() => onVerRubro(r)} className="px-4 text-2xl font-light active:opacity-70" style={t ? { color: t.accent } : undefined} aria-label="Ver todo el rubro">›</button>}

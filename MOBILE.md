@@ -1234,6 +1234,30 @@ Replace = no agrega historial (atrás sale de la pantalla).
 - Conocido: si se reasigna el vendedor de un cliente sin señal, la lista que impone el nuevo
   viajante se ve recién al sincronizar.
 
+### Colores: sistema Megasur (23/09/2026)
+
+Pedido del dueño: aplicar la paleta del PDF "Megasur · Sistema de color v1" **solo en colores**
+(sin tocar medidas, pantallas ni funciones). Implementación:
+
+- `apps/vendedor/src/tema.css` es la hoja de la app (la importa `main.tsx` en lugar de
+  `@gm/core/styles.css`, que sigue incluida adentro). Con `@theme` **redefine las familias de
+  Tailwind que ya usaba el código**, así no hubo que reescribir clases: emerald (la "marca")
+  → Azul Megasur · gray/slate → neutros tintados de azul · green → éxito · red → error ·
+  amber/orange/yellow → alerta · blue/sky → cian · violet/purple/indigo → lavanda.
+- Además define las familias con nombre propio (`azul`, `cian`, `lavanda`, `ambar`, `neutro`,
+  `exito`, `alerta`, `error`) para lo que la paleta asigna explícitamente: **Ámbar Oferta solo
+  en ofertas** (badge −x %, banner Ofertas), **"sin enviar" en lavanda**, chips de estado de
+  pedido con fondo tono 50 + texto 700/800 + punto (`ESTADO_BADGE` en `ui.tsx`).
+- Cáscara compartida: el core ahora usa tokens (`bg-barra`, `bg-en-linea`, `bg-sin-red`,
+  `bg-en-cola` y sus `-texto`) definidos en `packages/core/src/ui/styles.css` con **los mismos
+  valores de siempre** ⇒ Depósito y Chofer no cambian; Vendedor los redefine (barra Azul
+  Megasur, "En línea" cian, "Sin red" alerta, cola lavanda, textos Azul Noche).
+- Tintes del catálogo (`catalogo-ui.tsx`, `TINTE_PROVEEDORES`): Limpieza cian, Perfumería
+  lavanda, Bazar arena (alerta 50), Novedades éxito, Ofertas ámbar, Habituales azul,
+  Proveedores neutro.
+- Fuera de alcance (no son colores): tipografías del PDF, barra de navegación inferior (la app
+  no tiene), radios y alturas. La barra de estado nativa de Android no se tocó.
+
 ### Resultados de las pruebas (21/09/2026)
 Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
 solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.
