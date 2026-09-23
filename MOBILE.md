@@ -10,7 +10,7 @@
 
 ## 0. TL;DR para la próxima sesión
 
-1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (93 tests).
+1. `cd mobile && npm install` (una vez). Tests del motor: `npm test` (128 tests).
 2. Tu app vive en `mobile/apps/<app>/src`. Todo lo compartido está en
    `mobile/packages/core` (`@gm/core`, `@gm/core/ui`). **No dupliques** lógica: si dos
    apps la necesitan, va al core.
@@ -304,11 +304,16 @@ validación con las mismas reglas que la web, `capturado_at` como momento de neg
 | `pedido.editar` (ítems/condiciones) | vendedor | Solo si `esPedidoEditable(estado)` al aplicar; si el pedido pasó a preparación/facturación ⇒ rechazado con `motivoBloqueo()`. Ítems se envían como **estado final de la línea** (cantidad absoluta), no como deltas ⇒ reenviar es inocuo. |
 | `cliente.editar` | vendedor | **Compare-and-set por campo**: el payload lleva `{campo: {antes, despues}}`; se aplica cada campo cuyo valor actual == `antes`; los que otro usuario cambió mientras tanto ⇒ rechazo parcial listando esos campos. Dos vendedores sobre el mismo cliente solo chocan en el mismo campo. |
 | `cliente.crear` | vendedor | Dedupe por CUIT/código: si ya existe ⇒ rechazado indicando el existente. |
-| `cobro.registrar` | vendedor, chofer | Plata: nunca se fusiona ni se descarta. Se imputa a lo pendiente **al aplicar**; excedente queda a cuenta (igual que la web). |
-| `cobro.anular` | vendedor, chofer | Solo si no está rendido/confirmado al aplicar; si no ⇒ rechazado. |
-| `devolucion.registrar` | vendedor, chofer, depósito | Precio de la mercadería = último precio de venta al cliente a `capturado_at` (`precio-historico`). |
-| `gasto.registrar` | chofer | Append-only; la clave evita duplicados. |
-| `viaje.finalizar` | chofer | Transición idempotente: si ya estaba finalizado ⇒ éxito (duplicado). Requiere outbox del viaje vacío (FIFO lo garantiza). |
+| `cobro.registrar` | vendedor | Plata: nunca se fusiona ni se descarta. Se imputa a lo pendiente **al aplicar**; excedente queda a cuenta (igual que la web). |
+| `cobro.anular` | vendedor | Solo si no está rendido/confirmado al aplicar; si no ⇒ rechazado. |
+| `devolucion.registrar` | vendedor, depósito | Precio de la mercadería = último precio de venta al cliente a `capturado_at` (`precio-historico`). |
+| `viaje.iniciar` | chofer | Abrir el viaje en el equipo = iniciarlo (despachado → en_curso). Idempotente. |
+| `viaje.parada` | chofer | Resultado de la parada como valor ABSOLUTO (la última manda; reenviar es inocuo). Motivos obligatorios = los de la web; "cobrar sí o sí" se valida con lo cobrado que YA llegó (FIFO: los cobros van antes). |
+| `viaje.cobrar` | chofer | Payload = body del cobro web. Plata: nunca se fusiona ni se descarta; `cobranza_crear` deduplica por la clave. Fotos sin señal viajan adentro (`fotos_pendientes`). Rechazo de negocio de la RPC ⇒ 422 (definitivo). |
+| `viaje.cobro_anular` | chofer | Solo cobros que YA están en el servidor y siguen `pendiente_rendicion` sin rendición confirmada; ya anulado ⇒ éxito. Un cobro que todavía no salió del equipo se anula LOCALMENTE (`outbox.retirar`), sin viajar. |
+| `viaje.devolucion` | chofer | `id` generado en el equipo ⇒ reenviar no duplica; el cobro que la descuenta va después en el FIFO y la referencia por ese id. |
+| `viaje.gasto` | chofer | RPC `viaje_gasto_registrar` idempotente por clave. Sin viaje (billetera sola): segunda defensa por concepto+monto+10 min. |
+| `viaje.finalizar` | chofer | Transición idempotente: si ya estaba en rendición/completado ⇒ éxito (duplicado). Requiere outbox del viaje vacío (FIFO lo garantiza). Paradas sin resolver ⇒ rechazado (y la app lo valida antes). |
 | `picking.item` | depósito | **Valor absoluto** de cantidad preparada por línea; último escritor gana por línea; si el pedido ya se cerró ⇒ rechazado. |
 | `recepcion.item` | depósito | Igual que picking (conteo absoluto por ítem). |
 | `stock.ajustar` | depósito | Se envía como **conteo** (cantidad observada + stock que veía el operario). El servidor aplica el conteo; si el stock cambió entre captura y sync, registra la diferencia como alerta (no se descarta el conteo). |
@@ -375,9 +380,7 @@ La flecha del `Encabezado` usa la misma decisión.
 | Pantalla web | Estado actual | En la app |
 |---|---|---|
 | `vendedor/*` | ✅ migrado — ver "Vendedor → Navegación" (§18) | |
-| `chofer/[viajeId]/cliente/[clienteId]` | `showCobroSheet`, `showDevolucionSheet` | `?ver=cobro`, `?ver=devolucion` |
-| `chofer/billetera` | `showGastoSheet` | `?ver=gasto` |
-| `chofer/[viajeId]` | `showConfirmFinalizar` | `?ver=finalizar` |
+| `chofer/*` | ✅ migrado — ver "Chofer → Navegación" (§19) | |
 | `deposito/*` | ✅ migrado — ver "Depósito → Navegación" (§17) | |
 
 `lib/vendedor/use-back-trap.ts` queda para la web; **no se usa en las apps**.
@@ -413,17 +416,25 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
 | `/api/bcra/deudor/*` | O `bcra.consultar` (encolada después del cobro; nunca frena el FIFO: si el BCRA no responde, aplica con `sin_respuesta`) |
 | PDF de comprobantes y remitos | **L** |
 
-### Chofer
-| Endpoint | Tablas | Estrategia |
-|---|---|---|
-| GET `me` | usuarios, viajes | R `chofer_me` ✅ |
-| GET `viaje/[id]` | viajes, pedidos, pagos_clientes, devoluciones, remitos, comprobantes_venta, billetera_movimientos | R `chofer_viajes` ✅ |
-| GET `viaje/[id]/cliente/[clienteId]` | pedidos, pedidos_detalle, comprobantes_venta, devoluciones, pagos_clientes | R `chofer_viaje_clientes` |
-| POST `viaje/[id]/cobro` · DELETE `cobro/[pagoId]` | pagos_clientes, pago_comprobantes, billetera_movimientos, pedidos, rendicion_items | O `cobro.registrar` / `cobro.anular` |
-| POST `viaje/[id]/devolucion` | devoluciones, devoluciones_detalle | O `devolucion.registrar` |
-| POST `viaje/[id]/finalizar` | viajes | O `viaje.finalizar` |
-| GET `billetera` · POST `billetera/gasto` | billetera_movimientos | R · O `gasto.registrar` |
-| GET `articulo/precio-historico` | kardex, comprobantes_venta_detalle | R (último precio por cliente×artículo del viaje) |
+### Chofer ✅ (implementado — detalle en §19)
+| Endpoint web | Estrategia en la app |
+|---|---|
+| GET `me` | R `chofer_me` (envuelve el GET) |
+| GET `viaje/[id]` (hoja de ruta calculada; iniciaba el viaje al leerlo) | R `chofer_viajes` (leído con `x-gm-sin-iniciar`) · O `viaje.iniciar` al abrir el viaje en el equipo |
+| GET `viaje/[id]/cliente/[clienteId]` + lo que `ComprobantesSelector` leía con supabase-js + `v_saldo_clientes` + `precio-historico` | R `chofer_viaje_clientes` (una fila por parada: ficha + comprobantes cobrables + pedidos + últimos precios facturados) |
+| PATCH `viaje/[id]/parada` | O `viaje.parada` (absoluto) |
+| POST `viaje/[id]/cobro` · DELETE `cobro/[pagoId]` | O `viaje.cobrar` / `viaje.cobro_anular` (el cobro todavía no enviado se anula en el equipo) |
+| POST `viaje/[id]/devolucion` | O `viaje.devolucion` (id del equipo) |
+| POST `viaje/[id]/finalizar` | O `viaje.finalizar` (idempotente; "pendiente de enviar" visible) |
+| GET `billetera` · POST `billetera/gasto` | R `chofer_billetera` · O `viaje.gasto` |
+| GET `articulo/precio-historico` (devolución de mercadería vieja) | `comprados` replicados en la ficha; nunca facturado ⇒ **L** (precio vigente) o carga manual sin señal |
+| `/api/clientes/buscar` + saldo (cobro conjunto) | R `chofer_clientes` (todos los activos con saldo); búsqueda LOCAL |
+| `/api/articulos/buscar` (devolución) | R `chofer_articulos` (delta `articulos`, = catálogo vendible del vendedor); búsqueda LOCAL |
+| cuentas bancarias (transferencias) | R `chofer_catalogos` (nuevo GET `/api/chofer/cuentas-bancarias`, `requireAuth`) |
+| `/api/pagos-clientes/ocr` (cheques) · `/api/chofer/billetera/gasto/ocr` (tickets) | **L** en segundo plano / **L** (sin señal el gasto se carga a mano) |
+| `/api/bcra/deudor/*` | O `bcra.consultar` (ya admitía chofer) |
+| PDF de remitos | **L** (redirige a la URL firmada, se abre fuera de la app) |
+| PDF de la hoja de ruta | no está en la app (la hoja ES la pantalla del viaje; el PDF lo imprime oficina) |
 
 ### Depósito ✅ (implementado — detalle en §17)
 | Endpoint web | Tablas | Estrategia en la app |
@@ -481,8 +492,22 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
 - `lib/cobranzas/errores.ts` + 422 en `/api/viajante/cobro` (POST/DELETE) para rechazos de negocio (§18).
 - `typecheck:movil`: `lib/vendedor/`, `app/api/vendedor/`, `app/api/viajante/cobro/`, `lib/cobranzas/{crear,errores}.ts` y `lib/actions/cobranzas.ts` pasan al alcance en cero.
 
+**Sesión Chofer** (retrocompatibles; la web `/chofer` usa las mismas funciones y devuelve lo mismo):
+- `lib/viajes/cliente-viaje.ts`: `cargarClienteViaje` (extraída de GET `cliente/[clienteId]`, la route la llama) y
+  `cargarCuentaCobro` (las 4 consultas que `components/pagos/ComprobantesSelector` hacía con supabase-js desde el navegador).
+- `lib/viajes/chofer.ts`: `iniciarViajeSiDespachado` + `HEADER_SIN_INICIAR`. GET `viaje/[id]` inicia el viaje solo si NO viene ese
+  header (la réplica descarga, no abre: el inicio lo manda la app como `viaje.iniciar`, con o sin señal, igual que abrir la hoja en la web).
+- POST `viaje/[id]/cobro` y DELETE `cobro/[pagoId]`: rechazo de negocio de la RPC (`ErrorReglaCobranza`) ⇒ **422** `regla_negocio` (antes 500:
+  la app lo reintentaría para siempre y trabaría el FIFO; mismo arreglo que `/api/viajante/cobro`). La web ya trataba todo `!res.ok` igual.
+- POST `viaje/[id]/devolucion`: acepta `id` (UUID del equipo); si ya existe devuelve la existente (`dedup`).
+- Nuevo GET `/api/chofer/cuentas-bancarias` (`requireAuth`): cuentas destino para transferencias. Lo usa la app y el cobro web del chofer.
+- `lib/mobile/sync/chofer.ts` (7 datasets), `lib/mobile/outbox/chofer.ts` (7 handlers), `lib/mobile/outbox/rutas.ts` (`llamarRuta`/`llamarGET`
+  compartidos: los handlers del vendedor pasaron a importarlos), `enParalelo` exportado de `sync/vendedor.ts`.
+- Sin migraciones: `viajes_gastos.idempotency_key` y el `id` de `devoluciones` ya alcanzan. `chofer_viajes` no es delta (la hoja de ruta se
+  recalcula entera; refresco parcial por id + parche tras cada operación).
+- `typecheck:movil`: `app/api/chofer/` entero y `lib/viajes/cliente-viaje.ts` pasan al alcance en cero.
+
 **Pendientes por sesión de app**:
-- Datasets y handlers de la tabla §9 (cada uno reusando la lógica existente; extraer a `lib/` lo que hoy vive en route handlers/server actions).
 - Pantalla de admin para `mobile_alertas_integridad` y `mobile_dispositivos` (revocar equipo).
 - Si pg_cron no está habilitado: habilitarlo (Database → Extensions) y re-correr el bloque de jobs de la migración.
 
@@ -499,10 +524,9 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
   firmware usa otros, `configurarBroadcast(accion, extra)` (queda persistido).
 - `esQrOUrl()` descarta QR/URLs escaneados por error; `lecturaOk()`/`lecturaError()`
   dan beep + vibración (mismos tonos que la web).
-- **Estado en el equipo**: el NuStar 65-sp conectado **no tiene servicio de escaneo
-  instalado** (no aparece ningún paquete de scanner): o es la variante sin lector o
-  hay que habilitarlo en ajustes. La app depósito (shell) muestra cada lectura para
-  validarlo apenas haya lector.
+- **Estado en el equipo**: ✅ confirmado por el dueño el 23/09/2026: el NuStar 65-sp
+  tiene lector físico funcionando dentro de la app Depósito (keyboard wedge). La nota
+  anterior ("sin servicio de escaneo") era por un equipo mal configurado en la Sesión 0.
 
 ---
 
@@ -673,7 +697,7 @@ Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo ind
 |---|---|
 | Auditoría (endpoints→tablas, subpantallas, cambios de backend, riesgos) | ✅ (§8, §9, §10, §16) |
 | Workspace `mobile/` con 3 proyectos Capacitor (`com.gm.vendedor/chofer/deposito`) | ✅ compilan; typecheck strict limpio |
-| Motor offline: réplica + outbox + sincronizador + reloj, con tests | ✅ 81 tests (core + depósito + vendedor); validado en equipo |
+| Motor offline: réplica + outbox + sincronizador + reloj, con tests | ✅ 128 tests (core + depósito + vendedor + chofer); validado en equipo |
 | Motor de precios isomórfico extraído, ERP usando el mismo código | ✅ en producción (preview verificado por el dueño + flujos de pedido probados) |
 | Migración `20260918_mobile_fundacion.sql` | ✅ aplicada en producción; log de cambios, idempotencia e historial verificados en vivo |
 | Vigencia programada (ERP + dispositivo + materialización) | ✅ probada en producción: aplicada por **pg_cron** a la hora exacta (ver abajo) |
@@ -681,13 +705,13 @@ Leyenda: ✅ hecho y verificado · 🟡 hecho, sin verificar en real (motivo ind
 | Re-verificación de precios de pedidos offline (`verificarPreciosCapturados`) | 🟡 tests ✅; cableada en `pedido.crear` / `pedido.editar`; se ejercita en real al probar la app Vendedor contra el backend |
 | Auth de dispositivo (Keystore, refresh, revocación) + Bearer en servidor | ✅ en equipo y **contra producción** (chofer v0.1.1 release) |
 | Navegación: convención + hooks + botón atrás | ✅ en equipo |
-| Lector: wedge + broadcast (plugin nativo) | ✅ compila; 🟡 el NuStar conectado no tiene servicio de escaneo habilitado |
+| Lector: wedge + broadcast (plugin nativo) | ✅ lector físico del NuStar funcionando en la app Depósito (confirmado 23/09/2026) |
 | Pipeline de build firmado + keystores + CHANGELOG | ✅ las 3 apps v0.1.1 (versionCode 2) firmadas y verificadas |
 | Chofer v0.1.1 **release** en el NuStar contra gmv2.vercel.app | ✅ login, viajes reales, reloj 2 s de desfasaje |
 | Vendedor viejo v1.1 (`com.gm.vendedor`, otra firma) | ✅ desinstalado del NuStar |
 | **App Depósito completa** (Sesión 3) | ✅ **CERRADA 18/09/2026**: en `main` (merge `3862a9a`), migraciones aplicadas, APK `deposito-v0.2.0` en el NuStar, checklist contra producción superado y base verificada idéntica (§17). Pendientes del mes de prueba: §17 |
 | **App Vendedor completa** (Sesión 1) | ✅ **CERRADA 23/09/2026**: en `main`, migración aplicada, `vendedor-v0.2.2` en el NuStar, checklist contra producción superado (§18) |
-| Datasets/handlers y pantallas de chofer | ⏳ sesión Chofer (hoy solo el esqueleto de la fundación) |
+| **App Chofer completa** (Sesión 2) | 🟡 **CÓDIGO LISTO 23/09/2026** en la rama `apk-chofer`: datasets, handlers, pantallas, 16 tests de overlay, prueba de ruta/interrupción/reconexión superada contra el mock, APK `chofer-v0.2.0` firmado con el keystore de la fundación. **Pendiente**: OK del dueño para mergear a `main` (toca `app/api/chofer/*`), deploy, y checklist contra producción en el NuStar (§19) |
 
 ### Validación en producción (18/09/2026)
 
@@ -771,7 +795,9 @@ Cerrar desde recientes o reiniciar el equipo.
    `viajes`, `pedidos` y `usuarios` sin sesión. Las apps no dependen de RLS (todo por
    API con Bearer), pero es un riesgo del ERP a resolver aparte.
 3. **Keystore del chofer viejo perdido**: el APK viejo `com.gm.chofer` (si está en
-   algún equipo) debe desinstalarse antes del nuevo.
+   algún equipo) debe desinstalarse antes del nuevo. El NuStar de pruebas ya tiene el
+   v0.1.1 firmado con el keystore de la fundación (`~/.gm-keystores/chofer.jks`): las
+   versiones siguientes (v0.2.0…) actualizan encima sin desinstalar.
 4. **Reloj del handheld**: mitigado con `Reloj` (desfasaje medido). Un equipo que
    nunca tuvo red desde que se cambió la hora usa el último desfasaje conocido.
 5. **pg_cron**: activo y verificado (materializó un programado a la hora exacta).
@@ -1016,12 +1042,9 @@ Aprendido en la prueba: crear un pedido desde el ERP escribe 3 filas "venta" en 
 ligada por `orden_compra_id` (hay que contarlas al limpiar datos de prueba).
 
 ### PENDIENTES DEL MES DE PRUEBA (no bloquean el uso)
-1. **Gatillo del lector físico.** El NuStar de pruebas no tiene servicio de escaneo (el dueño
-   está averiguando con el proveedor si este equipo trae lector). `adb input text` no emula bien
-   la ráfaga (a veces la detecta, a veces no). Validar con un lector real: abrir la cantidad
-   desde la lista, **segundo gatillo = confirmar**, código de otro artículo = error sin perder
-   nada, y que la ráfaga no ensucie el campo de cantidad ni el buscador (`useCampoSinRafaga`).
-   Si el firmware usa broadcast: `configurarBroadcast(accion, extra)` (§11).
+1. ~~**Gatillo del lector físico.**~~ ✅ **Resuelto 23/09/2026**: el dueño confirmó que el NuStar
+   tiene lector físico y funciona dentro de la app Depósito. Si algún equipo de reemplazo usara
+   broadcast en vez de keyboard wedge: `configurarBroadcast(accion, extra)` (§11).
 2. **Pantalla de fotos de recepción con documentos reales**: sacar foto de remito/factura
    (cámara del equipo), OCR, abrir con el ojito (URL firmada al servir) y eliminar. La OC de
    prueba no tenía documentos; la firma de URLs se verificó en la web (9 de 12 fotos abren; las
@@ -1359,3 +1382,154 @@ de clientes y está en `.gitignore`) → `node scripts/mock-vendedor.mjs` (3998)
 `GM_DEV_HTTP=1 npx cap sync android`, `gradlew assembleDebug`, `adb reverse tcp:3998 tcp:3998`,
 `adb install`. Con `GM_DEV_HTTP=1` el WebView queda inspeccionable (chrome://inspect); el script de
 release borra esa variable: un release nunca lo lleva.
+
+---
+
+## 19. Chofer (com.gm.chofer) — Sesión 2
+
+Réplica fiel de `app/chofer/` (sin funciones nuevas), offline-first: **el viaje completo del
+día está en el equipo antes de salir** y el chofer opera todo el reparto sin señal. Código:
+`mobile/apps/chofer/src` (`datasets.ts`, `datos/` = overlay puro + hooks + borrador de
+devolución, `pantallas/`, `rutas.tsx`, `ui.tsx`, `tema.css` = barra azul del módulo web).
+Servidor: `lib/viajes/cliente-viaje.ts`, `lib/mobile/{sync,outbox}/chofer.ts`.
+
+### Datos
+| Dataset | Modo | Refresco | Contenido |
+|---|---|---|---|
+| `chofer_me` | snapshot | 5 min + al entrar al inicio + tras iniciar/finalizar | = GET `me` (identidad, viaje activo, historial) |
+| `chofer_viajes` | snapshot + parcial | 5 min · al abrir un viaje con señal se re-lee SOLO ese viaje | hoja de ruta calculada (= GET `viaje/[id]` **sin iniciar**): paradas con instrucción de oficina, pedidos, remitos, pagos, plata del viaje |
+| `chofer_viaje_clientes` | snapshot + parcial | 10 min · al abrir la ficha con señal se re-lee SOLO ese cliente · las que faltan se bajan de a 25 | una fila por parada de los viajes operables (despachado/en_curso/en_rendicion): ficha (= GET `cliente/[clienteId]`) + `cobro` (comprobantes cobrables, pedidos, facturados, dto. hecho: lo que el selector web leía con supabase-js) + `comprados` (último precio facturado por artículo) |
+| `chofer_billetera` | snapshot | 10 min + al entrar + tras cada cobro/anulación/gasto/cierre | = GET `billetera` |
+| `chofer_catalogos` | snapshot | 60 min | cuentas bancarias destino |
+| `chofer_clientes` | snapshot | 30 min | todos los clientes activos con saldo del libro (cobro conjunto en la calle) |
+| `chofer_articulos` | delta (`articulos`) | 60 min | catálogo vendible (mismo cargador que el vendedor), para buscar un artículo a devolver |
+
+Dependen del chofer ⇒ `replicaPorUsuario` default. Cada operación aplicada vuelve con el **parche** de
+la hoja de ruta, de la ficha de los clientes tocados y de la billetera (`lib/mobile/outbox/chofer.ts`):
+la pantalla nunca "vuelve atrás" entre el envío y el próximo sync.
+
+### Descarga del viaje ("viaje descargado ✓")
+El inicio y el viaje muestran **"✓ Viaje descargado (N clientes) · datos al hh:mm"** solo cuando la
+ficha de TODAS las paradas está en el equipo (`estadoDescarga`); si no, un cartel ámbar
+"Viaje a medio descargar: faltan N fichas… no salgas a ruta" con **Descargar ahora** (re-sync
+completo). Con señal, las fichas que faltan se piden solas de a 25 (`replica.refrescarIds`).
+Una parada sin ficha igual se puede abrir: se arma una ficha PARCIAL con lo de la hoja de ruta
+(nombre, dirección, saldo, cobrado) y se puede cobrar **a cuenta** (sin imputar).
+
+### Abrir el viaje lo inicia
+En la web, leer la hoja de ruta pasa el viaje de `despachado` a `en_curso` (sello `iniciado_at`).
+La réplica lo lee con el header `x-gm-sin-iniciar` (descargar ≠ salir a ruta) y la app encola
+`viaje.iniciar` la primera vez que el chofer ENTRA al viaje, con o sin señal.
+
+### Plata sin señal: cero ambigüedad
+Overlay puro (`datos/overlay.ts`, tests en `test/chofer-overlay.test.ts`): lo que ve el chofer =
+réplica + sus operaciones sin enviar, con la marca **"⇪ sin enviar"** en cada lugar donde hay plata:
+- Parada: cobrado, "N sin enviar", devuelto, resultado; "cobrar sí o sí" se recalcula con lo cobrado acá.
+- Plata del viaje: cobrado en efectivo/cheques/transferencias, gastos y **efectivo en mano** ("⇪ incluye N cobro(s) y N gasto(s) sin enviar").
+- Ficha: cobros registrados (sin enviar / enviando / rechazado), devoluciones "sin enviar", **lo imputado queda reservado** (`en_cobro`: no se cobra dos veces el mismo comprobante), anticipos marcados, devolución descontada.
+- Billetera: efectivo en mano con lo cobrado y gastado sin enviar; cada cobro con su estado (EN MANO · SIN ENVIAR / EN MANO / RENDIDO · ESPERANDO OFICINA / CONFIRMADO / RECHAZADO POR OFICINA con el motivo).
+- Una operación **rechazada** por el servidor no suma en ningún lado: se ve en rojo en el inicio, el viaje, la ficha y la billetera hasta "Entendido".
+
+### Anular / editar un cobro
+"Editar cobro" en la web = abrir otro cobro (la lista lo llama así): se mantiene. La anulación
+(DELETE `cobro/[pagoId]`, que la web tenía como endpoint sin botón) está en la ficha, por cobro
+`pendiente_rendicion`, mientras el viaje admite cobros:
+- cobro que **todavía no salió del equipo** ⇒ `outbox.retirar`: se resuelve en el equipo, nunca viaja ("Cobro descartado: nunca llegó al sistema"); si justo se está enviando, se pide reintentar en unos segundos;
+- cobro **ya en el servidor** ⇒ `viaje.cobro_anular` (FIFO); rechazo si oficina ya confirmó la rendición.
+
+### Cierre del viaje sin señal
+"Rendir viaje" valida en el equipo lo mismo que el servidor puede saber sin datos nuevos: titular,
+viaje en curso, **ninguna parada sin resolver** (con los resultados marcados acá). Encola
+`viaje.finalizar` con el efectivo declarado; la app pasa a "EN RENDICIÓN · **CIERRE SIN ENVIAR**"
+(inicio y viaje) hasta que sale. El servidor confirma lo que solo él sabe: estado real del viaje,
+qué cobros entran a la rendición (`rendicion_crear`); si otra persona ya lo rindió ⇒ éxito
+(duplicado); si quedaron paradas pendientes en el servidor ⇒ rechazado y visible.
+
+### Cheques (mismo flujo que la web y la app Vendedor)
+`@gm/cheques`: la foto abre la fila al instante; el OCR corre en segundo plano con señal
+(`/api/pagos-clientes/ocr`) y completa solo lo que el chofer no tocó (ámbar); sin señal la foto
+queda comprimida en el equipo y sube adentro del cobro (`fotos_pendientes`, las sube el handler).
+Al registrar, por cada cheque con CUIT válido se encola `bcra.consultar`; el veredicto llega como
+aviso (inicio, viaje, ficha, cobro) hasta "Visto"; sin CUIT válido ⇒ aviso "sin control de riesgo".
+**A diferencia de la web**, no hay consulta BCRA en vivo mientras se tipea el CUIT (sería una
+llamada online desde un formulario que tiene que andar sin señal): siempre por la cola.
+
+### Navegación — matriz del botón atrás
+Verificada en navegador (`history.back()`); el botón físico del NuStar usa la misma decisión (core).
+Replace = no agrega historial. **Atrás con un cobro o una devolución a medio cargar pide
+confirmación** (`useBloqueoSalida` = `useBlocker` de react-router: bloquea también el atrás físico).
+
+| Pantalla | Ruta | Atrás va a |
+|---|---|---|
+| Inicio | `/` | **minimiza** (proceso y outbox vivos). No existe ruta del ERP |
+| Cerrar sesión (hoja) | `/?ver=salir` | cierra la hoja |
+| Billetera | `/billetera` (`?tab=` replace) | pantalla anterior |
+| Cargar un gasto (hoja) | `/billetera?ver=gasto` · `/viajes/:id?ver=gasto` | cierra la hoja |
+| Viaje (hoja de ruta) | `/viajes/:id` | Inicio |
+| Resultado de parada (hoja) | `?ver=parada:<paradaId>` | cierra la hoja |
+| Reabrir parada (confirmación) | `?ver=reabrir:<paradaId>` | cierra la hoja |
+| Rendir viaje (hoja) | `?ver=rendir` | cierra la hoja · Rendir ⇒ **Inicio (replace)** |
+| Ficha del cliente | `/viajes/:id/clientes/:cid` | Viaje (padre lógico si se abrió directo) |
+| Anular cobro (confirmación) | `?ver=anular:<pagoId>` | cierra la hoja |
+| Cobrar | `/viajes/:id/clientes/:cid/cobrar` (`?abierto=` `?cli=` replace) | Ficha — con datos cargados: **"¿Descartar el cobro?"** (Seguir acá / Descartar) |
+| Diferencia al registrar (diálogo) | `…/cobrar?ver=diff` | cierra el diálogo |
+| Cobro registrado | — | **replace** a la Ficha (atrás desde la ficha va al viaje, nunca a un cobro ya enviado) |
+| Devolución | `/viajes/:id/clientes/:cid/devolucion` (`?q=` replace) | Ficha — con artículos: **"¿Descartar la devolución?"** · registrada ⇒ replace a la Ficha |
+| Deslizar un renglón del pedido ("Devolver") | agrega al borrador y abre Devolución | Ficha (el borrador sobrevive: sessionStorage) |
+| Operaciones pendientes | `/pendientes` (core) | la pantalla anterior |
+
+Desde la lista del viaje, "Cobrar" y "Devolución" van DIRECTO a esas pantallas (en la web abrían la
+ficha con el sheet): atrás vuelve al viaje.
+
+### Diferencias con la web (impuestas por navegación / offline / plataforma)
+- Encabezado del core (atrás · En línea/Sin red · ⇪) + `<Frescura>`; `alert()`/`confirm()` ⇒ toast y hojas con historial.
+- Los tres sheets de la web son rutas (cobrar, devolución) o hojas con historial (parada, gasto, rendir).
+- Los botones Devolución/Cobrar del pie de la ficha se muestran siempre que el viaje admita cobros (la web los ocultaba tras el primer cobro, pero la lista del viaje igual ofrecía "Editar cobro").
+- Anular un cobro tiene botón (la web solo tenía el endpoint).
+- Transferencia: selector de cuenta destino (la web del chofer no lo tenía y `faltantes()` la rechazaba siempre; **corregido también en la web**, ver abajo).
+- Precio de la mercadería vieja: del último facturado replicado; nunca facturado ⇒ precio vigente con señal, o carga manual (campo en ámbar) sin señal.
+- OCR de cheques/tickets, PDF de remitos: online-only, deshabilitados sin red con el motivo a la vista. La foto del cheque sí se adjunta sin señal. "Hoja PDF" no está (la hoja es la pantalla).
+- Pedidos ya anticipados se muestran con "ya anticipado" pero siguen seleccionables (= web).
+- Búsquedas de clientes (cobro conjunto) y artículos (devolución) son locales (todas las palabras, sin acentos, código exacto primero) en vez del motor híbrido.
+
+### Bugs de la web encontrados (corregidos, retrocompatibles)
+1. **Cobro y anulación del chofer devolvían 500 ante un rechazo de negocio** de `cobranza_crear`/`cobranza_anular` (comprobante anulado, no es del cliente…). Para la web era solo un mensaje; para una cola con reintentos era un bloqueo eterno del FIFO. Ahora 422 `regla_negocio` (§10).
+2. **Transferencias imposibles en el cobro web del chofer**: `MetodoPagoCard` no tenía cuenta destino y `faltantes()` la exige. Agregado el selector (GET `/api/chofer/cuentas-bancarias`).
+3. `GET viaje/[id]` iniciaba el viaje como efecto secundario de LEERLO: cualquier lector (la réplica, un refresco) habría "salido a ruta". Ahora el inicio es explícito (header + `viaje.iniciar`).
+
+### Resultados de las pruebas (23/09/2026, contra `mock-chofer.mjs`; en el NuStar pendiente)
+| Prueba | Resultado |
+|---|---|
+| Descarga: inicio y viaje con "✓ Viaje descargado (6 clientes)" | ✅ |
+| Abrir el viaje ⇒ `viaje.iniciar` aplicado 1 vez, `iniciado_at` sellado | ✅ |
+| **Modo avión (mock sin red)**: cobro parcial $5.000 con "dejar saldo pendiente", devolución de un renglón del pedido (precio y cantidad del pedido), anular el cobro sin enviar (retirado, nunca viajó), anular un cobro del servidor, cobro nuevo, gasto $12.000, cierre de las 6 paradas (2 con motivo "no cobró" obligatorio), rendir | ✅ 11 operaciones en cola; parada, ficha, plata del viaje y billetera con las marcas "sin enviar" |
+| Interrupción: recarga con 11 pendientes | ✅ 11 intactas, "CIERRE SIN ENVIAR" en el inicio |
+| Reconexión + Enviar ahora | ✅ 12 claves aplicadas **1 vez** cada una, en orden FIFO (devolución antes que el cobro que la descuenta, paradas antes que el cierre) |
+| Servidor tras la sync | ✅ viaje `en_rendicion` con `finalizado_at`; 6 paradas `entregado` con sus motivos; cobro nuevo `pendiente_rendicion` con la imputación; cobro anterior `anulado`; DEV-00043 registrada 1 vez y descontada; gasto 1 vez; rendición abierta con el pago declarado |
+| **Efectivo en mano**: app $43.000 = fondo $50.000 + cobrado $5.000 − gastos $12.000 = `efectivo_declarado` del servidor | ✅ |
+| Atrás: inicio → viaje → ficha → cobrar (idx 1-2-3); atrás con monto cargado ⇒ hoja "¿Descartar el cobro?"; Seguir acá conserva el monto; Descartar ⇒ ficha ⇒ viaje ⇒ inicio | ✅ |
+| `npm test` (128) · `npm run typecheck:movil` | ✅ en verde |
+
+### Puesta en marcha (pendiente del dueño)
+1. Merge de `apk-chofer` a `main` con OK del dueño (toca `app/api/chofer/*`, `lib/viajes/*`, `lib/mobile/*`) y deploy. Sin migraciones.
+2. Instalar `dist-apks/chofer-v0.2.0.apk` encima del v0.1.1 del NuStar (`adb install -r`, misma firma).
+3. Checklist contra producción (abajo) con un viaje de prueba marcado `TEST-CHOFER` y foto antes/después (método de §17/§18).
+
+### Checklist contra PRODUCCIÓN en el NuStar 65-sp — PENDIENTE
+- [ ] Login del chofer real; descarga del viaje despachado; "✓ Viaje descargado" con todas las paradas.
+- [ ] Modo avión con el interruptor del equipo: cobro parcial, devolución, gasto, anular cobro (local y del servidor), cerrar paradas, rendir. Matar la app desde recientes y reabrir: nada perdido ni duplicado.
+- [ ] Reconectar: todo aplicado 1 vez; `pagos_clientes`, `devoluciones`, `viajes_gastos`, `viajes_paradas`, `rendiciones` iguales a lo que muestra la app; efectivo en mano = `efectivo_declarado`.
+- [ ] Cheque real con foto: OCR en segundo plano, **aviso BCRA posterior** (llega como aviso hasta "Visto"; no verificado en producción todavía, tampoco en la app Vendedor).
+- [ ] Cobro rechazado por regla de negocio (comprobante anulado en el ERP mientras el equipo estaba sin señal): queda rechazado, no traba lo de atrás.
+- [ ] Remito PDF con señal; frescura ámbar tras 1 h.
+- [ ] Limpieza por id y foto final idéntica.
+
+### Probar sin backend
+`cd mobile && node scripts/mock-chofer.mjs` (3997) → `apps/chofer/.env.development.local` con
+`VITE_API_BASE=http://localhost:3997` → `npm run dev:chofer` → http://localhost:5173 (cualquier
+email, contraseña "x"). Fixture sintético: un viaje despachado con 6 paradas (una con "no entregar
+sin cobrar", dos con "cobrar sí o sí", una sin facturar), un cobro previo del servidor, 40 clientes,
+300 artículos. Atajos: `/__mock/red?on=0|1`, `/__mock/estado`, `/__mock/bcra?modo=`,
+`/__mock/ocr?modo=`, `/__mock/rechazar-cobros?on=1`, `/__mock/anular-cobro?id=`, `/__mock/reset`.
+En el navegador el indicador dice "En línea" aunque el mock corte la red (Capacitor Network no
+existe ahí): las operaciones igual quedan en cola y salen al restaurarla.

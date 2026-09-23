@@ -704,6 +704,15 @@ function CobroSheet({
   const total = totalCobro()
   const diff = totalMet - total
 
+  // Cuentas destino para transferencias (faltantes() exige cuenta_bancaria_id)
+  const [cuentas, setCuentas] = useState<Array<{ id: string; banco: string; alias: string | null }>>([])
+  useEffect(() => {
+    fetch("/api/chofer/cuentas-bancarias")
+      .then((r) => r.json())
+      .then((d) => setCuentas(Array.isArray(d?.cuentas) ? d.cuentas : []))
+      .catch(() => {})
+  }, [])
+
   // Búsqueda de clientes adicionales para cobrar
   const supabaseCli = createClientBrowser()
   const [busqCli, setBusqCli] = useState("")
@@ -861,6 +870,7 @@ function CobroSheet({
                 key={m.id}
                 metodo={m}
                 clienteNombre={clienteNombre}
+                cuentas={cuentas}
                 onChange={(updates) => setMetodosPago((prev) => prev.map((x, i) => (i === idx ? aplicarCambios(x, updates) : x)))}
                 onRemove={metodosPago.length > 1 ? () => setMetodosPago((p) => p.filter((_, i) => i !== idx)) : undefined}
                 onFoto={(files) => onFotos(files, esFila(m) ? { filaId: m.id } : undefined)}
@@ -945,6 +955,7 @@ const CLS_INPUT = "w-full border-2 rounded-xl px-4 py-3 text-base border-gray-20
 function MetodoPagoCard({
   metodo,
   clienteNombre,
+  cuentas,
   onChange,
   onRemove,
   onFoto,
@@ -952,6 +963,7 @@ function MetodoPagoCard({
 }: {
   metodo: MetodoPago
   clienteNombre: string | null
+  cuentas: Array<{ id: string; banco: string; alias: string | null }>
   onChange: (updates: CambiosMetodo) => void
   onRemove?: () => void
   onFoto: (files: FileList) => void
@@ -1047,7 +1059,15 @@ function MetodoPagoCard({
               {consulta?.veredicto && <VeredictoBcraCard v={consulta.veredicto} />}
             </>
           ) : (
-            <input type="text" placeholder="Número de comprobante / referencia" value={fila.referencia_transferencia} onChange={(e) => onChange({ referencia_transferencia: e.target.value })} className={CLS_INPUT} />
+            <>
+              <select value={fila.cuenta_bancaria_id} onChange={(e) => onChange({ cuenta_bancaria_id: e.target.value })} className={`${CLS_INPUT} bg-white`}>
+                <option value="">Cuenta destino *</option>
+                {cuentas.map((cb) => (
+                  <option key={cb.id} value={cb.id}>{cb.banco}{cb.alias ? ` (${cb.alias})` : ""}</option>
+                ))}
+              </select>
+              <input type="text" placeholder="Número de comprobante / referencia" value={fila.referencia_transferencia} onChange={(e) => onChange({ referencia_transferencia: e.target.value })} className={CLS_INPUT} />
+            </>
           )}
         </div>
       )}
