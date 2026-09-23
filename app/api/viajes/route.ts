@@ -118,6 +118,7 @@ async function listarCalendario(supabase: SupabaseClient, searchParams: URLSearc
       viajes_choferes(usuario_id, rol)
     `)
     .eq("tipo", tipo)
+    .neq("estado", "cancelado") // cancelado = fuera del calendario (queda el registro y su historial)
     .order("fecha", { ascending: true })
   if (desde) {
     const d = new Date(desde + "T00:00:00Z")

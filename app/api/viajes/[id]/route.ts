@@ -189,7 +189,7 @@ export async function PATCH(
       const { error: pErr } = await supabase.from("pedidos").update({ viaje_id: null }).eq("viaje_id", id)
       if (pErr) throw pErr
       await supabase.from("viajes_paradas").delete().eq("viaje_id", id)
-      const { error } = await supabase.from("viajes").update({ estado: "cancelado" }).eq("id", id)
+      const { error } = await supabase.from("viajes").update({ estado: "cancelado", actualizado_por: auth.user.id, actualizado_at: new Date().toISOString() }).eq("id", id)
       if (error) throw error
       return NextResponse.json({ success: true, estado: "cancelado" })
     }

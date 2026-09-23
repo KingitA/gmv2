@@ -88,6 +88,8 @@ export interface HojaRuta {
     despachado_at: string | null
     actualizado_por: string
     actualizado_at: string | null
+    creado_por: string
+    historial: Array<{ id: number; fecha: string; usuario: string; accion: string; cambios: Record<string, { de: any; a: any }> }>
     presupuesto: { nafta: number; peon: number; hotel: number; otros: number; total: number }
   }
   paradas: ParadaHoja[]
@@ -131,7 +133,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
     .from("viajes")
     .select(`
       id, nombre, fecha, dias, estado, tipo_transporte, observaciones, chofer_id, despachado_at,
-      actualizado_por, actualizado_at,
+      actualizado_por, actualizado_at, creado_por,
       dinero_nafta, gastos_peon, gastos_hotel, gastos_adicionales,
       vehiculos(nombre, patente), transportes(nombre),
       viaje_zonas(zonas(nombre)),
@@ -142,7 +144,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
   if (!v) return null
   const viaje = v as any
 
-  const [{ data: paradasRaw }, { data: pedidosRaw }, { data: pagos }, { data: devoluciones }, { data: fondos }, { data: gastos }] =
+  const [{ data: paradasRaw }, { data: pedidosRaw }, { data: pagos }, { data: devoluciones }, { data: fondos }, { data: gastos }, { data: historial }] =
     await Promise.all([
       supabase.from("viajes_paradas").select("*").eq("viaje_id", viajeId).order("orden", { ascending: true }),
       supabase
@@ -162,6 +164,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       supabase.from("devoluciones").select("cliente_id, monto_total").eq("viaje_id", viajeId),
       supabase.from("viajes_fondos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
       supabase.from("viajes_gastos").select("*").eq("viaje_id", viajeId).order("created_at", { ascending: true }),
+      supabase.from("viajes_historial").select("id, usuario_id, accion, cambios, created_at").eq("viaje_id", viajeId).order("created_at", { ascending: false }).limit(100),
     ])
 
   const paradas = (paradasRaw || []) as any[]
@@ -175,7 +178,9 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       ...(fondos || []).flatMap((f: any) => [f.retirado_por, f.entregado_por]),
       ...(gastos || []).map((g: any) => g.cargado_por),
       ...(pagos || []).map((p: any) => p.creado_por),
+      ...(historial || []).map((h: any) => h.usuario_id),
       viaje.actualizado_por,
+      viaje.creado_por,
     ]),
   ].filter(Boolean) as string[]
 
@@ -391,6 +396,8 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       despachado_at: viaje.despachado_at,
       actualizado_por: nombreUsuario.get(viaje.actualizado_por) || "",
       actualizado_at: viaje.actualizado_at,
+      creado_por: nombreUsuario.get(viaje.creado_por) || "",
+      historial: (historial || []).map((h: any) => ({ id: h.id, fecha: h.created_at, usuario: nombreUsuario.get(h.usuario_id) || "sistema", accion: h.accion, cambios: h.cambios || {} })),
       presupuesto,
     },
     paradas: paradasHoja,
