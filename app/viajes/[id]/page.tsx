@@ -33,6 +33,7 @@ export default function ViajeDetallePage() {
   const [editando, setEditando] = useState(false)
   const [entregando, setEntregando] = useState(false)
   const [verPedidos, setVerPedidos] = useState(false)
+  const [verHistorial, setVerHistorial] = useState(false)
 
   const cargar = useCallback(async () => {
     try {
@@ -207,6 +208,34 @@ export default function ViajeDetallePage() {
           <ChevronDown className={`h-4 w-4 transition-transform ${verPedidos ? "rotate-180" : ""}`} />
         </button>
         {verPedidos && <div className="border-t p-3"><ViajePedidos viajeId={id} onCambio={cargar} /></div>}
+      </div>
+
+      {/* Historial: quién creó, movió, despachó, canceló */}
+      <div className="rounded-lg border bg-white">
+        <button className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold" onClick={() => setVerHistorial((x) => !x)}>
+          <span>Historial de cambios ({v.historial.length}){v.creado_por && ` · creado por ${v.creado_por}`}</span>
+          <ChevronDown className={`h-4 w-4 transition-transform ${verHistorial ? "rotate-180" : ""}`} />
+        </button>
+        {verHistorial && (
+          <div className="divide-y border-t text-sm">
+            {v.historial.map((h) => (
+              <div key={h.id} className="flex flex-wrap gap-x-3 px-3 py-1.5">
+                <span className="w-32 shrink-0 text-xs text-muted-foreground">{formatDateTimeAR(h.fecha)}</span>
+                <span className="w-28 shrink-0 font-medium">{h.usuario}</span>
+                <span className="text-muted-foreground">
+                  {h.accion === "creado"
+                    ? `Programó el viaje (${formatDateAR(String(h.cambios.fecha))}${Number(h.cambios.dias) > 1 ? `, ${h.cambios.dias} días` : ""})`
+                    : Object.entries(h.cambios).map(([campo, c]) => {
+                        const fmt = (x: any) => (campo === "fecha" && x ? formatDateAR(String(x)) : campo === "estado" && x ? ESTADO_VIAJE_LABEL[String(x)] || x : x ?? "—")
+                        const nombre: Record<string, string> = { fecha: "fecha", dias: "duración", nombre: "nombre", estado: "estado", chofer: "chofer", vehiculo_id: "vehículo", transporte_id: "transporte", tipo_transporte: "tipo", zona_principal: "zona", observaciones: "observaciones" }
+                        return `${nombre[campo] || campo}: ${fmt(c.de)} → ${fmt(c.a)}`
+                      }).join(" · ")}
+                </span>
+              </div>
+            ))}
+            {v.historial.length === 0 && <p className="px-3 py-3 text-muted-foreground">Sin cambios registrados (el historial arranca con la migración del 23/09).</p>}
+          </div>
+        )}
       </div>
 
       {/* Plata del viaje y arqueo */}

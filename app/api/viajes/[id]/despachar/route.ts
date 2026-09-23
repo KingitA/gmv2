@@ -42,7 +42,7 @@ export async function POST(
       if (pErr) throw pErr
       const { error } = await supabase
         .from("viajes")
-        .update({ estado: "programado", despachado_at: null, despachado_por: null })
+        .update({ estado: "programado", despachado_at: null, despachado_por: null, actualizado_por: auth.user.id, actualizado_at: new Date().toISOString() })
         .eq("id", id)
       if (error) throw error
       return NextResponse.json({ success: true, estado: "programado" })
@@ -62,7 +62,7 @@ export async function POST(
       if (pErr) throw pErr
       const { error } = await supabase
         .from("viajes")
-        .update({ estado: "completado", finalizado_at: new Date().toISOString() })
+        .update({ estado: "completado", finalizado_at: new Date().toISOString(), actualizado_por: auth.user.id, actualizado_at: new Date().toISOString() })
         .eq("id", id)
       if (error) throw error
       return NextResponse.json({ success: true, estado: "completado" })
@@ -78,7 +78,7 @@ export async function POST(
         .eq("viaje_id", id)
         .eq("estado", "pendiente_rendicion")
       if (count) return errorJson(`Hay ${count} cobro(s) sin rendir: confirmá la rendición desde Caja`)
-      const { error } = await supabase.from("viajes").update({ estado: "completado" }).eq("id", id)
+      const { error } = await supabase.from("viajes").update({ estado: "completado", actualizado_por: auth.user.id, actualizado_at: new Date().toISOString() }).eq("id", id)
       if (error) throw error
       return NextResponse.json({ success: true, estado: "completado" })
     }
