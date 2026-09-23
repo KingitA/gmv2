@@ -4,7 +4,7 @@ import { DS } from "../datasets"
 import { useBorradores } from "../datos/borradores"
 import { rechazosDe, useClientes, useMe, usePedidos, useRefrescarAlEntrar, useYo } from "../datos/hooks"
 import { usePreciosVencidos } from "../datos/precios"
-import { BadgeEstado, fechaCorta, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useEnterCierraTeclado, useToast } from "../ui"
+import { AvisosBcra, BadgeEstado, fechaCorta, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useEnterCierraTeclado, useToast } from "../ui"
 
 // Inicio del vendedor (port de app/vendedor/page.tsx). Atrás acá MINIMIZA la app (lo
 // resuelve el core): no existe ninguna ruta del ERP a la que se pueda llegar.
@@ -58,6 +58,8 @@ export function Inicio() {
       {toast}
       {/* Lo que la oficina rechazó (un cobro, un pedido…) se ve apenas se abre la app: no queda escondido en un contador */}
       <Rechazos items={rechazosDe(ops, "")} ayuda="Eso NO quedó registrado en el sistema. Revisalo y, si corresponde, cargalo de nuevo." />
+      {/* Veredicto del BCRA de los cheques cobrados (llega después del cobro, también si se cargó sin señal) */}
+      <AvisosBcra />
       <div className="mx-auto w-full max-w-2xl space-y-6 p-4">
         {borradores.map((b) => (
           <button key={b.clienteId} onClick={() => navigate(`/pedido/nuevo/${b.clienteId}`)} className="flex w-full items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-left">

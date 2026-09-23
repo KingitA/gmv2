@@ -19,7 +19,9 @@
       "@gm/pricing": ["../lib/pricing/isomorfico.ts"],
       "@gm/contrato": ["../lib/mobile/contrato.ts"],
       "@gm/deposito": ["../lib/deposito/bonificados.ts"],
-      "@gm/vendedor": ["../lib/vendedor/isomorfico.ts"]
+      "@gm/vendedor": ["../lib/vendedor/isomorfico.ts"],
+      "@gm/cheques": ["../lib/cheques/isomorfico.ts"],
+      "@gm/cheques/foto": ["../lib/cheques/foto.ts"]
     }
   }
 }

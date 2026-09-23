@@ -8,6 +8,9 @@ import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
+import { editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
+import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
+import { ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
 
 // ─── Tipos ────────────────────────────────────────────────────
 
@@ -61,21 +64,23 @@ interface ItemDevolucion {
   comprobante_venta_id?: string
 }
 
-interface MetodoPago {
+// Efectivo, o una fila de cheque/transferencia (lib/cheques/fila: nace de la foto,
+// el OCR la completa en segundo plano, los campos del OCR quedan marcados).
+interface MetodoEfectivo {
   id: string
-  tipo: "efectivo" | "transferencia" | "cheque"
+  tipo: "efectivo"
   monto: number
-  // cheque
-  banco_emisor?: string
-  numero_cheque?: string
-  fecha_cheque?: string
-  fecha_emision?: string
-  cuit_emisor?: string
-  color_cheque?: string
-  // transferencia
-  numero_comprobante?: string
-  cuenta_bancaria_id?: string
 }
+type MetodoPago = MetodoEfectivo | FilaCheque
+const esFila = (m: MetodoPago): m is FilaCheque => m.tipo !== "efectivo"
+
+/** Fila → método en el formato que espera POST /api/chofer/viaje/[id]/cobro. */
+const metodoPayload = (m: MetodoPago) =>
+  esFila(m)
+    ? m.tipo === "cheque"
+      ? { tipo: "cheque", monto: m.monto, banco_emisor: m.banco, numero_cheque: m.numero_cheque, fecha_cheque: m.fecha_cheque, fecha_emision: m.fecha_emision || undefined, cuit_emisor: m.cuit_emisor || undefined, color_cheque: m.es_echeq ? "ECHEQ" : undefined }
+      : { tipo: "transferencia", monto: m.monto, numero_comprobante: m.referencia_transferencia || undefined, cuenta_bancaria_id: m.cuenta_bancaria_id || undefined }
+    : { tipo: "efectivo", monto: m.monto }
 
 const MOTIVOS = ["diferencia_precios", "rotura", "vencido", "no_pedido", "otro"]
 // en_rendicion ya NO es read-only: el chofer puede corregir cobros hasta que
@@ -114,9 +119,24 @@ export default function ClienteEntregaPage() {
   const [guardandoCobro, setGuardandoCobro] = useState(false)
   // Clave de idempotencia: estable ante doble tap/reintento, rota al éxito
   const idemKeyRef = useRef<string>(crypto.randomUUID())
-  const [procesandoOCR, setProcesandoOCR] = useState(false)
-  const [ocrMsg, setOcrMsg] = useState<string | null>(null)
-  const [comprobanteArchivos, setComprobanteArchivos] = useState<{ url: string; nombre: string }[]>([])
+  // Filas de cheque/transferencia dentro de metodosPago: la foto crea la fila al instante y
+  // el OCR la completa después (components/pagos/foto-cheque). Nada espera al OCR.
+  const setFilasCheques = useCallback((fn: (prev: FilaCheque[]) => FilaCheque[]) => {
+    setMetodosPago((prev) => {
+      const nuevas = fn(prev.filter(esFila))
+      const porId = new Map(nuevas.map((f) => [f.id, f]))
+      const base = prev.map((m) => (esFila(m) ? porId.get(m.id) : m)).filter((m): m is MetodoPago => !!m)
+      const yaIds = new Set(base.filter(esFila).map((f) => f.id))
+      const agregadas = nuevas.filter((f) => !yaIds.has(f.id))
+      // Un único efectivo vacío se reemplaza por lo que trae la foto
+      const soloUnEfectivoVacio = base.length === 1 && base[0].tipo === "efectivo" && base[0].monto === 0 && agregadas.length > 0
+      return soloUnEfectivoVacio ? agregadas : [...base, ...agregadas]
+    })
+  }, [])
+  const { leer: leerFotos, reintentarSubida } = useLectorFotos(setFilasCheques)
+  // Consultas BCRA en segundo plano: el cobro se registra sin esperarlas; lo que llega
+  // después de cerrar el formulario lo avisa el layout (AvisosBcraGlobal).
+  const bcra = useConsultasBcra()
   // Clientes adicionales para cobrar en la misma cobranza (cobro conjunto en la calle)
   const [cobrosExtra, setCobrosExtra] = useState<Array<{ cliente: any; saldo: number; monto: number }>>([])
   const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())  // anticipos con 10% contado
@@ -168,60 +188,6 @@ export default function ClienteEntregaPage() {
     }, 300)
     return () => clearTimeout(timer)
   }, [busquedaArticulo])
-
-  // ─── OCR: procesar foto(s) y agregar métodos de pago ─────────
-  const procesarFotosOCR = async (files: FileList | File[]) => {
-    if (!files || files.length === 0) return
-    setProcesandoOCR(true)
-    setOcrMsg("Procesando imagen con IA...")
-    try {
-      const formData = new FormData()
-      for (const file of Array.from(files)) {
-        formData.append("files", file)
-      }
-      const res = await fetch("/api/pagos-clientes/ocr", {
-        method: "POST",
-        body: formData,
-      })
-      const d = await res.json()
-      if (Array.isArray(d.archivos) && d.archivos.length) {
-        setComprobanteArchivos((prev) => [...prev, ...d.archivos])
-      }
-      if (!d.success || !d.resultados?.length) {
-        const detalle = Array.isArray(d.errores) && d.errores.length ? ` (${d.errores[0]})` : ""
-        setOcrMsg(`No se encontraron datos en la imagen${detalle}. La foto quedó adjunta; ingresá los datos manualmente.`)
-        return
-      }
-
-      const nuevosMetodos: MetodoPago[] = d.resultados.map((r: any, i: number) => ({
-        id: `ocr-${Date.now()}-${i}`,
-        tipo: r.tipo === "transferencia" ? "transferencia" : "cheque",
-        monto: r.monto || 0,
-        // cheque
-        banco_emisor: r.banco_emisor || "",
-        numero_cheque: r.numero_cheque || "",
-        fecha_cheque: r.fecha_cheque || "",
-        fecha_emision: r.fecha_emision || "",
-        cuit_emisor: r.cuit_emisor || "",
-        color_cheque: r.color_cheque || "NEGRO",
-        // transferencia
-        numero_comprobante: r.numero_comprobante || "",
-        cuenta_bancaria_id: r.cuenta_bancaria_id || undefined,
-      }))
-
-      // Reemplazar el efectivo inicial si solo había uno vacío, sino agregar
-      setMetodosPago((prev) => {
-        const soloUnEfectivoVacio = prev.length === 1 && prev[0].tipo === "efectivo" && prev[0].monto === 0
-        return soloUnEfectivoVacio ? nuevosMetodos : [...prev, ...nuevosMetodos]
-      })
-
-      setOcrMsg(`✓ ${d.total_encontrados} comprobante${d.total_encontrados > 1 ? "s" : ""} detectado${d.total_encontrados > 1 ? "s" : ""}. Revisá los datos.`)
-    } catch {
-      setOcrMsg("Error procesando imagen. Ingresá los datos manualmente.")
-    } finally {
-      setProcesandoOCR(false)
-    }
-  }
 
   // ─── Devoluciones ─────────────────────────────────────────────
 
@@ -333,6 +299,12 @@ export default function ClienteEntregaPage() {
       alert("Ingresá al menos un método de pago con monto.")
       return
     }
+    for (const m of metodosPago) {
+      if (esFila(m) && m.monto > 0 && faltantes(m).length) {
+        alert(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${faltantes(m).join(", ")}.`)
+        return
+      }
+    }
     // Diferencia (mismo criterio que viajante / ERP): si no da al centavo, se
     // ajusta por redondeo (tope 1% de lo imputado, oficina lo confirma al
     // rendir) o se deja saldo pendiente / a cuenta.
@@ -359,10 +331,10 @@ export default function ClienteEntregaPage() {
         body: JSON.stringify({
           cliente_id: clienteId,
           monto_total: totalMetodos,
-          metodos: metodosPago.filter((m) => m.monto > 0),
+          metodos: metodosPago.filter((m) => m.monto > 0).map(metodoPayload),
           imputaciones,
           devolucion_ids: devPendientes,
-          comprobante_urls: comprobanteArchivos,
+          comprobante_urls: urlsDeFotos(metodosPago.filter(esFila)).map((url) => ({ url })),
           pedidos_contado: [...contadoPedidos],
           contado_general: contadoGeneral && bonificacionEstimada() > 0,
           ajuste_redondeo: ajusteRedondeo,
@@ -373,7 +345,7 @@ export default function ClienteEntregaPage() {
         }),
       })
       const d = await res.json()
-      if (d.success) { idemKeyRef.current = crypto.randomUUID(); setShowCobroSheet(false); setCobrosExtra([]); setComprobanteArchivos([]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({}); cargarDatos() }
+      if (d.success) { idemKeyRef.current = crypto.randomUUID(); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({}); cargarDatos() }
       else alert(d.error || "Error al registrar cobro")
     } finally { setGuardandoCobro(false) }
   }
@@ -646,15 +618,14 @@ export default function ClienteEntregaPage() {
           totalCobro={totalCobro}
           guardarCobro={guardarCobro}
           guardandoCobro={guardandoCobro}
-          procesandoOCR={procesandoOCR}
-          ocrMsg={ocrMsg}
-          setOcrMsg={setOcrMsg}
-          onFotos={procesarFotosOCR}
+          onFotos={leerFotos}
+          onReintentarSubida={reintentarSubida}
+          clienteNombre={data?.cliente?.nombre || null}
           cobrosExtra={cobrosExtra}
           setCobrosExtra={setCobrosExtra}
           clienteId={clienteId}
           onContadoPedidosChange={setContadoPedidos}
-          onClose={() => setShowCobroSheet(false)}
+          onClose={() => { setShowCobroSheet(false); bcra.cerrarFormulario() }}
           contadoGeneral={contadoGeneral}
           onContadoGeneralChange={setContadoGeneral}
           onComprobantesLoaded={setCompsCargados}
@@ -683,10 +654,9 @@ function CobroSheet({
   totalCobro,
   guardarCobro,
   guardandoCobro,
-  procesandoOCR,
-  ocrMsg,
-  setOcrMsg,
   onFotos,
+  onReintentarSubida,
+  clienteNombre,
   cobrosExtra,
   setCobrosExtra,
   clienteId,
@@ -712,10 +682,9 @@ function CobroSheet({
   totalCobro: () => number
   guardarCobro: (modo?: "ajuste" | "saldo") => void
   guardandoCobro: boolean
-  procesandoOCR: boolean
-  ocrMsg: string | null
-  setOcrMsg: React.Dispatch<React.SetStateAction<string | null>>
-  onFotos: (files: FileList | File[]) => void
+  onFotos: (files: FileList | File[] | null | undefined, opts?: { filaId?: string }) => void
+  onReintentarSubida: (filaId: string) => void
+  clienteNombre: string | null
   cobrosExtra: Array<{ cliente: any; saldo: number; monto: number }>
   setCobrosExtra: React.Dispatch<React.SetStateAction<Array<{ cliente: any; saldo: number; monto: number }>>>
   clienteId: string
@@ -863,17 +832,9 @@ function CobroSheet({
             {/* Botón escanear */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={procesandoOCR}
-              className="w-full py-4 rounded-2xl border-2 border-dashed border-blue-400 text-blue-700 font-bold text-lg bg-blue-50 active:scale-95 transition-transform disabled:opacity-50 flex items-center justify-center gap-3"
+              className="w-full py-4 rounded-2xl border-2 border-dashed border-blue-400 text-blue-700 font-bold text-lg bg-blue-50 active:scale-95 transition-transform flex items-center justify-center gap-3"
             >
-              {procesandoOCR ? (
-                <>
-                  <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                  Procesando con IA...
-                </>
-              ) : (
-                <>📷 Sacar foto a cheques / transferencias</>
-              )}
+              📷 Sacar foto a cheques / transferencias
             </button>
 
             {/* Input oculto — acepta múltiples archivos, abre cámara en móvil */}
@@ -885,20 +846,12 @@ function CobroSheet({
               capture="environment"
               className="hidden"
               onChange={(e) => {
-                if (e.target.files?.length) {
-                  onFotos(e.target.files)
-                  setOcrMsg(null)
-                }
+                onFotos(e.target.files)
                 e.target.value = ""
               }}
             />
 
-            {/* Mensaje OCR */}
-            {ocrMsg && (
-              <div className={`rounded-xl px-4 py-3 text-sm font-medium text-center ${ocrMsg.startsWith("✓") ? "bg-green-50 text-green-700 border border-green-200" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
-                {ocrMsg}
-              </div>
-            )}
+            <p className="text-center text-xs text-gray-500">La foto abre el cheque al instante; los datos se completan solos en unos segundos y siempre se pueden corregir.</p>
           </div>
 
           {/* Métodos de pago */}
@@ -907,12 +860,11 @@ function CobroSheet({
               <MetodoPagoCard
                 key={m.id}
                 metodo={m}
-                onChange={(updates) => setMetodosPago((prev) => prev.map((x, i) => i === idx ? { ...x, ...updates } : x))}
+                clienteNombre={clienteNombre}
+                onChange={(updates) => setMetodosPago((prev) => prev.map((x, i) => (i === idx ? aplicarCambios(x, updates) : x)))}
                 onRemove={metodosPago.length > 1 ? () => setMetodosPago((p) => p.filter((_, i) => i !== idx)) : undefined}
-                onFoto={(files) => {
-                  // Foto individual: reemplaza ESTE método con los resultados OCR
-                  onFotos(files)
-                }}
+                onFoto={(files) => onFotos(files, esFila(m) ? { filaId: m.id } : undefined)}
+                onReintentarSubida={() => onReintentarSubida(m.id)}
               />
             ))}
 
@@ -968,73 +920,55 @@ function CobroSheet({
   )
 }
 
-// ─── Situaciones BCRA ─────────────────────────────────────────
-
-const SITUACIONES_BCRA: Record<number, { label: string; color: string }> = {
-  1: { label: "Normal", color: "green" },
-  2: { label: "Riesgo bajo / Seguimiento especial", color: "yellow" },
-  3: { label: "Riesgo medio / Con problemas", color: "orange" },
-  4: { label: "Alto riesgo de insolvencia", color: "red" },
-  5: { label: "Irrecuperable", color: "red" },
-  6: { label: "Irrecuperable por disposición técnica", color: "red" },
-}
-
-interface BcraResult {
-  situacion_max: number
-  denominacion: string | null
-  apto: boolean
-  sin_antecedentes: boolean
-  error?: string
-}
-
 // ─── Card de método de pago ────────────────────────────────────
+// Efectivo: solo monto. Cheque/transferencia: fila de lib/cheques con foto, campos
+// del OCR resaltados en ámbar (hasta que el chofer los pisa) y consulta BCRA en
+// segundo plano cuando el CUIT queda completo y válido.
+
+type CambiosMetodo = Partial<Omit<FilaCheque, "tipo">> & { tipo?: MetodoPago["tipo"] }
+
+/** Aplica cambios a un método: cambio de tipo (efectivo ↔ fila) o edición de campos (marca "editado" en la fila). */
+function aplicarCambios(m: MetodoPago, updates: CambiosMetodo): MetodoPago {
+  const { tipo, ...campos } = updates
+  let out: MetodoPago = m
+  if (tipo && tipo !== m.tipo) {
+    if (tipo === "efectivo") out = { id: m.id, tipo: "efectivo", monto: m.monto }
+    else if (m.tipo === "efectivo") out = { ...filaVacia(m.id, tipo), monto: m.monto }
+    else out = { ...m, tipo }
+  }
+  if (!esFila(out)) return { ...out, ...(campos.monto !== undefined ? { monto: campos.monto } : {}) }
+  return (Object.entries(campos) as Array<[keyof FilaCheque, any]>).reduce((f, [k, v]) => editarCampo(f, k, v), out)
+}
+
+const CLS_INPUT = "w-full border-2 rounded-xl px-4 py-3 text-base border-gray-200"
 
 function MetodoPagoCard({
   metodo,
+  clienteNombre,
   onChange,
   onRemove,
   onFoto,
+  onReintentarSubida,
 }: {
   metodo: MetodoPago
-  onChange: (updates: Partial<MetodoPago>) => void
+  clienteNombre: string | null
+  onChange: (updates: CambiosMetodo) => void
   onRemove?: () => void
   onFoto: (files: FileList) => void
+  onReintentarSubida: () => void
 }) {
   const fotoRef = useRef<HTMLInputElement>(null)
-  const [bcra, setBcra] = useState<BcraResult | null>(null)
-  const [consultandoBcra, setConsultandoBcra] = useState(false)
-
-  // Consulta via proxy Edge (/api/bcra/deudor/[cuit]).
-  // Edge Runtime usa IPs de Vercel Edge, distintas a AWS Lambda que el BCRA bloqueaba.
-  useEffect(() => {
-    if (metodo.tipo !== "cheque") return
-    const cuitLimpio = (metodo.cuit_emisor || "").replace(/\D/g, "")
-    if (cuitLimpio.length < 10) { setBcra(null); return }
-
-    const timer = setTimeout(async () => {
-      setConsultandoBcra(true)
-      setBcra(null)
-      try {
-        const res = await fetch(`/api/bcra/deudor/${cuitLimpio}`)
-        const d = await res.json()
-        if (d.error) setBcra({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: d.error })
-        else setBcra(d)
-      } catch {
-        setBcra({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: "No se pudo conectar" })
-      } finally {
-        setConsultandoBcra(false)
-      }
-    }, 800)
-
-    return () => clearTimeout(timer)
-  }, [metodo.cuit_emisor, metodo.tipo])
+  const fila = esFila(metodo) ? metodo : null
+  const consulta = useConsultaBcraFila(
+    metodo.id,
+    fila && fila.tipo === "cheque" && fila.cuit_emisor
+      ? { cuits: [fila.cuit_emisor], banco: fila.banco, numero_cheque: fila.numero_cheque, monto: fila.monto, cliente_nombre: clienteNombre }
+      : null,
+  )
+  const riesgo = consulta?.veredicto?.veredicto === "riesgo"
 
   return (
-    <div className={`rounded-2xl p-4 space-y-3 border-2 transition-colors ${
-      metodo.tipo === "cheque" && bcra && !bcra.apto
-        ? "bg-red-50 border-red-400"
-        : "bg-gray-50 border-gray-200"
-    }`}>
+    <div className={`rounded-2xl p-4 space-y-3 border-2 transition-colors ${riesgo ? "bg-red-50 border-red-400" : "bg-gray-50 border-gray-200"}`}>
       {/* Tipo + quitar */}
       <div className="flex items-center gap-2">
         <div className="flex gap-1 flex-1 flex-wrap">
@@ -1060,133 +994,58 @@ function MetodoPagoCard({
           value={metodo.monto || ""}
           onChange={(e) => onChange({ monto: Number(e.target.value) })}
           placeholder="0.00"
-          className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-2xl font-bold text-center focus:border-blue-500 focus:outline-none"
+          className={`w-full border-2 rounded-xl px-4 py-3 text-2xl font-bold text-center focus:border-blue-500 focus:outline-none ${fila ? clsOcr(fila, "monto", "border-gray-200") : "border-gray-200"}`}
         />
       </div>
 
-      {/* Campos específicos por tipo */}
-      {metodo.tipo === "cheque" && (
+      {fila && (
         <div className="space-y-2">
-          {/* Botón foto individual */}
           <button
             onClick={() => fotoRef.current?.click()}
             className="w-full py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 font-medium text-sm flex items-center justify-center gap-2"
           >
-            📷 Sacar foto a este cheque
+            📷 {fila.ocr.estado === "sin_foto" ? (fila.tipo === "cheque" ? "Sacar foto a este cheque" : "Sacar foto al comprobante") : "Sacar otra foto"}
           </button>
-          <input ref={fotoRef} type="file" accept="image/*" capture="environment" className="hidden"
-            onChange={(e) => { if (e.target.files?.length) onFoto(e.target.files); e.target.value = "" }} />
+          <input ref={fotoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { if (e.target.files?.length) onFoto(e.target.files); e.target.value = "" }} />
+          <EstadoFoto fila={fila} onReintentar={onReintentarSubida} />
 
-          <input type="text" placeholder="Banco" value={metodo.banco_emisor || ""} onChange={(e) => onChange({ banco_emisor: e.target.value })} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base" />
-          <input type="text" placeholder="Número de cheque" value={metodo.numero_cheque || ""} onChange={(e) => onChange({ numero_cheque: e.target.value })} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base" />
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Fecha emisión</label>
-              <input type="date" value={metodo.fecha_emision || ""} onChange={(e) => onChange({ fecha_emision: e.target.value })} className="w-full border-2 border-gray-200 rounded-xl px-3 py-2" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 mb-1 block">Fecha vencimiento</label>
-              <input type="date" value={metodo.fecha_cheque || ""} onChange={(e) => onChange({ fecha_cheque: e.target.value })} className="w-full border-2 border-gray-200 rounded-xl px-3 py-2" />
-            </div>
-          </div>
-
-          {/* CUIT — campo clave que dispara la consulta BCRA */}
-          <div>
-            <label className="text-xs text-gray-400 mb-1 block">CUIT emisor</label>
-            <input
-              type="text"
-              placeholder="XX-XXXXXXXX-X"
-              value={metodo.cuit_emisor || ""}
-              onChange={(e) => onChange({ cuit_emisor: e.target.value })}
-              className={`w-full border-2 rounded-xl px-4 py-3 text-base font-mono ${
-                bcra && !bcra.apto ? "border-red-400 bg-red-50" : "border-gray-200"
-              }`}
-            />
-          </div>
-
-          {/* ─── Resultado BCRA ─── */}
-          {consultandoBcra && (
-            <div className="flex items-center gap-2 px-4 py-3 bg-gray-100 rounded-xl text-sm text-gray-500">
-              <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-              Consultando BCRA...
-            </div>
-          )}
-
-          {!consultandoBcra && bcra && (
-            <BcraBadge bcra={bcra} />
-          )}
-
-          {/* Resumen del cheque */}
-          {metodo.banco_emisor && metodo.numero_cheque && (
-            <div className="bg-white rounded-xl px-3 py-2 text-xs text-gray-500 border border-gray-200">
-              {metodo.banco_emisor} · #{metodo.numero_cheque}
-              {metodo.fecha_cheque && ` · vence ${new Date(metodo.fecha_cheque + "T12:00:00").toLocaleDateString("es-AR")}`}
-            </div>
+          {fila.tipo === "cheque" ? (
+            <>
+              <input type="text" placeholder="Banco" value={fila.banco} onChange={(e) => onChange({ banco: e.target.value })} className={clsOcr(fila, "banco", CLS_INPUT)} />
+              <input type="text" inputMode="numeric" placeholder="Número de cheque" value={fila.numero_cheque} onChange={(e) => onChange({ numero_cheque: e.target.value })} className={clsOcr(fila, "numero_cheque", CLS_INPUT)} />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Fecha emisión</label>
+                  <input type="date" value={fila.fecha_emision} onChange={(e) => onChange({ fecha_emision: e.target.value })} className={clsOcr(fila, "fecha_emision", "w-full border-2 rounded-xl px-3 py-2 border-gray-200")} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Fecha vencimiento</label>
+                  <input type="date" value={fila.fecha_cheque} onChange={(e) => onChange({ fecha_cheque: e.target.value })} className={clsOcr(fila, "fecha_cheque", "w-full border-2 rounded-xl px-3 py-2 border-gray-200")} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">CUIT emisor</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="XX-XXXXXXXX-X"
+                  value={fila.cuit_emisor}
+                  onChange={(e) => onChange({ cuit_emisor: e.target.value })}
+                  className={`w-full border-2 rounded-xl px-4 py-3 text-base font-mono ${riesgo ? "border-red-400 bg-red-50" : clsOcr(fila, "cuit_emisor", "border-gray-200")}`}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input type="checkbox" checked={fila.es_echeq} onChange={(e) => onChange({ es_echeq: e.target.checked })} className="w-5 h-5" />
+                Es e-cheq
+              </label>
+              {consulta?.consultando && <ConsultandoBcra />}
+              {consulta?.veredicto && <VeredictoBcraCard v={consulta.veredicto} />}
+            </>
+          ) : (
+            <input type="text" placeholder="Número de comprobante / referencia" value={fila.referencia_transferencia} onChange={(e) => onChange({ referencia_transferencia: e.target.value })} className={CLS_INPUT} />
           )}
         </div>
       )}
-
-      {metodo.tipo === "transferencia" && (
-        <div className="space-y-2">
-          {/* Botón foto individual */}
-          <button
-            onClick={() => fotoRef.current?.click()}
-            className="w-full py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 font-medium text-sm flex items-center justify-center gap-2"
-          >
-            📷 Sacar foto al comprobante
-          </button>
-          <input ref={fotoRef} type="file" accept="image/*" capture="environment" className="hidden"
-            onChange={(e) => { if (e.target.files?.length) onFoto(e.target.files); e.target.value = "" }} />
-
-          <input type="text" placeholder="Número de comprobante / referencia" value={metodo.numero_comprobante || ""} onChange={(e) => onChange({ numero_comprobante: e.target.value })} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-base" />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Badge de resultado BCRA ──────────────────────────────────
-
-function BcraBadge({ bcra }: { bcra: BcraResult }) {
-  if (bcra.error) {
-    return (
-      <div className="flex items-center gap-2 px-4 py-3 bg-gray-100 rounded-xl border border-gray-300">
-        <span className="text-gray-500 text-lg">⚠️</span>
-        <div>
-          <p className="text-sm font-medium text-gray-600">No se pudo consultar BCRA</p>
-          <p className="text-xs text-gray-400">{bcra.error}</p>
-        </div>
-      </div>
-    )
-  }
-
-  const sit = bcra.situacion_max
-  const info = SITUACIONES_BCRA[sit] || { label: "Desconocida", color: "gray" }
-
-  if (bcra.apto) {
-    return (
-      <div className="flex items-center gap-3 px-4 py-3 bg-green-50 rounded-xl border-2 border-green-400">
-        <span className="text-3xl">✅</span>
-        <div className="flex-1">
-          <p className="font-bold text-green-800 text-base">Apto — Situación {sit}</p>
-          <p className="text-green-600 text-sm">{info.label}</p>
-          {bcra.denominacion && <p className="text-green-700 text-xs font-medium mt-0.5">{bcra.denominacion}</p>}
-          {bcra.sin_antecedentes && <p className="text-green-500 text-xs">Sin antecedentes en Central de Deudores</p>}
-        </div>
-      </div>
-    )
-  }
-
-  // Situación 2 o superior — NO aceptar cheque
-  return (
-    <div className="flex items-start gap-3 px-4 py-4 bg-red-50 rounded-xl border-2 border-red-500">
-      <span className="text-3xl mt-0.5">🚫</span>
-      <div className="flex-1">
-        <p className="font-bold text-red-800 text-lg">NO ACEPTAR CHEQUE</p>
-        <p className="font-bold text-red-700">Situación {sit} — {info.label}</p>
-        {bcra.denominacion && <p className="text-red-600 text-sm font-medium mt-1">{bcra.denominacion}</p>}
-        <p className="text-red-500 text-xs mt-1">El emisor tiene antecedentes negativos en el BCRA.</p>
-      </div>
     </div>
   )
 }

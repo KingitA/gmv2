@@ -1,49 +1,45 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import {
+  bcraError,
+  cuitValido,
+  esMismoBanco,
+  normalizarCuit,
+  SITUACION_LABEL,
+  veredictoBcra,
+  type BcraResultado,
+  type VeredictoBcra,
+} from "@/lib/cheques/isomorfico"
 
 // Chequeo del CUIT del emisor de un cheque contra la Central de Deudores del
 // BCRA (proxy Edge /api/bcra/deudor/[cuit]). Reutilizable en oficina
-// (MetodoPagoForm), cobro del vendedor y chofer: se le pasa el CUIT y muestra
-// el semáforo (situación 1 = normal; 2+ = con deuda en el sistema financiero).
+// (MetodoPagoForm), cobro del vendedor y chofer. Las reglas (veredicto, mismo
+// banco, etiquetas) viven en lib/cheques; acá solo la consulta y el pintado.
+//
+// Solo se consulta un CUIT COMPLETO y válido (dígito verificador): nada a medio
+// tipear. La consulta nunca bloquea nada: el cobro se registra igual.
 
-export interface BcraResultado {
-  situacion_max: number
-  denominacion: string | null
-  apto: boolean
-  sin_antecedentes: boolean
-  /** Peor situación por entidad informante (para resaltar el banco del cheque). */
-  entidades?: { entidad: string; situacion: number }[]
-  error?: string
+export type { BcraResultado }
+export { esMismoBanco }
+
+const BCRA_TIMEOUT_MS = 12_000
+
+/** Consulta un CUIT (ya validado). Nunca lanza. */
+export async function consultarBcra(cuit: string): Promise<BcraResultado> {
+  const limpio = cuit.replace(/\D/g, "")
+  try {
+    const res = await fetch(`/api/bcra/deudor/${limpio}`, { signal: AbortSignal.timeout(BCRA_TIMEOUT_MS) })
+    const d = await res.json().catch(() => null)
+    if (!d || d.error) return bcraError(limpio, d?.error || `Error ${res.status}`)
+    return { ...d, cuit: limpio, entidades: d.entidades || [] }
+  } catch (e: any) {
+    return bcraError(limpio, e?.name === "TimeoutError" ? "El BCRA no respondió a tiempo" : "Sin conexión con el BCRA")
+  }
 }
 
-// ¿La entidad del BCRA es el banco emisor del cheque? Comparación laxa por
-// tokens ("Macro" ⊂ "BANCO MACRO S.A.", "Nación" ⊂ "BANCO DE LA NACION ARGENTINA").
-const norm = (s: string) =>
-  s
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/\b(BANCO|BCO|DE|DEL|LA|EL|LOS|Y|S\.?A\.?U?|S\.?R\.?L\.?|ARGENTINA|BUENOS AIRES)\b/g, " ")
-    .replace(/[^A-Z0-9 ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-
-export function esMismoBanco(entidadBcra: string, bancoEmisor: string): boolean {
-  const a = norm(entidadBcra)
-  const b = norm(bancoEmisor)
-  if (!a || !b) return false
-  return a.includes(b) || b.includes(a)
-}
-
-const SITUACION_LABEL: Record<number, string> = {
-  1: "Situación 1 — normal",
-  2: "Situación 2 — riesgo bajo",
-  3: "Situación 3 — riesgo medio",
-  4: "Situación 4 — riesgo alto",
-  5: "Situación 5 — irrecuperable",
-  6: "Situación 6 — irrecuperable (disp. técnica)",
-}
+// Caché de sesión: el mismo CUIT no se consulta dos veces (oficina abre y cierra el form).
+const cache = new Map<string, BcraResultado>()
 
 export function useBcraDeudor(cuit: string | null | undefined) {
   const [resultado, setResultado] = useState<BcraResultado | null>(null)
@@ -51,114 +47,233 @@ export function useBcraDeudor(cuit: string | null | undefined) {
 
   useEffect(() => {
     const limpio = (cuit || "").replace(/\D/g, "")
-    if (limpio.length < 10) {
+    if (!cuitValido(limpio)) {
       setResultado(null)
       return
     }
+    const ya = cache.get(limpio)
+    if (ya) {
+      setResultado(ya)
+      return
+    }
+    let vivo = true
     const timer = setTimeout(async () => {
       setConsultando(true)
       setResultado(null)
-      try {
-        const res = await fetch(`/api/bcra/deudor/${limpio}`)
-        const d = await res.json()
-        if (d.error) setResultado({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: d.error })
-        else setResultado(d)
-      } catch {
-        setResultado({ situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: "Sin conexión con el BCRA" })
-      } finally {
+      const r = await consultarBcra(limpio)
+      if (!r.error) cache.set(limpio, r)
+      if (vivo) {
+        setResultado(r)
         setConsultando(false)
       }
-    }, 700)
-    return () => clearTimeout(timer)
+    }, 500)
+    return () => {
+      vivo = false
+      clearTimeout(timer)
+    }
   }, [cuit])
 
   return { resultado, consultando }
 }
 
-export function BcraDeudorChip({
-  cuit,
-  bancoEmisor,
-}: {
-  cuit: string | null | undefined
-  /** Banco que emitió el cheque: si la deuda está justo ahí, se resalta aparte
-   *  (es el banco que va a decidir si el cheque se paga). */
-  bancoEmisor?: string | null
-}) {
-  const { resultado, consultando } = useBcraDeudor(cuit)
+// ─── Consultas en segundo plano a nivel PÁGINA (chofer / vendedor web) ────────
+//
+// El formulario de cobro dispara la consulta cuando el CUIT queda completo y sigue
+// su vida: si el operario registra el cobro antes de que el BCRA conteste, el
+// resultado igual llega y se muestra como aviso en la página (patrón de avisos de
+// la app vendedor). Cada consulta lleva el contexto del cheque para que el aviso
+// diga de qué cheque habla.
 
-  if (consultando) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-xl border border-gray-200 text-sm text-gray-500">
-        <div className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin shrink-0" />
-        Consultando Central de Deudores (BCRA)...
-      </div>
-    )
+export interface ContextoCheque {
+  cuits: string[]
+  banco?: string | null
+  numero_cheque?: string | null
+  monto?: number | null
+  cliente_nombre?: string | null
+}
+
+export interface ConsultaBcra {
+  id: string
+  ctx: ContextoCheque
+  consultando: boolean
+  veredicto: VeredictoBcra | null
+  /** Ya se mostró en el formulario mientras estaba abierto: no hace falta el aviso */
+  visto: boolean
+  iniciada_at: number
+}
+
+class AlmacenConsultas {
+  private mapa = new Map<string, ConsultaBcra>()
+  private subs = new Set<() => void>()
+  private snapshot: ConsultaBcra[] = []
+  /** Cards de cheque montadas (formulario abierto): mientras haya, los "consultando" se ven ahí y no en el aviso global */
+  montajes = 0
+  suscribir = (fn: () => void) => {
+    this.subs.add(fn)
+    return () => void this.subs.delete(fn)
   }
-  if (!resultado) return null
-
-  if (resultado.error) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 rounded-xl border border-amber-300 text-sm text-amber-800">
-        ⚠️ No se pudo consultar el BCRA — verificá el cheque a mano. <span className="text-amber-600">{resultado.error}</span>
-      </div>
-    )
+  lista = () => this.snapshot
+  private emitir() {
+    this.snapshot = [...this.mapa.values()]
+    for (const fn of this.subs) fn()
   }
-
-  if (resultado.apto) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-green-50 rounded-xl border border-green-300 text-sm text-green-800">
-        ✅ BCRA: {resultado.sin_antecedentes ? "sin antecedentes" : "situación 1 — normal"}
-        {resultado.denominacion && <span className="text-green-600 truncate">· {resultado.denominacion}</span>}
-      </div>
-    )
+  get(id: string) {
+    return this.mapa.get(id) ?? null
   }
+  consultar(id: string, ctx: ContextoCheque) {
+    const cuits = [...new Set(ctx.cuits.map((c) => normalizarCuit(c)).filter((c): c is string => !!c))]
+    if (!cuits.length) {
+      if (this.mapa.delete(id)) this.emitir()
+      return
+    }
+    const clave = cuits.join(",")
+    const previa = this.mapa.get(id)
+    if (previa && previa.ctx.cuits.join(",") === clave) return // mismo CUIT: ya está en curso o resuelta
+    const c: ConsultaBcra = { id, ctx: { ...ctx, cuits }, consultando: true, veredicto: null, visto: false, iniciada_at: Date.now() }
+    this.mapa.set(id, c)
+    this.emitir()
+    void Promise.all(cuits.map(async (cuit) => cache.get(cuit.replace(/\D/g, "")) ?? consultarBcra(cuit))).then((res) => {
+      for (const r of res) if (!r.error) cache.set(r.cuit, r)
+      const actual = this.mapa.get(id)
+      if (!actual || actual.ctx.cuits.join(",") !== clave) return // cambió el CUIT mientras tanto
+      this.mapa.set(id, { ...actual, consultando: false, veredicto: veredictoBcra(res, ctx.banco) })
+      this.emitir()
+    })
+  }
+  marcarVisto(id: string) {
+    const c = this.mapa.get(id)
+    if (c && !c.visto) {
+      this.mapa.set(id, { ...c, visto: true })
+      this.emitir()
+    }
+  }
+  quitar(id: string) {
+    if (this.mapa.delete(id)) this.emitir()
+  }
+  montar(delta: number) {
+    this.montajes = Math.max(0, this.montajes + delta)
+    this.emitir()
+  }
+  /** El formulario se cerró: lo que ya se vio se descarta; lo pendiente/no visto queda para avisar. */
+  cerrarFormulario() {
+    let cambio = false
+    for (const [id, c] of this.mapa) if (c.visto) { this.mapa.delete(id); cambio = true }
+    if (cambio) this.emitir()
+  }
+}
 
-  // La deuda ¿está en el banco que emitió el cheque? Es el dato que más pesa.
-  const entidadDelCheque = bancoEmisor
-    ? (resultado.entidades || []).find((e) => e.situacion > 1 && esMismoBanco(e.entidad, bancoEmisor))
-    : null
+const almacen = new AlmacenConsultas()
 
+export function useConsultasBcra() {
+  const lista = useSyncExternalStore(almacen.suscribir, almacen.lista, almacen.lista)
+  const consultar = useCallback((id: string, ctx: ContextoCheque) => almacen.consultar(id, ctx), [])
+  const quitar = useCallback((id: string) => almacen.quitar(id), [])
+  const cerrarFormulario = useCallback(() => almacen.cerrarFormulario(), [])
+  const avisos = lista.filter((c) => !c.visto && c.veredicto)
+  const pendientes = almacen.montajes === 0 ? lista.filter((c) => c.consultando && !c.visto) : []
+  return { consultas: lista, consultar, quitar, cerrarFormulario, avisos, pendientes }
+}
+
+/**
+ * Dispara la consulta de una fila cuando su CUIT queda completo y válido. Se usa
+ * desde la card del cheque; `id` = id de la fila.
+ */
+export function useConsultaBcraFila(id: string, ctx: ContextoCheque | null) {
+  const clave = ctx ? ctx.cuits.map((c) => c.replace(/\D/g, "")).filter(cuitValido).join(",") : ""
+  const ctxRef = useRef(ctx)
+  ctxRef.current = ctx
+  useEffect(() => {
+    if (!clave) return
+    const t = setTimeout(() => ctxRef.current && almacen.consultar(id, ctxRef.current), 500)
+    return () => clearTimeout(t)
+  }, [id, clave])
+  useEffect(() => {
+    almacen.montar(1)
+    return () => almacen.montar(-1)
+  }, [])
+  const consultas = useSyncExternalStore(almacen.suscribir, almacen.lista, almacen.lista)
+  const consulta = consultas.find((c) => c.id === id) ?? null
+  // Si el resultado se pintó con el formulario abierto, no hace falta avisar después
+  useEffect(() => {
+    if (consulta?.veredicto && !consulta.visto) almacen.marcarVisto(id)
+  }, [id, consulta?.veredicto, consulta?.visto])
+  return consulta
+}
+
+// ─── Pintado ─────────────────────────────────────────────────────────────────
+
+const CLS_POR_VEREDICTO = {
+  apto: "bg-green-50 border-green-300 text-green-800",
+  riesgo: "bg-red-50 border-2 border-red-400 text-red-800",
+  sin_respuesta: "bg-amber-50 border-amber-300 text-amber-800",
+} as const
+
+/** Resultado de una consulta (una sola línea + detalle si hay riesgo). */
+export function VeredictoBcraCard({ v, compacto = false }: { v: VeredictoBcra; compacto?: boolean }) {
   return (
-    <div className="px-3 py-2 bg-red-50 rounded-xl border-2 border-red-400 text-sm">
-      <p className="font-bold text-red-700">
-        ⛔ BCRA: {SITUACION_LABEL[resultado.situacion_max] || `situación ${resultado.situacion_max}`}
-      </p>
-      {resultado.denominacion && <p className="text-red-600 truncate">{resultado.denominacion}</p>}
-      {entidadDelCheque ? (
-        <p className="text-red-700 text-xs mt-0.5 font-bold">
-          🚨 La deuda (situación {entidadDelCheque.situacion}) es en {entidadDelCheque.entidad} — el
-          MISMO banco que emitió este cheque.
-        </p>
-      ) : (
-        (resultado.entidades || [])
-          .filter((e) => e.situacion > 1)
-          .slice(0, 3)
-          .map((e) => (
-            <p key={e.entidad} className="text-red-500 text-xs mt-0.5">
-              · situación {e.situacion} en {e.entidad}
-            </p>
-          ))
-      )}
-      <p className="text-red-500 text-xs mt-0.5">El emisor registra deuda en el sistema financiero — evaluá si aceptás el cheque.</p>
+    <div className={`rounded-xl border px-3 py-2 text-sm ${CLS_POR_VEREDICTO[v.veredicto]}`}>
+      <p className={v.veredicto === "riesgo" ? "font-bold" : "font-medium"}>{v.titulo}</p>
+      {!compacto &&
+        v.detalle.slice(0, 4).map((d, i) => (
+          <p key={i} className={`mt-0.5 text-xs ${d.startsWith("🚨") ? "font-bold" : "opacity-80"}`}>
+            {d}
+          </p>
+        ))}
     </div>
   )
 }
 
-/**
- * Cuentas conjuntas: un cheque puede tener 2+ CUITs impresos (cotitulares).
- * Consulta a todos pero responde UNA sola cosa: ¿se puede aceptar o no?
- * - Todos situación 1 → una línea verde (sin desglose por CUIT).
- * - Alguno situación 2+ → detalle SOLO del titular con problema, resaltando
- *   si la deuda está en el mismo banco que emitió el cheque.
- */
-export function BcraDeudorMulti({
-  cuits,
-  bancoEmisor,
-}: {
-  cuits: (string | null | undefined)[]
-  bancoEmisor?: string | null
-}) {
-  const unicos = [...new Set(cuits.map((c) => (c || "").replace(/\D/g, "")).filter((c) => c.length >= 10))]
+export function ConsultandoBcra() {
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
+      <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+      Consultando Central de Deudores (BCRA)… el cobro se puede registrar igual.
+    </div>
+  )
+}
+
+/** Avisos de consultas que terminaron después de cerrar el formulario. */
+export function AvisosBcra({ avisos, pendientes, onVisto }: { avisos: ConsultaBcra[]; pendientes?: ConsultaBcra[]; onVisto: (id: string) => void }) {
+  if (!avisos.length && !pendientes?.length) return null
+  const titulo = (c: ConsultaBcra) => [c.ctx.numero_cheque ? `Cheque ${c.ctx.numero_cheque}` : "Cheque", c.ctx.banco, c.ctx.cliente_nombre].filter(Boolean).join(" · ")
+  return (
+    <div className="space-y-2">
+      {pendientes?.map((c) => (
+        <div key={c.id} className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+          <div className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+          {titulo(c)}: consultando el BCRA…
+        </div>
+      ))}
+      {avisos.map((c) => (
+        <div key={c.id} className={`rounded-xl border px-3 py-2 text-sm ${CLS_POR_VEREDICTO[c.veredicto!.veredicto]}`}>
+          <p className="text-xs opacity-70">{titulo(c)}</p>
+          <p className={c.veredicto!.veredicto === "riesgo" ? "font-bold" : "font-medium"}>{c.veredicto!.titulo}</p>
+          {c.veredicto!.detalle.slice(0, 3).map((d, i) => (
+            <p key={i} className="mt-0.5 text-xs opacity-80">
+              {d}
+            </p>
+          ))}
+          <button type="button" onClick={() => onVisto(c.id)} className="mt-1.5 rounded-lg border border-current px-3 py-1 text-xs font-bold">
+            Visto
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── Componentes históricos (oficina) ────────────────────────────────────────
+
+export function BcraDeudorChip({ cuit, bancoEmisor }: { cuit: string | null | undefined; bancoEmisor?: string | null }) {
+  const { resultado, consultando } = useBcraDeudor(cuit)
+  if (consultando) return <ConsultandoBcra />
+  if (!resultado) return null
+  return <VeredictoBcraCard v={veredictoBcra([resultado], bancoEmisor)} />
+}
+
+/** Cuentas conjuntas: consulta a todos los CUITs y responde UNA cosa. */
+export function BcraDeudorMulti({ cuits, bancoEmisor }: { cuits: (string | null | undefined)[]; bancoEmisor?: string | null }) {
+  const unicos = [...new Set(cuits.map((c) => (c || "").replace(/\D/g, "")).filter(cuitValido))]
   const clave = unicos.join(",")
   const [resultados, setResultados] = useState<BcraResultado[] | null>(null)
   const [consultando, setConsultando] = useState(false)
@@ -168,91 +283,28 @@ export function BcraDeudorMulti({
       setResultados(null)
       return
     }
+    let vivo = true
     const timer = setTimeout(async () => {
       setConsultando(true)
       setResultados(null)
-      try {
-        const res = await Promise.all(
-          unicos.map(async (c) => {
-            try {
-              const r = await fetch(`/api/bcra/deudor/${c}`)
-              const d = await r.json()
-              if (d.error)
-                return { situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: d.error } as BcraResultado
-              return d as BcraResultado
-            } catch {
-              return { situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: "Sin conexión con el BCRA" } as BcraResultado
-            }
-          })
-        )
+      const res = await Promise.all(unicos.map(async (c) => cache.get(c) ?? consultarBcra(c)))
+      for (const r of res) if (!r.error) cache.set(r.cuit, r)
+      if (vivo) {
         setResultados(res)
-      } finally {
         setConsultando(false)
       }
-    }, 700)
-    return () => clearTimeout(timer)
+    }, 500)
+    return () => {
+      vivo = false
+      clearTimeout(timer)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clave])
 
   if (!unicos.length) return null
-
-  if (consultando || (!resultados && unicos.length)) {
-    if (!consultando && !resultados) return null
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-xl border border-gray-200 text-sm text-gray-500">
-        <div className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin shrink-0" />
-        Consultando Central de Deudores (BCRA)…
-      </div>
-    )
-  }
+  if (consultando) return <ConsultandoBcra />
   if (!resultados) return null
-
-  const conError = resultados.filter((r) => r.error)
-  const conDeuda = resultados.filter((r) => !r.error && !r.apto)
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      {conDeuda.length === 0 && conError.length === 0 && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-green-50 rounded-xl border border-green-300 text-sm text-green-800">
-          ✅ BCRA: se puede aceptar — situación 1 / sin antecedentes
-          {unicos.length > 1 && <span className="text-green-600">({unicos.length} titulares consultados)</span>}
-        </div>
-      )}
-      {conDeuda.map((r, i) => {
-        const entidadDelCheque = bancoEmisor
-          ? (r.entidades || []).find((e) => e.situacion > 1 && esMismoBanco(e.entidad, bancoEmisor))
-          : null
-        return (
-          <div key={i} className="px-3 py-2 bg-red-50 rounded-xl border-2 border-red-400 text-sm">
-            <p className="font-bold text-red-700">
-              ⛔ BCRA: {SITUACION_LABEL[r.situacion_max] || `situación ${r.situacion_max}`}
-              {r.denominacion && <span className="font-semibold"> · {r.denominacion}</span>}
-            </p>
-            {entidadDelCheque ? (
-              <p className="text-red-700 text-xs mt-0.5 font-bold">
-                🚨 La deuda (situación {entidadDelCheque.situacion}) es en {entidadDelCheque.entidad} — el
-                MISMO banco que emitió este cheque.
-              </p>
-            ) : (
-              (r.entidades || [])
-                .filter((e) => e.situacion > 1)
-                .slice(0, 3)
-                .map((e) => (
-                  <p key={e.entidad} className="text-red-500 text-xs mt-0.5">
-                    · situación {e.situacion} en {e.entidad}
-                  </p>
-                ))
-            )}
-            <p className="text-red-500 text-xs mt-0.5">Evaluá si aceptás el cheque.</p>
-          </div>
-        )
-      })}
-      {conError.length > 0 && conDeuda.length === 0 && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 rounded-xl border border-amber-300 text-sm text-amber-800">
-          ⚠️ No se pudo consultar el BCRA {conError.length < resultados.length ? "para uno de los titulares" : ""} —
-          verificá el cheque a mano.
-        </div>
-      )}
-    </div>
-  )
+  return <VeredictoBcraCard v={veredictoBcra(resultados, bancoEmisor)} />
 }
+
+export { SITUACION_LABEL }

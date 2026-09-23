@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
-import { useBcraDeudor } from "@/components/pagos/BcraDeudorChip"
+import { ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
+import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
+import { editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
@@ -69,17 +71,9 @@ interface Cliente {
   saldo_proyectado?: number
 }
 
-interface Metodo {
-  tipo: "cheque" | "transferencia"
-  monto: number
-  banco: string
-  numero_cheque: string
-  fecha_cheque: string
-  cuit_emisor: string
-  es_echeq: boolean
-  referencia_transferencia: string
-  cuenta_bancaria_id: string
-}
+// Fila de cheque/transferencia (lib/cheques/fila): nace de la foto al instante, el OCR la
+// completa en segundo plano y marca qué campos vinieron de la foto.
+type Metodo = FilaCheque
 
 interface CuentaBancaria {
   id: string
@@ -97,17 +91,8 @@ const ESTADO_PEDIDO: Record<string, { label: string; cls: string }> = {
   confirmado: { label: "CONFIRMADO", cls: "bg-blue-100 text-blue-700" },
 }
 
-const nuevoMetodo = (tipo: Metodo["tipo"]): Metodo => ({
-  tipo,
-  monto: 0,
-  banco: "",
-  numero_cheque: "",
-  fecha_cheque: "",
-  cuit_emisor: "",
-  es_echeq: false,
-  referencia_transferencia: "",
-  cuenta_bancaria_id: "",
-})
+let seqMetodo = 0
+const nuevoMetodo = (tipo: Metodo["tipo"]): Metodo => filaVacia(`m-${Date.now().toString(36)}-${(seqMetodo++).toString(36)}`, tipo)
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -147,29 +132,25 @@ function MontoInput({
   )
 }
 
-// Semáforo BCRA compacto para la fila del cheque
-function BcraTick({ cuit }: { cuit: string }) {
-  const { resultado, consultando } = useBcraDeudor(cuit)
-  if (consultando)
-    return <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin shrink-0" />
-  if (!resultado) return null
-  if (resultado.apto) return <span className="text-green-600 text-lg leading-none shrink-0">✓</span>
-  if (resultado.error) return <span className="text-amber-500 text-sm shrink-0">⚠️</span>
-  return <span className="text-red-600 text-sm shrink-0">⛔</span>
-}
-
-function BcraAlerta({ cuit, banco }: { cuit: string; banco: string }) {
-  const { resultado } = useBcraDeudor(cuit)
-  if (!resultado || resultado.apto || resultado.error) return null
-  return (
-    <div className="bg-red-50 border-2 border-red-400 rounded-xl px-3 py-2 text-sm">
-      <p className="font-bold text-red-700">
-        ⛔ Cheque con riesgo: situación {resultado.situacion_max} en BCRA
-        {resultado.denominacion ? ` · ${resultado.denominacion}` : ""}
-      </p>
-      <p className="text-red-500 text-xs">Evaluá si aceptás este cheque{banco ? ` de ${banco}` : ""}.</p>
-    </div>
+// Semáforo BCRA de la fila: la consulta corre en segundo plano (components/pagos/BcraDeudorChip)
+// apenas el CUIT queda completo y válido; el cobro se registra sin esperarla. Si el
+// resultado llega después de registrar, lo avisa el layout (AvisosBcraGlobal).
+function BcraFila({ fila, clienteNombre, detalle }: { fila: Metodo; clienteNombre: string | null; detalle: boolean }) {
+  const consulta = useConsultaBcraFila(
+    fila.id,
+    fila.tipo === "cheque" && fila.cuit_emisor ? { cuits: [fila.cuit_emisor], banco: fila.banco, numero_cheque: fila.numero_cheque, monto: fila.monto, cliente_nombre: clienteNombre } : null,
   )
+  if (!consulta) return null
+  if (detalle) {
+    if (consulta.consultando) return <ConsultandoBcra />
+    return consulta.veredicto && consulta.veredicto.veredicto !== "apto" ? <VeredictoBcraCard v={consulta.veredicto} /> : null
+  }
+  if (consulta.consultando) return <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin shrink-0" />
+  const v = consulta.veredicto?.veredicto
+  if (v === "apto") return <span className="text-green-600 text-lg leading-none shrink-0">✓</span>
+  if (v === "riesgo") return <span className="text-red-600 text-sm shrink-0">⛔</span>
+  if (v === "sin_respuesta") return <span className="text-amber-500 text-sm shrink-0">⚠️</span>
+  return null
 }
 
 export default function VendedorCobrarPage() {
@@ -210,8 +191,9 @@ export default function VendedorCobrarPage() {
   const [metodos, setMetodos] = useState<Metodo[]>([])
   const [metodoAbierto, setMetodoAbierto] = useState<number | null>(null)
   const [cuentas, setCuentas] = useState<CuentaBancaria[]>([])
-  const [fotos, setFotos] = useState<string[]>([])
-  const [subiendoFotos, setSubiendoFotos] = useState(false)
+  // Fotos → filas al instante, OCR en segundo plano (nada bloquea)
+  const { leer: leerFotos, reintentarSubida } = useLectorFotos(setMetodos)
+  const bcra = useConsultasBcra()
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
   const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
@@ -373,52 +355,7 @@ export default function VendedorCobrarPage() {
   }
 
   const updateMetodo = (idx: number, patch: Partial<Metodo>) =>
-    setMetodos((prev) => prev.map((m, i) => (i === idx ? { ...m, ...patch } : m)))
-
-  // ── Fotos → OCR → filas precargadas ──
-  const subirFotos = async (files: FileList | null) => {
-    if (!files?.length) return
-    setSubiendoFotos(true)
-    try {
-      const fd = new FormData()
-      for (const f of Array.from(files)) fd.append("files", f)
-      const res = await fetch("/api/pagos-clientes/ocr", { method: "POST", body: fd })
-      const d = await res.json()
-      if (d.error) {
-        alert(d.error)
-        return
-      }
-      setFotos((prev) => [...prev, ...(d.archivos || []).map((a: any) => a.url).filter(Boolean)])
-      const nuevos: Metodo[] = []
-      for (const r of d.resultados || []) {
-        if (r.tipo === "cheque") {
-          nuevos.push({
-            ...nuevoMetodo("cheque"),
-            monto: Number(r.monto) || 0,
-            banco: r.banco_emisor || "",
-            numero_cheque: r.numero_cheque || "",
-            fecha_cheque: r.fecha_cheque || "",
-            cuit_emisor: r.cuit_emisor || "",
-            es_echeq: r.color_cheque === "ECHEQ",
-          })
-        } else if (r.tipo === "transferencia") {
-          nuevos.push({
-            ...nuevoMetodo("transferencia"),
-            monto: Number(r.monto) || 0,
-            referencia_transferencia: r.numero_comprobante || "",
-            cuenta_bancaria_id: r.cuenta_bancaria_id || "",
-          })
-        }
-      }
-      if (nuevos.length) setMetodos((prev) => [...prev, ...nuevos])
-      else if (!(d.resultados || []).length)
-        alert("La foto quedó adjunta pero no se detectaron datos. Cargá el cheque/transferencia a mano.")
-    } catch {
-      alert("Error al subir las fotos")
-    } finally {
-      setSubiendoFotos(false)
-    }
-  }
+    setMetodos((prev) => prev.map((m, i) => (i === idx ? (Object.entries(patch) as Array<[keyof Metodo, any]>).reduce((f, [k, v]) => editarCampo(f, k, v), m) : m)))
 
   // ── Registrar (patrón /caja para la diferencia) ──
   const registrar = async (modoDiferencia?: "ajuste" | "saldo") => {
@@ -428,11 +365,8 @@ export default function VendedorCobrarPage() {
       return
     }
     for (const m of metodos) {
-      if (m.monto <= 0) return alert("Todos los cheques/transferencias deben tener monto.")
-      if (m.tipo === "cheque" && (!m.banco || !m.numero_cheque || !m.fecha_cheque))
-        return alert("Los cheques requieren banco, número y fecha.")
-      if (m.tipo === "transferencia" && !m.cuenta_bancaria_id)
-        return alert("Las transferencias requieren la cuenta destino.")
+      const f = faltantes(m)
+      if (f.length) return alert(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${f.join(", ")}.`)
     }
 
     let impFinal: Record<string, number> = { ...imputaciones }
@@ -521,7 +455,7 @@ export default function VendedorCobrarPage() {
           },
         ],
         metodos: metodosPayload,
-        comprobante_urls: fotos,
+        comprobante_urls: urlsDeFotos(metodos),
         observaciones: `${obs || ""}${marcaContado}`.trim() || null,
       }
 
@@ -539,6 +473,7 @@ export default function VendedorCobrarPage() {
       // El ajuste por redondeo viajó ADENTRO del cobro (ajuste_redondeo): se
       // asienta cuando la oficina lo confirma, no acá.
       idemKey.current = crypto.randomUUID()
+      bcra.cerrarFormulario()
       alert(`✅ Cobro registrado por ${formatCurrency(totalMetodos)}. Queda pendiente de rendición.`)
       router.push(`/vendedor/clientes/${cliente.id}`)
     } catch {
@@ -963,25 +898,30 @@ export default function VendedorCobrarPage() {
                     {m.tipo === "cheque" && m.banco ? ` · ${m.banco}` : ""}
                     {m.tipo === "transferencia" ? ` · ${cuentas.find((c) => c.id === m.cuenta_bancaria_id)?.banco || "sin cuenta"}` : ""}
                   </span>
-                  {m.tipo === "cheque" && m.cuit_emisor && <BcraTick cuit={m.cuit_emisor} />}
-                  <MontoInput valor={m.monto} onCommit={(v) => updateMetodo(idx, { monto: v })} />
+                  <BcraFila fila={m} clienteNombre={cliente.nombre} detalle={false} />
+                  <span className={m.ocr.deOcr.includes("monto") ? "rounded-lg ring-2 ring-amber-400" : ""}><MontoInput valor={m.monto} onCommit={(v) => updateMetodo(idx, { monto: v })} /></span>
                   <button onClick={() => setMetodos((prev) => prev.filter((_, i) => i !== idx))} className="text-red-400 text-lg px-0.5">
                     ✕
                   </button>
                 </div>
+                {m.ocr.estado !== "sin_foto" && (
+                  <div className="px-3 pb-2">
+                    <EstadoFoto fila={m} onReintentar={() => reintentarSubida(m.id)} />
+                  </div>
+                )}
                 {m.tipo === "cheque" && m.cuit_emisor && (
                   <div className="px-3 pb-2">
-                    <BcraAlerta cuit={m.cuit_emisor} banco={m.banco} />
+                    <BcraFila fila={m} clienteNombre={cliente.nombre} detalle />
                   </div>
                 )}
                 {metodoAbierto === idx && (
                   <div className="px-3 pb-3 grid grid-cols-2 gap-2 bg-gray-50/60 pt-2">
                     {m.tipo === "cheque" ? (
                       <>
-                        <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                        <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                        <input type="date" value={m.fecha_cheque} onChange={(e) => updateMetodo(idx, { fecha_cheque: e.target.value })} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                        <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                        <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className={clsOcr(m, "banco", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
+                        <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={clsOcr(m, "numero_cheque", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
+                        <input type="date" value={m.fecha_cheque} onChange={(e) => updateMetodo(idx, { fecha_cheque: e.target.value })} className={clsOcr(m, "fecha_cheque", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
+                        <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className={clsOcr(m, "cuit_emisor", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
                         <label className="flex items-center gap-2 text-sm text-gray-600 col-span-2">
                           <input type="checkbox" checked={m.es_echeq} onChange={(e) => updateMetodo(idx, { es_echeq: e.target.checked })} className="w-5 h-5" />
                           Es e-cheq
@@ -1016,13 +956,13 @@ export default function VendedorCobrarPage() {
           <div className="grid grid-cols-2 gap-2 mt-2">
             <label className="bg-emerald-600 text-white rounded-xl py-3 font-bold text-center text-sm active:scale-[0.97] transition-transform cursor-pointer">
               📷 Foto cheque/transf.
-              <input type="file" accept="image/*" multiple capture="environment" className="hidden" disabled={subiendoFotos}
-                onChange={(e) => { subirFotos(e.target.files); e.target.value = "" }} />
+              <input type="file" accept="image/*" multiple capture="environment" className="hidden"
+                onChange={(e) => { leerFotos(e.target.files); e.target.value = "" }} />
             </label>
             <label className="bg-white border-2 border-emerald-600 text-emerald-700 rounded-xl py-3 font-bold text-center text-sm active:scale-[0.97] transition-transform cursor-pointer">
               🖼 Galería
-              <input type="file" accept="image/*" multiple className="hidden" disabled={subiendoFotos}
-                onChange={(e) => { subirFotos(e.target.files); e.target.value = "" }} />
+              <input type="file" accept="image/*" multiple className="hidden"
+                onChange={(e) => { leerFotos(e.target.files); e.target.value = "" }} />
             </label>
           </div>
           <div className="flex gap-4 px-1 mt-2">
@@ -1033,13 +973,7 @@ export default function VendedorCobrarPage() {
               + Transferencia a mano
             </button>
           </div>
-          {subiendoFotos && (
-            <div className="flex items-center gap-2 text-emerald-700 text-sm font-medium px-1 mt-2">
-              <div className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-              Leyendo la foto...
-            </div>
-          )}
-          {fotos.length > 0 && <p className="text-gray-500 text-xs px-1 mt-1">✓ {fotos.length} foto(s) adjuntas.</p>}
+          <p className="text-gray-500 text-xs px-1 mt-2">La foto abre el cheque al instante; los datos se completan solos en unos segundos y siempre se pueden corregir. Los campos en ámbar vinieron de la foto.</p>
         </section>
 
         {/* Observaciones */}

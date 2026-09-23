@@ -409,7 +409,9 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
 | `/api/viajante/cobro`, `cobro/[id]`, `devolucion` | O `cobro.registrar`, `cobro.anular`, `devolucion.registrar` (id generado en el equipo) |
 | `/api/viajante/rendir` | **L** (RPC atómica de plata) |
 | POST `buscar-foto` | código de barras: LOCAL (BarcodeDetector + catálogo) · identificar por foto: **L** (IA) |
-| `/api/pagos-clientes/ocr`, `/api/bcra/deudor/*`, PDF de comprobantes y remitos | **L** |
+| `/api/pagos-clientes/ocr` | **L** en segundo plano (la fila del cheque nace al instante; sin señal la foto viaja dentro del cobro como `fotos_pendientes`) — ver §18 "Cheques" |
+| `/api/bcra/deudor/*` | O `bcra.consultar` (encolada después del cobro; nunca frena el FIFO: si el BCRA no responde, aplica con `sin_respuesta`) |
+| PDF de comprobantes y remitos | **L** |
 
 ### Chofer
 | Endpoint | Tablas | Estrategia |
@@ -1280,6 +1282,39 @@ solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos 
 | `npm run typecheck:movil` | raíz | ✅ alcance 0 · mobile 0 · base 75/75 |
 | Modo avión con el interruptor del equipo | — | 🟡 "sin señal" se simuló cortando el túnel `adb reverse` (servidor inalcanzable de verdad) para no tocar ajustes del equipo. El camino "red caída según Android" es el de la fundación, ya validado con Chofer y Depósito |
 | Backend real (datasets y handlers contra Supabase) | — | 🟡 tipado y tests en verde; **sin ejecutar**: necesita la migración, el deploy en `main` y un usuario vendedor. La re-verificación de precios contra el historial real se ejercita ahí |
+
+### Cheques: foto, OCR y BCRA (23/09/2026 — rama `cheques-ocr-bcra`, PENDIENTE DE APK)
+
+Cambio en la rama, retrocompatible con la v0.2.3 instalada (misma ruta de OCR y misma
+`cobro.registrar`; los campos nuevos son opcionales). Sale en la próxima actualización
+batcheada. Lógica compartida en `lib/cheques/` (alias `@gm/cheques`; tests en
+`test/cheques.test.ts`), la misma para chofer web, vendedor web y la app.
+
+- **La foto nunca bloquea.** La fila del cheque se crea al instante con la foto (vista
+  previa local). El OCR corre en segundo plano y completa SOLO los campos que el vendedor
+  no tocó; esos campos quedan en ámbar (`ocr.deOcr`) hasta que los pisa. Si el OCR falla,
+  tarda o no lee nada, la fila queda igual y se carga a mano (`marcarFalloOcr` /
+  `marcarSinDatos`): ya no existe el cartel "la foto quedó adjunta pero no se registraron
+  datos" como callejón sin salida.
+- **Sin señal la foto igual se adjunta:** comprimida en el equipo (`@gm/cheques/foto`,
+  ~150–300 KB) y guardada en base64 dentro del payload del cobro (`fotos_pendientes`);
+  el handler `cobro.registrar` la sube al bucket antes de registrar.
+- **Prohibido inventar.** El servidor valida cada dato antes de devolverlo (`sanearCheque`):
+  CUIT por dígito verificador (módulo 11), fechas por formato y rango (±400 días; emisión
+  no futura), monto por formato y tope, número solo dígitos. Lo que no valida no viaja.
+  Se eliminó el "rescate" por regex que tomaba números de cheque como CUIT. El esquema
+  JSON de Gemini ahora sí se aplica (`responseSchema`) y el prompt dice "copiá, no completes".
+- **BCRA desacoplado.** Al registrar, por cada cheque con CUIT válido se encola
+  `bcra.consultar` DESPUÉS del cobro. El cobro cierra sin esperar. El handler consulta vía
+  el proxy Edge (las IPs de Lambda están bloqueadas por el BCRA) y **nunca lanza transitorio
+  por el BCRA**: si no responde, aplica con `veredicto: "sin_respuesta"` (un transitorio
+  frenaría el FIFO del usuario y trabaría los cobros siguientes). El veredicto llega al
+  equipo como `resultado` del item enviado y lo muestra `AvisosBcra` (ui.tsx; en Inicio,
+  ficha del cliente y cobro) hasta que el vendedor toca "Visto" (`sin_respuesta` ofrece
+  "Reintentar" = nueva operación). Funciona igual si se capturó sin señal.
+- **Web (chofer y vendedor):** mismas filas y validación; la consulta BCRA corre a nivel
+  página (`components/pagos/BcraDeudorChip`: `useConsultasBcra`) y lo que llega después de
+  registrar lo muestra `AvisosBcraGlobal` en el layout de `/chofer` y `/vendedor`.
 
 ### Puesta en marcha — HECHA (21–23/09/2026)
 1. ✅ Preview `37b72ed` verificada por el dueño (importación IA, pedido ERP, bonificados, vendedor web, cobro/anulación) → merge a `main` (`a4371c4`).

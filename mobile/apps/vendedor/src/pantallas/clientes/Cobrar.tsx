@@ -1,9 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router"
-import { ErrorHttp, useNoEnviados, useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
+import { useNoEnviados, useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
+import {
+  aplicarOcr,
+  cuitValido,
+  editarCampo,
+  faltantes,
+  filaDesdeFoto,
+  filaVacia,
+  marcarFalloOcr,
+  marcarFotoAdjunta,
+  marcarSinDatos,
+  resultadoConDatos,
+  urlsDeFotos,
+  type CampoCheque,
+  type ConsultaBcraPayload,
+  type FilaCheque,
+  type ResultadoOcr,
+} from "@gm/cheques"
+import { blobABase64, comprimirFoto, urlLocal } from "@gm/cheques/foto"
 import { DS, type ComprobanteCC, type DevolucionPendiente, type PedidoCobro } from "../../datasets"
-import { rechazosDe, useCuenta, useCuentasBancarias, useEncolar } from "../../datos/hooks"
-import { MontoInput, Pantalla, Rechazos, dejarAviso, formatCurrency, round2, useToast } from "../../ui"
+import { rechazosDe, useCuenta, useCuentasBancarias, useEncolar, uuidv4 } from "../../datos/hooks"
+import { AvisosBcra, MontoInput, Pantalla, Rechazos, dejarAviso, formatCurrency, round2, useToast } from "../../ui"
 
 // Port de app/vendedor/clientes/[id]/cobrar/page.tsx — espejo del patrón de /caja (Caja del Día):
 //  · "¿Qué paga?": pedidos con estado; tilde directa, monto editable inline que se confirma
@@ -16,8 +34,17 @@ import { MontoInput, Pantalla, Rechazos, dejarAviso, formatCurrency, round2, use
 //    El sobrante va a cuenta solo.
 //
 // En la app el cobro se ENCOLA (`cobro.registrar`, payload = body de POST /api/viajante/cobro
-// sin idempotency_key: el servidor usa la clave de la operación). Leer la foto (OCR) y el
-// semáforo del BCRA necesitan conexión; el cobro NO: siempre se puede registrar sin foto.
+// sin idempotency_key: el servidor usa la clave de la operación).
+//
+// Foto de cheques (MOBILE.md → "Vendedor → Cheques"):
+//  · La foto NUNCA bloquea: la fila del cheque abre al instante con la foto; el OCR corre
+//    en segundo plano (con señal) y completa solo los campos que el vendedor no tocó, que
+//    quedan en ámbar hasta que los pisa. Sin señal, o si el OCR falla, la foto queda
+//    guardada en el equipo y sube dentro del cobro (fotos_pendientes); los datos se cargan
+//    a mano. Todo lo que devuelve el OCR ya viene validado por el servidor (lib/cheques).
+//  · BCRA desacoplado: al registrar, por cada cheque con CUIT válido se encola
+//    `bcra.consultar` DESPUÉS del cobro. El cobro cierra sin esperar; el veredicto llega
+//    como aviso (AvisosBcra) cuando el servidor contesta, también si se cargó sin señal.
 
 /** = MARCA_CONTADO de lib/constants.ts */
 const MARCA_CONTADO = "[10% CONTADO]"
@@ -28,17 +55,8 @@ const topeAjuste = (totalDebitos: number) => round2(Math.max(0, Number(totalDebi
 // registrado sin confirmar — evita cobrar dos veces el mismo comprobante.
 const saldoCobrable = (cp: ComprobanteCC) => Math.max(0, Math.round((cp.saldo_pendiente - (cp.en_cobro || 0)) * 100) / 100)
 
-interface Metodo {
-  tipo: "cheque" | "transferencia"
-  monto: number
-  banco: string
-  numero_cheque: string
-  fecha_cheque: string
-  cuit_emisor: string
-  es_echeq: boolean
-  referencia_transferencia: string
-  cuenta_bancaria_id: string
-}
+/** Fila de cheque/transferencia (lib/cheques/fila): la misma en chofer web, vendedor web y la app. */
+type Metodo = FilaCheque
 
 const ESTADO_PEDIDO: Record<string, { label: string; cls: string }> = {
   pendiente: { label: "PENDIENTE", cls: "bg-yellow-100 text-yellow-700" },
@@ -49,88 +67,32 @@ const ESTADO_PEDIDO: Record<string, { label: string; cls: string }> = {
   confirmado: { label: "CONFIRMADO", cls: "bg-blue-100 text-blue-700" },
 }
 
-const nuevoMetodo = (tipo: Metodo["tipo"]): Metodo => ({
-  tipo,
-  monto: 0,
-  banco: "",
-  numero_cheque: "",
-  fecha_cheque: "",
-  cuit_emisor: "",
-  es_echeq: false,
-  referencia_transferencia: "",
-  cuenta_bancaria_id: "",
-})
+const nuevoMetodo = (tipo: Metodo["tipo"]): Metodo => filaVacia(uuidv4(), tipo)
 
 const CLS_MONTO = "w-28 min-h-11 rounded-lg border border-gray-300 px-2 py-2 text-right font-bold bg-white"
 
-// ─── BCRA (ONLINE-ONLY): GET /api/bcra/deudor/<cuit> ─────────────────────────
+// ─── Foto / OCR de una fila ──────────────────────────────────────────────────
 
-interface BcraResultado {
-  situacion_max: number
-  denominacion: string | null
-  apto: boolean
-  sin_antecedentes: boolean
-  error?: string
-}
+const CLS_CAMPO = "min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+/** Campo que vino del OCR: ámbar hasta que el vendedor lo pisa. */
+const clsOcr = (m: Metodo, campo: CampoCheque, base = CLS_CAMPO) => `${base} ${m.ocr.deOcr.includes(campo) ? "border-amber-400 bg-amber-50" : ""}`.trim()
 
-const bcraCache = new Map<string, BcraResultado>()
-
-function useBcraDeudor(cuit: string | null | undefined) {
-  const { api } = useRuntime()
-  const online = useOnline()
-  const [resultado, setResultado] = useState<BcraResultado | null>(null)
-  const [consultando, setConsultando] = useState(false)
-
-  useEffect(() => {
-    const limpio = (cuit || "").replace(/\D/g, "")
-    if (limpio.length < 10 || !online) {
-      setResultado(limpio.length >= 10 ? bcraCache.get(limpio) ?? null : null)
-      return
-    }
-    const ya = bcraCache.get(limpio)
-    if (ya) { setResultado(ya); return }
-    let vivo = true
-    const timer = setTimeout(async () => {
-      setConsultando(true)
-      setResultado(null)
-      let r: BcraResultado
-      try {
-        const d = await api.get<BcraResultado>(`/api/bcra/deudor/${limpio}`, { timeoutMs: 15_000 })
-        r = d?.error ? { situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: d.error } : d
-        if (!r.error) bcraCache.set(limpio, r)
-      } catch (e) {
-        r = { situacion_max: 0, denominacion: null, apto: false, sin_antecedentes: false, error: e instanceof ErrorHttp ? e.body?.error || "No se pudo consultar el BCRA" : "Sin conexión con el BCRA" }
-      }
-      if (vivo) { setResultado(r); setConsultando(false) }
-    }, 700)
-    return () => { vivo = false; clearTimeout(timer); setConsultando(false) }
-  }, [cuit, online, api])
-
-  return { resultado, consultando, online }
-}
-
-// Semáforo BCRA compacto para la fila del cheque
-function BcraTick({ cuit }: { cuit: string }) {
-  const { resultado, consultando } = useBcraDeudor(cuit)
-  if (consultando) return <span className="shrink-0 text-xs text-gray-400">BCRA…</span>
-  if (!resultado) return null
-  if (resultado.apto) return <span className="shrink-0 text-lg leading-none text-green-600">✓</span>
-  if (resultado.error) return <span className="shrink-0 text-sm text-amber-500">⚠️</span>
-  return <span className="shrink-0 text-sm text-red-600">⛔</span>
-}
-
-function BcraAlerta({ cuit, banco }: { cuit: string; banco: string }) {
-  const { resultado, online } = useBcraDeudor(cuit)
-  if (!resultado && !online && cuit.replace(/\D/g, "").length >= 10)
-    return <p className="text-xs text-gray-400">📡 Necesitás conexión para consultar el CUIT en el BCRA. El cheque se puede cargar igual.</p>
-  if (!resultado || resultado.apto || resultado.error) return null
+function EstadoFoto({ fila }: { fila: Metodo }) {
+  const o = fila.ocr
+  if (o.estado === "sin_foto") return null
+  const preview = o.foto_url || o.foto_local
   return (
-    <div className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2 text-sm">
-      <p className="font-bold text-red-700">
-        ⛔ Cheque con riesgo: situación {resultado.situacion_max} en BCRA
-        {resultado.denominacion ? ` · ${resultado.denominacion}` : ""}
-      </p>
-      <p className="text-xs text-red-500">Evaluá si aceptás este cheque{banco ? ` de ${banco}` : ""}.</p>
+    <div className="flex items-start gap-2 px-3 pb-2 text-xs">
+      {preview && <img src={preview} alt="Foto del comprobante" className="h-12 w-16 shrink-0 rounded-lg border border-gray-200 object-cover" />}
+      <div className="min-w-0 flex-1">
+        {o.estado === "leyendo" && <p className="text-gray-500">⏳ Leyendo la foto… podés cargar los datos mientras tanto.</p>}
+        {o.estado === "ok" && (
+          <p className="text-amber-700">
+            <span className="rounded bg-amber-100 px-1 font-bold">OCR</span> Los campos en ámbar vinieron de la foto: revisalos y corregí lo que haga falta.
+          </p>
+        )}
+        {(o.estado === "sin_datos" || o.estado === "fallo") && <p className="text-gray-600">{o.detalle}</p>}
+      </div>
     </div>
   )
 }
@@ -174,8 +136,11 @@ export function Cobrar() {
   // ── Cómo paga ──
   const [efectivo, setEfectivo] = useState(0)
   const [metodos, setMetodos] = useState<Metodo[]>([])
-  const [fotos, setFotos] = useState<string[]>([])
-  const [subiendoFotos, setSubiendoFotos] = useState(false)
+  // Foto guardada en el equipo (comprimida, base64) por fila: sube dentro del cobro cuando la
+  // lectura con señal no fue posible. Vive en un ref: no se re-renderiza por esto.
+  const fotosLocales = useRef(new Map<string, { b64: string; mime: string; nombre: string }>())
+  const vivo = useRef(true)
+  useEffect(() => () => { vivo.current = false }, [])
   const [obs, setObs] = useState("")
   const [enviando, setEnviando] = useState(false)
   const enviandoRef = useRef(false)
@@ -324,52 +289,49 @@ export function Cobrar() {
     })
   }
 
-  const updateMetodo = (idx: number, patch: Partial<Metodo>) => setMetodos((prev) => prev.map((m, i) => (i === idx ? { ...m, ...patch } : m)))
+  const updateMetodo = (idx: number, patch: Partial<Metodo>) =>
+    setMetodos((prev) => prev.map((m, i) => (i === idx ? (Object.entries(patch) as Array<[keyof Metodo, any]>).reduce((f, [k, v]) => editarCampo(f, k, v), m) : m)))
+  const setFila = (id: string, fn: (f: Metodo) => Metodo) => setMetodos((prev) => prev.map((m) => (m.id === id ? fn(m) : m)))
 
-  // ── Fotos → OCR → filas precargadas (ONLINE-ONLY) ──
-  const subirFotos = async (files: FileList | null) => {
+  // ── Fotos → fila al instante → OCR en segundo plano (nunca bloquea) ──
+  const leerFotos = (files: FileList | null) => {
     if (!files?.length) return
-    if (!online) {
-      mostrar("Necesitás conexión para leer la foto. Podés registrar el cobro sin foto.", "err")
-      return
-    }
-    setSubiendoFotos(true)
-    try {
-      const fd = new FormData()
-      for (const f of Array.from(files)) fd.append("files", f)
-      const d = await api.postForm<{ error?: string; archivos?: Array<{ url?: string }>; resultados?: Array<Record<string, any>> }>("/api/pagos-clientes/ocr", fd)
-      if (d?.error) {
-        mostrar(d.error, "err")
-        return
-      }
-      setFotos((prev) => [...prev, ...(d.archivos || []).map((a) => a.url).filter((u): u is string => !!u)])
-      const nuevos: Metodo[] = []
-      for (const r of d.resultados || []) {
-        if (r.tipo === "cheque") {
-          nuevos.push({
-            ...nuevoMetodo("cheque"),
-            monto: Number(r.monto) || 0,
-            banco: r.banco_emisor || "",
-            numero_cheque: r.numero_cheque || "",
-            fecha_cheque: r.fecha_cheque || "",
-            cuit_emisor: r.cuit_emisor || "",
-            es_echeq: r.color_cheque === "ECHEQ",
-          })
-        } else if (r.tipo === "transferencia") {
-          nuevos.push({
-            ...nuevoMetodo("transferencia"),
-            monto: Number(r.monto) || 0,
-            referencia_transferencia: r.numero_comprobante || "",
-            cuenta_bancaria_id: r.cuenta_bancaria_id || "",
-          })
+    for (const file of Array.from(files)) {
+      const id = uuidv4()
+      setMetodos((prev) => [...prev, filaDesdeFoto(id, urlLocal(file))])
+      void (async () => {
+        const foto = await comprimirFoto(file)
+        // Siempre queda la copia local: si la subida no sale, viaja con el cobro
+        try {
+          fotosLocales.current.set(id, { b64: await blobABase64(foto.blob), mime: foto.mime, nombre: foto.nombre })
+        } catch { /* sin copia local: se intenta subir igual */ }
+        if (!online) {
+          if (vivo.current) setFila(id, (f) => marcarFotoAdjunta(f, null))
+          return
         }
-      }
-      if (nuevos.length) setMetodos((prev) => [...prev, ...nuevos])
-      else if (!(d.resultados || []).length) mostrar("La foto quedó adjunta pero no se detectaron datos. Cargá el cheque/transferencia a mano.", "err")
-    } catch (e) {
-      mostrar(e instanceof ErrorHttp ? e.body?.error || "Error al subir las fotos" : "No se pudo leer la foto (sin conexión o el servidor tardó demasiado). Cargá los datos a mano.", "err")
-    } finally {
-      setSubiendoFotos(false)
+        try {
+          const fd = new FormData()
+          fd.append("files", foto.blob, foto.nombre)
+          const d = await api.postForm<{ error?: string; archivos_por_indice?: Array<{ url?: string } | null>; archivos?: Array<{ url?: string }>; saneados?: ResultadoOcr[]; errores?: string[] }>("/api/pagos-clientes/ocr", fd, { timeoutMs: 45_000 })
+          if (!vivo.current) return
+          const url = d?.archivos_por_indice?.[0]?.url ?? d?.archivos?.[0]?.url ?? null
+          if (url) fotosLocales.current.delete(id) // ya está en el bucket: no hace falta mandarla en el cobro
+          const resultados = (d?.saneados || []).filter(resultadoConDatos)
+          if (d?.error) setFila(id, (f) => marcarFalloOcr(f, url, d.error))
+          else if (!resultados.length) setFila(id, (f) => marcarSinDatos(f, url))
+          else {
+            const [primero, ...resto] = resultados
+            setMetodos((prev) => [
+              ...prev.map((m) => (m.id === id ? aplicarOcr(m, primero!, url) : m)),
+              ...resto.map((r) => aplicarOcr(filaDesdeFoto(uuidv4(), null), r, url)),
+            ])
+          }
+        } catch (e) {
+          if (!vivo.current) return
+          const motivo = e instanceof Error && /abort|timeout/i.test(e.name + e.message) ? "el servidor tardó demasiado" : "sin conexión"
+          setFila(id, (f) => (fotosLocales.current.has(id) ? marcarFotoAdjunta(f, null) : marcarFalloOcr(f, null, motivo)))
+        }
+      })()
     }
   }
 
@@ -396,9 +358,8 @@ export function Cobrar() {
       return
     }
     for (const m of metodos) {
-      if (m.monto <= 0) return mostrar("Todos los cheques/transferencias deben tener monto.", "err")
-      if (m.tipo === "cheque" && (!m.banco || !m.numero_cheque || !m.fecha_cheque)) return mostrar("Los cheques requieren banco, número y fecha.", "err")
-      if (m.tipo === "transferencia" && !m.cuenta_bancaria_id) return mostrar("Las transferencias requieren la cuenta destino.", "err")
+      const f = faltantes(m)
+      if (f.length) return mostrar(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${f.join(", ")}.`, "err")
     }
 
     const impFinal: Record<string, number> = { ...imputaciones }
@@ -489,11 +450,20 @@ export function Cobrar() {
           },
         ],
         metodos: metodosPayload,
-        comprobante_urls: fotos,
+        comprobante_urls: urlsDeFotos(metodos),
+        // Fotos que no llegaron al bucket (sin señal / OCR caído): las sube el servidor al aplicar el cobro
+        fotos_pendientes: metodos.filter((m) => !m.ocr.foto_url && fotosLocales.current.has(m.id)).map((m) => fotosLocales.current.get(m.id)!),
         observaciones: `${obs || ""}${marcaContado}`.trim() || null,
       }
 
       await encolar("cobro.registrar", payload, `Cobro ${cliente.nombre} ${formatCurrency(totalMetodos)}`)
+      // BCRA en segundo plano: una consulta por cheque con CUIT válido, DESPUÉS del cobro en la
+      // cola. El veredicto llega como aviso (AvisosBcra) aunque hoy no haya señal.
+      for (const m of metodos) {
+        if (m.tipo !== "cheque" || !cuitValido(m.cuit_emisor)) continue
+        const consulta: ConsultaBcraPayload = { cuits: [m.cuit_emisor], banco: m.banco || null, numero_cheque: m.numero_cheque || null, monto: m.monto, cliente_nombre: cliente.nombre }
+        await encolar("bcra.consultar", consulta, `BCRA cheque ${m.numero_cheque || ""} ${cliente.nombre}`.trim())
+      }
 
       // El ajuste por redondeo viajó ADENTRO del cobro (ajuste_redondeo): se asienta cuando la
       // oficina lo confirma, no acá.
@@ -588,6 +558,7 @@ export function Cobrar() {
         </div>
       </div>
       <Rechazos items={rechazos} ayuda="El cobro rechazado NO quedó registrado. Revisá el motivo y, si corresponde, volvé a cargarlo." />
+      <AvisosBcra />
 
       <div className="mx-auto w-full max-w-2xl space-y-6 p-4">
         {/* ══ 1. Qué paga ══ */}
@@ -840,8 +811,8 @@ export function Cobrar() {
                     {m.tipo === "cheque" && m.banco ? ` · ${m.banco}` : ""}
                     {m.tipo === "transferencia" ? ` · ${cuentas.find((c) => c.id === m.cuenta_bancaria_id)?.banco || "sin cuenta"}` : ""}
                   </span>
-                  {m.tipo === "cheque" && m.cuit_emisor && <BcraTick cuit={m.cuit_emisor} />}
-                  <MontoInput valor={m.monto} onCambio={(v) => updateMetodo(idx, { monto: v })} className={CLS_MONTO} />
+                  {m.ocr.estado === "leyendo" && <span className="shrink-0 text-xs text-gray-400">OCR…</span>}
+                  <MontoInput valor={m.monto} onCambio={(v) => updateMetodo(idx, { monto: v })} className={clsOcr(m, "monto", CLS_MONTO)} />
                   <button
                     onClick={() => {
                       setMetodos((prev) => prev.filter((_, i) => i !== idx))
@@ -853,19 +824,17 @@ export function Cobrar() {
                     ✕
                   </button>
                 </div>
-                {m.tipo === "cheque" && m.cuit_emisor && (
-                  <div className="px-3 pb-2">
-                    <BcraAlerta cuit={m.cuit_emisor} banco={m.banco} />
-                  </div>
-                )}
+                <EstadoFoto fila={m} />
                 {metodoAbierto === idx && (
                   <div className="grid grid-cols-2 gap-2 bg-gray-50/60 px-3 pb-3 pt-2">
                     {m.tipo === "cheque" ? (
                       <>
-                        <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className="min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                        <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" className="min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                        <input type="date" value={m.fecha_cheque} onChange={(e) => updateMetodo(idx, { fecha_cheque: e.target.value })} className="min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                        <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className="min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                        <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className={clsOcr(m, "banco")} />
+                        <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={clsOcr(m, "numero_cheque")} />
+                        <input type="date" value={m.fecha_cheque} onChange={(e) => updateMetodo(idx, { fecha_cheque: e.target.value })} className={clsOcr(m, "fecha_cheque")} />
+                        <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className={clsOcr(m, "cuit_emisor")} />
+                        {m.cuit_emisor && !cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs text-red-600">El CUIT no cierra (dígito verificador): revisalo. Se registra igual, pero no se consulta en el BCRA.</p>}
+                        {cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs text-gray-500">Al registrar, el CUIT se consulta en el BCRA en segundo plano; el resultado llega como aviso.</p>}
                         <label className="col-span-2 flex min-h-11 items-center gap-2 text-sm text-gray-600">
                           <input type="checkbox" checked={m.es_echeq} onChange={(e) => updateMetodo(idx, { es_echeq: e.target.checked })} className="h-5 w-5" />
                           Es e-cheq
@@ -897,16 +866,20 @@ export function Cobrar() {
           </div>
 
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <label className={`rounded-xl py-3 text-center text-sm font-bold ${online && !subiendoFotos ? "bg-emerald-600 text-white" : "bg-gray-300 text-gray-500"}`}>
+            <label className="rounded-xl bg-emerald-600 py-3 text-center text-sm font-bold text-white">
               📷 Foto cheque/transf.
-              <input type="file" accept="image/*" multiple capture="environment" className="hidden" disabled={subiendoFotos || !online} onChange={(e) => { void subirFotos(e.target.files); e.target.value = "" }} />
+              <input type="file" accept="image/*" multiple capture="environment" className="hidden" onChange={(e) => { leerFotos(e.target.files); e.target.value = "" }} />
             </label>
-            <label className={`rounded-xl border-2 py-3 text-center text-sm font-bold ${online && !subiendoFotos ? "border-emerald-600 bg-white text-emerald-700" : "border-gray-300 bg-gray-100 text-gray-400"}`}>
+            <label className="rounded-xl border-2 border-emerald-600 bg-white py-3 text-center text-sm font-bold text-emerald-700">
               🖼 Galería
-              <input type="file" accept="image/*" multiple className="hidden" disabled={subiendoFotos || !online} onChange={(e) => { void subirFotos(e.target.files); e.target.value = "" }} />
+              <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { leerFotos(e.target.files); e.target.value = "" }} />
             </label>
           </div>
-          {!online && <p className="mt-1 px-1 text-xs text-amber-700">📡 Necesitás conexión para leer la foto del cheque/transferencia. El cobro se puede registrar igual, sin foto: cargá los datos a mano.</p>}
+          <p className="mt-1 px-1 text-xs text-gray-500">
+            {online
+              ? "La foto abre el cheque al instante; los datos se completan solos en unos segundos y siempre se pueden corregir. Los campos en ámbar vinieron de la foto."
+              : "📡 Sin señal: la foto queda guardada en el equipo y sube con el cobro. Cargá los datos a mano."}
+          </p>
           <div className="mt-2 flex gap-4 px-1">
             <button onClick={() => { setMetodos((p) => [...p, nuevoMetodo("cheque")]); setMetodoAbierto(metodos.length) }} className="min-h-11 text-sm font-bold text-emerald-700">
               + Cheque a mano
@@ -915,8 +888,6 @@ export function Cobrar() {
               + Transferencia a mano
             </button>
           </div>
-          {subiendoFotos && <p className="mt-2 px-1 text-sm font-medium text-emerald-700">Leyendo la foto...</p>}
-          {fotos.length > 0 && <p className="mt-1 px-1 text-xs text-gray-500">✓ {fotos.length} foto(s) adjuntas.</p>}
         </section>
 
         {/* Observaciones */}

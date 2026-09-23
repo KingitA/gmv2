@@ -1,71 +1,36 @@
 import { NextRequest, NextResponse } from "next/server"
+import { bcraSinAntecedentes, cuitValido, interpretarRespuestaBcra } from "@/lib/cheques/isomorfico"
 
-// Ejecuta en Edge Runtime — IPs de Vercel Edge (distinto a AWS Lambda, no bloqueadas por BCRA)
+// Ejecuta en Edge Runtime — IPs de Vercel Edge (distinto a AWS Lambda, que el BCRA bloquea)
 export const runtime = "edge"
+
+const BCRA_TIMEOUT_MS = 10_000
 
 // GET /api/bcra/deudor/[cuit]
 // Proxy público a la API de Central de Deudores del BCRA.
 // Solo expone datos que ya son públicos en api.bcra.gob.ar — no requiere auth.
+// Solo acepta CUITs completos y válidos (dígito verificador): nada de consultas a
+// medio tipear ni de números inventados.
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ cuit: string }> }
 ) {
+  const { cuit } = await params
+  const cuitLimpio = cuit.replace(/\D/g, "")
+  if (!cuitValido(cuitLimpio)) {
+    return NextResponse.json({ error: "CUIT inválido" }, { status: 400 })
+  }
   try {
-    const { cuit } = await params
-    const cuitLimpio = cuit.replace(/\D/g, "")
-
-    if (cuitLimpio.length < 10 || cuitLimpio.length > 11) {
-      return NextResponse.json({ error: "CUIT inválido" }, { status: 400 })
-    }
-
-    const res = await fetch(
-      `https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/${cuitLimpio}`,
-      { headers: { Accept: "application/json" } }
-    )
-
-    if (res.status === 404) {
-      return NextResponse.json({
-        cuit: cuitLimpio,
-        denominacion: null,
-        situacion_max: 1,
-        sin_antecedentes: true,
-        apto: true,
-        entidades: [],
-      })
-    }
-
-    if (!res.ok) {
-      return NextResponse.json({ error: `Error BCRA: ${res.status}` }, { status: 502 })
-    }
-
-    const data = await res.json()
-    const results = data.results
-    let situacionMax = 1
-
-    // Peor situación por entidad (todas las informadas): permite al front
-    // resaltar si la deuda está justo en el banco emisor del cheque.
-    const porEntidad = new Map<string, number>()
-    for (const periodo of results?.periodos || []) {
-      for (const entidad of periodo.entidades || []) {
-        const sit = Number(entidad.situacion)
-        if (sit > situacionMax) situacionMax = sit
-        const nombre = String(entidad.entidad || "").trim()
-        if (nombre) porEntidad.set(nombre, Math.max(porEntidad.get(nombre) ?? 0, sit))
-      }
-    }
-
-    return NextResponse.json({
-      cuit: cuitLimpio,
-      denominacion: results?.denominacion || null,
-      situacion_max: situacionMax,
-      sin_antecedentes: false,
-      apto: situacionMax === 1,
-      entidades: [...porEntidad.entries()]
-        .map(([entidad, situacion]) => ({ entidad, situacion }))
-        .sort((a, b) => b.situacion - a.situacion),
+    const res = await fetch(`https://api.bcra.gob.ar/centraldedeudores/v1.0/Deudas/${cuitLimpio}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(BCRA_TIMEOUT_MS),
     })
+    if (res.status === 404) return NextResponse.json(bcraSinAntecedentes(cuitLimpio))
+    if (!res.ok) return NextResponse.json({ error: `Error BCRA: ${res.status}` }, { status: 502 })
+    return NextResponse.json(interpretarRespuestaBcra(cuitLimpio, await res.json()))
   } catch (error: any) {
+    const timeout = error?.name === "TimeoutError" || error?.name === "AbortError"
     console.error("[bcra]", error?.message)
-    return NextResponse.json({ error: "No se pudo consultar el BCRA" }, { status: 502 })
+    return NextResponse.json({ error: timeout ? "El BCRA no respondió a tiempo" : "No se pudo consultar el BCRA" }, { status: 502 })
   }
 }

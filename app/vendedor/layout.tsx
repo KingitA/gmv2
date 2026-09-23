@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import { EnterBlur } from "@/components/vendedor/enter-blur"
+import { AvisosBcraGlobal } from "@/components/pagos/AvisosBcraGlobal"
 
 export const metadata: Metadata = {
   title: "GM — Módulo Vendedor",
@@ -16,6 +17,7 @@ export default function VendedorLayout({ children }: { children: React.ReactNode
   return (
     <div className="min-h-screen bg-gray-50">
       <EnterBlur />
+      <AvisosBcraGlobal />
       {children}
     </div>
   )
