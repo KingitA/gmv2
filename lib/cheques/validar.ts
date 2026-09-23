@@ -24,6 +24,8 @@ export interface ChequeSaneado extends Partial<DatosCheque> {
   cuits_titulares: string[]
   /** Lo que el modelo leyó pero NO validó (pista para el operario; nunca se autocompleta) */
   descartados?: Partial<Record<CampoCheque, string>>
+  /** Campos clave que el modelo directamente NO encontró en la foto (CUIT, fecha) */
+  no_encontrados?: CampoCheque[]
 }
 
 export interface TransferenciaSaneada {
@@ -54,6 +56,30 @@ export function normalizarCuit(v: string | number | null | undefined): string | 
   return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`
 }
 
+/**
+ * CUIT/CUIL dentro de la transcripción de la línea del titular de un cheque
+ * ("Cta.: 114-355212/6 (10/99) … CUIL 20233373029 STRAUBINGER DIEGO ARIEL").
+ * Acotado a ESE texto (no a toda la imagen): primero el número que sigue a la etiqueta
+ * CUIT/CUIL/CT; si no, un grupo de exactamente 11 dígitos (con o sin guiones) que cierre
+ * el dígito verificador. El número de cuenta (con "/") y la banda MICR (más larga) no
+ * califican. Devuelve XX-XXXXXXXX-X o null.
+ */
+export function extraerCuitDeTexto(texto: string | null | undefined): string | null {
+  const t = String(texto ?? "")
+  if (!t) return null
+  const etiquetado = [...t.matchAll(/\b(?:C\.?U\.?I\.?[TL]\.?|CT)\s*[:.]?\s*(\d{2}\s*-?\s*\d{8}\s*-?\s*\d)(?!\d)/gi)]
+  for (const m of etiquetado) {
+    const c = normalizarCuit(m[1])
+    if (c) return c
+  }
+  const sueltos = [...t.matchAll(/(?<![\d/])(\d{2}-?\d{8}-?\d)(?![\d/])/g)]
+  for (const m of sueltos) {
+    const c = normalizarCuit(m[1])
+    if (c) return c
+  }
+  return null
+}
+
 /** Un CUIT ya se puede consultar: 11 dígitos válidos (no a medio tipear). */
 export const cuitConsultable = (v: string | null | undefined) => cuitValido(v)
 
@@ -68,7 +94,13 @@ function fechaLocalISO(d: Date): string {
   return `${y}-${m}-${dd}`
 }
 
-/** Parsea YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, DD/MM/YY. Fecha inexistente (31/02) → null. */
+const MESES: Record<string, number> = { ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6, jul: 7, ago: 8, sep: 9, set: 9, oct: 10, nov: 11, dic: 12 }
+
+/**
+ * Parsea YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, DD/MM/YY y las formas con el mes
+ * en letras que se escriben a mano en un cheque: "15 de ABRIL de 2026", "27 de junio 2026",
+ * "27/JUN/26", "27-jun-2026", "TANDIL, 15 de abril de 2026". Fecha inexistente (31/02) → null.
+ */
 export function parsearFecha(v: string | null | undefined): string | null {
   const s = String(v ?? "").trim()
   if (!s) return null
@@ -76,10 +108,17 @@ export function parsearFecha(v: string | null | undefined): string | null {
   let mt = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/)
   if (mt) {
     y = Number(mt[1]); m = Number(mt[2]); d = Number(mt[3])
-  } else {
-    mt = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/)
-    if (!mt) return null
+  } else if ((mt = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/))) {
     d = Number(mt[1]); m = Number(mt[2]); y = Number(mt[3])
+    if (mt[3]!.length === 2) y += 2000
+  } else {
+    // "… 15 de ABRIL de 2026" / "27/JUN/26" / "27 junio 2026" (con o sin lugar adelante)
+    const t = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    mt = t.match(/(\d{1,2})\s*(?:de\s+|[/.-]\s*)?([a-z]{3,10})\.?\s*(?:de\s+|[/.-]\s*)?(\d{2}|\d{4})(?!\d)/)
+    if (!mt) return null
+    const mes = MESES[mt[2]!.slice(0, 3)]
+    if (!mes) return null
+    d = Number(mt[1]); m = mes; y = Number(mt[3])
     if (mt[3]!.length === 2) y += 2000
   }
   if (m < 1 || m > 12 || d < 1 || d > 31) return null
@@ -157,6 +196,8 @@ export interface ChequeCrudo {
   fecha_emision?: unknown
   cuit_emisor?: unknown
   cuits_titulares?: unknown
+  /** Transcripción literal de las líneas impresas del titular (Cta., CUIT/CUIL, nombre) */
+  linea_titular?: unknown
   color_cheque?: unknown
   es_echeq?: unknown
 }
@@ -185,7 +226,9 @@ export function sanearCheque(r: ChequeCrudo, opts: { hoy?: string } = {}): Chequ
   if (venc) out.fecha_cheque = venc
   else if (emision) out.fecha_cheque = emision
   if (emision) out.fecha_emision = emision
-  const cuit = normalizarCuit(r.cuit_emisor as any)
+  // CUIT: el campo del modelo; si no cierra o vino vacío, el de la transcripción literal de
+  // la línea del titular (acotado a esa línea, con etiqueta CUIT/CUIL y dígito verificador).
+  const cuit = normalizarCuit(r.cuit_emisor as any) ?? extraerCuitDeTexto(typeof r.linea_titular === "string" ? r.linea_titular : null)
   if (cuit) out.cuit_emisor = cuit
   const titulares = Array.isArray(r.cuits_titulares) ? r.cuits_titulares : []
   out.cuits_titulares = [...new Set([cuit, ...titulares.map((c) => normalizarCuit(c as any))].filter((c): c is string => !!c))].slice(0, 4)
@@ -202,17 +245,25 @@ export function sanearCheque(r: ChequeCrudo, opts: { hoy?: string } = {}): Chequ
   const leidoMonto = String(r.monto ?? "").trim()
   if (out.monto === undefined && leidoMonto && !/^(null|undefined|0)$/i.test(leidoMonto)) descartados.monto = leidoMonto
   if (Object.keys(descartados).length) out.descartados = descartados
+  // Nada leído para CUIT / fecha: que la UI lo diga ("el OCR no lo encontró"), no que quede en silencio
+  const noEncontrados: CampoCheque[] = []
+  if (!out.cuit_emisor && !descartados.cuit_emisor) noEncontrados.push("cuit_emisor")
+  if (!out.fecha_cheque && !descartados.fecha_cheque) noEncontrados.push("fecha_cheque")
+  if (noEncontrados.length) out.no_encontrados = noEncontrados
   return out
 }
 
 /** Texto para la UI con lo leído y descartado ("CUIT leído 20-1234567X-9 no cierra: revisalo en el cheque"). */
-export function textoDescartados(d: Partial<Record<CampoCheque, string>> | undefined): string | null {
-  if (!d) return null
+export function textoDescartados(d: Partial<Record<CampoCheque, string>> | undefined, noEncontrados?: CampoCheque[]): string | null {
   const partes: string[] = []
-  if (d.cuit_emisor) partes.push(`CUIT leído "${d.cuit_emisor}" no cierra el dígito verificador`)
-  if (d.fecha_cheque) partes.push(`fecha leída "${d.fecha_cheque}" inválida o fuera de rango`)
-  if (d.monto) partes.push(`importe leído "${d.monto}" inválido`)
-  return partes.length ? `El OCR leyó algo que no valida y quedó vacío: ${partes.join("; ")}. Revisalo en el cheque y cargalo a mano.` : null
+  if (d?.cuit_emisor) partes.push(`CUIT leído "${d.cuit_emisor}" no cierra el dígito verificador`)
+  if (d?.fecha_cheque) partes.push(`fecha leída "${d.fecha_cheque}" inválida o fuera de rango`)
+  if (d?.monto) partes.push(`importe leído "${d.monto}" inválido`)
+  const faltan = (noEncontrados || []).map((c) => (c === "cuit_emisor" ? "el CUIT" : c === "fecha_cheque" ? "la fecha de pago" : c))
+  const a = partes.length ? `El OCR leyó algo que no valida y quedó vacío: ${partes.join("; ")}.` : ""
+  const b = faltan.length ? `El OCR no encontró ${faltan.join(" ni ")} en la foto.` : ""
+  if (!a && !b) return null
+  return `${[a, b].filter(Boolean).join(" ")} Revisalo en el cheque y cargalo a mano.`
 }
 
 export interface TransferenciaCruda {
@@ -243,6 +294,6 @@ export type ResultadoOcr =
 
 /** ¿Trae algún dato útil? (una foto de la que no salió nada no debe crear filas fantasma) */
 export function resultadoConDatos(r: ResultadoOcr): boolean {
-  const { tipo: _t, descartados: _d, ...resto } = r as unknown as Record<string, unknown>
+  const { tipo: _t, descartados: _d, no_encontrados: _n, ...resto } = r as unknown as Record<string, unknown>
   return Object.entries(resto).some(([k, v]) => (k === "cuits_titulares" ? Array.isArray(v) && v.length > 0 : v !== undefined && v !== "" && v !== false && v !== null))
 }

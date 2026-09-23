@@ -1,7 +1,8 @@
 // Foto del cheque en el cliente (navegador / WebView): se achica ANTES de viajar.
 // La cámara del NuStar saca 3–6 MB; Vercel corta el body en 4,5 MB y Gemini tarda
 // proporcional al tamaño. A 1600 px de lado mayor y JPEG 0,8 un cheque queda en
-// ~150–300 KB, se lee igual de bien y sube en un segundo con 3G.
+// ~150–300 KB y sube en un segundo con 3G. Se usa 2048: la línea del titular (CUIT/CUIL)
+// está impresa en letra chica y a 1600 px, con el cheque ocupando media foto, se perdía.
 
 export interface FotoComprimida {
   blob: Blob
@@ -12,7 +13,7 @@ export interface FotoComprimida {
 }
 
 export async function comprimirFoto(file: File | Blob, opts: { maxLado?: number; calidad?: number; nombre?: string } = {}): Promise<FotoComprimida> {
-  const maxLado = opts.maxLado ?? 1600
+  const maxLado = opts.maxLado ?? 2048
   const calidad = opts.calidad ?? 0.8
   const nombreOriginal = opts.nombre || (file as File).name || "foto.jpg"
   const nombre = nombreOriginal.replace(/\.[^.]+$/, "") + ".jpg"

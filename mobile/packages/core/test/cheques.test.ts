@@ -12,8 +12,10 @@ import {
   filaDesdeFoto,
   interpretarRespuestaBcra,
   marcarFalloOcr,
+  extraerCuitDeTexto,
   normalizarCuit,
   normalizarFecha,
+  parsearFecha,
   normalizarMonto,
   resultadoConDatos,
   sanearCheque,
@@ -98,6 +100,26 @@ describe("fecha y monto: por formato y rango", () => {
     const fila = aplicarOcr(filaDesdeFoto("f9", null), { tipo: "cheque", numero_cheque: "123", cuits_titulares: [], descartados: { cuit_emisor: "20-12345678-9" } }, null)
     expect(fila.cuit_emisor).toBe("")
     expect(fila.ocr.pista).toMatch(/20-12345678-9/)
+  })
+  it("fechas escritas a mano con el mes en letras (como en el cheque)", () => {
+    expect(parsearFecha("15 de ABRIL de 2026")).toBe("2026-04-15")
+    expect(parsearFecha("TANDIL, 27 de junio de 2026")).toBe("2026-06-27")
+    expect(parsearFecha("27/JUN/26")).toBe("2026-06-27")
+    expect(parsearFecha("1 de Setiembre 2026")).toBe("2026-09-01")
+    expect(parsearFecha("27 de xyz de 2026")).toBeNull()
+  })
+  it("el CUIT/CUIL sale de la transcripción literal de la línea del titular, nunca del nº de cuenta ni del MICR", () => {
+    const linea = "Cta.: 114-355212/6 (10/99) RICCHIERI 343 (7000) TANDIL | CUIL 20233373029 STRAUBINGER DIEGO ARIEL | 07223145700011400261000035521264"
+    expect(extraerCuitDeTexto(linea)).toBe("20-23337302-9")
+    expect(extraerCuitDeTexto("Cta.: 114-355212/6 (10/99) sin cuit")).toBeNull()
+    expect(extraerCuitDeTexto("CUIT 20-23337302-1 (mal)")).toBeNull()
+    // el modelo dejó cuit_emisor vacío pero transcribió la línea: se rescata de ahí
+    const s = sanearCheque({ cuit_emisor: null, linea_titular: linea }, { hoy: HOY })
+    expect(s.cuit_emisor).toBe("20-23337302-9")
+    expect(s.no_encontrados).toEqual(["fecha_cheque"])
+    // nada leído: la pista dice que no lo encontró
+    const n = sanearCheque({ numero_cheque: "11400261" }, { hoy: HOY })
+    expect(n.no_encontrados).toEqual(["cuit_emisor", "fecha_cheque"])
   })
   it("un resultado sin ningún dato válido no genera fila fantasma", () => {
     const s = sanearCheque({ cuit_emisor: "1", monto: "x", fecha_cheque: "ayer" }, { hoy: HOY })

@@ -93,7 +93,7 @@ export function aplicarOcr(fila: FilaCheque, r: ResultadoOcr, fotoUrl: string | 
       deOcr.add(campo)
     }
   }
-  out.ocr = { ...fila.ocr, estado: "ok", deOcr: [...deOcr], editados: [...editados], foto_url: fotoUrl ?? fila.ocr.foto_url, detalle: null, pista: r.tipo === "cheque" ? textoDescartados(r.descartados) : null }
+  out.ocr = { ...fila.ocr, estado: "ok", deOcr: [...deOcr], editados: [...editados], foto_url: fotoUrl ?? fila.ocr.foto_url, detalle: null, pista: r.tipo === "cheque" ? textoDescartados(r.descartados, r.no_encontrados) : null }
   return out
 }
 

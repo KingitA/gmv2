@@ -154,7 +154,7 @@ const PARCIALES = new Set(["vendedor_clientes", "vendedor_cc", "vendedor_viajes"
 const EDITABLES = ["en_venta", "pendiente", "impreso", "en_preparacion"]
 // Rechazo de negocio a pedido, para probar el caso "la RPC rechazó el cobro" (POST /__mock/rechazar-cobros?on=1)
 let MODO_BCRA = "apto" // apto | riesgo | caido
-let MODO_OCR = "ok" // ok | caido | sin_datos | lento
+let MODO_OCR = "ok" // ok | caido | sin_datos | lento | sin_cuit
 let RECHAZAR_COBROS = false
 const parchePedido = (id) => { const p = S.pedidos.find((x) => x.id === id && x.estado !== "eliminado"); return { dataset: "vendedor_pedidos", upserts: p ? [filaPedido(p)] : [], deletes: p ? [] : [id] } }
 const parcheCliente = (id) => { const c = clienteDe(id); return [{ dataset: "vendedor_clientes", upserts: c ? [c] : [], deletes: c ? [] : [id] }, { dataset: "vendedor_cc", upserts: c ? [filaCC(id)] : [], deletes: c ? [] : [id] }] }
@@ -396,7 +396,9 @@ createServer(async (req, res) => {
     const foto = { url: "https://placehold.co/640x300/e2e8f0/475569.png?text=Cheque+(mock)", nombre: "cheque.jpg" }
     if (MODO_OCR === "sin_datos") return json(200, { success: true, resultados: [], total_encontrados: 0, archivos: [foto], archivos_por_indice: [foto], saneados: [], errores: ["cheque.jpg: no se detectaron datos"] })
     const venc = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
-    const cheque = { tipo: "cheque", monto: 150000, banco: "Banco Macro", numero_cheque: "00098765", fecha_cheque: venc, cuit_emisor: "20-12345678-6", cuits_titulares: ["20-12345678-6"] }
+    const cheque = MODO_OCR === "sin_cuit"
+      ? { tipo: "cheque", monto: 421100, banco: "Santander", numero_cheque: "11400261", cuits_titulares: [], descartados: { fecha_cheque: "27 de xyz de 2026" }, no_encontrados: ["cuit_emisor"] }
+      : { tipo: "cheque", monto: 150000, banco: "Banco Macro", numero_cheque: "00098765", fecha_cheque: venc, cuit_emisor: "20-12345678-6", cuits_titulares: ["20-12345678-6"] }
     return json(200, { success: true, resultados: [{ ...cheque, banco_emisor: cheque.banco, archivo_index: 0 }], total_encontrados: 1, archivos: [foto], archivos_por_indice: [foto], saneados: [{ ...cheque, archivo_index: 0 }] })
   }
   // Online-only

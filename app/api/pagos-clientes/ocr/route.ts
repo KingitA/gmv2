@@ -2,16 +2,20 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai"
 import { normalizarMonto, resultadoConDatos, sanearCheque, sanearTransferencia, type ResultadoOcr } from "@/lib/cheques/isomorfico"
+import { leerComprobantesConGemini, leerTitularConGemini } from "@/lib/cheques/ocr-gemini"
 import { subirFotoComprobante, type FotoSubida } from "@/lib/cobranzas/fotos"
 
 // POST /api/pagos-clientes/ocr — multipart `files[]` (una o varias fotos).
 //
-// Por cada foto, EN PARALELO: la sube al bucket y la lee con Gemini. La respuesta
-// devuelve, por archivo, la URL de la foto y los comprobantes leídos YA VALIDADOS
-// (lib/cheques: CUIT por dígito verificador, fecha y monto por formato/rango). Lo que
-// no valida no viaja: el cliente lo carga a mano. Nunca un dato inventado.
+// Por cada foto, EN PARALELO: la sube al bucket y la lee con Gemini (lib/cheques/ocr-gemini).
+// La respuesta devuelve, por archivo, la URL de la foto y los comprobantes leídos YA
+// VALIDADOS (lib/cheques: CUIT por dígito verificador, fecha y monto por formato/rango).
+// Lo que no valida no viaja como dato: viaja como pista ("leído X, no cierra") y el
+// cliente lo carga a mano. Nunca un dato inventado.
+//
+// Si a un cheque le falta el CUIT o la fecha de pago después de la primera pasada, se
+// hace una segunda pasada corta (texto plano, foco en la línea del titular y las fechas).
 //
 // `solo_subir=1`: guarda la foto sin OCR (reintento de adjuntar cuando la lectura
 // falló, o el usuario ya cargó los datos).
@@ -22,79 +26,6 @@ import { subirFotoComprobante, type FotoSubida } from "@/lib/cobranzas/fotos"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
-
-// Esquema de salida: fuerza JSON válido (antes estaba definido pero NO se aplicaba).
-const OCR_SCHEMA: any = {
-  type: SchemaType.OBJECT,
-  properties: {
-    resultados: {
-      type: SchemaType.ARRAY,
-      items: {
-        type: SchemaType.OBJECT,
-        properties: {
-          tipo: { type: SchemaType.STRING, description: "cheque | transferencia | deposito" },
-          monto: { type: SchemaType.NUMBER },
-          numero_cheque: { type: SchemaType.STRING },
-          banco_emisor: { type: SchemaType.STRING },
-          fecha_emision: { type: SchemaType.STRING },
-          fecha_cheque: { type: SchemaType.STRING },
-          cuit_emisor: { type: SchemaType.STRING },
-          cuits_titulares: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-          localidad: { type: SchemaType.STRING },
-          color_cheque: { type: SchemaType.STRING, description: "ECHEQ solo si es cheque electrónico; en papel no devolver este campo" },
-          cbu_destino: { type: SchemaType.STRING },
-          cvu_destino: { type: SchemaType.STRING },
-          fecha_transferencia: { type: SchemaType.STRING },
-          numero_comprobante: { type: SchemaType.STRING },
-          fecha_deposito: { type: SchemaType.STRING },
-          items: {
-            type: SchemaType.ARRAY,
-            items: {
-              type: SchemaType.OBJECT,
-              properties: {
-                tipo_item: { type: SchemaType.STRING, description: "efectivo | cheque" },
-                monto: { type: SchemaType.NUMBER },
-                banco_emisor: { type: SchemaType.STRING },
-                numero_cheque: { type: SchemaType.STRING },
-                fecha_pago_cheque: { type: SchemaType.STRING },
-                numero_comprobante_deposito: { type: SchemaType.STRING },
-                fecha_deposito_efectivo: { type: SchemaType.STRING },
-                nro_comprobante_deposito_ef: { type: SchemaType.STRING },
-              },
-              required: ["tipo_item", "monto"],
-            },
-          },
-        },
-        required: ["tipo"],
-      },
-    },
-  },
-  required: ["resultados"],
-}
-
-const PROMPT = `Sos un experto en documentos bancarios y de pagos argentinos.
-
-Analizá esta imagen y extraé TODOS los comprobantes de pago que aparecen (puede haber uno o varios: cheques, transferencias, depósitos).
-
-REGLA PRINCIPAL: COPIÁ, NO COMPLETES. Transcribí lo que está impreso; nunca completes dígitos que no ves ni corrijas un número para que "cierre". Si un dato no está en la imagen, null. Un campo inventado es un error grave; un campo transcripto con un dígito dudoso lo revisa el sistema.
-
-CHEQUE (tipo: "cheque"):
-- numero_cheque: número del cheque, solo dígitos.
-- banco_emisor: nombre del banco emisor (logo/leyenda a la izquierda). Si no está claro, null.
-- FECHAS (prioridad alta): un cheque común tiene UNA sola fecha impresa (arriba a la derecha, "Lugar y fecha"): devolvela en fecha_cheque Y en fecha_emision. Un cheque de pago diferido tiene dos: "fecha de emisión" → fecha_emision y "fecha de pago" → fecha_cheque. Formato YYYY-MM-DD; si está en letras ("30 de octubre de 2026") convertila. Devolvé siempre la fecha si se ve, aunque sea futura.
-- monto: importe numérico sin símbolos. En el cheque figura en números y en letras: deben coincidir. Tené en cuenta que puede usar coma decimal y punto de miles o viceversa.
-- cuit_emisor (prioridad alta): CUIT/CUIL del titular de la cuenta, 11 dígitos. Está impreso junto al nombre del titular (abajo a la izquierda o debajo del nombre), precedido por "CUIT", "C.U.I.T.", "CUIL" o "CT", con o sin guiones (20-12345678-6 / 20123456786). Transcribí los 11 dígitos exactamente como se leen, en formato XX-XXXXXXXX-X, aunque tengas dudas de un dígito (el sistema verifica el dígito verificador). Solo devolvé null si directamente no hay CUIT impreso o faltan dígitos. NO uses el número de cheque, el número de cuenta ni la línea inferior (MICR).
-- cuits_titulares: TODOS los CUITs impresos junto a los nombres de los titulares (cuenta conjunta = dos). Mismo formato. Si hay uno solo, array con ese único CUIT.
-- localidad: si es visible.
-- color_cheque: "ECHEQ" únicamente si es un cheque electrónico; si es papel, null.
-
-TRANSFERENCIA (tipo: "transferencia"):
-- monto, cbu_destino / cvu_destino (22 dígitos si es visible), fecha_transferencia (YYYY-MM-DD), numero_comprobante.
-
-DEPÓSITO (tipo: "deposito", puede tener varios ítems):
-- fecha_deposito (YYYY-MM-DD) e items: { tipo_item: "efectivo", monto, fecha_deposito_efectivo, nro_comprobante_deposito_ef } o { tipo_item: "cheque", monto, banco_emisor, numero_cheque, fecha_pago_cheque, numero_comprobante_deposito }.
-
-Los montos SIEMPRE numéricos. Devolvé solo el JSON { "resultados": [ ... ] }.`
 
 /** Resultado en el formato que ya consumen los clientes viejos (nombres de campo del prompt). */
 interface OCRResultLegacy {
@@ -118,28 +49,6 @@ interface OCRResultLegacy {
   items?: any[]
 }
 
-const OCR_TIMEOUT_MS = 30_000
-
-async function leerConGemini(base64: string, mimeType: string): Promise<any[]> {
-  if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurado")
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    generationConfig: { responseMimeType: "application/json", responseSchema: OCR_SCHEMA, temperature: 0 },
-  })
-  const result = await model.generateContent([{ inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } }, PROMPT], { timeout: OCR_TIMEOUT_MS })
-  const text = result.response.text()
-  let parsed: any
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    const m = text.match(/\{[\s\S]*\}/)
-    if (!m) throw new Error("No se pudo interpretar la respuesta del OCR")
-    parsed = JSON.parse(m[0])
-  }
-  return Array.isArray(parsed?.resultados) ? parsed.resultados : []
-}
-
 /**
  * Valida cada resultado crudo del modelo. Cheques y transferencias pasan por
  * lib/cheques (campo que no valida ⇒ no viaja). Los depósitos (solo oficina) se
@@ -152,7 +61,6 @@ function sanear(crudos: any[], bancos: any[], archivoIndex: number): { legacy: O
     if (!r || typeof r !== "object") continue
     if (r.tipo === "cheque") {
       const s = sanearCheque(r)
-      if (s.descartados) console.warn("[pagos-clientes/ocr] descartado por validación:", JSON.stringify({ leido: { cuit: r.cuit_emisor, fecha_cheque: r.fecha_cheque, fecha_emision: r.fecha_emision, monto: r.monto }, descartados: s.descartados }))
       const res: ResultadoOcr = { tipo: "cheque", ...s }
       if (!resultadoConDatos(res)) continue
       saneados.push(res)
@@ -195,6 +103,30 @@ function sanear(crudos: any[], bancos: any[], archivoIndex: number): { legacy: O
   return { legacy, saneados }
 }
 
+/**
+ * Lee una foto: pasada 1 (JSON) y, si a algún cheque le falta CUIT válido o fecha de
+ * pago, pasada 2 (texto con foco). La pasada 2 solo APORTA lo que faltaba: nunca pisa
+ * lo que la primera ya leyó bien.
+ */
+async function leerFoto(base64: string, mime: string, nombre: string): Promise<any[]> {
+  const crudos = await leerComprobantesConGemini(base64, mime)
+  const cheques = crudos.filter((r) => r?.tipo === "cheque")
+  console.log(`[pagos-clientes/ocr] lectura ${nombre}:`, JSON.stringify(cheques.map((r) => ({ numero: r.numero_cheque, banco: r.banco_emisor, monto: r.monto, fecha_emision: r.fecha_emision, fecha_cheque: r.fecha_cheque, cuit: r.cuit_emisor, titulares: r.cuits_titulares, linea_titular: r.linea_titular }))))
+  const incompletos = cheques.filter((r) => {
+    const s = sanearCheque(r)
+    return !s.cuit_emisor || !s.fecha_cheque
+  })
+  if (incompletos.length === 1) {
+    const t = await leerTitularConGemini(base64, mime)
+    console.log(`[pagos-clientes/ocr] segunda pasada ${nombre}:`, JSON.stringify(t))
+    const r = incompletos[0]
+    if (t.linea_titular) r.linea_titular = [r.linea_titular, t.linea_titular].filter(Boolean).join(" | ")
+    if (t.fecha_pago && !sanearCheque(r).fecha_cheque) r.fecha_cheque = t.fecha_pago
+    if (t.fecha_emision && !sanearCheque(r).fecha_emision) r.fecha_emision = t.fecha_emision
+  }
+  return crudos
+}
+
 export async function POST(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -218,6 +150,7 @@ export async function POST(request: NextRequest) {
     const porArchivo = await Promise.all(
       files.map(async (file, i) => {
         const buffer = Buffer.from(await file.arrayBuffer())
+        const nombre = file.name || `archivo ${i + 1}`
         // Subida y lectura EN PARALELO: la foto queda guardada aunque el OCR falle o tarde
         const subida = subirFotoComprobante(admin, buffer, { mime: file.type, nombre: file.name }).catch((e: any) => {
           console.error("[pagos-clientes/ocr] upload:", e?.message)
@@ -225,25 +158,26 @@ export async function POST(request: NextRequest) {
         })
         const lectura = soloSubir
           ? Promise.resolve<{ ok: true; crudos: any[] } | { ok: false; error: string }>({ ok: true, crudos: [] })
-          : leerConGemini(buffer.toString("base64"), file.type)
+          : leerFoto(buffer.toString("base64"), file.type, nombre)
               .then((crudos) => ({ ok: true as const, crudos }))
               .catch((e: any) => {
-                console.error("[pagos-clientes/ocr] archivo", file.name, e?.message)
+                console.error("[pagos-clientes/ocr] archivo", nombre, e?.message)
                 return { ok: false as const, error: String(e?.message || "no se pudo leer") }
               })
         const [foto, r] = await Promise.all([subida, lectura])
-        return { i, foto, r }
+        return { i, foto, r, nombre }
       }),
     )
 
-    for (const { i, foto, r } of porArchivo) {
+    for (const { i, foto, r, nombre } of porArchivo) {
       archivos[i] = foto
       if (!r.ok) {
-        errores.push(`${files[i].name || "archivo"}: ${r.error}`)
+        errores.push(`${nombre}: ${r.error}`)
         continue
       }
       const s = sanear(r.crudos, bancosActivos, i)
-      if (!soloSubir && !s.legacy.length) errores.push(`${files[i].name || "archivo"}: no se detectaron datos`)
+      for (const x of s.saneados) if (x.tipo === "cheque" && (x.descartados || x.no_encontrados?.length)) console.warn(`[pagos-clientes/ocr] ${nombre} sin validar:`, JSON.stringify({ descartados: x.descartados, no_encontrados: x.no_encontrados }))
+      if (!soloSubir && !s.legacy.length) errores.push(`${nombre}: no se detectaron datos`)
       resultados.push(...s.legacy)
       saneados.push(...s.saneados.map((x) => ({ ...x, archivo_index: i })))
     }
