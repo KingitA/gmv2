@@ -9,8 +9,12 @@ import { fechaHoraCorta, hace } from "./formato"
 // (360×800 dp), dedo con guante, sol. Alto contraste, objetivos táctiles ≥ 44 px,
 // sin animaciones pesadas.
 
-/** Encabezado de pantalla: atrás + título + red + contador de pendientes (siempre visible). */
-export function Encabezado({ titulo, atras = true, derecha }: { titulo: string; atras?: boolean; derecha?: ReactNode }) {
+/**
+ * Encabezado de pantalla: atrás + título + red + contador de pendientes (siempre visible).
+ * `compacto`: 44 px en vez de 56 (el botón atrás sigue midiendo 44). Lo usa depósito, donde
+ * cada píxel de alto es una línea más de descripción de artículo en pantalla.
+ */
+export function Encabezado({ titulo, atras = true, derecha, compacto = false }: { titulo: string; atras?: boolean; derecha?: ReactNode; compacto?: boolean }) {
   const navigate = useNavigate()
   const location = useLocation()
   const volver = () => {
@@ -19,13 +23,13 @@ export function Encabezado({ titulo, atras = true, derecha }: { titulo: string; 
     else if (d.accion === "padre") navigate(d.a, { replace: true })
   }
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-1 bg-slate-900 px-2 text-white shadow">
+    <header className={`sticky top-0 z-20 flex items-center gap-1 bg-slate-900 px-2 text-white shadow ${compacto ? "h-11" : "h-14"}`}>
       {atras && (
         <button onClick={volver} aria-label="Atrás" className="flex h-11 w-11 items-center justify-center rounded-full active:bg-white/20">
-          <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 18l-6-6 6-6" /></svg>
+          <svg viewBox="0 0 24 24" className={compacto ? "h-5 w-5" : "h-6 w-6"} fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M15 18l-6-6 6-6" /></svg>
         </button>
       )}
-      <h1 className="min-w-0 flex-1 truncate px-1 text-lg font-semibold">{titulo}</h1>
+      <h1 className={`min-w-0 flex-1 truncate px-1 font-semibold ${compacto ? "text-base" : "text-lg"}`}>{titulo}</h1>
       {derecha}
       <IndicadorRed />
       <IndicadorPendientes />
@@ -67,13 +71,13 @@ export function IndicadorPendientes() {
  * Frescura del dato mostrado desde la réplica: "Datos al 18/09 14:30".
  * La hora es la del SERVIDOR que generó los datos (no la del reloj del equipo).
  */
-export function Frescura({ dataset, etiqueta = "Datos al", viejoTrasMin = 60 }: { dataset: string; etiqueta?: string; viejoTrasMin?: number }) {
+export function Frescura({ dataset, etiqueta = "Datos al", viejoTrasMin = 60, compacto = false }: { dataset: string; etiqueta?: string; viejoTrasMin?: number; compacto?: boolean }) {
   const meta = useMetaDataset(dataset)
   const { sync } = useRuntime()
   const [sinc, setSinc] = useState(false)
   const viejo = !meta?.generadoAt || Date.now() - Date.parse(meta.generadoAt) > viejoTrasMin * 60_000
   return (
-    <div className={`flex items-center gap-2 px-3 py-1.5 text-xs ${viejo ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600"}`}>
+    <div className={`flex items-center gap-2 px-3 text-xs ${compacto ? "py-0.5" : "py-1.5"} ${viejo ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600"}`}>
       <span className="flex-1">
         {meta?.generadoAt ? `${etiqueta} ${fechaHoraCorta(meta.generadoAt)} (${hace(meta.syncedAt)})` : "Sin datos descargados todavía"}
         {meta?.error ? " · último intento falló" : ""}

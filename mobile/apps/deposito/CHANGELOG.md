@@ -3,6 +3,18 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.2.3 (versionCode 6) — 2026-09-22
+
+- Foto del articulo en la ficha: el catalogo vuelve a bajar completo tras el cambio de version del dataset
+
+## v0.2.2 (versionCode 5) — 2026-09-22
+
+- Build de diagnostico: DevTools del WebView abierto
+
+## v0.2.1 (versionCode 4) — 2026-09-22
+
+- Descripción del artículo en dos líneas (antes se cortaba) y ficha del artículo al tocar el renglón: foto, SKU, marca y unidades por bulto
+
 ## v0.2.0 (versionCode 3) — 2026-09-18
 
 Primera versión completa: réplica fiel del módulo web `/deposito`, offline-tolerante.

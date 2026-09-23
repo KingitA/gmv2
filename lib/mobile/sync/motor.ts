@@ -39,6 +39,14 @@ export interface DatasetDef {
    * un dataset delta sin trigger respondería "sin cambios" para siempre.
    */
   requiereLogDe?: string[]
+  /**
+   * Versión de la FORMA de las filas. Un dataset delta solo reenvía las filas que
+   * cambiaron: si se agrega una columna, los equipos que ya tienen cursor nunca la
+   * reciben (sus filas no "cambiaron"). Subir este número marca los cursores viejos
+   * como vencidos ⇒ el próximo sync es un snapshot completo, que reemplaza el
+   * dataset entero. Sin `version` el comportamiento es exactamente el de antes.
+   */
+  version?: number
   /** Carga filas del dataset. ids undefined ⇒ todas las del alcance del usuario. */
   cargar(ctx: CtxSync, ids?: string[]): Promise<FilaReplica[]>
   /**
@@ -76,11 +84,18 @@ function hashFilas(filas: FilaReplica[]): string {
   return h.digest("base64url").slice(0, 27)
 }
 
+/** Marca de versión que viaja dentro del cursor (ver DatasetDef.version). */
+function marcaVersion(def: DatasetDef): string {
+  return def.version ? `v${def.version}-` : ""
+}
+
 async function snapshot(ctx: CtxSync, def: DatasetDef, cursorCliente: string | null, seqActual: string | null): Promise<RespuestaSync> {
   const filas = await def.cargar(ctx)
-  const hash = hashFilas(filas)
+  const marca = marcaVersion(def)
+  const hash = marca + hashFilas(filas)
   // Si el dataset admite delta y conocemos el seq, el próximo pedido ya puede ser delta
   const cursor = seqActual !== null && def.tablas?.length ? `d:${seqActual}:${hash}` : `s:${hash}`
+  // Un cursor de otra versión nunca termina en `v<n>-<hash>` ⇒ se mandan todas las filas.
   const mismo = !!cursorCliente && cursorCliente.endsWith(hash)
   return {
     dataset: def.nombre,
@@ -111,6 +126,8 @@ export async function responderSync(ctx: CtxSync, def: DatasetDef, cursorCliente
 
   const m = cursorCliente ? /^d:(\d+):(.*)$/.exec(cursorCliente) : null
   if (!def.tablas?.length || seq === null || !m) return snapshot(ctx, def, cursorCliente, seq)
+  // Cursor de una versión anterior de la forma de las filas ⇒ snapshot completo.
+  if (def.version && !m[2]!.startsWith(marcaVersion(def))) return snapshot(ctx, def, cursorCliente, seq)
 
   if (def.requiereLogDe?.length) {
     const { data: hay, error: errLog } = await admin.from("mobile_cambios").select("seq").in("tabla", def.requiereLogDe).limit(1)
@@ -134,7 +151,7 @@ export async function responderSync(ctx: CtxSync, def: DatasetDef, cursorCliente
 
   const ids = [...new Set<string>(cambios.map((c: any) => String(c.ref_id)).filter(Boolean))]
   const maxSeq = cambios.reduce((mx: bigint, c: any) => (BigInt(c.seq) > mx ? BigInt(c.seq) : mx), BigInt(desde))
-  const cursor = `d:${(BigInt(seq) > maxSeq ? BigInt(seq) : maxSeq).toString()}:`
+  const cursor = `d:${(BigInt(seq) > maxSeq ? BigInt(seq) : maxSeq).toString()}:${marcaVersion(def)}`
   if (!ids.length) {
     return { dataset: def.nombre, modo: "delta", cursor, generado_at: new Date().toISOString(), sin_cambios: true, upserts: [], deletes: [] }
   }

@@ -166,6 +166,15 @@ aplica como parche (`replica.refrescarIds`): no mueve cursor ni frescura. Máx. 
    (id de la fila del dataset). Agregalo en una migración nueva con el mismo patrón.
 3. App: `{ nombre, prioridad, invalidable?, cadaMs? }` en `DATASETS`.
 
+**Agregar una COLUMNA a un dataset delta ⇒ subir `version`** (trampa encontrada el
+22/09/2026 con `imagen_url` en `deposito_articulos`). Un dataset delta solo reenvía las
+filas que **cambiaron**: los equipos que ya tienen cursor nunca reciben la columna nueva
+—sus filas no cambiaron— y la pantalla muestra el campo vacío para siempre, mientras en
+la base el dato está. `DatasetDef.version` (número opcional) viaja dentro del cursor: si
+el cursor del equipo es de otra versión, el próximo sync es un **snapshot completo**, que
+reemplaza el dataset entero (R2). Un dataset sin `version` se comporta igual que antes.
+Verificado en el NuStar: cursor `d:2048:v2-…`, 2015 artículos rebajados, foto visible.
+
 ### 4.2 Outbox (escrituras)
 
 `POST /api/mobile/outbox` con `MutacionOutbox`:
@@ -557,6 +566,25 @@ cd android && gradlew assembleDebug && adb install -r app/build/outputs/apk/debu
 ```
 (el APK debug usa otra firma: desinstalar el release antes, y viceversa).
 
+### Diagnosticar un equipo YA instalado sin borrarle los datos
+```bash
+cd mobile && npm run build:apks -- --apps deposito --devtools --notas "diagnostico"
+adb install -r ..\dist-apks\deposito-v0.2.2.apk        # misma firma ⇒ conserva outbox y réplica
+adb forward tcp:9222 localabstract:webview_devtools_remote_<pid de la app>
+curl http://127.0.0.1:9222/json                        # y hablar CDP por el webSocketDebuggerUrl
+```
+`--devtools` es lo único que pone `GM_DEBUG_WEBVIEW=1`; `build-apks.mjs` la borra del
+entorno en cualquier otro build, igual que `GM_DEV_HTTP`. **Siempre recompilar e instalar
+después un release limpio** (se verifica con `cat /proc/net/unix | grep webview_devtools`:
+no debe aparecer el pid de la app). Así se leyó la réplica del NuStar para confirmar que
+`imagen_url` había llegado.
+
+**Pantalla blanca después de que Android actualiza el WebView** (visto el 22/09/2026):
+la app abre, el proceso queda al 0 % de CPU, el renderer no responde ni a CDP y el
+logcat solo muestra `cr_ChildProcessConn: Failed to establish the service connection`
+con dos `versionName` distintos de `com.google.android.webview`. **No es la app: se
+arregla reiniciando el equipo** (no hace falta borrar datos ni reinstalar).
+
 ### Cómo publicar una actualización (ciclo del mes de prueba: 4-5 releases por app)
 
 1. **Rama**: trabajar en la rama de la app (`apk-deposito`, …) partiendo de `main` al día.
@@ -800,6 +828,39 @@ recorrido Anterior/Siguiente de Modificación de artículos (calculado sobre la 
 - **Datos de artículo**: compare-and-set por campo; lo que otro cambió no se pisa y
   vuelve como rechazo explicando qué campo.
 
+### Renglón del artículo y ficha (22/09/2026, pedido del dueño tras el primer uso)
+**Problema:** la descripción iba en UNA línea a 22 px y se cortaba a los ~14 caracteres:
+"PROTECTOR ANATÓMICO S/D ROSA x20u" se leía "PROTECTOR ANAT" y no se distinguía de
+"…C/D VERDE x40u". Medido en el mock con datos del largo real (360×800):
+
+| | antes | ahora |
+|---|---|---|
+| caracteres visibles | 13–15 (de 39–54) | 36–44 |
+| alto del renglón | 105 px | 90 px |
+| renglones en pantalla | 3 | 4 |
+
+**Cómo:** descripción en DOS líneas a 17 px (`DESCRIPCION` en `ui.tsx`, line-clamp 2) y
+alto ganado en el resto: `Encabezado` 56 → 44 px y `Frescura` más fina (props `compacto`
+**opt-in** del core: chofer y vendedor quedan igual), cabecera del pedido/recepción en dos
+renglones, barra de progreso más fina y la ayuda del swipe solo mientras el pedido no se
+empezó. El catálogo real tiene mediana 33 caracteres y p90 45: entran casi todos; lo que
+no entra se lee en la ficha.
+
+**Ficha del artículo** (`pantallas/comunes/FichaArticulo.tsx`): un TOQUE en el renglón la
+abre (picking y recepción) con foto, descripción completa, SKU, marca, unidades por bulto
+y EAN. Es un overlay `?ficha=<articulo_id>`: el botón atrás la cierra sin salir de la
+pantalla, y si el operario escanea con la ficha abierta, la pantalla de cantidad REEMPLAZA
+la entrada (atrás vuelve a la lista, no a la ficha).
+- El swipe para marcar faltante no cambia: en `TarjetaSwipe`, un dedo que se movió más de
+  6 px (swipe o scroll) nunca cuenta como toque.
+- Los datos salen de la réplica (`deposito_articulos`), así que la ficha abre sin señal.
+  La FOTO es lo único que viaja por red: `articulos.imagen_url`, bucket **público**
+  `articulos-imagenes` (no vence, no hay que firmarla), la tienen ~42 % de los artículos y
+  suma ~133 KB a la réplica. Sin foto cargada, sin señal o si la URL no resuelve, la ficha
+  dice el motivo en vez de mostrar una imagen rota. **Pendiente del mes de prueba:** un
+  artículo que nunca se vio con WiFi no muestra la foto offline (el WebView solo cachea lo
+  ya visto); si molesta, habría que guardar las fotos en la réplica.
+
 ### Lector
 `useLector` en toda pantalla donde hoy se identifica un artículo. En la lista del
 pedido / recepción el gatillo abre la cantidad del renglón; **un segundo gatillo sobre
@@ -965,8 +1026,10 @@ ligada por `orden_compra_id` (hay que contarlas al limpiar datos de prueba).
    otras 3 no tienen archivo).
 3. **Devoluciones con el flujo real de chofer** (ver abajo).
 4. Gestos con el dedo (swipe, objetivos táctiles): los prueba el depósito; acá se hicieron por adb.
+   Incluye el TOQUE que abre la ficha del artículo y que el swipe siga saliendo natural.
 5. Detalles vistos en el equipo: en Buscar, con el teclado abierto, la lista de resultados queda
    chica (los botones del pie ocupan lugar); en la cola, "⇪ N sin enviar" se parte en dos líneas.
+   Resuelto el 22/09: la descripción del artículo se cortaba a los ~14 caracteres (ver arriba).
 6. Tarea aparte ya anotada: depuración de los `impreso` viejos (arriba).
 
 ### Devoluciones: FUERA del checklist contra producción (decisión del dueño, 18/09/2026)

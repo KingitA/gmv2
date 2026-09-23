@@ -84,6 +84,8 @@ export interface Articulo {
   tipo_fraccion: string | null
   cantidad_fraccion: number | null
   marca: string | null
+  /** Foto del artículo (bucket público). La tienen ~4 de cada 10 artículos. */
+  imagen_url: string | null
 }
 
 export type EstadoLinea = "pendiente" | "ok" | "faltante"

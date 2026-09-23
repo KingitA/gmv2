@@ -20,8 +20,8 @@ export const C = {
 export function Marco({ titulo, atras = true, dataset, derecha, children }: { titulo: string; atras?: boolean; dataset?: string; derecha?: ReactNode; children: ReactNode }) {
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: C.bg, color: C.text }}>
-      <Encabezado titulo={titulo} atras={atras} derecha={derecha} />
-      {dataset && <Frescura dataset={dataset} viejoTrasMin={10} />}
+      <Encabezado titulo={titulo} atras={atras} derecha={derecha} compacto />
+      {dataset && <Frescura dataset={dataset} viejoTrasMin={10} compacto />}
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "auto", position: "relative" }}>{children}</div>
       <AvisoUrgente />
     </div>
@@ -63,15 +63,24 @@ export function useAvisoEntrante(mostrar: (m: string, t?: "ok" | "err") => void)
 
 // ─── Tarjeta con swipe (deslizar ← revela la acción; tocar la confirma) ──────
 
-export function TarjetaSwipe({ children, bg, borde, accion, bloqueado }: {
+export function TarjetaSwipe({ children, bg, borde, accion, bloqueado, onAbrir }: {
   children: ReactNode; bg: string; borde: string; bloqueado?: boolean
   accion: { fondo: string; icono: string; etiqueta: string; onConfirmar: () => void }
+  /** Tocar la tarjeta (un toque, sin arrastrar) — p. ej. abrir la ficha del artículo. */
+  onAbrir?: () => void
 }) {
   const [dx, setDx] = useState(0)
   const [revelado, setRevelado] = useState(false)
-  const inicio = useRef(0)
+  const inicio = useRef({ x: 0, y: 0 })
+  // Un dedo que se movió es swipe o scroll, NUNCA un toque: así la ficha no se abre sola
+  const movido = useRef(false)
   const UMBRAL = 72
   const cerrar = () => { setRevelado(false); setDx(0) }
+  const tocar = () => {
+    if (revelado) { cerrar(); return } // con la acción a la vista, el toque la cierra (como antes)
+    if (movido.current) return
+    onAbrir?.()
+  }
   return (
     <div style={{ position: "relative", overflow: "hidden", borderRadius: 16, marginBottom: 8 }}>
       <button
@@ -82,15 +91,19 @@ export function TarjetaSwipe({ children, bg, borde, accion, bloqueado }: {
         <span style={{ color: "#fff", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em" }}>{accion.etiqueta}</span>
       </button>
       <div
-        onClick={() => revelado && cerrar()}
-        onTouchStart={(e) => { if (!revelado && !bloqueado) inicio.current = e.touches[0]!.clientX }}
+        onClick={tocar}
+        onTouchStart={(e) => {
+          movido.current = false
+          inicio.current = { x: e.touches[0]!.clientX, y: e.touches[0]!.clientY }
+        }}
         onTouchMove={(e) => {
+          const d = inicio.current.x - e.touches[0]!.clientX
+          if (Math.abs(d) > 6 || Math.abs(inicio.current.y - e.touches[0]!.clientY) > 6) movido.current = true
           if (revelado || bloqueado) return
-          const d = inicio.current - e.touches[0]!.clientX
           setDx(d > 0 ? Math.min(d, UMBRAL + 10) : 0)
         }}
         onTouchEnd={() => { if (dx >= UMBRAL) { setRevelado(true); setDx(UMBRAL) } else cerrar() }}
-        style={{ position: "relative", background: bg, border: `1.5px solid ${borde}`, borderRadius: 16, padding: "20px 16px", display: "flex", alignItems: "center", gap: 14, transform: `translateX(-${revelado ? UMBRAL : dx}px)` }}
+        style={{ position: "relative", background: bg, border: `1.5px solid ${borde}`, borderRadius: 16, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, transform: `translateX(-${revelado ? UMBRAL : dx}px)`, cursor: onAbrir ? "pointer" : undefined }}
       >
         {children}
       </div>
@@ -100,18 +113,39 @@ export function TarjetaSwipe({ children, bg, borde, accion, bloqueado }: {
 
 // ─── Piezas comunes de picking y recepción ───────────────────────────────────
 
+/**
+ * Descripción del artículo en un renglón: hasta DOS líneas y después recorta.
+ * Con una sola línea a 22 px se leía "PROTECTOR ANAT…" de "PROTECTOR ANATÓMICO S/D
+ * ROSA x20u" y no se distinguían las variantes (x4u / x20u / x40u, c/d o s/d).
+ */
+export const DESCRIPCION: CSSProperties = {
+  color: C.text, fontWeight: 700, fontSize: 17, lineHeight: 1.22,
+  display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2,
+  overflow: "hidden", overflowWrap: "anywhere",
+}
+
+/** Título de un grupo de renglones ("Pendientes (4)"). */
+export const TITULO_GRUPO: CSSProperties = {
+  fontSize: 12, fontWeight: 700, color: C.light, textTransform: "uppercase", letterSpacing: "0.1em", padding: "2px 2px 8px",
+}
+
+/** Datos chicos bajo la descripción (SKU, proveedor, badges): una sola línea. */
+export const META: CSSProperties = {
+  display: "flex", gap: 7, alignItems: "center", marginTop: 3, overflow: "hidden", whiteSpace: "nowrap",
+}
+
 export function BarraProgreso({ resueltos, total, pendientes, ok, faltantes }: { resueltos: number; total: number; pendientes: number; ok: number; faltantes: number }) {
   const pct = total > 0 ? Math.round((resueltos / total) * 100) : 0
   return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: C.sub, marginBottom: 6 }}>
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: C.sub, marginBottom: 4 }}>
         <span><span style={{ color: C.green, fontWeight: 700 }}>{resueltos}</span> de {total} resueltos</span>
         <span style={{ fontWeight: 800, color: pct === 100 ? C.green : C.text, fontSize: 14 }}>{pct}%</span>
       </div>
-      <div style={{ background: C.border, borderRadius: 999, height: 8 }}>
+      <div style={{ background: C.border, borderRadius: 999, height: 6 }}>
         <div style={{ height: "100%", background: pct === 100 ? C.green : C.orange, borderRadius: 999, width: `${pct}%` }} />
       </div>
-      <Contadores pendientes={pendientes} ok={ok} faltantes={faltantes} estilo={{ marginTop: 7, fontSize: 13, gap: 18 }} />
+      <Contadores pendientes={pendientes} ok={ok} faltantes={faltantes} estilo={{ marginTop: 5, fontSize: 13, gap: 18 }} />
     </div>
   )
 }

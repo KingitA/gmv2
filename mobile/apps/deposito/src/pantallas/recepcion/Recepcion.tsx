@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { ErrorHttp, esQrOUrl, lecturaError, lecturaOk, useLector, useNoEnviados, useOnline, useRuntime } from "@gm/core"
 import { DS } from "../../datasets"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
 import { useArticulos, useCatalogos, useEncolar, useRecepcion, useRecepciones, useRefrescarAlEntrar } from "../../datos/hooks"
 import type { LineaRecepcion, RecepcionVista } from "../../datos/overlay"
-import { BarraProgreso, C, Contadores, dejarAviso, Marco, Rechazos, SinEnviar, TarjetaSwipe, useAvisoEntrante, useToast, useVolver, Vacio } from "../../ui"
+import { BarraProgreso, C, Contadores, dejarAviso, DESCRIPCION, Marco, META, Rechazos, SinEnviar, TarjetaSwipe, TITULO_GRUPO, useAvisoEntrante, useToast, useVolver, Vacio } from "../../ui"
+import { FichaArticulo, useAbrirFicha, useFichaAbierta, type DatosFicha } from "../comunes/FichaArticulo"
 import { PanelBuscar } from "../comunes/Buscar"
 import { PanelCantidad } from "../comunes/Cantidad"
 
@@ -152,32 +153,39 @@ function OrdenNoDisponible({ cargando, finalizada }: { cargando: boolean; finali
   )
 }
 
-function Linea({ l, accion }: { l: LineaRecepcion; accion: { fondo: string; icono: string; etiqueta: string; onConfirmar: () => void } }) {
+/** Renglón de la recepción: mismo criterio que el picking (descripción en 2 líneas, toque = ficha). */
+function Linea({ l, accion, onAbrir }: { l: LineaRecepcion; accion: { fondo: string; icono: string; etiqueta: string; onConfirmar: () => void }; onAbrir?: () => void }) {
   const ok = l.estado_linea === "ok"
   const faltante = l.estado_linea === "faltante"
   return (
-    <TarjetaSwipe bg={ok ? C.greenL : faltante ? C.redL : C.white} borde={ok ? C.greenB : faltante ? C.redB : C.border} accion={accion}>
-      <div style={{ width: 13, height: 13, borderRadius: "50%", background: ok ? C.green : faltante ? C.red : "#fbbf24", flexShrink: 0 }} />
+    <TarjetaSwipe bg={ok ? C.greenL : faltante ? C.redL : C.white} borde={ok ? C.greenB : faltante ? C.redB : C.border} accion={accion} onAbrir={onAbrir}>
+      <div style={{ width: 10, height: 10, borderRadius: "50%", background: ok ? C.green : faltante ? C.red : "#fbbf24", flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ color: C.text, fontWeight: 700, fontSize: 22, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={DESCRIPCION}>
           {l.fuera_de_oc ? "⚠ " : ""}{l.articulo?.descripcion || l.articulo_id}{l.fuera_de_oc ? " (NO PEDIDO)" : ""}
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
-          <span style={{ color: C.light, fontSize: 15, fontFamily: "monospace" }}>{l.articulo?.sku}</span>
+        <div style={META}>
+          <span style={{ color: C.light, fontSize: 13, fontFamily: "monospace", flexShrink: 0 }}>{l.articulo?.sku}</span>
           {l.sinEnviar && <SinEnviar />}
         </div>
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         {ok ? (
-          <><div style={{ color: C.green, fontWeight: 800, fontSize: 27 }}>{l.cantidad_fisica}</div><div style={{ color: C.light, fontSize: 15 }}>de {l.cantidad_oc}</div></>
+          <><div style={{ color: C.green, fontWeight: 800, fontSize: 24, lineHeight: 1.1 }}>{l.cantidad_fisica}</div><div style={{ color: C.light, fontSize: 12 }}>de {l.cantidad_oc}</div></>
         ) : faltante ? (
-          <div style={{ color: C.red, fontWeight: 700, fontSize: 16 }}>FALTANTE</div>
+          <div style={{ color: C.red, fontWeight: 800, fontSize: 13 }}>FALTANTE</div>
         ) : (
-          <><div style={{ color: C.text, fontWeight: 800, fontSize: 27 }}>{l.cantidad_oc}</div><div style={{ color: C.light, fontSize: 15 }}>esperadas</div></>
+          <><div style={{ color: C.text, fontWeight: 800, fontSize: 24, lineHeight: 1.1 }}>{l.cantidad_oc}</div><div style={{ color: C.light, fontSize: 12 }}>esperadas</div></>
         )}
       </div>
     </TarjetaSwipe>
   )
+}
+
+/** Datos para la ficha de un artículo que no esté en el catálogo replicado (p. ej. fuera de OC). */
+const respaldoDe = (r: RecepcionVista | null) => (articuloId: string): DatosFicha | undefined => {
+  const a = r?.lineas.find((l) => l.articulo_id === articuloId)?.articulo
+  return a ? { id: articuloId, descripcion: a.descripcion, sku: a.sku, unidades_por_bulto: a.unidades_por_bulto, ean13: a.ean13 } : undefined
 }
 
 function useFinalizarRecepcion(r: RecepcionVista | null, mostrar: Mostrar) {
@@ -279,9 +287,13 @@ export function Recepcion() {
   useAvisoEntrante(mostrar)
   const { contar, resolverCodigo, abrirItem } = useAccionesRecepcion(r, mostrar)
   const finalizar = useFinalizarRecepcion(r, mostrar)
+  const abrirFicha = useAbrirFicha()
+  const fichaAbierta = useFichaAbierta()
+  const respaldoFicha = useMemo(() => respaldoDe(r), [r])
   const online = useOnline()
   const conBultos = !!r && !r.cierrePendiente && !r.conformidad
-  useLector({ enabled: !!r && !conBultos, onCodigo: (c) => { const a = resolverCodigo(c); if (a) abrirItem(a) } })
+  // Con la ficha abierta, la cantidad la reemplaza (atrás vuelve a la lista, no a la ficha)
+  useLector({ enabled: !!r && !conBultos, onCodigo: (c) => { const a = resolverCodigo(c); if (a) abrirItem(a, { replace: fichaAbierta }) } })
 
   if (!r || r.cierrePendiente) return <Marco titulo="Recibir Mercadería" dataset={DATASET}>{toast}<OrdenNoDisponible cargando={cargando} finalizada={r?.cierrePendiente} /></Marco>
   if (conBultos) return <Marco titulo="Recibir Mercadería" dataset={DATASET}>{toast}<ControlBultos r={r} mostrar={mostrar} /></Marco>
@@ -303,11 +315,11 @@ export function Recepcion() {
     <Marco titulo="Recibir Mercadería" dataset={DATASET}>
       {toast}
       <Rechazos items={r.rechazos} ayuda="La lista ya muestra el estado real del servidor." />
-      <div style={{ background: C.white, borderBottom: `1px solid ${C.border}`, padding: "16px 18px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontSize: 19, fontWeight: 800, color: C.text }}>{r.orden.numero_orden || "Recepción"}</div>
-            <div style={{ color: C.green, fontWeight: 600, fontSize: 14, marginTop: 3 }}>🏭 {r.orden.proveedores?.nombre}</div>
+      <div style={{ background: C.white, borderBottom: `1px solid ${C.border}`, padding: "10px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: C.text }}>{r.orden.numero_orden || "Recepción"}</div>
+            <div style={{ color: C.green, fontWeight: 600, fontSize: 13, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🏭 {r.orden.proveedores?.nombre}</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
             <button onClick={irDocumentos} style={{ background: "#eff6ff", border: "1.5px solid #bfdbfe", borderRadius: 14, padding: "8px 14px", minHeight: 44, display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: "#1d4ed8", opacity: online ? 1 : 0.5 }}>
@@ -323,28 +335,29 @@ export function Recepcion() {
         <BarraProgreso resueltos={s.ok + s.faltantes} total={s.total} pendientes={s.pendientes} ok={s.ok} faltantes={s.faltantes} />
       </div>
 
-      {pendientes.length > 0 && (
-        <div style={{ background: C.greenL, borderBottom: `1px solid ${C.greenB}`, padding: "10px 18px", display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 16 }}>👈</span>
-          <span style={{ fontSize: 13, color: C.green, fontWeight: 600 }}>Swipeá para marcar faltante · Escaneá para registrar cantidad</span>
+      {pendientes.length > 0 && s.ok + s.faltantes === 0 && (
+        <div style={{ background: C.greenL, borderBottom: `1px solid ${C.greenB}`, padding: "5px 14px", display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 13 }}>👈</span>
+          <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>Swipeá para faltante · Escaneá para cantidad · Tocá para ver la ficha</span>
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: "auto", padding: "12px 14px 0" }}>
+      <div style={{ flex: 1, overflow: "auto", padding: "10px 14px 0" }}>
         {pendientes.length > 0 && (
           <>
-            <div style={{ fontSize: 12, fontWeight: 700, color: C.light, textTransform: "uppercase", letterSpacing: "0.1em", padding: "2px 2px 10px" }}>Pendientes ({pendientes.length})</div>
-            {pendientes.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} />)}
+            <div style={TITULO_GRUPO}>Pendientes ({pendientes.length})</div>
+            {pendientes.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} onAbrir={() => abrirFicha(l.articulo_id)} />)}
           </>
         )}
         {recibidos.length > 0 && (
           <>
-            <div style={{ fontSize: 12, fontWeight: 700, color: C.light, textTransform: "uppercase", letterSpacing: "0.1em", padding: "8px 2px 10px" }}>Recibidos ({recibidos.length})</div>
-            {recibidos.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} />)}
+            <div style={{ ...TITULO_GRUPO, paddingTop: 8 }}>Recibidos ({recibidos.length})</div>
+            {recibidos.map((l) => <Linea key={l.articulo_id} l={l} accion={aFaltante(l)} onAbrir={() => abrirFicha(l.articulo_id)} />)}
           </>
         )}
         <div style={{ height: 16 }} />
       </div>
+      <FichaArticulo respaldo={respaldoFicha} />
 
       <div style={{ background: C.white, borderTop: `1px solid ${C.border}`, padding: "14px 16px", display: "flex", gap: 12 }}>
         <button onClick={() => navigate(`/recibir/${r.orden.id}/buscar`)} style={{ flex: 2, background: C.white, color: C.text, fontWeight: 700, fontSize: 18, padding: "19px 0", borderRadius: 18, border: `1.5px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
@@ -456,6 +469,8 @@ export function RecepcionFaltantes() {
   const { toast, mostrar } = useToast()
   const { contar, resolverCodigo, abrirItem } = useAccionesRecepcion(r, mostrar)
   const volver = useVolver()
+  const abrirFicha = useAbrirFicha()
+  const respaldoFicha = useMemo(() => respaldoDe(r), [r])
   useLector({ enabled: !!r, onCodigo: (c) => { const a = resolverCodigo(c); if (a) abrirItem(a, { replace: true }) } })
   if (!r || r.cierrePendiente) return <Marco titulo="Faltantes">{toast}<OrdenNoDisponible cargando={cargando} finalizada={r?.cierrePendiente} /></Marco>
   const faltantes = r.lineas.filter((l) => l.estado_linea === "faltante")
@@ -469,10 +484,11 @@ export function RecepcionFaltantes() {
         </div>
         {faltantes.length === 0 && <div style={{ textAlign: "center", padding: "40px 0", color: C.light, fontSize: 16 }}>No hay faltantes</div>}
         {faltantes.map((l) => (
-          <Linea key={l.articulo_id} l={l} accion={{ fondo: C.green, icono: "↩", etiqueta: "Pendiente", onConfirmar: () => void contar(l.articulo_id, l.articulo?.descripcion ?? "artículo", -1).then(() => mostrar("Devuelto a pendientes")) }} />
+          <Linea key={l.articulo_id} l={l} onAbrir={() => abrirFicha(l.articulo_id)} accion={{ fondo: C.green, icono: "↩", etiqueta: "Pendiente", onConfirmar: () => void contar(l.articulo_id, l.articulo?.descripcion ?? "artículo", -1).then(() => mostrar("Devuelto a pendientes")) }} />
         ))}
         <button onClick={() => volver()} style={{ width: "100%", background: C.white, color: C.text, fontWeight: 700, fontSize: 16, padding: 17, borderRadius: 18, border: `1.5px solid ${C.border}`, marginTop: 12 }}>← Volver a la lista</button>
       </div>
+      <FichaArticulo respaldo={respaldoFicha} />
     </Marco>
   )
 }
