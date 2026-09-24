@@ -1510,6 +1510,29 @@ ficha con el sheet): atrás vuelve al viaje.
 | Atrás: inicio → viaje → ficha → cobrar (idx 1-2-3); atrás con monto cargado ⇒ hoja "¿Descartar el cobro?"; Seguir acá conserva el monto; Descartar ⇒ ficha ⇒ viaje ⇒ inicio | ✅ |
 | `npm test` (128) · `npm run typecheck:movil` | ✅ en verde |
 
+### Correcciones tras la prueba del dueño en la preview (24/09/2026, misma rama)
+1. **Cheque duplicado = rechazo definitivo con mensaje claro.** La unicidad de `cheques` (SQLSTATE 23505)
+   devolvía 500 con el texto crudo de Postgres. Ahora `errorDeRpcCobranza` / `crearCobranza`
+   (`lib/cobranzas/errores.ts`, `crear.ts`) lo convierten en `ErrorReglaCobranza` (422 `regla_negocio`,
+   no reintentable) con el texto "El cheque N° X (Banco) ya está registrado: está en el cobro del
+   dd/mm/aaaa a CLIENTE (estado)…". Cubre las 4 superficies: chofer web y vendedor web (sus routes ya
+   mapean `ErrorReglaCobranza` → 422) y las dos apps (`llamarRuta`: 4xx ⇒ rechazado, nunca traba el FIFO).
+   Tests: `test/cheques-duplicado-fechas.test.ts`.
+2. **Fechas dd/mm/aaaa.** `<input type="date">` pintaba mm/dd/aaaa según el idioma del navegador. Reglas
+   puras en `lib/cheques/validar.ts` (`fechaIsoAAR`, `autoFormatoFechaAR`, `fechaARAIso`); web: `DateInputAR`
+   en el cobro del chofer y del vendedor; apps: `FechaInput` (chofer y vendedor). Auditoría de solo lectura
+   de los 436 cheques: ningún cheque de terceros con día/mes cruzados; 2 cheques PROPIOS de julio (CREDICOOP
+   N° 1 y N° 3) tienen emisión posterior al vencimiento (no vienen de este flujo; informados al dueño).
+3. **Navegación post-cobro.** Cobrar/devolución desde la hoja de ruta vuelve a la hoja de ruta, posicionada en
+   la parada (`CLAVE_VOLVER_A_PARADA`); desde la ficha vuelve a la ficha. Convención §8: atrás = pantalla
+   anterior; el formulario y el diálogo de diferencia no quedan en el historial.
+4. **Cheque "preso"** (registrado en un cobro: no se elimina y la unicidad impide re-ingresarlo): propuesta
+   de circuito enviada al dueño antes de implementar (ver la entrega del 24/09); no se tocó código.
+Limpieza de las pruebas del 24/09 (viaje OLAVARRIA · 25/09) + el cobro con el cheque del OCR del 23/09:
+borrado por id con guardas y compare-and-set de saldos (billetera y caja), foto antes/después; el viaje
+volvió a `programado` con sus 3 paradas pendientes. NO se tocó el pago de oficina 499f4c06 (confirmado:
+libro mayor, recibo, kardex; zona de caja de la otra sesión).
+
 ### Puesta en marcha (pendiente del dueño)
 1. Merge de `apk-chofer` a `main` con OK del dueño (toca `app/api/chofer/*`, `lib/viajes/*`, `lib/mobile/*`) y deploy. Sin migraciones.
 2. Instalar `dist-apks/chofer-v0.2.0.apk` encima del v0.1.1 del NuStar (`adb install -r`, misma firma).
