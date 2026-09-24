@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 import { ChipBcra, ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
 import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
 import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
@@ -917,7 +918,7 @@ export default function VendedorCobrarPage() {
                       <>
                         <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className={clsOcr(m, "banco", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
                         <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={clsOcr(m, "numero_cheque", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
-                        <input type="date" value={m.fecha_cheque} onChange={(e) => updateMetodo(idx, { fecha_cheque: e.target.value })} className={clsOcr(m, "fecha_cheque", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
+                        <DateInputAR value={m.fecha_cheque} onChange={(v) => updateMetodo(idx, { fecha_cheque: v })} className={clsOcr(m, "fecha_cheque", "h-10 rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
                         <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className={clsOcr(m, "cuit_emisor", `rounded-lg border px-3 py-2 text-sm ${m.cuit_emisor && !cuitValido(m.cuit_emisor) ? "border-red-400" : "border-gray-300"}`)} />
                         {!cuitValido(m.cuit_emisor) && (
                           <p className="col-span-2 text-xs font-medium text-amber-700">

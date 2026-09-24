@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useBlocker, useLocation, useNavigate, useSearchParams } from "react-router"
 import { decidirAtras, indiceHistorial, useItemsOutbox, useOnline, useRuntime, type ItemOutbox } from "@gm/core"
-import { avisosBcraPendientes, resultadoSinCuit, type ConsultaBcraResultado } from "@gm/cheques"
+import { autoFormatoFechaAR, avisosBcraPendientes, fechaARAIso, fechaIsoAAR, resultadoSinCuit, type ConsultaBcraResultado } from "@gm/cheques"
 import { Encabezado, Frescura, Hoja } from "@gm/core/ui"
 
 // UI compartida de la app Chofer. Mismos textos, colores y jerarquía que el módulo web
@@ -329,6 +329,26 @@ export function useBloqueoSalida(sucio: boolean, textos: { titulo: string; detal
 }
 
 // ─── Campos ──────────────────────────────────────────────────────────────────
+
+// ─── Fecha dd/mm/aaaa (= DateInputAR de la web) ───────────────────────────────
+
+/** Fecha de un cheque como la tipea y lee todo el sistema: dd/mm/aaaa. `valor` y `onCambio` en ISO (aaaa-mm-dd o ""). */
+export function FechaInput({ valor, onCambio, className = "", placeholder = "DD/MM/AAAA" }: { valor: string; onCambio: (iso: string) => void; className?: string; placeholder?: string }) {
+  const [texto, setTexto] = useState(() => fechaIsoAAR(valor))
+  const emitido = useRef(valor)
+  // Cambio que vino de AFUERA (el OCR completó la fecha): adoptar. Lo propio no se pisa a medio tipear.
+  useEffect(() => {
+    if (valor !== emitido.current) { emitido.current = valor; setTexto(fechaIsoAAR(valor)) }
+  }, [valor])
+  return (
+    <input
+      type="text" inputMode="numeric" placeholder={placeholder} maxLength={10} value={texto}
+      onChange={(e) => { const f = autoFormatoFechaAR(e.target.value); setTexto(f); const iso = fechaARAIso(f); emitido.current = iso; onCambio(iso) }}
+      className={className}
+    />
+  )
+}
+
 
 /** Monto en pesos: acepta coma o punto; confirma al salir o con Enter. */
 export function MontoInput({ valor, onCambio, className = "", placeholder = "0" }: { valor: number; onCambio: (n: number) => void; className?: string; placeholder?: string }) {

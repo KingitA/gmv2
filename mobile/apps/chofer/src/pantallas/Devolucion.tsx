@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
-import { useOnline, useRuntime } from "@gm/core"
+import { indiceHistorial, useOnline, useRuntime } from "@gm/core"
 import { DS, esEnCurso, MOTIVOS_DEVOLUCION, type Articulo, type ItemDevolucion, type OpDevolucion } from "../datasets"
 import { guardarBorrador, useBorradorDevolucion } from "../datos/borrador-devolucion"
 import { buscarArticulos, useArticulos, useClienteViaje, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
 import { dejarAviso, formatCurrency, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
+import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
 // Devolución en el reparto (= el sheet "Registrar Devolución" de la ficha web, ahora ruta
 // propia). Artículos del pedido entran deslizando el renglón en la ficha; cualquier otro
@@ -36,9 +37,12 @@ export function Devolucion() {
     detalle: `Tenés ${items.length} artículo(s) cargados que todavía no se registraron.`,
     confirmar: "Descartar",
   })
-  // Registrada: salir a la ficha sin dejar el formulario en el historial
+  // Registrada: volver a donde se entró (ficha o parada del viaje) sin dejar el formulario en el historial
   useEffect(() => {
-    if (listo) navigate(`/viajes/${viajeId}/clientes/${clienteId}`, { replace: true })
+    if (!listo) return
+    try { sessionStorage.setItem(CLAVE_VOLVER_A_PARADA, clienteId) } catch { /* noop */ }
+    if (indiceHistorial() >= 1) navigate(-1)
+    else navigate(`/viajes/${viajeId}/clientes/${clienteId}`, { replace: true })
   }, [listo, navigate, viajeId, clienteId])
 
   const resultados = useMemo(() => (q.trim().length >= 2 ? buscarArticulos(articulos, q, 8) : []), [articulos, q])

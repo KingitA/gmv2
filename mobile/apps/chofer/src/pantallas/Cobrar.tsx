@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router"
-import { useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
+import { indiceHistorial, useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
 import {
   aplicarOcr, cuitValido, editarCampo, faltantes, filaDesdeFoto, filaVacia, marcarFalloOcr, marcarFotoAdjunta, marcarSinDatos, resultadoConDatos, urlsDeFotos,
   type CampoCheque, type ConsultaBcraPayload, type FilaCheque, type ResultadoOcr,
@@ -8,7 +8,7 @@ import {
 import { blobABase64, comprimirFoto, urlLocal } from "@gm/cheques/foto"
 import { DS, ESTADOS_COBRABLES, nombreCliente, type ClienteBusqueda, type ComprobanteCobro, type MetodoPayload, type OpCobrar, type PedidoCobro } from "../datasets"
 import { buscarClientes, useClienteViaje, useClientesTodos, useCuentasBancarias, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
-import { AvisosBcra, dejarAviso, dejarAvisoSinCuit, formatCurrency, formatDateAR, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
+import { AvisosBcra, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 
 // Cobro en el reparto (= el sheet "Registrar Cobro" de la ficha web, ahora ruta propia).
 //  · Pedidos / comprobantes a cobrar (incluye anticipos a pedidos sin facturar): lo que
@@ -37,6 +37,8 @@ const metodoPayload = (m: MetodoPago): MetodoPayload =>
     : { tipo: "efectivo", monto: m.monto }
 
 const PEDIDO_PREFIX = "pedido:"
+/** La hoja de ruta se posiciona en esta parada al volver (sessionStorage). */
+export const CLAVE_VOLVER_A_PARADA = "gm.chofer.volverAParada"
 /** = topeAjuste de lib/cobranzas/ajuste.ts: máximo ajuste admitido (1% de lo imputado). */
 const topeAjuste = (total: number) => round2(Math.max(0, Number(total) || 0) * 0.01)
 /** Saldo cobrable HOY: el del comprobante menos lo que ya está en un cobro hecho acá sin enviar. */
@@ -169,17 +171,15 @@ export function Cobrar() {
   useEffect(() => {
     if (dialogo.abierto && (dialogoDiff === null || Math.abs(diff) <= 0.01) && !guardandoRef.current) dialogo.cerrar()
   }, [dialogo, dialogoDiff, diff])
-  // Registrado: a la ficha, sin dejar el formulario ni el diálogo en el historial
+  // Registrado: volver a donde se entró (la ficha, o la parada de la hoja de ruta si se cobró desde
+  // el viaje), sin dejar el formulario ni el diálogo en el historial. Convención §8: atrás = la
+  // pantalla anterior. Abierto sin historial ⇒ padre lógico (la ficha), con replace.
   useEffect(() => {
     if (!listo) return
-    const ir = () => navigate(`/viajes/${viajeId}/clientes/${clienteId}`, { replace: true })
-    if (dialogo.abierto && (location.state as { overlay?: boolean } | null)?.overlay) {
-      let hecho = false
-      const una = () => { if (!hecho) { hecho = true; ir() } }
-      window.addEventListener("popstate", () => setTimeout(una, 0), { once: true })
-      setTimeout(una, 800)
-      navigate(-1)
-    } else ir()
+    try { sessionStorage.setItem(CLAVE_VOLVER_A_PARADA, clienteId) } catch { /* noop */ }
+    const pasos = dialogo.abierto && (location.state as { overlay?: boolean } | null)?.overlay ? 2 : 1
+    if (indiceHistorial() >= pasos) navigate(-pasos)
+    else navigate(`/viajes/${viajeId}/clientes/${clienteId}`, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listo])
 
@@ -632,11 +632,11 @@ function MetodoPagoCard({ metodo, cuentas, onChange, onRemove, onFoto }: {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="mb-1 block text-xs text-gray-400">Fecha emisión</label>
-                  <input type="date" value={fila.fecha_emision} onChange={(e) => onChange({ fecha_emision: e.target.value })} className={clsOcr(fila, "fecha_emision", "min-h-11 w-full rounded-xl border-2 px-3 py-2 border-gray-200")} />
+                  <FechaInput valor={fila.fecha_emision} onCambio={(v) => onChange({ fecha_emision: v })} className={clsOcr(fila, "fecha_emision", "min-h-11 w-full rounded-xl border-2 px-3 py-2 border-gray-200")} />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-gray-400">Fecha vencimiento</label>
-                  <input type="date" value={fila.fecha_cheque} onChange={(e) => onChange({ fecha_cheque: e.target.value })} className={clsOcr(fila, "fecha_cheque", "min-h-11 w-full rounded-xl border-2 px-3 py-2 border-gray-200")} />
+                  <FechaInput valor={fila.fecha_cheque} onCambio={(v) => onChange({ fecha_cheque: v })} className={clsOcr(fila, "fecha_cheque", "min-h-11 w-full rounded-xl border-2 px-3 py-2 border-gray-200")} />
                 </div>
               </div>
               <div>

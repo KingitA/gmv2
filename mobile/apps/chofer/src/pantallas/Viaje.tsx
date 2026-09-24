@@ -7,6 +7,7 @@ import { paradasSinResolver, type ParadaVista } from "../datos/overlay"
 import { rechazosDe, useDescargaViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, HojaConfirmar, Linea, Pantalla, Rechazos, SinDescargar, SinEnviar, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
+import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
 // Hoja de ruta del chofer (= app/chofer/[viajeId]/page.tsx): paradas en el orden que armó
 // oficina, con su instrucción; en cada parada cobrar, devolución y el resultado de la
@@ -67,6 +68,16 @@ export function Viaje() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rendir.abierto])
+
+  // Al volver de Cobrar / Devolución, la hoja de ruta se posiciona en la parada que se estaba atendiendo
+  const posicionado = useRef(false)
+  useEffect(() => {
+    if (!v || posicionado.current) return
+    posicionado.current = true
+    let cid: string | null = null
+    try { cid = sessionStorage.getItem(CLAVE_VOLVER_A_PARADA); if (cid) sessionStorage.removeItem(CLAVE_VOLVER_A_PARADA) } catch { /* noop */ }
+    if (cid) setTimeout(() => document.getElementById(`parada-${cid}`)?.scrollIntoView({ block: "start" }), 50)
+  }, [v])
 
   // Abrir el viaje lo inicia (una sola vez por apertura del equipo)
   const iniciado = useRef(false)
@@ -162,6 +173,7 @@ export function Viaje() {
     return (
       <div
         key={p.id}
+        id={`parada-${p.cliente_id}`}
         className={`w-full rounded-2xl border p-4 shadow-sm ${gris ? "border-gray-200 bg-gray-100 opacity-80" : p.bloquear_entrega ? "border-2 border-red-400 bg-white" : "border-gray-200 bg-white"}`}
       >
         <button className="flex w-full items-start gap-3 text-left" onClick={() => navigate(`/viajes/${viajeId}/clientes/${p.cliente_id}`)}>

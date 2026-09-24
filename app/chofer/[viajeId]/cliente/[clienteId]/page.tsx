@@ -6,6 +6,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
@@ -1028,11 +1029,11 @@ function MetodoPagoCard({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Fecha emisión</label>
-                  <input type="date" value={fila.fecha_emision} onChange={(e) => onChange({ fecha_emision: e.target.value })} className={clsOcr(fila, "fecha_emision", "w-full border-2 rounded-xl px-3 py-2 border-gray-200")} />
+                  <DateInputAR value={fila.fecha_emision} onChange={(v) => onChange({ fecha_emision: v })} className={clsOcr(fila, "fecha_emision", "h-11 w-full rounded-xl border-2 px-3 py-2 border-gray-200 text-base")} />
                 </div>
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Fecha vencimiento</label>
-                  <input type="date" value={fila.fecha_cheque} onChange={(e) => onChange({ fecha_cheque: e.target.value })} className={clsOcr(fila, "fecha_cheque", "w-full border-2 rounded-xl px-3 py-2 border-gray-200")} />
+                  <DateInputAR value={fila.fecha_cheque} onChange={(v) => onChange({ fecha_cheque: v })} className={clsOcr(fila, "fecha_cheque", "h-11 w-full rounded-xl border-2 px-3 py-2 border-gray-200 text-base")} />
                 </div>
               </div>
               <div>

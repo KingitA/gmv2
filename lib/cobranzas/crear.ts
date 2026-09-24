@@ -1,4 +1,4 @@
-import { errorDeRpcCobranza } from "./errores"
+import { chequeDuplicadoDe, ErrorReglaCobranza, errorDeRpcCobranza, mensajeChequeDuplicado } from "./errores"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 /**
@@ -78,9 +78,46 @@ export async function crearCobranza(
   params: CrearCobranzaParams,
 ): Promise<{ pago_id: string; dedup: boolean }> {
   const { data, error } = await supabase.rpc("cobranza_crear", { p_payload: params })
-  // Regla de negocio (RAISE de la RPC) ⇒ ErrorReglaCobranza: definitivo, no reintentable
-  if (error) throw errorDeRpcCobranza("cobranza_crear", error)
+  if (error) {
+    // Cheque ya registrado (unicidad de `cheques`): definitivo, y con la referencia al
+    // cobro/cliente donde está para que quien cobra sepa qué pasó.
+    const dup = chequeDuplicadoDe(error)
+    if (dup) throw new ErrorReglaCobranza(await describirChequeDuplicado(supabase, params, dup))
+    // Regla de negocio (RAISE de la RPC) ⇒ ErrorReglaCobranza: definitivo, no reintentable
+    throw errorDeRpcCobranza("cobranza_crear", error)
+  }
   return { pago_id: data.pago_id as string, dedup: Boolean(data.dedup) }
+}
+
+/**
+ * Busca el cheque que chocó (por la clave del índice o, si Postgres no la informó, por los
+ * cheques del cobro) y el cobro/cliente donde está. Nunca lanza: si no se puede averiguar,
+ * el mensaje va sin referencia.
+ */
+async function describirChequeDuplicado(supabase: SupabaseClient, params: CrearCobranzaParams, clave: Record<string, string>): Promise<string> {
+  try {
+    const candidatos = clave.numero || clave.numero_cheque
+      ? [{ numero: clave.numero || clave.numero_cheque!, banco: clave.banco }]
+      : params.detalles.flatMap((d) => [...(d.cheque?.numero ? [{ numero: d.cheque.numero, banco: d.cheque.banco || undefined }] : []), ...(d.deposito_items || []).flatMap((i) => (i.cheque?.numero ? [{ numero: i.cheque.numero, banco: i.cheque.banco || undefined }] : []))])
+    for (const c of candidatos) {
+      let q = supabase.from("cheques").select("id, banco, numero, estado, created_at").eq("numero", c.numero).order("created_at", { ascending: false }).limit(5)
+      if (c.banco) q = q.ilike("banco", c.banco)
+      const { data: cheques } = await q
+      const cheque = cheques?.[0]
+      if (!cheque) continue
+      const { data: det } = await supabase.from("pagos_detalle").select("pago_id").eq("cheque_id", cheque.id).limit(1).maybeSingle()
+      let donde: { fecha?: string | null; cliente?: string | null; estado?: string | null } | null = null
+      if (det?.pago_id) {
+        const { data: pago } = await supabase.from("pagos_clientes").select("fecha_pago, estado, clientes(nombre, razon_social)").eq("id", det.pago_id).maybeSingle()
+        const cli: any = (pago as any)?.clientes
+        donde = pago ? { fecha: (pago as any).fecha_pago, estado: (pago as any).estado, cliente: cli?.razon_social || cli?.nombre || null } : null
+      }
+      return mensajeChequeDuplicado({ numero: cheque.numero, banco: cheque.banco || c.banco || "" }, donde)
+    }
+  } catch (e: any) {
+    console.error("[cobranzas] describir cheque duplicado:", e?.message)
+  }
+  return mensajeChequeDuplicado(clave)
 }
 
 /**
