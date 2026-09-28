@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { NuevaLocalidadSheet } from "@/components/vendedor/NuevaLocalidadSheet"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { useAvisoInline } from "@/components/pagos/aviso-inline"
 
 interface Comprobante {
   id: string
@@ -95,6 +96,8 @@ export default function VendedorClienteFichaPage() {
   const [data, setData] = useState<Ficha | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // "Cobro registrado" que dejó la pantalla de cobrar
+  const { Aviso } = useAvisoInline({ entrante: true })
   const [reasignando, setReasignando] = useState(false)
   const [editando, setEditando] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
@@ -308,6 +311,7 @@ export default function VendedorClienteFichaPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {Aviso}
       <header className="bg-emerald-700 text-white px-5 py-4 sticky top-0 z-10 shadow-md flex items-center gap-3">
         <button onClick={() => router.push("/vendedor/clientes")} className="text-2xl leading-none px-1">
           ←

@@ -30,6 +30,7 @@ import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
+import { filtrarYaBonificados } from "@/lib/comprobantes/ya-bonificados"
 
 const DESCUENTO_CONTADO_PCT = 10
 const IVA_PCT = 0.21
@@ -129,54 +130,8 @@ async function reservarNumero(
   throw new Error(`No se pudo reservar numeración para ${tipo} ${puntoVenta} (concurrencia)`)
 }
 
-/**
- * Filtra los comprobantes que YA tienen una bonificación 10% viva, para que
- * llamar dos veces a la generación jamás emita dos NC/REV (con la NC fiscal
- * el doble CAE es irreversible en ARCA).
- *
- * Un comprobante está bonificado si una NC/REV de bonificación NO anulada:
- *  a) le está imputada como crédito (vínculo estructural, modelo actual), o
- *  b) lo menciona por número en sus observaciones (legado del modelo pozo).
- */
-async function filtrarYaBonificados(
-  supabase: SupabaseClient,
-  cliente_id: string,
-  comprobantes: ComprobanteInput[],
-): Promise<ComprobanteInput[]> {
-  if (!comprobantes.length) return []
-
-  const ids = comprobantes.map(c => c.id)
-  const [{ data: impsCredito }, { data: ncsBonif }] = await Promise.all([
-    supabase
-      .from("imputaciones")
-      .select("comprobante_id, credito:comprobantes_venta!imputaciones_credito_comprobante_id_fkey(observaciones, anulado_en)")
-      .in("comprobante_id", ids)
-      .not("credito_comprobante_id", "is", null)
-      .neq("estado", "anulado"),
-    supabase
-      .from("comprobantes_venta")
-      .select("observaciones")
-      .eq("cliente_id", cliente_id)
-      .in("tipo_comprobante", ["REV", "NCA", "NCB", "NCC"])
-      .is("anulado_en", null)
-      .neq("estado_pago", "anulado")
-      .ilike("observaciones", "%Bonificación contado%"),
-  ])
-
-  const bonificadosPorImputacion = new Set(
-    (impsCredito || [])
-      .filter((i: any) => {
-        const cred = i.credito
-        return cred && !cred.anulado_en && (cred.observaciones || "").includes("Bonificación contado")
-      })
-      .map((i: any) => i.comprobante_id),
-  )
-  const obsNcs = (ncsBonif || []).map((n: any) => n.observaciones || "")
-
-  return comprobantes.filter(
-    c => !bonificadosPorImputacion.has(c.id) && !obsNcs.some(o => o.includes(c.numero_comprobante)),
-  )
-}
+// filtrarYaBonificados: ahora vive en lib/comprobantes/ya-bonificados.ts (misma regla para la NC,
+// el control al registrar el cobro con 10 % y el selector de comprobantes).
 
 async function crearComprobante(
   supabase: SupabaseClient,

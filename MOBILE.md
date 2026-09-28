@@ -1551,6 +1551,33 @@ borrado por id con guardas y compare-and-set de saldos (billetera y caja), foto 
 volvió a `programado` con sus 3 paradas pendientes. NO se tocó el pago de oficina 499f4c06 (confirmado:
 libro mayor, recibo, kardex; zona de caja de la otra sesión).
 
+### Segunda tanda tras la prueba del dueño (28/09/2026, misma rama)
+1. **Devolución desde el viaje parte del pedido** (app `Devolucion.tsx` y chofer web, sheet Devolución):
+   sección "Artículos del pedido #N" con botón "↩ Devolver" por renglón (trae cantidad y precio del
+   pedido; después se corrige la cantidad); la búsqueda por SKU queda como "Otro artículo (que no está
+   en este pedido)".
+2. **10% contado.** (a) Toggle "10% contado a todo" con el mismo formato y ubicación que "Incluir
+   devoluciones como crédito" (inmediatamente debajo), en app y web (`ComprobantesSelector` con
+   `contadoEnBarra={false}`: el padre pinta el toggle y el selector lo sigue). Aplica solo a los
+   comprobantes seleccionados que aún no lo tienen; los checks individuales siguen coherentes.
+   (b) **Regla en el servidor: un comprobante jamás recibe el 10 % dos veces.** Detección única en
+   `lib/comprobantes/ya-bonificados.ts` (la misma que usa la NC al confirmar): un comprobante "ya lo
+   tiene" si una NC/REV de bonificación viva (no anulada) le está imputada como crédito
+   (`imputaciones.credito_comprobante_id`) o lo menciona por número en sus observaciones ("Bonificación
+   contado…", legado). `lib/cobranzas/contado-duplicado.ts` lo aplica al REGISTRAR el cobro (routes
+   `chofer/viaje/[id]/cobro` y `viajante/cobro`): si TODOS los seleccionados ya lo tienen ⇒ 422
+   `regla_negocio` (rechazo definitivo, no reintentable); si solo algunos ⇒ se registra y responde
+   `aviso_contado` / `avisosContado` diciendo a cuáles no se aplica. Tests:
+   `test/contado-duplicado.test.ts`. La interacción 10 % ↔ devoluciones-crédito NO se tocó (otra sesión).
+3. **Sin `alert()` nativo.** `components/pagos/aviso-inline.tsx` (`useAvisoInline`, `dejarAvisoPagina`):
+   banner propio en pantalla (rojo queda hasta cerrarlo, verde se va solo) en chofer web y vendedor web;
+   las apps ya usaban `Rechazos`/toast.
+4. **La X quita una fila de cheque siempre** (app `Cobrar.tsx` y chofer web), también si es el único
+   método: queda una fila de efectivo vacía. Antes la X del último método no existía y un cheque
+   rechazado quedaba atrapado en el formulario.
+5. **Chofer WEB post-cobro:** vuelve a la hoja de ruta posicionada en la parada (`#parada-<clienteId>`)
+   con el aviso de éxito. El cobro NO marca la parada como entregada: "Cerrar parada" sigue siendo la
+   acción aparte (en "Visitados · falta cerrar la parada"), igual que en la app.
 ### Puesta en marcha (pendiente del dueño)
 1. Merge de `apk-chofer` a `main` con OK del dueño (toca `app/api/chofer/*`, `lib/viajes/*`, `lib/mobile/*`) y deploy. Sin migraciones.
 2. Instalar `dist-apks/chofer-v0.2.0.apk` encima del v0.1.1 del NuStar (`adb install -r`, misma firma).

@@ -8,6 +8,7 @@ import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
+import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 
 // POST /api/chofer/viaje/[id]/cobro
 // Registra un cobro del chofer con estado='pendiente_rendicion'.
@@ -115,6 +116,14 @@ export async function POST(
       }
     }
     const conContado = Boolean(contado_general)
+    // Un comprobante jamás recibe el 10 % dos veces: si TODOS los seleccionados ya lo tienen,
+    // rechazo definitivo (422: la app no lo reintenta); si algunos, se registra y se avisa.
+    let avisoContado: string | null = null
+    if (conContado) {
+      const ctl = await controlarContadoDuplicado(supabase, cliente_id, impsCompletas.map((i) => i.comprobante_id))
+      if (ctl.rechazo) return NextResponse.json({ error: ctl.rechazo, mensaje: ctl.rechazo, codigo: "regla_negocio", reintentable: false }, { status: 422 })
+      avisoContado = ctl.aviso
+    }
     const obsPago = [observaciones, conContado ? MARCA_CONTADO : "", marcaAjuste(montoAjuste)].filter(Boolean).join(" · ") || null
 
     // Con 10% contado el recorte es proporcional (cada comprobante recibe su
@@ -256,6 +265,7 @@ export async function POST(
       pago_id: pago.id,
       estado: "pendiente_rendicion",
       mensaje: "Cobro registrado. Se imputará al confirmar la rendición del viaje.",
+      aviso_contado: avisoContado,
     })
   } catch (error: any) {
     console.error("[chofer] Error en POST cobro:", error)

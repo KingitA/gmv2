@@ -7,6 +7,7 @@ import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
 import { DateInputAR } from "@/components/ui/date-input-ar"
+import { dejarAvisoPagina, useAvisoInline } from "@/components/pagos/aviso-inline"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
@@ -147,6 +148,8 @@ export default function ClienteEntregaPage() {
   const [dialogoDiff, setDialogoDiff] = useState<number | null>(null)             // +falta / −sobra
 
   const esReadOnly = READONLY_ESTADOS.includes(data?.viaje_estado || "")
+  // Errores y rechazos dentro de la pantalla (nada de alert() nativo)
+  const { mostrar: avisar, Aviso } = useAvisoInline()
 
   const cargarDatos = useCallback(() => {
     setLoading(true)
@@ -297,12 +300,12 @@ export default function ClienteEntregaPage() {
     const totalNeto = totalCobro()
     const totalMetodos = Math.round(metodosPago.reduce((s, m) => s + Number(m.monto), 0) * 100) / 100
     if (totalMetodos <= 0) {
-      alert("Ingresá al menos un método de pago con monto.")
+      avisar("Ingresá al menos un método de pago con monto.")
       return
     }
     for (const m of metodosPago) {
       if (esFila(m) && m.monto > 0 && faltantes(m).length) {
-        alert(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${faltantes(m).join(", ")}.`)
+        avisar(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${faltantes(m).join(", ")}.`)
         return
       }
     }
@@ -346,8 +349,13 @@ export default function ClienteEntregaPage() {
         }),
       })
       const d = await res.json()
-      if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({}); cargarDatos() }
-      else alert(d.error || "Error al registrar cobro")
+      if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({})
+        // Vuelta a la hoja de ruta, posicionada en esta parada, con el cobro reflejado. La parada
+        // NO queda "entregada" por cobrar: "Cerrar parada" sigue siendo una acción aparte.
+        dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)} a ${clienteNombre}. Se imputará al confirmar la rendición.${d.aviso_contado ? ` ${d.aviso_contado}` : ""}`)
+        router.push(`/chofer/${viajeId}#parada-${clienteId}`)
+      }
+      else avisar(d.mensaje || d.error || "Error al registrar cobro")
     } finally { setGuardandoCobro(false) }
   }
 
@@ -366,6 +374,7 @@ export default function ClienteEntregaPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {Aviso}
       <header className="bg-blue-700 text-white px-5 py-4 sticky top-0 z-10 shadow-md">
         <button onClick={() => router.push(`/chofer/${viajeId}`)} className="text-blue-200 text-sm mb-1">← Volver al viaje</button>
         <h1 className="text-xl font-bold truncate">{clienteNombre}</h1>
@@ -528,8 +537,28 @@ export default function ClienteEntregaPage() {
                   ⚠️ {devError}
                 </div>
               )}
+              {/* Primero, el pedido de esta entrega: todo listo para devolver (después se ajusta la cantidad) */}
+              {pedido && pedido.detalle.filter((it) => !devItems.some((x) => x.articulo_id === it.articulo_id)).length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-gray-600 mb-1">Artículos del pedido #{pedido.numero}</p>
+                  <p className="text-xs text-gray-400 mb-2">Tocá "Devolver" en lo que vuelve; después ajustá la cantidad si no es todo.</p>
+                  <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
+                    {pedido.detalle.filter((it) => !devItems.some((x) => x.articulo_id === it.articulo_id)).map((it) => (
+                      <div key={it.id} className="flex items-center gap-3 px-4 py-2.5 bg-white">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-800 truncate">{it.articulos.descripcion}</p>
+                          <p className="text-xs text-gray-400">{it.articulos.sku} · {it.cantidad} × {formatCurrency(it.precio_final)}</p>
+                        </div>
+                        <button onClick={() => agregarItemPorArticulo(it.articulo_id, it.articulos.sku, it.articulos.descripcion, it.precio_final, it.cantidad)} className="shrink-0 rounded-xl bg-amber-500 px-3 py-2 text-sm font-bold text-white active:scale-95">
+                          ↩ Devolver
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
-                <label className="text-sm font-medium text-gray-600 mb-2 block">Buscar artículo adicional</label>
+                <label className="text-sm font-medium text-gray-600 mb-2 block">Otro artículo (que no está en este pedido)</label>
                 <input type="text" value={busquedaArticulo} onChange={(e) => setBusquedaArticulo(e.target.value)} placeholder="SKU o descripción..." className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:border-blue-500 focus:outline-none" />
                 {resultadosArticulo.length > 0 && (
                   <div className="mt-2 border border-gray-200 rounded-xl overflow-hidden">
@@ -758,6 +787,7 @@ function CobroSheet({
               onContadoGeneralChange={onContadoGeneralChange}
               onComprobantesLoaded={onComprobantesLoaded}
               onDtosHechosLoaded={onDtosHechosLoaded}
+              contadoEnBarra={false}
             />
             {bonificacion > 0 && (
               <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -825,6 +855,28 @@ function CobroSheet({
             </div>
           )}
 
+          {/* Toggle 10% contado a todo: aplica solo a los comprobantes seleccionados que aún no lo tengan
+              (el servidor vuelve a controlar que ninguno lo reciba dos veces) */}
+          {Object.keys(comprobantesSeleccionados).length > 0 && (
+            <div className="bg-emerald-50 rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-bold text-emerald-800">10% contado a todo</p>
+                  <p className="text-emerald-700 text-sm">
+                    {contadoGeneral
+                      ? bonificacion > 0
+                        ? `−${formatCurrency(bonificacion)} sobre lo seleccionado (la NC sale al confirmar la rendición)`
+                        : "Lo seleccionado ya tiene el 10% aplicado o no bonifica: no se aplica dos veces."
+                      : "Aplica a los comprobantes seleccionados que aún no lo tengan; los pedidos sin facturar cobran el 90%."}
+                  </p>
+                </div>
+                <button onClick={() => onContadoGeneralChange(!contadoGeneral)} className={`w-14 h-7 shrink-0 rounded-full transition-colors ${contadoGeneral ? "bg-green-500" : "bg-gray-300"}`} aria-label="10% contado a todo">
+                  <span className={`block w-5 h-5 bg-white rounded-full shadow transition-transform mx-1 ${contadoGeneral ? "translate-x-7" : ""}`} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Total */}
           <div className="bg-blue-50 rounded-2xl px-4 py-4 text-center">
             <p className="text-blue-600 text-sm">Total a cobrar</p>
@@ -873,7 +925,7 @@ function CobroSheet({
                 clienteNombre={clienteNombre}
                 cuentas={cuentas}
                 onChange={(updates) => setMetodosPago((prev) => prev.map((x, i) => (i === idx ? aplicarCambios(x, updates) : x)))}
-                onRemove={metodosPago.length > 1 ? () => setMetodosPago((p) => p.filter((_, i) => i !== idx)) : undefined}
+                onRemove={() => setMetodosPago((p) => { const r = p.filter((_, i) => i !== idx); return r.length ? r : [{ id: Date.now().toString(), tipo: "efectivo", monto: 0 }] })}
                 onFoto={(files) => onFotos(files, esFila(m) ? { filaId: m.id } : undefined)}
                 onReintentarSubida={() => onReintentarSubida(m.id)}
               />

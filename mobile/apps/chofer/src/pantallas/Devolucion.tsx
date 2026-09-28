@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { indiceHistorial, useOnline, useRuntime } from "@gm/core"
-import { DS, esEnCurso, MOTIVOS_DEVOLUCION, type Articulo, type ItemDevolucion, type OpDevolucion } from "../datasets"
+import { DS, esEnCurso, MOTIVOS_DEVOLUCION, type Articulo, type DetallePedido, type ItemDevolucion, type OpDevolucion } from "../datasets"
 import { guardarBorrador, useBorradorDevolucion } from "../datos/borrador-devolucion"
 import { buscarArticulos, useArticulos, useClienteViaje, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
 import { dejarAviso, formatCurrency, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
@@ -93,6 +93,15 @@ export function Devolucion() {
     if (aviso) mostrar(aviso, "err")
   }
 
+  // Del pedido de esta entrega: entra con la cantidad y el precio facturados (después se ajusta)
+  const agregarDelPedido = (it: DetallePedido) => {
+    if (items.some((x) => x.articulo_id === it.articulo_id)) return
+    setBorrador((prev) => ({
+      items: [...prev.items, { articulo_id: it.articulo_id, sku: it.articulos?.sku ?? null, descripcion: it.articulos?.descripcion || "Artículo", cantidad: it.cantidad, precio_venta_original: it.precio_final, motivo: "otro", condicion: "vendible", origen: "pedido", comprobante_venta_id: null }],
+    }))
+  }
+  const delPedidoSinAgregar = (data?.pedido?.detalle ?? []).filter((it) => !items.some((x) => x.articulo_id === it.articulo_id))
+
   const updateItem = (idx: number, patch: Partial<ItemDevolucion>) => setBorrador((prev) => ({ items: prev.items.map((i, n) => (n === idx ? { ...i, ...patch } : i)) }))
   const total = items.reduce((s, i) => s + i.cantidad * i.precio_venta_original, 0)
 
@@ -150,8 +159,26 @@ export function Devolucion() {
       <p className="truncate bg-blue-700 px-5 pb-3 text-sm text-blue-200">{clienteNombre}</p>
       {!enCurso && <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-center text-sm text-amber-800">El viaje no está en curso: no se pueden registrar devoluciones.</div>}
       <div className="space-y-5 p-4">
+        {/* Primero, el pedido de esta entrega: todo listo para devolver */}
+        {data?.pedido && delPedidoSinAgregar.length > 0 && (
+          <div>
+            <p className="mb-1 text-sm font-medium text-gray-600">Artículos del pedido #{data.pedido.numero}</p>
+            <p className="mb-2 text-xs text-gray-400">Tocá "Devolver" en lo que vuelve; después ajustá la cantidad si no es todo.</p>
+            <div className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+              {delPedidoSinAgregar.map((it) => (
+                <div key={it.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-gray-800">{it.articulos?.descripcion || "Artículo"}</p>
+                    <p className="text-xs text-gray-400">{it.articulos?.sku} · {it.cantidad} × {formatCurrency(it.precio_final)}</p>
+                  </div>
+                  <button onClick={() => agregarDelPedido(it)} disabled={!enCurso} className="min-h-11 shrink-0 rounded-xl bg-amber-500 px-3 text-sm font-bold text-white active:scale-95 disabled:opacity-40">↩ Devolver</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div>
-          <label className="mb-2 block text-sm font-medium text-gray-600">Buscar artículo adicional</label>
+          <label className="mb-2 block text-sm font-medium text-gray-600">Otro artículo (que no está en este pedido)</label>
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="SKU o descripción..." className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg focus:border-blue-500 focus:outline-none" />
           {q.trim().length >= 2 && !cargandoArt && articulos.length === 0 && <p className="mt-2 text-sm text-amber-700">El catálogo todavía no se descargó en este equipo. Deslizá un renglón del pedido en la ficha para devolverlo.</p>}
           {resultados.length > 0 && (
@@ -215,7 +242,7 @@ export function Devolucion() {
             </div>
           </div>
         ))}
-        {items.length === 0 && !q.trim() && <p className="py-6 text-center text-sm text-gray-400">Deslizá un renglón del pedido en la ficha, o buscá el artículo arriba.</p>}
+        {items.length === 0 && !q.trim() && delPedidoSinAgregar.length === 0 && <p className="py-6 text-center text-sm text-gray-400">Buscá el artículo arriba.</p>}
       </div>
     </Pantalla>
   )

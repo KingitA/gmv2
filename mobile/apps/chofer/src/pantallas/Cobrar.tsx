@@ -411,8 +411,8 @@ export function Cobrar() {
             <div className="space-y-2">
               {clavesTodas.length > 0 && (
                 <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
+                  {/* "10% contado a todo" está más abajo, junto a "Incluir devoluciones" */}
                   <label className="flex min-h-11 items-center gap-2 font-semibold"><input type="checkbox" checked={todoSeleccionado} onChange={toggleTodo} className="h-5 w-5" /> Seleccionar todo</label>
-                  <label className="ml-auto flex min-h-11 items-center gap-2 text-amber-800"><input type="checkbox" checked={contadoGeneral} onChange={toggleContadoTodo} className="h-5 w-5" /> 10% contado a todo</label>
                 </div>
               )}
               {pedidos.map((ped) => {
@@ -523,6 +523,28 @@ export function Cobrar() {
           </div>
         )}
 
+        {/* 10% contado a todo: solo a los comprobantes seleccionados que aún no lo tengan (el servidor
+            vuelve a controlar que ninguno lo reciba dos veces) */}
+        {Object.keys(sel).length > 0 && (
+          <div className="rounded-2xl bg-emerald-50 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-bold text-emerald-800">10% contado a todo</p>
+                <p className="text-sm text-emerald-700">
+                  {contadoGeneral
+                    ? bonificacionEstimada > 0
+                      ? `−${formatCurrency(bonificacionEstimada)} sobre lo seleccionado (la NC sale al confirmar la rendición)`
+                      : "Lo seleccionado ya tiene el 10% aplicado o no bonifica: no se aplica dos veces."
+                    : "Aplica a los comprobantes seleccionados que aún no lo tengan; los pedidos sin facturar cobran el 90%."}
+                </p>
+              </div>
+              <button onClick={toggleContadoTodo} className={`h-7 w-14 shrink-0 rounded-full ${contadoGeneral ? "bg-green-500" : "bg-gray-300"}`} aria-label="10% contado a todo">
+                <span className={`mx-1 block h-5 w-5 rounded-full bg-white shadow ${contadoGeneral ? "translate-x-7" : ""}`} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Total */}
         <div className="rounded-2xl bg-blue-50 px-4 py-4 text-center">
           <p className="text-sm text-blue-600">Total a cobrar</p>
@@ -550,7 +572,7 @@ export function Cobrar() {
               metodo={m}
               cuentas={cuentas}
               onChange={(updates) => setMetodosPago((prev) => prev.map((x, i) => (i === idx ? aplicarCambios(x, updates) : x)))}
-              onRemove={metodosPago.length > 1 ? () => setMetodosPago((p) => p.filter((_, i) => i !== idx)) : undefined}
+              onRemove={() => setMetodosPago((p) => { const r = p.filter((_, i) => i !== idx); return r.length ? r : [{ id: uuidv4(), tipo: "efectivo", monto: 0 }] })}
               onFoto={(files) => leerFotos(files, esFila(m) ? m.id : undefined)}
             />
           ))}
