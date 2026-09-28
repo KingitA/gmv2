@@ -96,21 +96,27 @@ export async function crearCobranza(
  */
 async function describirChequeDuplicado(supabase: SupabaseClient, params: CrearCobranzaParams, clave: Record<string, string>): Promise<string> {
   try {
-    const candidatos = clave.numero || clave.numero_cheque
-      ? [{ numero: clave.numero || clave.numero_cheque!, banco: clave.banco }]
+    // La clave real es (banco, numero, monto, fecha_vencimiento): si Postgres la informó, se
+    // busca exacta; si no, por los cheques que traía el cobro.
+    type Cand = { numero: string; banco?: string; monto?: string; fecha?: string }
+    const candidatos: Cand[] = clave.numero || clave.numero_cheque
+      ? [{ numero: clave.numero || clave.numero_cheque!, banco: clave.banco, monto: clave.monto, fecha: clave.fecha_vencimiento }]
       : params.detalles.flatMap((d) => [...(d.cheque?.numero ? [{ numero: d.cheque.numero, banco: d.cheque.banco || undefined }] : []), ...(d.deposito_items || []).flatMap((i) => (i.cheque?.numero ? [{ numero: i.cheque.numero, banco: i.cheque.banco || undefined }] : []))])
     for (const c of candidatos) {
       let q = supabase.from("cheques").select("id, banco, numero, estado, created_at").eq("numero", c.numero).order("created_at", { ascending: false }).limit(5)
       if (c.banco) q = q.ilike("banco", c.banco)
+      if (c.monto && Number.isFinite(Number(c.monto))) q = q.eq("monto", Number(c.monto))
+      if (c.fecha) q = q.eq("fecha_vencimiento", c.fecha)
       const { data: cheques } = await q
-      const cheque = cheques?.[0]
+      // El que sigue vivo manda; si todos están anulados, se informa eso
+      const cheque = cheques?.find((k: any) => k.estado !== "ANULADO") || cheques?.[0]
       if (!cheque) continue
       const { data: det } = await supabase.from("pagos_detalle").select("pago_id").eq("cheque_id", cheque.id).limit(1).maybeSingle()
-      let donde: { fecha?: string | null; cliente?: string | null; estado?: string | null } | null = null
+      let donde: { fecha?: string | null; cliente?: string | null; estado?: string | null; cheque_estado?: string | null } = { cheque_estado: cheque.estado }
       if (det?.pago_id) {
         const { data: pago } = await supabase.from("pagos_clientes").select("fecha_pago, estado, clientes(nombre, razon_social)").eq("id", det.pago_id).maybeSingle()
         const cli: any = (pago as any)?.clientes
-        donde = pago ? { fecha: (pago as any).fecha_pago, estado: (pago as any).estado, cliente: cli?.razon_social || cli?.nombre || null } : null
+        if (pago) donde = { ...donde, fecha: (pago as any).fecha_pago, estado: (pago as any).estado, cliente: cli?.razon_social || cli?.nombre || null }
       }
       return mensajeChequeDuplicado({ numero: cheque.numero, banco: cheque.banco || c.banco || "" }, donde)
     }

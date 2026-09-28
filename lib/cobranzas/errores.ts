@@ -76,15 +76,26 @@ export function errorDeRpcCobranza(nombre: string, error: ErrorRpc): Error {
   return new Error(mensaje)
 }
 
-/** Texto en castellano para un cheque ya registrado; `donde` (cobro/cliente) se agrega si se pudo averiguar. */
-export function mensajeChequeDuplicado(clave: Record<string, string>, donde?: { fecha?: string | null; cliente?: string | null; estado?: string | null } | null): string {
+/**
+ * Texto en castellano para un cheque ya registrado; `donde` (cobro/cliente/estado del pago y
+ * estado del cheque en cartera) se agrega si se pudo averiguar. Si el cheque existente está
+ * ANULADO se dice explícitamente: con la unicidad parcial (migración 20260928) ese caso ya no
+ * choca; si choca, la base todavía tiene la clave vieja.
+ */
+export function mensajeChequeDuplicado(
+  clave: Record<string, string>,
+  donde?: { fecha?: string | null; cliente?: string | null; estado?: string | null; cheque_estado?: string | null } | null,
+): string {
   const numero = clave.numero || clave.numero_cheque
   const banco = clave.banco
   const que = numero ? `El cheque N° ${numero}${banco ? ` (${banco})` : ""}` : "Ese cheque"
   let ref = ""
-  if (donde) {
+  if (donde && (donde.fecha || donde.cliente || donde.estado)) {
     const partes = [donde.fecha ? `cobro del ${String(donde.fecha).slice(0, 10).split("-").reverse().join("/")}` : "un cobro", donde.cliente ? `a ${donde.cliente}` : "", donde.estado ? `(${ESTADO_PAGO_TEXTO[donde.estado] || donde.estado})` : ""].filter(Boolean)
     ref = `: está en el ${partes.join(" ")}`
+  }
+  if (donde?.cheque_estado === "ANULADO") {
+    return `${que} ya está registrado y figura ANULADO en la cartera${ref}. Un cheque anulado no debería frenar la carga: avisale a oficina (falta aplicar la unicidad parcial de cheques).`
   }
   return `${que} ya está registrado${ref}. No se puede cargar dos veces: si es un error, hay que anular ese cobro desde oficina.`
 }

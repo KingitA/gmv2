@@ -10,14 +10,18 @@ import { ErrorReglaCobranza, chequeDuplicadoDe, errorDeRpcCobranza, mensajeChequ
 //     del navegador.
 
 describe("Cheque duplicado: rechazo definitivo con mensaje claro", () => {
+  // Clave real en producción: (banco, numero, monto, fecha_vencimiento); desde la migración
+  // 20260928 es el índice parcial ux_cheques_vivos (excluye ANULADO), con las mismas 4 columnas.
   const errorPg = {
     code: "23505",
-    message: 'duplicate key value violates unique constraint "cheques_banco_numero_key"',
-    details: "Key (banco, numero)=(Santander, 11400260) already exists.",
+    message: 'duplicate key value violates unique constraint "ux_cheques_vivos"',
+    details: "Key (banco, numero, monto, fecha_vencimiento)=(Santander, 11400260, 100000, 2026-06-15) already exists.",
   }
 
-  it("lee la clave que chocó del detalle de Postgres", () => {
-    expect(chequeDuplicadoDe(errorPg)).toEqual({ banco: "Santander", numero: "11400260" })
+  it("lee la clave que chocó del detalle de Postgres (las 4 columnas)", () => {
+    expect(chequeDuplicadoDe(errorPg)).toEqual({ banco: "Santander", numero: "11400260", monto: "100000", fecha_vencimiento: "2026-06-15" })
+    // La clave vieja (constraint creada fuera de migraciones) se lee igual
+    expect(chequeDuplicadoDe({ code: "23505", message: 'duplicate key value violates unique constraint "cheques_banco_numero_monto_fecha_vencimiento_key"', details: "Key (banco, numero, monto, fecha_vencimiento)=(Macro, 1, 10.5, 2026-01-02) already exists." })).toEqual({ banco: "Macro", numero: "1", monto: "10.5", fecha_vencimiento: "2026-01-02" })
   })
 
   it("unicidad de OTRA tabla o sin detalle: no es un cheque duplicado / clave vacía", () => {
@@ -40,6 +44,15 @@ describe("Cheque duplicado: rechazo definitivo con mensaje claro", () => {
       "El cheque N° 11400260 (Santander) ya está registrado: está en el cobro del 23/09/2026 a HERRERO MAXIMILIANO (pendiente de rendición). No se puede cargar dos veces: si es un error, hay que anular ese cobro desde oficina.",
     )
     expect(mensajeChequeDuplicado({})).toBe("Ese cheque ya está registrado. No se puede cargar dos veces: si es un error, hay que anular ese cobro desde oficina.")
+  })
+
+  it("si el cheque existente está ANULADO lo dice: con la unicidad parcial ya no debería chocar", () => {
+    const m = mensajeChequeDuplicado({ numero: "1", banco: "Macro" }, { cheque_estado: "ANULADO", fecha: "2026-09-23", cliente: "X", estado: "anulado" })
+    expect(m).toMatch(/figura ANULADO en la cartera/)
+    expect(m).toMatch(/cobro del 23\/09\/2026 a X \(anulado\)/)
+    expect(m).toMatch(/falta aplicar la unicidad parcial/)
+    // Cheque vivo: el mensaje habitual
+    expect(mensajeChequeDuplicado({ numero: "1" }, { cheque_estado: "EN_CARTERA" })).toMatch(/hay que anular ese cobro desde oficina/)
   })
 
   it("un error transitorio sigue siendo transitorio", () => {

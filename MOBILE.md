@@ -652,6 +652,12 @@ soporta encriptación con clave propia).
 
 ## 14. Pruebas
 
+> **Regla del dueño (28/09/2026) sobre la base de producción:** TODO es dato de prueba, salvo los
+> **comprobantes fiscales** (jamás se tocan) y las tablas de **artículos, proveedores y clientes**.
+> No preguntar si un dato es real: ante la duda, es prueba (con la excepción fiscal). Las
+> limpiezas siguen siendo por id, con foto antes/después, y los pagos confirmados se revierten
+> por el circuito formal (`cobranza_anular`), no borrando filas.
+
 - `cd mobile && npm test` — invariantes de réplica (R1–R6), outbox (O1–O8), backoff,
   lector wedge, botón atrás, motor de precios (casos dorados + isomorfismo
   dispositivo/servidor + vigencia programada) y frontera del paquete de precios.
@@ -1526,8 +1532,20 @@ ficha con el sheet): atrás vuelve al viaje.
 3. **Navegación post-cobro.** Cobrar/devolución desde la hoja de ruta vuelve a la hoja de ruta, posicionada en
    la parada (`CLAVE_VOLVER_A_PARADA`); desde la ficha vuelve a la ficha. Convención §8: atrás = pantalla
    anterior; el formulario y el diálogo de diferencia no quedan en el historial.
-4. **Cheque "preso"** (registrado en un cobro: no se elimina y la unicidad impide re-ingresarlo): propuesta
-   de circuito enviada al dueño antes de implementar (ver la entrega del 24/09); no se tocó código.
+4. **Cheque "preso"** (registrado en un cobro: no se elimina y la unicidad impedía re-ingresarlo).
+   Circuito aprobado por el dueño e implementado (28/09/2026):
+   - Antes de enviar el cobro, quitar un cheque es libre (fila del formulario / `outbox.retirar`).
+   - Después, un cheque se saca SOLO anulando el cobro por `cobranza_anular` (reversa completa:
+     imputaciones, billetera, cartera → estado `ANULADO`; la foto queda en `pago_comprobantes` y el
+     veredicto BCRA en el outbox). No existe DELETE de cheques en ninguna superficie (verificado:
+     solo los scripts de reset de 08/2026).
+   - Migración `supabase/migrations/20260928_cheques_unicidad_parcial.sql` (PENDIENTE de aplicar por el
+     dueño): reemplaza la UNIQUE (banco, numero, monto, fecha_vencimiento) por el índice parcial
+     `ux_cheques_vivos` con las mismas 4 columnas `WHERE estado <> 'ANULADO'`, y borra el índice
+     duplicado `idx_cheques_proveedor`. Se conservan las 4 columnas porque el número de cheque es único
+     por CUENTA, no por banco, y la tabla no guarda el CUIT/cuenta del emisor.
+   - El mensaje de duplicado busca el cheque por la clave real y, si el existente está ANULADO, lo
+     dice (con la migración aplicada ese caso ya no choca; si choca, falta aplicarla).
 Limpieza de las pruebas del 24/09 (viaje OLAVARRIA · 25/09) + el cobro con el cheque del OCR del 23/09:
 borrado por id con guardas y compare-and-set de saldos (billetera y caja), foto antes/después; el viaje
 volvió a `programado` con sus 3 paradas pendientes. NO se tocó el pago de oficina 499f4c06 (confirmado:
