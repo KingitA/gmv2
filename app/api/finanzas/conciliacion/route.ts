@@ -23,7 +23,7 @@ export async function GET() {
         id, monto, fecha_pago, cobrador_tipo, viaje_id, cliente_id, creado_por,
         clientes(nombre),
         viajes(nombre),
-        pagos_detalle(tipo_pago, monto, cuenta_bancaria_id, referencia, fecha_transferencia)
+        pagos_detalle(tipo_pago, monto, cuenta_bancaria_id, referencia, numero_comprobante_pago, fecha_transferencia)
       `)
       .eq("estado", "confirmado")
       .is("verificado_por", null)
@@ -68,7 +68,8 @@ export async function GET() {
         viaje: (p as any).viajes?.nombre ?? null,
         cuenta_destino:
           dets.map((d: any) => nombreCuenta.get(d.cuenta_bancaria_id)).find(Boolean) ?? "Sin cuenta",
-        referencias: dets.map((d: any) => d.referencia).filter(Boolean),
+        // chofer guardaba la referencia en numero_comprobante_pago: se leen ambos
+        referencias: dets.map((d: any) => d.referencia || d.numero_comprobante_pago).filter(Boolean),
         fotos: fotos.get(p.id) ?? [],
       }
     })

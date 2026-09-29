@@ -81,6 +81,8 @@ export async function POST(
         cuenta_bancaria_id: metodo.tipo === "transferencia" ? metodo.cuenta_bancaria_id || null : null,
         fecha_transferencia: metodo.tipo === "transferencia" ? metodo.fecha_transferencia || null : null,
         numero_comprobante_pago: metodo.tipo === "transferencia" ? metodo.numero_comprobante || null : null,
+        // Campo unificado con el vendedor: conciliación lee `referencia`
+        referencia: metodo.tipo === "transferencia" ? metodo.numero_comprobante || metodo.referencia || null : null,
         banco: metodo.tipo === "cheque" ? metodo.banco_emisor || null : null,
         numero_cheque: metodo.tipo === "cheque" ? metodo.numero_cheque || null : null,
         fecha_cheque: metodo.tipo === "cheque" ? metodo.fecha_cheque || null : null,
@@ -247,6 +249,7 @@ export async function POST(
             cuenta_bancaria_id: m.cuenta_bancaria_id || null,
             fecha_transferencia: m.fecha_transferencia || null,
             numero_comprobante_pago: m.numero_comprobante || null,
+            referencia: m.numero_comprobante || m.referencia || null,
             banco: m.banco_emisor || null,
             numero_cheque: m.numero_cheque || null,
             fecha_cheque: m.fecha_cheque || null,

@@ -476,13 +476,16 @@ export async function GET(request: NextRequest) {
     const filasPendAnteriores: FilaCaja[] = []
 
     for (const p of pendientes as any[]) {
-      if (pagosEnRendicion.has(p.id)) continue
+      const enRendicion = pagosEnRendicion.has(p.id)
       const detalles: any[] = p.pagos_detalle || []
       const esEcheq = (d: any) => d.tipo_pago === "cheque" && d.color_cheque === "ECHEQ"
       // De un pago en la calle solo mostramos lo que ya viaja por canales digitales;
-      // el efectivo y los cheques físicos llegan con la rendición.
+      // el efectivo y los cheques físicos llegan con la rendición. Un pago ya
+      // DECLARADO en una rendición abierta antes se salteaba entero — sus
+      // transferencias/echeqs eran invisibles en /caja hasta la confirmación
+      // (29/09): ahora la parte digital se muestra igual, marcada.
       const relevantes =
-        p.estado === "pendiente_rendicion"
+        p.estado === "pendiente_rendicion" || enRendicion
           ? detalles.filter((d) => d.tipo_pago === "transferencia" || d.tipo_pago === "deposito" || esEcheq(d))
           : detalles
       if (!relevantes.length) continue
@@ -506,14 +509,15 @@ export async function GET(request: NextRequest) {
       })
 
       const origen =
-        p.cobrador_tipo && p.cobrador_tipo !== "oficina"
+        (p.cobrador_tipo && p.cobrador_tipo !== "oficina"
           ? `cargó ${p.cobrador_tipo}`
-          : "Cobro en oficina"
+          : "Cobro en oficina") + (enRendicion ? " · declarado en rendición" : "")
 
       // Confirmable entero desde /caja: pago de oficina, o pago de la calle
       // cuyos métodos son TODOS digitales. Mixto → espera su rendición.
       const esDigital = (d: any) => d.tipo_pago === "transferencia" || d.tipo_pago === "deposito" || esEcheq(d)
-      const confirmable = p.estado === "pendiente" || detalles.every(esDigital)
+      // Declarado en rendición: se confirma CON la rendición, no suelto acá
+      const confirmable = !enRendicion && (p.estado === "pendiente" || detalles.every(esDigital))
       // Cheque físico a cuenta sin color asignado → la confirmación pide BLANCO/NEGRO
       const requiereColor = detalles.some(
         (d) => d.tipo_pago === "cheque" && !esEcheq(d) && (!d.color_cheque || d.color_cheque === "PENDIENTE")
@@ -540,7 +544,7 @@ export async function GET(request: NextRequest) {
         salida: null,
         neutro: null,
         estado: !confirmable
-          ? { tipo: "info" as const, texto: "Llega con la rendición" }
+          ? { tipo: "info" as const, texto: enRendicion ? "Se confirma con su rendición" : "Llega con la rendición" }
           : {
               tipo: "accion" as const,
               texto: tieneEcheq

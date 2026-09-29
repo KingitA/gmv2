@@ -272,7 +272,11 @@ export function RegistrarCobro({
       payload.caja_id = cajaId || cajaChicaDefault || undefined
       label = `💵 Efectivo`
     } else if (metodo === "transferencia") {
-      if (cuentaBancariaId) payload.cuenta_bancaria_id = cuentaBancariaId
+      // Banco OBLIGATORIO (29/09): sin cuenta destino el asiento salía a
+      // "BANCO/null" y NINGÚN banco subía — plata contabilizada en el aire.
+      // La calle ya lo exige; la oficina era el único agujero.
+      if (!cuentaBancariaId) return null
+      payload.cuenta_bancaria_id = cuentaBancariaId
       payload.fecha_transferencia = ocrExtra.fecha_transferencia || todayArgentina()
       if (numeroOperacion) payload.numero_comprobante = numeroOperacion
       const b = bancos.find((x) => x.cuenta_id === cuentaBancariaId)
@@ -330,7 +334,11 @@ export function RegistrarCobro({
       return
     }
     if (!actual && Number(monto.replace(",", ".")) > 0) {
-      toast({ variant: "destructive", title: "Falta el número", description: "Cargá el número del cheque/echeq" })
+      toast({
+        variant: "destructive",
+        title: metodo === "transferencia" ? "Falta el banco" : "Falta el número",
+        description: metodo === "transferencia" ? "Elegí la cuenta destino de la transferencia" : "Cargá el número del cheque/echeq",
+      })
       return
     }
     // Igual que Pagos Clientes: los "pedido:<id>" son anticipos (no se imputan)
