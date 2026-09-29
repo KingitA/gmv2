@@ -1631,7 +1631,23 @@ Registrar un cobro significa que la parada está FINALIZADA. Regla pura `cierreD
    pago 78d65de0 (que en realidad se imputó a un comprobante). Se les quitó `pago_contado_10` y
    `anticipo_pago_id`; el pago y el comprobante no se tocaron.
 
-### Checklist contra PRODUCCIÓN en el NuStar 65-sp — PENDIENTE
+### Checklist contra PRODUCCIÓN en el NuStar 65-sp — EN CURSO (arrancó el 29/09/2026)
+Hecho el 29/09: merge `0a94f63` en `main`, deploy verificado (`/api/chofer/cuentas-bancarias` pasó de 404 a
+401), `chofer-v0.2.1` instalado encima del v0.2.0 (sesión conservada, datos frescos, cola en 0). Foto de solo
+lectura: `scripts/foto-chofer.cjs` (`guardar` / `comparar` / `rastros TEST-CHOFER`); foto "antes" tomada.
+
+Volúmenes reales medidos contra producción (29/09, solo lectura, mismas consultas que los datasets):
+
+| Dataset | Volumen real |
+|---|---|
+| `chofer_clientes` | 596 clientes activos, 154 KB + saldos 42 KB, 1,3 s en total |
+| `chofer_articulos` | 2.019 artículos activos |
+| `chofer_viajes` | 4 viajes operables del chofer del dueño (9 en toda la base, 5 sin chofer) |
+| `chofer_viaje_clientes` | 15 fichas; el viaje más grande tiene 9 paradas y 13 pedidos |
+| Renglones de pedido en viajes operables | 693 |
+
+Falta medir en el equipo el tiempo real de la primera descarga.
+
 - [ ] Login del chofer real; descarga del viaje despachado; "✓ Viaje descargado" con todas las paradas.
 - [ ] Modo avión con el interruptor del equipo: cobro parcial, devolución, gasto, anular cobro (local y del servidor), cerrar paradas, rendir. Matar la app desde recientes y reabrir: nada perdido ni duplicado.
 - [ ] Reconectar: todo aplicado 1 vez; `pagos_clientes`, `devoluciones`, `viajes_gastos`, `viajes_paradas`, `rendiciones` iguales a lo que muestra la app; efectivo en mano = `efectivo_declarado`.
