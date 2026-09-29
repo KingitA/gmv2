@@ -100,10 +100,18 @@ export async function GET() {
     const r2 = (n: number) => Math.round(n * 100) / 100
     const efectivoEnMano = r2(efectivo + fondoEnMano - gastosEnMano)
 
-    // Saldo de la cuenta corriente del chofer (diferencias de rendición: lo que debe o tiene a favor)
+    // Saldo de la cuenta corriente del chofer (diferencias de rendición).
+    // Convención de los MOVIMIENTOS: positivo = plata que retuvo (DEBE),
+    // negativo = entregó de más (a favor). Para la UI se invierte el signo:
+    // saldo_cuenta_corriente > 0 = a favor del chofer, < 0 = debe.
+    // Incluye 'rendicion_devuelta' (la anulación de una rendición devuelta
+    // por oficina): sin ella, una rendición devuelta quedaba sumando como
+    // deuda/favor fantasma para siempre (28/09: $3.583.530 de una prueba).
     const saldoCC = r2(
-      (movimientos || [])
-        .filter((m: any) => ["rendicion_diferencia", "rendicion_saldo_declarado", "viaje_gasto_rechazado"].includes(m.referencia_tipo))
+      -(movimientos || [])
+        .filter((m: any) =>
+          ["rendicion_diferencia", "rendicion_saldo_declarado", "rendicion_devuelta", "viaje_gasto_rechazado"].includes(m.referencia_tipo),
+        )
         .reduce((s: number, m: any) => s + Number(m.monto), 0),
     )
 
