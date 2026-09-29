@@ -1618,6 +1618,24 @@ Registrar un cobro significa que la parada está FINALIZADA. Regla pura `cierreD
   sola, ni un cobro con el viaje ya `en_rendicion`.
 - "Cerrar parada (entregado / no entregado)" queda para cuando NO hubo cobro, y para el parcial.
 
+### Cobrar cierra la parada (regla del dueño, 29/09/2026)
+Registrar un cobro en una parada la deja FINALIZADA; "Cerrar parada" queda para cuando no hubo cobro
+(entregado sin cobrar, no entregado, parcial). Regla pura `cierreDeParadaPorCobro` en
+`lib/cobranzas/reglas-cobro.ts` (`@gm/cobro`), la misma en el servidor y en la app.
+- Parada PENDIENTE con mercadería ⇒ `entregado` con todos sus bultos; sin mercadería ⇒ `solo_cobro`.
+- Nunca pisa un resultado ya cargado (no entregado / parcial / entregado).
+- Un cobro PARCIAL cierra igual. Si oficina pidió "cobrar sí o sí" y no alcanza, no bloquea: deja
+  constancia en `motivo_no_cobro` ("Cobró $ X de $ Y exigidos…").
+- Anular o modificar un cobro NO reabre la entrega. En el servidor la anulación no toca la parada.
+  En la app, un cobro que nunca salió del equipo se retira de la cola y, si era el que había cerrado
+  la parada, se encola un `viaje.parada` con el mismo resultado (`cierreAConservar`).
+- Solo cierra la parada del cliente del cobro; los clientes extra de un cobro conjunto no.
+- Servidor: `POST /api/chofer/viaje/[id]/cobro` cierra después de registrar el pago, solo con el viaje
+  `despachado`/`en_curso`; si el cierre falla, el cobro queda igual registrado y la parada aparece en
+  "Visitados · falta cerrar la parada". Responde `parada_cerrada`.
+- App sin señal: el overlay muestra la parada entregada al instante y respeta el orden de la cola
+  (un resultado de parada posterior al cobro manda). "Reabrir parada" sigue disponible para corregir.
+- Tests: `test/chofer-overlay.test.ts` (bloques "cobrar cierra la parada" y "anular no reabre").
 ### Puesta en marcha (pendiente del dueño)
 1. Merge de `apk-chofer` a `main` con OK del dueño (toca `app/api/chofer/*`, `lib/viajes/*`, `lib/mobile/*`) y deploy. Sin migraciones.
 2. Instalar `dist-apks/chofer-v0.2.0.apk` encima del v0.1.1 del NuStar (`adb install -r`, misma firma).
