@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { anularCobranza } from "@/lib/actions/cobranzas"
+import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 
 /**
  * DELETE /api/chofer/viaje/[id]/cobro/[pagoId]
@@ -65,6 +66,11 @@ export async function DELETE(
     return NextResponse.json({ success: true })
   } catch (error: any) {
     console.error("[chofer/cobro] DELETE error:", error)
+    // Regla de negocio de la RPC: respuesta DEFINITIVA (422), no 500. Si no, la app
+    // Chofer reintentaría la anulación para siempre y trabaría lo cargado después.
+    if (error instanceof ErrorReglaCobranza) {
+      return NextResponse.json({ error: error.message, mensaje: mensajeParaUsuario(error), codigo: error.codigo, reintentable: false }, { status: 422 })
+    }
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

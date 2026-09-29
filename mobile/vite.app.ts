@@ -27,6 +27,8 @@ export function configApp(appDir: string, puerto: number): UserConfigFnObject {
           // Foto de cheques: validación del OCR, fila del formulario, veredicto BCRA (mismas reglas que el ERP)
           "@gm/cheques/foto": resolve(RAIZ_REPO, "lib/cheques/foto.ts"),
           "@gm/cheques": resolve(RAIZ_REPO, "lib/cheques/isomorfico.ts"),
+          // Reglas puras del cobro en la calle (10% solo a lo seleccionado, tope de ajuste): mismas que el servidor
+          "@gm/cobro": resolve(RAIZ_REPO, "lib/cobranzas/reglas-cobro.ts"),
         },
       },
       define: {

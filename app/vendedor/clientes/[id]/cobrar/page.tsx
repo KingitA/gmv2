@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { dejarAvisoPagina, useAvisoInline } from "@/components/pagos/aviso-inline"
 import { ChipBcra, ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
 import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
 import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
@@ -151,6 +153,8 @@ function BcraFila({ fila, clienteNombre, detalle }: { fila: Metodo; clienteNombr
 export default function VendedorCobrarPage() {
   const router = useRouter()
   const { id } = useParams<{ id: string }>()
+  // Errores y rechazos dentro de la pantalla (nada de alert() nativo)
+  const { mostrar: avisar, Aviso } = useAvisoInline()
 
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
@@ -356,12 +360,12 @@ export default function VendedorCobrarPage() {
   const registrar = async (modoDiferencia?: "ajuste" | "saldo") => {
     if (!cliente || enviando) return
     if (totalMetodos + totalDevoluciones <= 0) {
-      alert("Ingresá efectivo, cheques/transferencias o descontá una devolución.")
+      avisar("Ingresá efectivo, cheques/transferencias o descontá una devolución.")
       return
     }
     for (const m of metodos) {
       const f = faltantes(m)
-      if (f.length) return alert(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${f.join(", ")}.`)
+      if (f.length) return avisar(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${f.join(", ")}.`)
     }
 
     let impFinal: Record<string, number> = { ...imputaciones }
@@ -369,7 +373,7 @@ export default function VendedorCobrarPage() {
 
     if (falta > 0.01) {
       if (falta > totalImputado + 0.01) {
-        alert(`Faltan ${formatCurrency(falta)} y superan lo imputado a comprobantes — sumá plata o sacá selección.`)
+        avisar(`Faltan ${formatCurrency(falta)} y superan lo imputado a comprobantes — sumá plata o sacá selección.`)
         return
       }
       if (!modoDiferencia) {
@@ -461,7 +465,7 @@ export default function VendedorCobrarPage() {
       })
       const d = await res.json()
       if (!res.ok || d.error) {
-        alert(d.error || "Error al registrar el cobro.")
+        avisar(d.mensaje || d.error || "Error al registrar el cobro.")
         return
       }
 
@@ -471,10 +475,10 @@ export default function VendedorCobrarPage() {
       // Cheques sin CUIT válido: no hubo consulta al BCRA — aviso explícito, no silencio
       for (const m of metodos) if (m.tipo === "cheque" && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: cliente.nombre }, m.cuit_emisor || null)
       bcra.cerrarFormulario()
-      alert(`✅ Cobro registrado por ${formatCurrency(totalMetodos)}. Queda pendiente de rendición.`)
+      dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)}. Queda pendiente de rendición.`)
       router.push(`/vendedor/clientes/${cliente.id}`)
     } catch {
-      alert("Error de conexión al registrar el cobro.")
+      avisar("Error de conexión al registrar el cobro.")
     } finally {
       setEnviando(false)
     }
@@ -541,6 +545,7 @@ export default function VendedorCobrarPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-44">
+      {Aviso}
       <header className="bg-emerald-700 text-white px-5 py-4 sticky top-0 z-10 shadow-md flex items-center gap-3">
         <button onClick={() => router.back()} className="text-2xl leading-none px-1">←</button>
         <div className="min-w-0 flex-1">
@@ -917,7 +922,7 @@ export default function VendedorCobrarPage() {
                       <>
                         <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className={clsOcr(m, "banco", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
                         <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={clsOcr(m, "numero_cheque", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
-                        <input type="date" value={m.fecha_cheque} onChange={(e) => updateMetodo(idx, { fecha_cheque: e.target.value })} className={clsOcr(m, "fecha_cheque", "rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
+                        <DateInputAR value={m.fecha_cheque} onChange={(v) => updateMetodo(idx, { fecha_cheque: v })} className={clsOcr(m, "fecha_cheque", "h-10 rounded-lg border border-gray-300 px-3 py-2 text-sm")} />
                         <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className={clsOcr(m, "cuit_emisor", `rounded-lg border px-3 py-2 text-sm ${m.cuit_emisor && !cuitValido(m.cuit_emisor) ? "border-red-400" : "border-gray-300"}`)} />
                         {!cuitValido(m.cuit_emisor) && (
                           <p className="col-span-2 text-xs font-medium text-amber-700">

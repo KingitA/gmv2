@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { useAvisoInline } from "@/components/pagos/aviso-inline"
 import { formatCurrency } from "@/lib/utils"
 import type { ParadaHoja, HojaRuta } from "@/lib/viajes/hoja-ruta"
 import { GastoSheet } from "@/components/chofer/gasto-sheet"
@@ -59,6 +60,17 @@ export default function ViajeDashboardPage() {
   }, [viajeId])
 
   useEffect(() => { cargar() }, [cargar])
+
+  // Al volver de un cobro (#parada-<clienteId>): posicionarse en esa parada y mostrar el aviso
+  const { Aviso } = useAvisoInline({ entrante: true })
+  const posicionado = useRef(false)
+  useEffect(() => {
+    if (!data || posicionado.current) return
+    const h = window.location.hash
+    if (!h) return
+    posicionado.current = true
+    setTimeout(() => document.getElementById(h.slice(1))?.scrollIntoView({ block: "start" }), 50)
+  }, [data])
 
   // "Atrás" físico: cerrar la hoja abierta antes de salir de la página
   useBackTrap(() => {
@@ -141,6 +153,7 @@ export default function ViajeDashboardPage() {
     return (
       <div
         key={p.id}
+        id={`parada-${p.cliente_id}`}
         className={`w-full rounded-2xl shadow-sm border p-4 ${gris ? "bg-gray-100 border-gray-200 opacity-80" : p.bloquear_entrega ? "bg-white border-red-400 border-2" : "bg-white border-gray-200"}`}
       >
         <div className="flex items-start gap-3" onClick={() => router.push(`/chofer/${viajeId}/cliente/${p.cliente_id}`)}>
@@ -264,6 +277,7 @@ export default function ViajeDashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="sticky top-0 z-10 bg-blue-700 px-5 py-4 text-white shadow-md">
+        {Aviso}
         <button onClick={() => router.push("/chofer")} className="mb-1 flex items-center gap-1 text-sm text-blue-200">← Inicio</button>
         <div className="flex items-start justify-between gap-2">
           <div>

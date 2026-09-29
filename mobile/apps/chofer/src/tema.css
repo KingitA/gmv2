@@ -1,0 +1,8 @@
+/* Tema visual de la app Chofer: la barra toma el azul del módulo web /chofer
+   (bg-blue-700), el resto son los colores por defecto del core. Solo color. */
+@import "@gm/core/styles.css";
+
+@theme {
+  --color-barra: oklch(48.8% 0.243 264.376); /* blue-700 */
+  --color-barra-activo: oklch(42.4% 0.199 265.638); /* blue-800 */
+}

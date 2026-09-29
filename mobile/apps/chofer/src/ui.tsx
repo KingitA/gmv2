@@ -1,36 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { useLocation, useNavigate, useSearchParams } from "react-router"
+import { useBlocker, useLocation, useNavigate, useSearchParams } from "react-router"
 import { decidirAtras, indiceHistorial, useItemsOutbox, useOnline, useRuntime, type ItemOutbox } from "@gm/core"
 import { autoFormatoFechaAR, avisosBcraPendientes, fechaARAIso, fechaIsoAAR, resultadoSinCuit, type ConsultaBcraResultado } from "@gm/cheques"
 import { Encabezado, Frescura, Hoja } from "@gm/core/ui"
-import { CARTEL_PRECIOS_VENCIDOS } from "@gm/vendedor"
 
-// UI compartida de la app Vendedor. Mismos textos, colores y jerarquía que el módulo
-// web /vendedor (los viajantes ya lo conocen); lo único propio de la app es el
-// encabezado del core (atrás · En línea/Sin red · contador ⇪) y la frescura del dato.
+// UI compartida de la app Chofer. Mismos textos, colores y jerarquía que el módulo web
+// /chofer (los choferes ya lo conocen); lo único propio de la app es el encabezado del
+// core (atrás · En línea/Sin red · contador ⇪) y la frescura del dato.
+// (Rechazos, AvisosBcra, MontoInput, HojaConfirmar y los toasts son el mismo patrón que
+// la app Vendedor; consolidarlos en @gm/core/ui es tarea de la próxima actualización
+// batcheada de las tres apps.)
 
 const ARS = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" })
 export const formatCurrency = (n: number | null | undefined) => ARS.format(Number(n) || 0)
 export const round2 = (n: number) => Math.round(n * 100) / 100
 
-/** "12 sept" — fecha YYYY-MM-DD sin corrimiento de huso (igual que fechaCorta de la web). */
-export function fechaCorta(f: string | null | undefined, opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" }): string {
-  if (!f) return "—"
-  const d = new Date(`${f.slice(0, 10)}T00:00:00`)
-  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("es-AR", opts)
+/** = formatDateAR de la web: fecha (DATE o timestamp) en el día calendario de Argentina. */
+export function formatDateAR(f: string | null | undefined): string {
+  if (!f) return ""
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(f) ? `${f}T12:00:00Z` : f)
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
 }
-export const fechaAR = (f: string | null | undefined) => fechaCorta(f, { day: "2-digit", month: "2-digit", year: "numeric" })
+/** Fecha de un viaje ("lunes, 23 de septiembre"): la fecha es un DATE, sin corrimiento de huso. */
+export function fechaViaje(f: string | null | undefined, opts: Intl.DateTimeFormatOptions = { weekday: "long", day: "numeric", month: "long" }): string {
+  if (!f) return ""
+  const d = new Date(`${f.slice(0, 10)}T12:00:00Z`)
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("es-AR", { ...opts, timeZone: "UTC" })
+}
+/** "23 sept, 14:30" de un timestamp (billetera, cobros). */
+export const fechaHora = (v: string | null | undefined) => (v ? new Date(v).toLocaleDateString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "")
 
 /** Marco de toda pantalla: encabezado del core + (opcional) frescura del dataset que se muestra. */
-export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = 60, pie, children, fondo = "bg-gray-50", preciosVencidos = false }: {
+export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = 60, pie, children, fondo = "bg-gray-50" }: {
   titulo: string; atras?: boolean; derecha?: ReactNode; dataset?: string; etiquetaFrescura?: string; viejoTrasMin?: number; pie?: ReactNode; children: ReactNode; fondo?: string
-  /** Pantallas que muestran PRECIOS: cartel fijo si hace más de 24 hs que no se actualizan */
-  preciosVencidos?: boolean
 }) {
   return (
     <div className={`flex h-dvh flex-col ${fondo} text-gray-900`}>
       <Encabezado titulo={titulo} atras={atras} derecha={derecha} />
-      <CartelPreciosVencidos visible={preciosVencidos} />
       {dataset && <Frescura dataset={dataset} etiqueta={etiquetaFrescura} viejoTrasMin={viejoTrasMin} />}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
       {pie}
@@ -58,19 +64,9 @@ export function SinDescargar({ que }: { que: string }) {
   return <Vacio icono={online ? "⏳" : "📡"}>{online ? `Descargando ${que}…` : `Todavía no se descargó ${que} en este equipo. Conectate una vez para tenerlo sin señal.`}</Vacio>
 }
 
-/** Cartel fijo (texto del dueño) cuando hace más de 24 hs que el equipo no actualiza precios. */
-export function CartelPreciosVencidos({ visible }: { visible: boolean }) {
-  if (!visible) return null
-  return (
-    <div role="alert" className="border-b-2 border-red-700 bg-red-600 px-3 py-2 text-center text-[13px] font-extrabold leading-snug text-white">
-      ⚠ {CARTEL_PRECIOS_VENCIDOS}
-    </div>
-  )
-}
-
-/** Guardado en el equipo y todavía sin enviar: lavanda (Megasur: "sin sincronizar"). Rechazado: rojo. */
+/** Guardado en el equipo y todavía sin enviar. Rechazado: rojo. */
 export const SinEnviar = ({ texto = "sin enviar", rechazado = false }: { texto?: string; rechazado?: boolean }) => (
-  <span className={`shrink-0 rounded-full border px-2 py-px text-[11px] font-extrabold ${rechazado ? "border-red-200 bg-red-50 text-red-700" : "border-lavanda-200 bg-lavanda-50 text-lavanda-700"}`}>⇪ {texto}</span>
+  <span className={`shrink-0 rounded-full border px-2 py-px text-[11px] font-extrabold ${rechazado ? "border-red-200 bg-red-50 text-red-700" : "border-amber-300 bg-amber-50 text-amber-800"}`}>⇪ {texto}</span>
 )
 
 /** Operaciones que el servidor rechazó, visibles donde importan, con el motivo y una salida clara. */
@@ -98,10 +94,10 @@ export function Rechazos({ items, ayuda, accion }: { items: ItemOutbox[]; ayuda?
 // ─── Avisos del BCRA (cheques) ───────────────────────────────────────────────
 // La consulta a la Central de Deudores va por el outbox (`bcra.consultar`, encolada
 // justo después del cobro) y contesta cuando puede: el cobro cerró sin esperarla.
-// Acá se muestra el veredicto apenas llega (esta pantalla o cualquiera que monte el
-// aviso), hasta que el vendedor lo marca como visto. Lo visto se recuerda en el equipo.
+// Acá se muestra el veredicto apenas llega (en el inicio, la ficha y el cobro), hasta
+// que el chofer lo marca como visto. Lo visto se recuerda en el equipo.
 
-const CLAVE_BCRA_VISTOS = "gm.vendedor.bcra.vistos"
+const CLAVE_BCRA_VISTOS = "gm.chofer.bcra.vistos"
 function leerVistos(): string[] {
   try { return JSON.parse(localStorage.getItem(CLAVE_BCRA_VISTOS) || "[]") } catch { return [] }
 }
@@ -109,9 +105,8 @@ function guardarVistos(v: string[]) {
   try { localStorage.setItem(CLAVE_BCRA_VISTOS, JSON.stringify(v.slice(-200))) } catch { /* noop */ }
 }
 
-// Cheques registrados SIN CUIT válido: no hubo consulta (no hay item en el outbox), pero
-// tampoco puede pasar en silencio. Aviso local, en el equipo, hasta que se marca visto.
-const CLAVE_SIN_CUIT = "gm.vendedor.bcra.sincuit"
+// Cheques registrados SIN CUIT válido: no hubo consulta, pero tampoco puede pasar en silencio.
+const CLAVE_SIN_CUIT = "gm.chofer.bcra.sincuit"
 type AvisoLocal = { key: string; resultado: ConsultaBcraResultado }
 const oyentesSinCuit = new Set<() => void>()
 function leerSinCuit(): AvisoLocal[] {
@@ -191,6 +186,7 @@ export function AvisosBcra() {
     </div>
   )
 }
+
 /** Volver a la pantalla anterior (misma decisión que el botón atrás físico y la flecha del encabezado). */
 export function useVolver() {
   const navigate = useNavigate()
@@ -206,10 +202,38 @@ export function useVolver() {
 }
 
 /**
+ * Overlay con valor dinámico (?ver=parada:<id>): como useOverlay del core, pero el valor
+ * lo decide quien abre. `valor` = lo que sigue al prefijo, o null si no está abierto.
+ */
+export function useOverlayDinamico(prefijo: string, param = "ver") {
+  const [sp] = useSearchParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const actual = sp.get(param)
+  const valor = actual && actual.startsWith(`${prefijo}:`) ? actual.slice(prefijo.length + 1) : null
+  const abrir = useCallback(
+    (v: string) => {
+      const n = new URLSearchParams(location.search)
+      n.set(param, `${prefijo}:${v}`)
+      navigate({ pathname: location.pathname, search: `?${n}` }, { state: { overlay: true } })
+    },
+    [location.pathname, location.search, navigate, param, prefijo],
+  )
+  const cerrar = useCallback(() => {
+    if (valor === null) return
+    if ((location.state as { overlay?: boolean } | null)?.overlay) navigate(-1)
+    else {
+      const n = new URLSearchParams(location.search)
+      n.delete(param)
+      navigate({ pathname: location.pathname, search: n.size ? `?${n}` : "" }, { replace: true })
+    }
+  }, [valor, location.pathname, location.search, location.state, navigate, param])
+  return { valor, abierto: valor !== null, abrir, cerrar }
+}
+
+/**
  * Texto de búsqueda: responde en el acto (estado local) y se guarda en la URL con un
- * retardo corto (replace, sin historial). Escribir cada tecla en la URL re-renderiza todo
- * el árbol de rutas: en el NuStar eso se siente. La URL sigue siendo la memoria del
- * buscador (volver de una ficha lo encuentra como estaba).
+ * retardo corto (replace, sin historial).
  */
 export function useBusqueda(param = "q", retardoMs = 250): [string, (v: string) => void] {
   const [sp, setSp] = useSearchParams()
@@ -217,7 +241,6 @@ export function useBusqueda(param = "q", retardoMs = 250): [string, (v: string) 
   const [valor, setValor] = useState(enUrl)
   const ultimoEscrito = useRef(enUrl)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  // Cambio que vino de AFUERA (otro componente navegó con ?q=…): adoptar
   useEffect(() => {
     if (enUrl !== ultimoEscrito.current) { ultimoEscrito.current = enUrl; setValor(enUrl) }
   }, [enUrl])
@@ -256,7 +279,7 @@ export function useToast() {
 }
 
 /** Aviso que sobrevive a un cambio de pantalla ("Cobro registrado" → se ve en la ficha). */
-const CLAVE_AVISO = "gm.vendedor.aviso"
+const CLAVE_AVISO = "gm.chofer.aviso"
 export function dejarAviso(msg: string) {
   try { sessionStorage.setItem(CLAVE_AVISO, msg) } catch { /* noop */ }
 }
@@ -271,83 +294,38 @@ export function useAvisoEntrante(mostrar: (m: string, t?: "ok" | "err") => void)
 
 // ─── Confirmación (reemplaza a confirm() de la web: es una hoja con historial) ─
 
-export function HojaConfirmar({ abierta, onCerrar, titulo, children, confirmar, onConfirmar, peligro }: {
-  abierta: boolean; onCerrar: () => void; titulo: string; children?: ReactNode; confirmar: string; onConfirmar: () => void; peligro?: boolean
+export function HojaConfirmar({ abierta, onCerrar, titulo, children, confirmar, onConfirmar, peligro, ocupado }: {
+  abierta: boolean; onCerrar: () => void; titulo: string; children?: ReactNode; confirmar: string; onConfirmar: () => void; peligro?: boolean; ocupado?: boolean
 }) {
   return (
     <Hoja abierta={abierta} onCerrar={onCerrar} titulo={titulo}>
       {children && <div className="mb-4 text-[15px] text-gray-600">{children}</div>}
       <div className="grid grid-cols-2 gap-2">
         <button onClick={onCerrar} className="min-h-12 rounded-xl border border-gray-300 bg-white font-bold text-gray-700">Cancelar</button>
-        <button onClick={onConfirmar} className={`min-h-12 rounded-xl font-bold text-white ${peligro ? "bg-red-600" : "bg-emerald-600"}`}>{confirmar}</button>
+        <button onClick={onConfirmar} disabled={ocupado} className={`min-h-12 rounded-xl font-bold text-white disabled:opacity-50 ${peligro ? "bg-red-600" : "bg-blue-600"}`}>{ocupado ? "Guardando…" : confirmar}</button>
       </div>
     </Hoja>
   )
 }
 
-// ─── Zoom de foto (?foto=<url>: entrada de historial, atrás lo cierra) ───────
-
-export function useFotoZoom() {
-  const [sp] = useSearchParams()
-  const navigate = useNavigate()
-  const location = useLocation()
-  const src = sp.get("foto")
-  const abrir = useCallback(
-    (url: string | null | undefined) => {
-      if (!url) return
-      const n = new URLSearchParams(location.search)
-      n.set("foto", url)
-      navigate({ pathname: location.pathname, search: `?${n}` }, { state: { overlay: true } })
-    },
-    [location.pathname, location.search, navigate],
+/**
+ * Salir de una pantalla con datos a medio cargar (cobro, devolución) pide confirmación:
+ * bloquea la navegación (incluido el botón ATRÁS físico, que en la app es history.back)
+ * y muestra la hoja "¿Descartar?". `sucio` = hay algo que se perdería.
+ */
+export function useBloqueoSalida(sucio: boolean, textos: { titulo: string; detalle: string; confirmar: string }) {
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => sucio && currentLocation.pathname !== nextLocation.pathname)
+  const bloqueado = blocker.state === "blocked"
+  const hoja = (
+    <Hoja abierta={bloqueado} onCerrar={() => blocker.reset?.()} titulo={textos.titulo}>
+      <div className="mb-4 text-[15px] text-gray-600">{textos.detalle}</div>
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => blocker.reset?.()} className="min-h-12 rounded-xl border border-gray-300 bg-white font-bold text-gray-700">Seguir acá</button>
+        <button onClick={() => blocker.proceed?.()} className="min-h-12 rounded-xl bg-red-600 font-bold text-white">{textos.confirmar}</button>
+      </div>
+    </Hoja>
   )
-  const cerrar = useCallback(() => {
-    if ((location.state as { overlay?: boolean } | null)?.overlay) navigate(-1)
-    else {
-      const n = new URLSearchParams(location.search)
-      n.delete("foto")
-      navigate({ pathname: location.pathname, search: n.size ? `?${n}` : "" }, { replace: true })
-    }
-  }, [location.pathname, location.search, location.state, navigate])
-  return { src, abrir, cerrar }
-}
-
-/** Foto a pantalla completa: pellizco 1–5×, doble toque 1 ↔ 2,5×, arrastre con zoom, toque afuera cierra. */
-export function ZoomFoto({ src, alt, onCerrar }: { src: string; alt?: string; onCerrar: () => void }) {
-  const [t, setT] = useState({ escala: 1, x: 0, y: 0 })
-  const gesto = useRef<{ dist: number; escala: number; x: number; y: number; px: number; py: number; ultimoTap: number }>({ dist: 0, escala: 1, x: 0, y: 0, px: 0, py: 0, ultimoTap: 0 })
-  const dist = (e: React.TouchEvent) => Math.hypot(e.touches[0]!.clientX - e.touches[1]!.clientX, e.touches[0]!.clientY - e.touches[1]!.clientY)
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex touch-none items-center justify-center bg-black/90"
-      onClick={() => t.escala <= 1.02 && onCerrar()}
-      onTouchStart={(e) => {
-        const g = gesto.current
-        if (e.touches.length === 2) Object.assign(g, { dist: dist(e), escala: t.escala })
-        else Object.assign(g, { px: e.touches[0]!.clientX, py: e.touches[0]!.clientY, x: t.x, y: t.y })
-      }}
-      onTouchMove={(e) => {
-        const g = gesto.current
-        if (e.touches.length === 2 && g.dist > 0) setT((p) => ({ ...p, escala: Math.min(5, Math.max(1, (g.escala * dist(e)) / g.dist)) }))
-        else if (e.touches.length === 1 && t.escala > 1) setT((p) => ({ ...p, x: g.x + e.touches[0]!.clientX - g.px, y: g.y + e.touches[0]!.clientY - g.py }))
-      }}
-      onTouchEnd={(e) => {
-        const g = gesto.current
-        if (t.escala <= 1.02) setT({ escala: 1, x: 0, y: 0 })
-        if (e.touches.length === 0 && e.changedTouches.length === 1) {
-          const ahora = Date.now()
-          if (ahora - g.ultimoTap < 300) {
-            e.preventDefault()
-            setT((p) => (p.escala > 1 ? { escala: 1, x: 0, y: 0 } : { escala: 2.5, x: 0, y: 0 }))
-            g.ultimoTap = 0
-          } else g.ultimoTap = ahora
-        }
-      }}
-    >
-      <img src={src} alt={alt || ""} className="max-h-full max-w-full object-contain" style={{ transform: `translate(${t.x}px, ${t.y}px) scale(${t.escala})` }} onClick={(e) => t.escala > 1.02 && e.stopPropagation()} />
-      <button onClick={onCerrar} aria-label="Cerrar" className="absolute right-3 top-3 h-11 w-11 rounded-full bg-white/15 text-2xl leading-none text-white">×</button>
-    </div>
-  )
+  return { hoja, bloqueado }
 }
 
 // ─── Campos ──────────────────────────────────────────────────────────────────
@@ -372,7 +350,7 @@ export function FechaInput({ valor, onCambio, className = "", placeholder = "DD/
 }
 
 
-/** Monto en pesos: acepta coma o punto; confirma al salir o con Enter (= MontoInput de la web). */
+/** Monto en pesos: acepta coma o punto; confirma al salir o con Enter. */
 export function MontoInput({ valor, onCambio, className = "", placeholder = "0" }: { valor: number; onCambio: (n: number) => void; className?: string; placeholder?: string }) {
   const [texto, setTexto] = useState(valor ? String(valor) : "")
   const editando = useRef(false)
@@ -397,7 +375,7 @@ export function MontoInput({ valor, onCambio, className = "", placeholder = "0" 
   )
 }
 
-/** Enter en un input cierra el teclado (= <EnterBlur/> del layout web). Se instala una vez en el inicio de la app. */
+/** Enter en un input cierra el teclado. Se instala una vez en el inicio de la app. */
 export function useEnterCierraTeclado() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -408,27 +386,51 @@ export function useEnterCierraTeclado() {
   }, [])
 }
 
-// ─── Estados de pedido (una sola tabla: en la web había tres copias distintas) ─
-
-export const ESTADO_BADGE: Record<string, string> = {
-  // Chips Megasur: fondo tono 50 + texto tono 700/800 + punto de color
-  en_venta: "bg-neutro-100 text-neutro-700",
-  pendiente: "bg-alerta-50 text-alerta-700",
-  impreso: "bg-azul-50 text-azul-700",
-  en_preparacion: "bg-azul-50 text-azul-700",
-  en_viaje: "bg-azul-100 text-azul-800",
-  confirmado: "bg-azul-50 text-azul-700",
-  facturado: "bg-cian-50 text-cian-800",
-  entregado: "bg-exito-50 text-exito-700",
-  cancelado: "bg-error-50 text-error-700",
+/** Abrir un PDF del ERP (remito): la web redirige a una URL firmada del bucket; se resuelve con la sesión del equipo y se abre FUERA de la app. Online-only. */
+export function useAbrirPdf(mostrar: (m: string, t?: "ok" | "err") => void) {
+  const rt = useRuntime()
+  return useCallback(
+    async (ruta: string) => {
+      try {
+        const token = await rt.auth.accessToken()
+        const ctrl = new AbortController()
+        const res = await fetch(`${rt.api.base}${ruta}`, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal })
+        const url = res.url
+        ctrl.abort()
+        if (!res.ok || !url || url.startsWith(rt.api.base)) throw new Error()
+        window.open(url, "_blank")
+      } catch {
+        mostrar("No se pudo abrir el PDF. Probá de nuevo con buena señal.", "err")
+      }
+    },
+    [rt, mostrar],
+  )
 }
-const ESTADO_TEXTO: Record<string, string> = { en_venta: "EN VENTA", pendiente: "PENDIENTE", impreso: "IMPRESO", en_preparacion: "EN PREPARACIÓN", en_viaje: "EN VIAJE" }
-export const estadoTexto = (e: string) => ESTADO_TEXTO[e] || e.toUpperCase()
-export function BadgeEstado({ estado }: { estado: string }) {
+
+export const ESTADO_PARADA: Record<string, { label: string; cls: string }> = {
+  pendiente: { label: "PENDIENTE", cls: "bg-gray-200 text-gray-700" },
+  entregado: { label: "ENTREGADO", cls: "bg-green-600 text-white" },
+  entregado_parcial: { label: "PARCIAL", cls: "bg-amber-500 text-white" },
+  no_entregado: { label: "NO ENTREGADO", cls: "bg-red-600 text-white" },
+  solo_cobro: { label: "COBRADO", cls: "bg-blue-600 text-white" },
+}
+
+export function Linea({ etiqueta, valor, fuerte, rojo }: { etiqueta: string; valor: string; fuerte?: boolean; rojo?: boolean }) {
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold ${ESTADO_BADGE[estado] || "bg-gray-100 text-gray-700"}`}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-      {estadoTexto(estado)}
-    </span>
+    <div className={`flex justify-between ${fuerte ? "text-base font-bold" : ""}`}>
+      <span className="text-gray-500">{etiqueta}</span>
+      <span className={rojo ? "font-bold text-red-600" : "font-bold"}>{valor}</span>
+    </div>
+  )
+}
+
+export function Botones({ ocupado, onCancelar, onConfirmar, texto, naranja }: { ocupado: boolean; onCancelar: () => void; onConfirmar: () => void; texto: string; naranja?: boolean }) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <button onClick={onCancelar} className="min-h-12 rounded-2xl border-2 border-gray-300 py-3 font-bold text-gray-600 active:scale-95">Cancelar</button>
+      <button onClick={onConfirmar} disabled={ocupado} className={`min-h-12 rounded-2xl py-3 font-bold text-white active:scale-95 disabled:opacity-50 ${naranja ? "bg-orange-500" : "bg-blue-600"}`}>
+        {ocupado ? "Guardando…" : texto}
+      </button>
+    </div>
   )
 }

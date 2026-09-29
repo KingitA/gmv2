@@ -6,8 +6,10 @@ import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { dejarAvisoPagina, useAvisoInline } from "@/components/pagos/aviso-inline"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
-import { topeAjuste } from "@/lib/cobranzas/ajuste"
+import { anticiposDeSeleccion, ofreceAjuste, pedidosContadoAEnviar, topeAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
 import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
 import { ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
@@ -146,6 +148,8 @@ export default function ClienteEntregaPage() {
   const [dialogoDiff, setDialogoDiff] = useState<number | null>(null)             // +falta / −sobra
 
   const esReadOnly = READONLY_ESTADOS.includes(data?.viaje_estado || "")
+  // Errores y rechazos dentro de la pantalla (nada de alert() nativo)
+  const { mostrar: avisar, Aviso } = useAvisoInline()
 
   const cargarDatos = useCallback(() => {
     setLoading(true)
@@ -296,12 +300,12 @@ export default function ClienteEntregaPage() {
     const totalNeto = totalCobro()
     const totalMetodos = Math.round(metodosPago.reduce((s, m) => s + Number(m.monto), 0) * 100) / 100
     if (totalMetodos <= 0) {
-      alert("Ingresá al menos un método de pago con monto.")
+      avisar("Ingresá al menos un método de pago con monto.")
       return
     }
     for (const m of metodosPago) {
       if (esFila(m) && m.monto > 0 && faltantes(m).length) {
-        alert(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${faltantes(m).join(", ")}.`)
+        avisar(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${faltantes(m).join(", ")}.`)
         return
       }
     }
@@ -312,7 +316,9 @@ export default function ClienteEntregaPage() {
     let ajusteRedondeo = 0
     if (Math.abs(diff) > 0.01 && totalImputado() > 0) {
       if (!modoDiferencia) { setDialogoDiff(diff); return }
-      if (modoDiferencia === "ajuste") ajusteRedondeo = -diff // +falta = crédito, −sobra = débito
+      // +falta = crédito (tope 1 %), −sobra = débito. El sobrante nunca bloquea: si supera el
+      // 1 % no se ofrece como ajuste y queda a cuenta del cliente.
+      if (modoDiferencia === "ajuste" && ofreceAjuste(diff, totalImputado())) ajusteRedondeo = -diff
     }
     setDialogoDiff(null)
     setGuardandoCobro(true)
@@ -335,7 +341,10 @@ export default function ClienteEntregaPage() {
           imputaciones,
           devolucion_ids: devPendientes,
           comprobante_urls: urlsDeFotos(metodosPago.filter(esFila)).map((url) => ({ url })),
-          pedidos_contado: [...contadoPedidos],
+          // 10 % sobre pedidos sin facturar: solo los SELECCIONADOS; los anticipos viajan para que
+          // el servidor marque solo esos y calcule el tope del ajuste sobre todo lo seleccionado
+          pedidos_contado: pedidosContadoAEnviar(contadoPedidos, comprobantesSeleccionados),
+          pedidos_anticipo: anticiposDeSeleccion(comprobantesSeleccionados),
           contado_general: contadoGeneral && bonificacionEstimada() > 0,
           ajuste_redondeo: ajusteRedondeo,
           cobros_extra: cobrosExtra
@@ -345,8 +354,13 @@ export default function ClienteEntregaPage() {
         }),
       })
       const d = await res.json()
-      if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({}); cargarDatos() }
-      else alert(d.error || "Error al registrar cobro")
+      if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({})
+        // Vuelta a la hoja de ruta, posicionada en esta parada, con el cobro reflejado. Cobrar
+        // CIERRA la parada (el servidor la deja entregada); "Cerrar parada" es para cuando no hubo cobro.
+        dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)} a ${clienteNombre}.${d.parada_cerrada === "entregado" ? " Parada entregada." : d.parada_cerrada === "solo_cobro" ? " Parada cerrada." : ""} Se imputará al confirmar la rendición.${d.aviso_contado ? ` ${d.aviso_contado}` : ""}${d.aviso_ajuste ? ` ${d.aviso_ajuste}` : ""}`)
+        router.push(`/chofer/${viajeId}#parada-${clienteId}`)
+      }
+      else avisar(d.mensaje || d.error || "Error al registrar cobro")
     } finally { setGuardandoCobro(false) }
   }
 
@@ -365,6 +379,7 @@ export default function ClienteEntregaPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {Aviso}
       <header className="bg-blue-700 text-white px-5 py-4 sticky top-0 z-10 shadow-md">
         <button onClick={() => router.push(`/chofer/${viajeId}`)} className="text-blue-200 text-sm mb-1">← Volver al viaje</button>
         <h1 className="text-xl font-bold truncate">{clienteNombre}</h1>
@@ -527,8 +542,28 @@ export default function ClienteEntregaPage() {
                   ⚠️ {devError}
                 </div>
               )}
+              {/* Primero, el pedido de esta entrega: todo listo para devolver (después se ajusta la cantidad) */}
+              {pedido && pedido.detalle.filter((it) => !devItems.some((x) => x.articulo_id === it.articulo_id)).length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-gray-600 mb-1">Artículos del pedido #{pedido.numero}</p>
+                  <p className="text-xs text-gray-400 mb-2">Tocá "Devolver" en lo que vuelve; después ajustá la cantidad si no es todo.</p>
+                  <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
+                    {pedido.detalle.filter((it) => !devItems.some((x) => x.articulo_id === it.articulo_id)).map((it) => (
+                      <div key={it.id} className="flex items-center gap-3 px-4 py-2.5 bg-white">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-800 truncate">{it.articulos.descripcion}</p>
+                          <p className="text-xs text-gray-400">{it.articulos.sku} · {it.cantidad} × {formatCurrency(it.precio_final)}</p>
+                        </div>
+                        <button onClick={() => agregarItemPorArticulo(it.articulo_id, it.articulos.sku, it.articulos.descripcion, it.precio_final, it.cantidad)} className="shrink-0 rounded-xl bg-amber-500 px-3 py-2 text-sm font-bold text-white active:scale-95">
+                          ↩ Devolver
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
-                <label className="text-sm font-medium text-gray-600 mb-2 block">Buscar artículo adicional</label>
+                <label className="text-sm font-medium text-gray-600 mb-2 block">Otro artículo (que no está en este pedido)</label>
                 <input type="text" value={busquedaArticulo} onChange={(e) => setBusquedaArticulo(e.target.value)} placeholder="SKU o descripción..." className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:border-blue-500 focus:outline-none" />
                 {resultadosArticulo.length > 0 && (
                   <div className="mt-2 border border-gray-200 rounded-xl overflow-hidden">
@@ -704,6 +739,15 @@ function CobroSheet({
   const total = totalCobro()
   const diff = totalMet - total
 
+  // Cuentas destino para transferencias (faltantes() exige cuenta_bancaria_id)
+  const [cuentas, setCuentas] = useState<Array<{ id: string; banco: string; alias: string | null }>>([])
+  useEffect(() => {
+    fetch("/api/chofer/cuentas-bancarias")
+      .then((r) => r.json())
+      .then((d) => setCuentas(Array.isArray(d?.cuentas) ? d.cuentas : []))
+      .catch(() => {})
+  }, [])
+
   // Búsqueda de clientes adicionales para cobrar
   const supabaseCli = createClientBrowser()
   const [busqCli, setBusqCli] = useState("")
@@ -748,6 +792,7 @@ function CobroSheet({
               onContadoGeneralChange={onContadoGeneralChange}
               onComprobantesLoaded={onComprobantesLoaded}
               onDtosHechosLoaded={onDtosHechosLoaded}
+              contadoEnBarra={false}
             />
             {bonificacion > 0 && (
               <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -815,6 +860,28 @@ function CobroSheet({
             </div>
           )}
 
+          {/* Toggle 10% contado a todo: aplica solo a los comprobantes seleccionados que aún no lo tengan
+              (el servidor vuelve a controlar que ninguno lo reciba dos veces) */}
+          {Object.keys(comprobantesSeleccionados).length > 0 && (
+            <div className="bg-emerald-50 rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-bold text-emerald-800">10% contado a todo</p>
+                  <p className="text-emerald-700 text-sm">
+                    {contadoGeneral
+                      ? bonificacion > 0
+                        ? `−${formatCurrency(bonificacion)} sobre lo seleccionado (la NC sale al confirmar la rendición)`
+                        : "Lo seleccionado ya tiene el 10% aplicado o no bonifica: no se aplica dos veces."
+                      : "Aplica a los comprobantes seleccionados que aún no lo tengan; los pedidos sin facturar cobran el 90%."}
+                  </p>
+                </div>
+                <button onClick={() => onContadoGeneralChange(!contadoGeneral)} className={`w-14 h-7 shrink-0 rounded-full transition-colors ${contadoGeneral ? "bg-green-500" : "bg-gray-300"}`} aria-label="10% contado a todo">
+                  <span className={`block w-5 h-5 bg-white rounded-full shadow transition-transform mx-1 ${contadoGeneral ? "translate-x-7" : ""}`} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Total */}
           <div className="bg-blue-50 rounded-2xl px-4 py-4 text-center">
             <p className="text-blue-600 text-sm">Total a cobrar</p>
@@ -861,8 +928,9 @@ function CobroSheet({
                 key={m.id}
                 metodo={m}
                 clienteNombre={clienteNombre}
+                cuentas={cuentas}
                 onChange={(updates) => setMetodosPago((prev) => prev.map((x, i) => (i === idx ? aplicarCambios(x, updates) : x)))}
-                onRemove={metodosPago.length > 1 ? () => setMetodosPago((p) => p.filter((_, i) => i !== idx)) : undefined}
+                onRemove={() => setMetodosPago((p) => { const r = p.filter((_, i) => i !== idx); return r.length ? r : [{ id: Date.now().toString(), tipo: "efectivo", monto: 0 }] })}
                 onFoto={(files) => onFotos(files, esFila(m) ? { filaId: m.id } : undefined)}
                 onReintentarSubida={() => onReintentarSubida(m.id)}
               />
@@ -880,7 +948,7 @@ function CobroSheet({
           {Math.abs(diff) > 0.01 && (
             <div className={`rounded-xl px-4 py-3 text-center font-medium ${diff < 0 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
               {diff < 0 ? `Faltan ${formatCurrency(Math.abs(diff))}` : `Sobran ${formatCurrency(diff)}`}
-              <span className="block text-xs font-normal opacity-80">Al registrar elegís: ajuste por redondeo o dejar el saldo.</span>
+              <span className="block text-xs font-normal opacity-80">{diff < 0 ? "Al registrar elegís: ajuste por redondeo o dejar el saldo pendiente." : "Al registrar elegís: dejarlo a cuenta del cliente o, si es chico, ajuste por redondeo."}</span>
             </div>
           )}
 
@@ -890,15 +958,17 @@ function CobroSheet({
                 <h3 className="text-center text-lg font-bold">
                   {dialogoDiff < 0 ? `Faltan ${formatCurrency(Math.abs(dialogoDiff))}` : `Sobran ${formatCurrency(dialogoDiff)}`}
                 </h3>
+                {/* El tope del 1 % es solo para PERDONAR saldo. El sobrante nunca bloquea: chico ⇒ se
+                    puede ajustar; grande ⇒ queda a cuenta del cliente. */}
                 {Math.abs(dialogoDiff) <= topeAjusteActual + 0.005 ? (
                   <button onClick={() => guardarCobro("ajuste")} disabled={guardandoCobro} className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:opacity-50">
                     Ajuste por redondeo {dialogoDiff < 0 ? "(se le perdona)" : "(no queda a favor)"} — oficina lo confirma al rendir
                   </button>
-                ) : (
+                ) : dialogoDiff < 0 ? (
                   <p className="rounded-xl bg-amber-50 px-3 py-2 text-center text-sm text-amber-800">
-                    La diferencia supera el 1% de lo imputado ({formatCurrency(topeAjusteActual)}): no se ajusta desde la calle.
+                    Lo que falta supera el 1% de lo seleccionado ({formatCurrency(topeAjusteActual)}): no se perdona desde la calle.
                   </p>
-                )}
+                ) : null}
                 <button onClick={() => guardarCobro("saldo")} disabled={guardandoCobro} className="w-full rounded-2xl border-2 border-gray-300 py-4 font-bold text-gray-700 disabled:opacity-50">
                   {dialogoDiff < 0 ? "Dejar el saldo pendiente" : "Dejar el sobrante a cuenta del cliente"}
                 </button>
@@ -945,6 +1015,7 @@ const CLS_INPUT = "w-full border-2 rounded-xl px-4 py-3 text-base border-gray-20
 function MetodoPagoCard({
   metodo,
   clienteNombre,
+  cuentas,
   onChange,
   onRemove,
   onFoto,
@@ -952,6 +1023,7 @@ function MetodoPagoCard({
 }: {
   metodo: MetodoPago
   clienteNombre: string | null
+  cuentas: Array<{ id: string; banco: string; alias: string | null }>
   onChange: (updates: CambiosMetodo) => void
   onRemove?: () => void
   onFoto: (files: FileList) => void
@@ -1016,11 +1088,11 @@ function MetodoPagoCard({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Fecha emisión</label>
-                  <input type="date" value={fila.fecha_emision} onChange={(e) => onChange({ fecha_emision: e.target.value })} className={clsOcr(fila, "fecha_emision", "w-full border-2 rounded-xl px-3 py-2 border-gray-200")} />
+                  <DateInputAR value={fila.fecha_emision} onChange={(v) => onChange({ fecha_emision: v })} className={clsOcr(fila, "fecha_emision", "h-11 w-full rounded-xl border-2 px-3 py-2 border-gray-200 text-base")} />
                 </div>
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Fecha vencimiento</label>
-                  <input type="date" value={fila.fecha_cheque} onChange={(e) => onChange({ fecha_cheque: e.target.value })} className={clsOcr(fila, "fecha_cheque", "w-full border-2 rounded-xl px-3 py-2 border-gray-200")} />
+                  <DateInputAR value={fila.fecha_cheque} onChange={(v) => onChange({ fecha_cheque: v })} className={clsOcr(fila, "fecha_cheque", "h-11 w-full rounded-xl border-2 px-3 py-2 border-gray-200 text-base")} />
                 </div>
               </div>
               <div>
@@ -1047,7 +1119,15 @@ function MetodoPagoCard({
               {consulta?.veredicto && <VeredictoBcraCard v={consulta.veredicto} />}
             </>
           ) : (
-            <input type="text" placeholder="Número de comprobante / referencia" value={fila.referencia_transferencia} onChange={(e) => onChange({ referencia_transferencia: e.target.value })} className={CLS_INPUT} />
+            <>
+              <select value={fila.cuenta_bancaria_id} onChange={(e) => onChange({ cuenta_bancaria_id: e.target.value })} className={`${CLS_INPUT} bg-white`}>
+                <option value="">Cuenta destino *</option>
+                {cuentas.map((cb) => (
+                  <option key={cb.id} value={cb.id}>{cb.banco}{cb.alias ? ` (${cb.alias})` : ""}</option>
+                ))}
+              </select>
+              <input type="text" placeholder="Número de comprobante / referencia" value={fila.referencia_transferencia} onChange={(e) => onChange({ referencia_transferencia: e.target.value })} className={CLS_INPUT} />
+            </>
           )}
         </div>
       )}

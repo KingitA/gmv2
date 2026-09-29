@@ -5,8 +5,10 @@ import { todayArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
+import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
-import { topeAjuste, marcaAjuste } from "@/lib/cobranzas/ajuste"
+import { marcaAjuste } from "@/lib/cobranzas/ajuste"
+import { topeAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { MARCA_CONTADO } from "@/lib/constants"
 
 /**
@@ -84,6 +86,7 @@ export async function POST(request: NextRequest) {
       .in("id", clienteIds)
     const vendedorDe = new Map((clientesDb || []).map((c) => [c.id, c.vendedor_id]))
     const nombreDe = new Map((clientesDb || []).map((c) => [c.id, c.nombre]))
+    const avisosContado: string[] = []
     for (const c of clientes) {
       if (!vendedorDe.has(c.cliente_id)) {
         return NextResponse.json({ error: `Cliente ${c.cliente_id} no encontrado` }, { status: 404 })
@@ -220,7 +223,10 @@ export async function POST(request: NextRequest) {
       // plata → oficina). Viaja como promesa y se asienta al confirmar.
       const montoAjuste = Math.round(Number(c.ajuste_redondeo || 0) * 100) / 100
       if (montoAjuste > 0.005) {
-        const totalDebitosSel = (c.imputaciones || []).reduce((s: number, i: any) => s + Number(i.monto || 0), 0)
+        // Base = todo lo seleccionado: comprobantes + anticipos a pedidos sin facturar
+        const totalDebitosSel =
+          (c.imputaciones || []).reduce((s: number, i: any) => s + Number(i.monto || 0), 0) +
+          (c.pedidos || []).reduce((s: number, p: any) => s + Number(p.monto || 0), 0)
         const tope = topeAjuste(totalDebitosSel)
         if (montoAjuste > tope + 0.005) {
           return NextResponse.json(
@@ -231,6 +237,13 @@ export async function POST(request: NextRequest) {
       }
 
       const obsPago = [observaciones, notaAnticipo, marcaCreditos(paresCreditos), marcaAjuste(montoAjuste)].filter(Boolean).join(" · ") || null
+      // 10 % contado: un comprobante jamás lo recibe dos veces (regla del servidor). Si todos
+      // los seleccionados ya lo tienen ⇒ 422 definitivo; si algunos ⇒ se registra y se avisa.
+      if ((obsPago || "").includes(MARCA_CONTADO)) {
+        const ctl = await controlarContadoDuplicado(supabase, c.cliente_id, debitosNetos.map((i: { comprobante_id: string }) => i.comprobante_id))
+        if (ctl.rechazo) return NextResponse.json({ error: ctl.rechazo, mensaje: ctl.rechazo, codigo: "regla_negocio", reintentable: false }, { status: 422 })
+        if (ctl.aviso) avisosContado.push(ctl.aviso)
+      }
 
       // ── Detalles por método (proporcional al monto del cliente) ──
       // Color de cheques: derivado de las imputaciones de ESTE cliente

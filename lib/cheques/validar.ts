@@ -142,6 +142,32 @@ export function normalizarFecha(v: string | null | undefined, opts: { hoy?: stri
   return iso
 }
 
+// ─── Fecha dd/mm/aaaa (Argentina) en un input de texto ───────────────────────
+// Todo el sistema muestra y tipea fechas como dd/mm/aaaa. Un <input type="date"> las
+// pinta según el idioma del navegador (mm/dd/aaaa en inglés): por eso los formularios
+// de cheques usan un input de texto con estas reglas (= components/ui/date-input-ar.tsx).
+
+/** ISO aaaa-mm-dd → "dd/mm/aaaa" ("" si está vacío o no es ISO). */
+export function fechaIsoAAR(iso: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ""))
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : ""
+}
+
+/** Lo tipeado → "dd/mm/aaaa" con las barras puestas solas (solo dígitos, máximo 8). */
+export function autoFormatoFechaAR(crudo: string): string {
+  const d = String(crudo ?? "").replace(/\D/g, "").slice(0, 8)
+  if (d.length <= 2) return d
+  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`
+  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`
+}
+
+/** "dd/mm/aaaa" completo y existente → ISO aaaa-mm-dd; incompleto o inexistente (31/02) → "". */
+export function fechaARAIso(texto: string): string {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(texto ?? "").trim())
+  if (!m) return ""
+  return parsearFecha(`${m[3]}-${m[2]}-${m[1]}`) ?? ""
+}
+
 // ─── Monto / número / banco ──────────────────────────────────────────────────
 
 export const MONTO_MAXIMO = 500_000_000

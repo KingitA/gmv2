@@ -1,7 +1,8 @@
 "use client"
+import { pedidosContadoAlAplicarTodo } from "@/lib/cobranzas/reglas-cobro"
 import { formatDateAR } from "@/lib/utils"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
@@ -50,6 +51,9 @@ interface Props {
   seleccionTotal?: boolean
   contadoGeneral?: boolean
   onContadoGeneralChange?: (v: boolean) => void
+  // false: el toggle "10% contado a todo" lo pinta el padre (junto a "Incluir devoluciones");
+  // el selector solo sigue el valor de `contadoGeneral` (marca los anticipos al 90%).
+  contadoEnBarra?: boolean
 }
 
 // Prefijo de clave para anticipos a pedidos sin facturar (quedan como pago a cuenta).
@@ -65,7 +69,7 @@ export interface ResumenCuenta {
 
 const fmtARS = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })
 
-export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange, modo = "todos", onResumenLoaded, seleccionTotal, contadoGeneral, onContadoGeneralChange }: Props) {
+export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange, modo = "todos", onResumenLoaded, seleccionTotal, contadoGeneral, onContadoGeneralChange, contadoEnBarra = true }: Props) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [pedidosFacturados, setPedidosFacturados] = useState<Set<string>>(new Set())
@@ -177,8 +181,21 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
 
   const montoAnticipo = (ped: Pedido) => (contado.has(ped.id) ? Math.round(Number(ped.total) * 0.9 * 100) / 100 : Number(ped.total))
 
-  const toggleAnticipo = (ped: Pedido) =>
-    setSel(PEDIDO_PREFIX + ped.id, seleccionados[PEDIDO_PREFIX + ped.id] !== undefined ? null : montoAnticipo(ped))
+  const cambiarContado = (next: Set<string>) => { setContado(next); onContadoPedidosChange?.(next) }
+
+  // El 10 % es SOLO de lo seleccionado: con "10% contado a todo" activo, el pedido que se
+  // selecciona lo recibe; el que se deselecciona lo pierde.
+  const toggleAnticipo = (ped: Pedido) => {
+    const estaba = seleccionados[PEDIDO_PREFIX + ped.id] !== undefined
+    const conContado = !estaba && (contadoGeneral ? true : contado.has(ped.id))
+    if (conContado !== contado.has(ped.id)) {
+      const next = new Set(contado)
+      if (conContado) next.add(ped.id)
+      else next.delete(ped.id)
+      cambiarContado(next)
+    }
+    setSel(PEDIDO_PREFIX + ped.id, estaba ? null : conContado ? Math.round(Number(ped.total) * 0.9 * 100) / 100 : Number(ped.total))
+  }
 
   const toggleContado = (ped: Pedido) => {
     const next = new Set(contado)
@@ -200,17 +217,34 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
   const clavesTodas = [...comprobantes.map((c) => c.id), ...pedidosSinFacturar.map((p) => PEDIDO_PREFIX + p.id)]
   const todoSeleccionado = clavesTodas.length > 0 && clavesTodas.every((k) => seleccionados[k] !== undefined)
   const toggleTodo = () => {
-    if (todoSeleccionado) { onChange({}); return }
+    if (todoSeleccionado) { if (contado.size) cambiarContado(new Set()); onChange({}); return }
+    // Con "10% contado a todo" activo, todo lo que se selecciona lo recibe
+    const conContado = contadoGeneral ? new Set(pedidosSinFacturar.map((p) => p.id)) : contado
+    if (contadoGeneral) cambiarContado(conContado)
     const next: Record<string, number> = { ...seleccionados }
     for (const c of comprobantes) next[c.id] = Number(c.saldo_pendiente)
-    for (const p of pedidosSinFacturar) next[PEDIDO_PREFIX + p.id] = montoAnticipo(p)
+    for (const p of pedidosSinFacturar) next[PEDIDO_PREFIX + p.id] = conContado.has(p.id) ? Math.round(Number(p.total) * 0.9 * 100) / 100 : Number(p.total)
     onChange(next)
   }
+  // El padre cambió "10% contado a todo" (toggle fuera del selector): los anticipos siguen
+  const contadoAplicado = useRef<boolean | undefined>(undefined)
+  useEffect(() => {
+    if (contadoEnBarra || contadoGeneral === undefined) return
+    if (contadoAplicado.current === contadoGeneral) return
+    contadoAplicado.current = contadoGeneral
+    aplicarContadoTodo(contadoGeneral)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contadoGeneral, contadoEnBarra, pedidos, comprobantes])
+
   const toggleContadoTodo = () => {
     const activar = !contadoGeneral
     onContadoGeneralChange?.(activar)
-    // Pedidos sin facturar: el 10% se aplica por pedido (90% de anticipo)
-    const next = new Set<string>(activar ? pedidosSinFacturar.map((p) => p.id) : [])
+    aplicarContadoTodo(activar)
+  }
+  const aplicarContadoTodo = (activar: boolean) => {
+    // Pedidos sin facturar: el 10% se aplica por pedido (90% de anticipo) y SOLO a los
+    // seleccionados para cobrar — nunca a toda la lista (lib/cobranzas/reglas-cobro.ts)
+    const next = new Set<string>(pedidosContadoAlAplicarTodo(activar, pedidosSinFacturar.map((p) => p.id), seleccionados))
     setContado(next)
     onContadoPedidosChange?.(next)
     const sel = { ...seleccionados }
@@ -252,10 +286,12 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
             <Checkbox checked={todoSeleccionado} onCheckedChange={toggleTodo} />
             Seleccionar todo
           </label>
-          <label className="ml-auto flex items-center gap-2 text-amber-800 cursor-pointer" title="Cobro contado: 10% de bonificación sobre lo saldado (NC al confirmar)">
-            <Checkbox checked={!!contadoGeneral} onCheckedChange={toggleContadoTodo} />
-            10% contado a todo
-          </label>
+          {contadoEnBarra && (
+            <label className="ml-auto flex items-center gap-2 text-amber-800 cursor-pointer" title="Cobro contado: 10% de bonificación sobre lo saldado (NC al confirmar)">
+              <Checkbox checked={!!contadoGeneral} onCheckedChange={toggleContadoTodo} />
+              10% contado a todo
+            </label>
+          )}
         </div>
       )}
       {pedidosVisibles.map((ped) => {
