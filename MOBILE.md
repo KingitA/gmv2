@@ -1539,7 +1539,7 @@ ficha con el sheet): atrás vuelve al viaje.
      imputaciones, billetera, cartera → estado `ANULADO`; la foto queda en `pago_comprobantes` y el
      veredicto BCRA en el outbox). No existe DELETE de cheques en ninguna superficie (verificado:
      solo los scripts de reset de 08/2026).
-   - Migración `supabase/migrations/20260928_cheques_unicidad_parcial.sql` (PENDIENTE de aplicar por el
+   - Migración `supabase/migrations/20260928_cheques_unicidad_parcial.sql` (APLICADA por el dueño el 29/09/2026; antes pendiente de aplicar por el
      dueño): reemplaza la UNIQUE (banco, numero, monto, fecha_vencimiento) por el índice parcial
      `ux_cheques_vivos` con las mismas 4 columnas `WHERE estado <> 'ANULADO'`, y borra el índice
      duplicado `idx_cheques_proveedor`. Se conservan las 4 columnas porque el número de cheque es único
@@ -1618,10 +1618,18 @@ Registrar un cobro significa que la parada está FINALIZADA. Regla pura `cierreD
   sola, ni un cobro con el viaje ya `en_rendicion`.
 - "Cerrar parada (entregado / no entregado)" queda para cuando NO hubo cobro, y para el parcial.
 
-### Puesta en marcha (pendiente del dueño)
-1. Merge de `apk-chofer` a `main` con OK del dueño (toca `app/api/chofer/*`, `lib/viajes/*`, `lib/mobile/*`) y deploy. Sin migraciones.
-2. Instalar `dist-apks/chofer-v0.2.0.apk` encima del v0.1.1 del NuStar (`adb install -r`, misma firma).
-3. Checklist contra producción (abajo) con un viaje de prueba marcado `TEST-CHOFER` y foto antes/después (método de §17/§18).
+### Puesta en marcha
+1. HECHO 29/09/2026: el dueño verificó la preview completa, aprobó el inicio de viaje explícito
+   (`viaje.iniciar`: descargar el viaje no lo abre) y dio el OK de merge de `apk-chofer` a `main`.
+   Migración de cheques `20260928` aplicada por el dueño.
+2. APK `dist-apks/chofer-v0.2.1.apk` (versionCode 4, misma firma): todas las correcciones de la revisión.
+   Se instala encima del v0.2.0 del NuStar (`adb install -r`).
+3. Checklist contra producción (abajo) con un viaje de prueba marcado `TEST-CHOFER` y foto antes/después
+   (método de §17/§18). Incluye aviso BCRA posterior, volúmenes reales de los datasets y la pasada de modo
+   avión (el dueño avisa cuándo mueve el interruptor).
+4. Limpieza 29/09: el bug viejo del toggle del 10 % había marcado 11 pedidos del cliente e574e00b con el
+   pago 78d65de0 (que en realidad se imputó a un comprobante). Se les quitó `pago_contado_10` y
+   `anticipo_pago_id`; el pago y el comprobante no se tocaron.
 
 ### Checklist contra PRODUCCIÓN en el NuStar 65-sp — PENDIENTE
 - [ ] Login del chofer real; descarga del viaje despachado; "✓ Viaje descargado" con todas las paradas.

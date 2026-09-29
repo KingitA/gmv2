@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.2.1 (versionCode 4) — 2026-09-29
+
+- Correcciones de la revisión del dueño: cobrar cierra la parada (el cobro parcial también; anular no la reabre), 10% contado solo a lo seleccionado, el sobrante nunca rebota, devolución desde el pedido, cheque duplicado con mensaje claro, fechas dd/mm/aaaa, la X siempre quita un cheque
+
 ## v0.2.0 (versionCode 3) — 2026-09-23
 
 - App Chofer completa: viaje descargado al equipo, cobros/devoluciones/gastos/cierre sin señal (se envían solos al volver la red), foto de cheques con lectura en segundo plano y aviso BCRA
