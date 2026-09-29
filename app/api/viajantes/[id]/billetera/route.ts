@@ -25,6 +25,25 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const movimientos = balanceData
     const balance = movimientos.reduce((sum, m) => sum + Number(m.monto), 0)
+
+    // "En camino a oficina": declarado en rendiciones abiertas — sigue en el
+    // saldo contable (se debita al confirmar) pero el cobrador ya no lo tiene.
+    const { data: rendsAbiertas } = await supabase
+      .from("rendiciones")
+      .select("id, rendicion_items(pago_id)")
+      .eq("cobrador_id", id)
+      .eq("estado", "abierta")
+    const pagoIdsRend = (rendsAbiertas || []).flatMap((r: any) => (r.rendicion_items || []).map((i: any) => i.pago_id))
+    let enViaje = 0
+    if (pagoIdsRend.length) {
+      const { data: pagosRend } = await supabase
+        .from("pagos_clientes")
+        .select("monto")
+        .in("id", pagoIdsRend)
+        .in("estado", ["pendiente", "pendiente_rendicion"])
+      enViaje = (pagosRend || []).reduce((s: number, p: any) => s + Number(p.monto), 0)
+    }
+    enViaje = Math.round(enViaje * 100) / 100
     const desglose = {
       cobros: movimientos.filter(m => m.tipo === "cobro_cliente").reduce((s, m) => s + Number(m.monto), 0),
       retiros: movimientos.filter(m => m.tipo === "retiro_comision").reduce((s, m) => s + Number(m.monto), 0),
@@ -55,6 +74,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({
       balance,
+      en_viaje: enViaje,
+      en_mano: Math.round((balance - enViaje) * 100) / 100,
       desglose,
       comisiones_pendientes: comisionesPendientes,
       total_pendiente_comisiones: totalPendiente,

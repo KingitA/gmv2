@@ -75,7 +75,8 @@ export function EntregarDinero({ hoja, abierto, onClose, onHecho }: { hoja: Hoja
           <DialogDescription>
             A cuenta del viaje {viaje.nombre}. Total del viaje {formatCurrency(totales.total_viaje)} · 3 % = {formatCurrency(Math.round(totales.total_viaje * 0.03))}
             {dinero.fondo_entregado > 0 && <> · ya entregado {formatCurrency(dinero.fondo_entregado)}</>}
-            {" · "}billetera del titular hoy {formatCurrency(dinero.saldo_billetera_titular)}
+            {" · "}en mano del titular hoy {formatCurrency(Math.round((dinero.saldo_billetera_titular - (dinero.billetera_en_camino || 0)) * 100) / 100)}
+            {(dinero.billetera_en_camino || 0) > 0 && <> (+{formatCurrency(dinero.billetera_en_camino)} en camino a oficina, rendición sin confirmar)</>}
           </DialogDescription>
         </DialogHeader>
         {!viaje.titular_id ? (

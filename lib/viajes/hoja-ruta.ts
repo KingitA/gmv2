@@ -117,6 +117,7 @@ export interface HojaRuta {
     cobrado_transferencias: number
     efectivo_en_mano: number      // fondo + cobrado_efectivo − gastos
     saldo_billetera_titular: number
+    billetera_en_camino: number   // declarado en rendiciones abiertas (se debita al confirmar)
   }
 }
 
@@ -445,6 +446,26 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
       cobrado_transferencias: sumaTipo(["transferencia", "deposito"]),
       efectivo_en_mano: r2(fondoEntregado + cobradoEfectivo - gastosTotal),
       saldo_billetera_titular: r2(((saldoBill || []) as any[]).reduce((s, x) => s + Number(x.saldo), 0)),
+      // Plata declarada en rendiciones ABIERTAS del titular: está "en camino a
+      // oficina" — sigue en el saldo contable de la billetera (se debita al
+      // confirmar), pero el titular ya no la tiene encima. Quien mira este
+      // número para darle un fondo tiene que verla aparte.
+      billetera_en_camino: await (async () => {
+        if (!viaje.chofer_id) return 0
+        const { data: rendsAbiertas } = await supabase
+          .from("rendiciones")
+          .select("id, rendicion_items(pago_id)")
+          .eq("cobrador_id", viaje.chofer_id)
+          .eq("estado", "abierta")
+        const pagoIdsRend = (rendsAbiertas || []).flatMap((r: any) => (r.rendicion_items || []).map((i: any) => i.pago_id))
+        if (!pagoIdsRend.length) return 0
+        const { data: pagosRend } = await supabase
+          .from("pagos_clientes")
+          .select("monto")
+          .in("id", pagoIdsRend)
+          .in("estado", ["pendiente", "pendiente_rendicion"])
+        return r2((pagosRend || []).reduce((s: number, p: any) => s + Number(p.monto), 0))
+      })(),
     },
   }
 }

@@ -37,6 +37,8 @@ interface Movimiento {
 
 interface BilleteraData {
   balance: number
+  en_viaje?: number
+  en_mano?: number
   desglose: { cobros: number; retiros: number; debitos: number; creditos: number }
   comisiones_pendientes: Comision[]
   total_pendiente_comisiones: number
@@ -188,6 +190,11 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
           <p className={`text-2xl font-bold font-mono ${(data?.balance ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
             {loading ? '...' : ars(data?.balance ?? 0)}
           </p>
+          {!loading && (data?.en_viaje ?? 0) > 0 && (
+            <p className="text-xs text-amber-300 mt-1">
+              en camino a oficina {ars(data?.en_viaje ?? 0)} · en mano {ars(data?.en_mano ?? 0)}
+            </p>
+          )}
         </div>
         {[
           { label: 'Cobros', key: 'cobros' as const, color: 'text-emerald-400' },

@@ -76,6 +76,22 @@ export function ControlarRendicion({
         // Un pago ya rechazado/anulado no forma parte de lo que se rinde
         const pagos = (pagosAll || []).filter((p: any) => ["pendiente", "pendiente_rendicion"].includes(p.estado))
 
+        // Fondos ("a cuenta viaje") y gastos del viaje: parte del esperado en
+        // mano (esperado = cobrado + fondos − gastos). Rendiciones sin viaje
+        // (vendedor): ambos en 0, misma cuenta que siempre.
+        let fondosViaje = 0
+        let gastosViaje = 0
+        if (rend.viaje_id) {
+          const [{ data: vf }, { data: vg }] = await Promise.all([
+            supabase.from("viajes_fondos").select("monto").eq("viaje_id", rend.viaje_id),
+            supabase.from("viajes_gastos").select("monto").eq("viaje_id", rend.viaje_id).neq("estado", "rechazado"),
+          ])
+          fondosViaje = (vf || []).reduce((s: number, f: any) => s + Number(f.monto), 0)
+          gastosViaje = (vg || []).reduce((s: number, g: any) => s + Number(g.monto), 0)
+        }
+        setFondos(Math.round(fondosViaje * 100) / 100)
+        setGastos(Math.round(gastosViaje * 100) / 100)
+
         const fisicos: ChequeFisico[] = []
         const digs: { desc: string; monto: number }[] = []
         const digPagos: string[] = []
@@ -167,14 +183,21 @@ export function ControlarRendicion({
 
   const chequesOk = cheques.filter((c) => checks[c.key])
   const chequesFaltantes = cheques.filter((c) => !checks[c.key])
+  const [fondos, setFondos] = useState(0)
+  const [gastos, setGastos] = useState(0)
   const efectivoDeclarado = Number(rendicion?.efectivo_declarado ?? 0)
   // Lo que los COBROS dicen que entró en efectivo (Σ pagos_detalle efectivo).
   // Es contra esto que se mide la diferencia: si el vendedor cobró 1.241.200 y
   // trae 1.241.000, faltan 200 aunque él haya "declarado" 1.241.000.
   const efectivoRegistrado = Number(rendicion?.efectivo_registrado ?? 0)
   const contadoNum = Number(efectivoContado.replace(",", ".")) || 0
-  const difEfectivo = Math.round((contadoNum - efectivoRegistrado) * 100) / 100
-  const difDeclarado = Math.round((efectivoDeclarado - efectivoRegistrado) * 100) / 100
+  // Esperado en mano = cobrado + a cuenta viaje − gastos declarados.
+  // Dos ejes (mismos que el SQL): retención = esperado − declarado (ya
+  // asentada en la CC del cobrador al declarar) y diferencia de oficina =
+  // contado − declarado (lo que decide "confirmar con diferencia").
+  const esperado = Math.round((efectivoRegistrado + fondos - gastos) * 100) / 100
+  const difEfectivo = Math.round((contadoNum - efectivoDeclarado) * 100) / 100
+  const retencion = Math.round((esperado - efectivoDeclarado) * 100) / 100
 
   const confirmar = async (forzar: boolean) => {
     if (!cajaDestino) {
@@ -416,22 +439,36 @@ export function ControlarRendicion({
               </div>
             )}
 
-            {/* Efectivo */}
+            {/* Efectivo: desglose del esperado en mano + control contra lo declarado */}
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span>
-                  💵 Cobrado en efectivo: <b style={NUM}>$ {fmt(efectivoRegistrado)}</b>
-                  <span className="text-xs text-slate-400"> (según los cobros)</span>
-                </span>
-                <span>
-                  Declaró traer: <b style={NUM}>$ {fmt(efectivoDeclarado)}</b>
-                  {difDeclarado !== 0 && (
-                    <span className="ml-1 text-xs font-semibold text-amber-700" style={NUM}>
-                      ({difDeclarado > 0 ? "+" : "−"} $ {fmt(Math.abs(difDeclarado))} vs cobrado)
-                    </span>
-                  )}
-                </span>
+              <div className="grid max-w-xs grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-sm" style={NUM}>
+                <span className="text-slate-600">💵 Cobrado en efectivo</span>
+                <span className="text-right font-semibold">$ {fmt(efectivoRegistrado)}</span>
+                {fondos > 0 && (
+                  <>
+                    <span className="text-slate-600">+ A cuenta del viaje</span>
+                    <span className="text-right font-semibold">$ {fmt(fondos)}</span>
+                  </>
+                )}
+                {gastos > 0 && (
+                  <>
+                    <span className="text-slate-600">− Gastos declarados</span>
+                    <span className="text-right font-semibold">$ {fmt(gastos)}</span>
+                  </>
+                )}
+                <span className="border-t border-slate-300 pt-0.5 font-bold text-slate-800">= Esperado en mano</span>
+                <span className="border-t border-slate-300 pt-0.5 text-right font-bold">$ {fmt(esperado)}</span>
               </div>
+              <p className="mt-2 text-sm">
+                Declaró enviar: <b style={NUM}>$ {fmt(efectivoDeclarado)}</b>
+                {Math.abs(retencion) > 0.005 && (
+                  <span className={`ml-1.5 text-xs font-semibold ${retencion > 0 ? "text-amber-700" : "text-sky-700"}`} style={NUM}>
+                    {retencion > 0
+                      ? `(retiene $ ${fmt(retencion)} — ya debitado en su cuenta al declarar)`
+                      : `(entregó $ ${fmt(-retencion)} de más — ya a su favor)`}
+                  </span>
+                )}
+              </p>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
                 <span className="flex items-center gap-1.5">
                   Contado por vos:
@@ -445,20 +482,19 @@ export function ControlarRendicion({
                 </span>
                 {difEfectivo === 0 ? (
                   <span className="rounded-full bg-green-100 px-3 py-0.5 text-[11px] font-bold text-green-700">
-                    ✓ coincide con lo cobrado
+                    ✓ coincide con lo declarado
                   </span>
                 ) : (
                   <span className="rounded-full bg-red-100 px-3 py-0.5 text-[11px] font-bold text-red-700" style={NUM}>
-                    {difEfectivo > 0 ? "sobra" : "falta"} $ {fmt(Math.abs(difEfectivo))} vs lo cobrado
+                    {difEfectivo > 0 ? "sobra" : "falta"} $ {fmt(Math.abs(difEfectivo))} vs lo declarado
                   </span>
                 )}
               </div>
               {difEfectivo !== 0 && (
                 <p className="mt-2 text-xs text-slate-500">
-                  Si confirmás con diferencia: los clientes quedan pagos por lo que cobró el vendedor, a la caja entra
-                  lo que contaste, y {difEfectivo < 0 ? "el faltante le queda debiendo en su billetera" : "el sobrante queda a favor suyo en su billetera"}{" "}
-                  (es su cuenta corriente: cobró 100, entregó 90, sigue debiendo 10). Si la plata tiene que aparecer
-                  ahora, no confirmes: dejá la rendición esperando.
+                  Si confirmás con diferencia: a la caja entra lo que contaste y la diferencia con lo declarado
+                  {difEfectivo < 0 ? " le queda debiendo en su cuenta" : " queda a favor suyo en su cuenta"} (auditada).
+                  Si la plata tiene que aparecer ahora, no confirmes: dejá la rendición esperando.
                 </p>
               )}
             </div>
