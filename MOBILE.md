@@ -1576,7 +1576,7 @@ libro mayor, recibo, kardex; zona de caja de la otra sesión).
    método: queda una fila de efectivo vacía. Antes la X del último método no existía y un cheque
    rechazado quedaba atrapado en el formulario.
 5. **Chofer WEB post-cobro:** vuelve a la hoja de ruta posicionada en la parada (`#parada-<clienteId>`)
-   con el aviso de éxito. El cobro NO marca la parada como entregada: "Cerrar parada" sigue siendo la
+   con el aviso de éxito. (Superado el 29/09: ahora cobrar CIERRA la parada, ver más abajo.) En la tanda 2 "Cerrar parada" era la
    acción aparte (en "Visitados · falta cerrar la parada"), igual que en la app.
 ### Bugs de la segunda pasada del dueño (29/09/2026, misma rama)
 Reglas puras nuevas en `lib/cobranzas/reglas-cobro.ts` (alias `@gm/cobro`: servidor, web y app usan el
@@ -1598,6 +1598,26 @@ mismo código). Tests: `test/contado-ajuste.test.ts`.
    cuenta del cliente y responde `aviso_ajuste`.
    NO se tocó `app/api/pagos-clientes` ni `components/caja/*` (zona de la otra sesión): ahí el tope
    sigue aplicando en los dos sentidos.
+### Cobrar cierra la parada (regla del dueño, 29/09/2026, misma rama)
+Registrar un cobro significa que la parada está FINALIZADA. Regla pura `cierreDeParadaPorCobro` en
+`lib/cobranzas/reglas-cobro.ts` (`@gm/cobro`), la misma en el servidor y en la app. Tests en
+`test/chofer-overlay.test.ts`.
+- **Servidor** (`POST chofer/viaje/[id]/cobro`): si la parada del cliente estaba `pendiente` y el viaje está
+  `despachado`/`en_curso`, queda `entregado` con todos sus bultos (o `solo_cobro` si no llevaba
+  mercadería). Responde `parada_cerrada`. Nunca pisa un resultado ya cargado (parcial, no entregado) y
+  nunca hace fallar el cobro: si el cierre falla, la parada queda en "Visitados · falta cerrar la parada".
+- **Cobro parcial cierra igual.** Con "cobrar sí o sí" sin alcanzar el mínimo no bloquea: cierra y deja
+  constancia automática en `motivo_no_cobro` ("Cobró $X de $Y exigidos…").
+- **Anular o modificar un cobro NO reabre la entrega.** La anulación en el servidor no toca
+  `viajes_paradas`. En la app, el cobro que nunca salió del equipo se descarta de la cola: si era lo que
+  cerraba la parada, `cierreAConservar` encola ese cierre como `viaje.parada` propio. La parada solo
+  vuelve a pendiente con "Reabrir parada".
+- **App sin señal:** el overlay cierra la parada al instante con el cobro en la cola, respetando el orden
+  (un resultado de parada cargado DESPUÉS del cobro manda).
+- **No cierra:** el cliente extra de un cobro conjunto (el chofer no estuvo en esa parada), la devolución
+  sola, ni un cobro con el viaje ya `en_rendicion`.
+- "Cerrar parada (entregado / no entregado)" queda para cuando NO hubo cobro, y para el parcial.
+
 ### Puesta en marcha (pendiente del dueño)
 1. Merge de `apk-chofer` a `main` con OK del dueño (toca `app/api/chofer/*`, `lib/viajes/*`, `lib/mobile/*`) y deploy. Sin migraciones.
 2. Instalar `dist-apks/chofer-v0.2.0.apk` encima del v0.1.1 del NuStar (`adb install -r`, misma firma).

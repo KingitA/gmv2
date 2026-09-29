@@ -253,6 +253,12 @@ const HANDLERS = {
     for (const i of recortadas) { const k = S.comprobantes.find((c) => c.id === i.comprobante_id); k.saldo_pendiente = r2(k.saldo_pendiente - i.monto_imputado); k.estado_pago = k.saldo_pendiente <= 0.009 ? "pagado" : "parcial" }
     for (const pid of (p.pedidos_contado || []).filter((id) => !anticipos || anticipos.some((a) => a.pedido_id === id))) { const ped = S.pedidos.find((x) => x.id === pid); if (ped) { ped.pago_contado_10 = true; ped.anticipo_pago_id = pago.id } }
     for (const did of p.devolucion_ids || []) { const d = S.devoluciones.find((x) => x.id === did); if (d) d.descontada = true }
+    // Cobrar CIERRA la parada (= lib/cobranzas/reglas-cobro.ts): solo si estaba pendiente y el viaje sigue en la calle
+    const paCobro = S.paradas.find((x) => x.viaje_id === v.id && x.cliente_id === p.cliente_id)
+    if (paCobro && paCobro.estado === "pendiente" && ["despachado", "en_curso"].includes(v.estado)) {
+      const calc = parada(paCobro)
+      Object.assign(paCobro, { estado: calc.pedidos.length ? "entregado" : "solo_cobro", bultos_entregados: calc.pedidos.length ? calc.bultos : null, motivo_no_entrega: null, motivo_no_cobro: calc.cobro_cumplido ? null : `Cobró $${calc.cobrado} de $${calc.minimo_exigido} exigidos (parada cerrada al registrar el cobro)`, resuelto_at: ahora() })
+    }
     const extras = []
     for (const ex of p.cobros_extra || []) {
       if (!ex?.cliente_id || !ex?.metodos?.length) continue

@@ -2,7 +2,8 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { marcaAjuste } from "@/lib/cobranzas/ajuste"
-import { baseTopeAjuste, normalizarAnticipos, pedidosContadoValidos, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
+import { baseTopeAjuste, cierreDeParadaPorCobro, normalizarAnticipos, pedidosContadoValidos, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
+import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
@@ -273,6 +274,48 @@ export async function POST(
       fecha: nowArgentina(),
     })
 
+    // ── Cobrar CIERRA la parada (lib/cobranzas/reglas-cobro.ts) ──
+    // Si la parada del cliente estaba pendiente queda "entregado" (o "solo cobro" si no llevaba
+    // mercadería). Nunca pisa un resultado ya cargado y nunca hace fallar el cobro: la plata ya
+    // está registrada; si esto falla la parada queda en "Visitados · falta cerrar la parada".
+    let paradaCerrada: string | null = null
+    if (["despachado", "en_curso"].includes(viaje.estado)) {
+      try {
+        const { data: fila } = await supabase
+          .from("viajes_paradas")
+          .select("id, estado")
+          .eq("viaje_id", viajeId)
+          .eq("cliente_id", cliente_id)
+          .maybeSingle()
+        if (fila?.estado === "pendiente") {
+          const hoja = await armarHojaRuta(supabase, viajeId)
+          const par = hoja?.paradas.find((p) => p.id === fila.id)
+          const cierre = par
+            ? cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado })
+            : null
+          if (cierre) {
+            const { error: cierreErr } = await supabase
+              .from("viajes_paradas")
+              .update({
+                estado: cierre.estado,
+                bultos_entregados: cierre.bultos_entregados,
+                motivo_no_entrega: null,
+                motivo_no_cobro: cierre.motivo_no_cobro,
+                resuelto_at: new Date().toISOString(),
+                resuelto_por: auth.user.id,
+              })
+              .eq("id", fila.id)
+              .eq("viaje_id", viajeId)
+              .eq("estado", "pendiente")
+            if (cierreErr) throw cierreErr
+            paradaCerrada = cierre.estado
+          }
+        }
+      } catch (cierreError: any) {
+        console.error("[chofer/cobro] no se pudo cerrar la parada:", cierreError?.message)
+      }
+    }
+
     return NextResponse.json({
       success: true,
       pago_id: pago.id,
@@ -280,6 +323,7 @@ export async function POST(
       mensaje: "Cobro registrado. Se imputará al confirmar la rendición del viaje.",
       aviso_contado: avisoContado,
       aviso_ajuste: ajusteResuelto.aviso,
+      parada_cerrada: paradaCerrada,
     })
   } catch (error: any) {
     console.error("[chofer] Error en POST cobro:", error)

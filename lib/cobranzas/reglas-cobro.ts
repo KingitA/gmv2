@@ -114,3 +114,35 @@ export function resolverAjuste(ajustePedido: number, base: number): AjusteResuel
 export function ofreceAjuste(diff: number, totalSeleccionado: number): boolean {
   return Math.abs(r2(num(diff))) <= topeAjuste(totalSeleccionado) + 0.005
 }
+
+// ─── Cobrar cierra la parada ─────────────────────────────────────────────────
+// Regla del dueño (29/09/2026): si el chofer registra un cobro en una parada, la parada está
+// FINALIZADA: queda "entregado" (o "solo cobro" si no llevaba mercadería) sin tocar ningún
+// botón. "Cerrar parada" queda para cuando NO hubo cobro (entregado sin cobrar, no entregado,
+// parcial). Solo cierra una parada PENDIENTE: nunca pisa un resultado que el chofer ya cargó.
+// Si oficina pidió "cobrar sí o sí" y lo cobrado no alcanza, NO bloquea: deja constancia.
+
+export interface ParadaParaCierre {
+  estado: string
+  /** Bultos que llevaba la parada */
+  bultos: number
+  tienePedidos: boolean
+  minimoExigido: number
+  /** Cobrado en la parada INCLUYENDO el cobro que se acaba de registrar */
+  cobrado: number
+}
+export interface CierrePorCobro {
+  estado: "entregado" | "solo_cobro"
+  bultos_entregados: number | null
+  motivo_no_cobro: string | null
+}
+
+export function cierreDeParadaPorCobro(p: ParadaParaCierre): CierrePorCobro | null {
+  if (p.estado !== "pendiente") return null
+  const cumplido = num(p.cobrado) + 0.01 >= num(p.minimoExigido)
+  return {
+    estado: p.tienePedidos ? "entregado" : "solo_cobro",
+    bultos_entregados: p.tienePedidos ? num(p.bultos) : null,
+    motivo_no_cobro: cumplido ? null : `Cobró ${pesos(p.cobrado)} de ${pesos(p.minimoExigido)} exigidos (parada cerrada al registrar el cobro)`,
+  }
+}

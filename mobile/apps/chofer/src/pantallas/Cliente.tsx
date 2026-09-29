@@ -1,9 +1,9 @@
 import { useRef, useState, type ReactNode } from "react"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useRuntime } from "@gm/core"
-import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular } from "../datasets"
+import { DS, esEnCurso, ESTADOS_COBRABLES, idClienteViaje, type DetallePedido, type OpCobroAnular, type OpParada } from "../datasets"
 import { agregarAlBorrador } from "../datos/borrador-devolucion"
-import { esIdLocal, keyDeIdLocal } from "../datos/overlay"
+import { cierreAConservar, esIdLocal, keyDeIdLocal } from "../datos/overlay"
 import { rechazosDe, useClienteViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
 import { AvisosBcra, fechaHora, formatCurrency, formatDateAR, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 
@@ -72,8 +72,12 @@ export function Cliente() {
     try {
       if (esIdLocal(pagoAnular.id)) {
         // Nunca salió del equipo: se resuelve acá, sin viajar al servidor
+        // Anular un cobro NO reabre la entrega: si la parada la cerró este cobro, el cierre se
+        // conserva como resultado de parada propio (el cobro se va de la cola, el cierre no).
+        const conservar: OpParada | null = viaje ? cierreAConservar(viaje, clienteId, pagoAnular.id) : null
         const retirado = await rt.outbox.retirar(keyDeIdLocal(pagoAnular.id))
         if (!retirado) return mostrar("Ese cobro se está enviando ahora: esperá unos segundos y volvé a intentar.", "err")
+        if (conservar) await encolar("viaje.parada", conservar, `Parada ${clienteNombre}: ${conservar.estado === "solo_cobro" ? "cerrada" : "entregada"}`)
         mostrar("Cobro descartado: nunca llegó al sistema.")
       } else {
         const payload: OpCobroAnular = { viaje_id: viajeId, pago_id: pagoAnular.id, cliente_id: clienteId }

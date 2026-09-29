@@ -8,6 +8,7 @@
 // marca "sin enviar"; una operación rechazada por el servidor NO cuenta (se muestra aparte).
 
 import type { ItemOutbox } from "@gm/core"
+import { cierreDeParadaPorCobro } from "@gm/cobro"
 import type {
   BilleteraData, ClienteViajeRow, DineroHoja, MetodoPayload, OpCobrar, OpCobroAnular, OpDevolucion, OpFinalizar, OpGasto, OpIniciar, OpParada,
   PagoHoja, ParadaHoja, ViajeDetalle,
@@ -41,6 +42,8 @@ export interface ParadaVista extends ParadaHoja {
   pagos: PagoVista[]
   /** Su resultado (entregado / no entregado…) se marcó acá y todavía no salió */
   resultadoSinEnviar?: boolean
+  /** La cerró un cobro que todavía no salió del equipo (key de esa operación) */
+  cerradaPorCobro?: string
 }
 export interface ViajeVista extends ViajeDetalle {
   paradas: ParadaVista[]
@@ -140,6 +143,18 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
     }
   }
 
+  // Cobrar CIERRA la parada (misma regla que el servidor, @gm/cobro): un cobro en la cola deja
+  // entregada la parada que estaba pendiente. Se respeta el orden de la cola: si DESPUÉS del
+  // cobro hay un resultado de parada (p. ej. la reabrió), manda ese.
+  for (const { op, p } of cobrosDelViaje(ops, v.id)) {
+    const par = porCliente.get(p.cliente_id)
+    if (!par) continue
+    const resultadoPosterior = viv.some((o) => o.tipo === "viaje.parada" && o.seq > op.seq && (o.payload as OpParada).parada_id === par.id)
+    if (resultadoPosterior) continue
+    const cierre = cierreDeParadaPorCobro({ estado: par.estado, bultos: par.bultos, tienePedidos: par.pedidos.length > 0, minimoExigido: par.minimo_exigido, cobrado: par.cobrado })
+    if (cierre) Object.assign(par, { ...cierre, motivo_no_entrega: null, resuelto_at: op.capturadoAt, resultadoSinEnviar: true, cerradaPorCobro: op.key })
+  }
+
   // Gastos
   for (const { op, p } of de<OpGasto>(viv, "viaje.gasto").filter((x) => x.p.viaje_id === v.id)) {
     sinEnviar.gastos++
@@ -159,6 +174,29 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
   if (cierrePendiente) estado = "en_rendicion"
 
   return { ...v, viaje: { ...v.viaje, estado }, paradas, dinero, cierrePendiente, inicioPendiente, sinEnviar }
+}
+
+/**
+ * Anular un cobro NO reabre la entrega (regla del dueño, 29/09/2026). En el servidor la
+ * anulación no toca la parada. Pero un cobro que nunca salió del equipo se descarta de la
+ * cola, y con él se iría el cierre que produjo: esta función devuelve el resultado de parada
+ * que hay que encolar para CONSERVAR el cierre (null si el cierre no dependía de ese cobro).
+ */
+export function cierreAConservar(v: ViajeVista, clienteId: string, pagoId: string): OpParada | null {
+  if (!esIdLocal(pagoId)) return null
+  const par = v.paradas.find((p) => p.cliente_id === clienteId)
+  if (!par || par.estado === "pendiente" || par.cerradaPorCobro !== keyDeIdLocal(pagoId)) return null
+  const pago = par.pagos.find((p) => p.id === pagoId)
+  const cobradoSin = r2(par.cobrado - (pago?.monto || 0))
+  const pesos = (n: number) => `$ ${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return {
+    viaje_id: v.id,
+    parada_id: par.id,
+    cliente_id: clienteId,
+    estado: par.estado,
+    // "Cobrar sí o sí" sin alcanzar el mínimo: el servidor pide el motivo (nunca bloquea)
+    ...(cobradoSin + 0.01 < par.minimo_exigido ? { motivo_no_cobro: `Cobro anulado: quedó cobrado ${pesos(cobradoSin)} de ${pesos(par.minimo_exigido)} exigidos` } : {}),
+  }
 }
 
 /** Paradas que todavía hay que resolver antes de rendir (misma regla que el servidor). */

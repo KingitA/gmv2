@@ -355,9 +355,9 @@ export default function ClienteEntregaPage() {
       })
       const d = await res.json()
       if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({})
-        // Vuelta a la hoja de ruta, posicionada en esta parada, con el cobro reflejado. La parada
-        // NO queda "entregada" por cobrar: "Cerrar parada" sigue siendo una acción aparte.
-        dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)} a ${clienteNombre}. Se imputará al confirmar la rendición.${d.aviso_contado ? ` ${d.aviso_contado}` : ""}${d.aviso_ajuste ? ` ${d.aviso_ajuste}` : ""}`)
+        // Vuelta a la hoja de ruta, posicionada en esta parada, con el cobro reflejado. Cobrar
+        // CIERRA la parada (el servidor la deja entregada); "Cerrar parada" es para cuando no hubo cobro.
+        dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)} a ${clienteNombre}.${d.parada_cerrada === "entregado" ? " Parada entregada." : d.parada_cerrada === "solo_cobro" ? " Parada cerrada." : ""} Se imputará al confirmar la rendición.${d.aviso_contado ? ` ${d.aviso_contado}` : ""}${d.aviso_ajuste ? ` ${d.aviso_ajuste}` : ""}`)
         router.push(`/chofer/${viajeId}#parada-${clienteId}`)
       }
       else avisar(d.mensaje || d.error || "Error al registrar cobro")
