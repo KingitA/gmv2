@@ -4,6 +4,7 @@
 // sin re-autenticar por cliente. Ver MOBILE.md → "Vendedor".
 
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
+import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 import { MARCA_CONTADO } from "@/lib/constants"
 
@@ -215,11 +216,24 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
     for (const d of descuentos || [])
       descontadoPorDev.set(d.devolucion_id, (descontadoPorDev.get(d.devolucion_id) || 0) + Number(d.monto))
   }
-  const devolucionesConRestante = (devolucionesPendientes || []).map((d: any) => ({
-    ...d,
-    descontado: Math.round((descontadoPorDev.get(d.id) || 0) * 100) / 100,
-    restante: Math.max(0, Math.round((Number(d.monto_total || 0) - (descontadoPorDev.get(d.id) || 0)) * 100) / 100),
-  }))
+  // Valor en cobro con la regla única (precio de factura, neto del 10% si la
+  // factura original fue contado): es lo que descuenta la pantalla y lo que
+  // va a acreditar la NC futura, al centavo.
+  const valoresDev = await valorarDevoluciones(supabase, { clienteId: id, devolucionIds: devIds })
+  const devolucionesConRestante = (devolucionesPendientes || []).map((d: any) => {
+    const descontado = Math.round((descontadoPorDev.get(d.id) || 0) * 100) / 100
+    const v = valoresDev.get(d.id)
+    const valorTotal = v?.total ?? (Number(d.monto_total) || 0)
+    return {
+      ...d,
+      descontado,
+      // restante ahora en términos de VALOR (los descuentos también se asientan por valor)
+      restante: Math.max(0, Math.round((valorTotal - descontado) * 100) / 100),
+      aplica_10: v?.aplica_10 ?? false,
+      valor_total: valorTotal,
+      valor_cobro: Math.max(0, Math.round((valorTotal - descontado) * 100) / 100),
+    }
+  })
 
   // ── Saldo REAL y PROYECTADO: UNA sola fórmula para todas las pantallas
   // (lib/cuenta-corriente/saldo.ts). El proyectado descuenta exactamente lo

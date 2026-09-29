@@ -14,6 +14,8 @@ import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
+import { valorDevolucion } from "@/lib/cobranzas/valor-devolucion"
+import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 
 export async function POST(request: Request) {
   try {
@@ -185,12 +187,24 @@ export async function POST(request: Request) {
 
     const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, "0")}`
 
-    let totalNeto = 0
-
-    devolucion.detalle.forEach((item: any) => {
-      totalNeto += Number(item.subtotal) || 0
+    // ── VALOR DE LA DEVOLUCIÓN — regla única (lib/cobranzas/valor-devolucion,
+    // 29/09): si la factura original fue cobrada CONTADO con 10%, la NC sale
+    // con la misma bonificación POR RENGLÓN (el cliente pagó el 90% de esa
+    // mercadería, la NC le devuelve exactamente eso). El descuento hecho en
+    // el cobro y esta NC coinciden al centavo porque usan la misma función.
+    const valoracion = await valorarDevoluciones(supabase, {
+      clienteId: devolucion.cliente_id,
+      devolucionIds: [devolucion.id],
+      cliente: devolucion.cliente,
     })
-    totalNeto = Math.round(totalNeto * 100) / 100
+    const aplica10 = valoracion.get(devolucion.id)?.aplica_10 ?? false
+    const motor = valorDevolucion({
+      renglones: devolucion.detalle.map((item: any) => ({ subtotal: Number(item.subtotal) || 0 })),
+      aplica10,
+      conIva: false, // IVA y percepciones se calculan abajo con el circuito fiscal propio de esta ruta
+    })
+    const netoRenglon = motor.netoPorRenglon
+    const totalNeto = motor.neto
 
     // precio_venta_original es el precio NETO (igual que en la FA original)
     // el IVA se calcula como 21% del neto, no como complemento del total.
@@ -336,17 +350,19 @@ export async function POST(request: Request) {
       saldo_pendiente:    -Math.abs(totalComprobante),
       estado_pago:        "pendiente",
       motivo_ajuste:      motivo_ajuste,
-      observaciones:      `Devolución ${devolucion.numero_devolucion || devolucion.id}`,
+      observaciones:      `Devolución ${devolucion.numero_devolucion || devolucion.id}${aplica10 ? " (renglones bonificados 10% contado — la factura original fue cobrada con el descuento)" : ""}`,
       ...(cae            ? { cae }                             : {}),
       ...(vencimientoCae ? { vencimiento_cae: vencimientoCae } : {}),
     }
 
-    const detallePayload = devolucion.detalle.map((item: any) => ({
+    const detallePayload = devolucion.detalle.map((item: any, idx: number) => ({
       articulo_id: item.articulo_id,
-      descripcion: item.articulo.descripcion,
+      descripcion: item.articulo.descripcion + (aplica10 ? " (bonif. 10% contado)" : ""),
       cantidad: -Math.abs(item.cantidad), // Negativo
       precio_unitario: item.precio_venta_original || 0,
-      precio_total: -Math.abs(item.subtotal || 0),
+      // Con 10% contado: el renglón sale bonificado (mismo redondeo por renglón
+      // que usó el descuento en el cobro — coinciden al centavo)
+      precio_total: -Math.abs(netoRenglon[idx] ?? item.subtotal ?? 0),
     }))
 
     const logId = cae ? await registrarCAEObtenido(supabase, {

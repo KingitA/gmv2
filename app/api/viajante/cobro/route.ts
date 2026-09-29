@@ -10,6 +10,7 @@ import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobra
 import { marcaAjuste } from "@/lib/cobranzas/ajuste"
 import { topeAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { MARCA_CONTADO } from "@/lib/constants"
+import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 
 /**
  * POST /api/viajante/cobro — cobro en la calle del viajante (Fase E).
@@ -122,6 +123,13 @@ export async function POST(request: NextRequest) {
       for (const u of usados || [])
         usadoPorDev.set(u.devolucion_id, (usadoPorDev.get(u.devolucion_id) || 0) + Number(u.monto))
 
+      // Tope por VALOR EN COBRO (regla única: precio de factura, neto del 10%
+      // si la factura fue contado) — no por el monto pleno de la devolución.
+      const valoresPorCliente = new Map<string, Map<string, { total: number }>>()
+      for (const clienteDevId of [...new Set(todosDescuentos.map((d) => d.cliente_id))]) {
+        const idsCliente = [...new Set(todosDescuentos.filter((d) => d.cliente_id === clienteDevId).map((d) => d.devolucion_id))]
+        valoresPorCliente.set(clienteDevId, await valorarDevoluciones(supabase, { clienteId: clienteDevId, devolucionIds: idsCliente }))
+      }
       for (const d of todosDescuentos) {
         const dev = devMap.get(d.devolucion_id)
         if (!dev) return NextResponse.json({ error: "Devolución inexistente" }, { status: 400 })
@@ -129,10 +137,11 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "La devolución no es de ese cliente" }, { status: 400 })
         if (dev.estado !== "pendiente")
           return NextResponse.json({ error: "La devolución ya fue procesada por la oficina" }, { status: 400 })
-        const restante = Number(dev.monto_total || 0) - (usadoPorDev.get(d.devolucion_id) || 0)
+        const valorTotal = valoresPorCliente.get(d.cliente_id)?.get(d.devolucion_id)?.total ?? (Number(dev.monto_total) || 0)
+        const restante = valorTotal - (usadoPorDev.get(d.devolucion_id) || 0)
         if (d.monto > restante + 0.01)
           return NextResponse.json(
-            { error: `La devolución tiene ${restante.toFixed(2)} disponibles y se intentó descontar ${d.monto.toFixed(2)}` },
+            { error: `La devolución tiene ${restante.toFixed(2)} disponibles (valor en cobro) y se intentó descontar ${d.monto.toFixed(2)}` },
             { status: 400 }
           )
       }

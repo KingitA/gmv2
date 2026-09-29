@@ -410,6 +410,11 @@ export function RegistrarCobro({
           metodos: metodosCobro.map((m) => m.payload),
           imputaciones,
           observaciones: obsFinal,
+          // Anticipos seleccionados con su monto: entran a la BASE del tope de
+          // ajuste (regla de la calle: la base es TODO lo seleccionado)
+          pedidos_anticipo: Object.entries(seleccionados)
+            .filter(([k, v]) => k.startsWith(PEDIDO_PREFIX) && Number(v) > 0)
+            .map(([k, v]) => ({ pedido_id: k.replace(PEDIDO_PREFIX, ""), monto: Number(v) })),
           pedidos_contado: [...contadoPedidos],
           comprobante_urls: archivos,
           confirmar: esEfectivo,

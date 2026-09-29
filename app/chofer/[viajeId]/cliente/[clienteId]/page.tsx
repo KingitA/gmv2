@@ -289,8 +289,10 @@ export default function ClienteEntregaPage() {
   }
   const totalImputado = () => Object.values(comprobantesSeleccionados).reduce((s, v) => s + v, 0)
   const totalCobro = () => {
+    // Valor en cobro (regla única): precio de factura neto del 10% si la
+    // factura fue contado, y neto de lo ya descontado en cobros previos.
     const devTotal = incluirDevoluciones
-      ? (data?.devoluciones || []).filter((d) => d.estado === "pendiente").reduce((s: number, d: any) => s + Number(d.monto_total), 0)
+      ? (data?.devoluciones || []).filter((d) => d.estado === "pendiente").reduce((s: number, d: any) => s + Number(d.valor_cobro ?? d.monto_total), 0)
       : 0
     return Math.max(0, Math.round((totalImputado() - devTotal - bonificacionEstimada()) * 100) / 100)
   }
@@ -486,7 +488,10 @@ export default function ClienteEntregaPage() {
                       {dev.estado === "pendiente" ? "pendiente confirmación" : "confirmada"}
                     </span>
                   </div>
-                  <p className="font-bold text-green-600">+{formatCurrency(dev.monto_total)}</p>
+                  <p className="font-bold text-green-600">
+                    +{formatCurrency(Number(dev.valor_cobro ?? dev.monto_total))}
+                    {dev.aplica_10 && <span className="block text-[10px] font-normal text-green-700">neto del 10% contado</span>}
+                  </p>
                 </div>
               ))}
 

@@ -74,6 +74,21 @@ async function calcularBajasExtra(
     for (const c of comps || []) totalDe.set(c.id, Math.abs(Number(c.total_factura)))
   }
 
+  // Devoluciones descontadas en el cobro: el monto asentado en
+  // devoluciones_descuentos ya es el VALOR de la regla única (neto del 10%
+  // si la factura fue contado) — exactamente lo que va a acreditar la NC
+  // cuando depósito confirme. Sin esto, el proyectado quedaba inflado por
+  // la devolución hasta la emisión de la NC.
+  const devPorPago = new Map<string, number>()
+  {
+    const { data: descs } = await supabase
+      .from("devoluciones_descuentos")
+      .select("pago_id, monto")
+      .in("pago_id", ids)
+    for (const d of descs || [])
+      devPorPago.set(d.pago_id, (devPorPago.get(d.pago_id) || 0) + Number(d.monto))
+  }
+
   for (const p of pagosPend) {
     let extra = 0
     const contado = (p.observaciones || "").includes(MARCA_CONTADO)
@@ -82,6 +97,7 @@ async function calcularBajasExtra(
       for (const par of paresPorPago.get(p.id) || []) if (par.aplicar_10) extra -= par.monto * 0.1
     }
     extra += parsearMarcaAjuste(p.observaciones)
+    extra += devPorPago.get(p.id) || 0
     extras.set(p.id, extra)
   }
   return extras

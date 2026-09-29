@@ -11,6 +11,7 @@ import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/action
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
+import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 
 // POST /api/chofer/viaje/[id]/cobro
 // Registra un cobro del chofer con estado='pendiente_rendicion'.
@@ -141,6 +142,37 @@ export async function POST(
     // 90%; la NC del 10% lo salda al confirmar). Sin contado, secuencial.
     const impsRecortadas = recortarImputaciones(impsCompletas, Number(monto_total), conContado ? "proporcional" : "secuencial")
 
+    // ── Devoluciones descontadas en este cobro: validar y VALUAR con la regla
+    // única (precio de factura, neto del 10% si la factura fue contado).
+    // Antes `devolucion_ids` se descartaba: el descuento no quedaba asentado
+    // y la misma devolución podía descontarse dos veces (chofer y vendedor).
+    const devolucionesADescontar: Array<{ devolucion_id: string; monto: number }> = []
+    if (Array.isArray(devolucion_ids) && devolucion_ids.length) {
+      const devIds = [...new Set(devolucion_ids as string[])]
+      const [{ data: devs }, { data: usados }, valores] = await Promise.all([
+        supabase.from("devoluciones").select("id, cliente_id, estado, monto_total").in("id", devIds),
+        supabase.from("devoluciones_descuentos").select("devolucion_id, monto").in("devolucion_id", devIds),
+        valorarDevoluciones(supabase, { clienteId: cliente_id, devolucionIds: devIds }),
+      ])
+      const devMap = new Map((devs || []).map((d: any) => [d.id, d]))
+      const usadoPorDev = new Map<string, number>()
+      for (const u of usados || [])
+        usadoPorDev.set(u.devolucion_id, (usadoPorDev.get(u.devolucion_id) || 0) + Number(u.monto))
+      for (const devId of devIds) {
+        const dev = devMap.get(devId)
+        if (!dev) return NextResponse.json({ error: "Devolución inexistente" }, { status: 400 })
+        if (dev.cliente_id !== cliente_id)
+          return NextResponse.json({ error: "La devolución no es de este cliente" }, { status: 400 })
+        if (dev.estado !== "pendiente")
+          return NextResponse.json({ error: "La devolución ya fue procesada por la oficina" }, { status: 400 })
+        const valorTotal = valores.get(devId)?.total ?? (Number(dev.monto_total) || 0)
+        const restante = Math.round((valorTotal - (usadoPorDev.get(devId) || 0)) * 100) / 100
+        if (restante <= 0.01)
+          return NextResponse.json({ error: "La devolución ya fue descontada en otro cobro" }, { status: 400 })
+        devolucionesADescontar.push({ devolucion_id: devId, monto: restante })
+      }
+    }
+
     const { pago_id, dedup } = await crearCobranza(supabase, {
       idempotency_key: idempotency_key || null,
       cliente_id,
@@ -165,6 +197,15 @@ export async function POST(
         dedup: true,
         mensaje: "Cobro ya registrado (reintento detectado).",
       })
+    }
+
+    // Asentar el vínculo devolución ↔ cobro (anti doble uso; se libera al
+    // anular el cobro — lib/actions/cobranzas.ts)
+    if (devolucionesADescontar.length) {
+      const { error: devErr } = await supabase.from("devoluciones_descuentos").insert(
+        devolucionesADescontar.map((d) => ({ devolucion_id: d.devolucion_id, pago_id: pago.id, monto: d.monto })),
+      )
+      if (devErr) console.error("[chofer/cobro] devoluciones_descuentos:", devErr.message)
     }
 
     // Marcar pedidos anticipados con 10% contado (NC automática al facturar): SOLO los

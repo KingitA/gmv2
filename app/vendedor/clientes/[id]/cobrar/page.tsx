@@ -63,7 +63,10 @@ interface DevolucionPendiente {
   numero_devolucion: string | null
   pedido_id: string | null
   monto_total: number
+  /** VALOR en cobro (regla única): precio de factura neto del 10% si fue contado, menos lo ya descontado */
   restante: number
+  aplica_10?: boolean
+  valor_total?: number
 }
 
 interface Cliente {
@@ -841,7 +844,8 @@ export default function VendedorCobrarPage() {
                             <p className="font-bold text-gray-900 text-sm">Devolución {d.numero_devolucion || ""}</p>
                             <p className="text-gray-400 text-xs">
                               disponible {formatCurrency(d.restante)}
-                              {d.restante < d.monto_total ? ` de ${formatCurrency(d.monto_total)}` : ""}
+                              {d.aplica_10 ? " (neto del 10% contado — coincide con la NC)" : ""}
+                              {!d.aplica_10 && d.restante < d.monto_total ? ` de ${formatCurrency(d.monto_total)}` : ""}
                             </p>
                           </div>
                         </button>

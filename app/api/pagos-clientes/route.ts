@@ -6,7 +6,8 @@ import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
-import { topeAjuste, marcaAjuste } from "@/lib/cobranzas/ajuste"
+import { marcaAjuste } from "@/lib/cobranzas/ajuste"
+import { baseTopeAjuste, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
@@ -257,19 +258,21 @@ export async function POST(request: NextRequest) {
     }
     // Ajuste por redondeo: tope 1% de los débitos seleccionados; viaja como
     // promesa ([AJUSTE:x]) y se asienta en la confirmación.
-    // Con signo: positivo = falta (crédito), negativo = sobrante (débito, no
-    // queda a favor). Tope 1% en ambos sentidos.
-    const montoAjuste = Math.round(Number(ajuste_redondeo || 0) * 100) / 100
-    if (Math.abs(montoAjuste) > 0.005) {
-      const totalDebitosSel = ((imputaciones as any[]) || []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0)
-      const tope = topeAjuste(totalDebitosSel)
-      if (Math.abs(montoAjuste) > tope + 0.005) {
-        return NextResponse.json(
-          { error: `El ajuste por redondeo ($${Math.abs(montoAjuste).toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados ($${tope.toFixed(2)}). ${montoAjuste > 0 ? "Dejá el saldo pendiente." : "Dejá el sobrante a cuenta."}` },
-          { status: 400 },
-        )
-      }
+    // Ajuste por redondeo — MISMA regla que la calle (lib/cobranzas/reglas-cobro):
+    //  · positivo = falta (se perdona): tope 1% de TODO lo seleccionado
+    //    (imputaciones + anticipos a pedidos), o rebota.
+    //  · negativo = sobrante: NUNCA rebota — chico ⇒ ajuste a favor,
+    //    grande ⇒ se descarta el ajuste y queda a cuenta (con aviso).
+    const totalDebitosSel = ((imputaciones as any[]) || []).reduce((s: number, i: any) => s + Number(i.monto_imputado || 0), 0)
+    const totalAnticipos = ((body.pedidos_anticipo as any[]) || []).reduce((s: number, p: any) => s + (Number(p?.monto) || 0), 0)
+    const ajusteResuelto = resolverAjuste(
+      Math.round(Number(ajuste_redondeo || 0) * 100) / 100,
+      baseTopeAjuste({ imputado: totalDebitosSel, anticipos: totalAnticipos, montoTotal, ajuste: Number(ajuste_redondeo || 0) }),
+    )
+    if (ajusteResuelto.rechazo) {
+      return NextResponse.json({ error: ajusteResuelto.rechazo }, { status: 400 })
     }
+    const montoAjuste = ajusteResuelto.ajuste
     const obsConCreditos = [observaciones, marcaCred, marcaAjuste(montoAjuste)].filter(Boolean).join(" ") || null
 
     // ── 2. Alta transaccional (pago + detalle + cheques + imputaciones) ──
@@ -384,6 +387,8 @@ export async function POST(request: NextRequest) {
       numero_recibo: numeroReciboFinal,
       bonificacion,
       bonificacion_error,
+      // Sobrante mayor al 1% pedido como ajuste: se descartó y quedó a cuenta
+      aviso_ajuste: ajusteResuelto.aviso || undefined,
     })
   } catch (error: any) {
     console.error("[pagos-clientes] POST error:", error)

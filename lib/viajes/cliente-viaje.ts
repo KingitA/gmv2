@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
+import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 
 // Ficha de UN cliente dentro de un viaje de reparto: lo que ve el chofer al bajar
 // del camión (pedido con renglones, comprobantes pendientes, devoluciones y cobros
@@ -96,6 +97,33 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
   // Doble saldo: real (libro mayor, confirmado) y proyectado (real − pendientes)
   const saldos = await getSaldosCliente(supabase, clienteId)
   const saldo_anterior = saldos.saldo_real
+
+  // Valor de cada devolución EN UN COBRO (regla única valor-devolucion:
+  // precio de factura, neto del 10% si la factura fue contado) + lo ya
+  // descontado en cobros anteriores (anti doble uso).
+  const devIds = (devoluciones || []).map((d: any) => d.id)
+  const [valores, { data: descuentosPrevios }] = await Promise.all([
+    valorarDevoluciones(supabase, { clienteId, devolucionIds: devIds }),
+    devIds.length
+      ? supabase.from("devoluciones_descuentos").select("devolucion_id, monto").in("devolucion_id", devIds)
+      : Promise.resolve({ data: [] as any[] }),
+  ])
+  const descontadoDe = new Map<string, number>()
+  for (const u of descuentosPrevios || [])
+    descontadoDe.set(u.devolucion_id, (descontadoDe.get(u.devolucion_id) || 0) + Number(u.monto))
+  const devolucionesValoradas = (devoluciones || []).map((d: any) => {
+    const v = valores.get(d.id)
+    const valorTotal = v?.total ?? (Number(d.monto_total) || 0)
+    const descontado = Math.round((descontadoDe.get(d.id) || 0) * 100) / 100
+    return {
+      ...d,
+      aplica_10: v?.aplica_10 ?? false,
+      valor_total: valorTotal,
+      valor_descontado: descontado,
+      // Lo que se puede descontar en ESTE cobro (coincide con la NC futura)
+      valor_cobro: Math.max(0, Math.round((valorTotal - descontado) * 100) / 100),
+    }
+  })
   const total_devuelto = (devoluciones || []).reduce((s, d) => s + Number(d.monto_total), 0)
   const total_cobrado = (pagos_registrados || []).reduce((s, p) => s + Number(p.monto), 0)
 
@@ -114,7 +142,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
         }
       : null,
     comprobantes_pendientes: comprobantes || [],
-    devoluciones: devoluciones || [],
+    devoluciones: devolucionesValoradas,
     pagos_registrados: pagos_registrados || [],
     resumen: {
       saldo_anterior,
