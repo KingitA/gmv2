@@ -21,6 +21,7 @@
       "@gm/deposito": ["../lib/deposito/bonificados.ts"],
       "@gm/vendedor": ["../lib/vendedor/isomorfico.ts"],
       "@gm/cheques": ["../lib/cheques/isomorfico.ts"],
+      "@gm/cobro": ["../lib/cobranzas/reglas-cobro.ts"],
       "@gm/cheques/foto": ["../lib/cheques/foto.ts"]
     }
   }

@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { topeAjuste, marcaAjuste } from "@/lib/cobranzas/ajuste"
+import { marcaAjuste } from "@/lib/cobranzas/ajuste"
+import { baseTopeAjuste, normalizarAnticipos, pedidosContadoValidos, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
@@ -35,8 +36,9 @@ export async function POST(
       comprobante_urls, // [{url, nombre}] fotos de comprobantes
       cobros_extra,     // [{ cliente_id, monto, metodos, imputaciones }] otros clientes en la misma cobranza
       pedidos_contado,  // string[] pedidos sin facturar anticipados con 10% contado
+      pedidos_anticipo, // [{ pedido_id, monto }] anticipos a pedidos sin facturar SELECCIONADOS (clientes nuevos)
       contado_general,  // bool: 10% contado sobre los comprobantes saldados (NC al confirmar)
-      ajuste_redondeo,  // número con signo: +falta (crédito) / −sobra (débito), tope 1%
+      ajuste_redondeo,  // número con signo: +falta (crédito, tope 1%) / −sobra (débito, nunca rebota)
       idempotency_key,  // uuid del front: reintentos/doble tap devuelven el MISMO pago
     } = body
 
@@ -103,18 +105,26 @@ export async function POST(
       .filter((i: any) => i?.comprobante_id)
       .map((i: any) => ({ comprobante_id: i.comprobante_id, monto_imputado: Number(i.monto_imputado) }))
 
-    // Ajuste por redondeo: TOPE 1% de los comprobantes tildados (más es perdonar
-    // plata → oficina). Viaja como marca y se asienta al confirmar la rendición.
-    const montoAjuste = Math.round(Number(ajuste_redondeo || 0) * 100) / 100
-    if (Math.abs(montoAjuste) > 0.005) {
-      const tope = topeAjuste(impsCompletas.reduce((x, i) => x + i.monto_imputado, 0))
-      if (Math.abs(montoAjuste) > tope + 0.005) {
-        return NextResponse.json(
-          { error: `El ajuste (${Math.abs(montoAjuste).toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados (${tope.toFixed(2)}). Dejá el saldo pendiente: lo resuelve la oficina.` },
-          { status: 400 },
-        )
-      }
+    // Ajuste por redondeo (lib/cobranzas/reglas-cobro.ts). Viaja como marca y se asienta al
+    // confirmar la rendición.
+    //  · Tope 1 % SOLO para el ajuste en contra (perdonar saldo): más que eso → oficina.
+    //  · El sobrante nunca rebota: chico ⇒ ajuste a favor; grande ⇒ queda a cuenta + aviso.
+    //  · Base = todo lo seleccionado: comprobantes + anticipos a pedidos sin facturar (que no
+    //    viajan como imputaciones: con solo pedidos seleccionados la base daba $0).
+    const anticipos = normalizarAnticipos(pedidos_anticipo)
+    const ajusteResuelto = resolverAjuste(
+      Number(ajuste_redondeo || 0),
+      baseTopeAjuste({
+        imputado: impsCompletas.reduce((x, i) => x + (Number(i.monto_imputado) || 0), 0),
+        anticipos: (anticipos || []).reduce((x, a) => x + a.monto, 0),
+        montoTotal: Number(monto_total),
+        ajuste: Number(ajuste_redondeo || 0),
+      }),
+    )
+    if (ajusteResuelto.rechazo) {
+      return NextResponse.json({ error: ajusteResuelto.rechazo, mensaje: ajusteResuelto.rechazo, codigo: "regla_negocio", reintentable: false }, { status: 422 })
     }
+    const montoAjuste = ajusteResuelto.ajuste
     const conContado = Boolean(contado_general)
     // Un comprobante jamás recibe el 10 % dos veces: si TODOS los seleccionados ya lo tienen,
     // rechazo definitivo (422: la app no lo reintenta); si algunos, se registra y se avisa.
@@ -156,12 +166,15 @@ export async function POST(
       })
     }
 
-    // Marcar pedidos anticipados con 10% contado (NC automática al facturar)
-    if (Array.isArray(pedidos_contado) && pedidos_contado.length) {
+    // Marcar pedidos anticipados con 10% contado (NC automática al facturar): SOLO los
+    // seleccionados en este cobro y del cliente del cobro — nunca toda la lista.
+    const pedidosContado = pedidosContadoValidos(pedidos_contado, anticipos)
+    if (pedidosContado.length) {
       await supabase
         .from("pedidos")
         .update({ pago_contado_10: true, anticipo_pago_id: pago.id })
-        .in("id", pedidos_contado)
+        .in("id", pedidosContado)
+        .eq("cliente_id", cliente_id)
     }
 
     // Fotos de comprobantes (cheque/transferencia) cargadas por el chofer
@@ -266,6 +279,7 @@ export async function POST(
       estado: "pendiente_rendicion",
       mensaje: "Cobro registrado. Se imputará al confirmar la rendición del viaje.",
       aviso_contado: avisoContado,
+      aviso_ajuste: ajusteResuelto.aviso,
     })
   } catch (error: any) {
     console.error("[chofer] Error en POST cobro:", error)

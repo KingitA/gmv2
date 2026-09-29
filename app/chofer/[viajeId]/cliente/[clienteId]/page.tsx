@@ -9,7 +9,7 @@ import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
 import { DateInputAR } from "@/components/ui/date-input-ar"
 import { dejarAvisoPagina, useAvisoInline } from "@/components/pagos/aviso-inline"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
-import { topeAjuste } from "@/lib/cobranzas/ajuste"
+import { anticiposDeSeleccion, ofreceAjuste, pedidosContadoAEnviar, topeAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
 import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
 import { ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
@@ -316,7 +316,9 @@ export default function ClienteEntregaPage() {
     let ajusteRedondeo = 0
     if (Math.abs(diff) > 0.01 && totalImputado() > 0) {
       if (!modoDiferencia) { setDialogoDiff(diff); return }
-      if (modoDiferencia === "ajuste") ajusteRedondeo = -diff // +falta = crédito, −sobra = débito
+      // +falta = crédito (tope 1 %), −sobra = débito. El sobrante nunca bloquea: si supera el
+      // 1 % no se ofrece como ajuste y queda a cuenta del cliente.
+      if (modoDiferencia === "ajuste" && ofreceAjuste(diff, totalImputado())) ajusteRedondeo = -diff
     }
     setDialogoDiff(null)
     setGuardandoCobro(true)
@@ -339,7 +341,10 @@ export default function ClienteEntregaPage() {
           imputaciones,
           devolucion_ids: devPendientes,
           comprobante_urls: urlsDeFotos(metodosPago.filter(esFila)).map((url) => ({ url })),
-          pedidos_contado: [...contadoPedidos],
+          // 10 % sobre pedidos sin facturar: solo los SELECCIONADOS; los anticipos viajan para que
+          // el servidor marque solo esos y calcule el tope del ajuste sobre todo lo seleccionado
+          pedidos_contado: pedidosContadoAEnviar(contadoPedidos, comprobantesSeleccionados),
+          pedidos_anticipo: anticiposDeSeleccion(comprobantesSeleccionados),
           contado_general: contadoGeneral && bonificacionEstimada() > 0,
           ajuste_redondeo: ajusteRedondeo,
           cobros_extra: cobrosExtra
@@ -352,7 +357,7 @@ export default function ClienteEntregaPage() {
       if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({})
         // Vuelta a la hoja de ruta, posicionada en esta parada, con el cobro reflejado. La parada
         // NO queda "entregada" por cobrar: "Cerrar parada" sigue siendo una acción aparte.
-        dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)} a ${clienteNombre}. Se imputará al confirmar la rendición.${d.aviso_contado ? ` ${d.aviso_contado}` : ""}`)
+        dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)} a ${clienteNombre}. Se imputará al confirmar la rendición.${d.aviso_contado ? ` ${d.aviso_contado}` : ""}${d.aviso_ajuste ? ` ${d.aviso_ajuste}` : ""}`)
         router.push(`/chofer/${viajeId}#parada-${clienteId}`)
       }
       else avisar(d.mensaje || d.error || "Error al registrar cobro")
@@ -943,7 +948,7 @@ function CobroSheet({
           {Math.abs(diff) > 0.01 && (
             <div className={`rounded-xl px-4 py-3 text-center font-medium ${diff < 0 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
               {diff < 0 ? `Faltan ${formatCurrency(Math.abs(diff))}` : `Sobran ${formatCurrency(diff)}`}
-              <span className="block text-xs font-normal opacity-80">Al registrar elegís: ajuste por redondeo o dejar el saldo.</span>
+              <span className="block text-xs font-normal opacity-80">{diff < 0 ? "Al registrar elegís: ajuste por redondeo o dejar el saldo pendiente." : "Al registrar elegís: dejarlo a cuenta del cliente o, si es chico, ajuste por redondeo."}</span>
             </div>
           )}
 
@@ -953,15 +958,17 @@ function CobroSheet({
                 <h3 className="text-center text-lg font-bold">
                   {dialogoDiff < 0 ? `Faltan ${formatCurrency(Math.abs(dialogoDiff))}` : `Sobran ${formatCurrency(dialogoDiff)}`}
                 </h3>
+                {/* El tope del 1 % es solo para PERDONAR saldo. El sobrante nunca bloquea: chico ⇒ se
+                    puede ajustar; grande ⇒ queda a cuenta del cliente. */}
                 {Math.abs(dialogoDiff) <= topeAjusteActual + 0.005 ? (
                   <button onClick={() => guardarCobro("ajuste")} disabled={guardandoCobro} className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:opacity-50">
                     Ajuste por redondeo {dialogoDiff < 0 ? "(se le perdona)" : "(no queda a favor)"} — oficina lo confirma al rendir
                   </button>
-                ) : (
+                ) : dialogoDiff < 0 ? (
                   <p className="rounded-xl bg-amber-50 px-3 py-2 text-center text-sm text-amber-800">
-                    La diferencia supera el 1% de lo imputado ({formatCurrency(topeAjusteActual)}): no se ajusta desde la calle.
+                    Lo que falta supera el 1% de lo seleccionado ({formatCurrency(topeAjusteActual)}): no se perdona desde la calle.
                   </p>
-                )}
+                ) : null}
                 <button onClick={() => guardarCobro("saldo")} disabled={guardandoCobro} className="w-full rounded-2xl border-2 border-gray-300 py-4 font-bold text-gray-700 disabled:opacity-50">
                   {dialogoDiff < 0 ? "Dejar el saldo pendiente" : "Dejar el sobrante a cuenta del cliente"}
                 </button>

@@ -73,6 +73,7 @@ function reset() {
     })
     const total = r2(detalle.reduce((s, d) => s + d.subtotal, 0))
     S.pedidos.push({ id: pedidoId, numero_pedido: String(1700 + i).padStart(6, "0"), fecha: hoy(), estado: "en_viaje", total, bultos: 3 + i, cliente_id: c.id, viaje_id: viajeId, observaciones: null, detalle, pago_contado_10: false, anticipo_pago_id: null })
+    if (i === 2) S.pedidos.push({ id: uid(3050), numero_pedido: "001750", fecha: hoy(), estado: "impreso", total: 352718.8, bultos: 4, cliente_id: c.id, viaje_id: null, observaciones: null, detalle: [], pago_contado_10: false, anticipo_pago_id: null })
     if (i !== 2) {
       S.comprobantes.push({ id: uid(4000 + i), cliente_id: c.id, pedido_id: pedidoId, tipo_comprobante: "FA", numero_comprobante: `0003-${String(5000 + i).padStart(8, "0")}`, fecha: hoy(), total_neto: r2(total / 1.21), total_factura: total, saldo_pendiente: total, estado_pago: "pendiente", anulado_en: null })
       S.remitos.push({ id: uid(4500 + i), pedido_id: pedidoId, tipo_remito: "REM", numero_remito: `0001-${String(800 + i).padStart(8, "0")}`, estado_pdf: "generado" })
@@ -235,7 +236,13 @@ const HANDLERS = {
     const monto = r2(Number(p.monto_total))
     const imps = (p.imputaciones || []).filter((i) => i.comprobante_id).map((i) => ({ comprobante_id: i.comprobante_id, monto_imputado: r2(Number(i.monto_imputado)) }))
     const ajuste = r2(Number(p.ajuste_redondeo || 0))
-    if (Math.abs(ajuste) > 0.005) { const tope = r2(imps.reduce((s, i) => s + i.monto_imputado, 0) * 0.01); if (Math.abs(ajuste) > tope + 0.005) throw new Rechazo(`El ajuste (${Math.abs(ajuste).toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados (${tope.toFixed(2)}). Dejá el saldo pendiente: lo resuelve la oficina.`) }
+    // = lib/cobranzas/reglas-cobro.ts: tope 1 % SOLO en contra; el sobrante nunca rebota; base = comprobantes + anticipos
+    const anticipos = Array.isArray(p.pedidos_anticipo) ? p.pedidos_anticipo.filter((a) => a?.pedido_id && Number(a.monto) > 0) : null
+    if (Math.abs(ajuste) > 0.005) {
+      const base = Math.max(imps.reduce((s, i) => s + i.monto_imputado, 0) + (anticipos || []).reduce((s, a) => s + Number(a.monto), 0), monto + Math.max(0, ajuste))
+      const tope = r2(base * 0.01)
+      if (ajuste > tope + 0.005) throw new Rechazo(`El ajuste por redondeo ($ ${ajuste.toFixed(2)}) supera el tope del 1% de lo seleccionado ($ ${tope.toFixed(2)}). Dejá el saldo pendiente: lo resuelve la oficina.`)
+    }
     // Recorte: Σ imputaciones ≤ monto (secuencial)
     let resta = monto
     const recortadas = []
@@ -244,7 +251,7 @@ const HANDLERS = {
     const pago = { id: randomUUID(), viaje_id: v.id, cliente_id: p.cliente_id, monto, estado: "pendiente_rendicion", created_at: ahora(), creado_por: u.id, detalles: (p.metodos || []).map((x) => ({ tipo_pago: x.tipo, monto: r2(Number(x.monto)), banco: x.banco_emisor || null, numero_cheque: x.numero_cheque || null, numero_comprobante_pago: x.numero_comprobante || null })), imputaciones: recortadas, contado: !!p.contado_general, ajuste, fotos: [...(p.comprobante_urls || []).map((c) => c.url), ...(p.fotos_pendientes || []).map(() => "https://placehold.co/640x300/e2e8f0/475569.png?text=Foto+pendiente+(mock)")], declarado: false }
     S.pagos.push(pago)
     for (const i of recortadas) { const k = S.comprobantes.find((c) => c.id === i.comprobante_id); k.saldo_pendiente = r2(k.saldo_pendiente - i.monto_imputado); k.estado_pago = k.saldo_pendiente <= 0.009 ? "pagado" : "parcial" }
-    for (const pid of p.pedidos_contado || []) { const ped = S.pedidos.find((x) => x.id === pid); if (ped) { ped.pago_contado_10 = true; ped.anticipo_pago_id = pago.id } }
+    for (const pid of (p.pedidos_contado || []).filter((id) => !anticipos || anticipos.some((a) => a.pedido_id === id))) { const ped = S.pedidos.find((x) => x.id === pid); if (ped) { ped.pago_contado_10 = true; ped.anticipo_pago_id = pago.id } }
     for (const did of p.devolucion_ids || []) { const d = S.devoluciones.find((x) => x.id === did); if (d) d.descontada = true }
     const extras = []
     for (const ex of p.cobros_extra || []) {

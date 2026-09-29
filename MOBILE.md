@@ -1578,6 +1578,26 @@ libro mayor, recibo, kardex; zona de caja de la otra sesión).
 5. **Chofer WEB post-cobro:** vuelve a la hoja de ruta posicionada en la parada (`#parada-<clienteId>`)
    con el aviso de éxito. El cobro NO marca la parada como entregada: "Cerrar parada" sigue siendo la
    acción aparte (en "Visitados · falta cerrar la parada"), igual que en la app.
+### Bugs de la segunda pasada del dueño (29/09/2026, misma rama)
+Reglas puras nuevas en `lib/cobranzas/reglas-cobro.ts` (alias `@gm/cobro`: servidor, web y app usan el
+mismo código). Tests: `test/contado-ajuste.test.ts`.
+1. **"10% contado a todo" tildaba pedidos NO seleccionados.** El toggle marcaba el 10 % en todos los
+   pedidos sin facturar de la lista y `pedidos_contado` viajaba con todos: el servidor les ponía
+   `pago_contado_10` + `anticipo_pago_id` aunque no se cobraran (bug anterior a la tanda 2, heredado de
+   la barra del selector). Ahora: el toggle aplica solo a lo seleccionado; con el toggle activo, lo que
+   se selecciona recibe el 10 % y lo que se deselecciona lo pierde; al servidor viajan solo los
+   seleccionados (`pedidos_contado`) más los anticipos (`pedidos_anticipo: [{pedido_id, monto}]`), y la
+   route marca únicamente los que están en la selección y son del cliente del cobro. Una APK anterior
+   (sin `pedidos_anticipo`) conserva el comportamiento previo.
+2. **Tope del ajuste por redondeo.** (a) La base daba $0 porque se calculaba sobre las imputaciones a
+   COMPROBANTES y los anticipos a pedidos sin facturar no viajan como imputaciones: con solo pedidos
+   seleccionados, 1 % de 0 = 0. Base nueva = comprobantes + anticipos (piso: lo que había que
+   entregar). Mismo arreglo en `viajante/cobro`. (b) El tope del 1 % aplica SOLO al ajuste en contra
+   (perdonar saldo): si lo supera, 422 `regla_negocio`. El sobrante JAMÁS rebota: hasta el 1 % se
+   puede tomar como ajuste a favor; por encima no se ofrece y, si llegara igual, el servidor lo deja a
+   cuenta del cliente y responde `aviso_ajuste`.
+   NO se tocó `app/api/pagos-clientes` ni `components/caja/*` (zona de la otra sesión): ahí el tope
+   sigue aplicando en los dos sentidos.
 ### Puesta en marcha (pendiente del dueño)
 1. Merge de `apk-chofer` a `main` con OK del dueño (toca `app/api/chofer/*`, `lib/viajes/*`, `lib/mobile/*`) y deploy. Sin migraciones.
 2. Instalar `dist-apks/chofer-v0.2.0.apk` encima del v0.1.1 del NuStar (`adb install -r`, misma firma).

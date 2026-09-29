@@ -6,6 +6,7 @@ import {
   type CampoCheque, type ConsultaBcraPayload, type FilaCheque, type ResultadoOcr,
 } from "@gm/cheques"
 import { blobABase64, comprimirFoto, urlLocal } from "@gm/cheques/foto"
+import { anticiposDeSeleccion, ofreceAjuste, PEDIDO_PREFIX, pedidosContadoAEnviar, pedidosContadoAlAplicarTodo, topeAjuste } from "@gm/cobro"
 import { DS, ESTADOS_COBRABLES, nombreCliente, type ClienteBusqueda, type ComprobanteCobro, type MetodoPayload, type OpCobrar, type PedidoCobro } from "../datasets"
 import { buscarClientes, useClienteViaje, useClientesTodos, useCuentasBancarias, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
 import { AvisosBcra, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
@@ -36,11 +37,8 @@ const metodoPayload = (m: MetodoPago): MetodoPayload =>
       : { tipo: "transferencia", monto: m.monto, numero_comprobante: m.referencia_transferencia || undefined, cuenta_bancaria_id: m.cuenta_bancaria_id || undefined }
     : { tipo: "efectivo", monto: m.monto }
 
-const PEDIDO_PREFIX = "pedido:"
 /** La hoja de ruta se posiciona en esta parada al volver (sessionStorage). */
 export const CLAVE_VOLVER_A_PARADA = "gm.chofer.volverAParada"
-/** = topeAjuste de lib/cobranzas/ajuste.ts: máximo ajuste admitido (1% de lo imputado). */
-const topeAjuste = (total: number) => round2(Math.max(0, Number(total) || 0) * 0.01)
 /** Saldo cobrable HOY: el del comprobante menos lo que ya está en un cobro hecho acá sin enviar. */
 const saldoCobrable = (cp: ComprobanteCobro) => Math.max(0, round2(cp.saldo_pendiente - (cp.en_cobro || 0)))
 const fmt = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })
@@ -191,7 +189,14 @@ export function Cobrar() {
     setSel((prev) => { const n = { ...prev }; for (const c of comps) { if (todos) delete n[c.id]; else if (saldoCobrable(c) > 0.005) n[c.id] = saldoCobrable(c) } return n })
   }
   const montoAnticipo = (p: PedidoCobro, contado = contadoPedidos.has(p.id)) => (contado ? round2(p.total * 0.9) : p.total)
-  const toggleAnticipo = (p: PedidoCobro) => setUno(PEDIDO_PREFIX + p.id, sel[PEDIDO_PREFIX + p.id] !== undefined ? null : montoAnticipo(p))
+  // El 10 % es SOLO de lo seleccionado: con "10% contado a todo" activo, el pedido que se
+  // selecciona lo recibe; el que se deselecciona lo pierde.
+  const toggleAnticipo = (p: PedidoCobro) => {
+    const estaba = sel[PEDIDO_PREFIX + p.id] !== undefined
+    const conContado = !estaba && (contadoGeneral ? true : contadoPedidos.has(p.id))
+    if (conContado !== contadoPedidos.has(p.id)) setContadoPedidos((prev) => { const n = new Set(prev); if (conContado) n.add(p.id); else n.delete(p.id); return n })
+    setUno(PEDIDO_PREFIX + p.id, estaba ? null : montoAnticipo(p, conContado))
+  }
   const toggleContado = (p: PedidoCobro) => {
     const next = new Set(contadoPedidos)
     if (next.has(p.id)) next.delete(p.id); else next.add(p.id)
@@ -201,13 +206,17 @@ export function Cobrar() {
   const clavesTodas = [...comprobantes.map((c) => c.id), ...pedidosSinFacturar.map((p) => PEDIDO_PREFIX + p.id)]
   const todoSeleccionado = clavesTodas.length > 0 && clavesTodas.every((k) => sel[k] !== undefined)
   const toggleTodo = () => {
-    if (todoSeleccionado) return setSel({})
-    setSel((prev) => { const n = { ...prev }; for (const c of comprobantes) n[c.id] = saldoCobrable(c); for (const p of pedidosSinFacturar) n[PEDIDO_PREFIX + p.id] = montoAnticipo(p); return n })
+    if (todoSeleccionado) { setContadoPedidos(new Set()); return setSel({}) }
+    // Con "10% contado a todo" activo, todo lo que se selecciona lo recibe
+    const conContado = contadoGeneral ? new Set(pedidosSinFacturar.map((p) => p.id)) : contadoPedidos
+    if (contadoGeneral) setContadoPedidos(conContado)
+    setSel((prev) => { const n = { ...prev }; for (const c of comprobantes) n[c.id] = saldoCobrable(c); for (const p of pedidosSinFacturar) n[PEDIDO_PREFIX + p.id] = montoAnticipo(p, conContado.has(p.id)); return n })
   }
   const toggleContadoTodo = () => {
     const activar = !contadoGeneral
     setContadoGeneral(activar)
-    const next = new Set<string>(activar ? pedidosSinFacturar.map((p) => p.id) : [])
+    // Solo a los pedidos SELECCIONADOS para cobrar — nunca a toda la lista (@gm/cobro)
+    const next = new Set<string>(pedidosContadoAlAplicarTodo(activar, pedidosSinFacturar.map((p) => p.id), sel))
     setContadoPedidos(next)
     setSel((prev) => { const n = { ...prev }; for (const p of pedidosSinFacturar) if (n[PEDIDO_PREFIX + p.id] !== undefined) n[PEDIDO_PREFIX + p.id] = montoAnticipo(p, activar); return n })
   }
@@ -284,9 +293,10 @@ export function Cobrar() {
     let ajusteRedondeo = 0
     if (Math.abs(diff) > 0.01 && totalImputado > 0) {
       if (!modoDiferencia) { setDialogoDiff(diff); dialogo.abrir(); return }
+      // +falta = crédito (tope 1 %), −sobra = débito. El sobrante nunca bloquea: si supera el
+      // 1 % no se ofrece como ajuste y queda a cuenta del cliente.
       if (modoDiferencia === "ajuste") {
-        if (Math.abs(diff) > topeAjuste(totalImputado) + 0.005) return
-        ajusteRedondeo = -diff // +falta = crédito, −sobra = débito
+        if (!ofreceAjuste(diff, totalImputado)) { if (diff < 0) return } else ajusteRedondeo = -diff
       }
     }
     guardandoRef.current = true
@@ -303,7 +313,10 @@ export function Cobrar() {
         imputaciones: Object.entries(sel).filter(([k, monto]) => monto > 0 && !k.startsWith(PEDIDO_PREFIX)).map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado })),
         devolucion_ids: incluirDevoluciones ? devPendientes.map((d) => d.id) : [],
         comprobante_urls: urlsDeFotos(filas).map((url) => ({ url })),
-        pedidos_contado: [...contadoPedidos],
+        // 10 % sobre pedidos sin facturar: solo los SELECCIONADOS; los anticipos viajan para que el
+        // servidor marque solo esos y calcule el tope del ajuste sobre todo lo seleccionado
+        pedidos_contado: pedidosContadoAEnviar(contadoPedidos, sel),
+        pedidos_anticipo: anticiposDeSeleccion(sel),
         contado_general: contadoGeneral && bonificacionEstimada > 0,
         ajuste_redondeo: ajusteRedondeo,
         cobros_extra: cobrosExtra.filter((c) => c.monto > 0).map((c) => ({ cliente_id: c.cliente.id, cliente_nombre: nombreCliente(c.cliente), metodos: [{ tipo: "efectivo", monto: c.monto }], imputaciones: [] })),
@@ -379,7 +392,7 @@ export function Cobrar() {
           {Math.abs(diff) > 0.01 && totalImputado > 0 && (
             <p className={`mb-2 rounded-xl px-4 py-2 text-center text-sm font-medium ${diff < 0 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
               {diff < 0 ? `Faltan ${formatCurrency(Math.abs(diff))}` : `Sobran ${formatCurrency(diff)}`}
-              <span className="block text-xs font-normal opacity-80">Al registrar elegís: ajuste por redondeo o dejar el saldo.</span>
+              <span className="block text-xs font-normal opacity-80">{diff < 0 ? "Al registrar elegís: ajuste por redondeo o dejar el saldo pendiente." : "Al registrar elegís: dejarlo a cuenta del cliente o, si es chico, ajuste por redondeo."}</span>
             </p>
           )}
           <button onClick={() => void guardarCobro()} disabled={guardando || totalMetodos <= 0 || !puedeCobrar} className="min-h-14 w-full rounded-2xl bg-blue-600 py-4 text-xl font-bold text-white active:scale-95 disabled:opacity-50">
@@ -587,15 +600,17 @@ export function Cobrar() {
         <div className="fixed inset-0 z-[60] flex items-end bg-black/60" onClick={dialogo.cerrar}>
           <div className="w-full space-y-3 rounded-t-3xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-center text-lg font-bold">{dialogoDiff < 0 ? `Faltan ${formatCurrency(Math.abs(dialogoDiff))}` : `Sobran ${formatCurrency(dialogoDiff)}`}</h3>
-            {Math.abs(dialogoDiff) <= topeAjuste(totalImputado) + 0.005 ? (
+            {/* El tope del 1 % es solo para PERDONAR saldo. El sobrante nunca bloquea: chico ⇒ se
+                puede ajustar; grande ⇒ queda a cuenta del cliente. */}
+            {ofreceAjuste(dialogoDiff, totalImputado) ? (
               <button onClick={() => void guardarCobro("ajuste")} disabled={guardando} className="min-h-12 w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:opacity-50">
                 Ajuste por redondeo {dialogoDiff < 0 ? "(se le perdona)" : "(no queda a favor)"} — oficina lo confirma al rendir
               </button>
-            ) : (
+            ) : dialogoDiff < 0 ? (
               <p className="rounded-xl bg-amber-50 px-3 py-2 text-center text-sm text-amber-800">
-                La diferencia supera el 1% de lo imputado ({formatCurrency(topeAjuste(totalImputado))}): no se ajusta desde la calle.
+                Lo que falta supera el 1% de lo seleccionado ({formatCurrency(topeAjuste(totalImputado))}): no se perdona desde la calle.
               </p>
-            )}
+            ) : null}
             <button onClick={() => void guardarCobro("saldo")} disabled={guardando} className="min-h-12 w-full rounded-2xl border-2 border-gray-300 py-4 font-bold text-gray-700 disabled:opacity-50">
               {dialogoDiff < 0 ? "Dejar el saldo pendiente" : "Dejar el sobrante a cuenta del cliente"}
             </button>

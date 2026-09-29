@@ -299,6 +299,8 @@ export interface OpCobrar {
   devolucion_ids: string[]
   comprobante_urls: Array<{ url: string }>
   pedidos_contado: string[]
+  /** Anticipos a pedidos sin facturar de la selección (el servidor marca el 10 % solo sobre estos) */
+  pedidos_anticipo?: Array<{ pedido_id: string; monto: number }>
   contado_general: boolean
   ajuste_redondeo: number
   cobros_extra: Array<{ cliente_id: string; cliente_nombre?: string; metodos: MetodoPayload[]; imputaciones: [] }>
