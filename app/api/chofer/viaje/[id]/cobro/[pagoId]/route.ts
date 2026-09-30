@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { anularCobranza } from "@/lib/actions/cobranzas"
 import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
+import { compensarBilleteraLegada } from "@/lib/cobranzas/billetera-chofer"
 
 /**
  * DELETE /api/chofer/viaje/[id]/cobro/[pagoId]
@@ -33,7 +34,7 @@ export async function DELETE(
 
     const { data: pago } = await supabase
       .from("pagos_clientes")
-      .select("id, estado, viaje_id")
+      .select("id, estado, viaje_id, monto")
       .eq("id", pagoId)
       .single()
     if (!pago || pago.viaje_id !== viajeId) {
@@ -62,6 +63,14 @@ export async function DELETE(
       usuarioId: auth.user.id,
       motivo: "Corrección del chofer antes de rendir",
     })
+
+    // Cobros asentados antes del 30/09/2026 (billetera referenciada al viaje): cobranza_anular no
+    // encuentra el movimiento y la plata quedaba en la billetera. Se compensa acá, una sola vez.
+    try {
+      await compensarBilleteraLegada(supabase, { titularId: viaje.chofer_id, pagoId, viajeId, monto: Number(pago.monto), usuarioId: auth.user.id })
+    } catch (compErr: any) {
+      console.error("[chofer/cobro] compensación de billetera:", compErr?.message)
+    }
 
     return NextResponse.json({ success: true })
   } catch (error: any) {

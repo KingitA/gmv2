@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth"
 import { marcaAjuste } from "@/lib/cobranzas/ajuste"
 import { baseTopeAjuste, cierreDeParadaPorCobro, normalizarAnticipos, pedidosContadoValidos, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
+import { asentarCobroEnBilletera } from "@/lib/cobranzas/billetera-chofer"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
@@ -226,7 +227,7 @@ export async function POST(
         })
 
         try {
-          await crearCobranza(supabase, {
+          const extra = await crearCobranza(supabase, {
             // Clave derivada del submit para el cobro extra N: se pisa el nibble
             // de versión (pos 14) con 'e' — un uuid v4 del front jamás colisiona —
             // y los últimos 2 dígitos con el índice. Reintentos no duplican extras.
@@ -250,29 +251,19 @@ export async function POST(
               montoEx,
             ),
           })
+          // Billetera del titular: también la plata del cliente extra (la rendición la debita)
+          if (!extra.dedup) {
+            await asentarCobroEnBilletera(supabase, { titularId: viaje.chofer_id, pagoId: extra.pago_id, monto: montoEx, metodos: ex.metodos, usuarioId: auth.user.id, fecha: nowArgentina() })
+          }
         } catch (exErr: any) {
           console.error("[chofer/cobro] cobro extra falló:", ex.cliente_id, exErr?.message)
         }
       }
     }
 
-    // Registrar en billetera del chofer
-    await supabase.from("billetera_movimientos").insert({
-      viajante_id: viaje.chofer_id, // titular: el acompañante cobra contra su billetera
-      tipo: "cobro_cliente",
-      medio:
-        metodos[0]?.tipo === "efectivo"
-          ? "efectivo"
-          : metodos[0]?.tipo === "cheque"
-          ? "cheque"
-          : "transferencia",
-      monto: monto_total,
-      concepto: `Cobro cliente`,
-      referencia_id: viajeId,
-      referencia_tipo: "viaje",
-      creado_por: auth.user.id,
-      fecha: nowArgentina(),
-    })
+    // Billetera del chofer: referenciada AL PAGO, para que cobranza_anular la revierta al anular
+    // (lib/cobranzas/billetera-chofer.ts). Antes iba referenciada al viaje y la anulación no la tocaba.
+    await asentarCobroEnBilletera(supabase, { titularId: viaje.chofer_id, pagoId: pago.id, monto: Number(monto_total), metodos, usuarioId: auth.user.id, fecha: nowArgentina() })
 
     // ── Cobrar CIERRA la parada (lib/cobranzas/reglas-cobro.ts) ──
     // Si la parada del cliente estaba pendiente queda "entregado" (o "solo cobro" si no llevaba
