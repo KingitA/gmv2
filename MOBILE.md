@@ -1631,7 +1631,53 @@ Registrar un cobro significa que la parada está FINALIZADA. Regla pura `cierreD
    pago 78d65de0 (que en realidad se imputó a un comprobante). Se les quitó `pago_contado_10` y
    `anticipo_pago_id`; el pago y el comprobante no se tocaron.
 
-### Checklist contra PRODUCCIÓN en el NuStar 65-sp — PENDIENTE
+### Checklist contra PRODUCCIÓN en el NuStar 65-sp — EN CURSO (arrancó el 29/09/2026)
+Hecho el 29/09: merge `0a94f63` en `main`, deploy verificado (`/api/chofer/cuentas-bancarias` pasó de 404 a
+401), `chofer-v0.2.1` instalado encima del v0.2.0 (sesión conservada, datos frescos, cola en 0). Foto de solo
+lectura: `scripts/foto-chofer.cjs` (`guardar` / `comparar` / `rastros TEST-CHOFER`); foto "antes" tomada.
+
+Volúmenes reales medidos contra producción (29/09, solo lectura, mismas consultas que los datasets):
+
+| Dataset | Volumen real |
+|---|---|
+| `chofer_clientes` | 596 clientes activos, 154 KB + saldos 42 KB, 1,3 s en total |
+| `chofer_articulos` | 2.019 artículos activos |
+| `chofer_viajes` | 4 viajes operables del chofer del dueño (9 en toda la base, 5 sin chofer) |
+| `chofer_viaje_clientes` | 15 fichas; el viaje más grande tiene 9 paradas y 13 pedidos |
+| Renglones de pedido en viajes operables | 693 |
+
+Falta medir en el equipo el tiempo real de la primera descarga.
+
+**Resultados (29–30/09/2026, usuario chofer real del dueño, release v0.2.1).**
+
+| Prueba | Resultado |
+|---|---|
+| Viaje `TEST-CHOFER` (29/09, el dueño a mano, con señal) | ✅ 9 operaciones, 9 claves, todas aplicadas 1 vez: inicio explícito, 3 devoluciones, 2 cobros (10 % contado, sobrante de $ 67,52 como ajuste, faltante de $ 3.901,81 dentro del tope), gasto, rendición. Paradas cerradas por el cobro. Plata al centavo (caja, banco, billetera). |
+| Arranque en frío | ✅ 0,47–0,58 s, sin login |
+| **Modo avión con el interruptor del equipo** (`TEST-CHOFER2`, 30/09): cobro parcial con "cobrar sí o sí", devolución desde el pedido, cobro local descartado, anulación de un cobro del servidor, gasto, parada no entregada con motivo, rendir | ✅ 7 operaciones en la cola; cada pantalla reflejó el cambio al instante (paradas entregadas "sin enviar", efectivo en mano) |
+| Matar la app desde recientes y reabrir sin señal | ✅ el proceso murió; reabrió en frío en 0,47 s con las 7 operaciones intactas; la base no recibió nada durante el corte |
+| Reconectar | ✅ las 7 entraron **1 vez, en orden FIFO, en 16 s**, con su hora de captura; base = pantalla; 0 alertas de integridad; 0 comprobantes creados |
+| Anular un cobro no reabre la entrega (local y del servidor) | ✅ las dos paradas siguieron entregadas |
+| Doble 10 % sobre un presupuesto ya bonificado (PRES 0001-00000018) | ✅ la pantalla no lo aplica ("ya tiene el 10% aplicado… no se aplica dos veces"); la regla del servidor, corrida en solo lectura contra ese comprobante, devuelve el rechazo 422 |
+| Volúmenes reales | ✅ tabla de arriba; refresco manual < 4 s. La primera descarga no se pudo cronometrar (el viaje ya estaba en el equipo) |
+
+**Bug de plata encontrado y corregido (30/09, preexistente, también en el chofer web):** anular un cobro del
+chofer no revertía su billetera. `POST chofer/viaje/[id]/cobro` asentaba el movimiento con la referencia al
+VIAJE y `cobranza_anular` revierte por la referencia al PAGO (como asienta `viajante/cobro`). Ahora se
+asienta por pago (`lib/cobranzas/billetera-chofer.ts`), también el de cada cliente extra de un cobro
+conjunto (antes no se asentaba y la rendición lo debitaba igual). Los cobros viejos se compensan al
+anularlos (`compensarBilleteraLegada`, idempotente). Tests: `test/billetera-chofer.test.ts`.
+
+**Trampa de campo:** si la app abre en BLANCO justo al recuperar señal después de días, es Google Play
+actualizando "WebView del sistema Android" (`process is bad` en logcat): se arregla solo en 2–3 minutos.
+
+**Pendientes de pantalla anotados:** la ficha de un cliente con DOS pedidos en el viaje (o solo con
+`nombre_razon_social`) muestra "Cliente" y "Este pedido $ 0"; la hora de un cobro del servidor se ve en UTC;
+la hoja suma la NC de una factura anulada (total negativo en la parada).
+
+**Falta:** cheque real con aviso BCRA posterior, cobro rechazado por regla de negocio, ciclo cheque
+anulado → recargado, limpieza por id de `TEST-CHOFER` y `TEST-CHOFER2`.
+
 - [ ] Login del chofer real; descarga del viaje despachado; "✓ Viaje descargado" con todas las paradas.
 - [ ] Modo avión con el interruptor del equipo: cobro parcial, devolución, gasto, anular cobro (local y del servidor), cerrar paradas, rendir. Matar la app desde recientes y reabrir: nada perdido ni duplicado.
 - [ ] Reconectar: todo aplicado 1 vez; `pagos_clientes`, `devoluciones`, `viajes_gastos`, `viajes_paradas`, `rendiciones` iguales a lo que muestra la app; efectivo en mano = `efectivo_declarado`.
