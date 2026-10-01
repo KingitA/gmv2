@@ -9,7 +9,8 @@ import { MARCA_CONTADO } from "@/lib/constants"
 import { esTripulante } from "@/lib/viajes/chofer"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
-import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { crearCobranza, recortarImputaciones, repartirImputacionesContado, type DetalleInput } from "@/lib/cobranzas/crear"
+import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
@@ -143,7 +144,16 @@ export async function POST(
 
     // Con 10% contado el recorte es proporcional (cada comprobante recibe su
     // 90%; la NC del 10% lo salda al confirmar). Sin contado, secuencial.
-    const impsRecortadas = recortarImputaciones(impsCompletas, Number(monto_total), conContado ? "proporcional" : "secuencial")
+    // Contado: reparto POR COMPROBANTE (saldo − su propio 10%; los ya
+    // bonificados cobran entero) — el proporcional parejo mezclaba el
+    // descuento entre bonificados y sin bonificar (01/10).
+    const impsRecortadas = conContado
+      ? repartirImputacionesContado(
+          impsCompletas,
+          Number(monto_total),
+          await bonificacionPendientePorComprobante(supabase, cliente_id, impsCompletas.map((i: any) => i.comprobante_id)),
+        )
+      : recortarImputaciones(impsCompletas, Number(monto_total), "secuencial")
 
     // ── Devoluciones descontadas en este cobro: validar y VALUAR con la regla
     // única (precio de factura, neto del 10% si la factura fue contado).

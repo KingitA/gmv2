@@ -1,24 +1,41 @@
 -- ============================================================================
 -- RENDICIÓN v3 — integra fondos ("a cuenta viaje") y gastos del viaje
 -- ============================================================================
--- Aprobado 29/09. Regla: lo que el cobrador tiene EN MANO no es solo lo que
--- cobró: es  esperado = efectivo cobrado + fondos del viaje − gastos declarados.
+-- Aprobado 29/09 · corregido 01/10 con la revisión de la sesión Chofer:
+--  (a) fondos y gastos se CONGELAN en la rendición al declararla (columnas
+--      nuevas): un gasto rechazado o cargado entre declarar y confirmar ya no
+--      descuadra — la liquidación usa los valores congelados, y el gasto
+--      rechazado se compensa por su propio movimiento (viaje_gasto_rechazado).
+--  (b) la liquidación del fondo es única POR VIAJE: se descuenta lo ya
+--      liquidado por rendiciones anteriores del mismo viaje (confirmaciones
+--      parciales / cobros durante la rendición no duplican).
+--  (c) las rendiciones ABIERTAS al migrar fueron declaradas con la fórmula
+--      vieja (retención contra lo cobrado): el bloque final las congela y
+--      ajusta su saldo declarado a la fórmula nueva, con aviso por cada una.
+--  (d) rendiciones.diferencia al declarar = declarado − ESPERADO (no cobrado).
 --
---  · rendicion_crear: la retención (lo que queda debiendo / a favor en su
---    cuenta al DECLARAR) se mide contra ese esperado, no contra lo cobrado.
---    Caso 24/09: cobró 3.671.023,55, adelanto 100.000, gasto 50.000 →
---    esperado 3.721.023,55; declaró 3.721.000 → retiene $23,55 (antes el
---    sistema decía "$49.976,45 a su favor", al revés y sin sentido).
---  · rendicion_confirmar: al confirmarse, LIQUIDA el fondo del viaje
---    (movimiento 'viaje_fondo_liquidado' por fondos − gastos): la billetera
---    del cobrador queda en cero salvo su retención/diferencia. Antes el fondo
---    quedaba "en mano" para siempre.
---  · El eje de oficina no cambia: contado vs declarado (20260915).
---
--- NOTA COORDINACIÓN: estas funciones vienen de la rama apk-chofer
--- (20260915_rendicion_cc_dos_diferencias). Esta migración las EXTIENDE sin
--- cambiar su semántica de ejes. Revisar con esa sesión antes de aplicar.
+-- Regla: esperado en mano = efectivo cobrado + fondos del viaje − gastos
+-- declarados (no rechazados) − lo ya liquidado por rendiciones previas.
+-- Caso 24/09: cobró 3.671.023,55 + adelanto 100.000 − gasto 50.000 =
+-- esperado 3.721.023,55; declaró 3.721.000 → retiene $23,55.
 -- ============================================================================
+
+ALTER TABLE public.rendiciones
+  ADD COLUMN IF NOT EXISTS fondos_viaje numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS gastos_viaje numeric NOT NULL DEFAULT 0;
+COMMENT ON COLUMN public.rendiciones.fondos_viaje IS 'A cuenta viaje entregado al cobrador, CONGELADO al declarar la rendición';
+COMMENT ON COLUMN public.rendiciones.gastos_viaje IS 'Gastos del viaje no rechazados, CONGELADOS al declarar la rendición';
+
+-- Lo ya liquidado del fondo de un viaje por rendiciones anteriores
+CREATE OR REPLACE FUNCTION public.viaje_fondo_liquidado(p_viaje_id uuid)
+RETURNS numeric
+LANGUAGE sql
+STABLE
+AS $fn$
+  SELECT COALESCE(sum(-monto), 0)   -- los movimientos de liquidación son débitos (−neto)
+  FROM billetera_movimientos
+  WHERE referencia_tipo = 'viaje_fondo_liquidado' AND referencia_id = p_viaje_id
+$fn$;
 
 CREATE OR REPLACE FUNCTION public.rendicion_crear(
   p_cobrador_id uuid, p_cobrador_tipo text, p_pago_ids uuid[],
@@ -35,9 +52,10 @@ DECLARE
   v_pago_ids     uuid[];
   v_registrado   numeric;
   v_declarado    numeric;
-  v_fondos       numeric := 0;  -- "a cuenta viaje" entregado al cobrador
-  v_gastos       numeric := 0;  -- gastos del viaje no rechazados
-  v_esperado     numeric;       -- registrado + fondos − gastos: lo que debe traer
+  v_fondos       numeric := 0;  -- congelado al declarar
+  v_gastos       numeric := 0;  -- congelado al declarar
+  v_liquidado    numeric := 0;  -- fondo ya liquidado por rendiciones previas del viaje
+  v_esperado     numeric;
   v_saldo_cc     numeric;       -- esperado − declarado: >0 retiene (debe), <0 a favor
 BEGIN
   SELECT array_agg(p.id) INTO v_pago_ids
@@ -61,20 +79,23 @@ BEGIN
   IF p_viaje_id IS NOT NULL THEN
     SELECT COALESCE(sum(monto), 0) INTO v_fondos FROM viajes_fondos WHERE viaje_id = p_viaje_id;
     SELECT COALESCE(sum(monto), 0) INTO v_gastos FROM viajes_gastos WHERE viaje_id = p_viaje_id AND estado <> 'rechazado';
+    v_liquidado := viaje_fondo_liquidado(p_viaje_id);
   END IF;
 
   v_declarado := COALESCE(p_efectivo_declarado, 0);
-  v_esperado  := round((v_registrado + v_fondos - v_gastos) * 100) / 100;
+  v_esperado  := round((v_registrado + (v_fondos - v_gastos - v_liquidado)) * 100) / 100;
   v_saldo_cc  := round((v_esperado - v_declarado) * 100) / 100;
 
   INSERT INTO rendiciones (
     viaje_id, cobrador_id, cobrador_tipo,
     efectivo_declarado, efectivo_registrado, diferencia,
+    fondos_viaje, gastos_viaje,
     observaciones, creado_por
   ) VALUES (
     p_viaje_id, p_cobrador_id, p_cobrador_tipo,
     v_declarado, v_registrado,
-    v_declarado - v_registrado,
+    round((v_declarado - v_esperado) * 100) / 100,   -- (d): contra el esperado
+    v_fondos, v_gastos,
     p_observaciones, p_usuario_id
   ) RETURNING id INTO v_rendicion_id;
 
@@ -96,6 +117,7 @@ BEGIN
         || ' (cobró $' || v_registrado
         || CASE WHEN v_fondos > 0 THEN ' + a cuenta viaje $' || v_fondos ELSE '' END
         || CASE WHEN v_gastos > 0 THEN ' − gastos $' || v_gastos ELSE '' END
+        || CASE WHEN v_liquidado <> 0 THEN ' − ya liquidado $' || v_liquidado ELSE '' END
         || ') y declaró enviar $' || v_declarado
         || CASE WHEN v_saldo_cc > 0
              THEN ' — retiene $' || v_saldo_cc || ' (queda debiendo en su cuenta)'
@@ -111,10 +133,11 @@ BEGIN
     'efectivo_registrado', v_registrado,
     'fondos_viaje', v_fondos,
     'gastos_viaje', v_gastos,
+    'fondo_ya_liquidado', v_liquidado,
     'esperado_en_mano', v_esperado,
     'efectivo_declarado', v_declarado,
     'saldo_cobrador', v_saldo_cc,
-    'diferencia', v_declarado - v_registrado
+    'diferencia', round((v_declarado - v_esperado) * 100) / 100
   );
 END;
 $function$;
@@ -142,8 +165,7 @@ DECLARE
   v_declarado   numeric;   -- lo que el cobrador DECLARÓ al rendir
   v_contado     numeric;   -- lo que oficina CONTÓ al recibir
   v_diferencia  numeric;   -- contado − declarado (el eje de oficina)
-  v_fondos      numeric := 0;
-  v_gastos      numeric := 0;
+  v_liquidado   numeric := 0;
   v_neto_fondo  numeric := 0;
   v_solo_transferencia boolean;
 BEGIN
@@ -258,18 +280,13 @@ BEGIN
     );
   END IF;
 
-  -- LIQUIDACIÓN DEL FONDO DEL VIAJE (nuevo, 29/09): el adelanto entró a la
-  -- billetera al entregarse y los gastos la bajaron al declararse; el resto
-  -- del fondo vuelve DENTRO del sobre declarado. Sin este débito, el fondo
-  -- quedaba "en mano" del cobrador para siempre. Idempotente por rendición.
+  -- LIQUIDACIÓN DEL FONDO DEL VIAJE — con los valores CONGELADOS al declarar
+  -- y descontando lo ya liquidado por rendiciones anteriores del MISMO viaje
+  -- (única por viaje, no por rendición). Referencia = el VIAJE.
   IF v_rend.viaje_id IS NOT NULL THEN
-    SELECT COALESCE(sum(monto), 0) INTO v_fondos FROM viajes_fondos WHERE viaje_id = v_rend.viaje_id;
-    SELECT COALESCE(sum(monto), 0) INTO v_gastos FROM viajes_gastos WHERE viaje_id = v_rend.viaje_id AND estado <> 'rechazado';
-    v_neto_fondo := round((v_fondos - v_gastos) * 100) / 100;
-    IF abs(v_neto_fondo) > 0.005 AND NOT EXISTS (
-      SELECT 1 FROM billetera_movimientos
-      WHERE referencia_tipo = 'viaje_fondo_liquidado' AND referencia_id = p_rendicion_id
-    ) THEN
+    v_liquidado  := viaje_fondo_liquidado(v_rend.viaje_id);
+    v_neto_fondo := round((COALESCE(v_rend.fondos_viaje, 0) - COALESCE(v_rend.gastos_viaje, 0) - v_liquidado) * 100) / 100;
+    IF abs(v_neto_fondo) > 0.005 THEN
       INSERT INTO billetera_movimientos (
         viajante_id, tipo, medio, monto, concepto, referencia_id, referencia_tipo, fecha, creado_por
       ) VALUES (
@@ -278,8 +295,9 @@ BEGIN
         'efectivo',
         -v_neto_fondo,
         'Fondo del viaje liquidado en rendición ' || left(p_rendicion_id::text, 8)
-          || ': a cuenta $' || v_fondos || ' − gastos $' || v_gastos,
-        p_rendicion_id, 'viaje_fondo_liquidado', now(), p_usuario_id
+          || ': a cuenta $' || COALESCE(v_rend.fondos_viaje, 0) || ' − gastos $' || COALESCE(v_rend.gastos_viaje, 0)
+          || CASE WHEN v_liquidado <> 0 THEN ' − ya liquidado $' || v_liquidado ELSE '' END,
+        v_rend.viaje_id, 'viaje_fondo_liquidado', now(), p_usuario_id
       );
     END IF;
   END IF;
@@ -351,3 +369,60 @@ BEGIN
   );
 END;
 $function$;
+
+
+-- ============================================================================
+-- (c) Rendiciones ABIERTAS al migrar: declaradas con la fórmula vieja
+-- (retención contra lo cobrado, sin fondos/gastos). Se congelan sus fondos y
+-- gastos actuales y se ajusta su saldo declarado a la fórmula nueva.
+-- ============================================================================
+DO $$
+DECLARE
+  v_rend   record;
+  v_fondos numeric;
+  v_gastos numeric;
+  v_liquidado numeric;
+  v_esperado  numeric;
+  v_nuevo_cc  numeric;
+  v_viejo_cc  numeric;
+  v_delta     numeric;
+BEGIN
+  FOR v_rend IN SELECT * FROM rendiciones WHERE estado = 'abierta' LOOP
+    v_fondos := 0; v_gastos := 0; v_liquidado := 0;
+    IF v_rend.viaje_id IS NOT NULL THEN
+      SELECT COALESCE(sum(monto), 0) INTO v_fondos FROM viajes_fondos WHERE viaje_id = v_rend.viaje_id;
+      SELECT COALESCE(sum(monto), 0) INTO v_gastos FROM viajes_gastos WHERE viaje_id = v_rend.viaje_id AND estado <> 'rechazado';
+      v_liquidado := viaje_fondo_liquidado(v_rend.viaje_id);
+    END IF;
+    v_esperado := round((COALESCE(v_rend.efectivo_registrado, 0) + (v_fondos - v_gastos - v_liquidado)) * 100) / 100;
+    v_nuevo_cc := round((v_esperado - COALESCE(v_rend.efectivo_declarado, 0)) * 100) / 100;
+    SELECT COALESCE(sum(monto), 0) INTO v_viejo_cc
+    FROM billetera_movimientos
+    WHERE referencia_tipo = 'rendicion_saldo_declarado' AND referencia_id = v_rend.id;
+    v_delta := round((v_nuevo_cc - v_viejo_cc) * 100) / 100;
+
+    UPDATE rendiciones
+    SET fondos_viaje = v_fondos,
+        gastos_viaje = v_gastos,
+        diferencia   = round((COALESCE(efectivo_declarado, 0) - v_esperado) * 100) / 100
+    WHERE id = v_rend.id;
+
+    IF abs(v_delta) > 0.01 THEN
+      INSERT INTO billetera_movimientos (
+        viajante_id, tipo, medio, monto, concepto, referencia_id, referencia_tipo, fecha
+      ) VALUES (
+        v_rend.cobrador_id,
+        CASE WHEN v_delta > 0 THEN 'debito' ELSE 'credito' END,
+        'efectivo',
+        v_delta,
+        'Ajuste migración 20260929 rendición ' || left(v_rend.id::text, 8)
+          || ': saldo declarado recalculado con fondos $' || v_fondos || ' y gastos $' || v_gastos
+          || ' (esperado $' || v_esperado || ', antes retenía $' || v_viejo_cc || ', ahora $' || v_nuevo_cc || ')',
+        v_rend.id, 'rendicion_saldo_declarado', now()
+      );
+    END IF;
+
+    RAISE NOTICE 'Rendición abierta % (cobrador %): fondos=% gastos=% esperado=% retención %→% (delta %)',
+      left(v_rend.id::text, 8), left(v_rend.cobrador_id::text, 8), v_fondos, v_gastos, v_esperado, v_viejo_cc, v_nuevo_cc, v_delta;
+  END LOOP;
+END $$;

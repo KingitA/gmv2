@@ -135,11 +135,12 @@ async function describirChequeDuplicado(supabase: SupabaseClient, params: CrearC
  * Dos modos:
  * - "secuencial" (default): de primera a última, regla histórica — para pagos
  *   parciales comunes (se salda lo más viejo primero).
- * - "proporcional": cada imputación recibe la misma fracción del pago. ES EL
- *   MODO OBLIGATORIO para cobros con 10% CONTADO: el pago es el 90% del total
- *   y cada comprobante debe recibir SU 90% (la REV cubre el 10% de cada uno).
- *   Con recorte secuencial, el orden de la lista decidía qué comprobante se
- *   quedaba sin imputación → sin bonificación y pendiente (bug real, 12/08).
+ * - "proporcional": cada imputación recibe la misma fracción del pago.
+ *   OJO (01/10): para cobros con 10% CONTADO ya NO alcanza — si en el cobro
+ *   se mezclan comprobantes ya bonificados con otros sin bonificar, la misma
+ *   fracción para todos reparte el descuento también sobre el ya bonificado
+ *   (a uno le sobra nota y al otro le queda saldo). Para contado usar
+ *   repartirImputacionesContado (abajo).
  */
 export function recortarImputaciones<T extends { monto_imputado: number }>(
   imputaciones: T[],
@@ -172,6 +173,53 @@ export function recortarImputaciones<T extends { monto_imputado: number }>(
     if (apply > 0.005) {
       out.push({ ...imp, monto_imputado: Math.round(apply * 100) / 100 })
       remaining = Math.max(0, remaining - apply)
+    }
+  }
+  return out
+}
+
+/**
+ * Reparto del pago en un cobro con 10% CONTADO — regla 01/10:
+ * cada comprobante recibe en plata SU saldo seleccionado menos SU PROPIO 10%
+ * (la NC futura cubre ese 10%); los YA bonificados reciben su saldo completo.
+ *
+ * `bonifDe`: comprobante_id → monto de la NC del 10% que va a emitirse por él
+ * (0 o ausente = ya bonificado o no bonificable → recibe plata completa).
+ *
+ * Caso del bug (detectado por la sesión chofer): A $100 sin bonificar y
+ * B $50 ya bonificado, se cobran $140 → el proporcional viejo imputaba
+ * 93,33 / 46,67; lo correcto es 90 / 50 (a A su NC de $10 lo salda justo).
+ *
+ * Si la plata entregada no llega al objetivo (pago parcial), se escala
+ * proporcionalmente SOBRE LOS OBJETIVOS; si sobra, el resto queda a cuenta
+ * (nunca se imputa de más). Sirve igual para cobros multi-cliente: se llama
+ * por cliente con sus imputaciones y su monto.
+ */
+export function repartirImputacionesContado<T extends { comprobante_id?: string; monto_imputado: number }>(
+  imputaciones: T[],
+  montoPago: number,
+  bonifDe: Record<string, number>,
+): T[] {
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const objetivos = imputaciones.map((imp) => {
+    const bonif = Number(bonifDe[(imp as any).comprobante_id ?? ""] || 0)
+    return Math.max(0, r2(Number(imp.monto_imputado) - bonif))
+  })
+  const totalObjetivo = r2(objetivos.reduce((s, o) => s + o, 0))
+  if (totalObjetivo <= 0.005) return []
+
+  // Plata suficiente: cada uno recibe exactamente su objetivo (lo que sobre
+  // del pago queda a cuenta). Parcial: misma fracción de cada objetivo.
+  const factor = Math.min(1, montoPago / totalObjetivo)
+  const out = imputaciones
+    .map((imp, i) => ({ ...imp, monto_imputado: r2(objetivos[i] * factor) }))
+    .filter((i) => i.monto_imputado > 0.005)
+  if (factor < 1) {
+    // El último absorbe el redondeo: Σ == monto del pago al centavo
+    const suma = out.reduce((s, i) => s + i.monto_imputado, 0)
+    const diff = r2(montoPago - suma)
+    if (out.length && Math.abs(diff) > 0.001) {
+      out[out.length - 1].monto_imputado = r2(out[out.length - 1].monto_imputado + diff)
     }
   }
   return out

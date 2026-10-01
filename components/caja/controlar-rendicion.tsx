@@ -77,11 +77,13 @@ export function ControlarRendicion({
         const pagos = (pagosAll || []).filter((p: any) => ["pendiente", "pendiente_rendicion"].includes(p.estado))
 
         // Fondos ("a cuenta viaje") y gastos del viaje: parte del esperado en
-        // mano (esperado = cobrado + fondos − gastos). Rendiciones sin viaje
-        // (vendedor): ambos en 0, misma cuenta que siempre.
-        let fondosViaje = 0
-        let gastosViaje = 0
-        if (rend.viaje_id) {
+        // mano (esperado = cobrado + fondos − gastos). Se usan los valores
+        // CONGELADOS en la rendición al declararla (columnas fondos_viaje /
+        // gastos_viaje, migración 20260929); si la rendición es anterior a la
+        // migración, se leen en vivo. Rendiciones sin viaje (vendedor): 0.
+        let fondosViaje = Number(rend.fondos_viaje ?? 0)
+        let gastosViaje = Number(rend.gastos_viaje ?? 0)
+        if (rend.viaje_id && rend.fondos_viaje == null) {
           const [{ data: vf }, { data: vg }] = await Promise.all([
             supabase.from("viajes_fondos").select("monto").eq("viaje_id", rend.viaje_id),
             supabase.from("viajes_gastos").select("monto").eq("viaje_id", rend.viaje_id).neq("estado", "rechazado"),

@@ -4,7 +4,8 @@ import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
-import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { crearCobranza, recortarImputaciones, repartirImputacionesContado, type DetalleInput } from "@/lib/cobranzas/crear"
+import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
 import { marcaAjuste } from "@/lib/cobranzas/ajuste"
 import { baseTopeAjuste, resolverAjuste } from "@/lib/cobranzas/reglas-cobro"
@@ -278,11 +279,18 @@ export async function POST(request: NextRequest) {
     // ── 2. Alta transaccional (pago + detalle + cheques + imputaciones) ──
     // Si el total imputado supera el pago real, recortar; el excedente queda
     // como saldo del comprobante (lo cubre la NC o un pago futuro).
-    // Con 10% CONTADO el recorte es PROPORCIONAL: el pago es el 90% del total
-    // y cada comprobante debe recibir SU 90% (la REV cubre el 10% de cada uno).
-    // Secuencial acá dejaba comprobantes enteros sin imputación según el orden.
+    // Con 10% CONTADO el reparto es POR COMPROBANTE: cada uno recibe su saldo
+    // menos SU propio 10% (la NC lo completa); los YA bonificados cobran su
+    // saldo entero. El proporcional parejo repartía el descuento también
+    // sobre el ya bonificado (01/10): a uno le sobraba nota y al otro saldo.
     const esContado = Boolean(observaciones?.includes?.(MARCA_CONTADO))
-    const impsRecortadas = recortarImputaciones(debitosNetos, montoTotal, esContado ? "proporcional" : "secuencial")
+    const impsRecortadas = esContado
+      ? repartirImputacionesContado(
+          debitosNetos,
+          montoTotal,
+          await bonificacionPendientePorComprobante(supabase, cliente_id, debitosNetos.map((i: any) => i.comprobante_id)),
+        )
+      : recortarImputaciones(debitosNetos, montoTotal, "secuencial")
 
     const { pago_id, dedup } = await crearCobranza(supabase, {
       idempotency_key: idempotency_key || null,

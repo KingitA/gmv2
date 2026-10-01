@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { todayArgentina } from "@/lib/utils"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
-import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
+import { crearCobranza, recortarImputaciones, repartirImputacionesContado, type DetalleInput } from "@/lib/cobranzas/crear"
+import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendiente"
 import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 import { asignarCreditosFIFO, validarCreditos, marcaCreditos } from "@/lib/cobranzas/creditos"
@@ -322,13 +323,16 @@ export async function POST(request: NextRequest) {
         estado: "pendiente_rendicion",
         creado_por: session.user.id,
         detalles,
-        // Débitos NETOS de créditos; con 10% contado el recorte es proporcional
-        // (cada comprobante recibe su 90% — el orden no importa)
-        imputaciones: recortarImputaciones(
-          debitosNetos,
-          montoPago,
-          (obsPago || "").includes(MARCA_CONTADO) ? "proporcional" : "secuencial",
-        ),
+        // Débitos NETOS de créditos; con 10% contado el reparto es POR
+        // COMPROBANTE (saldo − su propio 10%; los ya bonificados cobran
+        // entero) — funciona por cliente, también en cobros multi-cliente.
+        imputaciones: (obsPago || "").includes(MARCA_CONTADO)
+          ? repartirImputacionesContado(
+              debitosNetos,
+              montoPago,
+              await bonificacionPendientePorComprobante(supabase, c.cliente_id, debitosNetos.map((i: any) => i.comprobante_id)),
+            )
+          : recortarImputaciones(debitosNetos, montoPago, "secuencial"),
       })
       const pago = { id: pagoId }
       if (dedup) {
