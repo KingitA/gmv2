@@ -1618,6 +1618,45 @@ Registrar un cobro significa que la parada está FINALIZADA. Regla pura `cierreD
   sola, ni un cobro con el viaje ya `en_rendicion`.
 - "Cerrar parada (entregado / no entregado)" queda para cuando NO hubo cobro, y para el parcial.
 
+### Tanda final (01/10/2026): cobro conjunto, ficha, fecha del viaje
+**Cobro CONJUNTO (un pago físico que cubre a varios clientes).** Caso real: el cliente de la parada
+tiene otro local y paga los dos con UN cheque. Modelo del vendedor: un pago por cliente bajo una
+cabecera `cobranzas`.
+- Reglas puras en `lib/cobranzas/cobro-conjunto.ts` (`@gm/cobro/conjunto`): a cada cliente agregado se
+  le cobra EXACTAMENTE lo que suma su cuenta; la diferencia (falta, sobra, ajuste) es siempre del
+  principal. Los medios se reparten EN CASCADA, al centavo (`repartirMetodos`): un cheque solo se parte
+  si cruza de un cliente a otro; pedazos de igual importe llevan sufijo " (2)" en el número (la unicidad
+  de cheques es banco + número + importe + vencimiento).
+- Servidor: `POST chofer/viaje/[id]/cobro` con `clientes_extra`. Agregados primero y el principal al
+  final (el único que cierra su parada); si uno falla, los pagos ya creados en ese envío se anulan.
+  Cada cliente pasa por el mismo camino que un cobro simple (`cobrarUno`): el reparto de la
+  imputación con 10 % mezclado es del servidor (otra sesión) y acá solo se consume.
+  `cobros_extra` (APK ≤ 0.2.1: otro cliente con un monto en efectivo) sigue funcionando.
+- App: `datos/cuenta-cobro.ts` (lógica pura de la cuenta de un cliente) + `pantallas/SelectorCuenta.tsx`
+  (la MISMA pantalla para el principal y cada agregado: pedidos, comprobantes, devoluciones, 10 %).
+  La cuenta del agregado sale de `chofer_viaje_clientes`: si es otra parada del viaje ya está en el
+  equipo (sin señal anda); si es de afuera, se pide con `refrescarIds` y hace falta señal (dicho en
+  pantalla; sin señal solo se le puede tomar plata a cuenta). El overlay muestra a cada cliente SU parte
+  y cuenta la plata una sola vez por medio físico.
+- Web: `components/chofer/cuenta-agregada.tsx`. Tests: `test/cobro-conjunto.test.ts`.
+- Limitación conocida: el pago de un cliente agregado de AFUERA del viaje no tiene ficha en la app para
+  anularlo desde el equipo (se anula desde oficina).
+
+**Ficha del cliente** (`lib/viajes/cliente-viaje.ts`): admite VARIOS pedidos del mismo cliente en el
+viaje (se leía con `maybeSingle()`: con dos, la ficha quedaba sin pedido ni nombre); el nombre sale de
+`clientes` (incluye `nombre_razon_social`); la hora de los cobros del servidor va con zona (se veía en
+UTC). **Hoja de ruta:** solo débitos vivos como comprobantes del pedido (la NC de una factura anulada
+daba total negativo).
+
+**ERP:** la fecha del viaje (alta y edición) usa `DateInputAR` (dd/mm/aaaa; el `type="date"` agendó
+"01/10" como 10 de enero). `DateInputAR` ya no borra lo tipeado al editar ni emite fechas imposibles.
+El selector de pedidos al armar el viaje sale ordenado por número. PENDIENTE (rama propia, después de
+que mergee `cobranzas-plata`): barrido de los demás `type="date"` del ERP.
+
+**Limpieza 01/10:** `TEST-CHOFER` y `TEST-CHOFER2` borrados por id con respaldo; stock de 67 artículos
+y numeración (PRES, REV, REMX, RECIBO) devueltos; foto del 29/09 idéntica salvo actividad ajena.
+
+
 ### Puesta en marcha
 1. HECHO 29/09/2026: el dueño verificó la preview completa, aprobó el inicio de viaje explícito
    (`viaje.iniciar`: descargar el viaje no lo abre) y dio el OK de merge de `apk-chofer` a `main`.
