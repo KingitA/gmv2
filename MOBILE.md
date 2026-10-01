@@ -1642,6 +1642,20 @@ cabecera `cobranzas`.
 - Limitación conocida: el pago de un cliente agregado de AFUERA del viaje no tiene ficha en la app para
   anularlo desde el equipo (se anula desde oficina).
 
+**CORRECTIVO OBLIGATORIO DEL PRIMER BATCH — un cheque es UN papel (dueño, 01/10/2026).** Partir el
+cheque en una fila de cartera por cliente (y el sufijo " (2)") es un parche avalado SOLO para la pasada
+del 01/10. El cheque se endosa entero a un proveedor: en cartera tiene que haber **UNA fila por el total
+del cheque**, y el reparto entre clientes vive en las imputaciones/detalles de cada pago (cada pago
+referencia el mismo `cheque_id` con su parte). Alcance del correctivo:
+- Chofer (app y web): `repartirMetodos` + `cobrarUno` de `POST chofer/viaje/[id]/cobro`.
+- **Vendedor web y app Vendedor: mismo bug, ya en producción.** `app/api/viajante/cobro/route.ts`
+  prorratea CADA medio entre los clientes (`proporcion = montoPago / totalMetodos`) y crea un `cheque`
+  por cliente con el monto proporcional: un cheque de un cobro a N clientes queda como N cheques en
+  cartera, ninguno por el importe del papel. Va en el mismo batch.
+- Al corregir: anular el pago de un cliente no puede anular el cheque si otro pago lo sigue usando;
+  migrar los cheques ya partidos (los " (N)" del chofer y los prorrateados del vendedor); la unicidad
+  (banco + número + importe + vencimiento) vuelve a ser la del papel.
+
 **Ficha del cliente** (`lib/viajes/cliente-viaje.ts`): admite VARIOS pedidos del mismo cliente en el
 viaje (se leía con `maybeSingle()`: con dos, la ficha quedaba sin pedido ni nombre); el nombre sale de
 `clientes` (incluye `nombre_razon_social`); la hora de los cobros del servidor va con zona (se veía en
@@ -1669,8 +1683,10 @@ y numeración (PRES, REV, REMX, RECIBO) devueltos; foto del 29/09 idéntica salv
 4. Limpieza 29/09: el bug viejo del toggle del 10 % había marcado 11 pedidos del cliente e574e00b con el
    pago 78d65de0 (que en realidad se imputó a un comprobante). Se les quitó `pago_contado_10` y
    `anticipo_pago_id`; el pago y el comprobante no se tocaron.
+5. 01/10/2026: tanda final en `main` (merge `c7cf303`), APK `dist-apks/chofer-v0.2.2.apk` (versionCode 5)
+   instalado en el NuStar encima del v0.2.1; pasada final única superada (abajo).
 
-### Checklist contra PRODUCCIÓN en el NuStar 65-sp — EN CURSO (arrancó el 29/09/2026)
+### Checklist contra PRODUCCIÓN en el NuStar 65-sp (29/09–01/10/2026) — SUPERADO
 Hecho el 29/09: merge `0a94f63` en `main`, deploy verificado (`/api/chofer/cuentas-bancarias` pasó de 404 a
 401), `chofer-v0.2.1` instalado encima del v0.2.0 (sesión conservada, datos frescos, cola en 0). Foto de solo
 lectura: `scripts/foto-chofer.cjs` (`guardar` / `comparar` / `rastros TEST-CHOFER`); foto "antes" tomada.
@@ -1714,16 +1730,50 @@ actualizando "WebView del sistema Android" (`process is bad` en logcat): se arre
 `nombre_razon_social`) muestra "Cliente" y "Este pedido $ 0"; la hora de un cobro del servidor se ve en UTC;
 la hoja suma la NC de una factura anulada (total negativo en la parada).
 
-**Falta:** cheque real con aviso BCRA posterior, cobro rechazado por regla de negocio, ciclo cheque
-anulado → recargado, limpieza por id de `TEST-CHOFER` y `TEST-CHOFER2`.
+**Pasada final única (01/10/2026, `TEST-CHOFER3`, release v0.2.2 = merge `c7cf303`, guionada y operada por
+adb; el dueño solo sacó la foto del cheque, movió el modo avión y anuló el presupuesto en el ERP).**
 
-- [ ] Login del chofer real; descarga del viaje despachado; "✓ Viaje descargado" con todas las paradas.
-- [ ] Modo avión con el interruptor del equipo: cobro parcial, devolución, gasto, anular cobro (local y del servidor), cerrar paradas, rendir. Matar la app desde recientes y reabrir: nada perdido ni duplicado.
-- [ ] Reconectar: todo aplicado 1 vez; `pagos_clientes`, `devoluciones`, `viajes_gastos`, `viajes_paradas`, `rendiciones` iguales a lo que muestra la app; efectivo en mano = `efectivo_declarado`.
-- [ ] Cheque real con foto: OCR en segundo plano, **aviso BCRA posterior** (llega como aviso hasta "Visto"; no verificado en producción todavía, tampoco en la app Vendedor).
-- [ ] Cobro rechazado por regla de negocio (comprobante anulado en el ERP mientras el equipo estaba sin señal): queda rechazado, no traba lo de atrás.
-- [ ] Remito PDF con señal; frescura ámbar tras 1 h.
-- [ ] Limpieza por id y foto final idéntica.
+| Prueba | Resultado |
+|---|---|
+| Primera descarga del viaje (4 paradas, recién despachado) | ✅ arranque en frío 0,55 s; "✓ Viaje descargado (4 clientes)" en menos de un minuto (sello de las fichas = minuto del arranque; no se midió al segundo) |
+| Remito PDF con señal (Remito X 0001-00000030) | ✅ abre en el navegador del equipo; sin señal el botón queda apagado |
+| **Cobro conjunto con UN cheque real** ($ 822.550: Gioventu imputado a su PRES + Pistone a cuenta) | ✅ 2 pagos bajo una cabecera `cobranzas`, reparto al centavo, foto guardada, billetera por pago. OCR leyó banco, número, CUIT e importe; la fecha (cheque de 2016) la rechazó por fuera de rango y pidió cargarla a mano |
+| **Aviso BCRA posterior** | ✅ llegó solo a los ~5 s ("se puede aceptar — situación 1 / normal", con el titular) y quedó hasta "Visto" |
+| Ciclo cheque anulado → recargado | ✅ anulados los dos pagos desde la ficha de cada cliente (cheques `ANULADO`, billetera revertida, paradas siguen entregadas); el MISMO cheque se cargó de nuevo sin chocar con la unicidad |
+| **Cobro rechazado por regla de negocio** (sin señal: cobro a Aman imputado al PRES 0001-00000017 y otro detrás a Di Luca; el dueño anuló el PRES en el ERP; volvió la señal) | ✅ el de Aman quedó **Rechazado** con "el comprobante 0001-00000017 está anulado — no se puede cobrar"; el de Di Luca entró igual; al descartar el rechazado la parada de Aman volvió a pendiente |
+| Integridad | ✅ 8 operaciones, 8 claves, 0 alertas de integridad, 0 comprobantes creados por la app |
+| Limpieza por id (`limpiar-test3.mjs`, con respaldo) | ✅ 0 rastros de `TEST-CHOFER`; billetera 7.842.112,43, caja del fondo 1.216.110, numeración PRES 16 / REV 14 / REMX 29, stock y pedidos como antes del viaje |
+
+**Bug de plata encontrado en la pasada (PREEXISTENTE, en la base — NO corregido: es de la sesión de
+cobranzas).** `cobranza_anular` v6, paso 1b, al anular un pago anula TODA bonificación "Bonificación
+contado" viva imputada a los comprobantes de ese pago, sin mirar qué pago la generó. Caso real: el PRES
+0001-00000015 tenía el 10 % de un pago confirmado del 28/09 (REV 0001-00000014, $ 26.093,09); hoy se le
+imputó y se anuló OTRO cobro (sin 10 %) y la anulación se llevó puesta esa REV: saldo 10.491,36 →
+36.584,45, contra-asiento en el libro. Si la bonificación es una NC con CAE, devuelve
+`bonificaciones_fiscales_pendientes` y le pide una ND a la oficina por un descuento que no había que
+tocar. Corrección: revertir solo las bonificaciones nacidas del pago que se anula. La limpieza restauró
+el caso (REV viva, imputación confirmada, saldo 10.491,36).
+
+**Observaciones menores de la pasada (para el primer batch):**
+- Al sincronizar un cobro conjunto, durante 2–10 s la hoja muestra lo cobrado DUPLICADO ("1 sin enviar" +
+  el pago del servidor): el parche de réplica llega antes de que la operación salga de la cola. Se
+  corrige solo; es de pantalla, no de datos.
+- La cabecera `cobranzas` queda `pendiente` con su total aunque todos sus pagos estén anulados.
+- El buscador de "Agregar cliente" muestra el "debe" de `chofer_clientes`, que no se refresca tras un
+  cobro o una anulación (mostró 10.491,36 con el saldo real en 36.584,45).
+- Un rechazo por regla de negocio se reintentó 3 veces antes de quedar "Rechazado" (debería ser
+  definitivo al primer intento).
+- Un cliente agregado al cobro conjunto NO cierra su parada (decisión); queda en "Visitados · falta
+  cerrar la parada".
+
+- [x] Login del chofer real; descarga del viaje despachado; "✓ Viaje descargado" con todas las paradas.
+- [x] Modo avión con el interruptor del equipo: cobro parcial, devolución, gasto, anular cobro (local y del servidor), cerrar paradas, rendir. Matar la app desde recientes y reabrir: nada perdido ni duplicado.
+- [x] Reconectar: todo aplicado 1 vez; `pagos_clientes`, `devoluciones`, `viajes_gastos`, `viajes_paradas`, `rendiciones` iguales a lo que muestra la app; efectivo en mano = `efectivo_declarado`.
+- [x] Cheque real con foto: OCR en segundo plano, **aviso BCRA posterior** (llega como aviso hasta "Visto").
+- [x] Cobro rechazado por regla de negocio (comprobante anulado en el ERP mientras el equipo estaba sin señal): queda rechazado, no traba lo de atrás.
+- [x] Remito PDF con señal. (La frescura ámbar tras 1 h se vio el 01/10 al abrir con datos de 2 h.)
+- [x] Limpieza por id. La foto final no es idéntica solo por actividad ajena del 01/10 (importación de
+  62 comprobantes históricos a las 13:39, 2 pedidos y 2 viajes nuevos).
 
 ### Probar sin backend
 `cd mobile && node scripts/mock-chofer.mjs` (3997) → `apps/chofer/.env.development.local` con
