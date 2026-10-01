@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
@@ -128,7 +129,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
         </div>
         <div>
           <Label>Sale el</Label>
-          <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} disabled={!editable} />
+          <DateInputAR value={fecha} onChange={setFecha} disabled={!editable} />
         </div>
         <div>
           <Label>Duración (días)</Label>

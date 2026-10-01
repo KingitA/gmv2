@@ -34,6 +34,7 @@
     "lib/cobranzas/fotos.ts",
     "lib/cobranzas/reglas-cobro.ts",
     "lib/cobranzas/billetera-chofer.ts",
+    "lib/cobranzas/cobro-conjunto.ts",
     "lib/cobranzas/contado-duplicado.ts",
     "lib/comprobantes/ya-bonificados.ts",
     "components/pagos/aviso-inline.tsx",

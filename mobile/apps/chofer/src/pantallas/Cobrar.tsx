@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router"
 import { indiceHistorial, useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
 import {
@@ -6,16 +6,21 @@ import {
   type CampoCheque, type ConsultaBcraPayload, type FilaCheque, type ResultadoOcr,
 } from "@gm/cheques"
 import { blobABase64, comprimirFoto, urlLocal } from "@gm/cheques/foto"
-import { anticiposDeSeleccion, ofreceAjuste, PEDIDO_PREFIX, pedidosContadoAEnviar, pedidosContadoAlAplicarTodo, topeAjuste } from "@gm/cobro"
-import { DS, ESTADOS_COBRABLES, nombreCliente, type ClienteBusqueda, type ComprobanteCobro, type MetodoPayload, type OpCobrar, type PedidoCobro } from "../datasets"
-import { buscarClientes, useClienteViaje, useClientesTodos, useCuentasBancarias, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
+import { ofreceAjuste, topeAjuste } from "@gm/cobro"
+import { montoDelPrincipal, validarCobroConjunto } from "@gm/cobro/conjunto"
+import { DS, ESTADOS_COBRABLES, idClienteViaje, nombreCliente, type ClienteBusqueda, type MetodoPayload, type OpCobrar } from "../datasets"
+import { estadoCuentaVacio, resumenCuenta, type EstadoCuenta, type ResumenCuenta } from "../datos/cuenta-cobro"
+import { buscarClientes, useClienteViaje, useClientesTodos, useCuentasBancarias, useEncolar, useRefrescarFilas, useViaje, uuidv4 } from "../datos/hooks"
+import { SelectorCuenta } from "./SelectorCuenta"
 import { AvisosBcra, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 
 // Cobro en el reparto (= el sheet "Registrar Cobro" de la ficha web, ahora ruta propia).
 //  · Pedidos / comprobantes a cobrar (incluye anticipos a pedidos sin facturar): lo que
 //    components/pagos/ComprobantesSelector leía con supabase-js, ahora replicado en la ficha.
-//  · Clientes extra para cobrar en la misma cobranza (cobro conjunto en la calle): búsqueda
-//    local sobre chofer_clientes (saldo replicado).
+//  · COBRO CONJUNTO: se agregan otros clientes y a cada uno se le ve su cuenta COMPLETA, igual que
+//    la del principal (pedidos, comprobantes, 10 %, devoluciones); los medios de pago se reparten
+//    entre todos (lib/cobranzas/cobro-conjunto.ts). Caso real: un cheque único que paga dos
+//    locales. Un cliente del viaje se cobra completo sin señal; uno de afuera, solo con señal.
 //  · Devoluciones pendientes como crédito, 10% contado (por pedido y general), diferencia al
 //    registrar (ajuste por redondeo con tope 1% / dejar saldo), igual que la web.
 //  · Foto de cheques (MOBILE.md → "Cheques"): la foto NUNCA bloquea; el OCR corre en segundo
@@ -39,9 +44,6 @@ const metodoPayload = (m: MetodoPago): MetodoPayload =>
 
 /** La hoja de ruta se posiciona en esta parada al volver (sessionStorage). */
 export const CLAVE_VOLVER_A_PARADA = "gm.chofer.volverAParada"
-/** Saldo cobrable HOY: el del comprobante menos lo que ya está en un cobro hecho acá sin enviar. */
-const saldoCobrable = (cp: ComprobanteCobro) => Math.max(0, round2(cp.saldo_pendiente - (cp.en_cobro || 0)))
-const fmt = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })
 
 type CambiosMetodo = Partial<Omit<FilaCheque, "tipo">> & { tipo?: MetodoPago["tipo"] }
 /** Aplica cambios a un método: cambio de tipo (efectivo ↔ fila) o edición de campos (marca "editado" en la fila). */
@@ -79,6 +81,9 @@ function EstadoFoto({ fila }: { fila: FilaCheque }) {
   )
 }
 
+/** Cliente agregado al cobro conjunto, con lo que se eligió cobrarle. */
+interface Agregado { cliente: ClienteBusqueda; estado: EstadoCuenta }
+
 export function Cobrar() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -92,14 +97,12 @@ export function Cobrar() {
   const { filas: clientesTodos } = useClientesTodos()
   const { toast, mostrar } = useToast()
 
-  // ── Qué paga ──
-  const [sel, setSel] = useState<Record<string, number>>({}) // { comprobante_id | "pedido:<id>": monto }
-  const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())
-  const [contadoGeneral, setContadoGeneral] = useState(false)
-  const [incluirDevoluciones, setIncluirDevoluciones] = useState(true)
+  // ── Qué paga el cliente de la parada ──
+  const [cuenta, setCuenta] = useState<EstadoCuenta>(estadoCuentaVacio)
   const [expandido, setExpandido] = useParamEstado("abierto")
-  // ── Clientes extra (cobro conjunto) ──
-  const [cobrosExtra, setCobrosExtra] = useState<Array<{ cliente: ClienteBusqueda; saldo: number; monto: number }>>([])
+  // ── Clientes agregados (cobro conjunto): cada uno con su propia cuenta ──
+  const [agregados, setAgregados] = useState<Agregado[]>([])
+  const [resumenes, setResumenes] = useState<Record<string, ResumenCuenta>>({})
   const [busqCli, setBusqCli] = useBusqueda("cli")
   // ── Cómo paga ──
   const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([{ id: "1", tipo: "efectivo", monto: 0 }])
@@ -117,44 +120,10 @@ export function Cobrar() {
   const [listo, setListo] = useState(false)
   const guardandoRef = useRef(false)
 
-  const cobro = data?.cobro
-  const comprobantes = useMemo(() => cobro?.comprobantes ?? [], [cobro?.comprobantes])
-  const pedidos = useMemo(() => cobro?.pedidos ?? [], [cobro?.pedidos])
-  const pedidosFacturados = useMemo(() => new Set(cobro?.pedidos_facturados ?? []), [cobro?.pedidos_facturados])
-  const dtosHechos = useMemo(() => new Set(cobro?.dtos_hechos ?? []), [cobro?.dtos_hechos])
-  const devPendientes = useMemo(() => (data?.devoluciones ?? []).filter((d) => d.estado === "pendiente"), [data?.devoluciones])
-
-  // Agrupar comprobantes por pedido; un comprobante vivo cuyo pedido fue eliminado cae en "Otros"
-  const { compsPorPedido, sinPedido } = useMemo(() => {
-    const vivos = new Set(pedidos.map((p) => p.id))
-    const m = new Map<string, ComprobanteCobro[]>()
-    const sueltos: ComprobanteCobro[] = []
-    for (const c of comprobantes) {
-      if (c.pedido_id && vivos.has(c.pedido_id)) {
-        if (!m.has(c.pedido_id)) m.set(c.pedido_id, [])
-        m.get(c.pedido_id)!.push(c)
-      } else sueltos.push(c)
-    }
-    return { compsPorPedido: m, sinPedido: sueltos }
-  }, [comprobantes, pedidos])
-  const pedidosSinFacturar = useMemo(() => pedidos.filter((p) => !compsPorPedido.has(p.id) && !pedidosFacturados.has(p.id)), [pedidos, compsPorPedido, pedidosFacturados])
-  const esSaldado = (p: PedidoCobro) => pedidosFacturados.has(p.id) && !compsPorPedido.has(p.id)
-
-  // ── Totales (= web) ──
-  const bonificacionEstimada = useMemo(() => {
-    if (!contadoGeneral) return 0
-    let b = 0
-    for (const cp of comprobantes) {
-      const imp = sel[cp.id]
-      if (imp === undefined || dtosHechos.has(cp.id)) continue
-      if (!["FA", "FB", "FC", "PRES"].includes(String(cp.tipo_comprobante || "").toUpperCase())) continue
-      if (Math.abs(imp - cp.saldo_pendiente) < 0.01) b += cp.total_factura * 0.1
-    }
-    return round2(b)
-  }, [contadoGeneral, comprobantes, sel, dtosHechos])
-  const totalImputado = round2(Object.values(sel).reduce((s, v) => s + v, 0))
-  const devTotal = incluirDevoluciones ? round2(devPendientes.reduce((s, d) => s + Number(d.monto_total), 0)) : 0
-  const totalCobro = Math.max(0, round2(totalImputado - devTotal - bonificacionEstimada))
+  // ── Totales ──
+  const r = useMemo(() => resumenCuenta(data && !data.parcial ? data : null, cuenta), [data, cuenta])
+  const totalAgregados = round2(agregados.reduce((s, a) => s + (resumenes[a.cliente.id]?.totalCobro || 0), 0))
+  const totalCobro = round2(r.totalCobro + totalAgregados)
   const totalMetodos = round2(metodosPago.reduce((s, m) => s + Number(m.monto || 0), 0))
   const diff = round2(totalMetodos - totalCobro)
 
@@ -162,7 +131,7 @@ export function Cobrar() {
   const estadoViaje = viaje?.viaje.estado || data?.viaje_estado || ""
   const puedeCobrar = ESTADOS_COBRABLES.includes(estadoViaje)
 
-  const sucio = !listo && (totalMetodos > 0 || Object.keys(sel).length > 0 || cobrosExtra.length > 0 || metodosPago.some(esFila))
+  const sucio = !listo && (totalMetodos > 0 || r.haySeleccion || agregados.length > 0 || metodosPago.some(esFila))
   const { hoja: hojaDescartar } = useBloqueoSalida(sucio, { titulo: "¿Descartar el cobro?", detalle: "Lo cargado en esta pantalla no se registró todavía.", confirmar: "Descartar" })
 
   // Diálogo abierto sin diferencia (recarga o se corrigió el monto): no corresponde
@@ -181,54 +150,21 @@ export function Cobrar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listo])
 
-  // ── Selección (= ComprobantesSelector) ──
-  const setUno = (key: string, monto: number | null) => setSel((prev) => { const n = { ...prev }; if (monto === null) delete n[key]; else n[key] = monto; return n })
-  const toggleComprobante = (cp: ComprobanteCobro) => setUno(cp.id, sel[cp.id] !== undefined ? null : saldoCobrable(cp))
-  const togglePedidoCompleto = (comps: ComprobanteCobro[]) => {
-    const todos = comps.every((c) => sel[c.id] !== undefined)
-    setSel((prev) => { const n = { ...prev }; for (const c of comps) { if (todos) delete n[c.id]; else if (saldoCobrable(c) > 0.005) n[c.id] = saldoCobrable(c) } return n })
-  }
-  const montoAnticipo = (p: PedidoCobro, contado = contadoPedidos.has(p.id)) => (contado ? round2(p.total * 0.9) : p.total)
-  // El 10 % es SOLO de lo seleccionado: con "10% contado a todo" activo, el pedido que se
-  // selecciona lo recibe; el que se deselecciona lo pierde.
-  const toggleAnticipo = (p: PedidoCobro) => {
-    const estaba = sel[PEDIDO_PREFIX + p.id] !== undefined
-    const conContado = !estaba && (contadoGeneral ? true : contadoPedidos.has(p.id))
-    if (conContado !== contadoPedidos.has(p.id)) setContadoPedidos((prev) => { const n = new Set(prev); if (conContado) n.add(p.id); else n.delete(p.id); return n })
-    setUno(PEDIDO_PREFIX + p.id, estaba ? null : montoAnticipo(p, conContado))
-  }
-  const toggleContado = (p: PedidoCobro) => {
-    const next = new Set(contadoPedidos)
-    if (next.has(p.id)) next.delete(p.id); else next.add(p.id)
-    setContadoPedidos(next)
-    if (sel[PEDIDO_PREFIX + p.id] !== undefined) setUno(PEDIDO_PREFIX + p.id, montoAnticipo(p, next.has(p.id)))
-  }
-  const clavesTodas = [...comprobantes.map((c) => c.id), ...pedidosSinFacturar.map((p) => PEDIDO_PREFIX + p.id)]
-  const todoSeleccionado = clavesTodas.length > 0 && clavesTodas.every((k) => sel[k] !== undefined)
-  const toggleTodo = () => {
-    if (todoSeleccionado) { setContadoPedidos(new Set()); return setSel({}) }
-    // Con "10% contado a todo" activo, todo lo que se selecciona lo recibe
-    const conContado = contadoGeneral ? new Set(pedidosSinFacturar.map((p) => p.id)) : contadoPedidos
-    if (contadoGeneral) setContadoPedidos(conContado)
-    setSel((prev) => { const n = { ...prev }; for (const c of comprobantes) n[c.id] = saldoCobrable(c); for (const p of pedidosSinFacturar) n[PEDIDO_PREFIX + p.id] = montoAnticipo(p, conContado.has(p.id)); return n })
-  }
-  const toggleContadoTodo = () => {
-    const activar = !contadoGeneral
-    setContadoGeneral(activar)
-    // Solo a los pedidos SELECCIONADOS para cobrar — nunca a toda la lista (@gm/cobro)
-    const next = new Set<string>(pedidosContadoAlAplicarTodo(activar, pedidosSinFacturar.map((p) => p.id), sel))
-    setContadoPedidos(next)
-    setSel((prev) => { const n = { ...prev }; for (const p of pedidosSinFacturar) if (n[PEDIDO_PREFIX + p.id] !== undefined) n[PEDIDO_PREFIX + p.id] = montoAnticipo(p, activar); return n })
-  }
-
-  // ── Clientes extra ──
-  const resCli = useMemo(() => (busqCli.trim().length >= 2 ? buscarClientes(clientesTodos.filter((c) => c.id !== clienteId), busqCli, 8) : []), [clientesTodos, busqCli, clienteId])
-  const agregarClienteExtra = (cli: ClienteBusqueda) => {
+  // ── Clientes agregados ──
+  const resCli = useMemo(
+    () => (busqCli.trim().length >= 2 ? buscarClientes(clientesTodos.filter((c) => c.id !== clienteId && !agregados.some((a) => a.cliente.id === c.id)), busqCli, 8) : []),
+    [clientesTodos, busqCli, clienteId, agregados],
+  )
+  const agregarCliente = (cli: ClienteBusqueda) => {
     setBusqCli("")
-    if (cobrosExtra.some((c) => c.cliente.id === cli.id)) return
-    const saldo = Number(cli.saldo_actual) || 0
-    setCobrosExtra((prev) => [...prev, { cliente: cli, saldo, monto: saldo > 0 ? saldo : 0 }])
+    setAgregados((prev) => (prev.some((a) => a.cliente.id === cli.id) ? prev : [...prev, { cliente: cli, estado: estadoCuentaVacio() }]))
   }
+  const quitarCliente = (id: string) => {
+    setAgregados((prev) => prev.filter((a) => a.cliente.id !== id))
+    setResumenes((prev) => { const n = { ...prev }; delete n[id]; return n })
+  }
+  const cambiarAgregado = useCallback((id: string, estado: EstadoCuenta) => setAgregados((prev) => prev.map((a) => (a.cliente.id === id ? { ...a, estado } : a))), [])
+  const informarResumen = useCallback((id: string, res: ResumenCuenta) => setResumenes((prev) => (JSON.stringify(prev[id]) === JSON.stringify(res) ? prev : { ...prev, [id]: res })), [])
 
   // ── Fotos → fila al instante → OCR en segundo plano (nunca bloquea) ──
   const setFila = (id: string, fn: (f: FilaCheque) => FilaCheque) => setMetodosPago((prev) => prev.map((m) => (m.id === id && esFila(m) ? fn(m) : m)))
@@ -288,15 +224,22 @@ export function Cobrar() {
     for (const m of metodosPago) {
       if (esFila(m) && m.monto > 0 && faltantes(m).length) return mostrar(`Al ${m.tipo === "cheque" ? "cheque" : "comprobante"}${m.numero_cheque ? " " + m.numero_cheque : ""} le falta: ${faltantes(m).join(", ")}.`, "err")
     }
+    // Cobro conjunto: a cada cliente agregado se le cobra EXACTAMENTE lo que suma su cuenta; lo
+    // que falte o sobre es siempre del cliente de la parada.
+    const extras = agregados.map((a) => ({ a, res: resumenes[a.cliente.id] }))
+    const sinImporte = extras.find((x) => !(x.res && x.res.totalCobro > 0))
+    if (sinImporte) return mostrar(`${nombreCliente(sinImporte.a.cliente)} no tiene nada para cobrar: seleccioná qué se le cobra o quitalo.`, "err")
+    const motivo = validarCobroConjunto(clienteId, totalMetodos, extras.map((x) => ({ cliente_id: x.a.cliente.id, monto: x.res!.totalCobro })))
+    if (motivo) return mostrar(motivo, "err")
     // Diferencia (mismo criterio que viajante / ERP): ajuste por redondeo (tope 1% de lo
     // imputado, oficina lo confirma al rendir) o dejar saldo pendiente / a cuenta.
     let ajusteRedondeo = 0
-    if (Math.abs(diff) > 0.01 && totalImputado > 0) {
+    if (Math.abs(diff) > 0.01 && r.totalImputado > 0) {
       if (!modoDiferencia) { setDialogoDiff(diff); dialogo.abrir(); return }
       // +falta = crédito (tope 1 %), −sobra = débito. El sobrante nunca bloquea: si supera el
       // 1 % no se ofrece como ajuste y queda a cuenta del cliente.
       if (modoDiferencia === "ajuste") {
-        if (!ofreceAjuste(diff, totalImputado)) { if (diff < 0) return } else ajusteRedondeo = -diff
+        if (!ofreceAjuste(diff, r.totalImputado)) { if (diff < 0) return } else ajusteRedondeo = -diff
       }
     }
     guardandoRef.current = true
@@ -309,21 +252,34 @@ export function Cobrar() {
         cliente_nombre: clienteNombre,
         monto_total: totalMetodos,
         metodos: metodosPago.filter((m) => m.monto > 0).map(metodoPayload),
-        // Imputaciones = solo comprobantes reales. "pedido:<id>" son anticipos → quedan a cuenta.
-        imputaciones: Object.entries(sel).filter(([k, monto]) => monto > 0 && !k.startsWith(PEDIDO_PREFIX)).map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado })),
-        devolucion_ids: incluirDevoluciones ? devPendientes.map((d) => d.id) : [],
+        imputaciones: r.imputaciones,
+        devolucion_ids: r.devolucion_ids,
         comprobante_urls: urlsDeFotos(filas).map((url) => ({ url })),
-        // 10 % sobre pedidos sin facturar: solo los SELECCIONADOS; los anticipos viajan para que el
-        // servidor marque solo esos y calcule el tope del ajuste sobre todo lo seleccionado
-        pedidos_contado: pedidosContadoAEnviar(contadoPedidos, sel),
-        pedidos_anticipo: anticiposDeSeleccion(sel),
-        contado_general: contadoGeneral && bonificacionEstimada > 0,
+        pedidos_contado: r.pedidos_contado,
+        pedidos_anticipo: r.pedidos_anticipo,
+        contado_general: r.contado_general,
         ajuste_redondeo: ajusteRedondeo,
-        cobros_extra: cobrosExtra.filter((c) => c.monto > 0).map((c) => ({ cliente_id: c.cliente.id, cliente_nombre: nombreCliente(c.cliente), metodos: [{ tipo: "efectivo", monto: c.monto }], imputaciones: [] })),
+        cobros_extra: [],
+        // Clientes agregados: cada uno con SU selección; el servidor reparte los medios de pago
+        ...(extras.length
+          ? {
+              clientes_extra: extras.map((x) => ({
+                cliente_id: x.a.cliente.id,
+                cliente_nombre: nombreCliente(x.a.cliente),
+                monto: x.res!.totalCobro,
+                imputaciones: x.res!.imputaciones,
+                devolucion_ids: x.res!.devolucion_ids,
+                pedidos_contado: x.res!.pedidos_contado,
+                pedidos_anticipo: x.res!.pedidos_anticipo,
+                contado_general: x.res!.contado_general,
+              })),
+            }
+          : {}),
         // Fotos que no llegaron al bucket (sin señal / OCR caído): las sube el servidor al aplicar el cobro
         fotos_pendientes: filas.filter((m) => !m.ocr.foto_url && fotosLocales.current.has(m.id)).map((m) => fotosLocales.current.get(m.id)!),
       }
-      await encolar("viaje.cobrar", payload, `Cobro ${clienteNombre} ${formatCurrency(totalMetodos)}`)
+      const quienes = extras.length ? `${clienteNombre} + ${extras.length} más` : clienteNombre
+      await encolar("viaje.cobrar", payload, `Cobro ${quienes} ${formatCurrency(totalMetodos)}`)
       // BCRA en segundo plano: una consulta por cheque con CUIT válido, DESPUÉS del cobro en la
       // cola. El veredicto llega como aviso (AvisosBcra) aunque hoy no haya señal.
       for (const m of filas) {
@@ -335,7 +291,8 @@ export function Cobrar() {
         const consulta: ConsultaBcraPayload = { cuits: [m.cuit_emisor], banco: m.banco || null, numero_cheque: m.numero_cheque || null, monto: m.monto, cliente_nombre: clienteNombre }
         await encolar("bcra.consultar", consulta, `BCRA cheque ${m.numero_cheque || ""} ${clienteNombre}`.trim())
       }
-      dejarAviso(online ? `✅ Cobro registrado por ${formatCurrency(totalMetodos)}. Se imputará al confirmar la rendición del viaje.` : `✅ Cobro por ${formatCurrency(totalMetodos)} guardado en el equipo: se envía al volver la señal.`)
+      const detalle = extras.length ? ` repartido entre ${extras.length + 1} clientes` : ""
+      dejarAviso(online ? `✅ Cobro registrado por ${formatCurrency(totalMetodos)}${detalle}. Se imputará al confirmar la rendición del viaje.` : `✅ Cobro por ${formatCurrency(totalMetodos)}${detalle} guardado en el equipo: se envía al volver la señal.`)
       setListo(true)
     } catch {
       guardandoRef.current = false
@@ -353,34 +310,7 @@ export function Cobrar() {
   }
   if (!data) return <Pantalla titulo="Registrar Cobro">{null}</Pantalla>
 
-  // Fila de comprobante (función de render, no componente: los inputs no pierden el foco)
-  const filaComprobante = (cp: ComprobanteCobro, dentroDePedido: boolean) => {
-    const checked = sel[cp.id] !== undefined
-    return (
-      <div key={cp.id} className={`flex items-center gap-2 border-t px-3 py-2 text-sm ${checked ? "bg-blue-50" : ""} ${dentroDePedido ? "" : "first:border-t-0"}`}>
-        <input type="checkbox" checked={checked} onChange={() => toggleComprobante(cp)} className="h-5 w-5 shrink-0" />
-        <button onClick={() => toggleComprobante(cp)} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-2 text-left">
-          <span className="rounded border px-1 text-xs">{cp.tipo_comprobante}</span>
-          <span className="font-mono text-xs">{cp.numero_comprobante}</span>
-          <span className="text-[10px] text-gray-400">{cp.fecha ? cp.fecha.slice(0, 10).split("-").reverse().join("/") : ""}</span>
-          {dtosHechos.has(cp.id) && <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">Dto. ctdo</span>}
-          {(cp.en_cobro || 0) > 0.005 && <span className="text-[10px] font-bold text-sky-600">🔒 {fmt(cp.en_cobro!)} en un cobro sin enviar</span>}
-          <span className="ml-auto font-mono text-orange-600">saldo ${fmt(saldoCobrable(cp))}</span>
-        </button>
-        {checked ? (
-          <input
-            type="number" inputMode="decimal" min={0} max={saldoCobrable(cp)} step="0.01" value={sel[cp.id]}
-            onChange={(e) => setUno(cp.id, Math.min(Math.max(0, parseFloat(e.target.value) || 0), saldoCobrable(cp)))}
-            className="min-h-10 w-28 rounded-lg border border-gray-300 px-2 text-right text-sm"
-          />
-        ) : (
-          <span className="w-28 text-right text-gray-400">—</span>
-        )}
-      </div>
-    )
-  }
-
-  const nadaQueCobrar = pedidos.length === 0 && sinPedido.length === 0
+  const principalCobra = agregados.length ? montoDelPrincipal(totalMetodos, agregados.map((a) => resumenes[a.cliente.id]?.totalCobro || 0)) : totalMetodos
 
   return (
     <Pantalla
@@ -389,10 +319,10 @@ export function Cobrar() {
       etiquetaFrescura="Ficha al"
       pie={
         <div className="border-t border-gray-200 bg-white p-4">
-          {Math.abs(diff) > 0.01 && totalImputado > 0 && (
+          {Math.abs(diff) > 0.01 && r.totalImputado > 0 && (
             <p className={`mb-2 rounded-xl px-4 py-2 text-center text-sm font-medium ${diff < 0 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
               {diff < 0 ? `Faltan ${formatCurrency(Math.abs(diff))}` : `Sobran ${formatCurrency(diff)}`}
-              <span className="block text-xs font-normal opacity-80">{diff < 0 ? "Al registrar elegís: ajuste por redondeo o dejar el saldo pendiente." : "Al registrar elegís: dejarlo a cuenta del cliente o, si es chico, ajuste por redondeo."}</span>
+              <span className="block text-xs font-normal opacity-80">{diff < 0 ? "Al registrar elegís: ajuste por redondeo o dejar el saldo pendiente." : "Al registrar elegís: dejarlo a cuenta del cliente o, si es chico, ajuste por redondeo."}{agregados.length ? ` La diferencia es de ${clienteNombre}.` : ""}</span>
             </p>
           )}
           <button onClick={() => void guardarCobro()} disabled={guardando || totalMetodos <= 0 || !puedeCobrar} className="min-h-14 w-full rounded-2xl bg-blue-600 py-4 text-xl font-bold text-white active:scale-95 disabled:opacity-50">
@@ -413,155 +343,47 @@ export function Cobrar() {
       <AvisosBcra />
 
       <div className="space-y-5 p-4">
-        {/* ══ Pedidos y comprobantes a cobrar ══ */}
+        {/* ══ Pedidos y comprobantes a cobrar (cliente de la parada) ══ */}
         <section>
           <h3 className="mb-3 font-bold text-gray-700">Pedidos / comprobantes a cobrar</h3>
           {!descargada && data.parcial ? (
             <SinDescargar que="la cuenta del cliente" />
-          ) : nadaQueCobrar ? (
-            <div className="py-4 text-center text-sm text-gray-500">No hay pedidos ni comprobantes pendientes para este cliente</div>
           ) : (
-            <div className="space-y-2">
-              {clavesTodas.length > 0 && (
-                <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
-                  {/* "10% contado a todo" está más abajo, junto a "Incluir devoluciones" */}
-                  <label className="flex min-h-11 items-center gap-2 font-semibold"><input type="checkbox" checked={todoSeleccionado} onChange={toggleTodo} className="h-5 w-5" /> Seleccionar todo</label>
-                </div>
-              )}
-              {pedidos.map((ped) => {
-                const comps = compsPorPedido.get(ped.id) || []
-                const facturado = comps.length > 0
-                const anticipoSel = sel[PEDIDO_PREFIX + ped.id] !== undefined
-                const todosCompsSel = facturado && comps.every((c) => sel[c.id] !== undefined)
-                const algunoSel = comps.some((c) => sel[c.id] !== undefined)
-                const abierto = expandido === ped.id
-                if (esSaldado(ped))
-                  return (
-                    <div key={ped.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-2.5 text-slate-400">
-                      <span className="w-5" />
-                      <span className="text-sm font-semibold">Pedido #{ped.numero_pedido}</span>
-                      <span className="text-xs">{formatDateAR(ped.fecha)}</span>
-                      <span className="rounded border border-green-200 bg-green-50 px-1.5 text-[10px] text-green-700">Saldado</span>
-                      <span className="ml-auto font-mono text-sm">${fmt(ped.total)}</span>
-                    </div>
-                  )
-                return (
-                  <div key={ped.id} className={`rounded-lg border ${anticipoSel || algunoSel ? "border-blue-300 bg-blue-50/40" : "border-gray-200 bg-white"}`}>
-                    <div className="flex items-center gap-2 p-2.5">
-                      <input type="checkbox" checked={facturado ? todosCompsSel : anticipoSel} onChange={() => (facturado ? togglePedidoCompleto(comps) : toggleAnticipo(ped))} className="h-5 w-5 shrink-0" />
-                      <button onClick={() => facturado && setExpandido(abierto ? "" : ped.id)} disabled={!facturado} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-1.5 text-left">
-                        <span className="w-4 text-gray-400">{facturado ? (abierto ? "▾" : "▸") : ""}</span>
-                        <span className="text-sm font-semibold">Pedido #{ped.numero_pedido}</span>
-                        <span className="text-xs text-gray-400">{formatDateAR(ped.fecha)}</span>
-                        {facturado ? (
-                          <span className="rounded border px-1.5 text-[10px]">{comps.length} comprob.</span>
-                        ) : (
-                          <span className="rounded border border-amber-200 bg-amber-50 px-1.5 text-[10px] text-amber-700">Sin facturar (anticipo)</span>
-                        )}
-                        {ped.anticipo_pago_id && !facturado && <span className="rounded border border-gray-200 bg-gray-100 px-1.5 text-[10px] text-gray-600">ya anticipado</span>}
-                      </button>
-                      {!facturado && (
-                        <label className="mr-1 flex min-h-11 items-center gap-1 text-[11px] text-amber-700"><input type="checkbox" checked={contadoPedidos.has(ped.id)} onChange={() => toggleContado(ped)} className="h-5 w-5" /> 10%</label>
-                      )}
-                      <span className="font-mono text-sm">${fmt(facturado ? comps.reduce((s, c) => s + saldoCobrable(c), 0) : montoAnticipo(ped))}</span>
-                    </div>
-                    {facturado && abierto && <div className="border-t bg-white">{comps.map((c) => filaComprobante(c, true))}</div>}
-                  </div>
-                )
-              })}
-              {sinPedido.length > 0 && (
-                <div className="rounded-lg border border-gray-200 bg-white">
-                  <div className="flex items-center gap-2 border-b px-3 py-2 text-xs font-semibold text-gray-500">
-                    <input type="checkbox" checked={sinPedido.every((c) => sel[c.id] !== undefined)} onChange={() => togglePedidoCompleto(sinPedido)} className="h-5 w-5" title="Seleccionar todos" />
-                    <span>Otros comprobantes</span>
-                    <span className="ml-auto font-mono text-orange-600">saldo ${fmt(sinPedido.reduce((s, c) => s + saldoCobrable(c), 0))}</span>
-                  </div>
-                  {sinPedido.map((c) => filaComprobante(c, false))}
-                </div>
-              )}
-              {Object.keys(sel).length > 0 && (
-                <div className="flex justify-end pt-1 text-sm font-semibold">Total a pagar: <span className="ml-2 text-blue-700">${fmt(totalImputado)}</span></div>
-              )}
-            </div>
-          )}
-          {bonificacionEstimada > 0 && (
-            <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">10% contado: −{formatCurrency(bonificacionEstimada)} (la NC sale al confirmar la rendición)</p>
+            <SelectorCuenta datos={data} estado={cuenta} onChange={setCuenta} expandido={expandido} onExpandir={setExpandido} />
           )}
         </section>
 
         {/* ══ Agregar cliente para cobrar (cobro conjunto en la calle) ══ */}
         <section>
-          <h3 className="mb-2 font-bold text-gray-700">Agregar cliente para cobrar</h3>
+          <h3 className="mb-1 font-bold text-gray-700">Agregar cliente para cobrar</h3>
+          <p className="mb-2 text-xs text-gray-500">Un mismo pago (por ejemplo, un cheque) puede cubrir a más de un cliente: agregalo y elegí qué se le cobra.</p>
           <input type="search" value={busqCli} onChange={(e) => setBusqCli(e.target.value)} placeholder="Buscar cliente por nombre o CUIT..." className="min-h-11 w-full rounded-xl border-2 border-gray-200 px-3 py-2.5 text-sm" />
           {busqCli.trim().length >= 2 && clientesTodos.length === 0 && <p className="mt-1 text-xs text-amber-700">La lista de clientes todavía no se descargó en este equipo.</p>}
           {resCli.length > 0 && (
             <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border">
               {resCli.map((cli) => (
-                <button key={cli.id} onClick={() => agregarClienteExtra(cli)} className="w-full border-b px-3 py-2 text-left last:border-0 active:bg-blue-50">
+                <button key={cli.id} onClick={() => agregarCliente(cli)} className="w-full border-b px-3 py-2 text-left last:border-0 active:bg-blue-50">
                   <p className="text-sm font-medium">{nombreCliente(cli)}</p>
                   <p className="text-xs text-gray-400">{cli.direccion || ""}{cli.localidad ? ` · ${cli.localidad}` : ""}{cli.saldo_actual > 0 ? ` · debe ${formatCurrency(cli.saldo_actual)}` : ""}</p>
                 </button>
               ))}
             </div>
           )}
-          {cobrosExtra.map((ce, idx) => (
-            <div key={ce.cliente.id} className="mt-2 rounded-xl bg-white p-3 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{nombreCliente(ce.cliente)}</p>
-                  <p className="text-xs text-gray-400">Saldo: {formatCurrency(ce.saldo)}</p>
-                </div>
-                <button onClick={() => setCobrosExtra((p) => p.filter((_, i) => i !== idx))} className="min-h-10 px-2 text-lg text-red-500">×</button>
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <span className="text-xs text-gray-500">Cobrar (efectivo):</span>
-                <input type="number" inputMode="decimal" value={ce.monto || 0} onChange={(e) => setCobrosExtra((p) => p.map((c, i) => (i === idx ? { ...c, monto: Number(e.target.value) || 0 } : c)))} className="min-h-10 flex-1 rounded-lg border-2 border-gray-200 px-2 py-1 text-right font-bold" />
-              </div>
-            </div>
+          {agregados.map((a) => (
+            <CuentaAgregada key={a.cliente.id} viajeId={viajeId} agregado={a} online={online} onEstado={cambiarAgregado} onResumen={informarResumen} onQuitar={quitarCliente} />
           ))}
         </section>
-
-        {/* Toggle devoluciones */}
-        {devPendientes.length > 0 && (
-          <div className="rounded-2xl bg-amber-50 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-bold text-amber-800">Incluir devoluciones como crédito</p>
-                <p className="text-sm text-amber-600">{formatCurrency(devPendientes.reduce((s, d) => s + Number(d.monto_total), 0))}{devPendientes.some((d) => d.local) ? " (incluye una sin enviar)" : ""}</p>
-              </div>
-              <button onClick={() => setIncluirDevoluciones((p) => !p)} className={`h-7 w-14 rounded-full ${incluirDevoluciones ? "bg-green-500" : "bg-gray-300"}`} aria-label="Incluir devoluciones">
-                <span className={`mx-1 block h-5 w-5 rounded-full bg-white shadow ${incluirDevoluciones ? "translate-x-7" : ""}`} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 10% contado a todo: solo a los comprobantes seleccionados que aún no lo tengan (el servidor
-            vuelve a controlar que ninguno lo reciba dos veces) */}
-        {Object.keys(sel).length > 0 && (
-          <div className="rounded-2xl bg-emerald-50 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-bold text-emerald-800">10% contado a todo</p>
-                <p className="text-sm text-emerald-700">
-                  {contadoGeneral
-                    ? bonificacionEstimada > 0
-                      ? `−${formatCurrency(bonificacionEstimada)} sobre lo seleccionado (la NC sale al confirmar la rendición)`
-                      : "Lo seleccionado ya tiene el 10% aplicado o no bonifica: no se aplica dos veces."
-                    : "Aplica a los comprobantes seleccionados que aún no lo tengan; los pedidos sin facturar cobran el 90%."}
-                </p>
-              </div>
-              <button onClick={toggleContadoTodo} className={`h-7 w-14 shrink-0 rounded-full ${contadoGeneral ? "bg-green-500" : "bg-gray-300"}`} aria-label="10% contado a todo">
-                <span className={`mx-1 block h-5 w-5 rounded-full bg-white shadow ${contadoGeneral ? "translate-x-7" : ""}`} />
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Total */}
         <div className="rounded-2xl bg-blue-50 px-4 py-4 text-center">
           <p className="text-sm text-blue-600">Total a cobrar</p>
           <p className="text-3xl font-bold text-blue-800">{formatCurrency(totalCobro)}</p>
+          {agregados.length > 0 && (
+            <p className="mt-1 text-xs text-blue-700">
+              {clienteNombre}: {formatCurrency(r.totalCobro)} · clientes agregados: {formatCurrency(totalAgregados)}
+              {totalMetodos > 0 && <span className="block">De lo entregado, a {clienteNombre} le quedan {formatCurrency(principalCobra)}.</span>}
+            </p>
+          )}
         </div>
 
         {/* ══ Forma de pago ══ */}
@@ -602,13 +424,13 @@ export function Cobrar() {
             <h3 className="text-center text-lg font-bold">{dialogoDiff < 0 ? `Faltan ${formatCurrency(Math.abs(dialogoDiff))}` : `Sobran ${formatCurrency(dialogoDiff)}`}</h3>
             {/* El tope del 1 % es solo para PERDONAR saldo. El sobrante nunca bloquea: chico ⇒ se
                 puede ajustar; grande ⇒ queda a cuenta del cliente. */}
-            {ofreceAjuste(dialogoDiff, totalImputado) ? (
+            {ofreceAjuste(dialogoDiff, r.totalImputado) ? (
               <button onClick={() => void guardarCobro("ajuste")} disabled={guardando} className="min-h-12 w-full rounded-2xl bg-blue-600 py-4 font-bold text-white disabled:opacity-50">
                 Ajuste por redondeo {dialogoDiff < 0 ? "(se le perdona)" : "(no queda a favor)"} — oficina lo confirma al rendir
               </button>
             ) : dialogoDiff < 0 ? (
               <p className="rounded-xl bg-amber-50 px-3 py-2 text-center text-sm text-amber-800">
-                Lo que falta supera el 1% de lo seleccionado ({formatCurrency(topeAjuste(totalImputado))}): no se perdona desde la calle.
+                Lo que falta supera el 1% de lo seleccionado ({formatCurrency(topeAjuste(r.totalImputado))}): no se perdona desde la calle.
               </p>
             ) : null}
             <button onClick={() => void guardarCobro("saldo")} disabled={guardando} className="min-h-12 w-full rounded-2xl border-2 border-gray-300 py-4 font-bold text-gray-700 disabled:opacity-50">
@@ -619,6 +441,59 @@ export function Cobrar() {
         </div>
       )}
     </Pantalla>
+  )
+}
+
+// ─── Cliente agregado al cobro conjunto ───────────────────────────────────────
+// Su cuenta COMPLETA, igual que la del principal. Sale de la misma réplica (chofer_viaje_clientes):
+// si el cliente es otra parada del viaje ya está en el equipo y se cobra sin señal; si es de afuera
+// del viaje, se pide al servidor al agregarlo y hace falta señal (queda dicho en pantalla).
+function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuitar }: {
+  viajeId: string
+  agregado: Agregado
+  online: boolean
+  onEstado: (id: string, e: EstadoCuenta) => void
+  onResumen: (id: string, r: ResumenCuenta) => void
+  onQuitar: (id: string) => void
+}) {
+  const id = agregado.cliente.id
+  useRefrescarFilas(DS.clientesViaje, [idClienteViaje(viajeId, id)])
+  const { cliente: datos } = useClienteViaje(viajeId, id)
+  const [abierto, setAbierto] = useState("")
+  const completa = !!datos && !datos.parcial
+  const res = useMemo(() => resumenCuenta(completa ? datos : null, agregado.estado), [completa, datos, agregado.estado])
+  useEffect(() => { onResumen(id, res) }, [id, res, onResumen])
+  const nombre = nombreCliente(agregado.cliente)
+  return (
+    <div className="mt-3 rounded-2xl border-2 border-blue-200 bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate font-bold text-gray-800">➕ {nombre}</p>
+          <p className="truncate text-xs text-gray-400">{agregado.cliente.direccion || ""}{agregado.cliente.localidad ? ` · ${agregado.cliente.localidad}` : ""}</p>
+        </div>
+        <button onClick={() => onQuitar(id)} className="min-h-11 shrink-0 px-2 text-xl text-red-500" aria-label={`Quitar a ${nombre}`}>×</button>
+      </div>
+      <div className="mt-2">
+        {completa ? (
+          <SelectorCuenta datos={datos} estado={agregado.estado} onChange={(e) => onEstado(id, e)} expandido={abierto} onExpandir={setAbierto} />
+        ) : (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {online
+              ? "⏳ Descargando la cuenta de este cliente…"
+              : "📡 Sin señal: la cuenta de un cliente que no está en este viaje se ve solo con señal. Podés tomarle plata a cuenta (sin imputar) y oficina la imputa después."}
+          </p>
+        )}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <span className="text-xs text-gray-500">A cuenta (sin imputar):</span>
+        <input
+          type="number" inputMode="decimal" min={0} step="0.01" value={agregado.estado.aCuenta || ""} placeholder="0"
+          onChange={(e) => onEstado(id, { ...agregado.estado, aCuenta: Math.max(0, parseFloat(e.target.value) || 0) })}
+          className="min-h-10 flex-1 rounded-lg border-2 border-gray-200 px-2 py-1 text-right font-bold"
+        />
+      </div>
+      <p className="mt-2 text-right text-sm font-semibold">Se le cobra: <span className="text-blue-700">{formatCurrency(res.totalCobro)}</span></p>
+    </div>
   )
 }
 

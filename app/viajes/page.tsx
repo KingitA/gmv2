@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -330,7 +331,7 @@ function ViajesCalendario() {
             <div className="grid grid-cols-[1fr_130px] gap-3">
               <div>
                 <Label>Sale el *</Label>
-                <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+                <DateInputAR value={fecha} onChange={setFecha} />
               </div>
               <div>
                 <Label>Duración (días)</Label>
