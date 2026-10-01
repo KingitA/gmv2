@@ -22,6 +22,7 @@
 
 import { SupabaseClient } from "@supabase/supabase-js"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
+import { marcaPagoBonif } from "@/lib/cobranzas/marca-pago"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
 import { actualizarDescuentoFinancieroKardex } from "@/lib/kardex/insertar-kardex"
 import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
@@ -360,9 +361,11 @@ export async function generarBonificacionContado(
   supabase: SupabaseClient,
   params: ParamsBonificacion,
 ): Promise<ResultadoBonificacion> {
-  // pago_id se mantiene en la firma por compatibilidad, pero desde el fix del
-  // "modelo pozo" la NC/REV se imputa directo a los comprobantes bonificados.
-  const { cliente_id, comprobante_ids } = params
+  // La NC/REV se imputa directo a los comprobantes bonificados; pago_id se usa
+  // para MARCAR qué pago la generó ([pago:<id>] en observaciones), así la
+  // anulación de ese pago revierte SOLO su bonificación (fix Gioventu 01/10).
+  const { cliente_id, comprobante_ids, pago_id } = params
+  const marcaOrigen = pago_id ? ` ${marcaPagoBonif(pago_id)}` : ""
 
   if (!comprobante_ids || comprobante_ids.length === 0) {
     return { total_bonificacion: 0, comprobantes_generados: [] }
@@ -433,7 +436,7 @@ export async function generarBonificacionContado(
       total_neto: totalNeto,
       total_iva: 0,
       total_factura: totalNeto,
-      observaciones: `Bonificación contado 10% — presupuestos ${presupuestos.map(c => c.numero_comprobante).join(", ")}`,
+      observaciones: `Bonificación contado 10% — presupuestos ${presupuestos.map(c => c.numero_comprobante).join(", ")}${marcaOrigen}`,
     })
 
     await crearDetalle(supabase, id, bonificacionId, lineas)
@@ -597,7 +600,9 @@ export async function generarBonificacionContado(
       condicionIVAReceptorId: condIvaReceptor,
     })
 
-    const observaciones = `Bonificación contado 10% — facturas ${facturas.map(c => c.numero_comprobante).join(", ")}`
+    // La marca [pago:] va solo en el documento guardado (el PDF queda limpio)
+    const observacionesPdf = `Bonificación contado 10% — facturas ${facturas.map(c => c.numero_comprobante).join(", ")}`
+    const observaciones = `${observacionesPdf}${marcaOrigen}`
 
     // Registro durable del CAE antes del insert local
     const logId = await registrarCAEObtenido(supabase, {
@@ -676,7 +681,7 @@ export async function generarBonificacionContado(
       cae: respCAE.cae,
       vencimiento_cae: respCAE.vencimientoCae,
       lineas,
-      observaciones,
+      observaciones: observacionesPdf,
     })
 
     comprobantesGenerados.push({ id, tipo: tipoNC, numero, total_neto: totalNeto, total_iva: totalIva, total_factura: totalFactura, cae: respCAE.cae })
