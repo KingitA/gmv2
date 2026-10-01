@@ -272,27 +272,20 @@ export default function VendedorCobrarPage() {
   // Créditos tildados (NC/REV + a cuenta): descuentan del total a saldar
   const totalCreditos = round2(Object.values(credSel).reduce((s, v) => s + (v || 0), 0))
 
-  // NC 10% proyectada — regla 25/08: bonif neta = 10% × (débitos sin dto −
-  // créditos de MERCADERÍA sin dto). Los débitos completos bonifican SIEMPRE;
-  // cada crédito NC con su check de 10% activo resta el 10% de lo usado
-  // (crédito a precio lleno usado en cobro contado → vale 90%).
+  // NC 10% proyectada — REGLA 01/10 (caso Urquiza): el 10% se calcula sobre
+  // LO SELECCIONADO EN ESTE COBRO de cada comprobante, nunca sobre el total
+  // histórico ni contando entregas a cuenta sin tildar. Si el comprobante se
+  // completa en varios cobros contado, cada cobro genera SU parte (la NC
+  // lleva la marca [pago:<id>] del pago que la generó). Cada crédito NC con
+  // su check de 10% activo resta el 10% de lo usado (regla 25/08 intacta).
   const bonificacionEstimada = useMemo(() => {
     if (!contadoGeneral) return 0
     let bonif = 0
     for (const cp of comprobantes) {
       const imp = imputaciones[cp.id]
-      if (imp === undefined) continue
-      const cobrable = saldoCobrable(cp)
-      // Completo con plata de HOY…
-      const completoHoy = Math.abs(imp - cp.saldo_pendiente) < 0.01
-      // …o completo CONTANDO lo ya en cobro sin confirmar, siempre que esas
-      // entregas también hayan sido contado ([10% CONTADO]): hoy se cobra
-      // todo el cobrable y entre ambas partes el comprobante queda saldado.
-      const completoConEnCobro =
-        Math.abs(imp - cobrable) < 0.01 &&
-        (cp.en_cobro || 0) > 0.005 &&
-        cobrable + (cp.en_cobro_contado || 0) >= cp.saldo_pendiente - 0.01
-      if (completoHoy || completoConEnCobro) bonif += cp.total_factura * 0.1
+      if (imp === undefined || !(imp > 0)) continue
+      if (!["FA", "FB", "FC", "PRES"].includes(String(cp.tipo_comprobante || "").toUpperCase())) continue
+      bonif += imp * 0.1
     }
     for (const [key, monto] of Object.entries(credSel)) {
       if (key.startsWith("nc:") && cred10[key] && monto > 0) bonif -= monto * 0.1
@@ -1003,7 +996,7 @@ export default function VendedorCobrarPage() {
               {bonificacionEstimada > 0 ? ` − NC ${formatCurrency(bonificacionEstimada)}` : ""}
               {totalDevoluciones > 0 ? ` − dev. ${formatCurrency(totalDevoluciones)}` : ""}
               {totalCreditos > 0.005 ? ` − créditos ${formatCurrency(totalCreditos)}` : ""}
-              {totalCreditos <= 0.005 && totalAFavor > 0.005 ? ` · tiene ${formatCurrency(totalAFavor)} a favor` : ""}
+              {/* El resumen refleja SOLO lo tildado; los créditos disponibles ya se ven arriba (01/10) */}
             </span>
             <span>Entregado {formatCurrency(totalMetodos)}</span>
           </div>

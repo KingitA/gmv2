@@ -274,7 +274,7 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
       ? repartirImputacionesContado(
           impsCompletas,
           Number(monto_total),
-          await bonificacionPendientePorComprobante(supabase, cliente_id, impsCompletas.map((i: any) => i.comprobante_id)),
+          await bonificacionPendientePorComprobante(supabase, cliente_id, impsCompletas),
         )
       : recortarImputaciones(impsCompletas, Number(monto_total), "secuencial")
 

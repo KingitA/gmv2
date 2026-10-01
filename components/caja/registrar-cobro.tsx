@@ -134,15 +134,16 @@ export function RegistrarCobro({
     [seleccionados]
   )
 
-  // Preview del 10% contado: la NC devuelve el 10% de TODOS los componentes
-  // (neto + IVA + percepciones) → exactamente 10% del total de cada comprobante.
+  // Preview del 10% contado — REGLA 01/10: la NC es el 10% de LO SELECCIONADO
+  // EN ESTE COBRO de cada comprobante, nunca del total histórico ni de
+  // entregas a cuenta sin tildar (cada cobro contado genera SU parte).
   const bonificacionEstimada = useMemo(() => {
     if (!aplicarContado) return 0
     let total = 0
-    for (const [key] of Object.entries(seleccionados)) {
+    for (const [key, v] of Object.entries(seleccionados)) {
       if (key.startsWith(PEDIDO_PREFIX) || dtosHechos.has(key)) continue
       const comp = comprobantes.find((c) => c.id === key)
-      if (comp) total += Math.abs(Number(comp.total_factura)) * 0.1
+      if (comp) total += Math.max(0, Number(v) || 0) * 0.1
     }
     return round2(total)
   }, [aplicarContado, seleccionados, dtosHechos, comprobantes])
@@ -329,16 +330,18 @@ export function RegistrarCobro({
     // Métodos del cobro: los ya agregados + el que está en la barra (si tiene monto)
     const actual = construirMetodoActual()
     const metodosCobro = [...metodosAgregados, ...(actual ? [actual] : [])]
-    if (!metodosCobro.length) {
-      toast({ variant: "destructive", title: "Monto inválido", description: "Ingresá un monto mayor a 0" })
-      return
-    }
+    // PRIMERO el método incompleto (banco/número faltante) y recién después el
+    // "sin monto": antes una transferencia sin banco caía en "Monto inválido".
     if (!actual && Number(monto.replace(",", ".")) > 0) {
       toast({
         variant: "destructive",
         title: metodo === "transferencia" ? "Falta el banco" : "Falta el número",
         description: metodo === "transferencia" ? "Elegí la cuenta destino de la transferencia" : "Cargá el número del cheque/echeq",
       })
+      return
+    }
+    if (!metodosCobro.length) {
+      toast({ variant: "destructive", title: "Monto inválido", description: "Ingresá un monto mayor a 0" })
       return
     }
     // Igual que Pagos Clientes: los "pedido:<id>" son anticipos (no se imputan)

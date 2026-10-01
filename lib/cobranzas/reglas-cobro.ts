@@ -27,6 +27,24 @@ export function topeAjuste(totalSeleccionado: number): number {
   return r2(Math.max(0, num(totalSeleccionado)) * TOPE_AJUSTE_PCT)
 }
 
+// ─── 10 % contado ────────────────────────────────────────────────────────────
+// REGLA (01/10, caso Urquiza PRES 3): la NC del 10% se calcula sobre lo que se
+// está saldando HOY de cada comprobante (lo seleccionado en ESTE cobro), nunca
+// sobre entregas a cuenta sin tildar ni sobre el total histórico. Si un
+// comprobante se completa en varios cobros contado, cada cobro genera SU parte
+// (cada NC lleva la marca [pago:<id>] de su pago).
+
+/** NC del 10% proyectada para lo seleccionado hoy de un comprobante. */
+export function ncContado(seleccionadoHoy: number): number {
+  return r2(Math.max(0, num(seleccionadoHoy)) * 0.1)
+}
+
+/** El server reconstruye la NC desde lo CUBIERTO (plata + créditos + devolución
+ *  neta = 90% de lo saldado): NC = cubierto / 9. Inversa exacta de ncContado. */
+export function ncContadoDesdeCubierto(cubierto: number): number {
+  return r2(Math.max(0, num(cubierto)) / 9)
+}
+
 // ─── 10 % contado sobre pedidos sin facturar ─────────────────────────────────
 
 const seleccionado = (seleccion: Record<string, number>, pedidoId: string) => seleccion[PEDIDO_PREFIX + pedidoId] !== undefined

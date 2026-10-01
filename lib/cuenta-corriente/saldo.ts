@@ -41,7 +41,7 @@ async function calcularBajasExtra(
   const ids = pagosPend.map((p) => p.id)
   const { data: imps } = await supabase
     .from("imputaciones")
-    .select("pago_id, comprobante_id")
+    .select("pago_id, comprobante_id, monto_imputado")
     .in("pago_id", ids)
     .neq("estado", "anulado")
     .not("comprobante_id", "is", null)
@@ -89,11 +89,25 @@ async function calcularBajasExtra(
       devPorPago.set(d.pago_id, (devPorPago.get(d.pago_id) || 0) + Number(d.monto))
   }
 
+  // Cubierto por pago sobre débitos BONIFICABLES (para la NC del 10%):
+  // plata imputada + créditos tildados + devoluciones descontadas.
+  // REGLA 01/10: la NC proyectada es cubierto/9 (10% de lo que ESTE cobro
+  // salda), nunca 10% del total histórico del comprobante.
+  const cashBonifPorPago = new Map<string, number>()
+  for (const i of imps || []) {
+    if (!totalDe.has(i.comprobante_id)) continue // solo FA/FB/FC/PRES vivos
+    cashBonifPorPago.set(i.pago_id, (cashBonifPorPago.get(i.pago_id) ?? 0) + Number(i.monto_imputado || 0))
+  }
+
   for (const p of pagosPend) {
     let extra = 0
     const contado = (p.observaciones || "").includes(MARCA_CONTADO)
     if (contado) {
-      for (const d of debitosPorPago.get(p.id) || []) extra += (totalDe.get(d) ?? 0) * 0.1
+      const cubierto =
+        (cashBonifPorPago.get(p.id) ?? 0) +
+        (paresPorPago.get(p.id) || []).reduce((s, par) => s + Number(par.monto || 0), 0) +
+        (devPorPago.get(p.id) || 0)
+      extra += cubierto / 9
       for (const par of paresPorPago.get(p.id) || []) if (par.aplicar_10) extra -= par.monto * 0.1
     }
     extra += parsearMarcaAjuste(p.observaciones)

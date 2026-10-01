@@ -98,10 +98,11 @@ export async function procesarPostConfirmacion(
         ...paresCreditos.map((p) => p.debito_id),
       ])]
       let bonificables: string[] = []
+      const totalDeComp = new Map<string, number>()
       if (compIds.length) {
         const { data: comps } = await supabase
           .from("comprobantes_venta")
-          .select("id")
+          .select("id, total_factura")
           .in("id", compIds)
           .in("tipo_comprobante", ["FA", "FB", "FC", "PRES"])
           .is("anulado_en", null)
@@ -109,13 +110,54 @@ export async function procesarPostConfirmacion(
         // (filtra los comprobantes que ya tienen NC/REV de bonificación viva),
         // así que acá alcanza con pasarle los candidatos.
         bonificables = (comps || []).map((c: any) => c.id)
+        for (const c of comps || []) totalDeComp.set(c.id, Math.abs(Number(c.total_factura)) || 0)
       }
 
       if (bonificables.length) {
+        // ── Fracción saldada HOY por comprobante (regla 01/10) ──
+        // La NC sale por el 10% de lo que ESTE cobro salda de cada
+        // comprobante: cubierto = plata imputada + créditos tildados +
+        // devoluciones descontadas en el cobro (su valor ya es el 90%).
+        // fracción = cubierto / (90% del total). Nunca sobre el total
+        // histórico ni sobre entregas a cuenta sin tildar.
+        const cubiertoDe = new Map<string, number>()
+        for (const [cid, m] of montoPorComprobante) cubiertoDe.set(cid, (cubiertoDe.get(cid) ?? 0) + m)
+        for (const par of paresCreditos) cubiertoDe.set(par.debito_id, (cubiertoDe.get(par.debito_id) ?? 0) + Number(par.monto))
+        // Devoluciones descontadas en este cobro → al comprobante de su mercadería
+        const { data: devsPago } = await supabase
+          .from("devoluciones_descuentos")
+          .select("devolucion_id, monto")
+          .eq("pago_id", pagoId)
+        if (devsPago?.length) {
+          const { data: devDet } = await supabase
+            .from("devoluciones_detalle")
+            .select("devolucion_id, comprobante_venta_id, subtotal")
+            .in("devolucion_id", devsPago.map((d: any) => d.devolucion_id))
+          for (const dp of devsPago) {
+            const det = (devDet || []).filter((d: any) => d.devolucion_id === dp.devolucion_id && d.comprobante_venta_id)
+            const base = det.reduce((s: number, d: any) => s + Math.abs(Number(d.subtotal) || 0), 0)
+            if (base > 0) {
+              for (const d of det) {
+                const parte = (Number(dp.monto) * Math.abs(Number(d.subtotal) || 0)) / base
+                cubiertoDe.set(d.comprobante_venta_id, (cubiertoDe.get(d.comprobante_venta_id) ?? 0) + parte)
+              }
+            } else if (bonificables.length === 1) {
+              cubiertoDe.set(bonificables[0], (cubiertoDe.get(bonificables[0]) ?? 0) + Number(dp.monto))
+            }
+          }
+        }
+        const fraccionPorComprobante: Record<string, number> = {}
+        for (const cid of bonificables) {
+          const total = totalDeComp.get(cid) ?? 0
+          const cubierto = cubiertoDe.get(cid) ?? 0
+          fraccionPorComprobante[cid] = total > 0 ? Math.min(1, cubierto / (0.9 * total)) : 0
+        }
+
         const r = await generarBonificacionContado(admin, {
           cliente_id: pago.cliente_id,
           comprobante_ids: bonificables,
           pago_id: pagoId,
+          fraccion_por_comprobante: fraccionPorComprobante,
         })
         if (r.total_bonificacion > 0) result.bonificacion = { total: r.total_bonificacion }
         if (r.advertencias?.length) result.bonificacion_error = r.advertencias.join(" · ")

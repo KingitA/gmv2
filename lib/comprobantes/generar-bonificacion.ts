@@ -74,6 +74,11 @@ export interface ParamsBonificacion {
   comprobante_ids: string[]
   /** Si se provee, se crean imputaciones ligando las NC/REV a este pago */
   pago_id?: string
+  /** Fracción (0..1) de cada comprobante que se está saldando en ESTE cobro.
+   *  La NC sale por el 10% de ESA parte (regla 01/10: nunca sobre el total
+   *  histórico ni sobre entregas no tildadas). Sin entrada para un id, o sin
+   *  el mapa (facturación de pedido con anticipo 90%): fracción 1 (total). */
+  fraccion_por_comprobante?: Record<string, number>
 }
 
 async function getNextNumero(
@@ -366,6 +371,12 @@ export async function generarBonificacionContado(
   // anulación de ese pago revierte SOLO su bonificación (fix Gioventu 01/10).
   const { cliente_id, comprobante_ids, pago_id } = params
   const marcaOrigen = pago_id ? ` ${marcaPagoBonif(pago_id)}` : ""
+  // Qué parte de cada comprobante bonifica ESTE cobro (1 = el total, legado)
+  const fraccionDe = (compId: string): number => {
+    const f = params.fraccion_por_comprobante?.[compId]
+    if (f == null || !isFinite(f)) return 1
+    return Math.min(1, Math.max(0, f))
+  }
 
   if (!comprobante_ids || comprobante_ids.length === 0) {
     return { total_bonificacion: 0, comprobantes_generados: [] }
@@ -423,7 +434,7 @@ export async function generarBonificacionContado(
 
     const lineas = presupuestos.map(c => ({
       descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
-      precio_neto: r2(Math.abs(c.total_factura) * DESCUENTO_CONTADO_PCT / 100),
+      precio_neto: r2(Math.abs(c.total_factura) * (DESCUENTO_CONTADO_PCT / 100) * fraccionDe(c.id)),
     }))
 
     const totalNeto = r2(lineas.reduce((s, l) => s + l.precio_neto, 0))
@@ -536,12 +547,12 @@ export async function generarBonificacionContado(
     // → la NC devuelve exactamente el 10% del total facturado.
     const lineas = facturas.map(c => ({
       descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
-      precio_neto: r2(Math.abs(c.total_neto) * DESCUENTO_CONTADO_PCT / 100),
+      precio_neto: r2(Math.abs(c.total_neto) * (DESCUENTO_CONTADO_PCT / 100) * fraccionDe(c.id)),
     }))
     const totalNeto = r2(lineas.reduce((s, l) => s + l.precio_neto, 0))
     const totalIva = r2(totalNeto * IVA_PCT)
-    const percepIva = r2(facturas.reduce((s, c) => s + Math.abs(Number(c.percepcion_iva ?? 0)), 0) * DESCUENTO_CONTADO_PCT / 100)
-    const percepIibb = r2(facturas.reduce((s, c) => s + Math.abs(Number(c.percepcion_iibb ?? 0)), 0) * DESCUENTO_CONTADO_PCT / 100)
+    const percepIva = r2(facturas.reduce((s, c) => s + Math.abs(Number(c.percepcion_iva ?? 0)) * fraccionDe(c.id), 0) * DESCUENTO_CONTADO_PCT / 100)
+    const percepIibb = r2(facturas.reduce((s, c) => s + Math.abs(Number(c.percepcion_iibb ?? 0)) * fraccionDe(c.id), 0) * DESCUENTO_CONTADO_PCT / 100)
     const totalTrib = r2(percepIva + percepIibb)
     const totalFactura =
       (Math.round(totalNeto * 100) + Math.round(totalIva * 100) + Math.round(percepIva * 100) + Math.round(percepIibb * 100)) / 100

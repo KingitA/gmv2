@@ -288,7 +288,7 @@ export async function POST(request: NextRequest) {
       ? repartirImputacionesContado(
           debitosNetos,
           montoTotal,
-          await bonificacionPendientePorComprobante(supabase, cliente_id, debitosNetos.map((i: any) => i.comprobante_id)),
+          await bonificacionPendientePorComprobante(supabase, cliente_id, debitosNetos),
         )
       : recortarImputaciones(debitosNetos, montoTotal, "secuencial")
 
