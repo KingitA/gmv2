@@ -36,30 +36,59 @@ export interface ClienteViaje {
   viaje_estado: string
 }
 
-export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: string, clienteId: string, viajeEstado: string): Promise<ClienteViaje> {
-  // Pedido del viaje para este cliente
-  const { data: pedido } = await supabase
-    .from("pedidos")
-    .select(`
-      id, numero_pedido, fecha, estado, total, bultos, observaciones,
-      clientes(nombre, razon_social, direccion, telefono, cuit, condicion_pago)
-    `)
-    .eq("viaje_id", viajeId)
-    .eq("cliente_id", clienteId)
-    .maybeSingle()
+/** `timestamp` sin zona (la base lo guarda en UTC) → ISO con Z: si no, el equipo lo lee como hora local. */
+const comoUtc = (s: string | null | undefined) => (s && !/(Z|[+-]\d\d:?\d\d)$/.test(s) ? `${s}Z` : s)
 
-  // Detalle del pedido (artículos)
+export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: string, clienteId: string, viajeEstado: string): Promise<ClienteViaje> {
+  // Pedidos del viaje para este cliente. Pueden ser VARIOS (dos pedidos del mismo cliente en la
+  // parada) o ninguno (cliente agregado a un cobro conjunto, o parada "solo cobrar"): antes se leía
+  // con maybeSingle() y con dos pedidos la ficha quedaba sin pedido NI nombre del cliente.
+  const [{ data: pedidosCli }, { data: cli }] = await Promise.all([
+    supabase
+      .from("pedidos")
+      .select("id, numero_pedido, fecha, estado, total, bultos, observaciones")
+      .eq("viaje_id", viajeId)
+      .eq("cliente_id", clienteId)
+      .neq("estado", "eliminado")
+      .order("numero_pedido", { ascending: true }),
+    supabase.from("clientes").select("nombre, razon_social, nombre_razon_social, direccion, telefono, cuit, condicion_pago").eq("id", clienteId).maybeSingle(),
+  ])
+  const pedidos = pedidosCli || []
+  const cliente = cli
+    ? {
+        nombre: cli.nombre || cli.nombre_razon_social || cli.razon_social || null,
+        razon_social: cli.razon_social || cli.nombre_razon_social || null,
+        direccion: cli.direccion,
+        telefono: cli.telefono,
+        cuit: cli.cuit,
+        condicion_pago: cli.condicion_pago,
+      }
+    : null
+
+  // Detalle de los pedidos (artículos), con el pedido de cada renglón
   let pedido_detalle: any[] = []
-  if (pedido) {
+  if (pedidos.length) {
     const { data: detalle } = await supabase
       .from("pedidos_detalle")
       .select(`
-        id, cantidad, precio_final, subtotal, es_bonificado,
+        id, pedido_id, cantidad, precio_final, subtotal, es_bonificado,
         articulo_id, articulos(sku, descripcion, unidades_por_bulto)
       `)
-      .eq("pedido_id", pedido.id)
+      .in("pedido_id", pedidos.map((p) => p.id))
     pedido_detalle = detalle || []
   }
+  // La ficha muestra UN "pedido": con varios, se presentan juntos (números unidos, totales sumados)
+  const pedido = pedidos.length
+    ? {
+        id: pedidos[0].id,
+        numero_pedido: pedidos.map((p) => p.numero_pedido).join(" + "),
+        fecha: pedidos[0].fecha,
+        estado: pedidos[0].estado,
+        total: pedidos.reduce((s, p) => s + (Number(p.total) || 0), 0),
+        bultos: pedidos.reduce((s, p) => s + (Number(p.bultos) || 0), 0),
+        observaciones: pedidos.map((p) => p.observaciones).filter(Boolean).join(" · ") || null,
+      }
+    : null
 
   // Comprobantes pendientes del cliente (saldo anterior)
   const { data: comprobantes } = await supabase
@@ -100,7 +129,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
   const total_cobrado = (pagos_registrados || []).reduce((s, p) => s + Number(p.monto), 0)
 
   return {
-    cliente: pedido?.clientes || null,
+    cliente,
     pedido: pedido
       ? {
           id: pedido.id,
@@ -115,7 +144,7 @@ export async function cargarClienteViaje(supabase: SupabaseClient, viajeId: stri
       : null,
     comprobantes_pendientes: comprobantes || [],
     devoluciones: devoluciones || [],
-    pagos_registrados: pagos_registrados || [],
+    pagos_registrados: (pagos_registrados || []).map((p) => ({ ...p, created_at: comoUtc(p.created_at) })),
     resumen: {
       saldo_anterior,
       saldo_real: saldos.saldo_real,

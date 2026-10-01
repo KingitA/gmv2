@@ -30,14 +30,21 @@ function autoFormat(raw: string): string {
 function displayToISO(display: string): string {
   const parts = display.split("/")
   if (parts.length !== 3 || parts[0].length !== 2 || parts[1].length !== 2 || parts[2].length !== 4) return ""
+  // Fecha imposible (31/02, mes 13…): no se emite — antes pasaba tal cual y el servidor la corría de mes
+  const [d, m, y] = parts.map(Number)
+  const f = new Date(Date.UTC(y, m - 1, d))
+  if (f.getUTCFullYear() !== y || f.getUTCMonth() !== m - 1 || f.getUTCDate() !== d) return ""
   return `${parts[2]}-${parts[1]}-${parts[0]}`
 }
 
 export function DateInputAR({ value, onChange, placeholder = "DD/MM/AAAA", className, disabled }: Props) {
   const [display, setDisplay] = useState(() => isoToDisplay(value))
 
+  // Sincroniza con el valor externo SOLO si difiere de lo que hay escrito: mientras se tipea una
+  // fecha incompleta el valor emitido es "" y no tiene que borrar lo tipeado (pasaba al editar una
+  // fecha ya cargada: el primer retroceso vaciaba el campo).
   useEffect(() => {
-    setDisplay(isoToDisplay(value))
+    setDisplay((actual) => (displayToISO(actual) === value ? actual : isoToDisplay(value)))
   }, [value])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

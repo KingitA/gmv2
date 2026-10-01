@@ -11,6 +11,7 @@ export default defineConfig({
       "@gm/deposito": r("../../../lib/deposito/bonificados.ts"),
       "@gm/vendedor": r("../../../lib/vendedor/isomorfico.ts"),
       "@gm/cheques": r("../../../lib/cheques/isomorfico.ts"),
+      "@gm/cobro/conjunto": r("../../../lib/cobranzas/cobro-conjunto.ts"),
       "@gm/cobro": r("../../../lib/cobranzas/reglas-cobro.ts"),
       "@gm/core": r("./src/index.ts"),
     },

@@ -9,6 +9,7 @@
 
 import type { ItemOutbox } from "@gm/core"
 import { cierreDeParadaPorCobro } from "@gm/cobro"
+import { montoDelPrincipal, repartirMetodos } from "@gm/cobro/conjunto"
 import type {
   BilleteraData, ClienteViajeRow, DineroHoja, MetodoPayload, OpCobrar, OpCobroAnular, OpDevolucion, OpFinalizar, OpGasto, OpIniciar, OpParada,
   PagoHoja, ParadaHoja, ViajeDetalle,
@@ -28,6 +29,23 @@ const suma = (metodos: MetodoPayload[] | undefined, tipo?: string) =>
 /** Cobrado sin enviar por cliente dentro de un viaje (titular + clientes extra del cobro conjunto). */
 function cobrosDelViaje(ops: ItemOutbox[], viajeId: string) {
   return de<OpCobrar>(vivas(ops), "viaje.cobrar").filter((x) => x.p.viaje_id === viajeId)
+}
+
+/**
+ * Reparto de un cobro entre sus clientes (misma función que usa el servidor): el principal y cada
+ * cliente agregado con SU monto y SUS medios de pago. Sin agregados, todo es del principal.
+ */
+export function partesDelCobro(p: OpCobrar): Array<{ cliente_id: string; monto: number; metodos: MetodoPayload[]; principal: boolean }> {
+  const extras = p.clientes_extra || []
+  if (!extras.length) return [{ cliente_id: p.cliente_id, monto: r2(Number(p.monto_total)), metodos: p.metodos, principal: true }]
+  const montos = [montoDelPrincipal(Number(p.monto_total), extras.map((e) => Number(e.monto))), ...extras.map((e) => Number(e.monto))]
+  let reparto: MetodoPayload[][]
+  try {
+    reparto = repartirMetodos(p.metodos, montos)
+  } catch {
+    reparto = montos.map((m) => [{ tipo: "efectivo", monto: m }])
+  }
+  return montos.map((monto, i) => ({ cliente_id: i === 0 ? p.cliente_id : extras[i - 1]!.cliente_id, monto: r2(monto), metodos: reparto[i] || [], principal: i === 0 }))
 }
 
 // ─── Viaje (hoja de ruta) ────────────────────────────────────────────────────
@@ -93,10 +111,12 @@ export function viajeVisible(v: ViajeDetalle, ops: ItemOutbox[]): ViajeVista {
   // Cobros hechos acá (cliente principal + clientes extra del cobro conjunto)
   for (const { op, p } of cobrosDelViaje(ops, v.id)) {
     sinEnviar.cobros++
-    const principal = porCliente.get(p.cliente_id)
-    if (principal) {
-      principal.cobrado = r2(principal.cobrado + Number(p.monto_total))
-      principal.pagos.push(pagoLocal(op, Number(p.monto_total), p.metodos, p))
+    // Cobro conjunto: cada cliente ve SU parte (el principal ya no se lleva todo el monto)
+    for (const parte of partesDelCobro(p)) {
+      const par = porCliente.get(parte.cliente_id)
+      if (!par) continue
+      par.cobrado = r2(par.cobrado + parte.monto)
+      par.pagos.push(pagoLocal(op, parte.monto, parte.metodos, parte.principal ? p : { contado_general: false, ajuste_redondeo: 0 }))
     }
     sumarDinero(p.metodos, 1)
     for (const ex of p.cobros_extra || []) {
@@ -222,18 +242,22 @@ export function clienteVisible(c: ClienteViajeRow, ops: ItemOutbox[]): ClienteVi
   for (const { op, p } of cobrosDelViaje(ops, c.viaje_id)) {
     const propio = p.cliente_id === c.cliente_id
     const extra = (p.cobros_extra || []).find((x) => x.cliente_id === c.cliente_id)
-    if (!propio && !extra) continue
-    const monto = propio ? Number(p.monto_total) : suma(extra!.metodos)
+    // Cliente AGREGADO a un cobro conjunto: lleva su propia selección, que se reserva igual
+    const agregado = (p.clientes_extra || []).find((x) => x.cliente_id === c.cliente_id)
+    if (!propio && !extra && !agregado) continue
+    const parte = partesDelCobro(p).find((x) => x.cliente_id === c.cliente_id)
+    const monto = extra ? suma(extra.metodos) : parte ? parte.monto : Number(p.monto_total)
     out.pagos_registrados = [{ id: idLocal(op.key), monto: r2(monto), estado: "pendiente_rendicion", created_at: op.capturadoAt, local: { opKey: op.key, estado: op.estado, error: op.error } }, ...out.pagos_registrados]
     out.resumen.total_cobrado = r2(out.resumen.total_cobrado + monto)
-    if (propio) {
+    const seleccion = propio ? p : agregado
+    if (seleccion) {
       // Lo imputado sin señal queda RESERVADO: no se puede cobrar dos veces el mismo comprobante
-      const imp = new Map(p.imputaciones.map((i) => [i.comprobante_id, Number(i.monto_imputado) || 0]))
+      const imp = new Map(seleccion.imputaciones.map((i) => [i.comprobante_id, Number(i.monto_imputado) || 0]))
       out.cobro.comprobantes = out.cobro.comprobantes.map((k) => (imp.has(k.id) ? { ...k, en_cobro: r2((k.en_cobro || 0) + imp.get(k.id)!) } : k))
-      const anticipados = new Set(p.pedidos_contado || [])
+      const anticipados = new Set(seleccion.pedidos_contado || [])
       out.cobro.pedidos = out.cobro.pedidos.map((k) => (anticipados.has(k.id) ? { ...k, pago_contado_10: true, anticipo_pago_id: k.anticipo_pago_id || idLocal(op.key) } : k))
       // Devoluciones descontadas en el cobro dejan de estar pendientes de descuento
-      const dev = new Set(p.devolucion_ids || [])
+      const dev = new Set(seleccion.devolucion_ids || [])
       out.devoluciones = out.devoluciones.map((d) => (dev.has(d.id) ? { ...d, estado: "descontada_sin_enviar" } : d))
     }
   }
@@ -301,17 +325,25 @@ export function billeteraVisible(b: BilleteraData, ops: ItemOutbox[]): Billetera
   const out: BilleteraData = { ...b, desglose: { ...b.desglose }, cobros: [...b.cobros], gastos: [...b.gastos] }
   // Cobros: los vivos suman plata; los rechazados se listan (para que no pasen inadvertidos) sin sumar
   for (const { op, p } of de<OpCobrar>(ops, "viaje.cobrar")) {
-    const todos = [{ cliente_nombre: p.cliente_nombre, metodos: p.metodos }, ...(p.cobros_extra || []).map((x) => ({ cliente_nombre: x.cliente_nombre || "Cliente", metodos: x.metodos }))]
-    for (const c of todos) {
-      const rechazado = op.estado === "rechazado"
-      if (!rechazado) {
-        const ef = suma(c.metodos, "efectivo"), ch = suma(c.metodos, "cheque"), tr = suma(c.metodos, "transferencia")
+    const rechazado = op.estado === "rechazado"
+    // La PLATA se cuenta una vez por medio físico (un cheque repartido entre dos clientes es UN cheque)
+    if (!rechazado) {
+      for (const metodos of [p.metodos, ...(p.cobros_extra || []).map((x) => x.metodos)]) {
+        const ef = suma(metodos, "efectivo"), ch = suma(metodos, "cheque"), tr = suma(metodos, "transferencia")
         out.efectivo = r2(out.efectivo + ef)
         out.desglose.cobros_efectivo = r2(out.desglose.cobros_efectivo + ef)
         out.desglose.cheques_monto = r2(out.desglose.cheques_monto + ch)
         out.desglose.transferencias = r2(out.desglose.transferencias + tr)
-        out.cheques_cantidad += c.metodos.filter((m) => m.tipo === "cheque").length
+        out.cheques_cantidad += metodos.filter((m) => m.tipo === "cheque").length
       }
+    }
+    // La LISTA muestra un renglón por cliente, con su parte (cobro conjunto) o su monto (legado)
+    const nombreExtra = new Map((p.clientes_extra || []).map((x) => [x.cliente_id, x.cliente_nombre || "Cliente"]))
+    const todos = [
+      ...partesDelCobro(p).map((x) => ({ cliente_nombre: x.principal ? p.cliente_nombre : nombreExtra.get(x.cliente_id) || "Cliente", metodos: x.metodos })),
+      ...(p.cobros_extra || []).map((x) => ({ cliente_nombre: x.cliente_nombre || "Cliente", metodos: x.metodos })),
+    ]
+    for (const c of todos) {
       out.cobros.unshift({
         id: `${idLocal(op.key)}:${c.cliente_nombre}`,
         fecha: op.capturadoAt,

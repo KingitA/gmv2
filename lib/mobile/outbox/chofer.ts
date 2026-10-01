@@ -123,7 +123,7 @@ const viajeCobrar: HandlerDef<Record<string, any>> = {
       params: { id: viaje_id },
       body: { ...resto, comprobante_urls, idempotency_key: m.idempotency_key },
     })
-    const clienteIds = [resto.cliente_id, ...((resto.cobros_extra as any[]) || []).map((c) => c?.cliente_id)].filter(esUuid)
+    const clienteIds = [resto.cliente_id, ...((resto.cobros_extra as any[]) || []).map((c) => c?.cliente_id), ...((resto.clientes_extra as any[]) || []).map((c) => c?.cliente_id)].filter(esUuid)
     return { ...r, replica: await parches(() => parcheViaje(ctx, viaje_id), () => parcheClientes(ctx, viaje_id, clienteIds), () => parcheBilletera(ctx)) }
   },
 }

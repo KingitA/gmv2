@@ -303,8 +303,22 @@ export interface OpCobrar {
   pedidos_anticipo?: Array<{ pedido_id: string; monto: number }>
   contado_general: boolean
   ajuste_redondeo: number
+  /** Legado (APK ≤ 0.2.1): otro cliente con un monto en efectivo a cuenta. Las apps nuevas mandan `clientes_extra`. */
   cobros_extra: Array<{ cliente_id: string; cliente_nombre?: string; metodos: MetodoPayload[]; imputaciones: [] }>
+  /** Cobro conjunto: clientes agregados, cada uno con su selección. El servidor reparte `metodos` entre todos. */
+  clientes_extra?: OpClienteExtra[]
   fotos_pendientes: Array<{ b64: string; mime: string; nombre: string }>
+}
+export interface OpClienteExtra {
+  cliente_id: string
+  cliente_nombre?: string
+  /** Lo que se le cobra a este cliente (parte de `monto_total`) */
+  monto: number
+  imputaciones: Array<{ comprobante_id: string; monto_imputado: number }>
+  devolucion_ids: string[]
+  pedidos_contado: string[]
+  pedidos_anticipo: Array<{ pedido_id: string; monto: number }>
+  contado_general: boolean
 }
 export interface OpCobroAnular { viaje_id: string; pago_id: string; cliente_id: string }
 export interface ItemDevolucion {
