@@ -46,8 +46,8 @@ export function Cliente() {
   const enCurso = esEnCurso(estadoViaje)
   const puedeCobrar = !esReadOnly && ESTADOS_COBRABLES.includes(estadoViaje)
   const rechazos = rechazosDe(ops, "viaje.", viajeId).filter((it) => {
-    const p = it.payload as { cliente_id?: string; cobros_extra?: Array<{ cliente_id?: string }> } | null
-    return p?.cliente_id === clienteId || !!p?.cobros_extra?.some((c) => c.cliente_id === clienteId)
+    const p = it.payload as { cliente_id?: string; cobros_extra?: Array<{ cliente_id?: string }>; clientes_extra?: Array<{ cliente_id?: string }> } | null
+    return p?.cliente_id === clienteId || !!p?.cobros_extra?.some((c) => c.cliente_id === clienteId) || !!p?.clientes_extra?.some((c) => c.cliente_id === clienteId)
   })
   const pagoAnular = anular.valor ? pagos_registrados.find((p) => p.id === anular.valor) ?? null : null
 

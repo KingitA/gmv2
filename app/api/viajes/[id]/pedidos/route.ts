@@ -102,6 +102,10 @@ export async function GET(
       }
     }
 
+    // Candidatos ordenados por NÚMERO de pedido (salían por fecha y, dentro del día, mezclados:
+    // #205, 211, 209, 224…). La consulta sigue pidiendo los más viejos primero por el tope de 500.
+    candidatos.sort((a, b) => String(a.numero_pedido).localeCompare(String(b.numero_pedido), "es", { numeric: true }))
+
     return NextResponse.json({
       editable: viajeEditable(viaje.estado),
       pedidos: (asignados || []).map(forma),

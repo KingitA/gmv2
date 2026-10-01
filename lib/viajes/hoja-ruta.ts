@@ -202,6 +202,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
             .from("comprobantes_venta")
             .select("id, pedido_id, tipo_comprobante, punto_venta, numero_comprobante, total_factura, saldo_pendiente")
             .in("pedido_id", pedidoIds)
+            .in("tipo_comprobante", ["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
             .is("anulado_en", null)
             .neq("estado_pago", "anulado")
         : Promise.resolve({ data: [] as any[] }),

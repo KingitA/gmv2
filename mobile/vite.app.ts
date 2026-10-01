@@ -28,6 +28,7 @@ export function configApp(appDir: string, puerto: number): UserConfigFnObject {
           "@gm/cheques/foto": resolve(RAIZ_REPO, "lib/cheques/foto.ts"),
           "@gm/cheques": resolve(RAIZ_REPO, "lib/cheques/isomorfico.ts"),
           // Reglas puras del cobro en la calle (10% solo a lo seleccionado, tope de ajuste): mismas que el servidor
+          "@gm/cobro/conjunto": resolve(RAIZ_REPO, "lib/cobranzas/cobro-conjunto.ts"),
           "@gm/cobro": resolve(RAIZ_REPO, "lib/cobranzas/reglas-cobro.ts"),
         },
       },

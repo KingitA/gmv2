@@ -14,21 +14,144 @@ import { bonificacionPendientePorComprobante } from "@/lib/cobranzas/bonif-pendi
 import { ErrorReglaCobranza, mensajeParaUsuario } from "@/lib/cobranzas/errores"
 import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
+import { claveDelCliente, montoDelPrincipal, repartirMetodos, validarCobroConjunto } from "@/lib/cobranzas/cobro-conjunto"
+import { anularCobranza } from "@/lib/actions/cobranzas"
+import type { User } from "@supabase/supabase-js"
 
 // POST /api/chofer/viaje/[id]/cobro
 // Registra un cobro del chofer con estado='pendiente_rendicion'.
 // Crea imputaciones en estado='pendiente' - se confirman al aprobar la rendición.
+//
+// Con `clientes_extra` es un COBRO CONJUNTO (lib/cobranzas/cobro-conjunto.ts): los mismos medios
+// de pago cubren a varios clientes; cada cliente lleva su propia selección (comprobantes, pedidos,
+// 10 %, devoluciones) y queda UN pago por cliente bajo una cabecera `cobranzas`.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
+  const { id: viajeId } = await params
+  let body: any
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: "Cuerpo inválido" }, { status: 400 })
+  }
+  if (Array.isArray(body?.clientes_extra) && body.clientes_extra.length) return cobrarConjunto(auth.user, viajeId, body)
+  return cobrarUno(auth.user, viajeId, body)
+}
 
+/** Opciones internas del cobro conjunto (no vienen del cliente HTTP). */
+interface OpcionesInternas {
+  /** Cabecera que agrupa los pagos del cobro conjunto */
+  cobranzaId?: string | null
+  /** Cliente agregado: su parada NO se cierra (el chofer no estuvo ahí) */
+  esClienteAgregado?: boolean
+}
+
+// ─── Cobro conjunto ──────────────────────────────────────────────────────────
+// Los clientes agregados se registran PRIMERO y el principal al final: así la parada (que cierra
+// el pago del principal) solo se cierra cuando todo lo demás ya entró. Si uno falla, los pagos
+// ya creados en este envío se anulan (reversa completa) y se devuelve el error: nunca queda medio
+// cheque registrado.
+async function cobrarConjunto(user: User, viajeId: string, body: any) {
+  const extras: any[] = body.clientes_extra
+  const total = Number(body.monto_total)
+  const motivo = validarCobroConjunto(String(body.cliente_id || ""), total, extras.map((e) => ({ cliente_id: String(e?.cliente_id || ""), monto: Number(e?.monto) })))
+  if (motivo) return NextResponse.json({ error: motivo, mensaje: motivo, codigo: "regla_negocio", reintentable: false }, { status: 422 })
+
+  const montos = [montoDelPrincipal(total, extras.map((e) => Number(e.monto))), ...extras.map((e) => Number(e.monto))]
+  let reparto: any[][]
+  try {
+    reparto = repartirMetodos(body.metodos || [], montos)
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message, mensaje: e.message, codigo: "regla_negocio", reintentable: false }, { status: 422 })
+  }
+
+  const supabase = await createClient()
+  const claves = montos.map((_, i) => claveDelCliente(body.idempotency_key, i))
+
+  // Cabecera: una por envío. En un reintento se reutiliza la del primer pago que ya exista.
+  let cobranzaId: string | null = null
+  const clavesValidas = claves.filter((k): k is string => !!k)
+  if (clavesValidas.length) {
+    const { data: previos } = await supabase.from("pagos_clientes").select("cobranza_id").in("idempotency_key", clavesValidas).not("cobranza_id", "is", null).limit(1)
+    cobranzaId = previos?.[0]?.cobranza_id ?? null
+  }
+  if (!cobranzaId) {
+    const { data: cab, error: cabErr } = await supabase
+      .from("cobranzas")
+      .insert({ fecha: todayArgentina(), estado: "pendiente", origen: "VIAJE", viaje_id: viajeId, cobrador_id: user.id, total, observaciones: body.observaciones || null, creado_por: user.id })
+      .select("id")
+      .single()
+    if (cabErr) return NextResponse.json({ error: cabErr.message }, { status: 500 })
+    cobranzaId = cab.id
+  }
+
+  const creados: string[] = []
+  const pagos: Array<{ cliente_id: string; pago_id: string; monto: number; dedup?: boolean }> = []
+  const avisos: string[] = []
+  const deshacer = async () => {
+    for (const pagoId of creados) {
+      try {
+        await anularCobranza(supabase, { pagoId, usuarioId: user.id, motivo: "Cobro conjunto incompleto: otro cliente del mismo envío fue rechazado" })
+      } catch (e: any) {
+        console.error("[chofer/cobro] no se pudo deshacer el pago", pagoId, e?.message)
+      }
+    }
+  }
+
+  // Agregados primero (índices 1..n), principal al final
+  const orden = [...extras.map((_, i) => i + 1), 0]
+  let respuestaPrincipal: any = null
+  for (const i of orden) {
+    const esPrincipal = i === 0
+    const ex = esPrincipal ? null : extras[i - 1]
+    const cuerpo = esPrincipal
+      ? { ...body, monto_total: montos[0], metodos: reparto[0], clientes_extra: undefined, cobros_extra: undefined, idempotency_key: claves[0] }
+      : {
+          cliente_id: ex.cliente_id,
+          monto_total: montos[i],
+          metodos: reparto[i],
+          imputaciones: ex.imputaciones || [],
+          devolucion_ids: ex.devolucion_ids || [],
+          pedidos_contado: ex.pedidos_contado || [],
+          pedidos_anticipo: ex.pedidos_anticipo,
+          contado_general: !!ex.contado_general,
+          ajuste_redondeo: 0, // la diferencia del cobro es siempre del cliente principal
+          observaciones: body.observaciones,
+          comprobante_urls: [], // las fotos van con el pago del principal
+          idempotency_key: claves[i],
+        }
+    const res = await cobrarUno(user, viajeId, cuerpo, { cobranzaId, esClienteAgregado: !esPrincipal })
+    const datos: any = await res.json().catch(() => ({}))
+    if (!res.ok || !datos.success) {
+      await deshacer()
+      const quien = esPrincipal ? "" : ` (cliente agregado ${i})`
+      const texto = `${datos.mensaje || datos.error || "No se pudo registrar el cobro"}${quien}`
+      return NextResponse.json({ ...datos, error: texto, mensaje: texto }, { status: res.status >= 400 ? res.status : 500 })
+    }
+    if (!datos.dedup) creados.push(datos.pago_id)
+    pagos.push({ cliente_id: cuerpo.cliente_id, pago_id: datos.pago_id, monto: montos[i], ...(datos.dedup ? { dedup: true } : {}) })
+    if (datos.aviso_contado) avisos.push(datos.aviso_contado)
+    if (esPrincipal) respuestaPrincipal = datos
+  }
+
+  return NextResponse.json({
+    ...respuestaPrincipal,
+    cobranza_id: cobranzaId,
+    pagos,
+    aviso_contado: avisos.join(" ") || null,
+    mensaje: `Cobro conjunto registrado: ${pagos.length} clientes. Se imputará al confirmar la rendición del viaje.`,
+  })
+}
+
+// ─── Un cliente ──────────────────────────────────────────────────────────────
+async function cobrarUno(user: User, viajeId: string, body: any, interno: OpcionesInternas = {}) {
+  const auth = { user }
   try {
     const supabase = await createClient()
-    const { id: viajeId } = await params
-    const body = await request.json()
 
     const {
       cliente_id,
@@ -191,6 +314,7 @@ export async function POST(
       cliente_id,
       vendedor_id: null, // chofer = usuario (profiles), no vendedor; se traza por creado_por/viaje
       viaje_id: viajeId,
+      cobranza_id: interno.cobranzaId ?? null,
       cobrador_tipo: "chofer",
       monto: Number(monto_total),
       fecha_pago: todayArgentina(),
@@ -324,7 +448,7 @@ export async function POST(
     // mercadería). Nunca pisa un resultado ya cargado y nunca hace fallar el cobro: la plata ya
     // está registrada; si esto falla la parada queda en "Visitados · falta cerrar la parada".
     let paradaCerrada: string | null = null
-    if (["despachado", "en_curso"].includes(viaje.estado)) {
+    if (!interno.esClienteAgregado && ["despachado", "en_curso"].includes(viaje.estado)) {
       try {
         const { data: fila } = await supabase
           .from("viajes_paradas")

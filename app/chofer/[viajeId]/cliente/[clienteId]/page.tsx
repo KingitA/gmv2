@@ -6,6 +6,8 @@ import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { createClient as createClientBrowser } from "@/lib/supabase/client"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
+import { CuentaAgregada, type ResumenAgregado } from "@/components/chofer/cuenta-agregada"
+import { montoDelPrincipal, validarCobroConjunto } from "@/lib/cobranzas/cobro-conjunto"
 import { DateInputAR } from "@/components/ui/date-input-ar"
 import { dejarAvisoPagina, useAvisoInline } from "@/components/pagos/aviso-inline"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
@@ -140,7 +142,14 @@ export default function ClienteEntregaPage() {
   // después de cerrar el formulario lo avisa el layout (AvisosBcraGlobal).
   const bcra = useConsultasBcra()
   // Clientes adicionales para cobrar en la misma cobranza (cobro conjunto en la calle)
-  const [cobrosExtra, setCobrosExtra] = useState<Array<{ cliente: any; saldo: number; monto: number }>>([])
+  // Cobro conjunto: clientes agregados (cada uno con su cuenta completa) y lo que se le cobra a cada uno
+  const [agregados, setAgregados] = useState<any[]>([])
+  const [resumenesExtra, setResumenesExtra] = useState<Record<string, ResumenAgregado>>({})
+  const informarResumen = useCallback((id: string, r: ResumenAgregado) => setResumenesExtra((prev) => (JSON.stringify(prev[id]) === JSON.stringify(r) ? prev : { ...prev, [id]: r })), [])
+  const quitarAgregado = useCallback((id: string) => {
+    setAgregados((prev) => prev.filter((c) => c.id !== id))
+    setResumenesExtra((prev) => { const n = { ...prev }; delete n[id]; return n })
+  }, [])
   const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())  // anticipos con 10% contado
   const [contadoGeneral, setContadoGeneral] = useState(false)                    // 10% sobre comprobantes saldados
   const [compsCargados, setCompsCargados] = useState<any[]>([])
@@ -288,14 +297,19 @@ export default function ClienteEntregaPage() {
     return Math.round(b * 100) / 100
   }
   const totalImputado = () => Object.values(comprobantesSeleccionados).reduce((s, v) => s + v, 0)
-  const totalCobro = () => {
-    // Valor en cobro (regla única): precio de factura neto del 10% si la
-    // factura fue contado, y neto de lo ya descontado en cobros previos.
+  /** Lo del cliente de la parada: seleccionado − devoluciones − 10 %.
+   *  Devoluciones por su VALOR en cobro (regla única): precio de factura neto
+   *  del 10% si la factura fue contado, y neto de lo ya descontado antes. */
+  const totalPrincipal = () => {
     const devTotal = incluirDevoluciones
       ? (data?.devoluciones || []).filter((d) => d.estado === "pendiente").reduce((s: number, d: any) => s + Number(d.valor_cobro ?? d.monto_total), 0)
       : 0
     return Math.max(0, Math.round((totalImputado() - devTotal - bonificacionEstimada()) * 100) / 100)
   }
+  const extras = () => agregados.map((c) => resumenesExtra[c.id]).filter((r): r is ResumenAgregado => !!r)
+  const totalAgregados = () => Math.round(extras().reduce((s, r) => s + r.monto, 0) * 100) / 100
+  /** Total del cobro: el cliente de la parada + los clientes agregados */
+  const totalCobro = () => Math.round((totalPrincipal() + totalAgregados()) * 100) / 100
 
   const guardarCobro = async (modoDiferencia?: "ajuste" | "saldo") => {
     // Total NETO a cobrar = comprobantes/anticipos seleccionados − devoluciones − NC 10%.
@@ -311,6 +325,15 @@ export default function ClienteEntregaPage() {
         return
       }
     }
+    // Cobro conjunto: a cada cliente agregado se le cobra EXACTAMENTE lo que suma su cuenta; lo
+    // que falte o sobre es siempre del cliente de la parada.
+    const sinImporte = agregados.find((c) => !(resumenesExtra[c.id]?.monto > 0))
+    if (sinImporte) {
+      avisar(`${sinImporte.nombre_razon_social || sinImporte.razon_social || sinImporte.nombre || "El cliente agregado"} no tiene nada para cobrar: seleccioná qué se le cobra o quitalo.`)
+      return
+    }
+    const motivoConjunto = validarCobroConjunto(clienteId, totalMetodos, extras().map((r) => ({ cliente_id: r.cliente_id, monto: r.monto })))
+    if (motivoConjunto) { avisar(motivoConjunto); return }
     // Diferencia (mismo criterio que viajante / ERP): si no da al centavo, se
     // ajusta por redondeo (tope 1% de lo imputado, oficina lo confirma al
     // rendir) o se deja saldo pendiente / a cuenta.
@@ -349,17 +372,16 @@ export default function ClienteEntregaPage() {
           pedidos_anticipo: anticiposDeSeleccion(comprobantesSeleccionados),
           contado_general: contadoGeneral && bonificacionEstimada() > 0,
           ajuste_redondeo: ajusteRedondeo,
-          cobros_extra: cobrosExtra
-            .filter((c) => c.monto > 0)
-            .map((c) => ({ cliente_id: c.cliente.id, metodos: [{ tipo: "efectivo", monto: c.monto }], imputaciones: [] })),
+          // Clientes agregados: cada uno con SU selección; el servidor reparte los medios de pago
+          ...(extras().length ? { clientes_extra: extras() } : {}),
           idempotency_key: idemKeyRef.current,
         }),
       })
       const d = await res.json()
-      if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setCobrosExtra([]); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({})
+      if (d.success) { idemKeyRef.current = crypto.randomUUID(); for (const m of metodosPago) if (esFila(m) && m.tipo === "cheque" && m.monto > 0 && !cuitValido(m.cuit_emisor)) bcra.sinCuit(m.id, { cuits: [], banco: m.banco, numero_cheque: m.numero_cheque, monto: m.monto, cliente_nombre: data?.cliente?.nombre || null }, m.cuit_emisor || null); setShowCobroSheet(false); bcra.cerrarFormulario(); setAgregados([]); setResumenesExtra({}); setMetodosPago([{ id: "1", tipo: "efectivo", monto: 0 }]); setContadoPedidos(new Set()); setContadoGeneral(false); setComprobantesSeleccionados({})
         // Vuelta a la hoja de ruta, posicionada en esta parada, con el cobro reflejado. Cobrar
         // CIERRA la parada (el servidor la deja entregada); "Cerrar parada" es para cuando no hubo cobro.
-        dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)} a ${clienteNombre}.${d.parada_cerrada === "entregado" ? " Parada entregada." : d.parada_cerrada === "solo_cobro" ? " Parada cerrada." : ""} Se imputará al confirmar la rendición.${d.aviso_contado ? ` ${d.aviso_contado}` : ""}${d.aviso_ajuste ? ` ${d.aviso_ajuste}` : ""}`)
+        dejarAvisoPagina(`✅ Cobro registrado por ${formatCurrency(totalMetodos)} a ${clienteNombre}${Array.isArray(d.pagos) && d.pagos.length > 1 ? ` y ${d.pagos.length - 1} cliente(s) más` : ""}.${d.parada_cerrada === "entregado" ? " Parada entregada." : d.parada_cerrada === "solo_cobro" ? " Parada cerrada." : ""} Se imputará al confirmar la rendición.${d.aviso_contado ? ` ${d.aviso_contado}` : ""}${d.aviso_ajuste ? ` ${d.aviso_ajuste}` : ""}`)
         router.push(`/chofer/${viajeId}#parada-${clienteId}`)
       }
       else avisar(d.mensaje || d.error || "Error al registrar cobro")
@@ -661,8 +683,13 @@ export default function ClienteEntregaPage() {
           onFotos={leerFotos}
           onReintentarSubida={reintentarSubida}
           clienteNombre={data?.cliente?.nombre || null}
-          cobrosExtra={cobrosExtra}
-          setCobrosExtra={setCobrosExtra}
+          agregados={agregados}
+          setAgregados={setAgregados}
+          onResumenAgregado={informarResumen}
+          onQuitarAgregado={quitarAgregado}
+          viajeId={viajeId}
+          totalPrincipal={totalPrincipal()}
+          totalAgregados={totalAgregados()}
           clienteId={clienteId}
           onContadoPedidosChange={setContadoPedidos}
           onClose={() => { setShowCobroSheet(false); bcra.cerrarFormulario() }}
@@ -697,8 +724,13 @@ function CobroSheet({
   onFotos,
   onReintentarSubida,
   clienteNombre,
-  cobrosExtra,
-  setCobrosExtra,
+  agregados,
+  setAgregados,
+  onResumenAgregado,
+  onQuitarAgregado,
+  viajeId,
+  totalPrincipal,
+  totalAgregados,
   clienteId,
   onContadoPedidosChange,
   onClose,
@@ -725,8 +757,13 @@ function CobroSheet({
   onFotos: (files: FileList | File[] | null | undefined, opts?: { filaId?: string }) => void
   onReintentarSubida: (filaId: string) => void
   clienteNombre: string | null
-  cobrosExtra: Array<{ cliente: any; saldo: number; monto: number }>
-  setCobrosExtra: React.Dispatch<React.SetStateAction<Array<{ cliente: any; saldo: number; monto: number }>>>
+  agregados: any[]
+  setAgregados: React.Dispatch<React.SetStateAction<any[]>>
+  onResumenAgregado: (id: string, r: ResumenAgregado) => void
+  onQuitarAgregado: (id: string) => void
+  viajeId: string
+  totalPrincipal: number
+  totalAgregados: number
   clienteId: string
   onContadoPedidosChange: (s: Set<string>) => void
   onClose: () => void
@@ -754,7 +791,6 @@ function CobroSheet({
   }, [])
 
   // Búsqueda de clientes adicionales para cobrar
-  const supabaseCli = createClientBrowser()
   const [busqCli, setBusqCli] = useState("")
   const [resCli, setResCli] = useState<any[]>([])
   useEffect(() => {
@@ -767,12 +803,10 @@ function CobroSheet({
     return () => clearTimeout(t)
   }, [busqCli])
 
-  const agregarClienteExtra = async (cli: any) => {
+  const agregarClienteExtra = (cli: any) => {
     setBusqCli(""); setResCli([])
-    if (cobrosExtra.some((c) => c.cliente.id === cli.id)) return
-    const { data: saldoRow } = await supabaseCli.from("v_saldo_clientes").select("saldo_actual").eq("cliente_id", cli.id).maybeSingle()
-    const saldo = Number((saldoRow as any)?.saldo_actual ?? 0)
-    setCobrosExtra((prev) => [...prev, { cliente: cli, saldo, monto: saldo > 0 ? saldo : 0 }])
+    if (cli.id === clienteId) return
+    setAgregados((prev) => (prev.some((c) => c.id === cli.id) ? prev : [...prev, cli]))
   }
 
   return (
@@ -808,7 +842,8 @@ function CobroSheet({
 
           {/* Agregar cliente para cobrar (cobro conjunto en la calle) */}
           <div>
-            <h3 className="font-bold text-gray-700 mb-2">Agregar cliente para cobrar</h3>
+            <h3 className="font-bold text-gray-700 mb-1">Agregar cliente para cobrar</h3>
+            <p className="text-xs text-gray-500 mb-2">Un mismo pago (por ejemplo, un cheque) puede cubrir a más de un cliente: agregalo y elegí qué se le cobra.</p>
             <input
               type="text"
               value={busqCli}
@@ -826,25 +861,9 @@ function CobroSheet({
                 ))}
               </div>
             )}
-            {cobrosExtra.map((ce, idx) => (
-              <div key={ce.cliente.id} className="mt-2 bg-gray-50 rounded-xl p-3">
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{ce.cliente.razon_social || ce.cliente.nombre_razon_social || ce.cliente.nombre}</p>
-                    <p className="text-xs text-gray-400">Saldo: {formatCurrency(ce.saldo)}</p>
-                  </div>
-                  <button onClick={() => setCobrosExtra((p) => p.filter((_, i) => i !== idx))} className="text-red-500 text-lg px-2">×</button>
-                </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-xs text-gray-500">Cobrar (efectivo):</span>
-                  <input
-                    type="number"
-                    value={ce.monto || 0}
-                    onChange={(e) => setCobrosExtra((p) => p.map((c, i) => (i === idx ? { ...c, monto: Number(e.target.value) || 0 } : c)))}
-                    className="flex-1 border-2 border-gray-200 rounded-lg px-2 py-1 text-right font-bold"
-                  />
-                </div>
-              </div>
+            {/* Cada cliente agregado con su cuenta COMPLETA (pedidos, comprobantes, 10 %, devoluciones) */}
+            {agregados.map((cli) => (
+              <CuentaAgregada key={cli.id} viajeId={viajeId} cliente={cli} onResumen={onResumenAgregado} onQuitar={onQuitarAgregado} />
             ))}
           </div>
 
@@ -891,6 +910,12 @@ function CobroSheet({
           <div className="bg-blue-50 rounded-2xl px-4 py-4 text-center">
             <p className="text-blue-600 text-sm">Total a cobrar</p>
             <p className="text-3xl font-bold text-blue-800">{formatCurrency(total)}</p>
+            {agregados.length > 0 && (
+              <p className="mt-1 text-xs text-blue-700">
+                {clienteNombre || "Cliente de la parada"}: {formatCurrency(totalPrincipal)} · clientes agregados: {formatCurrency(totalAgregados)}
+                {totalMet > 0 && <span className="block">De lo entregado, al cliente de la parada le quedan {formatCurrency(montoDelPrincipal(totalMet, [totalAgregados]))}.</span>}
+              </p>
+            )}
           </div>
 
           {/* ─── Escáner OCR Global ─── */}

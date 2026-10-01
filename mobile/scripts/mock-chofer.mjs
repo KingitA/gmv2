@@ -84,6 +84,9 @@ function reset() {
     }
     S.paradas.push({ id: uid(2000 + i), viaje_id: viajeId, cliente_id: c.id, orden: i + 1, exigir_cobro_anterior: i === 3, exigir_cobro_actual: i === 1, bloquear_entrega: i === 4, motivo_bloqueo: i === 4 ? "Debe 2 facturas" : null, nota_oficina: i === 0 ? "Entregar por el fondo, preguntar por Marta" : null, estado: "pendiente", bultos_entregados: null, motivo_no_entrega: null, motivo_no_cobro: null, resuelto_at: null })
   }
+  // Cliente de AFUERA del viaje con deuda (para el cobro conjunto): una FA y un PRES
+  S.comprobantes.push({ id: uid(4910), cliente_id: f.clientes[10].id, pedido_id: null, tipo_comprobante: "FA", numero_comprobante: "0003-00009010", fecha: "2026-09-10", total_neto: r2(20000 / 1.21), total_factura: 20000, saldo_pendiente: 20000, estado_pago: "pendiente", anulado_en: null })
+  S.comprobantes.push({ id: uid(4911), cliente_id: f.clientes[10].id, pedido_id: null, tipo_comprobante: "PRES", numero_comprobante: "0001-00009011", fecha: "2026-09-12", total_neto: 8000, total_factura: 8000, saldo_pendiente: 8000, estado_pago: "pendiente", anulado_en: null })
   // Un cobro ya registrado en el servidor (para probar la anulación de un cobro del servidor)
   S.pagos.push({ id: uid(8001), viaje_id: viajeId, cliente_id: f.clientes[5].id, monto: 5000, estado: "pendiente_rendicion", created_at: ahora(), creado_por: chofer, detalles: [{ tipo_pago: "efectivo", monto: 5000 }], imputaciones: [], observaciones: null, declarado: false })
   // Saldo de cada cliente = Σ saldos de sus comprobantes
@@ -207,7 +210,7 @@ const PARCIALES = new Set(["chofer_viajes", "chofer_viaje_clientes"])
 // ─── Operaciones ─────────────────────────────────────────────────────────────
 let MODO_BCRA = "apto", MODO_OCR = "ok", RECHAZAR_COBROS = false
 const parcheViaje = (id) => { const v = viajeDe(id); return { dataset: "chofer_viajes", upserts: v ? [filaViaje(v)] : [], deletes: v ? [] : [id] } }
-const parcheClientes = (viajeId, ids) => ({ dataset: "chofer_viaje_clientes", upserts: ids.filter((c) => S.paradas.some((p) => p.viaje_id === viajeId && p.cliente_id === c)).map((c) => filaCliente(viajeId, c)), deletes: [] })
+const parcheClientes = (viajeId, ids, incluirAjenos = false) => ({ dataset: "chofer_viaje_clientes", upserts: ids.filter((c) => incluirAjenos || S.paradas.some((p) => p.viaje_id === viajeId && p.cliente_id === c)).map((c) => filaCliente(viajeId, c)), deletes: [] })
 const parcheBilletera = () => ({ dataset: "chofer_billetera", upserts: [billetera()], deletes: [] })
 const parcheMe = (u) => ({ dataset: "chofer_me", upserts: [me(u)], deletes: [] })
 const tripulante = (viajeId) => { const v = viajeDe(viajeId); if (!v) throw new Rechazo("El viaje ya no existe."); return v }
@@ -230,6 +233,37 @@ const HANDLERS = {
     return { replica: [parcheViaje(v.id)] }
   },
   "viaje.cobrar": (u, p, m) => {
+    // COBRO CONJUNTO (= lib/cobranzas/cobro-conjunto.ts): los medios se reparten en cascada, al centavo;
+    // un pago por cliente; agregados primero y el principal al final (el que cierra la parada).
+    if (Array.isArray(p.clientes_extra) && p.clientes_extra.length) {
+      const c = (n) => Math.round((Number(n) || 0) * 100)
+      const extras = p.clientes_extra
+      const restan = [c(p.monto_total) - extras.reduce((x, e) => x + c(e.monto), 0), ...extras.map((e) => c(e.monto))]
+      if (restan[0] <= 0) throw new Rechazo("Lo entregado no alcanza para cubrir a los clientes agregados y dejarle algo al cliente de la parada.")
+      const montos = restan.map((x) => x / 100)
+      const reparto = montos.map(() => [])
+      let k = 0
+      for (const met of p.metodos || []) {
+        let queda = c(met.monto), n = 0
+        while (queda > 0 && k < restan.length) {
+          if (restan[k] <= 0) { k++; continue }
+          const toma = Math.min(queda, restan[k])
+          reparto[k].push({ ...met, monto: toma / 100, ...(met.tipo === "cheque" && n > 0 && reparto.flat().some((x) => x.numero_cheque === met.numero_cheque && c(x.monto) === toma) ? { numero_cheque: `${met.numero_cheque} (${n + 1})` } : {}) })
+          restan[k] -= toma; queda -= toma; n++
+        }
+      }
+      const pagos = []
+      for (const i of [...extras.map((_, x) => x + 1), 0]) {
+        const ex = i === 0 ? null : extras[i - 1]
+        const cuerpo = i === 0
+          ? { ...p, monto_total: montos[0], metodos: reparto[0], clientes_extra: undefined, cobros_extra: undefined }
+          : { viaje_id: p.viaje_id, cliente_id: ex.cliente_id, monto_total: montos[i], metodos: reparto[i], imputaciones: ex.imputaciones || [], devolucion_ids: ex.devolucion_ids || [], pedidos_contado: ex.pedidos_contado || [], pedidos_anticipo: ex.pedidos_anticipo, contado_general: !!ex.contado_general, ajuste_redondeo: 0, _agregado: true }
+        const r = HANDLERS["viaje.cobrar"](u, cuerpo, m)
+        pagos.push({ cliente_id: cuerpo.cliente_id, pago_id: r.pago_id, monto: montos[i] })
+      }
+      const ids = [p.cliente_id, ...extras.map((e) => e.cliente_id)]
+      return { success: true, pago_id: pagos[pagos.length - 1].pago_id, pagos, estado: "pendiente_rendicion", replica: [parcheViaje(p.viaje_id), parcheClientes(p.viaje_id, ids, true), parcheBilletera()] }
+    }
     const v = tripulante(p.viaje_id)
     if (!["despachado", "en_curso", "en_rendicion"].includes(v.estado)) throw new Rechazo("El viaje no está activo")
     if (RECHAZAR_COBROS) { RECHAZAR_COBROS = false; throw new Rechazo("cobranza_crear: el comprobante 0003-00005001 está anulado — no se puede cobrar") }
@@ -255,7 +289,7 @@ const HANDLERS = {
     for (const did of p.devolucion_ids || []) { const d = S.devoluciones.find((x) => x.id === did); if (d) d.descontada = true }
     // Cobrar CIERRA la parada (= lib/cobranzas/reglas-cobro.ts): solo si estaba pendiente y el viaje sigue en la calle
     const paCobro = S.paradas.find((x) => x.viaje_id === v.id && x.cliente_id === p.cliente_id)
-    if (paCobro && paCobro.estado === "pendiente" && ["despachado", "en_curso"].includes(v.estado)) {
+    if (!p._agregado && paCobro && paCobro.estado === "pendiente" && ["despachado", "en_curso"].includes(v.estado)) {
       const calc = parada(paCobro)
       Object.assign(paCobro, { estado: calc.pedidos.length ? "entregado" : "solo_cobro", bultos_entregados: calc.pedidos.length ? calc.bultos : null, motivo_no_entrega: null, motivo_no_cobro: calc.cobro_cumplido ? null : `Cobró $${calc.cobrado} de $${calc.minimo_exigido} exigidos (parada cerrada al registrar el cobro)`, resuelto_at: ahora() })
     }
@@ -385,6 +419,8 @@ createServer(async (req, res) => {
     if (ids.length) {
       if (!PARCIALES.has(ds)) return json(400, { error: "Este dataset no admite refresco parcial." })
       const upserts = filas.filter((f) => ids.includes(f.id))
+      // Cliente de afuera del viaje (agregado a un cobro conjunto): su ficha se arma a pedido, como en el servidor
+      if (ds === "chofer_viaje_clientes") for (const id of ids) if (!upserts.some((f) => f.id === id)) { const i = id.indexOf(":"); const fila = i > 0 ? filaCliente(id.slice(0, i), id.slice(i + 1)) : null; if (fila) upserts.push(fila) }
       return json(200, { dataset: ds, generado_at: ahora(), upserts, deletes: ids.filter((id) => !upserts.some((f) => f.id === id)) })
     }
     const hash = createHash("sha1").update(JSON.stringify(filas)).digest("base64url").slice(0, 27)
