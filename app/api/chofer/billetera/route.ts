@@ -24,7 +24,7 @@ export async function GET() {
       viajeIds.length
         ? supabase
             .from("pagos_clientes")
-            .select("id, viaje_id, cliente_id, monto, estado, created_at, clientes(nombre, razon_social, nombre_razon_social), pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque)")
+            .select("id, viaje_id, cliente_id, monto, estado, created_at, clientes(nombre, razon_social, nombre_razon_social), pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, color_cheque)")
             .in("viaje_id", viajeIds)
             .in("estado", ["pendiente_rendicion", "confirmado"])
             .order("created_at", { ascending: false })
@@ -63,6 +63,7 @@ export async function GET() {
       const detalles: any[] = p.pagos_detalle || []
       const metodos = detalles.map((d) => {
         const t = (d.tipo_pago || "").toLowerCase()
+        if (t === "cheque" && d.color_cheque === "ECHEQ") return "Echeq"
         if (t === "cheque") return `Cheque ${d.banco || ""} ${d.numero_cheque || ""}`.trim()
         if (t === "transferencia") return "Transferencia"
         if (t === "deposito") return "Depósito"
@@ -73,8 +74,9 @@ export async function GET() {
       if (sinRendir && !declarado) {
         for (const d of detalles) {
           const t = (d.tipo_pago || "").toLowerCase()
+          // Echeq = canal digital (como la transferencia): no es papel en mano
           if (t === "efectivo") efectivo += Number(d.monto)
-          else if (t === "cheque") { chequesCantidad += 1; chequesMonto += Number(d.monto) }
+          else if (t === "cheque" && d.color_cheque !== "ECHEQ") { chequesCantidad += 1; chequesMonto += Number(d.monto) }
           else transferencias += Number(d.monto)
         }
       } else if (sinRendir && declarado) enViaje += Number(p.monto)

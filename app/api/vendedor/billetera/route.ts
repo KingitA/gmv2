@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     // a oficina" y dejan la billetera en 0.
     const { data: pagosSinRendir } = await supabase
       .from("pagos_clientes")
-      .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto)")
+      .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto, color_cheque)")
       .in("vendedor_id", session.vendedorIds)
       .eq("estado", "pendiente_rendicion")
 
@@ -55,6 +55,9 @@ export async function GET(request: Request) {
       if (detalles.length) {
         for (const d of detalles) {
           const tipo = (d.tipo_pago || "").toLowerCase()
+          // Echeq = canal DIGITAL (como la transferencia): no es un papel en
+          // mano — lo acepta oficina directo en /caja, no viaja en el sobre.
+          if (tipo === "cheque" && d.color_cheque === "ECHEQ") { transferencias += Number(d.monto); continue }
           if (tipo === "efectivo") efectivo += Number(d.monto)
           else if (tipo === "cheque") { cheques += Number(d.monto); chequesCantidad += 1 }
           else transferencias += Number(d.monto)
