@@ -7,8 +7,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const auth = await requireAuth()
   if (auth.error) return auth.error
 
-  // Movimientos manuales de billetera: admin y administrativo (oficina) — es
-  // el contramovimiento documentado con el que se corrige plata.
+  // Movimientos manuales de billetera: SOLO admin (decisión del dueño 02/10).
   // FIX 02/10: el chequeo viejo consultaba columnas inexistentes
   // (usuarios_roles.rol / user_id — el esquema real es usuario_id + rol_id →
   // roles.nombre): la query fallaba siempre y el 403 rebotaba a TODOS,
@@ -18,7 +17,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     .select("roles(nombre)")
     .eq("usuario_id", auth.user.id)
   const roles = (rolesData || []).map((r: any) => r.roles?.nombre).filter(Boolean)
-  if (!roles.includes("admin") && !roles.includes("administrativo")) {
+  if (!roles.includes("admin")) {
     return NextResponse.json({ error: "Solo administradores pueden registrar movimientos manuales" }, { status: 403 })
   }
 

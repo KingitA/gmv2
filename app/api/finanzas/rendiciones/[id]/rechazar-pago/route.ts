@@ -138,6 +138,39 @@ export async function POST(
         })
         .eq("id", rendicionId)
       rendicionCancelada = true
+
+      // Compensar el SALDO DECLARADO de la rendición (modelo 20260915: al
+      // declarar se asienta la retención/el a-favor en la billetera). Sin
+      // esto, cancelar la rendición dejaba ese movimiento vivo para siempre
+      // (caso FREIJE 02/10: −$674.500 fantasma). Mismo mecanismo que
+      // rendicion_devolver del chofer, idempotente por rendición.
+      const { data: declarados } = await admin
+        .from("billetera_movimientos")
+        .select("viajante_id, monto")
+        .eq("referencia_tipo", "rendicion_saldo_declarado")
+        .eq("referencia_id", rendicionId)
+      const totalDeclarado = (declarados || []).reduce((s: number, m: any) => s + Number(m.monto), 0)
+      if (Math.abs(totalDeclarado) > 0.005) {
+        const { data: yaDevuelta } = await admin
+          .from("billetera_movimientos")
+          .select("id")
+          .eq("referencia_tipo", "rendicion_devuelta")
+          .eq("referencia_id", rendicionId)
+          .maybeSingle()
+        if (!yaDevuelta) {
+          await admin.from("billetera_movimientos").insert({
+            viajante_id: declarados![0].viajante_id,
+            tipo: totalDeclarado > 0 ? "credito" : "debito",
+            medio: "efectivo",
+            monto: -totalDeclarado,
+            concepto: `Rendición ${rendicionId.slice(0, 8)} cancelada por oficina: se anula el saldo declarado (${motivoTxt})`,
+            referencia_id: rendicionId,
+            referencia_tipo: "rendicion_devuelta",
+            fecha: nowArgentina(),
+            creado_por: auth.user.id,
+          })
+        }
+      }
     }
 
     return NextResponse.json({

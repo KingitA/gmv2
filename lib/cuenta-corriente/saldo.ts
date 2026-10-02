@@ -107,7 +107,13 @@ async function calcularBajasExtra(
         (cashBonifPorPago.get(p.id) ?? 0) +
         (paresPorPago.get(p.id) || []).reduce((s, par) => s + Number(par.monto || 0), 0) +
         (devPorPago.get(p.id) || 0)
-      extra += cubierto / 9
+      // TOPE (02/10, fantasma WENG BIAO): la NC proyectada nunca supera el 10%
+      // de los débitos del pago — la emisión capea la fracción en 1 por
+      // comprobante; sin este tope, créditos aplicados por encima del 90%
+      // proyectaban una NC imposible y el saldo mostraba un "a favor" falso.
+      let topeNC = 0
+      for (const d of debitosPorPago.get(p.id) || []) topeNC += (totalDe.get(d) ?? 0) * 0.1
+      extra += Math.min(cubierto / 9, topeNC)
       for (const par of paresPorPago.get(p.id) || []) if (par.aplicar_10) extra -= par.monto * 0.1
     }
     extra += parsearMarcaAjuste(p.observaciones)
