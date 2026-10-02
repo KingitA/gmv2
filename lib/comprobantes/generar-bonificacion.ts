@@ -32,9 +32,9 @@ import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeH
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { filtrarYaBonificados } from "@/lib/comprobantes/ya-bonificados"
+import { componentesNCFiscal, esComprobanteApertura } from "@/lib/comprobantes/nc-fiscal-componentes"
 
 const DESCUENTO_CONTADO_PCT = 10
-const IVA_PCT = 0.21
 const PUNTO_VENTA_INTERNO = "0001"
 
 function r2(n: number): number {
@@ -50,6 +50,7 @@ interface ComprobanteInput {
   total_factura: number
   percepcion_iva?: number | null
   percepcion_iibb?: number | null
+  observaciones?: string | null
 }
 
 interface ComprobanteGenerado {
@@ -385,7 +386,7 @@ export async function generarBonificacionContado(
   // Cargar comprobantes
   const { data: comprobantesRaw, error: compError } = await supabase
     .from("comprobantes_venta")
-    .select("id, cliente_id, tipo_comprobante, numero_comprobante, total_neto, total_iva, total_factura, percepcion_iva, percepcion_iibb, anulado_en")
+    .select("id, cliente_id, tipo_comprobante, numero_comprobante, total_neto, total_iva, total_factura, percepcion_iva, percepcion_iibb, observaciones, anulado_en")
     .in("id", comprobante_ids)
 
   if (compError || !comprobantesRaw) {
@@ -544,18 +545,25 @@ export async function generarBonificacionContado(
     const numero = `${puntoVentaFiscal}-${nuevoNumero.toString().padStart(8, "0")}`
 
     // Totales: 10% de CADA componente de la factura (neto, IVA, percepciones)
-    // → la NC devuelve exactamente el 10% del total facturado.
-    const lineas = facturas.map(c => ({
-      descripcion: `BONIF. ${DESCUENTO_CONTADO_PCT}% ${c.tipo_comprobante} ${c.numero_comprobante}`,
-      precio_neto: r2(Math.abs(c.total_neto) * (DESCUENTO_CONTADO_PCT / 100) * fraccionDe(c.id)),
-    }))
-    const totalNeto = r2(lineas.reduce((s, l) => s + l.precio_neto, 0))
-    const totalIva = r2(totalNeto * IVA_PCT)
-    const percepIva = r2(facturas.reduce((s, c) => s + Math.abs(Number(c.percepcion_iva ?? 0)) * fraccionDe(c.id), 0) * DESCUENTO_CONTADO_PCT / 100)
-    const percepIibb = r2(facturas.reduce((s, c) => s + Math.abs(Number(c.percepcion_iibb ?? 0)) * fraccionDe(c.id), 0) * DESCUENTO_CONTADO_PCT / 100)
+    // → la NC devuelve exactamente el 10% del total facturado. Los comprobantes
+    // migrados (APERTURA GM: total_neto = importe final, IVA sin discriminar)
+    // llevan el IVA calculado ADENTRO del 10% del total, nunca agregado encima
+    // (regla 02/10 — módulo puro nc-fiscal-componentes, con test).
+    const { lineas, totalNeto, totalIva, percepIva, percepIibb, totalFactura } = componentesNCFiscal(
+      facturas.map(c => ({
+        id: c.id,
+        tipo_comprobante: c.tipo_comprobante,
+        numero_comprobante: c.numero_comprobante,
+        total_neto: c.total_neto,
+        total_factura: c.total_factura,
+        percepcion_iva: c.percepcion_iva,
+        percepcion_iibb: c.percepcion_iibb,
+        apertura: esComprobanteApertura(c.observaciones),
+      })),
+      fraccionDe,
+      DESCUENTO_CONTADO_PCT,
+    )
     const totalTrib = r2(percepIva + percepIibb)
-    const totalFactura =
-      (Math.round(totalNeto * 100) + Math.round(totalIva * 100) + Math.round(percepIva * 100) + Math.round(percepIibb * 100)) / 100
 
     // Tributos para ARCA — mismo formato que la factura original
     const tributos = []
