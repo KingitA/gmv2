@@ -1656,6 +1656,18 @@ referencia el mismo `cheque_id` con su parte). Alcance del correctivo:
   migrar los cheques ya partidos (los " (N)" del chofer y los prorrateados del vendedor); la unicidad
   (banco + número + importe + vencimiento) vuelve a ser la del papel.
 
+**ECHEQ EN LA CAPTURA — clasificación automática por OCR (dueño, 02/10/2026, mismo batch).** Un echeq
+no es un papel: es un comprobante digital con formato propio. Regla: el OCR debe CLASIFICAR el documento
+(echeq vs cheque físico) y marcar el tipo solo — leyenda "ECHEQ"/"cheque electrónico", formato de
+comprobante bancario, numeración típica — con el campo visible y corregible por el usuario. **Nada de
+depender de que el vendedor toque un switch** (caso real GRUPO HEMA 02/10: un echeq de $16,1M cargado
+como cheque físico quedó invisible para oficina y el flag `es_echeq` apagado). Aplica a las CUATRO
+superficies (vendedor web/app, chofer web/app). Contexto backend ya resuelto en main + migración
+`20261002_cobranza_confirmar_echeq_color.sql`: `pagos_detalle.color_cheque='ECHEQ'` es marcador de
+canal (no color de dinero — el enum es BLANCO/NEGRO/PENDIENTE), la confirmación lo sanea a BLANCO y
+marca `cheques.es_echeq`; /caja lo acepta directo ("Aceptar echeq") debitando la billetera del
+cobrador sin pasar por rendición.
+
 **Ficha del cliente** (`lib/viajes/cliente-viaje.ts`): admite VARIOS pedidos del mismo cliente en el
 viaje (se leía con `maybeSingle()`: con dos, la ficha quedaba sin pedido ni nombre); el nombre sale de
 `clientes` (incluye `nombre_razon_social`); la hora de los cobros del servidor va con zona (se veía en
