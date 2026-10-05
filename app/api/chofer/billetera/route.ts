@@ -106,16 +106,13 @@ export async function GET() {
     // Convención de los MOVIMIENTOS: positivo = plata que retuvo (DEBE),
     // negativo = entregó de más (a favor). Para la UI se invierte el signo:
     // saldo_cuenta_corriente > 0 = a favor del chofer, < 0 = debe.
-    // Incluye 'rendicion_devuelta' (la anulación de una rendición devuelta
-    // por oficina): sin ella, una rendición devuelta quedaba sumando como
-    // deuda/favor fantasma para siempre (28/09: $3.583.530 de una prueba).
-    const saldoCC = r2(
-      -(movimientos || [])
-        .filter((m: any) =>
-          ["rendicion_diferencia", "rendicion_saldo_declarado", "rendicion_devuelta", "viaje_gasto_rechazado"].includes(m.referencia_tipo),
-        )
-        .reduce((s: number, m: any) => s + Number(m.monto), 0),
-    )
+    // La lista de tipos vive en lib/cobranzas/billetera-cc (única con el
+    // vendedor): rendiciones, sus compensaciones ('rendicion_devuelta' — sin
+    // ella una rendición devuelta quedaba como fantasma, 28/09: $3.583.530 de
+    // una prueba) y los ajustes 'manual' del admin. El chofer suma además sus
+    // gastos de viaje rechazados.
+    const { deudaCuentaCorriente } = await import("@/lib/cobranzas/billetera-cc")
+    const saldoCC = -deudaCuentaCorriente(movimientos || [], ["viaje_gasto_rechazado"])
 
     return NextResponse.json({
       efectivo: efectivoEnMano,
