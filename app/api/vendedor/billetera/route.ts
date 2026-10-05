@@ -91,16 +91,19 @@ export async function GET(request: Request) {
 
     const totalPendiente = comisionesPendientes.reduce((s, c) => s + Number(c.monto), 0)
 
-    // Cuenta corriente de la billetera: saldos de rendiciones (positivo =
-    // debe, negativo = a favor). Dos orígenes:
-    //  · 'rendicion_saldo_declarado': lo que retuvo/entregó de más AL DECLARAR
-    //  · 'rendicion_diferencia': declaró X y oficina contó Y (al confirmar)
+    // Cuenta corriente de la billetera: saldos de rendiciones y ajustes
+    // (positivo = debe, negativo = a favor). La lista de tipos vive en
+    // lib/cobranzas/billetera-cc (única para vendedor y chofer): incluye las
+    // compensaciones 'rendicion_devuelta' y 'manual' — sin ellas, una
+    // rendición cancelada o un ajuste del admin dejaban a la app sumando
+    // distinto que /viajantes (caso FREIJE 05/10: −$674.500 vs $0).
+    const { deudaCuentaCorriente, TIPOS_CC_BILLETERA } = await import("@/lib/cobranzas/billetera-cc")
     const { data: difs } = await supabase
       .from("billetera_movimientos")
-      .select("monto")
+      .select("monto, referencia_tipo")
       .in("viajante_id", session.vendedorIds)
-      .in("referencia_tipo", ["rendicion_diferencia", "rendicion_saldo_declarado"])
-    const deudaRendiciones = Math.round((difs ?? []).reduce((s: number, m: any) => s + Number(m.monto), 0) * 100) / 100
+      .in("referencia_tipo", [...TIPOS_CC_BILLETERA])
+    const deudaRendiciones = deudaCuentaCorriente(difs ?? [])
 
     const { data: historial, count } = await supabase
       .from("billetera_movimientos")
