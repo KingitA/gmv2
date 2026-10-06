@@ -22,6 +22,8 @@ import { obtenerTAConCache } from "@/lib/arca/cache"
 import { ultimoAutorizado, solicitarCAE } from "@/lib/arca/wsfev1"
 import { generarRemitosParaPedido, type ResultadoRemitos } from "@/lib/remitos/generar-remito"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
+import { recalcularBonificadosPedido, cuposMercaderiaPedido, etiquetasCupos } from "@/lib/pedidos/mercaderia-bonificada"
+import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
 
 type CondicionSegmento = {
   lista_precio_id: string | null
@@ -50,7 +52,7 @@ export async function POST(request: Request) {
     // Prices are already stored in pedidos_detalle (calculated when the order was created).
     // precio_final = precio al cliente con IVA incluido (siempre)
     // precio_base  = precio neto antes de IVA
-    const { data: pedido, error: pedidoError } = await supabase
+    const cargarPedido = () => supabase
       .from("pedidos")
       .select(`
         *,
@@ -60,7 +62,7 @@ export async function POST(request: Request) {
         ),
         detalle:pedidos_detalle(
           id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item, metodo_facturacion_item,
-          precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct,
+          precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct, contado, bonif_merc_origen,
           articulo:articulos!pedidos_detalle_articulo_id_fkey(
             id, descripcion, sku, iva_ventas, categoria, iva_compras, marca_id, proveedor_id, segmento_precio
           )
@@ -68,6 +70,7 @@ export async function POST(request: Request) {
       `)
       .eq("id", pedido_id)
       .single()
+    let { data: pedido, error: pedidoError } = await cargarPedido()
 
     if (pedidoError || !pedido) {
       return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 })
@@ -104,8 +107,33 @@ export async function POST(request: Request) {
       }, { status: 422 })
     }
 
+    // ─── Mercadería bonificada: unidades definitivas y cupos sin definir ───
+    // Regla del dueño (06/10/2026): antes de facturar SÍ O SÍ tiene que estar
+    // definido qué mercadería se bonifica. Un cupo con % y sin artículos elegidos
+    // bloquea la facturación (salvo que se cambie la condición del pedido).
+    await recalcularBonificadosPedido(supabase, pedido_id)
+    {
+      const { pendientes } = await cuposMercaderiaPedido(supabase, pedido_id)
+      if (pendientes.length) {
+        const etiquetas = await etiquetasCupos(supabase, pendientes)
+        return NextResponse.json({
+          error: `Falta definir la mercadería bonificada de: ${pendientes.map((o) => etiquetas[o]).join(", ")}. Elegí los artículos a regalar en el pedido (o sacá la bonificación de mercadería del pedido) antes de facturar.`,
+          error_code: "MERCADERIA_BONIFICADA_PENDIENTE",
+          cupos_pendientes: pendientes.map((o) => ({ origen: o, nombre: etiquetas[o] })),
+        }, { status: 422 })
+      }
+    }
+    ;({ data: pedido, error: pedidoError } = await cargarPedido())
+    if (pedidoError || !pedido) {
+      return NextResponse.json({ error: "Pedido no encontrado" }, { status: 404 })
+    }
+
+    // Condiciones CONGELADAS del pedido (ficha al tomarlo): pedidos nuevos ya no
+    // dependen de la ficha actual del cliente. Pedidos viejos: ficha actual.
+    const fichaPedido = leerCondicionesCliente((pedido as any).condiciones_cliente)
+
     // ─── 2. Determinar método de facturación ───
-    const metodoRaw = pedido.metodo_facturacion_pedido || pedido.cliente.metodo_facturacion || "Final"
+    const metodoRaw = pedido.metodo_facturacion_pedido || (fichaPedido ? fichaPedido.cliente.metodo_facturacion : pedido.cliente.metodo_facturacion) || "Final"
     const metodoFacturacion: MetodoFacturacion =
       metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "Factura" :
       metodoRaw === "Presupuesto" ? "Presupuesto" : "Final"
@@ -115,7 +143,7 @@ export async function POST(request: Request) {
     // se factura SIEMPRE en comprobante aparte y con la lista/método/descuentos del proveedor.
     const condProvMap = new Map<string, CondicionProveedor>()
     {
-      const { data: cliCond } = await supabase
+      const { data: cliCond } = fichaPedido ? { data: [] } : await supabase
         .from("cliente_proveedor_condicion")
         .select(CONDICION_PROVEEDOR_COLS)
         .eq("cliente_id", pedido.cliente.id)
@@ -129,7 +157,7 @@ export async function POST(request: Request) {
     // Condiciones por MARCA (ganan sobre proveedor): override del pedido > ficha del cliente
     const condMarcaMap = new Map<string, CondicionMarca>()
     {
-      const { data: cliCond } = await supabase
+      const { data: cliCond } = fichaPedido ? { data: [] } : await supabase
         .from("cliente_marca_condicion")
         .select(CONDICION_MARCA_COLS)
         .eq("cliente_id", pedido.cliente.id)
@@ -183,6 +211,10 @@ export async function POST(request: Request) {
       proveedorId: string | null
       ivaCompras: string | null
       ivaVentas: string | null
+      /** el renglón sale con 10% por pago contado (NC/REV aparte al facturar) */
+      contado: boolean
+      /** cupo de mercadería bonificada del renglón regalado */
+      origenMerc: string | null
     }
 
     const IVA_RATE = 0.21
@@ -275,65 +307,81 @@ export async function POST(request: Request) {
         proveedorId: (art as any).proveedor_id ?? null,
         ivaCompras: art.iva_compras ?? null,
         ivaVentas: art.iva_ventas ?? null,
+        contado: !esBonificado && (det as any).contado === true,
+        origenMerc: (det as any).bonif_merc_origen ?? null,
       })
     }
 
-    // ─── 4. Cargar bonificaciones general + viajante del cliente ───
-    const { data: bonificacionesCliente } = await supabase
-      .from("bonificaciones")
-      .select("tipo, porcentaje, segmento")
-      .eq("cliente_id", pedido.cliente.id)
-      .eq("activo", true)
-      .in("tipo", ["general", "viajante"])
-
-    // ─── Agrupar items por (vaEnComprobante, perfil de descuento) ───
-    // La mercadería bonificada NO se agrupa: se reparte luego entre los comprobantes
-    // normales (no-especial) proporcional al neto de cada uno, como ÚLTIMO ítem.
-    // Clave de grupo de un ítem: vaEnComprobante + perfil de descuento + segmento (marca/prov).
+    // ─── Agrupar items por (vaEnComprobante, perfil de descuento, contado, segmento) ───
+    // El perfil de descuento sale de los % GUARDADOS en cada renglón (los que se
+    // aplicaron al tomar el pedido), nunca de la ficha actual del cliente.
     // Cada segmento (marca o proveedor con condición) → su propio comprobante aparte.
+    // Contado aparte: la NC/REV del 10% se emite por comprobante entero.
+    // La mercadería bonificada NO se agrupa: va al comprobante de SU cupo (ver abajo).
     const keyDeItem = (item: typeof itemsCalculados[number]) => {
       const { cond, segKey } = segCondDe(item.marcaId, item.proveedorId)
-      const bonifProfile = cond
-        ? `seg:${cond.dto_general_pct || 0}:${cond.dto_viajante_pct || 0}`
-        : getBonifProfile(item.segmento, bonificacionesCliente || [])
-      return { key: `${item.vaEnComprobante}__${bonifProfile}__${segKey}`, esSegmento: !!cond }
+      const bonifProfile = `g:${item.bonifGeneralPct}|v:${item.bonifViajantePct}`
+      return { key: `${item.vaEnComprobante}__${bonifProfile}__${item.contado ? "contado" : "cc"}__${segKey}`, esSegmento: !!cond, segKey }
     }
 
     const grupos = new Map<string, typeof itemsCalculados>()
     const itemsBonificados: typeof itemsCalculados = []
     for (const item of itemsCalculados) {
       const { key, esSegmento } = keyDeItem(item)
-      // La mercadería bonificada de un SEGMENTO va a su propio comprobante (como último ítem).
-      // La de nivel pedido (sin segmento) se reparte luego entre los comprobantes normales.
-      if (item.esBonificado && !esSegmento) { itemsBonificados.push(item); continue }
+      if (item.esBonificado) {
+        // Pedido viejo (sin cupo): la de un SEGMENTO va a su comprobante; la de nivel pedido se reparte.
+        if (!item.origenMerc && esSegmento) {
+          if (!grupos.has(key)) grupos.set(key, [])
+          grupos.get(key)!.push(item)
+        } else {
+          itemsBonificados.push(item)
+        }
+        continue
+      }
       if (!grupos.has(key)) grupos.set(key, [])
       grupos.get(key)!.push(item)
     }
 
-    // Repartir la mercadería bonificada de NIVEL PEDIDO entre los grupos NORMALES (sin
-    // segmento), proporcional al neto de cada grupo. Cada artículo bonificado se divide y
-    // se agrega al FINAL de cada comprobante normal.
+    // Mercadería bonificada → comprobante de su cupo:
+    //  - "prov:<id>" / "marca:<id>": el comprobante aparte de ese proveedor/marca.
+    //  - "seg:<segmento>": repartida entre los comprobantes normales de ese segmento.
+    //  - "todo" (o pedido viejo): repartida entre los comprobantes normales.
+    // El reparto es proporcional al neto de cada comprobante; va como ÚLTIMO ítem.
     if (itemsBonificados.length > 0) {
       const grupoEsProv = (items: typeof itemsCalculados) =>
         !!(items[0] && segCondDe(items[0].marcaId, items[0].proveedorId).cond)
       const netoGrupo = (items: typeof itemsCalculados) => round2(items.reduce((s, i) => s + i.subtotalNeto, 0))
-      const normales = [...grupos.values()].filter(g => !grupoEsProv(g))
-      const netos = normales.map(netoGrupo)
-      const netoTotal = round2(netos.reduce((s, n) => s + n, 0))
-      if (normales.length > 0 && netoTotal > 0) {
-        for (const bonif of itemsBonificados) {
-          const Q = Math.abs(bonif.cantidad)
-          let asignado = 0
-          for (let i = 0; i < normales.length; i++) {
-            const esUltimo = i === normales.length - 1
-            const qtyG = esUltimo ? (Q - asignado) : Math.round(Q * netos[i] / netoTotal)
-            asignado += qtyG
-            if (qtyG > 0) normales[i].push({ ...bonif, cantidad: qtyG })
-          }
+      const todos = [...grupos.values()]
+      const normales = todos.filter(g => !grupoEsProv(g))
+      const repartir = (bonif: typeof itemsCalculados[number], destino: Array<typeof itemsCalculados>) => {
+        const netos = destino.map(netoGrupo)
+        const netoTotal = round2(netos.reduce((s, n) => s + n, 0))
+        if (destino.length === 0) return false
+        if (netoTotal <= 0) { destino[0].push(bonif); return true }
+        const Q = Math.abs(bonif.cantidad)
+        let asignado = 0
+        for (let i = 0; i < destino.length; i++) {
+          const esUltimo = i === destino.length - 1
+          const qtyG = esUltimo ? (Q - asignado) : Math.round(Q * netos[i] / netoTotal)
+          asignado += qtyG
+          if (qtyG > 0) destino[i].push({ ...bonif, cantidad: qtyG })
         }
-      } else if (normales.length === 0 && grupos.size > 0) {
-        // Sin grupos normales (todo especial): la bonificación va al primero como último ítem.
-        ;[...grupos.values()][0].push(...itemsBonificados)
+        return true
+      }
+      for (const bonif of itemsBonificados) {
+        const o = bonif.origenMerc || ""
+        let destino: Array<typeof itemsCalculados> = normales
+        if (o.startsWith("prov:") || o.startsWith("marca:")) {
+          const delCupo = todos.filter(g => g[0] && keyDeItem(g[0]).segKey === o)
+          if (delCupo.length) destino = delCupo
+        } else if (o.startsWith("seg:")) {
+          const delSeg = normales.filter(g => g.some(i => !i.esBonificado && i.segmento === o.slice(4)))
+          if (delSeg.length) destino = delSeg
+        }
+        if (!repartir(bonif, destino) && todos.length > 0) {
+          // Sin comprobantes del cupo (todo especial, etc.): va al primero como último ítem.
+          todos[0].push(bonif)
+        }
       }
     }
 
@@ -470,15 +518,33 @@ export async function POST(request: Request) {
     // Aplica si se pidió en la facturación (pago_contado) O si el pedido fue
     // anticipado con 10% contado (pago_contado_10): en ese caso la NC se imputa
     // al pago anticipo (anticipo_pago_id) para netear el saldo a favor.
+    // Pedido marcado DE CONTADO (ficha, segmento, proveedor/marca o "solo este
+    // pedido"): la NC/REV del 10% sale ahora, junto con la factura, por los
+    // comprobantes de esa mercadería (completa, nunca parcial). La factura no
+    // muestra el descuento: si el cliente no paga de contado, se anula la NC/REV.
+    // Un comprobante tiene UNA sola NC de contado viva (filtrarYaBonificados).
     let bonificacion = null
+    let bonificacionError: string | null = null
     const contadoPorAnticipo = !!(pedido as any).pago_contado_10
-    if ((pago_contado || contadoPorAnticipo) && comprobantesGenerados.length > 0) {
-      const comprobanteIds = comprobantesGenerados.map((c: any) => c.id).filter(Boolean)
-      bonificacion = await generarBonificacionContado(supabase, {
-        cliente_id: pedido.cliente.id,
-        comprobante_ids: comprobanteIds,
-        pago_id: contadoPorAnticipo ? (pedido as any).anticipo_pago_id : undefined,
-      })
+    const idsContado = comprobantesGenerados
+      .filter((c: any) => c.id && (c._items as ItemCalculado[]).some((i) => i.contado))
+      .map((c: any) => c.id)
+    const idsBonificar = (pago_contado || contadoPorAnticipo)
+      ? comprobantesGenerados.map((c: any) => c.id).filter(Boolean)
+      : idsContado
+    if (idsBonificar.length > 0) {
+      try {
+        bonificacion = await generarBonificacionContado(supabase, {
+          cliente_id: pedido.cliente.id,
+          comprobante_ids: idsBonificar,
+          pago_id: contadoPorAnticipo ? (pedido as any).anticipo_pago_id : undefined,
+        })
+      } catch (bonifErr: any) {
+        // Los comprobantes ya tienen CAE: la facturación no se revierte. La NC/REV
+        // del contado se puede emitir después desde el cobro (10% contado).
+        console.error("[generar] NC/REV del 10% contado:", bonifErr?.message)
+        bonificacionError = bonifErr?.message || "No se pudo emitir la NC/REV del 10% contado"
+      }
       // Limpiar el flag para no regenerar la NC si se reintenta la facturación
       if (contadoPorAnticipo) {
         await supabase.from("pedidos").update({ pago_contado_10: false }).eq("id", pedido_id)
@@ -542,7 +608,9 @@ export async function POST(request: Request) {
           empresa:        empresaData,
           detalle:        compFull.comprobantes_venta_detalle ?? [],
           pedido:         compFull.pedidos,
-          bonificaciones: bonificacionesCliente ?? [],
+          // Los % salen de cada renglón (los aplicados al tomar el pedido), nunca
+          // de la ficha actual del cliente.
+          bonificaciones: [],
           marcaDesc,
           qrDataUrl,
         })
@@ -565,11 +633,12 @@ export async function POST(request: Request) {
       } catch (pdfErr: any) {
         console.error('[Generar PDF] Error en comprobante', comp.id, pdfErr.message)
         // Marcar error — el comprobante ya tiene CAE, el PDF requiere intervención manual
-        await supabase
+        // (el builder de supabase no tiene .catch: un error acá no debe voltear la respuesta)
+        const { error: marcaErr } = await supabase
           .from('comprobantes_venta')
           .update({ estado_pdf: 'error' })
           .eq('id', comp.id)
-          .catch(() => {})
+        if (marcaErr) console.error('[Generar PDF] No se pudo marcar estado_pdf=error:', marcaErr.message)
       }
     }
 
@@ -596,6 +665,7 @@ export async function POST(request: Request) {
       metodo_facturacion: metodoFacturacion,
       total_pedido: round2(totalPedido),
       bonificacion_contado: bonificacion,
+      ...(bonificacionError ? { bonificacion_contado_error: bonificacionError } : {}),
       remitos,
       ...(advertenciasLibro.length ? { advertencias_libro_mayor: advertenciasLibro } : {}),
     })
@@ -611,14 +681,6 @@ function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: s
   if (art.segmento_precio === "perfumeria")
     return art.iva_ventas === "presupuesto" ? "perf0" : "perf_plus"
   return "limpieza_bazar"
-}
-
-function getBonifProfile(itemSegmento: string, bonificaciones: any[]): string {
-  const aplicables = bonificaciones.filter((b: any) => !b.segmento || b.segmento === itemSegmento)
-  return aplicables
-    .sort((a: any, b: any) => a.tipo.localeCompare(b.tipo))
-    .map((b: any) => `${b.tipo}:${b.porcentaje}`)
-    .join("|")
 }
 
 

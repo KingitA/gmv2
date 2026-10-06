@@ -16,6 +16,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { determinarTipoFactura } from '@/lib/comprobantes/tipo-comprobante'
 import { calcularPercepciones } from '@/lib/comprobantes/calcular-percepciones'
 import { resolverAlicuotaIIBB } from '@/lib/comprobantes/percepcion-iibb'
+import { leerCondicionesCliente } from '@/lib/pedidos/condiciones-pedido'
 
 const IVA_RATE = 0.21
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -31,13 +32,6 @@ function detectarSegmento(art: { segmento_precio?: string | null; iva_ventas?: s
     return art.iva_ventas === 'presupuesto' ? 'perf0' : 'perf_plus'
   return 'limpieza_bazar'
 }
-function getBonifProfile(itemSegmento: string, bonificaciones: any[]): string {
-  return bonificaciones
-    .filter((b: any) => !b.segmento || b.segmento === itemSegmento)
-    .sort((a: any, b: any) => a.tipo.localeCompare(b.tipo))
-    .map((b: any) => `${b.tipo}:${b.porcentaje}`)
-    .join('|')
-}
 
 const CONDICION_PROVEEDOR_COLS =
   'proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct'
@@ -51,6 +45,8 @@ export interface ComprobantePreview {
   percepcion_iva: number
   percepcion_iibb: number
   total_factura: number
+  /** sale con 10% por pago contado: la NC/REV aparte se emite al facturar */
+  contado: boolean
   detalle: Array<{
     articulo_id: string | null
     descripcion: string
@@ -80,14 +76,14 @@ export async function armarComprobantesPreview(
   const { data: pedido, error } = await supabase
     .from('pedidos')
     .select(`
-      id, numero_pedido, condicion_entrega, metodo_facturacion_pedido,
+      id, numero_pedido, condicion_entrega, metodo_facturacion_pedido, condiciones_cliente,
       cliente:clientes!pedidos_cliente_id_fkey(
         id, nombre_razon_social, nombre, condicion_iva, metodo_facturacion, cuit, direccion,
         exento_iva, exento_iibb, provincia, percepcion_iibb, telefono, condicion_pago
       ),
       detalle:pedidos_detalle(
         id, articulo_id, cantidad, precio_final, precio_base, es_bonificado, estado_item, metodo_facturacion_item,
-        precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct,
+        precio_lista, descuento_propio_pct, bonif_general_pct, bonif_viajante_pct, contado, bonif_merc_origen,
         articulo:articulos!pedidos_detalle_articulo_id_fkey(
           id, descripcion, sku, iva_ventas, categoria, iva_compras, marca_id, proveedor_id, segmento_precio, descuento_propio
         )
@@ -100,24 +96,32 @@ export async function armarComprobantesPreview(
 
   const cliente = (pedido as any).cliente
 
+  // Condiciones CONGELADAS del pedido (idéntico al route): pedidos nuevos no
+  // dependen de la ficha actual del cliente.
+  const fichaPedido = leerCondicionesCliente((pedido as any).condiciones_cliente)
+
   // Método de facturación del pedido (idéntico al route)
-  const metodoRaw = (pedido as any).metodo_facturacion_pedido || cliente?.metodo_facturacion || 'Final'
+  const metodoRaw = (pedido as any).metodo_facturacion_pedido || (fichaPedido ? fichaPedido.cliente.metodo_facturacion : cliente?.metodo_facturacion) || 'Final'
   const metodoFacturacion = metodoDesdeRaw(metodoRaw)
 
-  // Condiciones por proveedor: override del pedido > ficha del cliente
+  // Condiciones por proveedor: las del pedido (+ ficha del cliente en pedidos viejos)
   const condProvMap = new Map<string, any>()
-  const { data: cliCond } = await supabase
-    .from('cliente_proveedor_condicion').select(CONDICION_PROVEEDOR_COLS).eq('cliente_id', cliente?.id)
-  for (const r of cliCond || []) condProvMap.set((r as any).proveedor_id, r)
+  if (!fichaPedido) {
+    const { data: cliCond } = await supabase
+      .from('cliente_proveedor_condicion').select(CONDICION_PROVEEDOR_COLS).eq('cliente_id', cliente?.id)
+    for (const r of cliCond || []) condProvMap.set((r as any).proveedor_id, r)
+  }
   const { data: pedCond } = await supabase
     .from('pedido_proveedor_condicion').select(CONDICION_PROVEEDOR_COLS).eq('pedido_id', pedidoId)
   for (const r of pedCond || []) condProvMap.set((r as any).proveedor_id, r)
 
   // Condiciones por MARCA (ganan sobre proveedor)
   const condMarcaMap = new Map<string, any>()
-  const { data: cliCondM } = await supabase
-    .from('cliente_marca_condicion').select(CONDICION_MARCA_COLS).eq('cliente_id', cliente?.id)
-  for (const r of cliCondM || []) condMarcaMap.set((r as any).marca_id, r)
+  if (!fichaPedido) {
+    const { data: cliCondM } = await supabase
+      .from('cliente_marca_condicion').select(CONDICION_MARCA_COLS).eq('cliente_id', cliente?.id)
+    for (const r of cliCondM || []) condMarcaMap.set((r as any).marca_id, r)
+  }
   const { data: pedCondM } = await supabase
     .from('pedido_marca_condicion').select(CONDICION_MARCA_COLS).eq('pedido_id', pedidoId)
   for (const r of pedCondM || []) condMarcaMap.set((r as any).marca_id, r)
@@ -190,30 +194,32 @@ export async function armarComprobantesPreview(
       descuentoPropioPct: Number(det.descuento_propio_pct ?? 0),
       bonifGeneralPct: Number(det.bonif_general_pct ?? 0),
       bonifViajantePct: Number(det.bonif_viajante_pct ?? 0),
+      contado: !esBonificado && det.contado === true,
+      origenMerc: det.bonif_merc_origen ?? null,
     })
   }
 
-  // ── Bonificaciones del cliente ──
-  const { data: bonificacionesCliente } = await supabase
-    .from('bonificaciones').select('tipo, porcentaje, segmento')
-    .eq('cliente_id', cliente?.id).eq('activo', true).in('tipo', ['general', 'viajante'])
-
-  // ── Agrupar por (vaEnComprobante, perfil de descuento, proveedor) — idéntico al route ──
-  // La mercadería bonificada NO se agrupa: se reparte luego entre los comprobantes
-  // normales (no-especial) proporcional al neto, como ÚLTIMO ítem de cada uno.
+  // ── Agrupar (idéntico al route): vaEnComprobante + % guardados del renglón +
+  // contado + segmento (marca/proveedor). Mercadería bonificada → comprobante de su cupo.
   const keyDeItem = (item: any) => {
     const { cond, segKey } = segCondDe(item.marcaId, item.proveedorId)
-    const bonifProfile = cond
-      ? `seg:${cond.dto_general_pct || 0}:${cond.dto_viajante_pct || 0}`
-      : getBonifProfile(item.segmento, bonificacionesCliente || [])
-    return { key: `${item.vaEnComprobante}__${bonifProfile}__${segKey}`, esSegmento: !!cond }
+    const bonifProfile = `g:${item.bonifGeneralPct}|v:${item.bonifViajantePct}`
+    return { key: `${item.vaEnComprobante}__${bonifProfile}__${item.contado ? 'contado' : 'cc'}__${segKey}`, esSegmento: !!cond, segKey }
   }
 
   const grupos = new Map<string, any[]>()
   const itemsBonificados: any[] = []
   for (const item of items) {
     const { key, esSegmento } = keyDeItem(item)
-    if (item.esBonificado && !esSegmento) { itemsBonificados.push(item); continue }
+    if (item.esBonificado) {
+      if (!item.origenMerc && esSegmento) {
+        if (!grupos.has(key)) grupos.set(key, [])
+        grupos.get(key)!.push(item)
+      } else {
+        itemsBonificados.push(item)
+      }
+      continue
+    }
     if (!grupos.has(key)) grupos.set(key, [])
     grupos.get(key)!.push(item)
   }
@@ -221,21 +227,33 @@ export async function armarComprobantesPreview(
   if (itemsBonificados.length > 0) {
     const grupoEsProv = (g: any[]) => !!(g[0] && segCondDe(g[0].marcaId, g[0].proveedorId).cond)
     const netoGrupo = (g: any[]) => r2(g.reduce((s, i) => s + i.subtotalNeto, 0))
-    const normales = [...grupos.values()].filter(g => !grupoEsProv(g))
-    const netos = normales.map(netoGrupo)
-    const netoTotal = r2(netos.reduce((s, n) => s + n, 0))
-    if (normales.length > 0 && netoTotal > 0) {
-      for (const bonif of itemsBonificados) {
-        const Q = Math.abs(bonif.cantidad)
-        let asignado = 0
-        for (let i = 0; i < normales.length; i++) {
-          const qtyG = i === normales.length - 1 ? (Q - asignado) : Math.round(Q * netos[i] / netoTotal)
-          asignado += qtyG
-          if (qtyG > 0) normales[i].push({ ...bonif, cantidad: qtyG })
-        }
+    const todos = [...grupos.values()]
+    const normales = todos.filter(g => !grupoEsProv(g))
+    const repartir = (bonif: any, destino: any[][]) => {
+      if (destino.length === 0) return false
+      const netos = destino.map(netoGrupo)
+      const netoTotal = r2(netos.reduce((s, n) => s + n, 0))
+      if (netoTotal <= 0) { destino[0].push(bonif); return true }
+      const Q = Math.abs(bonif.cantidad)
+      let asignado = 0
+      for (let i = 0; i < destino.length; i++) {
+        const qtyG = i === destino.length - 1 ? (Q - asignado) : Math.round(Q * netos[i] / netoTotal)
+        asignado += qtyG
+        if (qtyG > 0) destino[i].push({ ...bonif, cantidad: qtyG })
       }
-    } else if (normales.length === 0 && grupos.size > 0) {
-      ;[...grupos.values()][0].push(...itemsBonificados)
+      return true
+    }
+    for (const bonif of itemsBonificados) {
+      const o: string = bonif.origenMerc || ''
+      let destino: any[][] = normales
+      if (o.startsWith('prov:') || o.startsWith('marca:')) {
+        const delCupo = todos.filter(g => g[0] && keyDeItem(g[0]).segKey === o)
+        if (delCupo.length) destino = delCupo
+      } else if (o.startsWith('seg:')) {
+        const delSeg = normales.filter(g => g.some((i: any) => !i.esBonificado && i.segmento === o.slice(4)))
+        if (delSeg.length) destino = delSeg
+      }
+      if (!repartir(bonif, destino) && todos.length > 0) todos[0].push(bonif)
     }
   }
 
@@ -266,6 +284,7 @@ export async function armarComprobantesPreview(
     comprobantes.push({
       tipo, total_neto: totalNeto, total_iva: totalIva,
       percepcion_iva: percIva, percepcion_iibb: percIibb, total_factura: totalFactura,
+      contado: grupoItems.some((i) => i.contado),
       detalle: grupoItems.map((i) => ({
         articulo_id: i.articulo_id, descripcion: i.descripcion, sku: i.sku,
         cantidad: i.cantidad, precio_unitario: i.precioUnitario, precio_total: i.subtotalNeto,

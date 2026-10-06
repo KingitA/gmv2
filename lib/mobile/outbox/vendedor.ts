@@ -28,6 +28,10 @@ import {
   softDeletePedido,
 } from "@/lib/actions/pedidos"
 import { esPedidoEditable, motivoBloqueo } from "@/lib/pedidos/estados"
+import { esErrorReglaPedido, MSG_SIN_LISTA } from "@/lib/pedidos/errores"
+import { limpiarCentinela } from "@/lib/pricing/resolver"
+import { esApkVendedorVieja, compatOverridesApkVieja, SEGS_COMPAT } from "@/lib/vendedor/compat-apk"
+import { listasPermitidasDe } from "@/lib/vendedor/session"
 import type { BonifPedido } from "@/lib/pricing/segmento"
 import { vigenciaDelPedido } from "@/lib/vendedor/vigencia-precios"
 import type { FilaReplica } from "../contrato"
@@ -165,6 +169,15 @@ const overridesDe = (c?: CondPedido | null) => ({
   ...(c?.bonif_pedido ? { bonif_pedido: c.bonif_pedido } : {}),
 })
 
+/** Neco + las listas que imponen los viajantes del usuario (las únicas que se usan desde la app). */
+async function listasPermitidasVendedor(ctx: CtxOutbox, vendedorIds: string[]): Promise<string[]> {
+  const [{ data: neco }, { data: vends }] = await Promise.all([
+    ctx.supabase.from("listas_precio").select("id").eq("codigo", "neco").maybeSingle(),
+    ctx.supabase.from("vendedores").select("lista_precio_id").in("id", vendedorIds),
+  ])
+  return listasPermitidasDe(neco?.id ?? null, vends || [])
+}
+
 /**
  * Lleva los renglones NO bonificados del pedido al estado final que capturó el equipo
  * (cantidades absolutas). Idempotente: aplicarlo dos veces deja lo mismo.
@@ -193,7 +206,7 @@ async function reconciliarRenglones(ctx: CtxOutbox, pedidoId: string, items: Ite
   }
 }
 
-async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; capturado_at: string; idempotency_key: string; device_id: string; tipo: string }) {
+async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; capturado_at: string; idempotency_key: string; device_id: string; tipo: string; app_version?: string }) {
   const p = m.payload
   const sesion = await sesionVendedor(ctx)
 
@@ -213,11 +226,23 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     if (error) throw new Error(`pedidos.movil_local_id: ${error.message}`)
     pedidoId = previo?.id ?? null
   }
+  let listaActualPedido: string | null = null
   if (pedidoId) {
-    const { data: ped } = await ctx.supabase.from("pedidos").select("id, estado, vendedor_id, cliente_id, eliminado_at").eq("id", pedidoId).maybeSingle()
+    const { data: ped } = await ctx.supabase.from("pedidos").select("id, estado, vendedor_id, cliente_id, eliminado_at, lista_precio_pedido_id").eq("id", pedidoId).maybeSingle()
     if (!ped || ped.eliminado_at) throw new RechazoNegocio("El pedido fue eliminado: los cambios no se aplicaron.")
     if (ped.cliente_id !== p.cliente_id) throw new RechazoNegocio("El pedido es de otro cliente.")
     if (!esPedidoEditable(ped.estado)) throw new RechazoNegocio(motivoBloqueo(ped.estado) || "El pedido ya no se puede modificar.")
+    listaActualPedido = ped.lista_precio_pedido_id ?? null
+  }
+
+  // Lista "solo este pedido": solo las del vendedor (Neco + las de sus viajantes).
+  // La que el pedido ya tenía (p. ej. puesta desde el ERP) se acepta al editar.
+  const listaPedida = limpiarCentinela(p.cond?.lista_precio_pedido_id) || null
+  if (listaPedida && listaPedida !== listaActualPedido) {
+    const permitidas = await listasPermitidasVendedor(ctx, sesion.vendedorIds)
+    if (!permitidas.includes(listaPedida)) {
+      throw new RechazoNegocio("La lista elegida no está habilitada para vos: se asigna desde el ERP.")
+    }
   }
 
   // Precios: los vigentes cuando el vendedor los vio (mismo motor, insumos reconstruidos).
@@ -229,7 +254,12 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   const reconstruido = await insumosAFecha(ctx.admin, p.cliente_id, articuloIds, vigenciaAt)
   const faltan = articuloIds.filter((id) => !reconstruido.articulos.some((a: any) => a.id === id))
   if (faltan.length) throw new RechazoNegocio("Hay artículos del pedido que ya no existen en el catálogo.")
-  const overrides = overridesDe(p.cond)
+  // Nunca un pedido nuevo sin lista de precios (regla del dueño, 06/10/2026)
+  const cli = reconstruido.insumos.cliente as Record<string, any>
+  const tieneLista = !!(listaPedida || cli?.lista_precio_id || cli?.lista_limpieza_id || cli?.lista_perf0_id || cli?.lista_perf_plus_id)
+  if (!pedidoId && !tieneLista) throw new RechazoNegocio(MSG_SIN_LISTA)
+  const apkVieja = esApkVendedorVieja(m.app_version)
+  const overrides = apkVieja ? compatOverridesApkVieja(overridesDe(p.cond), cli) : overridesDe(p.cond)
   const verificacion = !garantizada ? null : await verificarPreciosCapturados(ctx.admin, {
     clienteId: p.cliente_id,
     capturadoAt: vigenciaAt,
@@ -250,6 +280,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
 
   const creado = !pedidoId
   const resultado = await conCaptura(captura, async () => {
+   try {
     if (!pedidoId) {
       const pedido: any = await createPedido({
         cliente_id: p.cliente_id,
@@ -262,6 +293,15 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
       // createPedido no es transaccional: si se cortó a mitad, el reintento entra por
       // la rama de abajo (movil_local_id) y completa los renglones que falten.
       return { numero_pedido: pedido.numero_pedido as string | null, total: Number(pedido.total) }
+    }
+    if (apkVieja) {
+      // Misma compatibilidad al editar: la ficha por segmento se fija en el pedido
+      const segCols: Record<string, any> = {}
+      for (const [, , listaPed, metodoPed] of SEGS_COMPAT) {
+        if ((overrides as any)[listaPed]) segCols[listaPed] = (overrides as any)[listaPed]
+        if ((overrides as any)[metodoPed]) segCols[metodoPed] = (overrides as any)[metodoPed]
+      }
+      if (Object.keys(segCols).length) await ctx.supabase.from("pedidos").update(segCols).eq("id", pedidoId)
     }
     await aplicarCondicionesPedidoVendedor(pedidoId, {
       metodo_facturacion_pedido: p.cond?.metodo_facturacion_pedido || null,
@@ -278,6 +318,11 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
       metodo_facturacion_pedido: p.cond?.metodo_facturacion_pedido || "",
     })
     return { numero_pedido: r.numero_pedido, total: Number(r.total) }
+   } catch (e) {
+    // Regla de negocio (sin lista, etc.): rechazo definitivo, nunca reintento eterno
+    if (esErrorReglaPedido(e)) throw new RechazoNegocio(e.message)
+    throw e
+   }
   })
 
   return {

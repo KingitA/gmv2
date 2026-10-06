@@ -2,26 +2,48 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { createPedido } from "@/lib/actions/pedidos"
+import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
+import { esErrorReglaPedido } from "@/lib/pedidos/errores"
 
 /**
  * POST /api/mostrador/venta — venta de mostrador en UN paso (Fase D).
  *
  * Orquesta el circuito existente sin duplicar lógica:
- *   1. createPedido (motor de precios completo) + condicion_entrega=retira_mostrador
- *   2. POST /api/comprobantes-venta/generar (facturación, CAE si corresponde)
- *   3. POST /api/pagos-clientes con imputación a los comprobantes generados
- *      (confirmar=true solo si es 100%% efectivo → entra a caja chica en el acto)
+ *   1. createPedido (motor de precios completo, con las condiciones elegidas en
+ *      mostrador: lista, método, descuentos, contado, mercadería) +
+ *      condicion_entrega=retira_mostrador
+ *   2. POST /api/comprobantes-venta/generar (facturación, CAE si corresponde;
+ *      si sale de contado, la NC/REV del 10% se emite ahí mismo)
+ *   3. POST /api/pagos-clientes por el SALDO REAL de los comprobantes (lo
+ *      facturado con percepciones, menos la NC de contado si la hubo)
+ *      (confirmar=true solo si es 100% efectivo → entra a caja chica en el acto)
  *   4. pedido → entregado
+ *
+ * La comisión queda a nombre del vendedor asignado al cliente (createPedido).
+ * Antes de crear el pedido se valida lo que la facturación exige (CUIT,
+ * condición de IVA): un error ahí ya no deja un pedido huérfano.
  *
  * Si algo falla DESPUÉS de facturar, devuelve el estado parcial: la FA queda
  * con saldo y se cobra desde /pagos-clientes (nada se pierde ni duplica).
  *
  * Body: {
  *   cliente_id, items: [{ producto_id, cantidad }],
- *   metodos: [{ tipo: "efectivo"|"transferencia"|"cheque", monto, ... }],
- *   observaciones?
+ *   metodos: [{ tipo: "efectivo"|"transferencia"|"cheque" }],   (el monto lo fija el servidor)
+ *   condiciones?: overrides de createPedido (lista/método/bonif_pedido/
+ *                 bonif_mercaderia_pct/condiciones_proveedor/condiciones_marca/
+ *                 mercaderia_bonificada),
+ *   observaciones?, idempotency_key?
  * }
  */
+const CAMPOS_CONDICION = [
+  "metodo_facturacion_pedido", "lista_precio_pedido_id",
+  "lista_limpieza_pedido_id", "metodo_limpieza_pedido",
+  "lista_perf0_pedido_id", "metodo_perf0_pedido",
+  "lista_perf_plus_pedido_id", "metodo_perf_plus_pedido",
+  "bonif_pedido", "bonif_mercaderia_pct",
+  "condiciones_proveedor", "condiciones_marca", "mercaderia_bonificada",
+] as const
+
 export async function POST(request: NextRequest) {
   const auth = await requireAuth()
   if (auth.error) return auth.error
@@ -42,21 +64,48 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // ── 0. Lo que la facturación exige, ANTES de crear el pedido ──
+    const { data: cli } = await supabase
+      .from("clientes")
+      .select("id, nombre_razon_social, cuit, condicion_iva")
+      .eq("id", cliente_id)
+      .maybeSingle()
+    if (!cli) return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 })
+    if (!cli.cuit || !String(cli.cuit).trim()) {
+      return NextResponse.json({
+        error: `El cliente "${cli.nombre_razon_social}" no tiene CUIT configurado. Cargalo en la ficha antes de vender: sin CUIT no se puede emitir el comprobante.`,
+        error_code: "CLIENTE_SIN_CUIT",
+      }, { status: 422 })
+    }
+    if (!determinarTipoFactura(cli.condicion_iva)) {
+      return NextResponse.json({ error: mensajeErrorCondicionIva(cli.nombre_razon_social), error_code: "CLIENTE_SIN_CONDICION_IVA" }, { status: 422 })
+    }
+
     const origin = new URL(request.url).origin
     const cookie = request.headers.get("cookie") ?? ""
     const internas = { "Content-Type": "application/json", cookie }
 
+    const condiciones: Record<string, unknown> = {}
+    for (const k of CAMPOS_CONDICION) if (body.condiciones?.[k] !== undefined) condiciones[k] = body.condiciones[k]
+
     // ── 1. Pedido (motor de precios completo) ──
-    const pedido = await createPedido({
-      cliente_id,
-      items: items.map((i: any) => ({
-        producto_id: i.producto_id,
-        cantidad: Number(i.cantidad),
-        precio_unitario: 0, // el motor calcula desde lista/segmento
-        descuento: 0,
-      })),
-      observaciones: observaciones ? `Mostrador — ${observaciones}` : "Venta mostrador",
-    })
+    let pedido: any
+    try {
+      pedido = await createPedido({
+        cliente_id,
+        items: items.map((i: any) => ({
+          producto_id: i.producto_id,
+          cantidad: Number(i.cantidad),
+          precio_unitario: 0, // el motor calcula desde lista/segmento
+          descuento: 0,
+        })),
+        observaciones: observaciones ? `Mostrador — ${observaciones}` : "Venta mostrador",
+        ...(condiciones as any),
+      })
+    } catch (e: any) {
+      if (esErrorReglaPedido(e)) return NextResponse.json({ error: e.message }, { status: 422 })
+      throw e
+    }
     pedidoId = pedido.id
     numeroPedido = pedido.numero_pedido
     paso.pedido = true
@@ -66,7 +115,7 @@ export async function POST(request: NextRequest) {
       .update({ condicion_entrega: "retira_mostrador" })
       .eq("id", pedido.id)
 
-    // ── 2. Facturar (reusa el circuito completo: segmentos, CAE, PDF, kardex) ──
+    // ── 2. Facturar (reusa el circuito completo: segmentos, CAE, PDF, kardex, NC contado) ──
     const genRes = await fetch(`${origin}/api/comprobantes-venta/generar`, {
       method: "POST",
       headers: internas,
@@ -80,7 +129,7 @@ export async function POST(request: NextRequest) {
           paso,
           pedido_id: pedidoId,
         },
-        { status: 500 }
+        { status: genRes.status === 422 ? 422 : 500 }
       )
     }
     paso.factura = true
@@ -93,50 +142,54 @@ export async function POST(request: NextRequest) {
       0
     )
 
-    // ── 3. Cobrar con imputación a los comprobantes generados ──
-    const totalMetodos = (metodos as any[]).reduce((s, m) => s + Number(m.monto), 0)
-    const soloEfectivo = (metodos as any[]).every((m) => m.tipo === "efectivo")
-
-    // Imputar proporcionalmente hasta agotar el pago
-    let restante = totalMetodos
-    const imputaciones = comprobantes
-      .map((c: any) => {
-        const saldo = Number(c.total_factura ?? c.total ?? 0)
-        const monto = Math.min(saldo, restante)
-        restante -= monto
-        return { comprobante_id: c.id, monto_imputado: monto }
-      })
+    // ── 3. Cobrar el SALDO REAL de cada comprobante (con percepciones; la NC de
+    // contado, si salió, ya está imputada y bajó el saldo) ──
+    const ids = comprobantes.map((c: any) => c.id).filter(Boolean)
+    const { data: saldos } = ids.length
+      ? await supabase.from("comprobantes_venta").select("id, saldo_pendiente").in("id", ids)
+      : { data: [] as any[] }
+    const saldoDe = new Map((saldos || []).map((s: any) => [s.id, Math.max(0, Number(s.saldo_pendiente) || 0)]))
+    const imputaciones = ids
+      .map((id: string) => ({ comprobante_id: id, monto_imputado: Math.round((saldoDe.get(id) ?? 0) * 100) / 100 }))
       .filter((i: any) => i.monto_imputado > 0)
+    const aCobrar = Math.round(imputaciones.reduce((s: number, i: any) => s + i.monto_imputado, 0) * 100) / 100
+    const tipoPago = String((metodos as any[])[0]?.tipo || "efectivo")
+    const soloEfectivo = tipoPago === "efectivo"
 
-    const pagoRes = await fetch(`${origin}/api/pagos-clientes`, {
-      method: "POST",
-      headers: internas,
-      body: JSON.stringify({
-        cliente_id,
-        metodos,
-        imputaciones,
-        observaciones: `Venta mostrador ${numeroPedido}`,
-        confirmar: soloEfectivo, // efectivo = plata a la vista; cheque/transf → revisión
-        idempotency_key: body.idempotency_key || null, // dedup del submit del front
-      }),
-    })
-    const pagoData = await pagoRes.json()
-    if (!pagoRes.ok) {
-      return NextResponse.json(
-        {
-          error: `Pedido ${numeroPedido} facturado, pero falló el cobro: ${pagoData.error}. Cobrar desde Pagos Clientes.`,
-          paso,
-          pedido_id: pedidoId,
-          comprobantes,
-        },
-        { status: 500 }
-      )
+    let numeroRecibo: string | null = null
+    if (aCobrar > 0) {
+      const pagoRes = await fetch(`${origin}/api/pagos-clientes`, {
+        method: "POST",
+        headers: internas,
+        body: JSON.stringify({
+          cliente_id,
+          metodos: [{ ...(metodos as any[])[0], tipo: tipoPago, monto: aCobrar }],
+          imputaciones,
+          observaciones: `Venta mostrador ${numeroPedido}`,
+          confirmar: soloEfectivo, // efectivo = plata a la vista; cheque/transf → revisión
+          idempotency_key: body.idempotency_key || null, // dedup del submit del front
+        }),
+      })
+      const pagoData = await pagoRes.json()
+      if (!pagoRes.ok) {
+        return NextResponse.json(
+          {
+            error: `Pedido ${numeroPedido} facturado, pero falló el cobro: ${pagoData.error}. Cobrar desde Pagos Clientes.`,
+            paso,
+            pedido_id: pedidoId,
+            comprobantes,
+          },
+          { status: 500 }
+        )
+      }
+      numeroRecibo = pagoData.numero_recibo ?? null
     }
     paso.pago = true
 
     // ── 4. Entregado (el cliente se lleva la mercadería) ──
     await supabase.from("pedidos").update({ estado: "entregado" }).eq("id", pedido.id)
 
+    const ncContado = Number(gen.bonificacion_contado?.total_bonificacion || 0)
     return NextResponse.json({
       success: true,
       pedido_id: pedidoId,
@@ -149,8 +202,11 @@ export async function POST(request: NextRequest) {
         pdf_url: c.pdf_url ?? null,
       })),
       total_facturado: totalAFacturar,
+      nc_contado: ncContado,
+      ...(gen.bonificacion_contado_error ? { aviso: `No salió la NC del 10% contado: ${gen.bonificacion_contado_error}` } : {}),
+      total_cobrado: aCobrar,
       pago_confirmado: soloEfectivo,
-      numero_recibo: pagoData.numero_recibo ?? null,
+      numero_recibo: numeroRecibo,
       mensaje: soloEfectivo
         ? `Venta ${numeroPedido} facturada y cobrada.`
         : `Venta ${numeroPedido} facturada. El pago quedó pendiente de verificación (cheque/transferencia).`,

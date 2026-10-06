@@ -507,6 +507,15 @@ de cada route (introspección de la base bloqueada en esta sesión; verificar).
   recalcula entera; refresco parcial por id + parche tras cada operación).
 - `typecheck:movil`: `app/api/chofer/` entero y `lib/viajes/cliente-viaje.ts` pasan al alcance en cero.
 
+**Sesión Precios y descuentos (06/10/2026, rama `precios-descuentos`)** — solo servidor/ERP; la APK vendedor instalada (≤ 0.2.3) sigue funcionando sin recompilar:
+- **Condiciones congeladas**: el pedido guarda la ficha comercial con la que se tomó (`pedidos.condiciones_cliente`, `precios_al`) y TODAS sus condiciones por proveedor/marca en `pedido_*_condicion`. Cambiar la ficha ya no re-precia pedidos tomados (se eliminó `repreciarPedidosAbiertosCliente`; las rutas `/api/vendedor/cliente/[id]` y `.../bonificaciones` responden `pedidos_repreciados: 0`). Todo lo que se haga sobre el mismo pedido usa sus condiciones y los precios a `precios_al` (mismo mecanismo de captura: `lib/pedidos/condiciones-pedido.ts`). "Repreciar" (ERP) lleva un pedido a precios de hoy.
+- **Resolver** (`lib/pricing/resolver.ts`): el método/lista "solo este pedido" GANA sobre la ficha por segmento; una condición por proveedor/marca con lista/método vacío HEREDA. La APK ≤ 0.2.3 tiene la regla vieja: el handler `pedido.crear/editar` fija por segmento el valor de la ficha para esas versiones (`lib/vendedor/compat-apk.ts`) ⇒ mismo precio que vio el vendedor, cero alertas.
+- **Contado** como condición (ficha/segmento/proveedor/marca/pedido: `bonificaciones.tipo='contado'`, `*_condicion.contado`, `bonif_pedido.contado`, `pedidos_detalle.contado`). Al facturar sale la NC/REV del 10% de esos comprobantes.
+- **Mercadería bonificada por cupo** (`pedidos_detalle.bonif_merc_origen/_pct`, `calcularBonificadosPorCupo` en `lib/deposito/bonificados.ts`): el picking recalcula por cupo y fija al cerrar; un cupo sin artículos bloquea la facturación. La APK depósito instalada sigue mostrando la estimación vieja (`calcularBonificados`), solo visual: el servidor manda.
+- **Listas permitidas en la app**: Neco + la que impone cada viajante del usuario (`session.listasPermitidas`); `catalogos-ficha` ya filtra (dato del servidor) y el outbox rechaza otra lista.
+- **Sin lista no hay pedido**: `createPedido` lanza `ErrorReglaPedido` (el outbox lo convierte en rechazo, nunca reintento).
+- **Pendiente para la APK vendedor nueva** (semana del 13/10): descuento general, condiciones por proveedor/marca, contado al tomar el pedido, elegir artículos de mercadería por cupo, método/lista por segmento, regla "sin precio base, sin precio" en `calculator.ts` (hoy calcula desde el costo: 6 artículos activos), y el motor con la precedencia nueva (al subir `version` a ≥ 0.3.0 la compatibilidad deja de aplicarse sola).
+
 **Pendientes por sesión de app**:
 - Pantalla de admin para `mobile_alertas_integridad` y `mobile_dispositivos` (revocar equipo).
 - Si pg_cron no está habilitado: habilitarlo (Database → Extensions) y re-correr el bloque de jobs de la migración.

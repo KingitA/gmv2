@@ -50,11 +50,19 @@ function round2(n: number) { return Math.round(n * 100) / 100 }
  * Fórmula ÚNICA de la comisión del vendedor (usada al crear el pedido = "vendida",
  * y al cobrar = "cobrada", y en ajustes).
  *
- *   comisión = baseNeto × cantidad × (1−mercadería%) × (1−financiero%) × (comisión% − viajante%) / 100
+ *   comisión = baseNeto × cantidad × (1−mercadería%) × (1−financiero%) × max(0, comisión% − viajante%) / 100
  *
- * - baseNeto: neto final por unidad (boleta), YA con oferta+general+viajante incluidos.
+ * Regla del dueño (06/10/2026): el descuento de viajante se le descuenta al
+ * vendedor en PUNTOS de comisión (20% de comisión con 5% de viajante ⇒ cobra
+ * 15%), y esa tasa se aplica sobre el precio SIN el descuento de viajante pero
+ * después de todos los demás (oferta, general, mercadería, contado). Si el
+ * viajante supera la comisión, la comisión es 0 (nunca negativa).
+ *
+ * - baseNeto: neto por unidad SIN el viajante. El renglón guarda el neto YA con
+ *   el viajante aplicado (`netoIncluyeViajante`, default true): se lo saca
+ *   dividiendo por (1 − viajante%). La mercadería bonificada no lleva viajante en
+ *   su precio (`netoIncluyeViajante: false`).
  *   Se le quita el IVA si corresponde (presupuesto + iva_ventas='factura').
- * - El viajante se resta UNA sola vez, vía la tasa (comisión% − viajante%).
  * - Mercadería y financiero reducen la base ("la venta real es $90"): la comisión
  *   se paga sobre la venta efectivamente cobrada.
  */
@@ -67,11 +75,15 @@ export function calcularComisionMonto(params: {
   viajantePct: number
   mercaderiaPct?: number
   financieroPct?: number
+  netoIncluyeViajante?: boolean
 }): { monto: number; tasaEfectivaPct: number } {
-  const netoUnit = getPrecioNeto(params.precioNetoUnitario, params.metodoFacturacion, params.ivaVentas)
+  const viajante = Number(params.viajantePct) || 0
+  const netoUnitConViajante = getPrecioNeto(params.precioNetoUnitario, params.metodoFacturacion, params.ivaVentas)
+  const sacarViajante = params.netoIncluyeViajante !== false && viajante > 0 && viajante < 100
+  const netoUnit = sacarViajante ? netoUnitConViajante / (1 - viajante / 100) : netoUnitConViajante
   const factorBase = (1 - (params.mercaderiaPct || 0) / 100) * (1 - (params.financieroPct || 0) / 100)
   const base = netoUnit * params.cantidad * factorBase
-  const tasaEfectivaPct = round2(params.comisionPct - params.viajantePct)
+  const tasaEfectivaPct = round2(Math.max(0, (Number(params.comisionPct) || 0) - viajante))
   const monto = round2(base * tasaEfectivaPct / 100)
   return { monto, tasaEfectivaPct }
 }

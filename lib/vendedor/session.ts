@@ -29,6 +29,11 @@ interface VendedorSuccess {
    *  vendedores.puede_cambiar_lista; alcanza con que un viajante del usuario
    *  lo tenga). Admin siempre puede. */
   puedeCambiarLista: boolean
+  /** Listas que el vendedor puede usar desde la app: Neco + la que impone cada
+   *  uno de sus viajantes (ej. Freije: Neco + Viajante). Regla del dueño
+   *  (06/10/2026): aunque el usuario sea admin, cualquier otra lista se asigna
+   *  desde el ERP, no desde la app. */
+  listasPermitidas: string[]
   error: null
 }
 
@@ -38,6 +43,7 @@ interface VendedorFailure {
   vendedores: null
   vendedorIds: null
   puedeCambiarLista: false
+  listasPermitidas: null
   error: NextResponse
 }
 
@@ -50,6 +56,7 @@ function fail(status: number, message: string): VendedorFailure {
     vendedores: null,
     vendedorIds: null,
     puedeCambiarLista: false,
+    listasPermitidas: null,
     error: NextResponse.json({ error: message }, { status }),
   }
 }
@@ -87,14 +94,22 @@ export async function requireVendedor(): Promise<VendedorSessionResult> {
     )
   }
 
+  const { data: neco } = await supabase.from("listas_precio").select("id").eq("codigo", "neco").maybeSingle()
+
   return {
     user: auth.user,
     roles,
     vendedores,
     vendedorIds: vendedores.map((v) => v.id),
     puedeCambiarLista: roles.includes("admin") || vendedores.some((v) => v.puede_cambiar_lista === true),
+    listasPermitidas: listasPermitidasDe(neco?.id ?? null, vendedores),
     error: null,
   }
+}
+
+/** Neco + las listas que imponen los viajantes del usuario (sin repetir). */
+export function listasPermitidasDe(necoId: string | null, vendedores: Array<{ lista_precio_id?: string | null }>): string[] {
+  return [...new Set([necoId, ...vendedores.map((v) => v.lista_precio_id)].filter((x): x is string => !!x))]
 }
 
 /** Lista que impone un viajante (vendedores.lista_precio_id), o null. */

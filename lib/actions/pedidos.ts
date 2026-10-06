@@ -36,16 +36,20 @@ import {
   toMetodoFacturacion,
   limpiarCentinela,
   getDescuentoViajante,
-  resolverListaSegmento,
-  mergeCondicionesProveedor,
-  mergeCondicionesMarca,
+  resolverListaMetodoConCondicion,
   resolverCondSegmento,
   mezclarOverride,
   resolverBonifItem,
+  resolverContadoItem,
+  resolverMercaderiaItem,
   type CondicionSegmento,
   type CondicionProveedor,
   type CondicionMarca,
+  type FilaBonifTipo,
 } from "@/lib/pricing/resolver"
+import { conPreciosDelPedido, leerFichaComercial, TIPOS_BONIF_FICHA } from "@/lib/pedidos/condiciones-pedido"
+import { recalcularBonificadosPedido } from "@/lib/pedidos/mercaderia-bonificada"
+import { ErrorReglaPedido, MSG_SIN_LISTA } from "@/lib/pedidos/errores"
 export type { CondicionSegmento, CondicionProveedor, CondicionMarca } from "@/lib/pricing/resolver"
 import { prepararMotorCliente, precioArticuloParaCliente, descuentosPorArticulo, formulasReglasDesdeFilas, datosListaDesdeFila, type ArticuloMotor } from "@/lib/pricing/motor"
 // Pedidos tomados en un dispositivo: insumos de precio vigentes a la captura
@@ -54,9 +58,9 @@ import { capturaActual, clienteCapturado } from "@/lib/mobile/contexto-captura"
 import { cargarInsumosCliente, ARTICULO_PRECIO_COLS } from "@/lib/pricing/cargar-insumos"
 
 const CONDICION_PROVEEDOR_COLS =
-  "proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct"
+  "proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, contado"
 const CONDICION_MARCA_COLS =
-  "marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct"
+  "marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, contado"
 
 // Mapa proveedor_id → condición. Si se pasa pedidoId, el override del pedido pisa al del cliente.
 async function fetchCondicionesProveedor(
@@ -181,7 +185,7 @@ const SEGMENTO_PEDIDO_COLS =
   "lista_limpieza_pedido_id,metodo_limpieza_pedido," +
   "lista_perf0_pedido_id,metodo_perf0_pedido," +
   "lista_perf_plus_pedido_id,metodo_perf_plus_pedido," +
-  "bonif_pedido"
+  "bonif_pedido,bonif_mercaderia_pct,condiciones_cliente,precios_al"
 const SEGMENTO_CLIENTE_COLS =
   "metodo_facturacion,lista_precio_id,lista_limpieza_id,metodo_limpieza," +
   "lista_perf0_id,metodo_perf0,lista_perf_plus_id,metodo_perf_plus"
@@ -201,21 +205,60 @@ async function resolverListaMetodoItem(
   condMarcaMap: Map<string, CondicionMarca>,
   listasCache: Record<string, DatosLista>,
   formulasReglas: Record<string, Record<string, string>>,
-): Promise<{ listaId: string | null; metodoRaw: string; metodo: MetodoFacturacion; listaDatos: DatosLista; cond: CondicionSegmento | null }> {
-  const { cond } = resolverCondSegmento(articulo, condProvMap, condMarcaMap)
-  let listaId: string | null
-  let metodoRaw: string
-  if (cond) {
-    listaId = cond.lista_precio_id
-    metodoRaw = cond.metodo_facturacion || "Final"
-  } else {
-    const r = resolverListaSegmento(segmento, pedidoOverrides, clienteCapturado(clienteInfo))
-    listaId = r.listaId
-    metodoRaw = r.metodoRaw
-  }
+): Promise<{ listaId: string | null; metodoRaw: string; metodo: MetodoFacturacion; listaDatos: DatosLista; cond: CondicionSegmento | null; segKey: string | null }> {
+  const { cond, segKey } = resolverCondSegmento(articulo, condProvMap, condMarcaMap)
+  const { listaId, metodoRaw } = resolverListaMetodoConCondicion(segmento, cond, pedidoOverrides, clienteCapturado(clienteInfo))
+  // Regla del dueño: nunca se toma un pedido sin lista de precios
+  if (!listaId) throw new ErrorReglaPedido(MSG_SIN_LISTA)
   const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
   const metodo = toMetodoFacturacion(metodoRaw)
-  return { listaId, metodoRaw, metodo, listaDatos, cond }
+  return { listaId, metodoRaw, metodo, listaDatos, cond, segKey }
+}
+
+/**
+ * Vista previa con las condiciones por proveedor/marca del pedido en armado: si
+ * la pantalla manda la lista (completa, precargada de la ficha), esa REEMPLAZA a
+ * la de la ficha — mismo criterio que createPedido.
+ */
+function insumosConCondicionesDelPedido<T extends { condicionesProveedor: any[]; condicionesMarca: any[] }>(
+  insumos: T,
+  overrides: { condiciones_proveedor?: unknown; condiciones_marca?: unknown },
+): T {
+  return {
+    ...insumos,
+    ...(Array.isArray(overrides.condiciones_proveedor) ? { condicionesProveedor: [] } : {}),
+    ...(Array.isArray(overrides.condiciones_marca) ? { condicionesMarca: [] } : {}),
+  }
+}
+
+/** Filas de mercadería / contado de la ficha (las congeladas del pedido si hay captura). */
+async function fetchFichaFilas(supabase: any, clienteId: string): Promise<FilaBonifTipo[]> {
+  const captura = capturaActual(clienteId)
+  if (captura) return (captura.insumos.bonificaciones || []) as FilaBonifTipo[]
+  const { data } = await supabase
+    .from("bonificaciones")
+    .select("tipo, segmento, porcentaje, proveedor_id")
+    .eq("cliente_id", clienteId)
+    .eq("activo", true)
+    .in("tipo", ["mercaderia", "contado"])
+  return ((data || []) as any[]).filter((b) => !b.proveedor_id) as FilaBonifTipo[]
+}
+
+/** Contado y cupo de mercadería de un renglón (se guardan en pedidos_detalle). */
+function extrasRenglon(
+  cond: CondicionSegmento | null,
+  segKey: string | null,
+  segmento: Segmento,
+  esEspecial: boolean,
+  pedido: { bonif_pedido?: BonifPedido | null; bonif_mercaderia_pct?: number | null },
+  fichaFilas: FilaBonifTipo[],
+) {
+  const merc = resolverMercaderiaItem(cond, segKey, pedido.bonif_pedido, pedido.bonif_mercaderia_pct, fichaFilas, segmento, esEspecial)
+  return {
+    contado: resolverContadoItem(cond, pedido.bonif_pedido, fichaFilas, segmento, esEspecial),
+    bonif_merc_origen: merc.origen,
+    bonif_merc_pct: merc.pct > 0 ? merc.pct : null,
+  }
 }
 
 async function fetchArticuloConDescuentos(supabase: any, productoId: string) {
@@ -295,7 +338,7 @@ export async function previewPrecioArticulo(
     cargarInsumosCliente(supabase, clienteId),
     fetchArticuloConDescuentos(supabase, articuloId),
   ])
-  const p = precioArticuloParaCliente(insumos, articulo, overrides)
+  const p = precioArticuloParaCliente(insumosConCondicionesDelPedido(insumos, overrides), articulo, overrides)
 
   return {
     precio: p.precio,
@@ -407,6 +450,9 @@ export async function previewPreciosArticulos(
     lista_perf0_pedido_id?: string;    metodo_perf0_pedido?: string
     lista_perf_plus_pedido_id?: string; metodo_perf_plus_pedido?: string
     bonif_pedido?: BonifPedido | null
+    // Condiciones por proveedor / marca del pedido en armado (lista completa)
+    condiciones_proveedor?: CondicionProveedor[]
+    condiciones_marca?: CondicionMarca[]
   } = {},
 ): Promise<Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }>> {
   if (!articuloIds?.length) return []
@@ -425,7 +471,7 @@ export async function previewPreciosArticulos(
 
   const descPorArt = descuentosPorArticulo(descuentosDB || [])
   // Misma resolución que previewPrecioArticulo: motor isomórfico (lib/pricing/motor.ts)
-  const motor = prepararMotorCliente(insumos, overrides)
+  const motor = prepararMotorCliente(insumosConCondicionesDelPedido(insumos, overrides), overrides)
 
   const out: Array<{ articulo_id: string; precio: number; precioNeto: number; contado: number; ivaIncluido: boolean; especial: { bruto: number; oferta_pct: number } | null; bonifViajantePct: number }> = []
   for (const art of articulos || []) {
@@ -561,6 +607,68 @@ export async function getCondicionesProveedorPedido(pedidoId: string, clienteId:
   return Array.from(map.values())
 }
 
+/** Artículos a regalar por cupo de mercadería bonificada. */
+export type MercaderiaBonificadaInput =
+  // compat: un solo % para todo el pedido + artículos (pantallas viejas)
+  | { pct: number; articulo_ids: string[] }
+  // por cupo: origen = "todo" | "seg:<segmento>" | "prov:<id>" | "marca:<id>"
+  | Array<{ origen: string; articulo_ids: string[] }>
+
+function mercaderiaElegida(m: MercaderiaBonificadaInput | undefined | null): Array<{ origen: string; articulo_ids: string[] }> {
+  if (!m) return []
+  if (Array.isArray(m)) return m.filter((e) => e?.origen && Array.isArray(e.articulo_ids))
+  return m.articulo_ids?.length ? [{ origen: "todo", articulo_ids: m.articulo_ids }] : []
+}
+
+/** Contexto para cotizar renglones de UN pedido (lo comparten alta, agregado y bonificados). */
+interface CtxCotizacion {
+  pedidoOverrides: any
+  clienteInfo: any
+  condProvMap: Map<string, CondicionProveedor>
+  condMarcaMap: Map<string, CondicionMarca>
+  viajanteFilas: Array<{ segmento: string | null; porcentaje: number }>
+  listasCache: Record<string, DatosLista>
+  formulasReglas: Record<string, Record<string, string>>
+}
+
+/**
+ * Inserta un renglón de mercadería bonificada (a $0 en el comprobante) para el
+ * cupo `origen`, con cantidad 0: las unidades las fija recalcularBonificadosPedido
+ * (estimadas al armar, definitivas al cerrar el picking). Sin kardex: lo crea el
+ * sincronizador cuando el renglón tiene cantidad.
+ */
+async function insertarRenglonBonificado(supabase: any, pedidoId: string, productoId: string, origen: string | null, ctx: CtxCotizacion, cantidad = 0) {
+  const articulo = await fetchArticuloConDescuentos(supabase, productoId)
+  const segmento = detectarSegmento(articulo)
+  const { listaId, metodoRaw, metodo, listaDatos } = await resolverListaMetodoItem(
+    supabase, articulo, segmento, ctx.pedidoOverrides, ctx.clienteInfo, ctx.condProvMap, ctx.condMarcaMap, ctx.listasCache, ctx.formulasReglas,
+  )
+  // Gratis: general/viajante no aplican a su precio (P.Lista real en el comprobante)
+  const precio = calcularPrecioPedido(articulo, listaDatos, metodo, {})
+  const ofertaPct = articulo.descuento_propio || 0
+  // Viajante del segmento: la comisión que se resta por lo regalado usa la misma tasa
+  const viajantePct = getDescuentoViajante(ctx.viajanteFilas, segmento)
+  const { error } = await supabase.from("pedidos_detalle").insert({
+    pedido_id: pedidoId,
+    articulo_id: productoId,
+    cantidad,
+    precio_base: precio.precioNeto,
+    precio_final: precio.precioAlCliente,
+    subtotal: round2(precio.precioAlCliente * cantidad),
+    precio_costo: articulo.precio_compra || 0,
+    es_bonificado: true,
+    lista_precio_id: listaId,
+    metodo_facturacion_item: metodoRaw,
+    precio_lista: ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista,
+    descuento_propio_pct: ofertaPct,
+    bonif_general_pct: 0,
+    bonif_viajante_pct: viajantePct,
+    contado: false,
+    bonif_merc_origen: origen,
+  })
+  if (error) throw error
+}
+
 export async function createPedido(data: {
   cliente_id: string
   items: Array<{
@@ -581,21 +689,21 @@ export async function createPedido(data: {
   metodo_perf0_pedido?: string
   lista_perf_plus_pedido_id?: string
   metodo_perf_plus_pedido?: string
-  // Condiciones por proveedor — override por pedido de la mercadería de un proveedor
+  // Condiciones por proveedor / marca de ESTE pedido. Si vienen, son la lista
+  // COMPLETA (la pantalla precarga las de la ficha: sacar una = este pedido sin
+  // esa condición). Si no vienen, rigen las de la ficha del cliente.
   condiciones_proveedor?: CondicionProveedor[]
-  // Condiciones por marca — override por pedido de la mercadería de una marca (gana sobre proveedor)
   condiciones_marca?: CondicionMarca[]
-  // Descuentos por segmento cargados en el pedido (general/viajante/mercadería).
-  // Si vienen, se usan en lugar de las bonificaciones permanentes del cliente.
+  // Compat (pantallas viejas): descuentos inline por segmento. Se convierten en
+  // override del pedido (bonif_pedido) sobre la ficha; NO la reemplazan.
   bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
-  // Bonificaciones SOLO para este pedido, por segmento y tipo (viajante /
-  // mercadería). Se persisten en pedidos.bonif_pedido (jsonb) para que los
-  // ítems que se agreguen después y los re-precios las respeten.
+  // Descuentos SOLO para este pedido, por tipo y segmento (general / viajante /
+  // mercadería / contado). Un 0 explícito = "sin ese descuento en este pedido".
   bonif_pedido?: BonifPedido | null
-  // Mercadería bonificada elegida al crear el pedido: artículos a regalar + % .
-  // Las unidades se calculan por monto (% × neto) repartido parejo, y luego se
-  // reajustan en vivo al preparar en depósito.
-  mercaderia_bonificada?: { pct: number; articulo_ids: string[] }
+  // Mercadería bonificada "todo el pedido" solo para este pedido (0 = sin).
+  bonif_mercaderia_pct?: number | null
+  // Artículos a regalar por cupo. Sin artículos el cupo queda pendiente.
+  mercaderia_bonificada?: MercaderiaBonificadaInput
   // "en_venta": el vendedor está armando el pedido en vivo (autoguardado);
   // pasa a "pendiente" al confirmar (confirmarPedidoVendedor).
   estado_inicial?: "en_venta" | "pendiente"
@@ -605,83 +713,64 @@ export async function createPedido(data: {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error("No autenticado")
 
-  const numeroPedido = await getNextOrderNumber(supabase)
-
   const { data: clienteInfo, error: clienteError } = await supabase
     .from("clientes")
-    .select(`
-      id, vendedor_id, metodo_facturacion, lista_precio_id,
-      lista_limpieza_id, metodo_limpieza,
-      lista_perf0_id, metodo_perf0,
-      lista_perf_plus_id, metodo_perf_plus, provincia
-    `)
+    .select("id, vendedor_id, provincia")
     .eq("id", data.cliente_id)
     .single()
   if (clienteError || !clienteInfo) throw new Error(`Cliente no encontrado: ${clienteError?.message || data.cliente_id}`)
   // Pedido tomado en un dispositivo (null en la web): ver lib/mobile/contexto-captura.ts
   const captura = capturaActual(data.cliente_id)
 
+  // Ficha comercial que se CONGELA en el pedido (lib/pedidos/condiciones-pedido.ts)
+  const ficha = await leerFichaComercial(supabase, data.cliente_id)
+  const clienteListas = { ...ficha.snapshot.cliente, id: data.cliente_id }
+
   // Cache de listas para evitar múltiples queries a la misma lista
   const listasCache: Record<string, DatosLista> = {}
   // Cargar todas las reglas de fórmulas una sola vez para el pedido
   const formulasReglas = await fetchFormulasReglas(supabase)
 
-  // Bonificaciones general + viajante (escalonadas en el neto por línea).
-  // Prioridad: las cargadas en el pedido (inline) > las permanentes del cliente.
-  let bonifData: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
-  if (data.bonificaciones_pedido && data.bonificaciones_pedido.length > 0) {
-    bonifData = data.bonificaciones_pedido
-  } else if (captura) {
-    bonifData = captura.insumos.bonificaciones
-  } else {
-    const { data: bonifTabla } = await supabase
-      .from("bonificaciones")
-      .select("tipo, segmento, porcentaje")
-      .eq("cliente_id", data.cliente_id)
-      .eq("activo", true)
-      .in("tipo", ["general", "viajante"])
-    bonifData = bonifTabla ?? []
-  }
-  // Las bonificaciones inline (ERP nuevo pedido) se PERSISTEN como override del
-  // pedido (bonif_pedido): si no, un re-precio o un ítem agregado después volvía
-  // a los % de la ficha y el mismo pedido quedaba con descuentos distintos.
+  // ── Descuentos: ficha + "solo este pedido" ────────────────────────────────
+  // Las filas inline (compat) se convierten en override del pedido por segmento.
+  // La mercadería inline "todos" va a bonif_mercaderia_pct (cupo "todo").
   const filasAOverride = (tipo: string): Record<string, number> | undefined => {
-    if (!data.bonificaciones_pedido?.length) return undefined
+    const filas = (data.bonificaciones_pedido || []).filter((x) => x.tipo === tipo)
+    if (!filas.length) return undefined
     const o: Record<string, number> = {}
-    for (const b of data.bonificaciones_pedido.filter((x) => x.tipo === tipo)) {
+    for (const b of filas) {
+      const todos = !b.segmento || b.segmento === "todos"
+      if (tipo === "mercaderia" && todos) continue
       const pct = Number(b.porcentaje) || 0
-      const segs = b.segmento && b.segmento !== "todos" ? [b.segmento] : [...SEGMENTOS_BONIF]
-      for (const s of segs) if (o[s] === undefined) o[s] = pct
+      for (const s of todos ? [...SEGMENTOS_BONIF] : [b.segmento as string]) if (o[s] === undefined) o[s] = pct
     }
     return Object.keys(o).length ? o : undefined
   }
-  const ovrGeneral = filasAOverride("general")
-  const ovrViajante = filasAOverride("viajante")
-  const ovrMercaderia = filasAOverride("mercaderia")
-  const bonifPedidoNorm = normalizarBonifPedido({
-    ...(data.bonif_pedido || {}),
-    ...(ovrGeneral    ? { general:    ovrGeneral }    : {}),
-    ...(ovrViajante   ? { viajante:   ovrViajante }   : {}),
-    ...(ovrMercaderia ? { mercaderia: ovrMercaderia } : {}),
-  })
-  const bonifGeneral: Array<{ segmento: string | null; porcentaje: number }> =
-    mezclarOverride(bonifData.filter((b: any) => b.tipo === "general"), bonifPedidoNorm, "general")
-  const bonificacionesViajante: Array<{ segmento: string | null; porcentaje: number }> =
-    mezclarOverride(bonifData.filter((b: any) => b.tipo === "viajante"), bonifPedidoNorm, "viajante")
-  // % mercadería inline "para todos los segmentos" → bonif_mercaderia_pct del pedido
-  // (antes se descartaba en silencio).
+  const inline: Record<string, Record<string, number>> = {}
+  for (const tipo of TIPOS_BONIF_FICHA) {
+    const o = filasAOverride(tipo)
+    if (o) inline[tipo] = o
+  }
+  const bonifPedidoNorm = normalizarBonifPedido({ ...(data.bonif_pedido || {}), ...inline })
+  const fichaBonif = ficha.snapshot.bonificaciones
+  const bonifGeneral = mezclarOverride(fichaBonif.filter((b) => b.tipo === "general"), bonifPedidoNorm, "general")
+  const bonificacionesViajante = mezclarOverride(fichaBonif.filter((b) => b.tipo === "viajante"), bonifPedidoNorm, "viajante")
+  // Mercadería "todo el pedido" solo para este pedido (null = hereda la ficha)
   const mercInline = (data.bonificaciones_pedido || []).find((b) => b.tipo === "mercaderia" && (!b.segmento || b.segmento === "todos"))
-  const mercInlinePct = mercInline ? Number(mercInline.porcentaje) || 0 : 0
+  let mercTodo: number | null =
+    data.bonif_mercaderia_pct !== undefined && data.bonif_mercaderia_pct !== null && Number.isFinite(Number(data.bonif_mercaderia_pct))
+      ? Number(data.bonif_mercaderia_pct)
+      : mercInline ? Number(mercInline.porcentaje) || 0 : null
+  if (mercTodo === null && data.mercaderia_bonificada && !Array.isArray(data.mercaderia_bonificada) && data.mercaderia_bonificada.pct > 0) {
+    mercTodo = Number(data.mercaderia_bonificada.pct)   // compat: % + artículos de la pantalla vieja
+  }
 
-  // Condiciones por proveedor: del cliente + overrides del formulario (este pedido)
-  const condicionesProveedor = mergeCondicionesProveedor(
-    await fetchCondicionesProveedor(supabase, data.cliente_id),
-    data.condiciones_proveedor,
+  // ── Condiciones por proveedor / marca: lista completa del pedido ───────────
+  const condicionesProveedor = new Map<string, CondicionProveedor>(
+    (data.condiciones_proveedor ?? ficha.condicionesProveedor).filter((c) => c?.proveedor_id).map((c) => [c.proveedor_id, c]),
   )
-  // Condiciones por marca: del cliente + overrides del formulario (este pedido)
-  const condicionesMarca = mergeCondicionesMarca(
-    await fetchCondicionesMarca(supabase, data.cliente_id),
-    data.condiciones_marca,
+  const condicionesMarca = new Map<string, CondicionMarca>(
+    (data.condiciones_marca ?? ficha.condicionesMarca).filter((c) => c?.marca_id).map((c) => [c.marca_id, c]),
   )
 
   // Overrides de segmento del pedido (vienen del formulario)
@@ -695,6 +784,7 @@ export async function createPedido(data: {
     lista_perf_plus_pedido_id: data.lista_perf_plus_pedido_id,
     metodo_perf_plus_pedido:   data.metodo_perf_plus_pedido,
   }
+  const pedidoCtx = { bonif_pedido: bonifPedidoNorm, bonif_mercaderia_pct: mercTodo }
 
   // ── Calculate real price for each item ──────────────────────────────────
   type ItemCalc = {
@@ -707,6 +797,7 @@ export async function createPedido(data: {
     cond: CondicionSegmento | null
     segKey: string | null
     esEspecial: boolean
+    extras: ReturnType<typeof extrasRenglon>
   }
   const itemsCalc: ItemCalc[] = []
   for (const item of data.items) {
@@ -714,22 +805,11 @@ export async function createPedido(data: {
     const segmento = detectarSegmento(articulo)
     // ¿Este artículo cae en un segmento (marca o proveedor)? Marca gana sobre proveedor.
     const { cond, segKey } = resolverCondSegmento(articulo, condicionesProveedor, condicionesMarca)
-    let listaId: string | null
-    let metodoRaw: string
-    let generalPct: number
-    let viajantePct: number
-    if (cond) {
-      // La mercadería del segmento se cotiza con su lista/método. Los descuentos
-      // que la condición define pisan; los que deja en null se heredan (override
-      // del pedido > ficha) — misma regla que resolverBonifItem.
-      listaId = cond.lista_precio_id
-      metodoRaw = cond.metodo_facturacion || "Final"
-    } else {
-      const resuelto = resolverListaSegmento(segmento, segmentoOverrides, clienteCapturado(clienteInfo))
-      listaId = resuelto.listaId
-      metodoRaw = resuelto.metodoRaw
-    }
-    ;({ generalPct, viajantePct } = resolverBonifItem(cond, bonifGeneral, bonificacionesViajante, segmento))
+    // Lista/método: la condición define los suyos; lo que deja vacío hereda.
+    const { listaId, metodoRaw } = resolverListaMetodoConCondicion(segmento, cond, segmentoOverrides, clienteListas)
+    if (!listaId) throw new ErrorReglaPedido(MSG_SIN_LISTA)
+    // Descuentos que la condición define pisan; los que deja en null se heredan.
+    const { generalPct, viajantePct } = resolverBonifItem(cond, bonifGeneral, bonificacionesViajante, segmento)
     const listaDatos = await fetchListaDatos(supabase, listaId, listasCache, formulasReglas)
     const metodo = toMetodoFacturacion(metodoRaw)
     const precio = calcularPrecioPedido(articulo, listaDatos, metodo, { generalPct, viajantePct })
@@ -753,11 +833,15 @@ export async function createPedido(data: {
       cond,
       segKey,
       esEspecial,
+      extras: extrasRenglon(cond, segKey, segmento, esEspecial, pedidoCtx, fichaBonif),
     })
   }
 
   const total = Math.round(itemsCalc.reduce((s, i) => s + i.precioAlCliente * i.cantidad, 0) * 100) / 100
   const percepciones = 0 // aplica_percepciones no implementado aún en DB
+
+  // El número se pide recién acá: un pedido rechazado (sin lista, etc.) no consume número
+  const numeroPedido = await getNextOrderNumber(supabase)
 
   const { data: pedido, error: pedidoError } = await supabase
     .from("pedidos")
@@ -779,7 +863,10 @@ export async function createPedido(data: {
       ...(data.lista_perf_plus_pedido_id    ? { lista_perf_plus_pedido_id:    data.lista_perf_plus_pedido_id }    : {}),
       ...(data.metodo_perf_plus_pedido      ? { metodo_perf_plus_pedido:      data.metodo_perf_plus_pedido }      : {}),
       ...(bonifPedidoNorm ? { bonif_pedido: bonifPedidoNorm } : {}),
-      ...(mercInlinePct > 0 ? { bonif_mercaderia_pct: mercInlinePct } : {}),
+      ...(mercTodo !== null ? { bonif_mercaderia_pct: mercTodo } : {}),
+      // Condiciones congeladas: el pedido ya no depende de la ficha del cliente
+      condiciones_cliente: ficha.snapshot,
+      precios_al: captura?.vigenciaAt || new Date().toISOString(),
       total_flete: 0,
       total_impuestos: percepciones,
       total: Math.round((total + percepciones) * 100) / 100,
@@ -791,42 +878,24 @@ export async function createPedido(data: {
 
   if (pedidoError) throw pedidoError
 
-  // Persistir las condiciones por proveedor de este pedido (override del formulario)
-  if (data.condiciones_proveedor?.length) {
-    const rows = data.condiciones_proveedor
-      .filter(c => c?.proveedor_id)
-      .map(c => ({
-        pedido_id:          pedido.id,
-        proveedor_id:       c.proveedor_id,
-        lista_precio_id:    c.lista_precio_id ?? null,
-        metodo_facturacion: c.metodo_facturacion ?? null,
-        dto_general_pct:    c.dto_general_pct ?? null,
-        dto_viajante_pct:   c.dto_viajante_pct ?? null,
-        dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
-      }))
-    if (rows.length) {
-      const { error: condError } = await supabase.from("pedido_proveedor_condicion").insert(rows)
-      if (condError) console.error("[createPedido] Error guardando condiciones por proveedor:", condError.message)
-    }
+  // Condiciones por proveedor / marca que rigen el pedido (ficha + este pedido)
+  const condRow = (c: CondicionSegmento) => ({
+    lista_precio_id:    limpiarCentinela(c.lista_precio_id) ?? null,
+    metodo_facturacion: limpiarCentinela(c.metodo_facturacion) ?? null,
+    dto_general_pct:    c.dto_general_pct ?? null,
+    dto_viajante_pct:   c.dto_viajante_pct ?? null,
+    dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+    contado:            c.contado ?? null,
+  })
+  if (condicionesProveedor.size) {
+    const rows = [...condicionesProveedor.values()].map((c) => ({ pedido_id: pedido.id, proveedor_id: c.proveedor_id, ...condRow(c) }))
+    const { error: condError } = await supabase.from("pedido_proveedor_condicion").insert(rows)
+    if (condError) throw new Error(`Condiciones por proveedor del pedido: ${condError.message}`)
   }
-
-  // Persistir las condiciones por marca de este pedido (override del formulario)
-  if (data.condiciones_marca?.length) {
-    const rows = data.condiciones_marca
-      .filter(c => c?.marca_id)
-      .map(c => ({
-        pedido_id:          pedido.id,
-        marca_id:           c.marca_id,
-        lista_precio_id:    c.lista_precio_id ?? null,
-        metodo_facturacion: c.metodo_facturacion ?? null,
-        dto_general_pct:    c.dto_general_pct ?? null,
-        dto_viajante_pct:   c.dto_viajante_pct ?? null,
-        dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
-      }))
-    if (rows.length) {
-      const { error: condError } = await supabase.from("pedido_marca_condicion").insert(rows)
-      if (condError) console.error("[createPedido] Error guardando condiciones por marca:", condError.message)
-    }
+  if (condicionesMarca.size) {
+    const rows = [...condicionesMarca.values()].map((c) => ({ pedido_id: pedido.id, marca_id: c.marca_id, ...condRow(c) }))
+    const { error: condError } = await supabase.from("pedido_marca_condicion").insert(rows)
+    if (condError) throw new Error(`Condiciones por marca del pedido: ${condError.message}`)
   }
 
   // Obtener stock actual de todos los artículos en una sola query
@@ -867,6 +936,7 @@ export async function createPedido(data: {
       descuento_propio_pct: item.descuentoPropioPct,
       bonif_general_pct: item.bonifGeneralPct,
       bonif_viajante_pct: item.bonifViajantePct,
+      ...item.extras,
     })
     if (itemError) throw itemError
 
@@ -917,9 +987,9 @@ export async function createPedido(data: {
         stock_antes: stockActual,
         stock_despues: stockActual !== null ? stockActual - item.cantidad : null,
         operador_id: user.id,
-        // Comisión del viajante embebida en kardex (fórmula única: base = neto final,
-        // tasa = comisión% − viajante%, restado una sola vez). El descuento_viajante (precio)
-        // ya lo aporta buildKardexDescuentos. Mercadería/financiero reducen al cobrar.
+        // Comisión del viajante embebida en kardex (fórmula única: base = neto sin
+        // el viajante, tasa = max(0, comisión% − viajante%)). El descuento_viajante
+        // (precio) ya lo aporta buildKardexDescuentos. Mercadería/financiero reducen al cobrar.
         ...(() => {
           if (!vendedorComisiones || !art?.segmento_precio) return {}
           const comisionPct = getComisionPorcentaje(vendedorComisiones, art.segmento_precio, art.iva_ventas)
@@ -956,54 +1026,27 @@ export async function createPedido(data: {
   // cada pedido dentro de un try/catch. La cuenta corriente del cliente se
   // postea al facturar (cc_postear via comprobantes), no al crear el pedido.
 
-  // ── Mercadería bonificada elegida al crear el pedido ──────────────────────
-  // Monto a bonificar = % × total (sin bonificados), repartido parejo entre los
-  // artículos elegidos. Crea las líneas es_bonificado; las cantidades se
-  // reajustan en vivo al preparar el pedido en depósito.
-  const merc = data.mercaderia_bonificada
-  if (merc && merc.pct > 0 && merc.articulo_ids.length > 0) {
-    try {
-      await supabase.from("pedidos").update({ bonif_mercaderia_pct: merc.pct }).eq("id", pedido.id)
-      // Base = NETO (sin IVA ni percepciones), excluyendo los artículos segmentados
-      // (proveedor/marca con condición propia): esos usan SOLO su propia mercadería.
-      const netoBonifBase = itemsCalc.reduce((s, i) => s + (i.cond ? 0 : i.precioNeto * i.cantidad), 0)
-      const monto = netoBonifBase * merc.pct / 100
-      const share = monto / merc.articulo_ids.length
-      for (const artId of merc.articulo_ids) {
-        const preview = await previewPrecioArticulo(data.cliente_id, artId, {})
-        const precioNetoArt = preview.precioNeto || 0  // neto: consistente con la base neta
-        const units = precioNetoArt > 0 ? Math.round(share / precioNetoArt) : 0
-        if (units > 0) await agregarItemBonificado(pedido.id, artId, units)
-      }
-    } catch (bonifErr) {
-      console.error("Error creando mercadería bonificada:", bonifErr)
+  // ── Mercadería bonificada: artículos elegidos por cupo ────────────────────
+  // Solo cupos que existen en el pedido (algún renglón aporta con % > 0). Las
+  // unidades las calcula recalcularTotalPedido → recalcularBonificadosPedido.
+  const cuposDelPedido = new Set(itemsCalc.map((i) => i.extras.bonif_merc_origen).filter((o): o is string => !!o))
+  const elegidos = mercaderiaElegida(data.mercaderia_bonificada).filter((e) => cuposDelPedido.has(e.origen))
+  if (elegidos.length) {
+    const ctx: CtxCotizacion = {
+      pedidoOverrides: { ...segmentoOverrides, ...pedidoCtx },
+      clienteInfo: clienteListas,
+      condProvMap: condicionesProveedor,
+      condMarcaMap: condicionesMarca,
+      viajanteFilas: bonificacionesViajante,
+      listasCache,
+      formulasReglas,
     }
-  }
-
-  // ── Mercadería bonificada POR SEGMENTO (proveedor/marca con dto_mercaderia_pct) ──
-  // Cada segmento regala % × su propio neto, repartido entre SUS artículos, como
-  // líneas es_bonificado. Como esos artículos pertenecen al segmento, la línea cae
-  // en el comprobante aparte del segmento (igual que la mercadería a nivel pedido).
-  try {
-    const segGroups = new Map<string, { cond: CondicionSegmento; items: ItemCalc[] }>()
-    for (const i of itemsCalc) {
-      if (i.cond && i.segKey && (i.cond.dto_mercaderia_pct || 0) > 0) {
-        if (!segGroups.has(i.segKey)) segGroups.set(i.segKey, { cond: i.cond, items: [] })
-        segGroups.get(i.segKey)!.items.push(i)
+    for (const e of elegidos) {
+      for (const artId of [...new Set(e.articulo_ids)]) {
+        await insertarRenglonBonificado(supabase, pedido.id, artId, e.origen, ctx)
       }
     }
-    for (const { cond, items } of segGroups.values()) {
-      const base = items.reduce((s, i) => s + i.precioNeto * i.cantidad, 0)
-      const monto = base * (cond.dto_mercaderia_pct || 0) / 100
-      if (monto <= 0 || items.length === 0) continue
-      const share = monto / items.length
-      for (const it of items) {
-        const units = it.precioNeto > 0 ? Math.round(share / it.precioNeto) : 0
-        if (units > 0) await agregarItemBonificado(pedido.id, it.producto_id, units)
-      }
-    }
-  } catch (segMercErr) {
-    console.error("Error creando mercadería bonificada por segmento:", segMercErr)
+    await recalcularTotalPedido(supabase, pedido.id)
   }
 
   revalidatePath("/clientes-pedidos")
@@ -1281,6 +1324,9 @@ async function assertPedidoEditable(supabase: any, pedidoId: string) {
 // Total del pedido = Σ subtotales de líneas no bonificadas (mismo criterio que
 // createPedido/guardarItemsPedido). Se llama tras cada alta/edición/baja de ítem.
 async function recalcularTotalPedido(supabase: any, pedidoId: string) {
+  // Unidades de mercadería bonificada según lo que va del pedido (no suman al total)
+  await recalcularBonificadosPedido(supabase, pedidoId)
+
   const { data: allItems } = await supabase
     .from("pedidos_detalle")
     .select("subtotal, es_bonificado")
@@ -1301,7 +1347,43 @@ async function recalcularTotalPedido(supabase: any, pedidoId: string) {
   return total
 }
 
+/** Datos mínimos para abrir el contexto de precios congelados de un pedido. */
+async function pedidoCongelable(supabase: any, pedidoId: string) {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("id, cliente_id, condiciones_cliente, precios_al")
+    .eq("id", pedidoId)
+    .single()
+  if (error || !data) throw new Error("Pedido no encontrado")
+  return data as { id: string; cliente_id: string; condiciones_cliente: unknown; precios_al: string | null }
+}
+
+/** ¿El pedido tiene cupos de mercadería o renglones bonificados? (para no recalcular de más) */
+async function tieneMercaderia(supabase: any, pedidoId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("pedidos_detalle")
+    .select("id")
+    .eq("pedido_id", pedidoId)
+    .or("es_bonificado.eq.true,bonif_merc_origen.not.is.null")
+    .limit(1)
+  return !!data?.length
+}
+
+// Agrega un artículo con las condiciones CONGELADAS del pedido y sus precios
+// (pedidos.precios_al): "mismo pedido, mismas condiciones".
 export async function agregarItemPedido(
+  pedidoId: string,
+  productoId: string,
+  cantidad: number
+) {
+  const supabase = await createClient()
+  const ped = await pedidoCongelable(supabase, pedidoId)
+  return conPreciosDelPedido(ped, { vigencia: "pedido", articuloIds: [productoId] }, () =>
+    agregarItemPedidoEnContexto(pedidoId, productoId, cantidad),
+  )
+}
+
+async function agregarItemPedidoEnContexto(
   pedidoId: string,
   productoId: string,
   cantidad: number
@@ -1343,7 +1425,7 @@ export async function agregarItemPedido(
 
   const segmentoArt = detectarSegmento(articuloConDescuentos)
   // Resolución por segmento (igual que createPedido): marca > proveedor > override pedido > cliente > general
-  const { listaId, metodoRaw: metodoItemRaw, metodo, listaDatos, cond } =
+  const { listaId, metodoRaw: metodoItemRaw, metodo, listaDatos, cond, segKey } =
     await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas)
 
   const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
@@ -1352,6 +1434,7 @@ export async function agregarItemPedido(
   const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
   const ofertaPct = esEspecial ? (articuloConDescuentos.oferta_lista_especial || 0) : (articuloConDescuentos.descuento_propio || 0)
   const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
+  const extras = extrasRenglon(cond, segKey, segmentoArt, esEspecial, pedido as any, await fetchFichaFilas(supabase, pedido.cliente_id))
 
   const subtotalLinea = Math.round(precio.precioAlCliente * cantidad * 100) / 100
   const { data: lineaInsertada, error } = await supabase
@@ -1370,6 +1453,7 @@ export async function agregarItemPedido(
       descuento_propio_pct: ofertaPct,
       bonif_general_pct: precio.bonifGeneralPct,
       bonif_viajante_pct: precio.bonifViajantePct,
+      ...extras,
     })
     .select("id")
     .single()
@@ -1468,6 +1552,9 @@ export async function agregarItemPedido(
     .eq("id", pedidoId)
   if (totErr) throw totErr
 
+  // El renglón nuevo cambia la base de los cupos de mercadería bonificada (estimación)
+  if (await tieneMercaderia(supabase, pedidoId)) await recalcularBonificadosPedido(supabase, pedidoId)
+
   // Sin revalidatePath: las pantallas del ERP que muestran pedidos cargan por
   // cliente (supabase-js), y el re-render RSC sumaba latencia a cada tap.
   // Se devuelve la línea para que la app actualice el carrito sin refetch.
@@ -1488,140 +1575,49 @@ export async function agregarItemPedido(
   }
 }
 
+// Agrega un artículo a regalar. Con `origen` (cupo: "todo" | "seg:x" | "prov:id" |
+// "marca:id") las unidades las calcula el sistema (estimadas hasta cerrar el
+// picking); sin origen (pedidos viejos) queda la cantidad indicada a mano.
 export async function agregarItemBonificado(
   pedidoId: string,
   productoId: string,
-  cantidad: number
+  cantidad: number,
+  origen?: string | null,
 ) {
   const supabase = await createClient()
   await assertPedidoEditable(supabase, pedidoId)
-
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: pedido } = await supabase
-    .from("pedidos")
-    .select(`cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
-    .eq("id", pedidoId)
-    .single()
-  if (!pedido) throw new Error("Pedido no encontrado")
-
-  const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
-  const formulasReglas = await fetchFormulasReglas(supabase)
-  const listasCache: Record<string, DatosLista> = {}
-  const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
-  const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
-
-  const articuloConDescuentos = await fetchArticuloConDescuentos(supabase, productoId)
-  const segmentoBonif = detectarSegmento(articuloConDescuentos)
-  // Resolución por segmento del producto bonificado (lista/método correctos)
-  const { listaId: listaIdBonif, metodoRaw: metodoItemRaw, metodo, listaDatos } =
-    await resolverListaMetodoItem(supabase, articuloConDescuentos, segmentoBonif, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas)
-  // La mercadería bonificada es gratis (net $0): general/viajante no aplican a su precio.
-  const precio = calcularPrecioPedido(articuloConDescuentos, listaDatos, metodo, {})
-  const ofertaPctBonif = articuloConDescuentos.descuento_propio || 0
-  const precioListaRef = precio.precioLista  // P.Lista real del producto bonificado
-  // Viajante del segmento: se guarda en la línea para que la comisión "cobrada" use
-  // la misma tasa (comisión% − viajante%) al restar el valor regalado.
-  const { viajante: bonifViajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido)
-  const viajantePctBonif = getDescuentoViajante(bonifViajante, segmentoBonif)
-
-  const { error } = await supabase.from("pedidos_detalle").insert({
-    pedido_id: pedidoId,
-    articulo_id: productoId,
-    cantidad,
-    precio_base: precio.precioNeto,
-    precio_final: precio.precioAlCliente,
-    subtotal: Math.round(precio.precioAlCliente * cantidad * 100) / 100,
-    precio_costo: articuloConDescuentos.precio_compra || 0,
-    es_bonificado: true,
-    lista_precio_id: listaIdBonif,
-    metodo_facturacion_item: metodoItemRaw,
-    precio_lista: ofertaPctBonif > 0 ? round2(precioListaRef / (1 - ofertaPctBonif / 100)) : precioListaRef,
-    descuento_propio_pct: ofertaPctBonif,
-    bonif_general_pct: 0,
-    bonif_viajante_pct: viajantePctBonif,
+  const ped = await pedidoCongelable(supabase, pedidoId)
+  await conPreciosDelPedido(ped, { vigencia: "pedido", articuloIds: [productoId] }, async () => {
+    const { data: pedido } = await supabase
+      .from("pedidos")
+      .select(`cliente_id,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS})`)
+      .eq("id", pedidoId)
+      .single()
+    if (!pedido) throw new Error("Pedido no encontrado")
+    const [formulasReglas, condProvMap, condMarcaMap, { viajante }] = await Promise.all([
+      fetchFormulasReglas(supabase),
+      fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId),
+      fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId),
+      fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido),
+    ])
+    await insertarRenglonBonificado(supabase, pedidoId, productoId, origen || null, {
+      pedidoOverrides: pedido,
+      clienteInfo: { ...(pedido.clientes as any), id: pedido.cliente_id },
+      condProvMap,
+      condMarcaMap,
+      viajanteFilas: viajante,
+      listasCache: {},
+      formulasReglas,
+    }, origen ? 0 : Math.max(0, Number(cantidad) || 0))
   })
-  if (error) throw error
-
-  const { data: artInfo } = await supabase
-    .from("articulos")
-    .select("sku, descripcion, categoria, marca_id, proveedor_id, iva_compras, iva_ventas, stock_actual, segmento_precio")
-    .eq("id", productoId)
-    .single()
-
-  const metodoRaw = metodoItemRaw
-  const colorDinero = metodoRaw === "Factura (21% IVA)" || metodoRaw === "Factura" ? "BLANCO" : "NEGRO"
-
-  // Reducción de comisión por mercadería bonificada ("la venta real es $90"):
-  // comisión negativa = − valor regalado × (comisión% − viajante%). El vendedor no
-  // cobra comisión sobre lo que se entregó gratis.
-  const vendedorIdBonif = (pedido.clientes as any)?.vendedor_id ?? null
-  const comisionReduccion = await (async () => {
-    if (!vendedorIdBonif || !artInfo?.segmento_precio) return {}
-    const { data: vd } = await supabase.from("vendedores").select("comision_limpieza_bazar, comision_perfumeria_0, comision_perfumeria_plus").eq("id", vendedorIdBonif).single()
-    if (!vd) return {}
-    const comisionPct = getComisionPorcentaje(vd, artInfo.segmento_precio, artInfo.iva_ventas)
-    if (comisionPct <= 0 && viajantePctBonif <= 0) return {}
-    const { monto, tasaEfectivaPct } = calcularComisionMonto({
-      precioNetoUnitario: precio.precioNeto,
-      cantidad,
-      metodoFacturacion: metodoRaw,
-      ivaVentas: artInfo.iva_ventas,
-      comisionPct,
-      viajantePct: viajantePctBonif,
-    })
-    return { comision_viajante_pct: tasaEfectivaPct, comision_viajante_monto: -monto }
-  })()
-
-  await insertarKardex(
-    createAdminClient(),
-    {
-      tipo_movimiento: "venta",
-      fecha: nowArgentina(),
-      articulo_id: productoId,
-      cantidad,
-      precio_costo: articuloConDescuentos.precio_compra || 0,
-      precio_lista: precioListaRef,
-      precio_unitario_final: 0,
-      iva_porcentaje: 0,
-      iva_monto_unitario: 0,
-      iva_incluido: false,
-      descuentos_json: [{ tipo: 'mercaderia' as const, porcentaje: 100, monto_unitario: precioListaRef }],
-      descuento_cliente_pct: 0,
-      descuento_mercaderia_pct: 100,
-      descuento_mercaderia_monto: precioListaRef,
-      descuento_general_pct: null,
-      descuento_general_monto: null,
-      subtotal_neto: 0,
-      subtotal_iva: 0,
-      subtotal_total: 0,
-      cliente_id: pedido.cliente_id,
-      vendedor_id: vendedorIdBonif,
-      provincia_destino: (pedido.clientes as any)?.provincia ?? null,
-      pedido_id: pedidoId,
-      numero_pedido: (pedido as any).numero_pedido ?? null,
-      lista_precio_id: pedido.lista_precio_pedido_id || (pedido.clientes as any)?.lista_precio_id || null,
-      metodo_facturacion: metodoRaw,
-      color_dinero: colorDinero,
-      stock_antes: artInfo?.stock_actual ?? null,
-      stock_despues: artInfo?.stock_actual != null ? artInfo.stock_actual - cantidad : null,
-      operador_id: user?.id ?? null,
-      ...comisionReduccion,
-    },
-    {
-      sku: artInfo?.sku,
-      descripcion: artInfo?.descripcion,
-      categoria: artInfo?.categoria,
-      marca_id: artInfo?.marca_id,
-      proveedor_id: artInfo?.proveedor_id,
-      iva_compras: artInfo?.iva_compras,
-      iva_ventas: artInfo?.iva_ventas,
-    },
-  )
 
   if (user?.id) {
     await supabase.from("pedidos").update({ actualizado_por: user.id }).eq("id", pedidoId)
   }
+  // Fija las unidades del cupo y alinea el kardex (comisión negativa por lo regalado)
+  await recalcularTotalPedido(supabase, pedidoId)
 
   revalidatePath("/clientes-pedidos")
   return { success: true }
@@ -1712,57 +1708,87 @@ export async function guardarItemsPedido(
   return { success: true }
 }
 
-// Re-precia todas las líneas no bonificadas de un pedido con sus overrides
-// actuales (misma resolución que agregarItemPedido: marca > proveedor >
-// override pedido > cliente). `pedido` debe traer SEGMENTO_PEDIDO_COLS +
-// clientes(SEGMENTO_CLIENTE_COLS).
-async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string) {
-  const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
-  const formulasReglas = await fetchFormulasReglas(supabase)
-  const listasCache: Record<string, DatosLista> = {}
-  const condProvMap = await fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId)
-  const condMarcaMap = await fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId)
-  const { general, viajante } = await fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido)
-
+// Re-precia todas las líneas de un pedido con sus condiciones (misma resolución
+// que agregarItemPedido: marca > proveedor > override pedido > ficha congelada).
+// `vigencia`: "pedido" = precios de cuando se tomó (cambio de condiciones del
+// pedido); "ahora" = precios de hoy (botón Repreciar). Los renglones bonificados
+// actualizan su precio de referencia (las unidades las recalcula
+// recalcularTotalPedido). `pedido` debe traer SEGMENTO_PEDIDO_COLS + clientes(SEGMENTO_CLIENTE_COLS).
+async function repreciarItemsPedido(supabase: any, pedido: any, pedidoId: string, vigencia: "pedido" | "ahora" = "pedido") {
   const { data: items } = await supabase
     .from("pedidos_detalle")
     .select("id, articulo_id, cantidad, es_bonificado")
     .eq("pedido_id", pedidoId)
 
-  for (const it of items || []) {
-    if (it.es_bonificado) continue
-    const articulo = await fetchArticuloConDescuentos(supabase, it.articulo_id)
-    const segmentoArt = detectarSegmento(articulo)
-    const { listaId, metodoRaw, metodo, listaDatos, cond } = await resolverListaMetodoItem(
-      supabase, articulo, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas
-    )
-    const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
-    const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
-    const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
-    const ofertaPct = esEspecial ? (articulo.oferta_lista_especial || 0) : (articulo.descuento_propio || 0)
-    const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
+  const congelable = { id: pedidoId, cliente_id: pedido.cliente_id, condiciones_cliente: pedido.condiciones_cliente, precios_al: pedido.precios_al }
+  await conPreciosDelPedido(congelable, { vigencia, articuloIds: (items || []).map((i: any) => i.articulo_id) }, async () => {
+    const clienteInfo = { ...(pedido.clientes as any), id: pedido.cliente_id }
+    const listasCache: Record<string, DatosLista> = {}
+    const [formulasReglas, condProvMap, condMarcaMap, { general, viajante }, fichaFilas] = await Promise.all([
+      fetchFormulasReglas(supabase),
+      fetchCondicionesProveedor(supabase, pedido.cliente_id, pedidoId),
+      fetchCondicionesMarca(supabase, pedido.cliente_id, pedidoId),
+      fetchBonifGeneralViajante(supabase, pedido.cliente_id, pedido),
+      fetchFichaFilas(supabase, pedido.cliente_id),
+    ])
 
-    const { error: itemError } = await supabase
-      .from("pedidos_detalle")
-      .update({
-        precio_base: precio.precioNeto,
-        precio_final: precio.precioAlCliente,
-        subtotal: round2(precio.precioAlCliente * it.cantidad),
-        lista_precio_id: listaId,
-        metodo_facturacion_item: metodoRaw,
-        precio_lista: precioListaBruto,
-        descuento_propio_pct: ofertaPct,
-        bonif_general_pct: precio.bonifGeneralPct,
-        bonif_viajante_pct: precio.bonifViajantePct,
-      })
-      .eq("id", it.id)
-    if (itemError) throw itemError
-  }
+    for (const it of items || []) {
+      const articulo = await fetchArticuloConDescuentos(supabase, it.articulo_id)
+      const segmentoArt = detectarSegmento(articulo)
+      const { listaId, metodoRaw, metodo, listaDatos, cond, segKey } = await resolverListaMetodoItem(
+        supabase, articulo, segmentoArt, pedido, clienteInfo, condProvMap, condMarcaMap, listasCache, formulasReglas
+      )
+      const esEspecial = (listaDatos.lista_codigo || "").toLowerCase() === "especial"
+
+      if (it.es_bonificado) {
+        // Mercadería regalada: precio de referencia (P.Lista real), sin general/viajante
+        const precio = calcularPrecioPedido(articulo, listaDatos, metodo, {})
+        const ofertaB = articulo.descuento_propio || 0
+        const { error: bErr } = await supabase
+          .from("pedidos_detalle")
+          .update({
+            precio_base: precio.precioNeto,
+            precio_final: precio.precioAlCliente,
+            subtotal: round2(precio.precioAlCliente * it.cantidad),
+            lista_precio_id: listaId,
+            metodo_facturacion_item: metodoRaw,
+            precio_lista: ofertaB > 0 ? round2(precio.precioLista / (1 - ofertaB / 100)) : precio.precioLista,
+            descuento_propio_pct: ofertaB,
+            bonif_viajante_pct: getDescuentoViajante(viajante, segmentoArt),
+          })
+          .eq("id", it.id)
+        if (bErr) throw bErr
+        continue
+      }
+
+      const bonif = resolverBonifItem(cond, general, viajante, segmentoArt)
+      const precio = calcularPrecioPedido(articulo, listaDatos, metodo, bonif)
+      const ofertaPct = esEspecial ? (articulo.oferta_lista_especial || 0) : (articulo.descuento_propio || 0)
+      const precioListaBruto = ofertaPct > 0 ? round2(precio.precioLista / (1 - ofertaPct / 100)) : precio.precioLista
+
+      const { error: itemError } = await supabase
+        .from("pedidos_detalle")
+        .update({
+          precio_base: precio.precioNeto,
+          precio_final: precio.precioAlCliente,
+          subtotal: round2(precio.precioAlCliente * it.cantidad),
+          lista_precio_id: listaId,
+          metodo_facturacion_item: metodoRaw,
+          precio_lista: precioListaBruto,
+          descuento_propio_pct: ofertaPct,
+          bonif_general_pct: precio.bonifGeneralPct,
+          bonif_viajante_pct: precio.bonifViajantePct,
+          ...extrasRenglon(cond, segKey, segmentoArt, esEspecial, pedido, fichaFilas),
+        })
+        .eq("id", it.id)
+      if (itemError) throw itemError
+    }
+  })
 }
 
-// Re-precia UN pedido (cualquier estado editable) con sus overrides actuales
-// y la config vigente del cliente. Lo usa el ERP al guardar el encabezado del
-// pedido (método/lista/segmentación del pedido) desde /clientes-pedidos/[id].
+// Re-precia UN pedido (cualquier estado editable) con sus condiciones y los
+// precios de cuando se tomó. Lo usa el ERP al guardar el encabezado del pedido
+// (método/lista/segmentación/descuentos del pedido) desde /clientes-pedidos/[id].
 export async function repreciarPedido(pedidoId: string) {
   const supabase = await createClient()
   await assertPedidoEditable(supabase, pedidoId)
@@ -1778,36 +1804,47 @@ export async function repreciarPedido(pedidoId: string) {
   return { success: true, total }
 }
 
-// Re-precia los pedidos ABIERTOS de un cliente (en_venta / pendiente: todavía
-// no impresos ni facturados) con su configuración comercial ACTUAL: lista,
-// método, bonificaciones y condiciones por proveedor/marca. Se invoca cada vez
-// que cambia algo de eso en la ficha (ERP o app vendedor) para que lo que se
-// factura coincida con lo que el cliente tiene asignado, no con el snapshot
-// tomado al armar el carrito. Los pedidos ya impresos no se tocan: el papel
-// que salió es el compromiso con el cliente. Best-effort por pedido.
-export async function repreciarPedidosAbiertosCliente(clienteId: string) {
+// ─── Botón "Repreciar" (modal del pedido en /clientes-pedidos) ───────────────
+// Regla del dueño (06/10/2026): el precio de un pedido se cierra al tomarlo y
+// los cambios de la ficha del cliente NO lo tocan. Repreciar es la acción
+// explícita que lo lleva a los precios de HOY, con las condiciones (listas,
+// método, descuentos, segmentación) que el pedido ya tiene. Se puede hasta que
+// el pedido tenga comprobantes vivos: facturado, el precio queda blindado; si se
+// anulan los comprobantes, se puede repreciar antes de volver a facturar.
+export async function repreciarPedidoPreciosActuales(pedidoId: string) {
   const supabase = await createClient()
-  const { data: pedidos, error } = await supabase
-    .from("pedidos")
-    .select(`id,estado,cliente_id,numero_pedido,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
-    .eq("cliente_id", clienteId)
-    .in("estado", ["en_venta", "pendiente"])
-  if (error) throw error
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error("No autenticado")
 
-  let repreciados = 0
-  const errores: string[] = []
-  for (const pedido of pedidos || []) {
-    try {
-      await repreciarItemsPedido(supabase, pedido, pedido.id)
-      await recalcularTotalPedido(supabase, pedido.id)
-      repreciados++
-    } catch (e: any) {
-      errores.push(`${(pedido as any).numero_pedido || pedido.id}: ${e?.message || e}`)
-    }
+  const { data: pedido, error } = await supabase
+    .from("pedidos")
+    .select(`id,estado,total,cliente_id,numero_pedido,eliminado_at,${SEGMENTO_PEDIDO_COLS},clientes:cliente_id(${SEGMENTO_CLIENTE_COLS},provincia,vendedor_id)`)
+    .eq("id", pedidoId)
+    .single()
+  if (error || !pedido) throw new Error("Pedido no encontrado")
+  if (pedido.estado === "eliminado" || (pedido as any).eliminado_at) throw new Error("El pedido está eliminado.")
+
+  const { data: vivo } = await supabase
+    .from("comprobantes_venta")
+    .select("tipo_comprobante, numero_comprobante")
+    .eq("pedido_id", pedidoId)
+    .is("anulado_en", null)
+    .limit(1)
+    .maybeSingle()
+  if (vivo) {
+    throw new Error(`El pedido ya está facturado (${vivo.tipo_comprobante} ${vivo.numero_comprobante}): el precio quedó cerrado. Para cambiarlo hay que anular los comprobantes.`)
   }
-  if (repreciados > 0) revalidatePath("/clientes-pedidos")
-  if (errores.length) console.error("[repreciarPedidosAbiertosCliente]", clienteId, errores)
-  return { success: true, repreciados, errores }
+
+  const totalAnterior = Number((pedido as any).total) || 0
+  await repreciarItemsPedido(supabase, pedido, pedidoId, "ahora")
+  const { error: upErr } = await supabase
+    .from("pedidos")
+    .update({ precios_al: new Date().toISOString(), actualizado_por: user.id })
+    .eq("id", pedidoId)
+  if (upErr) throw new Error(upErr.message)
+  const total = await recalcularTotalPedido(supabase, pedidoId)
+  revalidatePath("/clientes-pedidos")
+  return { success: true, total, total_anterior: totalAnterior }
 }
 
 // Condiciones "solo este pedido" desde el módulo vendedor: método, lista y/o
@@ -1848,15 +1885,15 @@ export async function aplicarCondicionesPedidoVendedor(
     if (v !== ((pedido as any).lista_precio_pedido_id || null)) patch.lista_precio_pedido_id = v
   }
   if (cond.bonif_pedido !== undefined) {
-    // MERGE por tipo, no reemplazo: la app solo maneja viajante/mercadería;
-    // un `general` "solo este pedido" cargado desde el ERP debe sobrevivir.
+    // MERGE por tipo, no reemplazo: la app (≤ 0.2.3) solo maneja viajante/mercadería;
+    // un `general` o `contado` "solo este pedido" cargado desde el ERP debe sobrevivir.
     // Un tipo que la app manda explícitamente (aunque sea vacío) sí se pisa.
     const actual = normalizarBonifPedido((pedido as any).bonif_pedido)
     const entrante = (cond.bonif_pedido || {}) as Record<string, unknown>
     const fusion: Record<string, unknown> = { ...(actual || {}) }
-    for (const tipo of ["general", "viajante", "mercaderia"]) {
+    for (const tipo of TIPOS_BONIF_FICHA) {
       if (tipo in entrante) fusion[tipo] = entrante[tipo]
-      else if (cond.bonif_pedido === null && tipo !== "general") delete fusion[tipo]
+      else if (cond.bonif_pedido === null && (tipo === "viajante" || tipo === "mercaderia")) delete fusion[tipo]
     }
     const v = normalizarBonifPedido(fusion)
     if (JSON.stringify(v) !== JSON.stringify(actual)) patch.bonif_pedido = v
@@ -1905,8 +1942,9 @@ export async function guardarCondicionesPedido(
 
   const provRows = (cond.proveedor || []).filter((c) => c?.proveedor_id).map((c) => ({
     pedido_id: pedidoId, proveedor_id: c.proveedor_id,
-    lista_precio_id: c.lista_precio_id ?? null, metodo_facturacion: c.metodo_facturacion ?? null,
+    lista_precio_id: limpiarCentinela(c.lista_precio_id) ?? null, metodo_facturacion: limpiarCentinela(c.metodo_facturacion) ?? null,
     dto_general_pct: c.dto_general_pct ?? null, dto_viajante_pct: c.dto_viajante_pct ?? null, dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+    contado: c.contado ?? null,
   }))
   if (provRows.length) {
     const { error } = await supabase.from("pedido_proveedor_condicion").insert(provRows)
@@ -1914,8 +1952,9 @@ export async function guardarCondicionesPedido(
   }
   const marcaRows = (cond.marca || []).filter((c) => c?.marca_id).map((c) => ({
     pedido_id: pedidoId, marca_id: c.marca_id,
-    lista_precio_id: c.lista_precio_id ?? null, metodo_facturacion: c.metodo_facturacion ?? null,
+    lista_precio_id: limpiarCentinela(c.lista_precio_id) ?? null, metodo_facturacion: limpiarCentinela(c.metodo_facturacion) ?? null,
     dto_general_pct: c.dto_general_pct ?? null, dto_viajante_pct: c.dto_viajante_pct ?? null, dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+    contado: c.contado ?? null,
   }))
   if (marcaRows.length) {
     const { error } = await supabase.from("pedido_marca_condicion").insert(marcaRows)
@@ -1968,15 +2007,17 @@ export async function confirmarPedidoVendedor(
     await supabase.from("pedidos").update({ metodo_facturacion_pedido: metodoNuevo }).eq("id", pedidoId)
     ;(pedido as any).metodo_facturacion_pedido = metodoNuevo
   }
-  // Al confirmar un carrito en_venta se re-precia SIEMPRE: las líneas traen el
-  // precio de cuando se agregaron y la lista/método/bonificación del cliente
-  // pudo cambiar mientras tanto (ficha ERP o app). Lo que pasa a pendiente
-  // queda con la configuración vigente, que es la que se factura.
-  if (cambioMetodo || pedido.estado === "en_venta") {
-    await repreciarItemsPedido(supabase, pedido, pedidoId)
+  // Al confirmar un carrito en_venta el precio se CIERRA: se re-precia con los
+  // precios de ese momento (las líneas traen el precio de cuando se agregaron).
+  // Las condiciones son las congeladas del pedido. Un pedido ya confirmado que
+  // solo cambia de método conserva sus precios (los de cuando se tomó).
+  const cierraCarrito = pedido.estado === "en_venta"
+  if (cambioMetodo || cierraCarrito) {
+    await repreciarItemsPedido(supabase, pedido, pedidoId, cierraCarrito ? "ahora" : "pedido")
   }
 
   const patch: Record<string, any> = { actualizado_por: user.id }
+  if (cierraCarrito) patch.precios_al = capturaActual(pedido.cliente_id)?.vigenciaAt || new Date().toISOString()
   if (opts.observaciones !== undefined) patch.observaciones = opts.observaciones || null
   if (pedido.estado === "en_venta") patch.estado = "pendiente"
   const { error: updError } = await supabase.from("pedidos").update(patch).eq("id", pedidoId)

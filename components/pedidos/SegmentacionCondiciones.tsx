@@ -1,6 +1,7 @@
 "use client"
 
 // Segmentación por PROVEEDOR y por MARCA.
+// Lista, método y contado vacíos ("Hereda") toman lo del pedido / la ficha.
 // Buscás (multi-selección) uno o más proveedores / marcas y a cada uno le asignás
 // lista, facturación y descuentos (general / viajante / mercadería) propios. Cada
 // segmento se factura en comprobante aparte. La lista "especial" sólo aparece si ese
@@ -17,11 +18,12 @@ import { Plus, Trash2 } from "lucide-react"
 export type CondRow = {
   ref_id: string                       // proveedor_id | marca_id
   nombre: string
-  lista_precio_id: string | null
-  metodo_facturacion: string           // 'Factura' | 'Presupuesto'
+  lista_precio_id: string | null       // null = hereda la lista del pedido
+  metodo_facturacion: string | null    // 'Factura' | 'Final' | 'Presupuesto' · null = hereda
   dto_general_pct: number | null
   dto_viajante_pct: number | null
   dto_mercaderia_pct: number | null
+  contado?: boolean | null             // true = sale con 10% contado · null = hereda
 }
 
 export type SegmentacionValue = { proveedor: CondRow[]; marca: CondRow[] }
@@ -37,6 +39,7 @@ export function condRowsToProveedor(rows: CondRow[]) {
     dto_general_pct: r.dto_general_pct,
     dto_viajante_pct: r.dto_viajante_pct,
     dto_mercaderia_pct: r.dto_mercaderia_pct,
+    contado: r.contado ?? null,
   }))
 }
 export function condRowsToMarca(rows: CondRow[]) {
@@ -47,6 +50,7 @@ export function condRowsToMarca(rows: CondRow[]) {
     dto_general_pct: r.dto_general_pct,
     dto_viajante_pct: r.dto_viajante_pct,
     dto_mercaderia_pct: r.dto_mercaderia_pct,
+    contado: r.contado ?? null,
   }))
 }
 
@@ -54,8 +58,9 @@ type LP = { id: string; nombre: string; codigo?: string }
 type Opcion = { id: string; nombre: string }
 
 const METODOS = [
-  { value: "Factura",     label: "Factura"     },
-  { value: "Presupuesto", label: "Presupuesto" },
+  { value: "Factura",     label: "Factura"       },
+  { value: "Final",       label: "Final (Mixto)" },
+  { value: "Presupuesto", label: "Presupuesto"   },
 ]
 
 function numOrNull(v: string): number | null {
@@ -138,8 +143,8 @@ function Seccion({
     if (rows.some(r => r.ref_id === o.id)) return
     onChangeRows([...rows, {
       ref_id: o.id, nombre: o.nombre,
-      lista_precio_id: null, metodo_facturacion: "Factura",
-      dto_general_pct: null, dto_viajante_pct: null, dto_mercaderia_pct: null,
+      lista_precio_id: null, metodo_facturacion: null,
+      dto_general_pct: null, dto_viajante_pct: null, dto_mercaderia_pct: null, contado: null,
     }])
     setSearch("")
   }
@@ -176,7 +181,7 @@ function Seccion({
                     <Select value={r.lista_precio_id ?? "__none__"} onValueChange={v => update(r.ref_id, { lista_precio_id: v === "__none__" ? null : v })}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Lista" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">Lista del segmento general</SelectItem>
+                        <SelectItem value="__none__">Hereda (lista del pedido)</SelectItem>
                         {listasNormales.map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
                         {ofreceEspecial && <SelectItem value={especialLista!.id}>Especial</SelectItem>}
                       </SelectContent>
@@ -184,19 +189,32 @@ function Seccion({
                   </div>
                   <div>
                     <label className="text-[10px] text-slate-500 uppercase">Facturación</label>
-                    <Select value={r.metodo_facturacion} onValueChange={v => update(r.ref_id, { metodo_facturacion: v })}>
+                    <Select value={r.metodo_facturacion || "__none__"} onValueChange={v => update(r.ref_id, { metodo_facturacion: v === "__none__" ? null : v })}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="__none__">Hereda (método del pedido)</SelectItem>
                         {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   <DtoInput label="General %"    value={r.dto_general_pct}    onChange={n => update(r.ref_id, { dto_general_pct: n })} />
                   <DtoInput label="Viajante %"   value={r.dto_viajante_pct}   onChange={n => update(r.ref_id, { dto_viajante_pct: n })} />
                   <DtoInput label="Mercadería %" value={r.dto_mercaderia_pct} onChange={n => update(r.ref_id, { dto_mercaderia_pct: n })} />
+                  <div>
+                    <label className="text-[10px] text-slate-500 uppercase">Contado 10%</label>
+                    <Select value={r.contado === true ? "si" : r.contado === false ? "no" : "__none__"} onValueChange={v => update(r.ref_id, { contado: v === "si" ? true : v === "no" ? false : null })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Hereda</SelectItem>
+                        <SelectItem value="si">Sí</SelectItem>
+                        <SelectItem value="no">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
+                <p className="text-[10px] text-slate-400">Vacío = hereda lo del pedido / la ficha.</p>
               </div>
             )
           })}

@@ -2,7 +2,6 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { cargarFichaCliente } from "@/lib/vendedor/ficha-cliente"
-import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 
 // GET /api/vendedor/cliente/[id]
 // Ficha del cliente + cuenta corriente: comprobantes con saldo pendiente
@@ -45,8 +44,6 @@ const CAMPOS_EDITABLES = [
   "lista_precio_id",
 ] as const
 
-// Campos cuyo cambio altera los precios de los pedidos abiertos del cliente
-const CAMPOS_PRECIO = ["lista_precio_id", "metodo_facturacion", "condicion_iva"] as const
 
 // PATCH /api/vendedor/cliente/[id]
 // Edita datos de la ficha (whitelist) y/o reasigna el vendedor. Deja
@@ -89,6 +86,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         .maybeSingle()
       if (listaSel?.codigo === "especial") {
         return NextResponse.json({ error: "La lista Especial se administra solo desde el ERP." }, { status: 403 })
+      }
+      // Desde la app solo las listas del vendedor (Neco + las de sus viajantes).
+      // Otra lista (ej. Bahía) se asigna desde el ERP.
+      if (!session.listasPermitidas.includes(body.lista_precio_id)) {
+        return NextResponse.json({ error: "Esa lista no está habilitada para vos: se asigna desde el ERP." }, { status: 403 })
       }
     }
 
@@ -143,18 +145,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .update({ actualizado_por: session.user.id, actualizado_at: new Date().toISOString() })
       .eq("id", id)
 
-    // Si cambió algo que define el precio (lista, método, viajante que impone
-    // lista), los pedidos abiertos del cliente se re-precian para que lo que
-    // llega a facturar coincida con la ficha — no solo la visual
-    let repreciados = 0
-    if (CAMPOS_PRECIO.some((c) => patch[c] !== undefined)) {
-      const r = await repreciarPedidosAbiertosCliente(id)
-      repreciados = r.repreciados
-    }
-
+    // Los pedidos ya tomados NO se re-precian: su precio y sus condiciones se
+    // cerraron al tomarlos (lib/pedidos/condiciones-pedido.ts). La ficha nueva
+    // rige desde el próximo pedido; el ERP tiene el botón "Repreciar".
     return NextResponse.json({
       success: true,
-      pedidos_repreciados: repreciados,
+      pedidos_repreciados: 0,
       ...(vendedorDestino ? { vendedor: vendedorDestino } : {}),
     })
   } catch (error: any) {

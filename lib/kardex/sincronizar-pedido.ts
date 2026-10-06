@@ -87,6 +87,8 @@ function valoresLinea(
       ivaVentas: art.iva_ventas,
       comisionPct: pct,
       viajantePct: v,
+      // La línea bonificada tiene el neto lleno (sin viajante aplicado)
+      netoIncluyeViajante: !bonif,
     })
     return { comision_viajante_pct: tasaEfectivaPct, comision_viajante_monto: bonif ? -monto : monto }
   })()

@@ -58,25 +58,35 @@ export function detectarSegmentoBonif(articulo: ArticuloSegmentable): SegmentoBo
  * Bonificaciones "solo este pedido" (pedidos.bonif_pedido, jsonb).
  * Cada tipo: objeto { segmento: % } — si el tipo está presente pisa la ficha
  * del cliente para los segmentos que tenga definidos; ausente/null = hereda.
+ * Un 0 explícito es un valor ("sin descuento en este pedido"), no "heredar".
+ * contado: { segmento: 10 | 0 } — 10 = ese segmento sale con 10% por pago
+ * contado (NC/REV aparte al facturar), 0 = no.
  */
 export type BonifPorSegmento = Partial<Record<SegmentoBonif, number>>
 export interface BonifPedido {
   general?: BonifPorSegmento | null
   viajante?: BonifPorSegmento | null
   mercaderia?: BonifPorSegmento | null
+  contado?: BonifPorSegmento | null
 }
+
+export const TIPOS_BONIF_PEDIDO = ["general", "viajante", "mercaderia", "contado"] as const
+
+/** % fijo del descuento por pago contado (NC/REV aparte, nunca en la factura). */
+export const CONTADO_PCT = 10
 
 /** Normaliza un BonifPedido: números finitos 0..100, sin claves vacías; null si queda vacío */
 export function normalizarBonifPedido(input: any): BonifPedido | null {
   if (!input || typeof input !== "object") return null
   const out: BonifPedido = {}
-  for (const tipo of ["general", "viajante", "mercaderia"] as const) {
+  for (const tipo of TIPOS_BONIF_PEDIDO) {
     const src = input[tipo]
     if (!src || typeof src !== "object") continue
     const seg: BonifPorSegmento = {}
     for (const k of SEGMENTOS_BONIF) {
       const v = Number(src[k])
-      if (Number.isFinite(v)) seg[k] = Math.max(0, Math.min(100, v))
+      if (src[k] === null || src[k] === undefined || src[k] === "") continue
+      if (Number.isFinite(v)) seg[k] = tipo === "contado" ? (v > 0 ? CONTADO_PCT : 0) : Math.max(0, Math.min(100, v))
     }
     if (Object.keys(seg).length) out[tipo] = seg
   }

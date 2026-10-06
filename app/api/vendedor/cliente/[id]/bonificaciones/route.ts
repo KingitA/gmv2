@@ -1,7 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
-import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 import { SEGMENTOS_BONIF, type SegmentoBonif } from "@/lib/pricing/segmento"
 import { leerBonificaciones } from "@/lib/vendedor/bonificaciones"
 
@@ -123,14 +122,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       .update({ actualizado_por: session.user.id, actualizado_at: new Date().toISOString() })
       .eq("id", id)
 
-    // La bonificación viajante entra en el precio de cada línea: los pedidos
-    // abiertos del cliente se re-precian (la de mercadería no toca precios)
-    const { repreciados } = cambios.viajante ? await repreciarPedidosAbiertosCliente(id) : { repreciados: 0 }
-
+    // Los pedidos ya tomados NO se re-precian: su precio se cerró al tomarlos
+    // (condiciones congeladas, lib/pedidos/condiciones-pedido.ts). La ficha nueva
+    // rige desde el próximo pedido. Para llevar un pedido a precios de hoy está
+    // el botón "Repreciar" del ERP.
     const b = await leerBonificaciones(supabase, id)
     return NextResponse.json({
       success: true,
-      pedidos_repreciados: repreciados,
+      pedidos_repreciados: 0,
       bonificaciones: { ...b.viajante, viajante: b.viajante, mercaderia: b.mercaderia },
     })
   } catch (error: any) {
