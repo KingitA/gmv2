@@ -83,7 +83,7 @@ export const SECCIONES: Seccion[] = [
     href: "/tablas",
     prefijos: ["/tablas", "/admin", "/usuarios-crm"],
     accesos: [
-      { label: "Tablas", href: "/tablas" },
+      { label: "Todos los ajustes", href: "/tablas" },
       { label: "Usuarios", href: "/admin/usuarios", roles: ["admin"] },
     ],
   },

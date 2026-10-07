@@ -40,7 +40,7 @@ const RUTAS: Record<string, string> = {
   "/validacion": "Validación",
   "/imports": "Importaciones",
   "/listas-proveedores": "Listas de Proveedores",
-  "/tablas": "Tablas",
+  "/tablas": "Ajustes",
   "/playroom": "Reportes",
   "/chofer": "Chofer",
   "/vendedor": "Vendedor",
