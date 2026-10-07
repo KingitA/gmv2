@@ -29,7 +29,7 @@ export const SECCIONES: Seccion[] = [
       "/revision-pagos", "/pagos-clientes", "/cobranzas", "/viajantes", "/transportes", "/mostrador", "/imports",
     ],
     accesos: [
-      { label: "Pedidos", href: "/clientes-pedidos" },
+      { label: "Pedidos y viajes", href: "/clientes-pedidos" },
       { label: "Viajes", href: "/viajes" },
       { label: "Fichas de clientes", href: "/clientes" },
       { label: "Comprobantes emitidos", href: "/comprobantes-venta" },
@@ -45,8 +45,8 @@ export const SECCIONES: Seccion[] = [
     href: "/vencimientos",
     prefijos: ["/vencimientos", "/proveedores", "/ordenes-pago", "/ordenes-compra", "/listas-proveedores"],
     accesos: [
-      { label: "Vencimientos", href: "/vencimientos" },
-      { label: "Proveedores", href: "/proveedores" },
+      { label: "Pagos y vencimientos", href: "/vencimientos" },
+      { label: "Fichas de proveedores", href: "/proveedores" },
       { label: "Órdenes de pago", href: "/ordenes-pago" },
       { label: "Órdenes de compra", href: "/ordenes-compra" },
       { label: "NC esperadas", href: "/ordenes-compra/nc-pendientes" },

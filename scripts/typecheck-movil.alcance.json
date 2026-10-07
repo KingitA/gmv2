@@ -96,6 +96,7 @@
     "lib/hooks/use-dentro-de-modal.ts",
     "app/api/pedidos/fecha-entrega/route.ts",
     "components/search/EntitySearchSelect.tsx",
-    "components/pagos/ClienteSearchCombobox.tsx"
+    "components/pagos/ClienteSearchCombobox.tsx",
+    "components/finanzas/calendario-pagos.tsx"
   ]
 }

@@ -22,8 +22,8 @@ import Link from "next/link"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { tiposVisibles } from "@/lib/finanzas/tipos-reservados"
-import { useUrlState } from "@/lib/hooks/use-url-state"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const TIPOS_VENCIMIENTO = [
     { value: "factura", label: "Factura de proveedor" },
@@ -89,10 +89,8 @@ export default function VencimientosPage() {
         loadProveedores()
     }, [filtroEstado, filtroTipo])
 
-    // Calendario / Lista queda en la URL (?vista=lista) para que "atrás" vuelva a la misma vista
-    const [vista, setVista] = useUrlState("vista", "calendario")
-    // En vivo (la vista Lista; el calendario tiene su propia suscripción)
-    useRealtime(["vencimientos"], () => loadVencimientos(true), { activo: vista === "lista" })
+    // En vivo (la lista; el calendario tiene su propia suscripción)
+    useRealtime(["vencimientos"], () => loadVencimientos(true))
 
     async function loadProveedores() {
         const supabase = createClient()
@@ -150,6 +148,8 @@ export default function VencimientosPage() {
     }
 
     async function marcarPagado(id: string) {
+        const v = vencimientos.find(x => x.id === id)
+        if (v?.proveedor_id && !confirm("Es un pago a proveedor. Marcado así (sin orden de pago) NO descuenta de la caja ni del banco, NO lo registra en la cuenta corriente del proveedor y NO calcula la retención de Ganancias: queda como \"pagado sin OP\".\n\n¿Marcarlo pagado igual? (Para hacerlo completo, usá el botón $ de Orden de pago)")) return
         await fetch("/api/vencimientos", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -211,31 +211,22 @@ export default function VencimientosPage() {
     )
 
     return (
-        <div className="min-h-screen bg-background">
-            <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
-                <div className="container mx-auto px-6 py-4">
-                    <div className="flex items-center gap-4">
-                        <Link href="/proveedores">
-                            <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
-                        </Link>
-                        <div>
-                            <h1 className="text-2xl font-bold">Vencimientos</h1>
-                            <p className="text-sm text-muted-foreground">Agenda de pagos — facturas, servicios, impuestos, seguros</p>
-                        </div>
-                    </div>
+        <div className="space-y-6 p-4 sm:p-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Pagos y vencimientos</h1>
+                    <p className="text-sm text-neutro-500">Facturas de proveedores, servicios, impuestos y gastos</p>
                 </div>
-            </header>
+                <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" asChild><Link href="/ordenes-compra?nueva=1"><Plus className="h-4 w-4" /> Orden de compra</Link></Button>
+                    <Button variant="outline" asChild><Link href="/ordenes-pago/nueva"><DollarSign className="h-4 w-4" /> Orden de pago</Link></Button>
+                </div>
+            </div>
 
-            <main className="container mx-auto px-6 py-8 space-y-6">
-                <Tabs value={vista} onValueChange={setVista}>
-                    <TabsList>
-                        <TabsTrigger value="calendario">Calendario</TabsTrigger>
-                        <TabsTrigger value="lista">Lista</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="calendario" className="mt-4">
-                        <CalendarioPagos showCheques={false} onDataChanged={loadVencimientos} />
-                    </TabsContent>
-                    <TabsContent value="lista" className="mt-4 space-y-6">
+            <CalendarioPagos showCheques={false} conSemana onDataChanged={loadVencimientos} />
+
+            <section className="space-y-4">
+                <h2 className="text-lg font-bold text-azul-900">Lista de vencimientos</h2>
                 {/* Resumen */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <Card className="border-l-4 border-l-blue-500">
@@ -405,8 +396,8 @@ export default function VencimientosPage() {
                                 <TableBody>
                                     {loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                                                Cargando...
+                                            <TableCell colSpan={7}>
+                                                <CargaProgreso compacto mensajes={MENSAJES.vencimientos} className="mx-auto max-w-sm py-6" />
                                             </TableCell>
                                         </TableRow>
                                     ) : vencimientos.length === 0 ? (
@@ -472,9 +463,7 @@ export default function VencimientosPage() {
                         </div>
                     </CardContent>
                 </Card>
-                    </TabsContent>
-                </Tabs>
-            </main>
+            </section>
         </div>
     )
 }

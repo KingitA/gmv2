@@ -135,6 +135,17 @@ Una pantalla con todo lo de configuración, agrupado:
 - Calendario y "Programar viaje" pasaron a piezas compartidas con /viajes (`components/viajes/calendario-viajes.tsx`, `programar-viaje-dialog.tsx`, `lib/viajes/use-viajes-rango.ts`).
 - Pendiente etapa 3: pedido suelto con fecha de entrega (necesita la migración de `pedidos.fecha_entrega`).
 
+**Correcciones del dueño a la etapa 2 + etapa 3 (08/10/2026):**
+- Pedido suelto: soltar UN pedido en un día lo deja con `fecha_entrega` sin viaje; varios de la misma zona → elegir "programar/usar viaje" o "dejarlos sin viaje"; zonas distintas → quedan sueltos. Calendario muestra "N sueltos · ZONA" (click filtra la lista). Tabla muestra "Para el 9/10 ×". Migración `20261008_pedidos_fecha_entrega.sql` (la aplica el dueño) + `PATCH /api/pedidos/fecha-entrega`.
+- Barra de selección: "Crear viaje" con los pedidos marcados.
+- Listas de búsqueda en modales (regresión de la etapa 1 por el scroll interno): `useDentroDeModal` las pone en el flujo dentro de modales; `onMouseDown preventDefault` evita que tocar la barra de scroll las cierre.
+
+**Etapa 4 PROVEEDORES (08/10/2026):**
+- `/vencimientos` = "Pagos y vencimientos": calendario de pagos arriba (vista Semana por defecto, Meses con un botón, en la URL) + lista abajo; botones Orden de compra (`/ordenes-compra?nueva=1` abre el formulario) y Orden de pago.
+- Arrastrar un pago a otro día cambia la fecha (`PUT /api/vencimientos`, la misma API).
+- Marcar pagado a proveedor SIN OP: permitido con aviso (calendario y lista); los pagados de proveedor sin OP muestran "sin OP".
+- Se mantienen el diálogo de edición del calendario, la cinta de pagos y los filtros de siempre. Los 3 formularios de alta siguen separados (unificarlos toca guardado → pendiente de OK).
+
 ## 5. Decisiones pendientes del dueño
 Respondidas por el dueño el 07/10/2026:
 1. **Lista de pedidos por defecto**: solo `pendiente` e `impreso` de los últimos 30 días (los demás, cambiando filtros). No se limpia nada de la base.

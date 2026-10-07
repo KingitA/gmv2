@@ -12,11 +12,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
-import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight } from "lucide-react"
+import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { useUrlParams } from "@/lib/hooks/use-url-state"
+import { celdasSemana } from "@/components/viajes/calendario-viajes"
+import { sumarDias } from "@/lib/viajes/use-viajes-rango"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
@@ -34,6 +38,7 @@ interface Vencimiento {
     descuentos_aplicados: boolean
     estado: string
     observaciones: string | null
+    orden_pago_id?: string | null
     proveedores?: { id: string; nombre: string; sigla: string | null } | null
 }
 
@@ -73,10 +78,13 @@ const fmtCorta = (iso: string) => {
 export function CalendarioPagos({
     showCheques = false,
     onDataChanged,
+    conSemana = false,
 }: {
     /** Mostrar los cheques en cartera como entradas verdes (solo /finanzas) */
     showCheques?: boolean
     onDataChanged?: () => void
+    /** Ofrecer la vista semana (por defecto) además del mes (PROVEEDORES) */
+    conSemana?: boolean
 }) {
     const [vencimientos, setVencimientos] = useState<Vencimiento[]>([])
     const [cheques, setCheques] = useState<ChequeCartera[]>([])
@@ -98,6 +106,15 @@ export function CalendarioPagos({
     const [verCheques, setVerCheques] = useState(false)
     const [verEmitidos, setVerEmitidos] = useState(true)
     const [verSaldados, setVerSaldados] = useState(false)
+
+    // Vista semana / mes (solo donde se pide: PROVEEDORES). En la URL (?cal=mes&dia=…)
+    const url = useUrlParams()
+    const vista: "semana" | "mes" = conSemana && url.get("cal") !== "mes" ? "semana" : "mes"
+    const semanaDe = /^\d{4}-\d{2}-\d{2}$/.test(url.get("dia")) ? url.get("dia") : todayArgentina()
+    const diasSemana = celdasSemana(semanaDe)
+    // Arrastrar un pago a otro día = cambiar la fecha
+    const [arrastrandoVenc, setArrastrandoVenc] = useState<string | null>(null)
+    const [sobreDia, setSobreDia] = useState<string | null>(null)
 
     // Selección (cinta)
     const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
@@ -267,18 +284,21 @@ export function CalendarioPagos({
         // Circuito único (S5): los pagos a PROVEEDORES van por Orden de Pago
         // (CC + kardex + retención + certificado). El atajo queda solo para
         // gastos sin proveedor (VEP, servicios, etc.).
+        // Decisión del dueño (07/10/2026): a proveedores también se puede marcar
+        // pagado SIN orden de pago, avisando qué no hace. Queda como "pagado sin OP".
         const deProveedor = vencimientos.filter((v) => ids.includes(v.id) && v.proveedor_id)
-        if (deProveedor.length === 1 && ids.length === 1) {
-            if (confirm(`"${deProveedor[0].concepto || 'Este pago'}" es de un proveedor: se paga por Orden de Pago (queda cuenta corriente, kardex y retención). ¿Ir a generar la OP?`)) {
-                window.location.href = `/ordenes-pago/nueva?proveedor_id=${deProveedor[0].proveedor_id}&vencimiento_id=${deProveedor[0].id}`
-            }
-            return
-        }
         if (deProveedor.length > 0) {
-            toast.error(`${deProveedor.length} de los seleccionados son pagos a proveedores — esos se pagan por Orden de Pago (uno por vez desde el ✓ del chip). Destildalos para marcar el resto.`)
+            setAvisoSinOP({ ids, vencCheque, cantidad: deProveedor.length })
             return
         }
         if (!confirm(`¿Marcar ${ids.length === 1 ? "este pago" : `estos ${ids.length} pagos`} como pagado${ids.length > 1 ? "s" : ""}?`)) return
+        await confirmarPagados(ids, vencCheque)
+    }
+
+    // "Pagado sin OP": aviso antes de marcar pagos a proveedores
+    const [avisoSinOP, setAvisoSinOP] = useState<{ ids: string[]; vencCheque?: Vencimiento; cantidad: number } | null>(null)
+
+    async function confirmarPagados(ids: string[], vencCheque?: Vencimiento) {
         setSaving(true)
         try {
             const results = await Promise.all(
@@ -307,6 +327,24 @@ export function CalendarioPagos({
         } finally {
             setSaving(false)
         }
+    }
+
+    async function moverVencimiento(id: string, nuevaFecha: string) {
+        setArrastrandoVenc(null)
+        setSobreDia(null)
+        const v = vencimientos.find((x) => x.id === id)
+        if (!v || v.fecha_vencimiento === nuevaFecha) return
+        // Optimista: se ve movido al instante
+        setVencimientos((prev) => prev.map((x) => (x.id === id ? { ...x, fecha_vencimiento: nuevaFecha } : x)))
+        const res = await fetch("/api/vencimientos", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, fecha_vencimiento: nuevaFecha }),
+        })
+        if (!res.ok) toast.error("No se pudo cambiar la fecha")
+        else toast.success(`${v.proveedores?.nombre || v.concepto} pasa al ${fmtCorta(nuevaFecha)}`)
+        await load()
+        onDataChanged?.()
     }
 
     async function volverAPendiente(id: string) {
@@ -397,6 +435,176 @@ export function CalendarioPagos({
     // ── Render ─────────────────────────────────────────────────────────────
     const hoy = hoyISO()
 
+    // ── Un día del calendario (lo usan la vista mes y la vista semana) ─────
+    const celdaDia = (key: string) => {
+        const d = Number(key.slice(8))
+                                            const pagos = porFecha[key] || []
+                                            const pagados = saldadosPorFecha[key] || []
+                                            const chqs = chequesPorFecha[key] || []
+                                            const emits = emitidosPorFecha[key] || []
+                                            const dsum = pagos.reduce((a, p) => a + Number(p.monto), 0)
+                                            const chqSum = chqs.reduce((a, c) => a + Number(c.monto), 0)
+                                            const emitSum = emits.reduce((a, c) => a + Number(c.monto), 0)
+                                            const expandido = diasExpandidos.has(key)
+                                            return (
+                                                <div
+                                                    key={key}
+                                                    onDragOver={(e) => { if (arrastrandoVenc) { e.preventDefault(); if (sobreDia !== key) setSobreDia(key) } }}
+                                                    onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node) && sobreDia === key) setSobreDia(null) }}
+                                                    onDrop={(e) => { e.preventDefault(); if (arrastrandoVenc) moverVencimiento(arrastrandoVenc, key) }}
+                                                    className={`flex flex-col gap-1 rounded-md border p-1 ${vista === "semana" ? "min-h-[64px] md:min-h-[140px]" : "min-h-[84px]"} ${pagos.length || pagados.length || chqs.length || emits.length ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50/50"} ${key === hoy ? "ring-2 ring-amber-400" : ""} ${sobreDia === key && arrastrandoVenc ? "bg-amber-50 ring-2 ring-amber-400" : ""}`}
+                                                >
+                                                    <div className="flex items-center justify-between px-0.5">
+                                                        <span className={`font-mono text-[11px] font-semibold ${pagos.length ? "text-slate-700" : "text-slate-400"}`}>{vista === "semana" && <span className="mr-1 font-sans md:hidden">{DOW[(new Date(key + "T00:00:00Z").getUTCDay() + 6) % 7]}</span>}{d}</span>
+                                                        {dsum > 0 && (
+                                                            <span className="font-mono text-[9px] text-slate-400">{formatCurrency(dsum)}</span>
+                                                        )}
+                                                    </div>
+                                                    {pagos.map((p) => {
+                                                        const f = FORMAS[formaDe(p)]
+                                                        const sel = seleccion.has(p.id)
+                                                        const nombre = p.proveedores?.nombre || p.concepto
+                                                        return (
+                                                            <div key={p.id} className="group/chip relative">
+                                                                <button
+                                                                    draggable
+                                                                    onDragStart={(e) => { setArrastrandoVenc(p.id); e.dataTransfer.effectAllowed = "move" }}
+                                                                    onDragEnd={() => { setArrastrandoVenc(null); setSobreDia(null) }}
+                                                                    onClick={() => toggleSel(p.id)}
+                                                                    title={`${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}${p.fecha_validez ? ` · validez ${fmtCorta(p.fecha_validez)}` : ""}${p.modalidad ? ` · ${p.modalidad}` : ""}${!p.descuentos_aplicados ? " · ⚠ chequear NC/retenciones" : ""}`}
+                                                                    className="w-full rounded-md border px-1.5 py-1 text-left transition-all hover:-translate-y-px hover:shadow"
+                                                                    style={{
+                                                                        borderColor: f.color,
+                                                                        borderLeftWidth: 3,
+                                                                        background: sel ? f.color : `${f.color}18`,
+                                                                    }}
+                                                                >
+                                                                    <span className={`flex items-center gap-1 text-[10px] font-semibold leading-tight ${sel ? "text-white" : "text-slate-700"}`}>
+                                                                        {p.modalidad === "entrega"
+                                                                            ? <HandCoins className={`h-3 w-3 shrink-0 ${sel ? "text-white" : ""}`} style={sel ? {} : { color: f.color }} />
+                                                                            : p.modalidad === "deposito"
+                                                                                ? <Landmark className={`h-3 w-3 shrink-0 ${sel ? "text-white" : ""}`} style={sel ? {} : { color: f.color }} />
+                                                                                : null}
+                                                                        <span className="truncate">{nombre}</span>
+                                                                        {!p.descuentos_aplicados && (
+                                                                            <AlertTriangle className={`h-3 w-3 shrink-0 ${sel ? "text-amber-200" : "text-amber-500"}`} />
+                                                                        )}
+                                                                    </span>
+                                                                    <span className={`block font-mono text-[9.5px] ${sel ? "text-white/80" : "text-slate-500"}`}>
+                                                                        {formatCurrency(Number(p.monto))}
+                                                                        {p.fecha_validez && p.fecha_validez !== p.fecha_vencimiento && (
+                                                                            <span className="ml-1">→ {fmtCorta(p.fecha_validez)}</span>
+                                                                        )}
+                                                                    </span>
+                                                                </button>
+                                                                <div className="absolute right-0.5 top-0.5 hidden flex-col gap-0.5 group-hover/chip:flex">
+                                                                    <button
+                                                                        onClick={(ev) => { ev.stopPropagation(); marcarPagados([p.id], p) }}
+                                                                        title="Marcar como pagado"
+                                                                        className="rounded bg-white/80 p-0.5 text-emerald-600 hover:bg-emerald-600 hover:text-white"
+                                                                    >
+                                                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={(ev) => { ev.stopPropagation(); abrirEdicion(p) }}
+                                                                        title="Editar"
+                                                                        className="rounded bg-white/80 p-0.5 text-slate-500 hover:bg-slate-600 hover:text-white"
+                                                                    >
+                                                                        <Pencil className="h-3.5 w-3.5" />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                    {pagados.map((p) => {
+                                                        const f = FORMAS[formaDe(p)]
+                                                        const nombre = p.proveedores?.nombre || p.concepto
+                                                        return (
+                                                            <div key={p.id} className="group/chip relative">
+                                                                <div
+                                                                    title={`PAGADO · ${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}`}
+                                                                    className="w-full rounded-md border border-slate-300 bg-slate-100 px-1.5 py-1 opacity-70"
+                                                                    style={{ borderLeftWidth: 3, borderLeftColor: f.color }}
+                                                                >
+                                                                    <span className="flex items-center gap-1 text-[10px] font-semibold leading-tight text-slate-500">
+                                                                        <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" />
+                                                                        <span className="truncate line-through">{nombre}</span>
+                                                                        {p.proveedor_id && !p.orden_pago_id && <span className="shrink-0 rounded bg-amber-100 px-1 text-[8.5px] font-bold text-amber-800 no-underline">sin OP</span>}
+                                                                    </span>
+                                                                    <span className="block font-mono text-[9.5px] text-slate-400 line-through">
+                                                                        {formatCurrency(Number(p.monto))}
+                                                                    </span>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => volverAPendiente(p.id)}
+                                                                    title="Volver a pendiente"
+                                                                    className="absolute right-0.5 top-0.5 hidden rounded p-0.5 text-slate-500 hover:bg-slate-600 hover:text-white group-hover/chip:block"
+                                                                >
+                                                                    ↩
+                                                                </button>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                    {chqs.length > 0 && (
+                                                        <button
+                                                            onClick={() =>
+                                                                setDiasExpandidos((prev) => {
+                                                                    const n = new Set(prev)
+                                                                    n.has(key) ? n.delete(key) : n.add(key)
+                                                                    return n
+                                                                })
+                                                            }
+                                                            className="rounded-md border border-dashed border-emerald-600 bg-emerald-50 px-1.5 py-0.5 text-left hover:bg-emerald-100"
+                                                        >
+                                                            <span className="flex justify-between text-[9px] font-bold text-emerald-700">
+                                                                <span>▲ {chqs.length} chq</span>
+                                                                <span className="font-mono">{formatCurrency(chqSum)}</span>
+                                                            </span>
+                                                            {expandido && (
+                                                                <span className="mt-0.5 block space-y-0.5">
+                                                                    {chqs.map((c) => (
+                                                                        <span key={c.id} className="flex justify-between font-mono text-[8.5px] text-emerald-800">
+                                                                            <span>#{c.numero}{c.es_echeq ? " (e)" : c.color === "NEGRO" ? " (N)" : ""}</span>
+                                                                            <span>{formatCurrency(Number(c.monto))}</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                    {emits.length > 0 && (
+                                                        <button
+                                                            onClick={() =>
+                                                                setDiasExpandidos((prev) => {
+                                                                    const n = new Set(prev)
+                                                                    const k2 = `emit:${key}`
+                                                                    n.has(k2) ? n.delete(k2) : n.add(k2)
+                                                                    return n
+                                                                })
+                                                            }
+                                                            title={`Cheques emitidos: cobrables desde ${fmtCorta(key)} y por 30 días`}
+                                                            className="rounded-md border border-dashed border-red-500 bg-red-50 px-1.5 py-0.5 text-left hover:bg-red-100"
+                                                        >
+                                                            <span className="flex justify-between text-[9px] font-bold text-red-700">
+                                                                <span>▼ {emits.length} emit.</span>
+                                                                <span className="font-mono">{formatCurrency(emitSum)}</span>
+                                                            </span>
+                                                            {diasExpandidos.has(`emit:${key}`) && (
+                                                                <span className="mt-0.5 block space-y-0.5">
+                                                                    {emits.map((c) => (
+                                                                        <span key={c.id} className="flex justify-between font-mono text-[8.5px] text-red-800">
+                                                                            <span>#{c.numero}{c.es_echeq ? " (e)" : c.color === "NEGRO" ? " (N)" : ""}</span>
+                                                                            <span>{formatCurrency(Number(c.monto))}</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )
+    }
+
     return (
         <div className="space-y-4">
             {/* Filtros + alta */}
@@ -447,6 +655,17 @@ export function CalendarioPagos({
                             Cheques emitidos
                         </button>
                     </>
+                )}
+                {conSemana && (
+                    <div className="inline-flex rounded-lg border bg-white p-0.5" role="group" aria-label="Vista del calendario">
+                        {(["semana", "mes"] as const).map((m) => (
+                            <button key={m} type="button" aria-pressed={vista === m}
+                                onClick={() => url.set({ cal: m }, "replace", { cal: "semana" })}
+                                className={`rounded-md px-3 py-1 text-[13px] font-semibold ${vista === m ? "bg-azul-600 text-white" : "text-neutro-600 hover:bg-neutro-100"}`}>
+                                {m === "semana" ? "Semana" : "Meses"}
+                            </button>
+                        ))}
+                    </div>
                 )}
                 <div className="ml-auto">
                     <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm() }}>
@@ -585,6 +804,34 @@ export function CalendarioPagos({
                         <div className="rounded-xl border bg-white">
                             <CargaProgreso mensajes={MENSAJES.vencimientos} />
                         </div>
+                    ) : vista === "semana" ? (
+                        <section className="rounded-xl border bg-white p-3 shadow-sm sm:p-4">
+                            <h2 className="mb-3 flex flex-wrap items-center gap-2 px-1 text-base font-bold">
+                                <span className="mr-auto">
+                                    Semana del {Number(diasSemana[0].slice(8))}/{Number(diasSemana[0].slice(5, 7))} al {Number(diasSemana[6].slice(8))}/{Number(diasSemana[6].slice(5, 7))}
+                                </span>
+                                <span className="font-mono text-xs font-medium text-muted-foreground">
+                                    ▼ sale {formatCurrency(visibles.filter((v) => v.fecha_vencimiento >= diasSemana[0] && v.fecha_vencimiento <= diasSemana[6]).reduce((a, v) => a + Number(v.monto), 0))}
+                                </span>
+                                <Button variant="outline" size="icon" className="h-8 w-8" aria-label="Semana anterior" onClick={() => url.set({ dia: sumarDias(semanaDe, -7) }, "replace")}><ChevronLeft className="h-4 w-4" /></Button>
+                                <Button variant="outline" size="sm" className="h-8" onClick={() => url.set({ dia: null }, "replace")}>Hoy</Button>
+                                <Button variant="outline" size="icon" className="h-8 w-8" aria-label="Semana siguiente" onClick={() => url.set({ dia: sumarDias(semanaDe, 7) }, "replace")}><ChevronRight className="h-4 w-4" /></Button>
+                            </h2>
+                            <div className="mb-1 hidden grid-cols-7 gap-1 md:grid">
+                                {DOW.map((d) => (
+                                    <span key={d} className="pl-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{d}</span>
+                                ))}
+                            </div>
+                            <div className="grid grid-cols-1 gap-1 md:grid-cols-7">
+                                {diasSemana.map((k) => celdaDia(k))}
+                            </div>
+                            {visibles.some((v) => v.fecha_vencimiento < diasSemana[0]) && (
+                                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                    Hay pagos pendientes de semanas anteriores: pasá a <button type="button" className="font-semibold underline" onClick={() => url.set({ cal: "mes" }, "replace", { cal: "semana" })}>Meses</button> para verlos.
+                                </p>
+                            )}
+                            <p className="mt-2 hidden text-[11px] text-muted-foreground md:block">Arrastrá un pago a otro día para cambiarle la fecha.</p>
+                        </section>
                     ) : meses.length === 0 ? (
                         <div className="rounded-xl border bg-white p-10 text-center text-sm text-muted-foreground">
                             No hay pagos pendientes con estos filtros.
@@ -641,168 +888,9 @@ export function CalendarioPagos({
                                         {Array.from({ length: startIdx }).map((_, i) => (
                                             <div key={`e${i}`} className="min-h-[84px] rounded-md border border-dashed border-slate-100" />
                                         ))}
-                                        {Array.from({ length: daysInMonth }).map((_, i) => {
-                                            const d = i + 1
-                                            const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
-                                            const pagos = porFecha[key] || []
-                                            const pagados = saldadosPorFecha[key] || []
-                                            const chqs = chequesPorFecha[key] || []
-                                            const emits = emitidosPorFecha[key] || []
-                                            const dsum = pagos.reduce((a, p) => a + Number(p.monto), 0)
-                                            const chqSum = chqs.reduce((a, c) => a + Number(c.monto), 0)
-                                            const emitSum = emits.reduce((a, c) => a + Number(c.monto), 0)
-                                            const expandido = diasExpandidos.has(key)
-                                            return (
-                                                <div
-                                                    key={key}
-                                                    className={`flex min-h-[84px] flex-col gap-1 rounded-md border p-1 ${pagos.length || pagados.length || chqs.length || emits.length ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50/50"} ${key === hoy ? "ring-2 ring-amber-400" : ""}`}
-                                                >
-                                                    <div className="flex items-center justify-between px-0.5">
-                                                        <span className={`font-mono text-[11px] font-semibold ${pagos.length ? "text-slate-700" : "text-slate-400"}`}>{d}</span>
-                                                        {dsum > 0 && (
-                                                            <span className="font-mono text-[9px] text-slate-400">{formatCurrency(dsum)}</span>
-                                                        )}
-                                                    </div>
-                                                    {pagos.map((p) => {
-                                                        const f = FORMAS[formaDe(p)]
-                                                        const sel = seleccion.has(p.id)
-                                                        const nombre = p.proveedores?.nombre || p.concepto
-                                                        return (
-                                                            <div key={p.id} className="group/chip relative">
-                                                                <button
-                                                                    onClick={() => toggleSel(p.id)}
-                                                                    title={`${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}${p.fecha_validez ? ` · validez ${fmtCorta(p.fecha_validez)}` : ""}${p.modalidad ? ` · ${p.modalidad}` : ""}${!p.descuentos_aplicados ? " · ⚠ chequear NC/retenciones" : ""}`}
-                                                                    className="w-full rounded-md border px-1.5 py-1 text-left transition-all hover:-translate-y-px hover:shadow"
-                                                                    style={{
-                                                                        borderColor: f.color,
-                                                                        borderLeftWidth: 3,
-                                                                        background: sel ? f.color : `${f.color}18`,
-                                                                    }}
-                                                                >
-                                                                    <span className={`flex items-center gap-1 text-[10px] font-semibold leading-tight ${sel ? "text-white" : "text-slate-700"}`}>
-                                                                        {p.modalidad === "entrega"
-                                                                            ? <HandCoins className={`h-3 w-3 shrink-0 ${sel ? "text-white" : ""}`} style={sel ? {} : { color: f.color }} />
-                                                                            : p.modalidad === "deposito"
-                                                                                ? <Landmark className={`h-3 w-3 shrink-0 ${sel ? "text-white" : ""}`} style={sel ? {} : { color: f.color }} />
-                                                                                : null}
-                                                                        <span className="truncate">{nombre}</span>
-                                                                        {!p.descuentos_aplicados && (
-                                                                            <AlertTriangle className={`h-3 w-3 shrink-0 ${sel ? "text-amber-200" : "text-amber-500"}`} />
-                                                                        )}
-                                                                    </span>
-                                                                    <span className={`block font-mono text-[9.5px] ${sel ? "text-white/80" : "text-slate-500"}`}>
-                                                                        {formatCurrency(Number(p.monto))}
-                                                                        {p.fecha_validez && p.fecha_validez !== p.fecha_vencimiento && (
-                                                                            <span className="ml-1">→ {fmtCorta(p.fecha_validez)}</span>
-                                                                        )}
-                                                                    </span>
-                                                                </button>
-                                                                <div className="absolute right-0.5 top-0.5 hidden flex-col gap-0.5 group-hover/chip:flex">
-                                                                    <button
-                                                                        onClick={(ev) => { ev.stopPropagation(); marcarPagados([p.id], p) }}
-                                                                        title="Marcar como pagado"
-                                                                        className="rounded bg-white/80 p-0.5 text-emerald-600 hover:bg-emerald-600 hover:text-white"
-                                                                    >
-                                                                        <CheckCircle2 className="h-3.5 w-3.5" />
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={(ev) => { ev.stopPropagation(); abrirEdicion(p) }}
-                                                                        title="Editar"
-                                                                        className="rounded bg-white/80 p-0.5 text-slate-500 hover:bg-slate-600 hover:text-white"
-                                                                    >
-                                                                        <Pencil className="h-3.5 w-3.5" />
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                    {pagados.map((p) => {
-                                                        const f = FORMAS[formaDe(p)]
-                                                        const nombre = p.proveedores?.nombre || p.concepto
-                                                        return (
-                                                            <div key={p.id} className="group/chip relative">
-                                                                <div
-                                                                    title={`PAGADO · ${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}`}
-                                                                    className="w-full rounded-md border border-slate-300 bg-slate-100 px-1.5 py-1 opacity-70"
-                                                                    style={{ borderLeftWidth: 3, borderLeftColor: f.color }}
-                                                                >
-                                                                    <span className="flex items-center gap-1 text-[10px] font-semibold leading-tight text-slate-500">
-                                                                        <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" />
-                                                                        <span className="truncate line-through">{nombre}</span>
-                                                                    </span>
-                                                                    <span className="block font-mono text-[9.5px] text-slate-400 line-through">
-                                                                        {formatCurrency(Number(p.monto))}
-                                                                    </span>
-                                                                </div>
-                                                                <button
-                                                                    onClick={() => volverAPendiente(p.id)}
-                                                                    title="Volver a pendiente"
-                                                                    className="absolute right-0.5 top-0.5 hidden rounded p-0.5 text-slate-500 hover:bg-slate-600 hover:text-white group-hover/chip:block"
-                                                                >
-                                                                    ↩
-                                                                </button>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                    {chqs.length > 0 && (
-                                                        <button
-                                                            onClick={() =>
-                                                                setDiasExpandidos((prev) => {
-                                                                    const n = new Set(prev)
-                                                                    n.has(key) ? n.delete(key) : n.add(key)
-                                                                    return n
-                                                                })
-                                                            }
-                                                            className="rounded-md border border-dashed border-emerald-600 bg-emerald-50 px-1.5 py-0.5 text-left hover:bg-emerald-100"
-                                                        >
-                                                            <span className="flex justify-between text-[9px] font-bold text-emerald-700">
-                                                                <span>▲ {chqs.length} chq</span>
-                                                                <span className="font-mono">{formatCurrency(chqSum)}</span>
-                                                            </span>
-                                                            {expandido && (
-                                                                <span className="mt-0.5 block space-y-0.5">
-                                                                    {chqs.map((c) => (
-                                                                        <span key={c.id} className="flex justify-between font-mono text-[8.5px] text-emerald-800">
-                                                                            <span>#{c.numero}{c.es_echeq ? " (e)" : c.color === "NEGRO" ? " (N)" : ""}</span>
-                                                                            <span>{formatCurrency(Number(c.monto))}</span>
-                                                                        </span>
-                                                                    ))}
-                                                                </span>
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                    {emits.length > 0 && (
-                                                        <button
-                                                            onClick={() =>
-                                                                setDiasExpandidos((prev) => {
-                                                                    const n = new Set(prev)
-                                                                    const k2 = `emit:${key}`
-                                                                    n.has(k2) ? n.delete(k2) : n.add(k2)
-                                                                    return n
-                                                                })
-                                                            }
-                                                            title={`Cheques emitidos: cobrables desde ${fmtCorta(key)} y por 30 días`}
-                                                            className="rounded-md border border-dashed border-red-500 bg-red-50 px-1.5 py-0.5 text-left hover:bg-red-100"
-                                                        >
-                                                            <span className="flex justify-between text-[9px] font-bold text-red-700">
-                                                                <span>▼ {emits.length} emit.</span>
-                                                                <span className="font-mono">{formatCurrency(emitSum)}</span>
-                                                            </span>
-                                                            {diasExpandidos.has(`emit:${key}`) && (
-                                                                <span className="mt-0.5 block space-y-0.5">
-                                                                    {emits.map((c) => (
-                                                                        <span key={c.id} className="flex justify-between font-mono text-[8.5px] text-red-800">
-                                                                            <span>#{c.numero}{c.es_echeq ? " (e)" : c.color === "NEGRO" ? " (N)" : ""}</span>
-                                                                            <span>{formatCurrency(Number(c.monto))}</span>
-                                                                        </span>
-                                                                    ))}
-                                                                </span>
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            )
-                                        })}
+                                        {Array.from({ length: daysInMonth }).map((_, i) =>
+                                            celdaDia(`${y}-${String(m + 1).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`)
+                                        )}
                                     </div>
                                     </>)}
                                 </section>
@@ -1014,6 +1102,34 @@ export function CalendarioPagos({
                 prefill={prefillEmitidos}
                 onSaved={() => { load(); onDataChanged?.() }}
             />
+            <AlertDialog open={!!avisoSinOP} onOpenChange={(o) => { if (!o) setAvisoSinOP(null) }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>¿Marcar como pagado sin orden de pago?</AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="space-y-2 text-sm">
+                                <p>{avisoSinOP?.cantidad === 1 ? "Es un pago a proveedor." : `${avisoSinOP?.cantidad} son pagos a proveedores.`} Marcado así:</p>
+                                <ul className="list-disc space-y-0.5 pl-5">
+                                    <li>no descuenta de la caja ni del banco,</li>
+                                    <li>no registra el pago en la cuenta corriente del proveedor,</li>
+                                    <li>no calcula la retención de Ganancias.</li>
+                                </ul>
+                                <p>Queda marcado como <b>pagado sin OP</b>. Para hacerlo completo, usá <b>Generar OP</b>.</p>
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        {avisoSinOP?.ids.length === 1 && (() => {
+                            const v = vencimientos.find((x) => x.id === avisoSinOP.ids[0])
+                            return v?.proveedor_id ? (
+                                <Button variant="outline" onClick={() => { window.location.href = `/ordenes-pago/nueva?proveedor_id=${v.proveedor_id}&vencimiento_id=${v.id}` }}>Generar OP</Button>
+                            ) : null
+                        })()}
+                        <AlertDialogAction onClick={() => { const a = avisoSinOP; setAvisoSinOP(null); if (a) confirmarPagados(a.ids, a.vencCheque) }}>Marcar pagado sin OP</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     )
 }

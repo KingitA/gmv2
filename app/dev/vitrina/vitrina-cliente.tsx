@@ -7,6 +7,7 @@ import { FichaArticulo } from "@/components/articulos/ficha-articulo"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { FichaProveedor } from "@/components/proveedores/ficha-proveedor"
 import { ClientesDemo } from "./clientes-demo"
+import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 
 const FF_EJEMPLO = {
@@ -23,6 +24,26 @@ const PROV_EJEMPLO = {
   tipo_iva: 2, condicion_pago_tipo: "cuenta_corriente", plazo_dias: 30, plazo_desde: "fecha_factura", tipo_proveedor: "mercaderia_general",
   banco_nombre: "", banco_cuenta: "", banco_numero_cuenta: "", banco_tipo_cuenta: "", tipo_pago: [], retencion_iibb: 0, retencion_ganancias: 0,
   percepcion_iva: 0, percepcion_iibb: 0, tipo_descuento: "cascada", default_unidad_factura: "UNIDAD",
+}
+
+
+// Solo vitrina: /api/vencimientos responde datos de ejemplo (no toca la base)
+if (typeof window !== "undefined" && !(window as any).__mockVenc) {
+  ;(window as any).__mockVenc = true
+  const datos: any[] = [
+    { id: "v1", proveedor_id: "p1", tipo: "factura", concepto: "IBERIA", monto: 806503, fecha_vencimiento: "2026-10-09", fecha_validez: null, forma_pago: "efectivo", modalidad: "entrega", descuentos_aplicados: true, estado: "pendiente", observaciones: null, proveedores: { id: "p1", nombre: "IBERIA", sigla: null } },
+    { id: "v2", proveedor_id: null, tipo: "servicios", concepto: "EXPENSAS", monto: 350000, fecha_vencimiento: "2026-10-07", fecha_validez: null, forma_pago: "transferencia", modalidad: "deposito", descuentos_aplicados: true, estado: "pendiente", observaciones: null },
+    { id: "v3", proveedor_id: "p2", tipo: "factura", concepto: "BUYANOR S.A", monto: 3625726, fecha_vencimiento: "2026-10-10", fecha_validez: null, forma_pago: "cheque", modalidad: "deposito", descuentos_aplicados: false, estado: "pendiente", observaciones: null, proveedores: { id: "p2", nombre: "BUYANOR S.A", sigla: null } },
+  ]
+  const orig = window.fetch.bind(window)
+  window.fetch = (async (input: any, init?: any) => {
+    const u = typeof input === "string" ? input : input.url
+    if (u.startsWith("/api/vencimientos")) {
+      if (init?.method === "PUT") { const b = JSON.parse(init.body); const v = datos.find(x => x.id === b.id); if (v) Object.assign(v, b); return new Response(JSON.stringify(v), { status: 200 }) }
+      return new Response(JSON.stringify(datos), { status: 200 })
+    }
+    return orig(input, init)
+  }) as any
 }
 
 export function VitrinaCliente() {
@@ -49,6 +70,8 @@ export function VitrinaCliente() {
         <CargaProgreso mensajes={MENSAJES.importarPedido} titulo="Importando pedido" />
       </div>
       <ClientesDemo />
+      <h2 className="text-xl font-bold text-azul-900">Pagos y vencimientos (sin datos: requiere sesión)</h2>
+      <CalendarioPagos conSemana />
       <FichaArticulo
         fa={fa} ff={ff} setFf={setFf as any}
         descuentos={[{ tipo: "comercial", porcentaje: 10, orden: 1 }, { tipo: "financiero", porcentaje: 3, orden: 2 }]}
