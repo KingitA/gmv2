@@ -604,6 +604,12 @@ export default function ClientesPedidosPage() {
 
       if (error) throw error
       const detalles = data || []
+      // Mercadería bonificada: no es mercadería del pedido sino un % que varía con
+      // lo que se prepare. En el papel va en un cartel (código + descripción), sin
+      // cantidad; depósito la ajusta al preparar. Un renglón por artículo.
+      const bonificadosImpresion = detalles
+        .filter((d: any) => d.es_bonificado)
+        .filter((d: any, i: number, arr: any[]) => arr.findIndex((x: any) => x.articulo_id === d.articulo_id) === i)
 
       // Ordenar por orden_deposito (los null van al final), luego por proveedor y descripción
       const detallesOrdenados = [...detalles].sort((a, b) => {
@@ -727,6 +733,13 @@ export default function ClientesPedidosPage() {
               <div class="value" style="color:#b91c1c;">MERCADERÍA BONIFICADA SIN DEFINIR — elegir qué se regala antes de facturar</div>
             </div>` : ""}
 
+            ${bonificadosImpresion.length ? `
+            <div class="info-box" style="margin-bottom: 20px; border: 2px solid #16a34a;">
+              <div class="value" style="color:#15803d;">MERCADERÍA A BONIFICAR</div>
+              <div style="font-size:11px;color:#475569;margin:2px 0 6px;">Va sin cargo. La cantidad no se fija acá: se calcula al terminar de preparar, sobre lo que realmente va.</div>
+              ${bonificadosImpresion.map((d: any) => `<div style="margin-bottom: 3px;"><strong>${d.articulos?.sku || "-"}</strong> — ${d.articulos?.descripcion || "Sin descripción"}</div>`).join("")}
+            </div>` : ""}
+
             ${desc.aparte.length ? `
             <div class="info-box" style="margin-bottom: 20px;">
               <div class="label" style="margin-bottom: 6px;">Segmentado aparte (marca / proveedor — se factura por separado)</div>
@@ -746,6 +759,7 @@ export default function ClientesPedidosPage() {
               </thead>
               <tbody>
                 ${detallesOrdenados
+          .filter((d) => !d.es_bonificado)
           .map((d) => {
             const esPresupuesto = d.articulos?.iva_ventas?.toLowerCase() === "presupuesto"
             const bgCode = esPresupuesto ? "#000" : "transparent"
