@@ -44,6 +44,9 @@ export function normalizarDatosArticulo<T extends DatosArticuloDeposito>(datos: 
     ...datos,
     ean13: datos.ean13 ? padEanArray(datos.ean13) : datos.ean13,
     codigo_bulto: datos.codigo_bulto ? padEan13(datos.codigo_bulto) : datos.codigo_bulto,
+    // FK a tipos_bulto / tipos_fraccion: "" no existe en el catálogo → vacío = null
+    ...("unidad_de_medida" in datos ? { unidad_de_medida: datos.unidad_de_medida || null } : {}),
+    ...("tipo_fraccion" in datos ? { tipo_fraccion: datos.tipo_fraccion || null } : {}),
   }
 }
 
