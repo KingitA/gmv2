@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Search, X } from "lucide-react"
+import { useDentroDeModal } from "@/lib/hooks/use-dentro-de-modal"
 
 interface Cliente {
   id: string
@@ -23,6 +24,7 @@ export function ClienteSearchCombobox({ onSelect, value }: Props) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const enModal = useDentroDeModal(ref, open)
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -79,7 +81,12 @@ export function ClienteSearchCombobox({ onSelect, value }: Props) {
         />
       </div>
       {open && (
-        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-64 overflow-y-auto">
+        // Dentro de un modal va en el flujo (si flota, el borde del modal la recorta).
+        // onMouseDown: tocar la barra de scroll de la lista no la cierra.
+        <div
+          onMouseDown={(e) => e.preventDefault()}
+          className={`${enModal ? "relative" : "absolute z-50"} w-full mt-1 bg-white border rounded-lg shadow-lg max-h-64 overflow-y-auto`}
+        >
           {loading ? (
             <div className="p-3 text-sm text-muted-foreground">Buscando...</div>
           ) : results.length === 0 ? (

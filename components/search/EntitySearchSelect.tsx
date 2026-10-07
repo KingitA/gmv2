@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, type ReactNode } from "react"
 import { Input } from "@/components/ui/input"
 import { Search, X, Loader2 } from "lucide-react"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
+import { useDentroDeModal } from "@/lib/hooks/use-dentro-de-modal"
 
 export type SearchEntity = "articulos" | "clientes" | "proveedores"
 
@@ -83,6 +84,7 @@ export function EntitySearchSelect<T extends { id: string }>(props: Props<T>) {
     const [loading, setLoading] = useState(false)
     const [highlight, setHighlight] = useState(0)
     const ref = useRef<HTMLDivElement>(null)
+    const enModal = useDentroDeModal(ref, open)
 
     useEffect(() => {
         const handleClick = (e: MouseEvent) => {
@@ -155,7 +157,12 @@ export function EntitySearchSelect<T extends { id: string }>(props: Props<T>) {
                 {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
             </div>
             {open && (
-                <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                // Dentro de un modal va en el flujo (si flota, el borde del modal la recorta).
+                // onMouseDown: tocar la barra de scroll de la lista no la cierra.
+                <div
+                    onMouseDown={(e) => e.preventDefault()}
+                    className={`${enModal ? "relative" : "absolute z-50"} w-full mt-1 bg-white border rounded-lg shadow-lg max-h-72 overflow-y-auto`}
+                >
                     {loading ? (
                         <div className="p-3 text-sm text-muted-foreground">Buscando...</div>
                     ) : results.length === 0 ? (

@@ -5,7 +5,8 @@
 // las unidades las calcula el servidor (% × neto del cupo, repartido parejo) y
 // quedan fijas al cerrar el picking. Un cupo sin artículos bloquea la facturación.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, useRef } from "react"
+import { useDentroDeModal } from "@/lib/hooks/use-dentro-de-modal"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Loader2, Package, Search, Trash2, AlertTriangle } from "lucide-react"
@@ -18,6 +19,8 @@ const $ = (n: number) => `$${(n || 0).toLocaleString("es-AR", { minimumFractionD
 function Buscador({ onElegir, disabled }: { onElegir: (p: any) => void; disabled?: boolean }) {
   const [q, setQ] = useState("")
   const [res, setRes] = useState<any[]>([])
+  const cajaRef = useRef<HTMLDivElement>(null)
+  const enModal = useDentroDeModal(cajaRef, res.length > 0)
   const buscar = useCallback(async (t: string) => {
     setQ(t)
     if (t.trim().length < 2) { setRes([]); return }
@@ -25,11 +28,11 @@ function Buscador({ onElegir, disabled }: { onElegir: (p: any) => void; disabled
     setRes((await searchProductos(t)) || [])
   }, [])
   return (
-    <div className="relative">
+    <div ref={cajaRef} className="relative">
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
       <Input placeholder="Buscar artículo a regalar..." className="pl-9 h-9" value={q} disabled={disabled} onChange={(e) => buscar(e.target.value)} />
       {res.length > 0 && (
-        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
+        <div className={`${enModal ? "relative" : "absolute top-full left-0 z-50"} w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 max-h-[260px] overflow-auto`}>
           {res.map((p: any) => (
             <div key={p.id} className="px-4 py-3 hover:bg-amber-50 cursor-pointer border-b border-slate-100 last:border-0"
               onClick={() => { onElegir(p); setQ(""); setRes([]) }}>

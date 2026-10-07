@@ -21,6 +21,8 @@ export type PedidoFila = {
   total: number
   bultos?: number | null
   viaje_id: string | null
+  /** Día previsto sin viaje (calendario). Si hay viaje, manda la fecha del viaje. */
+  fecha_entrega?: string | null
   clientes?: { nombre_razon_social: string; cuit?: string | null; localidad?: string | null } | null
   vendedores?: { nombre: string } | null
   viajes?: { nombre: string; fecha: string } | null
@@ -54,7 +56,11 @@ interface Props {
   onOrdenar: (o: Orden) => void
   /** Al empezar a arrastrar: ids que se arrastran. */
   onArrastrar: (ids: string[]) => void
+  /** Sacarle la fecha de entrega a un pedido sin viaje. */
+  onQuitarEntrega?: (p: PedidoFila) => void
 }
+
+const diaMes = (f: string) => `${Number(f.slice(8))}/${Number(f.slice(5, 7))}`
 
 export function TablaPedidos(p: Props) {
   const todos = p.pedidos.length > 0 && p.pedidos.every(x => p.seleccion.has(x.id))
@@ -153,7 +159,12 @@ export function TablaPedidos(p: Props) {
                   <td className="truncate px-2 text-[13px]">
                     {x.viajes?.nombre
                       ? <span className="flex min-w-0 items-center gap-1 font-medium uppercase text-azul-600" title={x.viajes.nombre}><Truck className="size-3.5 shrink-0" /><span className="truncate">{x.viajes.nombre}</span></span>
-                      : <span className="text-neutro-300">—</span>}
+                      : x.fecha_entrega
+                        ? <span className="inline-flex items-center gap-1 rounded-md bg-ambar-50 px-1.5 py-0.5 text-xs font-semibold normal-case text-ambar-800" onClick={e => e.stopPropagation()}>
+                            Para el {diaMes(x.fecha_entrega)}
+                            {p.onQuitarEntrega && <button type="button" aria-label="Sacar la fecha de entrega" className="text-ambar-600 hover:text-error-500" onClick={() => p.onQuitarEntrega!(x)}>×</button>}
+                          </span>
+                        : <span className="text-neutro-300">—</span>}
                   </td>
                   <td className="px-2 text-right font-semibold whitespace-nowrap tabular-nums text-azul-900">{x.total > 0 ? pesos(x.total) : '—'}</td>
                   <td className="pr-2 text-right" onClick={e => e.stopPropagation()}>
@@ -197,6 +208,7 @@ export function TablaPedidos(p: Props) {
                   {(x.prioridad || 3) < 3 && <span className={cn('rounded-full px-2 py-0.5 font-semibold', pr.fondo, pr.texto)}>{pr.label}</span>}
                   {x.zona?.nombre && <span className="rounded-full bg-neutro-100 px-2 py-0.5 uppercase text-neutro-600">{x.zona.nombre}</span>}
                   {x.viajes?.nombre && <span className="inline-flex items-center gap-1 rounded-full bg-azul-50 px-2 py-0.5 font-medium uppercase text-azul-600"><Truck className="size-3" />{x.viajes.nombre}</span>}
+                  {!x.viajes?.nombre && x.fecha_entrega && <span className="rounded-full bg-ambar-50 px-2 py-0.5 font-semibold text-ambar-800">Para el {diaMes(x.fecha_entrega)}</span>}
                 </div>
               </div>
             </div>

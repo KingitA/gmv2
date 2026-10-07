@@ -92,6 +92,10 @@
     "components/viajes/calendario-viajes.tsx",
     "components/viajes/programar-viaje-dialog.tsx",
     "lib/viajes/use-viajes-rango.ts",
-    "app/viajes/page.tsx"
+    "app/viajes/page.tsx",
+    "lib/hooks/use-dentro-de-modal.ts",
+    "app/api/pedidos/fecha-entrega/route.ts",
+    "components/search/EntitySearchSelect.tsx",
+    "components/pagos/ClienteSearchCombobox.tsx"
   ]
 }

@@ -30,6 +30,22 @@ interface Props {
   /** Si se pasan, el calendario acepta pedidos arrastrados. */
   onSoltarPedidosEnViaje?: (viaje: ViajeCal) => void
   onSoltarPedidosEnDia?: (dia: string) => void
+  /** Pedidos con fecha de entrega y sin viaje, por día y zona (CLIENTES). */
+  sueltos?: Map<string, GrupoSuelto[]>
+  onAbrirSueltos?: (dia: string, zonaId: string | null) => void
+}
+
+export type GrupoSuelto = { zonaId: string | null; zona: string; cantidad: number }
+
+function ChipSueltos({ g, onClick }: { g: GrupoSuelto; onClick?: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      title="Pedidos con fecha de entrega y sin viaje: tocá para verlos en la lista"
+      className="flex w-full items-center gap-1.5 rounded-lg border border-dashed border-ambar-400 bg-ambar-50/70 px-2 py-1 text-left text-[11px] font-semibold text-ambar-800 hover:bg-ambar-50">
+      <span className="tabular-nums">{g.cantidad}</span>
+      <span className="truncate">{g.cantidad === 1 ? 'suelto' : 'sueltos'} · {g.zona}</span>
+    </button>
+  )
 }
 
 export function CalendarioViajes(p: Props) {
@@ -63,7 +79,7 @@ export function CalendarioViajes(p: Props) {
 
   // Celular: agenda vertical (un día por fila). En el mes, solo los días con viajes y hoy.
   const diasAgenda = (p.celdas.filter(Boolean) as string[])
-    .filter(d => p.modo === 'semana' || d === p.hoy || (porDia.get(d)?.length ?? 0) > 0)
+    .filter(d => p.modo === 'semana' || d === p.hoy || (porDia.get(d)?.length ?? 0) > 0 || (p.sueltos?.get(d)?.length ?? 0) > 0)
   const nombreDia = (d: string) => DIAS_SEMANA[(new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7]
 
   return (
@@ -79,7 +95,8 @@ export function CalendarioViajes(p: Props) {
               <div className={cn('mx-auto grid size-7 place-items-center rounded-full text-sm font-bold', d === p.hoy ? 'bg-azul-600 text-white' : 'text-azul-900')}>{Number(d.slice(8))}</div>
             </div>
             <div className="min-w-0 flex-1 space-y-1.5">
-              {vs.length === 0 && <div className="pt-1.5 text-[13px] text-neutro-400">Sin viajes</div>}
+              {vs.length === 0 && !(p.sueltos?.get(d)?.length) && <div className="pt-1.5 text-[13px] text-neutro-400">Sin viajes</div>}
+              {(p.sueltos?.get(d) || []).map(g => <ChipSueltos key={g.zonaId ?? 'x'} g={g} onClick={() => p.onAbrirSueltos?.(d, g.zonaId)} />)}
               {vs.map(v => (
                 <button key={`${v.id}-${v.dia_n}`} type="button" onClick={() => p.onAbrirViaje(v.id)}
                   className="flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left active:bg-azul-50">
@@ -192,9 +209,10 @@ export function CalendarioViajes(p: Props) {
                         </button>
                       )
                     })}
+                    {(p.sueltos?.get(dia) || []).map(g => <ChipSueltos key={g.zonaId ?? 'x'} g={g} onClick={() => p.onAbrirSueltos?.(dia, g.zonaId)} />)}
                     {resaltado && aceptaPedidos && !viajeArr && (
                       <div className="rounded-md border border-dashed border-ambar-400 px-2 py-1 text-[11px] font-medium text-ambar-800">
-                        Soltá para armar un viaje este día
+                        Soltá para dejarlos este día
                       </div>
                     )}
                   </div>

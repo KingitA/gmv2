@@ -10,7 +10,7 @@ import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { TablaPedidos, type Orden, type PedidoFila } from "@/components/clientes/tabla-pedidos"
 import { FiltrosPedidos, type Filtros } from "@/components/clientes/filtros-pedidos"
-import { CalendarioViajes, celdasMes, celdasSemana } from "@/components/viajes/calendario-viajes"
+import { CalendarioViajes, celdasMes, celdasSemana, type GrupoSuelto } from "@/components/viajes/calendario-viajes"
 import { ProgramarViajeDialog } from "@/components/viajes/programar-viaje-dialog"
 import { useViajesRango, sumarDias, viajeMovible, type ViajeCal } from "@/lib/viajes/use-viajes-rango"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
@@ -84,6 +84,7 @@ type Pedido = {
   total: number
   observaciones: string | null
   prioridad: number
+  fecha_entrega?: string | null
   condicion_entrega: string
   metodo_facturacion_pedido: string | null
   lista_precio_pedido_id?: string | null
@@ -227,9 +228,10 @@ export default function ClientesPedidosPage() {
   }
   const limpiarFiltros = () => {
     setBusquedaLocal("")
-    url.set({ q: null, estados: null, vendedor: null, zona: null, prio: null, viaje: null, desde: null, hasta: null }, "replace")
+    url.set({ q: null, estados: null, vendedor: null, zona: null, prio: null, viaje: null, desde: null, hasta: null, entrega: null }, "replace")
   }
-  const hayFiltrosExtra = !!(filtros.vendedor || filtros.zona || filtros.prioridad || filtros.viaje || filtros.hasta || desdeParam !== DEF.desde || estadosParam !== DEF.estados || busqueda)
+  const entregaParam = /^\d{4}-\d{2}-\d{2}$/.test(url.get("entrega")) ? url.get("entrega") : ""
+  const hayFiltrosExtra = !!(entregaParam || filtros.vendedor || filtros.zona || filtros.prioridad || filtros.viaje || filtros.hasta || desdeParam !== DEF.desde || estadosParam !== DEF.estados || busqueda)
   const incluyeEliminados = filtros.estados.includes("eliminado")
   const orden = (url.get("orden", "prioridad") as Orden)
   const dir = (url.get("dir", "desc") === "asc" ? "asc" : "desc") as "asc" | "desc"
@@ -1007,6 +1009,7 @@ export default function ClientesPedidosPage() {
     if (filtros.prioridad && String(p.prioridad || 3) !== filtros.prioridad) return false
     if (filtros.viaje === "con" && !p.viaje_id) return false
     if (filtros.viaje === "sin" && p.viaje_id) return false
+    if (entregaParam && (p.viaje_id || p.fecha_entrega !== entregaParam)) return false
     return true
   })
 
@@ -1078,7 +1081,7 @@ export default function ClientesPedidosPage() {
   }
 
   // ── Confirmaciones (subir a un viaje de otra zona, usar un viaje existente) ──
-  const [propuesta, setPropuesta] = useState<{ titulo: string; texto: React.ReactNode; boton: string; accion: () => void } | null>(null)
+  const [propuesta, setPropuesta] = useState<{ titulo: string; texto: React.ReactNode; boton: string; accion: () => void; boton2?: string; accion2?: () => void } | null>(null)
 
   // ── Subir pedidos a un viaje (misma API que la hoja de ruta y el panel) ──
   const subirPedidosAViaje = async (viajeId: string, viajeNombre: string, ids: string[]) => {
@@ -1131,33 +1134,98 @@ export default function ClientesPedidosPage() {
     subirPedidosAViaje(v.id, nombre, ids)
   }
 
+  // ── Pedidos "sueltos": con fecha de entrega y todavía sin viaje ──
+  const [sueltosCal, setSueltosCal] = useState<{ id: string; fecha_entrega: string; zona: { id: string; nombre: string } | null }[]>([])
+  const cargarSueltos = async () => {
+    const { data, error } = await supabase
+      .from("pedidos")
+      .select("id, fecha_entrega, clientes (localidades (zonas (id, nombre)))")
+      .is("viaje_id", null)
+      .not("estado", "in", "(entregado,eliminado,rechazado)")
+      .gte("fecha_entrega", diasCal[0])
+      .lte("fecha_entrega", diasCal[diasCal.length - 1])
+    if (error) return // sin la migración de fecha_entrega todavía: el calendario no muestra sueltos
+    setSueltosCal((data || []).map((p: any) => ({ id: p.id, fecha_entrega: p.fecha_entrega, zona: p.clientes?.localidades?.zonas ?? null })))
+  }
+  useEffect(() => { cargarSueltos() }, [diasCal[0], diasCal[diasCal.length - 1]])
+  useRealtime(["pedidos"], () => cargarSueltos(), { esperaMs: 1200 })
+  const sueltosPorDia = (() => {
+    const m = new Map<string, GrupoSuelto[]>()
+    for (const p of sueltosCal) {
+      const grupos = m.get(p.fecha_entrega) ?? []
+      const g = grupos.find(x => x.zonaId === (p.zona?.id ?? null))
+      if (g) g.cantidad++
+      else grupos.push({ zonaId: p.zona?.id ?? null, zona: p.zona?.nombre ?? "Sin zona", cantidad: 1 })
+      m.set(p.fecha_entrega, grupos)
+    }
+    return m
+  })()
+  const abrirSueltos = (dia: string, zonaId: string | null) => {
+    url.set({ entrega: dia, zona: zonaId, desde: "todo", estados: "todos" }, "push", DEF)
+  }
+
+  /** Deja pedidos para un día sin viaje (fecha null = sacarles la fecha). */
+  const setFechaEntrega = async (ids: string[], fecha: string | null) => {
+    try {
+      const res = await fetch("/api/pedidos/fecha-entrega", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pedido_ids: ids, fecha }),
+      })
+      const r = await res.json()
+      if (!res.ok) throw new Error(r.error || "No se pudo guardar la fecha de entrega")
+      const cant = ids.length === 1 ? "El pedido" : `Los ${ids.length} pedidos`
+      if (fecha) toast.success(`${cant} quedó para el ${Number(fecha.slice(8))}/${Number(fecha.slice(5, 7))}, sin viaje`.replace("quedó", ids.length === 1 ? "quedó" : "quedaron"))
+      else toast.success(ids.length === 1 ? "Se sacó la fecha de entrega" : "Se sacaron las fechas de entrega")
+      setSeleccion(new Set())
+      await cargarPedidos(true)
+      cargarSueltos()
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudo guardar la fecha de entrega")
+    }
+  }
+
   const soltarEnDia = (dia: string) => {
     const ids = arrastreRef.current
     if (!ids.length) return
+    const fechaTxt = `${Number(dia.slice(8))}/${Number(dia.slice(5, 7))}`
+    // Un solo pedido: queda para ese día, sin viaje
+    if (ids.length === 1) { setFechaEntrega(ids, dia); return }
     const zonas = zonasDeIds(ids)
     const distintas = new Set(zonas.map(z => z?.id ?? "?"))
-    if (distintas.size > 1 || distintas.has("?")) {
-      toast.error(distintas.has("?")
-        ? "Hay pedidos de clientes sin zona: soltalos sobre un viaje o programá uno."
-        : "Son de zonas distintas: no se juntan solos en un viaje. Soltalos sobre un viaje existente o armá uno por zona.")
-      return
-    }
+    // Zonas distintas: nunca se juntan solos en un viaje → quedan sueltos ese día
+    if (distintas.size > 1 || distintas.has("?")) { setFechaEntrega(ids, dia); return }
     const zona = zonas[0]!
-    const fechaTxt = `${Number(dia.slice(8))}/${Number(dia.slice(5, 7))}`
-    const cantidad = ids.length === 1 ? "1 pedido" : `${ids.length} pedidos`
+    const cantidad = `${ids.length} pedidos`
     // ¿Ya hay un viaje ese día que vaya a esa zona?
     const existente = viajesCal.find(v => v.zonas.some(z => z.id === zona.id) && viajeMovible(v.estado) &&
       dia >= String(v.fecha).slice(0, 10) && dia <= sumarDias(String(v.fecha).slice(0, 10), Math.max(1, v.dias) - 1))
     if (existente) {
       setPropuesta({
-        titulo: `Ya hay un viaje a ${zona.nombre} ese día`,
-        texto: <>¿Subir {cantidad} de <b>{zona.nombre}</b> al viaje <b>{existente.nombre}</b> del {fechaTxt}?</>,
+        titulo: `Ya hay un viaje a ${zona.nombre} el ${fechaTxt}`,
+        texto: <>¿Subir los {cantidad} de <b>{zona.nombre}</b> al viaje <b>{existente.nombre}</b>, o dejarlos para ese día sin viaje?</>,
         boton: "Subir al viaje",
         accion: () => subirPedidosAViaje(existente.id, existente.nombre, ids),
+        boton2: "Dejarlos sin viaje",
+        accion2: () => setFechaEntrega(ids, dia),
       })
       return
     }
-    abrirProgramar(dia, [zona.id], ids, <>No hay viaje a <b>{zona.nombre}</b> el {fechaTxt}. Al programarlo se le suben {cantidad === "1 pedido" ? "el pedido" : `los ${cantidad}`}.</>)
+    setPropuesta({
+      titulo: `${cantidad} de ${zona.nombre} para el ${fechaTxt}`,
+      texto: <>No hay viaje a <b>{zona.nombre}</b> ese día. ¿Querés programar uno y subirlos, o dejarlos para ese día sin viaje?</>,
+      boton: "Programar viaje",
+      accion: () => abrirProgramar(dia, [zona.id], ids, <>Al programarlo se le suben los {cantidad} de <b>{zona.nombre}</b>.</>),
+      boton2: "Dejarlos sin viaje",
+      accion2: () => setFechaEntrega(ids, dia),
+    })
+  }
+
+  // Barra de selección → "Crear viaje" con los pedidos marcados
+  const crearViajeConSeleccion = () => {
+    const ids = seleccionados.map(p => p.id)
+    const zonas = [...new Map(seleccionados.map(p => p.zona).filter(Boolean).map(z => [z!.id, z!])).values()]
+    abrirProgramar("", zonas.map(z => z.id), ids, <>Se le van a subir {ids.length === 1 ? "el pedido seleccionado" : `los ${ids.length} pedidos seleccionados`}{zonas.length > 1 ? <> (son de {zonas.length} zonas: {zonas.map(z => z.nombre).join(", ")})</> : null}.</>)
   }
 
   const cambiarPrioridadVarios = async (ids: string[], prioridad: 1 | 2 | 3) => {
@@ -1337,11 +1405,13 @@ export default function ClientesPedidosPage() {
                 onMoverViaje={moverViaje}
                 onSoltarPedidosEnViaje={soltarEnViaje}
                 onSoltarPedidosEnDia={soltarEnDia}
+                sueltos={sueltosPorDia}
+                onAbrirSueltos={abrirSueltos}
               />
             </div>
           </div>
         )}
-        {calVisible && <p className="hidden text-xs text-neutro-400 md:block">Arrastrá pedidos de la lista a un viaje para subirlos, o a un día para armar el viaje de esa zona.</p>}
+        {calVisible && <p className="hidden text-xs text-neutro-400 md:block">Arrastrá pedidos de la lista a un viaje para subirlos, o a un día para dejarlos para esa fecha (con varios de la misma zona te ofrece armar el viaje).</p>}
       </section>
 
       {/* ═══ FILTROS ═══ */}
@@ -1410,6 +1480,13 @@ export default function ClientesPedidosPage() {
         </div>
       )}
 
+      {entregaParam && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-ambar-300 bg-ambar-50 px-4 py-2 text-sm text-ambar-900">
+          Pedidos sin viaje para el <b>{Number(entregaParam.slice(8))}/{Number(entregaParam.slice(5, 7))}</b>
+          <button type="button" className="ml-auto font-semibold text-azul-600 hover:underline" onClick={() => url.set({ entrega: null, zona: null }, "push")}>Ver todos</button>
+        </div>
+      )}
+
       {/* ═══ LISTA DE PEDIDOS ═══ */}
       {cargando && pedidos.length === 0 ? (
         <CargaProgreso mensajes={MENSAJES.pedidos} />
@@ -1435,6 +1512,7 @@ export default function ClientesPedidosPage() {
           dir={dir}
           onOrdenar={ordenar}
           onArrastrar={(ids) => { arrastreRef.current = ids }}
+          onQuitarEntrega={(p) => setFechaEntrega([p.id], null)}
         />
       )}
 
@@ -1461,6 +1539,9 @@ export default function ClientesPedidosPage() {
               ))}
             </SelectContent>
           </Select>
+          <Button size="sm" variant="secondary" className="h-9 bg-white text-azul-900 hover:bg-azul-50" onClick={crearViajeConSeleccion}>
+            <Truck className="h-4 w-4" /> Crear viaje
+          </Button>
           <Select value="" onValueChange={(v) => cambiarPrioridadVarios(seleccionados.map(p => p.id), Number(v) as 1 | 2 | 3)}>
             <SelectTrigger className="h-9 w-auto min-w-36 border-white/20 bg-white/10 text-white data-[placeholder]:text-white [&_svg:not([class*='text-'])]:text-white">
               <SelectValue placeholder="Prioridad…" />
@@ -1500,6 +1581,9 @@ export default function ClientesPedidosPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            {propuesta?.boton2 && (
+              <Button variant="outline" onClick={() => { const a = propuesta?.accion2; setPropuesta(null); a?.() }}>{propuesta.boton2}</Button>
+            )}
             <AlertDialogAction onClick={() => { const a = propuesta?.accion; setPropuesta(null); a?.() }}>{propuesta?.boton}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
