@@ -77,9 +77,11 @@ interface Props {
   /** Para el alta: si arranca repitiéndose (ej. "mensual" para servicios). */
   recurrenciaInicial?: string
   onSaved?: () => void
+  /** Si se marca pagado con forma "cheque": el calendario abre la elección de cheques. */
+  onPagadoConCheque?: (venc: VencimientoForm) => void
 }
 
-export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = "factura", recurrenciaInicial = "ninguna", onSaved }: Props) {
+export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = "factura", recurrenciaInicial = "ninguna", onSaved, onPagadoConCheque }: Props) {
   const { roles } = useMisRoles()
   const tipos = tiposVisibles(CATEGORIAS_GASTO, roles)
   const editando = !!venc
@@ -161,7 +163,7 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
         descuentos_aplicados: descuentos,
         es_estimado: estimado,
         observaciones: observaciones.trim() || null,
-        dias_alerta: Number(diasAlerta) || 3,
+        ...(!editando || diasAlerta !== String(venc?.dias_alerta ?? 3) ? { dias_alerta: diasAlerta === "" ? 3 : Math.max(0, Number(diasAlerta) || 0) } : {}),
       }
       const body = editando
         ? { id: venc!.id, ...datos }
@@ -238,11 +240,12 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error)
-      toast.success(forma === "cheque"
-        ? "Pago marcado. Registrá con qué cheques fue desde el calendario (para descargarlos de cartera)."
-        : "Pago marcado como pagado")
       onOpenChange(false)
       onSaved?.()
+      if (forma === "cheque" && onPagadoConCheque) onPagadoConCheque({ ...venc, forma_pago: "cheque" })
+      else toast.success(forma === "cheque"
+        ? "Pago marcado. Registrá con qué cheques fue desde el calendario (para descargarlos de cartera)."
+        : "Pago marcado como pagado")
     } catch (err: any) {
       toast.error(err?.message || "No se pudo marcar")
     } finally {

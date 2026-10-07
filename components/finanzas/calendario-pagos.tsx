@@ -676,6 +676,7 @@ export function CalendarioPagos({
                         onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm() }}
                         venc={editando}
                         onSaved={async () => { await load(); onDataChanged?.() }}
+                        onPagadoConCheque={(v) => setChequeChoice(v as Vencimiento)}
                     />
                 </div>
             </div>

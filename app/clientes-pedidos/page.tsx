@@ -280,9 +280,11 @@ export default function ClientesPedidosPage() {
   // ficha del cliente, atrás/adelante). Sin el parámetro, el panel se cierra.
   useEffect(() => {
     if (!pedidoParam) {
+      cerrandoRef.current = false
       if (modalDetalleAbierto) setModalDetalleAbierto(false)
       return
     }
+    if (cerrandoRef.current) return
     if (pedidoSeleccionado?.numero_pedido === pedidoParam && modalDetalleAbierto) return
     if (cargando && pedidos.length === 0) return // esperar a que cargue la lista
     const p = pedidos.find(x => x.numero_pedido === pedidoParam)
@@ -305,11 +307,14 @@ export default function ClientesPedidosPage() {
   }, [pedidoParam, pedidos, cargando])
 
   const abrirPedido = (pedido: Pedido) => {
+    cerrandoRef.current = false
     abiertoDesdeListaRef.current = true
     url.set({ pedido: pedido.numero_pedido }, "push")
   }
 
+  const cerrandoRef = useRef(false)
   const cerrarPedido = () => {
+    cerrandoRef.current = true
     setModalDetalleAbierto(false)
     if (!pedidoParam) return
     // Si lo abrimos desde la lista, "cerrar" = volver atrás (no deja una entrada de más)
@@ -380,7 +385,9 @@ export default function ClientesPedidosPage() {
   // mostrar la barra de carga ni vaciar la lista.
   const filtrosRef = useRef(filtros)
   filtrosRef.current = filtros
+  const turnoPedidosRef = useRef(0)
   const cargarPedidos = async (silencioso = false) => {
+    const turno = ++turnoPedidosRef.current
     try {
       if (!silencioso) setCargando(true)
       const f = filtrosRef.current
@@ -403,11 +410,12 @@ export default function ClientesPedidosPage() {
           .order("numero_pedido", { ascending: false })
       }
       const data = await fetchAllRows(buildPedidosQuery, "id")
+      if (turno !== turnoPedidosRef.current) return // llegó una lectura más nueva
       setPedidos(data || [])
     } catch (error) {
       console.error("Error cargando pedidos:", JSON.stringify(error, null, 2))
     } finally {
-      setCargando(false)
+      if (turno === turnoPedidosRef.current) setCargando(false)
     }
   }
 
@@ -416,7 +424,8 @@ export default function ClientesPedidosPage() {
 
   // En vivo: un pedido nuevo, impreso, facturado o movido por otro usuario
   // aparece solo. El picking del pedido abierto sigue con su canal propio.
-  useRealtime(["pedidos"], () => cargarPedidos(true))
+  useRealtime(["pedidos"], () => { cargarPedidos(true); cargarSueltosRef.current?.() }, { esperaMs: 1500 })
+  const cargarSueltosRef = useRef<(() => void) | null>(null)
   useRealtime(["picking_items"], () => cargarPickingStatus(), { esperaMs: 1500 })
 
   const cargarComprobantesExistentes = async () => {
@@ -478,8 +487,11 @@ export default function ClientesPedidosPage() {
       })
       if (res.ok) {
         setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, prioridad: nuevaPrioridad } : p))
+        return true
       }
+      toast.error("No se pudo cambiar la prioridad")
     } catch (e) { console.error("Error cambiando prioridad:", e) }
+    return false
   }
 
   const PRIORIDADES = [
@@ -1007,6 +1019,8 @@ export default function ClientesPedidosPage() {
     if (filtros.vendedor && p.vendedor_id !== filtros.vendedor) return false
     if (filtros.zona && zonaDe(p)?.id !== filtros.zona) return false
     if (filtros.prioridad && String(p.prioridad || 3) !== filtros.prioridad) return false
+    if (filtros.desde && (p.fecha || "") < filtros.desde) return false
+    if (filtros.hasta && (p.fecha || "").slice(0, 10) > filtros.hasta) return false
     if (filtros.viaje === "con" && !p.viaje_id) return false
     if (filtros.viaje === "sin" && p.viaje_id) return false
     if (entregaParam && (p.viaje_id || p.fecha_entrega !== entregaParam)) return false
@@ -1148,7 +1162,7 @@ export default function ClientesPedidosPage() {
     setSueltosCal((data || []).map((p: any) => ({ id: p.id, fecha_entrega: p.fecha_entrega, zona: p.clientes?.localidades?.zonas ?? null })))
   }
   useEffect(() => { cargarSueltos() }, [diasCal[0], diasCal[diasCal.length - 1]])
-  useRealtime(["pedidos"], () => cargarSueltos(), { esperaMs: 1200 })
+  cargarSueltosRef.current = cargarSueltos
   const sueltosPorDia = (() => {
     const m = new Map<string, GrupoSuelto[]>()
     for (const p of sueltosCal) {
@@ -1234,8 +1248,10 @@ export default function ClientesPedidosPage() {
   }
 
   const cambiarPrioridadVarios = async (ids: string[], prioridad: 1 | 2 | 3) => {
-    for (const id of ids) await cambiarPrioridad(id, prioridad)
-    toast.success(`Prioridad actualizada en ${ids.length === 1 ? "1 pedido" : `${ids.length} pedidos`}`)
+    let ok = 0
+    for (const id of ids) if (await cambiarPrioridad(id, prioridad)) ok++
+    if (ok) toast.success(`Prioridad actualizada en ${ok === 1 ? "1 pedido" : `${ok} pedidos`}`)
+    if (ok < ids.length) toast.error(`${ids.length - ok} no se pudieron actualizar`)
   }
 
   const getEstadoBadge = (estado: string) => {

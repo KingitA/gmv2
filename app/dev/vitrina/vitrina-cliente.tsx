@@ -7,6 +7,7 @@ import { FichaArticulo } from "@/components/articulos/ficha-articulo"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { FichaProveedor } from "@/components/proveedores/ficha-proveedor"
 import { ClientesDemo } from "./clientes-demo"
+import { PruebaUrl } from "./prueba-url"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 
@@ -54,6 +55,7 @@ export function VitrinaCliente() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       <h1 className="text-2xl font-bold text-azul-900">Vitrina del rediseño</h1>
+      <PruebaUrl />
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => { setFf(FF_EJEMPLO); setFa({ id: "a1", activo: true }) }}>Abrir ficha de artículo</Button>
         <Button variant="outline" onClick={() => { setFf({ ean13: [], iva_compras: "factura", iva_ventas: "factura" }); setFa({ id: "__new__" }) }}>Nuevo artículo</Button>

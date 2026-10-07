@@ -6,7 +6,7 @@
 // (pestañas, el pedido abierto, filtros). Lo efímero (un menú abierto) no.
 
 import { useCallback } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 
 type Modo = 'push' | 'replace'
 
@@ -17,7 +17,6 @@ type Modo = 'push' | 'replace'
  * Valor vacío/null/igual al default ⇒ el parámetro se quita.
  */
 export function useUrlParams() {
-  const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
@@ -33,10 +32,13 @@ export function useUrlParams() {
       const qs = sp.toString()
       const url = qs ? `${pathname}?${qs}` : pathname
       if (url === `${window.location.pathname}${window.location.search}`) return
-      if (modo === 'replace') router.replace(url, { scroll: false })
-      else router.push(url, { scroll: false })
+      // Historial nativo: Next.js lo sincroniza con useSearchParams SIN volver a
+      // pedir la página al servidor (con router.push/replace cada tecla del
+      // buscador o cada filtro era un viaje al servidor + middleware).
+      if (modo === 'replace') window.history.replaceState(null, '', url)
+      else window.history.pushState(null, '', url)
     },
-    [pathname, router],
+    [pathname],
   )
 
   return { get, set, searchParams }

@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { TopNav } from '@/components/layout/top-nav'
 import { esRutaSinNav } from '@/lib/navegacion'
@@ -11,11 +12,15 @@ import { esRutaSinNav } from '@/lib/navegacion'
 export function MainContent({ children, roles = [] }: { children: React.ReactNode; roles?: string[] }) {
   const pathname = usePathname()
   const hasErpAccess = roles.includes('admin') || roles.includes('administrativo')
+  const esApp = !!pathname && !pathname.startsWith('/auth') && esRutaSinNav(pathname)
+  // Las apps de calle conservan su estilo en mayúsculas, incluidos modales y menús
+  // (se dibujan fuera de <main>, directo en el body)
+  useEffect(() => {
+    document.body.classList.toggle('apps-mayusculas', esApp)
+  }, [esApp])
 
   if (esRutaSinNav(pathname) || !hasErpAccess) {
-    // Apps de calle/depósito: conservan su estilo en mayúsculas (el login y el ERP no)
-    const esApp = !!pathname && !pathname.startsWith('/auth') && esRutaSinNav(pathname)
-    return <main className={`min-h-screen ${esApp ? 'apps-mayusculas' : ''}`}>{children}</main>
+    return <main className="min-h-screen">{children}</main>
   }
 
   return (

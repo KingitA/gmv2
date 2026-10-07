@@ -30,6 +30,10 @@ export const ESTADOS_RAPIDOS: { value: string; label: string }[] = [
   { value: 'en_viaje', label: 'En viaje' },
   { value: 'entregado', label: 'Entregado' },
   { value: 'en_venta', label: 'En venta' },
+  { value: 'pendiente_facturacion', label: 'Pend. facturación' },
+  { value: 'listo_para_retirar', label: 'Listo para retirar' },
+  { value: 'listo_para_enviar', label: 'Listo para enviar' },
+  { value: 'rechazado', label: 'Rechazado' },
   { value: 'eliminado', label: 'Eliminado' },
 ]
 
@@ -92,9 +96,13 @@ export function FiltrosPedidos({ f, set, vendedores, zonas, hayFiltrosExtra, onL
           </Select>
           <div className="col-span-2 flex items-center gap-2 md:col-span-1">
             <span className="text-[13px] font-medium text-neutro-500">Desde</span>
-            <div className="w-[130px]"><DateInputAR value={f.desde} onChange={v => set({ desde: v })} /></div>
+            {/* Mientras se escribe la fecha llega vacía: solo se aplica una fecha completa.
+                Para sacar el límite, la ✕. */}
+            <div className="w-[130px]"><DateInputAR value={f.desde} onChange={v => { if (v) set({ desde: v }) }} /></div>
+            {f.desde && <button type="button" aria-label="Sin fecha desde" title="Sin límite de fecha" className="-ml-1 text-neutro-400 hover:text-error-500" onClick={() => set({ desde: '' })}><X className="size-4" /></button>}
             <span className="text-[13px] font-medium text-neutro-500">hasta</span>
-            <div className="w-[130px]"><DateInputAR value={f.hasta} onChange={v => set({ hasta: v })} /></div>
+            <div className="w-[130px]"><DateInputAR value={f.hasta} onChange={v => { if (v) set({ hasta: v }) }} /></div>
+            {f.hasta && <button type="button" aria-label="Sin fecha hasta" className="-ml-1 text-neutro-400 hover:text-error-500" onClick={() => set({ hasta: '' })}><X className="size-4" /></button>}
           </div>
           {hayFiltrosExtra && (
             <button type="button" onClick={onLimpiar} className="inline-flex h-10 items-center gap-1 rounded-lg px-3 text-[13px] font-semibold text-azul-600 hover:bg-azul-50">

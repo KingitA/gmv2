@@ -211,7 +211,8 @@ export function FichaArticulo(p: Props) {
                 ayuda="Dónde aparece en el catálogo y en los reportes. El segmento de precio se usa cuando el artículo pertenece a un rubro distinto al de su proveedor.">
                 <Campos>
                   <Campo label="Rubro">
-                    <Select value={ff.rubro_id || 'none'} onValueChange={v => {
+                    <Select value={ff.rubro_id || (ff.rubro ? '__actual__' : 'none')} onValueChange={v => {
+                      if (v === '__actual__') return
                       const r = p.rubros.find(x => x.id === v)
                       setFf(prev => ({ ...prev, rubro: r?.nombre ?? '', rubro_id: r?.id ?? null, categoria: '', subcategoria: '' }))
                     }}>
@@ -219,6 +220,9 @@ export function FichaArticulo(p: Props) {
                       <SelectContent>
                         <SelectItem value="none">Sin rubro</SelectItem>
                         {p.rubros.map(r => <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>)}
+                        {/* Rubro guardado que no está en la lista (inactivo o cargado solo como texto): no se pierde */}
+                        {ff.rubro_id && !p.rubros.some(r => r.id === ff.rubro_id) && <SelectItem value={ff.rubro_id}>{`${ff.rubro || 'Rubro'} (actual)`}</SelectItem>}
+                        {!ff.rubro_id && ff.rubro && <SelectItem value="__actual__">{`${ff.rubro} (actual)`}</SelectItem>}
                       </SelectContent>
                     </Select>
                   </Campo>

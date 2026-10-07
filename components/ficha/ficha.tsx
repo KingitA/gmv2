@@ -74,7 +74,8 @@ export function FichaCuerpo({ secciones, children }: { secciones: SeccionIndice[
     )
     secciones.forEach(s => { const el = raiz.querySelector(`#ficha-${s.id}`); if (el) obs.observe(el) })
     return () => obs.disconnect()
-  }, [secciones])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secciones.map(s => s.id).join()])
 
   const ir = (id: string) => {
     setActiva(id)
