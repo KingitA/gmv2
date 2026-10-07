@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fichas Megasur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..800&display=swap" rel="stylesheet">
+<style>
+/* Maqueta del sistema visual del ERP (rediseño 2026-10). Paleta: Megasur Sistema de Color v1. */
+:root{
+  --azul:#33378E; --azul-700:#2A2E77; --azul-900:#171A45; --azul-50:#EEEEF6; --azul-100:#CFD0E4;
+  --cian:#13A6CB; --cian-50:#E9F7FA; --cian-700:#106F90;
+  --ambar:#FFB81C; --ambar-50:#FFF7E6; --ambar-800:#9B670B;
+  --exito:#1F8F62; --exito-50:#E6F4EE; --alerta:#E8711A; --alerta-50:#FDF0E6; --error:#D84459;
+  --fondo:#F0F1F7; --superficie:#FFFFFF; --linea:#E3E5EF; --linea-fuerte:#CDD0DF;
+  --texto:#171A45; --texto-2:#454A63; --texto-3:#5E6480; --texto-4:#8187A1;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:"Archivo",system-ui,sans-serif;font-variation-settings:"wdth" 100;color:var(--texto);background:var(--fondo);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+.cond{font-variation-settings:"wdth" 82}
+
+/* ---------- barra superior del ERP (contexto) ---------- */
+.erp-bar{background:var(--azul-900);color:#fff;display:flex;align-items:flex-end;gap:2px;padding:0 12px;height:48px}
+.erp-bar .marca{align-self:center;font-weight:800;font-size:15px;letter-spacing:-.01em;padding-right:14px;margin-right:6px;border-right:1px solid rgba(255,255,255,.14)}
+.erp-bar .marca span{color:var(--cian);font-weight:700}
+.tab{color:#B0B1D3;padding:0 16px;height:38px;display:flex;align-items:center;border-radius:10px 10px 0 0;font-weight:600;font-size:13.5px;text-decoration:none}
+.tab.on{background:var(--fondo);color:var(--azul-900)}
+@media (max-width:760px){.erp-bar .tab{display:none}.erp-bar .tab.on{display:flex;background:none;color:#fff}}
+
+/* ---------- conmutador de maqueta ---------- */
+.demo{max-width:1100px;margin:18px auto 0;padding:0 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.demo p{margin:0 12px 0 0;color:var(--texto-3);font-size:13px}
+.seg{display:inline-flex;background:var(--superficie);border:1px solid var(--linea);border-radius:10px;padding:3px}
+.seg button{border:0;background:none;font:inherit;font-weight:600;color:var(--texto-3);padding:7px 14px;border-radius:7px;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--azul);color:#fff}
+
+/* ---------- ficha ---------- */
+.ficha{max-width:1100px;margin:14px auto 40px;background:var(--superficie);border-radius:16px;box-shadow:0 1px 0 var(--linea),0 18px 40px -24px rgba(23,26,69,.35);overflow:hidden}
+.cab{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;padding:20px 24px;border-bottom:1px solid var(--linea)}
+.foto{width:72px;height:72px;border-radius:12px;background:var(--azul-50);display:grid;place-items:center;overflow:hidden;position:relative}
+.foto svg{width:44px;height:44px}
+.cab h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.015em;line-height:1.15}
+.meta{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px;color:var(--texto-3);font-size:13px}
+.meta b{color:var(--texto);font-weight:600}
+.estado{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--exito);background:var(--exito-50);padding:4px 10px;border-radius:999px}
+.estado::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.acciones{display:flex;gap:8px}
+.btn{font:inherit;font-weight:600;font-size:13.5px;border-radius:9px;padding:9px 16px;border:1px solid var(--linea-fuerte);background:#fff;color:var(--texto);cursor:pointer}
+.btn.pri{background:var(--azul);border-color:var(--azul);color:#fff}
+.btn.pri:hover{background:var(--azul-700)}
+
+.cuerpo{display:grid;grid-template-columns:210px 1fr}
+.indice{border-right:1px solid var(--linea);padding:16px 10px;position:sticky;top:0;align-self:start}
+.indice a{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:9px;color:var(--texto-2);text-decoration:none;font-weight:500}
+.indice a.on{background:var(--azul-50);color:var(--azul);font-weight:650}
+.indice a small{color:var(--texto-4);font-weight:500}
+.indice a.aviso small{color:var(--alerta);font-weight:650}
+.secciones{padding:8px 28px 28px}
+section{padding:22px 0;border-bottom:1px solid var(--linea)}
+section:last-child{border-bottom:0}
+section h2{margin:0;font-size:16px;font-weight:700;letter-spacing:-.005em;display:flex;align-items:center;gap:10px}
+section h2 .ico{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--azul-50);color:var(--azul)}
+section h2 .ico svg{width:15px;height:15px}
+section .ayuda{margin:4px 0 16px 36px;color:var(--texto-3);font-size:13px;max-width:62ch}
+.grid{display:grid;gap:14px 16px;margin-left:36px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.span2{grid-column:span 2}
+.campo label{display:block;font-size:12.5px;font-weight:600;color:var(--texto-2);margin-bottom:5px}
+.campo label em{font-style:normal;font-weight:500;color:var(--texto-4);margin-left:4px}
+.ctrl{width:100%;font:inherit;font-size:14px;color:var(--texto);background:#fff;border:1px solid var(--linea-fuerte);border-radius:9px;padding:9px 11px;min-height:40px}
+.ctrl:focus{outline:2px solid var(--cian);outline-offset:1px;border-color:var(--cian)}
+.ctrl.sel{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235E6480' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;padding-right:30px}
+.ctrl.calc{background:var(--fondo);border-style:dashed;color:var(--texto-2)}
+.sufijo{position:relative}
+.sufijo span{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--texto-4);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border:1px solid var(--linea-fuerte);border-radius:9px;padding:6px 8px;min-height:40px}
+.chip{background:var(--azul-50);color:var(--azul-900);border-radius:6px;padding:3px 8px;font-size:13px}
+.chips input{border:0;outline:0;font:inherit;flex:1;min-width:120px}
+.ruta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:36px;margin-bottom:14px;font-size:13px;color:var(--texto-3)}
+.ruta b{background:var(--fondo);color:var(--texto);border-radius:7px;padding:4px 9px;font-weight:600}
+.ruta i{font-style:normal;color:var(--texto-4)}
+
+/* descuentos del proveedor: filas editables, no otro modal */
+.desc{margin-left:36px;border:1px solid var(--linea);border-radius:12px;overflow:hidden}
+.desc .fila{display:grid;grid-template-columns:130px 1fr 110px 34px;gap:10px;align-items:center;padding:9px 12px;border-top:1px solid var(--linea)}
+.desc .fila:first-child{border-top:0;background:var(--fondo);font-size:12.5px;font-weight:600;color:var(--texto-3);padding:8px 12px}
+.tipo{display:inline-block;border-radius:6px;padding:2px 8px;font-size:12.5px;font-weight:600}
+.t-com{background:var(--azul-50);color:var(--azul)} .t-fin{background:var(--cian-50);color:var(--cian-700)} .t-pro{background:var(--ambar-50);color:var(--ambar-800)}
+.desc .ctrl{min-height:34px;padding:6px 9px}
+.quitar{border:0;background:none;color:var(--texto-4);cursor:pointer;font-size:18px}
+.agregar{font:inherit;font-weight:600;color:var(--azul);background:none;border:0;padding:10px 12px;cursor:pointer}
+
+/* escalera de precio: el elemento protagonista */
+.escalera{margin:18px 0 0 36px;border-radius:14px;background:var(--azul-900);color:#fff;padding:18px 20px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;position:relative}
+.paso{padding:0 14px;border-left:1px solid rgba(255,255,255,.12)}
+.paso:first-child{border-left:0;padding-left:0}
+.paso small{display:block;color:#B0B1D3;font-size:12px;font-weight:500}
+.paso .v{font-size:20px;font-weight:700;letter-spacing:-.01em;margin-top:2px}
+.paso .op{display:inline-block;margin-top:6px;font-size:12px;font-weight:600;color:#93D6E7}
+.paso.final{background:var(--cian);color:var(--azul-900);border-radius:10px;padding:10px 14px;margin:-6px 0 -6px 8px;border-left:0}
+.paso.final small{color:var(--azul-900);opacity:.75}
+.paso.final .v{font-size:24px}
+.paso.final .op{color:var(--azul-900)}
+.oferta{margin:12px 0 0 36px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.oferta > div{border:1px solid var(--linea);border-radius:12px;padding:12px 14px}
+.oferta .sufijo{border:0;padding:0}
+.oferta div.amb{border-color:var(--ambar);background:var(--ambar-50)}
+.oferta small{display:block;color:var(--texto-3);font-size:12.5px}
+.oferta b{font-size:18px}
+.nota{margin:10px 0 0 36px;color:var(--texto-3);font-size:12.5px}
+
+.pie{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 24px;border-top:1px solid var(--linea);background:var(--fondo)}
+.pie p{margin:0;color:var(--texto-3);font-size:13px}
+.pie p b{color:var(--alerta)}
+
+/* proveedor */
+.toggle{display:flex;gap:6px;margin-left:36px;flex-wrap:wrap}
+.toggle label{border:1px solid var(--linea-fuerte);border-radius:9px;padding:8px 12px;cursor:pointer;font-weight:500;display:flex;gap:8px;align-items:center}
+.toggle label.on{border-color:var(--azul);background:var(--azul-50);color:var(--azul);font-weight:650}
+.canal{margin-left:36px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.canal > div{border:1px solid var(--linea);border-radius:12px;padding:14px}
+.canal h3{margin:0 0 10px;font-size:14px;display:flex;align-items:center;gap:8px}
+.punto{width:10px;height:10px;border-radius:3px;display:inline-block}
+.canal .grid{margin-left:0}
+
+[hidden]{display:none!important}
+
+@media (max-width:860px){
+  .cuerpo{grid-template-columns:1fr}
+  .indice{position:sticky;top:0;z-index:2;background:#fff;display:flex;overflow-x:auto;border-right:0;border-bottom:1px solid var(--linea);padding:8px;gap:4px}
+  .indice a{white-space:nowrap;padding:7px 11px}
+  .indice a small{display:none}
+  .secciones{padding:4px 16px 20px}
+  .grid,.desc,.escalera,.oferta,.nota,.ruta,.toggle,.canal{margin-left:0}
+  section .ayuda{margin-left:0}
+  .g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .escalera{grid-template-columns:1fr 1fr;gap:14px 0}
+  .oferta{grid-template-columns:1fr 1fr}
+  .paso{border-left:0;padding:0}
+  .paso.final{grid-column:span 2;margin:4px 0 0}
+  .cab{grid-template-columns:auto 1fr;padding:16px}
+  .acciones{grid-column:span 2}
+  .acciones .btn{flex:1}
+  .canal{grid-template-columns:1fr}
+  .desc .fila{grid-template-columns:110px 1fr 84px 28px}
+  .ficha{border-radius:0;margin-top:10px}
+}
+@media (max-width:420px){.canal .g2{grid-template-columns:1fr}.canal .span2{grid-column:auto}}
+</style>
+</head>
+<body>
+
+<div class="erp-bar">
+  <div class="marca">GM <span>ERP</span></div>
+  <a class="tab">Clientes</a><a class="tab" id="tabProv">Proveedores</a><a class="tab on" id="tabArt">Artículos</a><a class="tab">Finanzas</a><a class="tab">Playroom</a><a class="tab">Ajustes</a>
+</div>
+
+<div class="demo">
+  <p>Maqueta para aprobar el estilo. Los datos son de ejemplo.</p>
+  <div class="seg" role="group" aria-label="Ficha a mostrar">
+    <button aria-pressed="true" data-ver="art">Ficha de artículo</button>
+    <button aria-pressed="false" data-ver="prov">Ficha de proveedor</button>
+  </div>
+</div>
+
+<!-- ================= ARTÍCULO ================= -->
+<article class="ficha" id="art">
+  <header class="cab">
+    <div class="foto" aria-label="Foto del artículo">
+      <svg viewBox="0 0 48 48" fill="none"><rect x="9" y="6" width="30" height="36" rx="5" fill="#1F8F62"/><rect x="13" y="15" width="22" height="16" rx="3" fill="#9DD3BA"/><rect x="13" y="10" width="14" height="3" rx="1.5" fill="#fff"/></svg>
+    </div>
+    <div>
+      <h1>Fibra abrasiva verde x2u</h1>
+      <div class="meta"><span>SKU <b class="num">33701</b></span><span>Virulana</span><span>Newell Brands S.A.</span><span class="estado">Activo</span></div>
+    </div>
+    <div class="acciones"><button class="btn">Cancelar</button><button class="btn pri">Guardar cambios</button></div>
+  </header>
+
+  <div class="cuerpo">
+    <nav class="indice" aria-label="Secciones de la ficha">
+      <a href="#a-ident" class="on">Identificación</a>
+      <a href="#a-prov">Proveedor y costo <small>2 desc.</small></a>
+      <a href="#a-clas">Clasificación</a>
+      <a href="#a-precio">Precio de venta</a>
+      <a href="#a-log">Depósito y empaque</a>
+    </nav>
+
+    <div class="secciones">
+      <section id="a-ident">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/></svg></span>Identificación</h2>
+        <p class="ayuda">Cómo se reconoce el artículo en pedidos, facturas y en el escáner del depósito.</p>
+        <div class="grid g4">
+          <div class="campo span2"><label>Descripción</label><input class="ctrl" value="Fibra abrasiva verde x2u"></div>
+          <div class="campo"><label>SKU</label><input class="ctrl num" value="33701"></div>
+          <div class="campo"><label>Estado</label><select class="ctrl sel"><option>Activo</option><option>Inactivo</option></select></div>
+          <div class="campo span2"><label>Códigos de barra <em>puede tener varios</em></label>
+            <div class="chips"><span class="chip num">7794440003372 ✕</span><input placeholder="Escaneá o escribí y Enter"></div></div>
+          <div class="campo span2"><label>Foto</label><button class="btn" style="width:100%">Cambiar foto</button></div>
+        </div>
+      </section>
+
+      <section id="a-prov">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V9l6-4v4l6-4v4l6-4v16z"/></svg></span>Proveedor y costo</h2>
+        <p class="ayuda">Lo que nos cuesta. Los descuentos del proveedor se aplican en cascada (así está configurado Newell Brands).</p>
+        <div class="grid g4">
+          <div class="campo span2"><label>Proveedor</label><select class="ctrl sel"><option>Newell Brands S.A.</option></select></div>
+          <div class="campo"><label>Marca</label><select class="ctrl sel"><option>Virulana</option></select></div>
+          <div class="campo"><label>IVA de compra</label><select class="ctrl sel"><option>Blanco (+IVA)</option><option>Negro (sin IVA)</option><option>Mixto</option></select></div>
+          <div class="campo"><label>Precio de lista del proveedor</label><div class="sufijo"><input class="ctrl num" value="496,79"><span>$</span></div></div>
+        </div>
+        <div class="desc" style="margin-top:14px">
+          <div class="fila"><span>Tipo</span><span>Concepto</span><span>Porcentaje</span><span></span></div>
+          <div class="fila"><span><span class="tipo t-com">Comercial</span></span><input class="ctrl" value="Bonificación por volumen"><div class="sufijo"><input class="ctrl num" value="10"><span>%</span></div><button class="quitar" aria-label="Quitar">×</button></div>
+          <div class="fila"><span><span class="tipo t-fin">Financiero</span></span><input class="ctrl" value="Pago a 30 días"><div class="sufijo"><input class="ctrl num" value="3"><span>%</span></div><button class="quitar" aria-label="Quitar">×</button></div>
+          <button class="agregar">+ Agregar descuento</button>
+        </div>
+      </section>
+
+      <section id="a-clas">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h6"/></svg></span>Clasificación</h2>
+        <p class="ayuda">Dónde aparece en el catálogo y en los reportes. El segmento define qué recargo de lista le toca.</p>
+        <div class="ruta"><b>Limpieza</b><i>/</i><b>Esponjas y estropajos</b><i>/</i><b>Esponjas de acero y metal</b></div>
+        <div class="grid g4">
+          <div class="campo"><label>Rubro</label><select class="ctrl sel"><option>Limpieza</option></select></div>
+          <div class="campo"><label>Categoría</label><select class="ctrl sel"><option>Esponjas y estropajos</option></select></div>
+          <div class="campo"><label>Subcategoría</label><select class="ctrl sel"><option>Esponjas de acero y metal</option></select></div>
+          <div class="campo"><label>Segmento de precio</label><select class="ctrl sel"><option>Automático (según rubro)</option><option selected>Limpieza / bazar</option><option>Perfumería</option></select></div>
+        </div>
+      </section>
+
+      <section id="a-precio">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>Precio de venta</h2>
+        <p class="ayuda">Cambiá el margen o el costo y el precio se recalcula al instante. Las listas de cada cliente se aplican después, al tomar el pedido.</p>
+        <div class="grid g4">
+          <div class="campo"><label>Margen</label><div class="sufijo"><input class="ctrl num" value="25"><span>%</span></div></div>
+          <div class="campo"><label>Bonificación o recargo</label><div class="sufijo"><input class="ctrl num" value="0,05"><span>%</span></div></div>
+          <div class="campo"><label>Se vende con</label><select class="ctrl sel"><option>Factura (blanco)</option><option>Presupuesto (negro)</option></select></div>
+          <div class="campo"><label>Oferta vigente</label><div class="sufijo"><input class="ctrl num" value="15"><span>%</span></div></div>
+        </div>
+        <div class="escalera num" aria-label="Cómo se forma el precio">
+          <div class="paso"><small>Lista proveedor</small><div class="v">$ 496,79</div></div>
+          <div class="paso"><small>Costo neto</small><div class="v">$ 433,69</div><span class="op">− 10% − 3%</span></div>
+          <div class="paso"><small>Con margen</small><div class="v">$ 542,12</div><span class="op">+ 25%</span></div>
+          <div class="paso final"><small>Precio base</small><div class="v">$ 542,39</div><span class="op">+ 0,05% B/R</span></div>
+        </div>
+        <div class="oferta num">
+          <div><small>Precio contado</small><b>$ 488,15</b> <small style="display:inline">− 10%</small></div>
+          <div class="amb"><small>Precio con oferta (15%)</small><b>$ 461,03</b></div>
+          <div><small>Precio lista especial <em style="font-style:normal;color:var(--texto-4)">opcional</em></small><input class="ctrl num" placeholder="Sin precio especial" style="margin-top:6px"></div>
+          <div><small>Oferta especial</small><div class="sufijo" style="margin-top:6px"><input class="ctrl num" placeholder="0"><span>%</span></div></div>
+        </div>
+        <p class="nota">Números ilustrativos de la maqueta: en el sistema salen de la misma fórmula que usa hoy (lib/pricing).</p>
+      </section>
+
+      <section id="a-log">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21 8-9-5-9 5v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg></span>Depósito y empaque</h2>
+        <p class="ayuda">Cómo viene embalado y dónde se guarda. El orden de depósito es el recorrido del preparador.</p>
+        <div class="grid g4">
+          <div class="campo"><label>Unidades por bulto</label><input class="ctrl num" value="24"></div>
+          <div class="campo"><label>Tipo de bulto</label><select class="ctrl sel"><option>Pack</option></select></div>
+          <div class="campo"><label>Fracción</label><select class="ctrl sel"><option>Pack</option></select></div>
+          <div class="campo"><label>Unidades por fracción</label><input class="ctrl num" value="12"></div>
+          <div class="campo"><label>Orden en el depósito</label><input class="ctrl num" value="76400"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <footer class="pie">
+    <p>Cambiaste <b>2 campos</b> sin guardar.</p>
+    <div class="acciones"><button class="btn">Cancelar</button><button class="btn pri">Guardar cambios</button></div>
+  </footer>
+</article>
+
+<!-- ================= PROVEEDOR ================= -->
+<article class="ficha" id="prov" hidden>
+  <header class="cab">
+    <div class="foto" style="background:var(--azul);color:#fff;font-weight:800;font-size:22px">AC</div>
+    <div>
+      <h1>Acorazado</h1>
+      <div class="meta"><span>Código <b class="num">134</b></span><span>CUIT <b class="num">20-12345678-9</b></span><span>Mercadería</span><span class="estado">Activo</span></div>
+    </div>
+    <div class="acciones"><button class="btn">Cuenta corriente</button><button class="btn pri">Guardar cambios</button></div>
+  </header>
+
+  <div class="cuerpo">
+    <nav class="indice" aria-label="Secciones de la ficha">
+      <a href="#p-datos" class="on">Datos y contacto</a>
+      <a href="#p-com">Condiciones de compra</a>
+      <a href="#p-pago">Acuerdo de pago</a>
+      <a href="#p-fiscal" class="aviso">Fiscal <small>falta provincia</small></a>
+      <a href="#p-banco">Banco</a>
+    </nav>
+    <div class="secciones">
+      <section id="p-datos">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></span>Datos y contacto</h2>
+        <p class="ayuda">A quién le compramos y cómo lo ubicamos.</p>
+        <div class="grid g4">
+          <div class="campo span2"><label>Razón social</label><input class="ctrl" value="Acorazado"></div>
+          <div class="campo"><label>Sigla</label><input class="ctrl" value="MR"></div>
+          <div class="campo"><label>Código</label><input class="ctrl num" value="134"></div>
+          <div class="campo span2"><label>Dirección</label><input class="ctrl" placeholder="Calle y número"></div>
+          <div class="campo"><label>Localidad</label><input class="ctrl"></div>
+          <div class="campo"><label>Código postal</label><input class="ctrl num"></div>
+          <div class="campo"><label>Teléfono de oficina</label><input class="ctrl"></div>
+          <div class="campo"><label>Email de oficina</label><input class="ctrl"></div>
+          <div class="campo"><label>Vendedor que nos atiende</label><input class="ctrl" placeholder="Teléfono"></div>
+          <div class="campo"><label>Email del vendedor</label><input class="ctrl"></div>
+        </div>
+      </section>
+
+      <section id="p-com">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.5 12h12L22 7H6"/></svg></span>Condiciones de compra</h2>
+        <p class="ayuda">Cómo nos factura. Afecta el costo de todos sus artículos.</p>
+        <div class="campo" style="margin-left:36px;margin-bottom:8px"><label>Sus descuentos se aplican</label></div>
+        <div class="toggle"><label class="on"><input type="radio" name="td" checked> En cascada (uno sobre otro)</label><label><input type="radio" name="td"> Sumados sobre la lista</label></div>
+        <div class="grid g3" style="margin-top:14px">
+          <div class="campo"><label>Factura por</label><select class="ctrl sel"><option>Unidad</option><option>Bulto</option><option>Caja</option><option>Pack</option><option>Docena</option></select></div>
+          <div class="campo"><label>Tipo de proveedor</label><select class="ctrl sel"><option>Mercadería</option><option>Servicios</option><option>Transporte</option></select></div>
+          <div class="campo"><label>Condición</label><select class="ctrl sel"><option>Cuenta corriente</option><option>Contado</option><option>Anticipado</option></select></div>
+        </div>
+      </section>
+
+      <section id="p-pago">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/></svg></span>Acuerdo de pago</h2>
+        <p class="ayuda">Con esto se arman solos los vencimientos y la orden de pago. Hoy está en la ficha fiscal; acá queda a la vista.</p>
+        <div class="canal">
+          <div><h3><span class="punto" style="background:var(--azul-100)"></span>Blanco</h3>
+            <div class="grid g2">
+              <div class="campo"><label>Medio</label><select class="ctrl sel"><option>Transferencia</option><option>Cheque</option><option>Efectivo</option></select></div>
+              <div class="campo"><label>Entrega</label><select class="ctrl sel"><option>Depósito</option><option>Retira por oficina</option><option>Envío por Grimar</option></select></div>
+              <div class="campo"><label>Plazo</label><div class="sufijo"><input class="ctrl num" value="30"><span>días</span></div></div>
+              <div class="campo"><label>Desde</label><select class="ctrl sel"><option>La factura</option><option>La recepción</option></select></div>
+            </div></div>
+          <div><h3><span class="punto" style="background:var(--azul-900)"></span>Negro</h3>
+            <div class="grid g2">
+              <div class="campo span2"><label>Igual que blanco</label><select class="ctrl sel"><option>Sí, mismo acuerdo</option><option>No, distinto</option></select></div>
+            </div></div>
+        </div>
+      </section>
+
+      <section id="p-fiscal">
+        <h2><span class="ico" style="background:var(--alerta-50);color:var(--alerta)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>Fiscal</h2>
+        <p class="ayuda">Retenciones de Ganancias (RG 830), percepciones y la provincia para la declaración jurada.</p>
+        <div class="grid g4">
+          <div class="campo"><label>Provincia</label><select class="ctrl sel" style="border-color:var(--alerta)"><option>Elegir provincia</option></select></div>
+          <div class="campo"><label>Tipo de IVA</label><select class="ctrl sel"><option>Responsable inscripto</option></select></div>
+          <div class="campo"><label>Percepción IVA</label><div class="sufijo"><input class="ctrl num" value="0"><span>%</span></div></div>
+          <div class="campo"><label>Percepción IIBB</label><div class="sufijo"><input class="ctrl num" value="0"><span>%</span></div></div>
+          <div class="campo span2"><label>Régimen de Ganancias</label><select class="ctrl sel"><option>Compraventa de bienes</option></select></div>
+          <div class="campo span2"><label>Certificado de exclusión</label><button class="btn" style="width:100%">Subir certificado</button></div>
+        </div>
+      </section>
+
+      <section id="p-banco">
+        <h2><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M5 10v8M9 10v8M15 10v8M19 10v8M3 21h18M12 3l9 5H3z"/></svg></span>Banco</h2>
+        <p class="ayuda">Para las transferencias de las órdenes de pago.</p>
+        <div class="grid g4">
+          <div class="campo"><label>Banco</label><input class="ctrl"></div>
+          <div class="campo"><label>Tipo de cuenta</label><select class="ctrl sel"><option>Cuenta corriente</option><option>Caja de ahorro</option></select></div>
+          <div class="campo span2"><label>CBU o alias</label><input class="ctrl num"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+  <footer class="pie">
+    <p>Falta completar <b>la provincia</b> para la declaración jurada.</p>
+    <div class="acciones"><button class="btn">Cancelar</button><button class="btn pri">Guardar cambios</button></div>
+  </footer>
+</article>
+
+<script>
+document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.seg button').forEach(x=>x.setAttribute('aria-pressed',x===b))
+  const art=b.dataset.ver==='art'
+  document.getElementById('art').hidden=!art
+  document.getElementById('prov').hidden=art
+  document.getElementById('tabArt').classList.toggle('on',art)
+  document.getElementById('tabProv').classList.toggle('on',!art)
+  window.scrollTo(0,0)
+}))
+document.querySelectorAll('.indice').forEach(nav=>nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{
+  nav.querySelectorAll('a').forEach(x=>x.classList.toggle('on',x===a))
+})))
+</script>
+</body>
+</html>
