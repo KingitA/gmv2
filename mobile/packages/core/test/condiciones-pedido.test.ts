@@ -14,6 +14,24 @@ import {
 import { calcularBonificadosPorCupo, cantidadQueVa } from "@gm/deposito"
 import { calcularComisionMonto } from "../../../../lib/comisiones/calcular"
 import { compatOverridesApkVieja, esApkVendedorVieja } from "../../../../lib/vendedor/compat-apk"
+import { ncContadoComprobante } from "../../../../lib/cobranzas/reglas-cobro"
+import { repartirImputacionesContado } from "../../../../lib/cobranzas/crear"
+
+describe("cobro contado: 10% del TOTAL del comprobante, una sola vez (regla 07/10)", () => {
+  it("la NC es el 10% del total, aunque el cobro pague una parte", () => {
+    expect(ncContadoComprobante(124000)).toBe(12400)
+    expect(ncContadoComprobante(-100)).toBe(10)
+  })
+  it("presupuesto $100 contado: paga $45 → NC $10 + $45 de plata, queda $45", () => {
+    const imps = [{ comprobante_id: "P1", monto_imputado: 55 }]   // lo que cubre este cobro
+    const r = repartirImputacionesContado(imps, 45, { P1: ncContadoComprobante(100) })
+    expect(r).toEqual([{ comprobante_id: "P1", monto_imputado: 45 }])
+  })
+  it("un comprobante ya bonificado cobra entero (sin otra NC)", () => {
+    const r = repartirImputacionesContado([{ comprobante_id: "P1", monto_imputado: 30 }], 30, {})
+    expect(r).toEqual([{ comprobante_id: "P1", monto_imputado: 30 }])
+  })
+})
 
 const NECO = { id: "L-neco", codigo: "neco", recargo_limpieza_bazar: 20, recargo_perfumeria_negro: 10, recargo_perfumeria_blanco: 15 }
 const BAHIA = { id: "L-bahia", codigo: "bahia", recargo_limpieza_bazar: 0, recargo_perfumeria_negro: 0, recargo_perfumeria_blanco: 0 }

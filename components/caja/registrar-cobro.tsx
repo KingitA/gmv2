@@ -134,16 +134,15 @@ export function RegistrarCobro({
     [seleccionados]
   )
 
-  // Preview del 10% contado — REGLA 01/10: la NC es el 10% de LO SELECCIONADO
-  // EN ESTE COBRO de cada comprobante, nunca del total histórico ni de
-  // entregas a cuenta sin tildar (cada cobro contado genera SU parte).
+  // Preview del 10% contado — REGLA 07/10 (dueño): la NC es el 10% del TOTAL
+  // de cada comprobante, una sola vez, aunque este cobro pague una parte.
   const bonificacionEstimada = useMemo(() => {
     if (!aplicarContado) return 0
     let total = 0
     for (const [key, v] of Object.entries(seleccionados)) {
       if (key.startsWith(PEDIDO_PREFIX) || dtosHechos.has(key)) continue
       const comp = comprobantes.find((c) => c.id === key)
-      if (comp) total += Math.max(0, Number(v) || 0) * 0.1
+      if (comp) total += Math.min(Math.max(0, Number(v) || 0), Math.abs(Number(comp.total_factura) || 0) * 0.1)
     }
     return round2(total)
   }, [aplicarContado, seleccionados, dtosHechos, comprobantes])

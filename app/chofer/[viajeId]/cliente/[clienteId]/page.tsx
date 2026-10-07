@@ -292,9 +292,8 @@ export default function ClienteEntregaPage() {
       const imp = comprobantesSeleccionados[cp.id]
       if (imp === undefined || dtosHechos.has(cp.id)) continue
       if (!["FA", "FB", "FC", "PRES"].includes(String(cp.tipo_comprobante || "").toUpperCase())) continue
-      // REGLA 01/10: el 10% es sobre LO SELECCIONADO HOY, no sobre el total
-      // histórico del comprobante (cada cobro contado genera SU parte de NC)
-      b += Number(imp) * 0.1
+      // REGLA 07/10 (dueño): el 10% es del TOTAL del comprobante, una sola vez
+      b += Math.min(Number(imp), Math.abs(Number(cp.total_factura) || 0) * 0.1)
     }
     return Math.round(b * 100) / 100
   }

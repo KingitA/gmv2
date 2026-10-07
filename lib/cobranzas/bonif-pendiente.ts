@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { ncContado } from "@/lib/cobranzas/reglas-cobro"
+import { ncContadoComprobante } from "@/lib/cobranzas/reglas-cobro"
 
 /**
  * ¿Cuánta NC del 10% contado va a generar ESTE cobro por cada comprobante?
@@ -8,9 +8,8 @@ import { ncContado } from "@/lib/cobranzas/reglas-cobro"
  * este cobro lo completa); uno YA bonificado (NC/REV viva cuyo texto
  * "Bonificación contado…" lo menciona) devuelve 0 y cobra completo.
  *
- * REGLA 01/10 (caso Urquiza): la NC es el 10% de LO SELECCIONADO EN ESTE
- * COBRO (imputación enviada), nunca del total histórico del comprobante ni
- * de entregas a cuenta sin tildar. Solo bonifican FA/FB/FC/PRES.
+ * REGLA 07/10 (dueño): la NC es el 10% del TOTAL del comprobante, una sola
+ * vez, aunque este cobro pague solo una parte. Solo bonifican FA/FB/FC/PRES.
  */
 const BONIFICABLES = new Set(["FA", "FB", "FC", "PRES"])
 
@@ -31,7 +30,7 @@ export async function bonificacionPendientePorComprobante(
   const [{ data: comps }, { data: ncs }] = await Promise.all([
     supabase
       .from("comprobantes_venta")
-      .select("id, tipo_comprobante, numero_comprobante")
+      .select("id, tipo_comprobante, numero_comprobante, total_factura")
       .in("id", ids),
     supabase
       .from("comprobantes_venta")
@@ -47,7 +46,7 @@ export async function bonificacionPendientePorComprobante(
     if (!BONIFICABLES.has(c.tipo_comprobante)) continue
     const yaBonificado = obsBonif.some((o) => o.includes(c.numero_comprobante))
     if (yaBonificado) continue
-    out[c.id] = ncContado(porComp.get(c.id) ?? 0)
+    out[c.id] = ncContadoComprobante(Number(c.total_factura) || 0)
   }
   return out
 }

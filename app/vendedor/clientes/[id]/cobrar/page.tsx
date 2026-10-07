@@ -272,11 +272,9 @@ export default function VendedorCobrarPage() {
   // Créditos tildados (NC/REV + a cuenta): descuentan del total a saldar
   const totalCreditos = round2(Object.values(credSel).reduce((s, v) => s + (v || 0), 0))
 
-  // NC 10% proyectada — REGLA 01/10 (caso Urquiza): el 10% se calcula sobre
-  // LO SELECCIONADO EN ESTE COBRO de cada comprobante, nunca sobre el total
-  // histórico ni contando entregas a cuenta sin tildar. Si el comprobante se
-  // completa en varios cobros contado, cada cobro genera SU parte (la NC
-  // lleva la marca [pago:<id>] del pago que la generó). Cada crédito NC con
+  // NC 10% proyectada — REGLA 07/10 (dueño): el 10% es por el TOTAL de cada
+  // comprobante y una sola vez, aunque este cobro pague una parte (la NC
+  // cubre hasta lo seleccionado; el resto de la NC queda imputado igual). Cada crédito NC con
   // su check de 10% activo resta el 10% de lo usado (regla 25/08 intacta).
   const bonificacionEstimada = useMemo(() => {
     if (!contadoGeneral) return 0
@@ -285,7 +283,7 @@ export default function VendedorCobrarPage() {
       const imp = imputaciones[cp.id]
       if (imp === undefined || !(imp > 0)) continue
       if (!["FA", "FB", "FC", "PRES"].includes(String(cp.tipo_comprobante || "").toUpperCase())) continue
-      bonif += imp * 0.1
+      bonif += Math.min(imp, Math.abs(Number(cp.total_factura) || 0) * 0.1)
     }
     for (const [key, monto] of Object.entries(credSel)) {
       if (key.startsWith("nc:") && cred10[key] && monto > 0) bonif -= monto * 0.1
