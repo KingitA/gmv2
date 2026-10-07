@@ -77,6 +77,15 @@
     "components/ui/dialog.tsx",
     "components/ui/sheet.tsx",
     "components/ui/alert-dialog.tsx",
-    "lib/role-utils.ts"
+    "lib/role-utils.ts",
+    "components/ficha/",
+    "components/articulos/ficha-articulo.tsx",
+    "components/ui/table.tsx",
+    "components/ui/input.tsx",
+    "components/ui/label.tsx",
+    "components/ui/button.tsx",
+    "components/ui/select.tsx",
+    "components/proveedores/ficha-proveedor.tsx",
+    "app/dev/"
   ]
 }

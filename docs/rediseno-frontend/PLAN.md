@@ -122,6 +122,12 @@ Una pantalla con todo lo de configuración, agrupado:
 - Esperas con barra + mensajes: importación de pedido por archivo, lista de pedidos, clientes, viajes, calendario de vencimientos.
 - Arreglos: link roto de cuenta corriente → abre el pedido; "No hay clientes" falso mientras carga.
 
+**Etapa estilo visual (07/10/2026) — hecha en la rama, falta prueba del dueño:**
+- Paleta Megasur en todo el ERP (`app/megasur-tema.css`, mismas familias que la app Vendedor), tipografía Archivo, interfaz sin mayúsculas forzadas (datos de tablas siguen en mayúscula; apps de calle sin cambios).
+- Componentes base: campos más altos y legibles, etiquetas con jerarquía, encabezados de tabla suaves, modales con bordes y sombra nuevos.
+- Fichas por secciones (`components/ficha/ficha.tsx`): Artículo (`components/articulos/ficha-articulo.tsx`) y Proveedor (`components/proveedores/ficha-proveedor.tsx`). **Solo presentación**: mismos campos, mismas conversiones y mismo guardado. La "escalera de precio" de la maqueta se DESCARTÓ por pedido del dueño: precio base y contado vienen de la importación de artículos; el frontend no calcula precios.
+- Vitrina local `/dev/vitrina` (solo `next dev`, 404 en producción) para revisar componentes sin iniciar sesión.
+
 ## 5. Decisiones pendientes del dueño
 Respondidas por el dueño el 07/10/2026:
 1. **Lista de pedidos por defecto**: solo `pendiente` e `impreso` de los últimos 30 días (los demás, cambiando filtros). No se limpia nada de la base.

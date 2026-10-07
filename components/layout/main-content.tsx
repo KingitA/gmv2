@@ -13,7 +13,9 @@ export function MainContent({ children, roles = [] }: { children: React.ReactNod
   const hasErpAccess = roles.includes('admin') || roles.includes('administrativo')
 
   if (esRutaSinNav(pathname) || !hasErpAccess) {
-    return <main className="min-h-screen">{children}</main>
+    // Apps de calle/depósito: conservan su estilo en mayúsculas (el login y el ERP no)
+    const esApp = !!pathname && !pathname.startsWith('/auth') && esRutaSinNav(pathname)
+    return <main className={`min-h-screen ${esApp ? 'apps-mayusculas' : ''}`}>{children}</main>
   }
 
   return (

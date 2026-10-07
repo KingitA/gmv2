@@ -115,7 +115,7 @@ export function TopNav({ roles = [] }: { roles?: string[] }) {
 
         {/* Fila 2: accesos de la pestaña activa */}
         {accesos.length > 0 && (
-          <div className="flex h-10 items-center gap-1.5 overflow-x-auto border-b bg-white px-2 sm:px-4 [scrollbar-width:none]">
+          <div className="flex h-10 items-center gap-1.5 overflow-x-auto border-b bg-white px-2 sm:px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {accesos.map(a => {
               const sel = a.href === accesoSel
               return (

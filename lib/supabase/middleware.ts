@@ -37,6 +37,12 @@ export async function updateSession(request: NextRequest) {
   // El layout raíz decide el viewport (zoom libre en el ERP, bloqueado en las apps)
   requestHeaders.set("x-pathname", pathname)
 
+  // Vitrina de componentes (app/dev/vitrina): SOLO con `next dev`. En producción
+  // NODE_ENV es "production" y esta rama nunca corre (además la página da 404).
+  if (process.env.NODE_ENV === "development" && pathname.startsWith("/dev/")) {
+    return NextResponse.next({ request: { headers: requestHeaders } })
+  }
+
   // API routes manejan su propia auth con requireAuth()
   if (pathname.startsWith("/api/")) {
     const cors = corsHeaders(request)

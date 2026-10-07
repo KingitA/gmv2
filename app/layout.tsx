@@ -1,6 +1,6 @@
 import type React from "react"
 import type { Metadata, Viewport } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
+import { Archivo, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { headers } from "next/headers"
 import "./globals.css"
@@ -10,7 +10,9 @@ import { Toaster } from "@/components/ui/sonner"
 import { Toaster as ToasterRadix } from "@/components/ui/toaster"
 import { DocumentTitle } from "@/components/layout/document-title"
 
-const geist = Geist({ subsets: ["latin"], variable: "--font-geist" })
+// Archivo: grotesca industrial con ancho variable (permite tablas densas con
+// la versión angosta) y números del mismo ancho para columnas de importes.
+const archivo = Archivo({ subsets: ["latin"], variable: "--font-archivo", axes: ["wdth"], display: "swap" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
 
 export const metadata: Metadata = {
@@ -42,7 +44,7 @@ export default async function RootLayout({
 
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className={`${geist.variable} ${geistMono.variable} font-sans antialiased`}>
+      <body className={`${archivo.variable} ${geistMono.variable} font-sans antialiased`}>
         <DocumentTitle />
         <MainContent roles={roles}>{children}</MainContent>
         <Analytics />
