@@ -8,7 +8,8 @@ export const ALL_ROLES = ['admin', 'administrativo', 'deposito', 'chofer', 'vend
  * Null si el usuario no tiene módulo activo aún (ej: viajante-only).
  */
 export function getHomeForRoles(roles: string[]): string | null {
-  if (roles.includes('admin') || roles.includes('administrativo')) return '/'
+  // ERP: la pantalla de inicio es CLIENTES (el dashboard "/" salió del menú, 07/10/2026)
+  if (roles.includes('admin') || roles.includes('administrativo')) return '/clientes-pedidos'
   if (roles.includes('deposito') && roles.includes('chofer')) return '/seleccionar-modulo'
   if (roles.includes('deposito')) return '/deposito'
   if (roles.includes('chofer')) return '/chofer'

@@ -18,6 +18,7 @@ import type { Proveedor } from "@/lib/types"
 import * as XLSX from "xlsx"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PROVINCIAS_ARGENTINA, TIPOS_IVA_DJ, CONDICIONES_PAGO } from "@/lib/constants"
+import { useRealtime } from "@/lib/hooks/use-realtime"
 
 export default function ProveedoresPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
@@ -67,6 +68,8 @@ export default function ProveedoresPage() {
   useEffect(() => {
     loadProveedores()
   }, [])
+  // En vivo: altas/cambios de proveedores hechos desde otra PC
+  useRealtime(["proveedores"], () => loadProveedores(), { esperaMs: 1500 })
 
   useEffect(() => {
     const q = searchTerm.trim()

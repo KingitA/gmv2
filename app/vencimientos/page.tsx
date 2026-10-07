@@ -22,6 +22,8 @@ import Link from "next/link"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { tiposVisibles } from "@/lib/finanzas/tipos-reservados"
+import { useUrlState } from "@/lib/hooks/use-url-state"
+import { useRealtime } from "@/lib/hooks/use-realtime"
 
 const TIPOS_VENCIMIENTO = [
     { value: "factura", label: "Factura de proveedor" },
@@ -87,6 +89,11 @@ export default function VencimientosPage() {
         loadProveedores()
     }, [filtroEstado, filtroTipo])
 
+    // Calendario / Lista queda en la URL (?vista=lista) para que "atrás" vuelva a la misma vista
+    const [vista, setVista] = useUrlState("vista", "calendario")
+    // En vivo (la vista Lista; el calendario tiene su propia suscripción)
+    useRealtime(["vencimientos"], () => loadVencimientos(true), { activo: vista === "lista" })
+
     async function loadProveedores() {
         const supabase = createClient()
         const { data } = await supabase
@@ -97,8 +104,8 @@ export default function VencimientosPage() {
         setProveedores(data || [])
     }
 
-    async function loadVencimientos() {
-        setLoading(true)
+    async function loadVencimientos(silencioso = false) {
+        if (!silencioso) setLoading(true)
         try {
             let url = `/api/vencimientos?estado=${filtroEstado}`
             if (filtroTipo !== "todos") url += `&tipo=${filtroTipo}`
@@ -220,7 +227,7 @@ export default function VencimientosPage() {
             </header>
 
             <main className="container mx-auto px-6 py-8 space-y-6">
-                <Tabs defaultValue="calendario">
+                <Tabs value={vista} onValueChange={setVista}>
                     <TabsList>
                         <TabsTrigger value="calendario">Calendario</TabsTrigger>
                         <TabsTrigger value="lista">Lista</TabsTrigger>

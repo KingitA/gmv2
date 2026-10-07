@@ -19,6 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ImportClientesDialog, clientesFieldLabel } from "@/components/clientes/ImportClientesDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import { History } from "lucide-react"
+import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface Cliente {
   id: string
@@ -107,12 +109,19 @@ export default function ClientesPage() {
     metodo_perf_plus: "",
   })
 
+  // Hasta que llega la primera lectura se muestra "trabajando" (antes decía
+  // "No hay clientes registrados" unos segundos y confundía).
+  const [cargandoClientes, setCargandoClientes] = useState(true)
+
   useEffect(() => {
     loadClientes()
     loadVendedores()
     loadLocalidades()
     loadListasPrecio()
   }, [])
+
+  // En vivo: altas/cambios de clientes hechos por otro usuario o por la app del vendedor
+  useRealtime(["clientes"], () => loadClientes(), { esperaMs: 1500 })
 
   // Búsqueda vía motor unificado (trigram + vector). Devuelve ids; filtramos local.
   useEffect(() => {
@@ -143,10 +152,12 @@ export default function ClientesPage() {
         .order("nombre_razon_social"), "id")
     } catch (error) {
       console.error("[v0] Error loading clientes:", error)
+      setCargandoClientes(false)
       return
     }
 
     setClientes(data || [])
+    setCargandoClientes(false)
   }
 
   async function loadVendedores() {
@@ -719,7 +730,13 @@ export default function ClientesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredClientes.length === 0 ? (
+                  {cargandoClientes ? (
+                    <TableRow>
+                      <TableCell colSpan={7}>
+                        <CargaProgreso compacto mensajes={MENSAJES.clientes} className="mx-auto max-w-sm py-8" />
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredClientes.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                         {searchTerm ? "No se encontraron clientes" : "No hay clientes registrados"}

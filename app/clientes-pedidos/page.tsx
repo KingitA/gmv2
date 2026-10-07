@@ -3,8 +3,11 @@
 import type React from "react"
 
 import { useState, useEffect, useRef } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { useUrlParams } from "@/lib/hooks/use-url-state"
+import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { toast } from "sonner"
 import { formatDateAR } from "@/lib/utils"
@@ -181,8 +184,16 @@ const ESTADOS_PEDIDO = [
 export default function ClientesPedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [viajes, setViajes] = useState<Viaje[]>([])
-  const [busqueda, setBusqueda] = useState("")
-  const [filtroEstado, setFiltroEstado] = useState<string>("todos")
+  // Búsqueda, estado y pedido abierto viven en la URL (?q=…&estado=…&pedido=001755):
+  // "atrás" cierra el pedido y vuelve a la lista con los mismos filtros.
+  const url = useUrlParams()
+  const router = useRouter()
+  const [busqueda, setBusquedaLocal] = useState(() => url.get("q"))
+  const setBusqueda = (v: string) => { setBusquedaLocal(v); url.set({ q: v }, "replace") }
+  const filtroEstado = url.get("estado", "todos")
+  const setFiltroEstado = (v: string) => url.set({ estado: v }, "replace", { estado: "todos" })
+  const pedidoParam = url.get("pedido")
+  const abiertoDesdeListaRef = useRef(false)
   const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Pedido | null>(null)
   const [detallesPedido, setDetallesPedido] = useState<PedidoDetalle[]>([])
   // Descuentos efectivos del pedido abierto (ficha + overrides del pedido + condiciones aparte)
@@ -220,15 +231,41 @@ export default function ClientesPedidosPage() {
   const resizingRef = useRef(false)
 
   const supabase = createClient()
-  const searchParams = useSearchParams()
 
-  // Si viene ?pedido=000055 desde el dashboard, auto-buscar ese pedido
+  // ?pedido=001755 abre el panel de ese pedido (click en la lista, link desde la
+  // ficha del cliente, atrás/adelante). Sin el parámetro, el panel se cierra.
   useEffect(() => {
-    const pedidoParam = searchParams.get('pedido')
-    if (pedidoParam) {
-      setBusqueda(pedidoParam)
+    if (!pedidoParam) {
+      if (modalDetalleAbierto) setModalDetalleAbierto(false)
+      return
     }
-  }, [searchParams])
+    if (pedidoSeleccionado?.numero_pedido === pedidoParam && modalDetalleAbierto) return
+    if (cargando && pedidos.length === 0) return // esperar a que cargue la lista
+    const p = pedidos.find(x => x.numero_pedido === pedidoParam)
+    if (p) {
+      setPedidoSeleccionado(p)
+      setDetallesPedido([]) // limpiar ítems del pedido anterior mientras cargan los nuevos
+      cargarDetallesPedido(p.id)
+      setModalDetalleAbierto(true)
+    } else {
+      // No está en la lista cargada (ej. filtro de estado): lo dejamos en el buscador
+      setBusquedaLocal(pedidoParam)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidoParam, pedidos, cargando])
+
+  const abrirPedido = (pedido: Pedido) => {
+    abiertoDesdeListaRef.current = true
+    url.set({ pedido: pedido.numero_pedido }, "push")
+  }
+
+  const cerrarPedido = () => {
+    setModalDetalleAbierto(false)
+    if (!pedidoParam) return
+    // Si lo abrimos desde la lista, "cerrar" = volver atrás (no deja una entrada de más)
+    if (abiertoDesdeListaRef.current) { abiertoDesdeListaRef.current = false; router.back() }
+    else url.set({ pedido: null }, "replace")
+  }
 
   // Descuentos efectivos del pedido abierto para la cabecera del modal: misma
   // resolución que el motor de precios (ficha + "solo este pedido" + aparte).
@@ -285,9 +322,11 @@ export default function ClientesPedidosPage() {
     }
   }, [pedidos])
 
-  const cargarPedidos = async () => {
+  // silencioso: recarga en segundo plano (cambio hecho por otro usuario), sin
+  // mostrar la barra de carga ni vaciar la lista.
+  const cargarPedidos = async (silencioso = false) => {
     try {
-      setCargando(true)
+      if (!silencioso) setCargando(true)
       // Paginado interno: PostgREST corta en 1000 y ya hay 1159+ pedidos → se ocultaban.
       const buildPedidosQuery = () => {
         let q = supabase
@@ -314,6 +353,11 @@ export default function ClientesPedidosPage() {
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const { queue, addToQueue, removeFromQueue, confirmOrder, retryItem } = useOrderQueue(cargarPedidos)
+
+  // En vivo: un pedido nuevo, impreso, facturado o movido por otro usuario
+  // aparece solo. El picking del pedido abierto sigue con su canal propio.
+  useRealtime(["pedidos"], () => cargarPedidos(true))
+  useRealtime(["picking_items"], () => cargarPickingStatus(), { esperaMs: 1500 })
 
   const cargarComprobantesExistentes = async () => {
     try {
@@ -1076,9 +1120,6 @@ export default function ClientesPedidosPage() {
           {queue.filter(q => q.status !== "done").map(item => (
             <div key={item.id} className="bg-white border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                {(item.status === "processing" || item.status === "waiting") && (
-                  <Loader2 className="h-4 w-4 text-blue-500 animate-spin shrink-0" />
-                )}
                 {item.status === "needs_review" && (
                   <AlertCircle className="h-4 w-4 text-orange-500 shrink-0" />
                 )}
@@ -1091,6 +1132,9 @@ export default function ClientesPedidosPage() {
                   {item.status === "error" && item.error && (
                     <p className="text-xs text-destructive mt-0.5">{item.error}</p>
                   )}
+                  {item.status === "processing" && (
+                    <CargaProgreso compacto mensajes={MENSAJES.importarPedido} className="mt-1.5 max-w-sm" />
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1100,7 +1144,7 @@ export default function ClientesPedidosPage() {
                   item.status === "needs_review" ? "bg-orange-100 text-orange-700" :
                   "bg-red-100 text-red-700"
                 }`}>
-                  {item.status === "processing" ? "Importando..." :
+                  {item.status === "processing" ? "Importando" :
                    item.status === "waiting" ? "En espera" :
                    item.status === "needs_review" ? "Revisar" : "Error"}
                 </span>
@@ -1127,6 +1171,9 @@ export default function ClientesPedidosPage() {
       )}
 
       {/* ═══ ACORDEÓN POR PRIORIDAD ═══ */}
+      {cargando && pedidos.length === 0 ? (
+        <CargaProgreso mensajes={MENSAJES.pedidos} />
+      ) : (
       <div className="space-y-4">
         {PRIORIDADES.map(prio => {
           const pedidosDeEstaPrioridad = pedidosFiltrados
@@ -1175,12 +1222,7 @@ export default function ClientesPedidosPage() {
                         draggable
                         onDragStart={() => setDragPedidoId(pedido.id)}
                         onDragEnd={() => setDragPedidoId(null)}
-                        onClick={() => {
-                          setPedidoSeleccionado(pedido)
-                          setDetallesPedido([]) // limpiar ítems del pedido anterior mientras cargan los nuevos
-                          cargarDetallesPedido(pedido.id)
-                          setModalDetalleAbierto(true)
-                        }}
+                        onClick={() => abrirPedido(pedido)}
                         className={`bg-white border rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-gray-300 transition-all
                           ${dragPedidoId === pedido.id ? "opacity-40" : ""}`}
                       >
@@ -1254,11 +1296,13 @@ export default function ClientesPedidosPage() {
           )
         })}
       </div>
+      )}
 
       <Sheet
         open={modalDetalleAbierto}
         onOpenChange={(open) => {
-          setModalDetalleAbierto(open);
+          if (open) setModalDetalleAbierto(true)
+          else cerrarPedido()
           if (!open) {
             setTimeout(() => {
               document.body.style.pointerEvents = '';
@@ -1355,7 +1399,7 @@ export default function ClientesPedidosPage() {
                 </Link>
                 {puedeEliminarPedido(pedidoSeleccionado.estado) ? (
                   <Button size="sm" variant="outline"
-                    onClick={() => { setModalDetalleAbierto(false); setPedidoAEliminar(pedidoSeleccionado) }}
+                    onClick={() => { cerrarPedido(); setPedidoAEliminar(pedidoSeleccionado) }}
                     className="border-red-400/50 text-red-300 hover:bg-red-500/20">
                     <Trash2 className="h-3.5 w-3.5 mr-1.5" />Eliminar
                   </Button>

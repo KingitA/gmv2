@@ -32,6 +32,7 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { FechaInput } from "@/components/finanzas/fecha-input";
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible";
+import { useUrlState } from "@/lib/hooks/use-url-state";
 
 const ArrowLeftIcon = () => (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -149,7 +150,10 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     const [data, setData] = useState<CuentaCorrienteData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     // Vista: "saldos" (default — solo lo que tiene saldo) | "detallada" (desglose + filtro fechas)
-    const [vista, setVista] = useState<"saldos" | "detallada">("saldos");
+    // Queda en la URL (?vista=detallada) para que "atrás" desde un PDF/pedido vuelva igual
+    const [vistaUrl, setVistaUrl] = useUrlState("vista", "saldos");
+    const vista: "saldos" | "detallada" = vistaUrl === "detallada" ? "detallada" : "saldos";
+    const setVista = (v: "saldos" | "detallada") => setVistaUrl(v);
     // Pagos rechazados/anulados: ocultos por defecto (ruido); el toggle los
     // muestra, pero solo los del último año — después desaparecen de la ficha.
     const [verRechazados, setVerRechazados] = useState(false);
@@ -723,7 +727,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 <TableCell>{formatDateAR(doc.fecha)}</TableCell>
                                                 <TableCell>
                                                     {doc.pedido !== "-" ? (
-                                                        <Link href={`/pedidos/${doc.pedido}`} className="text-blue-600 hover:underline">
+                                                        <Link href={`/clientes-pedidos?pedido=${encodeURIComponent(doc.pedido)}`} className="text-blue-600 hover:underline">
                                                             {doc.pedido}
                                                         </Link>
                                                     ) : (

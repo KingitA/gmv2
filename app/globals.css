@@ -146,3 +146,31 @@ input[type="number"]::-webkit-outer-spin-button {
 input[type="number"] {
   -moz-appearance: textfield;
 }
+
+/* Barras de desplazamiento siempre visibles y con buen tamaño para agarrar
+   (antes dependían del sistema: en algunas PCs aparecían/desaparecían). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #b6bcc6 transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background-color: #b6bcc6;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: #8b93a1; }
+
+/* Barra de carga "trabajando" (components/ui/carga-progreso.tsx) */
+@keyframes carga-brillo {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+/* Al imprimir, el contenido del ERP no debe quedar cortado por su contenedor con scroll */
+@media print {
+  .erp-shell { height: auto !important; display: block !important; }
+  #erp-main { overflow: visible !important; padding-bottom: 0 !important; }
+}

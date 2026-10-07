@@ -23,6 +23,8 @@ import { CerrarDia } from "@/components/caja/cerrar-dia"
 import { ImputarPago, type PagoAImputar } from "@/components/caja/imputar-pago"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
+import { useUrlParams } from "@/lib/hooks/use-url-state"
+import { useRealtime } from "@/lib/hooks/use-realtime"
 
 type Estado = { tipo: "ok" | "info" | "accion" | "esperando" | "error"; texto: string }
 
@@ -220,11 +222,18 @@ function Fila({
 }
 
 export default function CajaDelDiaPage() {
-  const [fecha, setFecha] = useState(todayArgentina())
+  // Día y pestaña en la URL (?fecha=2026-10-07&tab=cobro): "atrás" vuelve al mismo día y filtro
+  const url = useUrlParams()
+  const hoy = todayArgentina()
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(url.get("fecha")) ? url.get("fecha") : hoy
+  const setFecha = (f: string) => url.set({ fecha: f }, "push", { fecha: hoy })
   const [feed, setFeed] = useState<FeedCaja | null>(null)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("todo")
+  type TabKey = (typeof TABS)[number]["key"]
+  const tabParam = url.get("tab", "todo")
+  const tab: TabKey = (TABS.some((t) => t.key === tabParam) ? tabParam : "todo") as TabKey
+  const setTab = (t: TabKey) => url.set({ tab: t }, "replace", { tab: "todo" })
   const [busqueda, setBusqueda] = useState("")
   const [cuentas, setCuentas] = useState<CuentaFondos[]>([])
   const [usuarioId, setUsuarioId] = useState("")
@@ -237,8 +246,8 @@ export default function CajaDelDiaPage() {
   const [anulando, setAnulando] = useState(false)
   const { toast } = useToast()
 
-  const cargar = useCallback(async (f: string) => {
-    setCargando(true)
+  const cargar = useCallback(async (f: string, silencioso = false) => {
+    if (!silencioso) setCargando(true)
     setError(null)
     try {
       const res = await fetch(`/api/caja?fecha=${f}`)
@@ -255,6 +264,13 @@ export default function CajaDelDiaPage() {
   useEffect(() => {
     cargar(fecha)
   }, [fecha, cargar])
+
+  // En vivo: cobros de la calle, transferencias, OPs y movimientos de otros usuarios
+  useRealtime(
+    ["pagos_clientes", "pagos_detalle", "imputaciones", "kardex_contable", "ordenes_pago", "cheques"],
+    () => cargar(fecha, true),
+    { esperaMs: 1200 },
+  )
 
   // Cuentas para la barra de registro y Mover plata + usuario para confirmar
   useEffect(() => {

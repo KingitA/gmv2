@@ -66,6 +66,17 @@
     "app/mostrador/page.tsx",
     "app/vendedor/pedido/nuevo/page.tsx",
     "lib/comprobantes/comprobantes-de-pedido.ts",
-    "app/api/comprobantes-venta/pedido/"
+    "app/api/comprobantes-venta/pedido/",
+    "lib/navegacion.ts",
+    "components/layout/top-nav.tsx",
+    "components/layout/main-content.tsx",
+    "app/layout.tsx",
+    "lib/hooks/use-realtime.ts",
+    "lib/hooks/use-url-state.ts",
+    "components/ui/carga-progreso.tsx",
+    "components/ui/dialog.tsx",
+    "components/ui/sheet.tsx",
+    "components/ui/alert-dialog.tsx",
+    "lib/role-utils.ts"
   ]
 }

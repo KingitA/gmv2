@@ -16,6 +16,8 @@ import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil
 import { toast } from "sonner"
 import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
+import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -117,8 +119,10 @@ export function CalendarioPagos({
         observaciones: "",
     })
 
+    const cargadoRef = useRef(false)
     const load = useCallback(async () => {
-        setLoading(true)
+        // Solo la primera carga muestra "cargando"; las recargas en vivo no tapan el calendario
+        if (!cargadoRef.current) setLoading(true)
         try {
             const reqs: Promise<any>[] = [fetch("/api/vencimientos?estado=todos").then((r) => r.json())]
             if (showCheques) {
@@ -135,11 +139,15 @@ export function CalendarioPagos({
             console.error(e)
             toast.error("Error cargando el calendario")
         } finally {
+            cargadoRef.current = true
             setLoading(false)
         }
     }, [showCheques])
 
     useEffect(() => { load() }, [load])
+
+    // En vivo: vencimientos cargados/pagados/movidos por otro usuario, cheques que entran o salen
+    useRealtime(showCheques ? ["vencimientos", "cheques"] : ["vencimientos"], load)
 
     // ── Derivados ──────────────────────────────────────────────────────────
     const pasaFiltros = useCallback(
@@ -574,8 +582,8 @@ export function CalendarioPagos({
             <div className="grid gap-5 lg:grid-cols-[1fr_300px] items-start">
                 <div className="space-y-6">
                     {loading ? (
-                        <div className="rounded-xl border bg-white p-10 text-center text-sm text-muted-foreground">
-                            Cargando calendario...
+                        <div className="rounded-xl border bg-white">
+                            <CargaProgreso mensajes={MENSAJES.vencimientos} />
                         </div>
                     ) : meses.length === 0 ? (
                         <div className="rounded-xl border bg-white p-10 text-center text-sm text-muted-foreground">

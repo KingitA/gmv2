@@ -34,6 +34,8 @@ export async function updateSession(request: NextRequest) {
   )
 
   const pathname = request.nextUrl.pathname
+  // El layout raíz decide el viewport (zoom libre en el ERP, bloqueado en las apps)
+  requestHeaders.set("x-pathname", pathname)
 
   // API routes manejan su propia auth con requireAuth()
   if (pathname.startsWith("/api/")) {

@@ -15,6 +15,9 @@ import { ChevronLeft, ChevronRight, Plus, Truck, User, Package } from "lucide-re
 import { toast } from "sonner"
 import { formatCurrency, formatDateAR, todayArgentina } from "@/lib/utils"
 import { ESTADO_VIAJE_LABEL, ESTADO_VIAJE_COLOR } from "@/lib/viajes/estados"
+import { useUrlParams } from "@/lib/hooks/use-url-state"
+import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // Calendario de viajes de reparto. Los viajes se PROGRAMAN con anticipación
 // (fin del mes anterior): solo fecha + zonas. Chofer, vehículo y pedidos se
@@ -47,8 +50,14 @@ function ViajesCalendario() {
   const search = useSearchParams()
   const hoy = todayArgentina()
 
-  const [anio, setAnio] = useState(Number(hoy.slice(0, 4)))
-  const [mes, setMes] = useState(Number(hoy.slice(5, 7)) - 1)
+  // El mes que se mira queda en la URL (?mes=2026-10): atrás/adelante y links lo respetan
+  const url = useUrlParams()
+  const mesParam = /^\d{4}-\d{2}$/.test(url.get("mes")) ? url.get("mes") : hoy.slice(0, 7)
+  const anio = Number(mesParam.slice(0, 4))
+  const mes = Number(mesParam.slice(5, 7)) - 1
+  const irAMes = (a: number, m: number) =>
+    url.set({ mes: `${a}-${String(m + 1).padStart(2, "0")}` }, "push", { mes: hoy.slice(0, 7) })
+  const setAnioMes = (a: number, m: number) => irAMes(a, m)
   const [viajes, setViajes] = useState<ViajeCal[]>([])
   const [cargando, setCargando] = useState(true)
 
@@ -61,8 +70,8 @@ function ViajesCalendario() {
   const [nombre, setNombre] = useState("")
   const [guardando, setGuardando] = useState(false)
 
-  const cargar = async (a = anio, m = mes) => {
-    setCargando(true)
+  const cargar = async (a = anio, m = mes, silencioso = false) => {
+    if (!silencioso) setCargando(true)
     try {
       const ultimo = new Date(a, m + 1, 0).getDate()
       const res = await fetch(`/api/viajes?desde=${iso(a, m, 1)}&hasta=${iso(a, m, ultimo)}`)
@@ -78,6 +87,9 @@ function ViajesCalendario() {
 
   useEffect(() => { cargar(anio, mes) }, [anio, mes])
 
+  // En vivo: viajes creados/movidos por otro usuario o pedidos que se suben/bajan
+  useRealtime(["viajes", "viaje_zonas", "pedidos"], () => cargar(anio, mes, true))
+
   useEffect(() => {
     createClient().from("zonas").select("id, nombre").order("nombre").then((r: { data: { id: string; nombre: string }[] | null }) => setZonas(r.data || []))
   }, [])
@@ -88,8 +100,7 @@ function ViajesCalendario() {
 
   const moverMes = (delta: number) => {
     const d = new Date(anio, mes + delta, 1)
-    setAnio(d.getFullYear())
-    setMes(d.getMonth())
+    setAnioMes(d.getFullYear(), d.getMonth())
   }
 
   const abrirDialogo = (f: string) => {
@@ -127,7 +138,7 @@ function ViajesCalendario() {
       const a = Number(fecha.slice(0, 4))
       const m = Number(fecha.slice(5, 7)) - 1
       if (a === anio && m === mes) cargar(a, m)
-      else { setAnio(a); setMes(m) }
+      else setAnioMes(a, m)
     } catch (e: any) {
       toast.error(e?.message || "No se pudo programar el viaje")
     } finally {
@@ -284,7 +295,7 @@ function ViajesCalendario() {
           </TableHeader>
           <TableBody>
             {cargando ? (
-              <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">Cargando…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9}><CargaProgreso compacto mensajes={MENSAJES.viajes} className="mx-auto max-w-sm py-6" /></TableCell></TableRow>
             ) : viajes.length === 0 ? (
               <TableRow><TableCell colSpan={9} className="py-8 text-center text-muted-foreground">No hay viajes programados en {MESES[mes]}</TableCell></TableRow>
             ) : (
