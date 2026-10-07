@@ -128,6 +128,13 @@ Una pantalla con todo lo de configuración, agrupado:
 - Fichas por secciones (`components/ficha/ficha.tsx`): Artículo (`components/articulos/ficha-articulo.tsx`) y Proveedor (`components/proveedores/ficha-proveedor.tsx`). **Solo presentación**: mismos campos, mismas conversiones y mismo guardado. La "escalera de precio" de la maqueta se DESCARTÓ por pedido del dueño: precio base y contado vienen de la importación de artículos; el frontend no calcula precios.
 - Vitrina local `/dev/vitrina` (solo `next dev`, 404 en producción) para revisar componentes sin iniciar sesión.
 
+**Etapa 2 CLIENTES (07/10/2026) — hecha en la rama, falta prueba del dueño:**
+- `/clientes-pedidos` ahora es "Pedidos y viajes": calendario de viajes (semana por defecto, mes con un botón, navegable, ocultable; en celular agenda vertical) + filtros (estados, vendedor, zona, prioridad, con/sin viaje, fechas; por defecto pendiente+impreso de 30 días) + tabla (prioridad editable en la fila, orden por columnas, tarjetas en celular) + selección múltiple con suma de total y bultos + acciones en lote (subir a viaje, prioridad).
+- Arrastrar pedidos (uno o la selección) a un viaje → se suben con la API de siempre (avisa si son de otra zona). A un día → si son todos de la misma zona: usa el viaje de esa zona de ese día si existe, si no ofrece programarlo y los sube. Zonas distintas nunca se juntan solas.
+- Panel del pedido y TODAS sus acciones sin cambios (mismo código). Botones: Importar pedido (archivo), Mostrador, Programar viaje.
+- Calendario y "Programar viaje" pasaron a piezas compartidas con /viajes (`components/viajes/calendario-viajes.tsx`, `programar-viaje-dialog.tsx`, `lib/viajes/use-viajes-rango.ts`).
+- Pendiente etapa 3: pedido suelto con fecha de entrega (necesita la migración de `pedidos.fecha_entrega`).
+
 ## 5. Decisiones pendientes del dueño
 Respondidas por el dueño el 07/10/2026:
 1. **Lista de pedidos por defecto**: solo `pendiente` e `impreso` de los últimos 30 días (los demás, cambiando filtros). No se limpia nada de la base.

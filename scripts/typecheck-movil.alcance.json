@@ -86,6 +86,12 @@
     "components/ui/button.tsx",
     "components/ui/select.tsx",
     "components/proveedores/ficha-proveedor.tsx",
-    "app/dev/"
+    "app/dev/",
+    "components/clientes/tabla-pedidos.tsx",
+    "components/clientes/filtros-pedidos.tsx",
+    "components/viajes/calendario-viajes.tsx",
+    "components/viajes/programar-viaje-dialog.tsx",
+    "lib/viajes/use-viajes-rango.ts",
+    "app/viajes/page.tsx"
   ]
 }

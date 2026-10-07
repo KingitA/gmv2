@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { FichaArticulo } from "@/components/articulos/ficha-articulo"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { FichaProveedor } from "@/components/proveedores/ficha-proveedor"
+import { ClientesDemo } from "./clientes-demo"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 
 const FF_EJEMPLO = {
@@ -30,7 +31,7 @@ export function VitrinaCliente() {
   const [provAbierto, setProvAbierto] = useState(false)
   const [prov, setProv] = useState<Record<string, any>>(PROV_EJEMPLO)
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       <h1 className="text-2xl font-bold text-azul-900">Vitrina del rediseño</h1>
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => { setFf(FF_EJEMPLO); setFa({ id: "a1", activo: true }) }}>Abrir ficha de artículo</Button>
@@ -47,6 +48,7 @@ export function VitrinaCliente() {
       <div className="rounded-xl border bg-white">
         <CargaProgreso mensajes={MENSAJES.importarPedido} titulo="Importando pedido" />
       </div>
+      <ClientesDemo />
       <FichaArticulo
         fa={fa} ff={ff} setFf={setFf as any}
         descuentos={[{ tipo: "comercial", porcentaje: 10, orden: 1 }, { tipo: "financiero", porcentaje: 3, orden: 2 }]}

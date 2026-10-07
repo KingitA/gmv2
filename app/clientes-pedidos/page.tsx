@@ -8,9 +8,14 @@ import { createClient } from "@/lib/supabase/client"
 import { useUrlParams } from "@/lib/hooks/use-url-state"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { TablaPedidos, type Orden, type PedidoFila } from "@/components/clientes/tabla-pedidos"
+import { FiltrosPedidos, type Filtros } from "@/components/clientes/filtros-pedidos"
+import { CalendarioViajes, celdasMes, celdasSemana } from "@/components/viajes/calendario-viajes"
+import { ProgramarViajeDialog } from "@/components/viajes/programar-viaje-dialog"
+import { useViajesRango, sumarDias, viajeMovible, type ViajeCal } from "@/lib/viajes/use-viajes-rango"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { toast } from "sonner"
-import { formatDateAR } from "@/lib/utils"
+import { formatDateAR, formatCurrency, todayArgentina } from "@/lib/utils"
 import { localMatch } from "@/lib/search/local-match"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,6 +28,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Search,
   Truck,
+  ChevronLeft,
+  ChevronRight,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -184,14 +191,49 @@ const ESTADOS_PEDIDO = [
 export default function ClientesPedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [viajes, setViajes] = useState<Viaje[]>([])
-  // Búsqueda, estado y pedido abierto viven en la URL (?q=…&estado=…&pedido=001755):
-  // "atrás" cierra el pedido y vuelve a la lista con los mismos filtros.
+  // Filtros, orden, calendario y pedido abierto viven en la URL
+  // (?estados=…&vendedor=…&zona=…&pedido=001755…): "atrás" cierra el pedido y
+  // vuelve a la lista con los mismos filtros, y el link se puede compartir.
   const url = useUrlParams()
   const router = useRouter()
+  const hoy = todayArgentina()
+  // Por defecto: pendientes e impresos de los últimos 30 días (decisión del dueño, 07/10/2026)
+  const DEF = { estados: "pendiente,impreso", desde: sumarDias(hoy, -30) }
   const [busqueda, setBusquedaLocal] = useState(() => url.get("q"))
-  const setBusqueda = (v: string) => { setBusquedaLocal(v); url.set({ q: v }, "replace") }
-  const filtroEstado = url.get("estado", "todos")
-  const setFiltroEstado = (v: string) => url.set({ estado: v }, "replace", { estado: "todos" })
+  const estadosParam = url.get("estados", DEF.estados)
+  const desdeParam = url.get("desde", DEF.desde)
+  const filtros: Filtros = {
+    q: busqueda,
+    estados: estadosParam === "todos" ? [] : estadosParam.split(",").filter(Boolean),
+    vendedor: url.get("vendedor"),
+    zona: url.get("zona"),
+    prioridad: url.get("prio"),
+    viaje: url.get("viaje"),
+    desde: desdeParam === "todo" ? "" : desdeParam,
+    hasta: url.get("hasta"),
+  }
+  const setFiltros = (c: Partial<Filtros>) => {
+    if (c.q !== undefined) setBusquedaLocal(c.q)
+    const p: Record<string, string | null> = {}
+    if (c.q !== undefined) p.q = c.q
+    if (c.estados !== undefined) p.estados = c.estados.length ? c.estados.join(",") : "todos"
+    if (c.vendedor !== undefined) p.vendedor = c.vendedor
+    if (c.zona !== undefined) p.zona = c.zona
+    if (c.prioridad !== undefined) p.prio = c.prioridad
+    if (c.viaje !== undefined) p.viaje = c.viaje
+    if (c.desde !== undefined) p.desde = c.desde || "todo"
+    if (c.hasta !== undefined) p.hasta = c.hasta
+    url.set(p, "replace", DEF)
+  }
+  const limpiarFiltros = () => {
+    setBusquedaLocal("")
+    url.set({ q: null, estados: null, vendedor: null, zona: null, prio: null, viaje: null, desde: null, hasta: null }, "replace")
+  }
+  const hayFiltrosExtra = !!(filtros.vendedor || filtros.zona || filtros.prioridad || filtros.viaje || filtros.hasta || desdeParam !== DEF.desde || estadosParam !== DEF.estados || busqueda)
+  const incluyeEliminados = filtros.estados.includes("eliminado")
+  const orden = (url.get("orden", "prioridad") as Orden)
+  const dir = (url.get("dir", "desc") === "asc" ? "asc" : "desc") as "asc" | "desc"
+  const ordenar = (o: Orden) => url.set({ orden: o, dir: orden === o && dir === "desc" ? "asc" : "desc" }, "replace", { orden: "prioridad", dir: "desc" })
   const pedidoParam = url.get("pedido")
   const abiertoDesdeListaRef = useRef(false)
   const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Pedido | null>(null)
@@ -247,9 +289,15 @@ export default function ClientesPedidosPage() {
       setDetallesPedido([]) // limpiar ítems del pedido anterior mientras cargan los nuevos
       cargarDetallesPedido(p.id)
       setModalDetalleAbierto(true)
-    } else {
-      // No está en la lista cargada (ej. filtro de estado): lo dejamos en el buscador
-      setBusquedaLocal(pedidoParam)
+    } else if (!cargando) {
+      // No está en la lista cargada (es viejo o lo tapan los filtros): se abren
+      // los filtros a "todo" con ese número en el buscador; al recargar, se abre.
+      if (!(desdeParam === "todo" && estadosParam === "todos")) {
+        setBusquedaLocal(pedidoParam)
+        url.set({ q: pedidoParam, desde: "todo", estados: "todos" }, "replace", DEF)
+      } else {
+        setBusquedaLocal(pedidoParam)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedidoParam, pedidos, cargando])
@@ -312,9 +360,13 @@ export default function ClientesPedidosPage() {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
+  // Se vuelve a leer de la base solo cuando cambia el rango de fechas o si se
+  // piden eliminados; el resto de los filtros se aplican sobre lo ya cargado.
+  const primeraCarga = useRef(true)
   useEffect(() => {
+    if (primeraCarga.current) { primeraCarga.current = false; return }
     cargarPedidos()
-  }, [filtroEstado])
+  }, [incluyeEliminados, filtros.desde, filtros.hasta])
 
   useEffect(() => {
     if (pedidos.length > 0) {
@@ -324,20 +376,26 @@ export default function ClientesPedidosPage() {
 
   // silencioso: recarga en segundo plano (cambio hecho por otro usuario), sin
   // mostrar la barra de carga ni vaciar la lista.
+  const filtrosRef = useRef(filtros)
+  filtrosRef.current = filtros
   const cargarPedidos = async (silencioso = false) => {
     try {
       if (!silencioso) setCargando(true)
+      const f = filtrosRef.current
       // Paginado interno: PostgREST corta en 1000 y ya hay 1159+ pedidos → se ocultaban.
       const buildPedidosQuery = () => {
         let q = supabase
           .from("pedidos")
           .select(`
           *,
-          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, listas_precio:lista_precio_id (nombre)),
+          clientes (nombre_razon_social, cuit, codigo_cliente, direccion, localidad, metodo_facturacion, lista_precio_id, lista_limpieza_id, metodo_limpieza, lista_perf0_id, metodo_perf0, lista_perf_plus_id, metodo_perf_plus, listas_precio:lista_precio_id (nombre), localidades (zonas (id, nombre))),
           vendedores (nombre),
           viajes (nombre, fecha)
         `)
-        if (filtroEstado !== "eliminado") q = q.neq("estado", "eliminado")
+        if (!f.estados.includes("eliminado")) q = q.neq("estado", "eliminado")
+        // Rango de fechas del filtro (por defecto, últimos 30 días)
+        if (f.desde) q = q.gte("fecha", f.desde)
+        if (f.hasta) q = q.lte("fecha", f.hasta)
         return q
           .order("prioridad", { ascending: true })
           .order("numero_pedido", { ascending: false })
@@ -938,18 +996,174 @@ export default function ClientesPedidosPage() {
     }
   }
 
-  const pedidosFiltrados = pedidos.filter((pedido) => {
-    const coincideBusqueda = !busqueda.trim() || localMatch(
-      busqueda,
-      pedido.numero_pedido,
-      pedido.clientes?.nombre_razon_social,
-      pedido.clientes?.cuit,
-    )
+  // Zona del pedido = zona de la localidad del cliente
+  const zonaDe = (p: Pedido): { id: string; nombre: string } | null => (p.clientes as any)?.localidades?.zonas ?? null
 
-    const coincideEstado = filtroEstado === "todos" || pedido.estado === filtroEstado
-
-    return coincideBusqueda && coincideEstado
+  const pedidosFiltrados = pedidos.filter((p) => {
+    if (busqueda.trim() && !localMatch(busqueda, p.numero_pedido, p.clientes?.nombre_razon_social, p.clientes?.cuit)) return false
+    if (filtros.estados.length && !filtros.estados.includes(p.estado)) return false
+    if (filtros.vendedor && p.vendedor_id !== filtros.vendedor) return false
+    if (filtros.zona && zonaDe(p)?.id !== filtros.zona) return false
+    if (filtros.prioridad && String(p.prioridad || 3) !== filtros.prioridad) return false
+    if (filtros.viaje === "con" && !p.viaje_id) return false
+    if (filtros.viaje === "sin" && p.viaje_id) return false
+    return true
   })
+
+  const pedidosLista: PedidoFila[] = [...pedidosFiltrados]
+    .sort((a, b) => {
+      const s = dir === "asc" ? 1 : -1
+      const porFecha = (b.fecha || "").localeCompare(a.fecha || "") || (b.numero_pedido || "").localeCompare(a.numero_pedido || "")
+      switch (orden) {
+        case "numero": return (a.numero_pedido || "").localeCompare(b.numero_pedido || "") * s
+        case "fecha": return ((a.fecha || "").localeCompare(b.fecha || "") || (a.numero_pedido || "").localeCompare(b.numero_pedido || "")) * s
+        case "cliente": return (a.clientes?.nombre_razon_social || "").localeCompare(b.clientes?.nombre_razon_social || "") * s
+        case "total": return ((a.total || 0) - (b.total || 0)) * s
+        default: return ((a.prioridad || 3) - (b.prioridad || 3)) * (dir === "desc" ? 1 : -1) || porFecha
+      }
+    })
+    .map((p) => ({ ...p, zona: zonaDe(p) }) as PedidoFila)
+
+  // Opciones de los filtros: los vendedores y zonas que aparecen en lo cargado
+  const opcionesVendedores = [...new Map(pedidos.filter(p => p.vendedor_id && p.vendedores?.nombre).map(p => [p.vendedor_id, { id: p.vendedor_id, nombre: p.vendedores!.nombre }])).values()]
+    .sort((a, b) => a.nombre.localeCompare(b.nombre))
+  const opcionesZonas = [...new Map(pedidos.map(zonaDe).filter(Boolean).map(z => [z!.id, z!])).values()]
+    .sort((a, b) => a.nombre.localeCompare(b.nombre))
+
+  // ── Selección múltiple ─────────────────────────────────────────────
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
+  const toggleSel = (id: string) => setSeleccion(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleTodos = () => setSeleccion(prev => pedidosLista.every(p => prev.has(p.id)) ? new Set() : new Set(pedidosLista.map(p => p.id)))
+  // Solo cuenta lo que está a la vista (si un filtro oculta algo seleccionado, no se suma)
+  const seleccionados = pedidosLista.filter(p => seleccion.has(p.id))
+  const totalSel = seleccionados.reduce((s, p) => s + (p.total || 0), 0)
+  const bultosSel = seleccionados.reduce((s, p) => s + (p.bultos || 0), 0)
+  const totalLista = pedidosLista.reduce((s, p) => s + (p.total || 0), 0)
+
+  // ── Calendario de viajes (semana o mes, en la URL: ?cal=mes&dia=2026-10-07) ──
+  const calModo: "semana" | "mes" = url.get("cal") === "mes" ? "mes" : "semana"
+  const calDia = /^\d{4}-\d{2}-\d{2}$/.test(url.get("dia")) ? url.get("dia") : hoy
+  const calVisible = url.get("calendario") !== "no"
+  const celdasCal = calModo === "semana"
+    ? celdasSemana(calDia)
+    : celdasMes(Number(calDia.slice(0, 4)), Number(calDia.slice(5, 7)) - 1)
+  const diasCal = celdasCal.filter(Boolean) as string[]
+  const { viajes: viajesCal, moverViaje, recargar: recargarViajesCal } = useViajesRango(diasCal[0], diasCal[diasCal.length - 1])
+  const moverCal = (delta: number) => {
+    let nuevo: string
+    if (calModo === "semana") nuevo = sumarDias(calDia, 7 * delta)
+    else {
+      const d = new Date(Number(calDia.slice(0, 4)), Number(calDia.slice(5, 7)) - 1 + delta, 1)
+      nuevo = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`
+    }
+    url.set({ dia: nuevo }, "replace", { dia: hoy })
+  }
+  const MESES_NOMBRE = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+  const tituloCal = calModo === "semana"
+    ? (() => {
+        const a = diasCal[0], b = diasCal[6]
+        const mesA = MESES_NOMBRE[Number(a.slice(5, 7)) - 1], mesB = MESES_NOMBRE[Number(b.slice(5, 7)) - 1]
+        return mesA === mesB ? `${Number(a.slice(8))} al ${Number(b.slice(8))} de ${mesA}` : `${Number(a.slice(8))} de ${mesA} al ${Number(b.slice(8))} de ${mesB}`
+      })()
+    : `${MESES_NOMBRE[Number(calDia.slice(5, 7)) - 1]} ${calDia.slice(0, 4)}`
+
+  // ── Programar viaje (desde el calendario o al soltar pedidos en un día) ──
+  const [progAbierto, setProgAbierto] = useState(false)
+  const [progFecha, setProgFecha] = useState("")
+  const [progZonas, setProgZonas] = useState<string[]>([])
+  const [progAviso, setProgAviso] = useState<React.ReactNode>(null)
+  const progPedidosRef = useRef<string[]>([])
+  const abrirProgramar = (fecha: string, zonaIds: string[] = [], pedidoIds: string[] = [], aviso: React.ReactNode = null) => {
+    setProgFecha(fecha); setProgZonas(zonaIds); setProgAviso(aviso); progPedidosRef.current = pedidoIds; setProgAbierto(true)
+  }
+
+  // ── Confirmaciones (subir a un viaje de otra zona, usar un viaje existente) ──
+  const [propuesta, setPropuesta] = useState<{ titulo: string; texto: React.ReactNode; boton: string; accion: () => void } | null>(null)
+
+  // ── Subir pedidos a un viaje (misma API que la hoja de ruta y el panel) ──
+  const subirPedidosAViaje = async (viajeId: string, viajeNombre: string, ids: string[]) => {
+    const elegibles = ids.filter(id => puedeAsignarViaje(pedidos.find(p => p.id === id)?.estado))
+    const noElegibles = ids.length - elegibles.length
+    if (!elegibles.length) {
+      toast.error(ids.length === 1 ? "Ese pedido ya no se puede subir a un viaje." : "Ninguno de esos pedidos se puede subir a un viaje.")
+      return
+    }
+    try {
+      const res = await fetch(`/api/viajes/${viajeId}/pedidos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agregar: elegibles }),
+      })
+      const r = await res.json()
+      if (!res.ok) throw new Error(r.error || "No se pudieron subir los pedidos")
+      const rechazados: { motivo?: string }[] = Array.isArray(r.rechazados) ? r.rechazados : []
+      const subidos = elegibles.length - rechazados.length
+      if (subidos > 0) toast.success(`${subidos === 1 ? "1 pedido subido" : `${subidos} pedidos subidos`} a ${viajeNombre}`)
+      if (rechazados.length) toast.error(`${rechazados.length} no se pudieron subir: ${rechazados[0]?.motivo || ""}`)
+      if (noElegibles) toast.message(`${noElegibles} quedaron afuera porque ya salieron o están entregados.`)
+      setSeleccion(new Set())
+      await cargarPedidos(true)
+      recargarViajesCal(true)
+      cargarViajes()
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudieron subir los pedidos")
+    }
+  }
+
+  const arrastreRef = useRef<string[]>([])
+  const zonasDeIds = (ids: string[]) => ids.map(id => { const p = pedidos.find(x => x.id === id); return p ? zonaDe(p) : null })
+
+  const soltarEnViaje = (v: ViajeCal) => {
+    const ids = arrastreRef.current
+    if (!ids.length) return
+    const zonasViaje = new Set(v.zonas.map(z => z.id))
+    const deOtraZona = zonasDeIds(ids).filter(z => !z || !zonasViaje.has(z.id)).length
+    const nombre = v.zonas.map(z => z.nombre).join(" + ") || v.nombre
+    if (deOtraZona > 0 && zonasViaje.size > 0) {
+      setPropuesta({
+        titulo: "Hay pedidos de otra zona",
+        texto: <>{deOtraZona === ids.length ? (ids.length === 1 ? "Ese pedido no es" : "Esos pedidos no son") : `${deOtraZona} de los ${ids.length} pedidos no son`} de las zonas del viaje <b>{nombre}</b>. ¿Subirlos igual?</>,
+        boton: "Subirlos igual",
+        accion: () => subirPedidosAViaje(v.id, nombre, ids),
+      })
+      return
+    }
+    subirPedidosAViaje(v.id, nombre, ids)
+  }
+
+  const soltarEnDia = (dia: string) => {
+    const ids = arrastreRef.current
+    if (!ids.length) return
+    const zonas = zonasDeIds(ids)
+    const distintas = new Set(zonas.map(z => z?.id ?? "?"))
+    if (distintas.size > 1 || distintas.has("?")) {
+      toast.error(distintas.has("?")
+        ? "Hay pedidos de clientes sin zona: soltalos sobre un viaje o programá uno."
+        : "Son de zonas distintas: no se juntan solos en un viaje. Soltalos sobre un viaje existente o armá uno por zona.")
+      return
+    }
+    const zona = zonas[0]!
+    const fechaTxt = `${Number(dia.slice(8))}/${Number(dia.slice(5, 7))}`
+    const cantidad = ids.length === 1 ? "1 pedido" : `${ids.length} pedidos`
+    // ¿Ya hay un viaje ese día que vaya a esa zona?
+    const existente = viajesCal.find(v => v.zonas.some(z => z.id === zona.id) && viajeMovible(v.estado) &&
+      dia >= String(v.fecha).slice(0, 10) && dia <= sumarDias(String(v.fecha).slice(0, 10), Math.max(1, v.dias) - 1))
+    if (existente) {
+      setPropuesta({
+        titulo: `Ya hay un viaje a ${zona.nombre} ese día`,
+        texto: <>¿Subir {cantidad} de <b>{zona.nombre}</b> al viaje <b>{existente.nombre}</b> del {fechaTxt}?</>,
+        boton: "Subir al viaje",
+        accion: () => subirPedidosAViaje(existente.id, existente.nombre, ids),
+      })
+      return
+    }
+    abrirProgramar(dia, [zona.id], ids, <>No hay viaje a <b>{zona.nombre}</b> el {fechaTxt}. Al programarlo se le suben {cantidad === "1 pedido" ? "el pedido" : `los ${cantidad}`}.</>)
+  }
+
+  const cambiarPrioridadVarios = async (ids: string[], prioridad: 1 | 2 | 3) => {
+    for (const id of ids) await cambiarPrioridad(id, prioridad)
+    toast.success(`Prioridad actualizada en ${ids.length === 1 ? "1 pedido" : `${ids.length} pedidos`}`)
+  }
 
   const getEstadoBadge = (estado: string) => {
     const estadoConfig = ESTADOS_PEDIDO.find((e) => e.value === estado)
@@ -1057,16 +1271,19 @@ export default function ClientesPedidosPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5 p-4 sm:p-6">
+      {/* ═══ ENCABEZADO ═══ */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold">Gestión de Pedidos</h1>
-          <p className="text-muted-foreground">Administra todos los pedidos de clientes</p>
+          <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Pedidos y viajes</h1>
+          <p className="text-sm text-neutro-500">
+            {cargando && pedidos.length === 0 ? "Cargando…" : <><b className="font-semibold text-azul-900 tabular-nums">{pedidosLista.length}</b> pedidos en la lista · <b className="font-semibold text-azul-900 tabular-nums">{formatCurrency(totalLista)}</b></>}
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button className="gap-2" onClick={() => setNuevoPedidoOpen(true)}>
             <Plus className="h-4 w-4" />
-            Nuevo Pedido
+            Importar pedido
           </Button>
           <Button variant="outline" className="gap-2" asChild>
             <Link href="/clientes-pedidos/nuevo">
@@ -1074,45 +1291,68 @@ export default function ClientesPedidosPage() {
               Mostrador
             </Link>
           </Button>
-          <Button variant="outline" asChild>
-            <a href="/viajes">
-              <Truck className="h-4 w-4 mr-2" />
-              Ver Viajes
-            </a>
-          </Button>
-          <Button asChild>
-            <a href="/viajes/nuevo">
-              <Truck className="h-4 w-4 mr-2" />
-              Crear Viaje
-            </a>
+          <Button variant="outline" className="gap-2" onClick={() => abrirProgramar("")}>
+            <Truck className="h-4 w-4" />
+            Programar viaje
           </Button>
         </div>
       </div>
 
-      <div className="flex gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-          <Input
-            placeholder="Buscar por número de pedido, cliente o CUIT..."
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className="pl-10"
-          />
+      {/* ═══ CALENDARIO DE VIAJES ═══ */}
+      <section className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="mr-auto text-base font-bold text-azul-900 first-letter:uppercase">
+            {calModo === "semana" ? "Semana del " : ""}{tituloCal}
+          </h2>
+          {calVisible && (
+            <>
+              <div className="inline-flex rounded-lg border bg-white p-0.5" role="group" aria-label="Vista del calendario">
+                {(["semana", "mes"] as const).map(m => (
+                  <button key={m} type="button" aria-pressed={calModo === m}
+                    onClick={() => url.set({ cal: m }, "replace", { cal: "semana" })}
+                    className={`rounded-md px-3 py-1 text-[13px] font-semibold ${calModo === m ? "bg-azul-600 text-white" : "text-neutro-600 hover:bg-neutro-100"}`}>
+                    {m === "semana" ? "Semana" : "Mes"}
+                  </button>
+                ))}
+              </div>
+              <Button variant="outline" size="icon" onClick={() => moverCal(-1)} aria-label="Anterior"><ChevronLeft className="h-4 w-4" /></Button>
+              <Button variant="outline" size="sm" onClick={() => url.set({ dia: null }, "replace")}>Hoy</Button>
+              <Button variant="outline" size="icon" onClick={() => moverCal(1)} aria-label="Siguiente"><ChevronRight className="h-4 w-4" /></Button>
+            </>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => url.set({ calendario: calVisible ? "no" : null }, "replace")}>
+            {calVisible ? "Ocultar" : "Mostrar calendario"}
+          </Button>
         </div>
-        <Select value={filtroEstado} onValueChange={setFiltroEstado}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Filtrar por estado" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los estados</SelectItem>
-            {ESTADOS_PEDIDO.map((estado) => (
-              <SelectItem key={estado.value} value={estado.value}>
-                {estado.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        {calVisible && (
+          <div className="overflow-x-auto">
+            <div className="md:min-w-[640px]">
+              <CalendarioViajes
+                modo={calModo}
+                celdas={celdasCal}
+                viajes={viajesCal}
+                hoy={hoy}
+                onAbrirViaje={(id) => router.push(`/viajes/${id}`)}
+                onProgramar={(dia) => abrirProgramar(dia)}
+                onMoverViaje={moverViaje}
+                onSoltarPedidosEnViaje={soltarEnViaje}
+                onSoltarPedidosEnDia={soltarEnDia}
+              />
+            </div>
+          </div>
+        )}
+        {calVisible && <p className="hidden text-xs text-neutro-400 md:block">Arrastrá pedidos de la lista a un viaje para subirlos, o a un día para armar el viaje de esa zona.</p>}
+      </section>
+
+      {/* ═══ FILTROS ═══ */}
+      <FiltrosPedidos
+        f={filtros}
+        set={setFiltros}
+        vendedores={opcionesVendedores}
+        zonas={opcionesZonas}
+        hayFiltrosExtra={hayFiltrosExtra}
+        onLimpiar={limpiarFiltros}
+      />
 
       {/* ═══ PEDIDOS EN PROCESAMIENTO ═══ */}
       {queue.filter(q => q.status !== "done").length > 0 && (
@@ -1170,133 +1410,100 @@ export default function ClientesPedidosPage() {
         </div>
       )}
 
-      {/* ═══ ACORDEÓN POR PRIORIDAD ═══ */}
+      {/* ═══ LISTA DE PEDIDOS ═══ */}
       {cargando && pedidos.length === 0 ? (
         <CargaProgreso mensajes={MENSAJES.pedidos} />
+      ) : pedidosLista.length === 0 ? (
+        <div className="rounded-xl border border-dashed bg-white px-6 py-12 text-center">
+          <p className="font-semibold text-azul-900">No hay pedidos con estos filtros</p>
+          <p className="mt-1 text-sm text-neutro-500">Probá ampliar las fechas o elegir otros estados.</p>
+          {hayFiltrosExtra && <Button variant="outline" className="mt-4" onClick={limpiarFiltros}>Volver a los filtros de siempre</Button>}
+        </div>
       ) : (
-      <div className="space-y-4">
-        {PRIORIDADES.map(prio => {
-          const pedidosDeEstaPrioridad = pedidosFiltrados
-            .filter(p => (p.prioridad || 3) === prio.nivel)
-            .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""))
-          const isExpanded = expandedPriorities[String(prio.nivel)] !== false
-          const count = pedidosDeEstaPrioridad.length
-
-          return (
-            <div
-              key={prio.nivel}
-              className={`border rounded-xl overflow-hidden ${prio.bgLight}`}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move" }}
-              onDrop={async (e) => {
-                e.preventDefault()
-                if (dragPedidoId && prio.nivel) {
-                  await cambiarPrioridad(dragPedidoId, prio.nivel)
-                  setDragPedidoId(null)
-                }
-              }}
-            >
-              {/* Header del acordeón */}
-              <button
-                onClick={() => setExpandedPriorities(prev => ({ ...prev, [String(prio.nivel)]: !prev[String(prio.nivel)] }))}
-                className="w-full flex items-center justify-between px-5 py-3 hover:opacity-80 transition-opacity"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-base font-bold">{prio.label}</span>
-                  <Badge variant="secondary" className="text-xs">{count}</Badge>
-                </div>
-                <span className={`text-lg transition-transform ${isExpanded ? "rotate-180" : ""}`}>▾</span>
-              </button>
-
-              {/* Contenido */}
-              {isExpanded && (
-                <div className="px-3 pb-3 space-y-2">
-                  {count === 0 ? (
-                    <div className="text-center py-6 text-sm text-muted-foreground opacity-60">
-                      {dragPedidoId ? "Soltá acá para cambiar prioridad" : "Sin pedidos"}
-                    </div>
-                  ) : pedidosDeEstaPrioridad.map(pedido => {
-                    const picking = pickingStatus[pedido.id]
-                    return (
-                      <div
-                        key={pedido.id}
-                        draggable
-                        onDragStart={() => setDragPedidoId(pedido.id)}
-                        onDragEnd={() => setDragPedidoId(null)}
-                        onClick={() => abrirPedido(pedido)}
-                        className={`bg-white border rounded-lg p-4 cursor-pointer hover:shadow-md hover:border-gray-300 transition-all
-                          ${dragPedidoId === pedido.id ? "opacity-40" : ""}`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            {/* Línea 1: número + cliente + localidad */}
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <span className="font-bold text-sm">{pedido.numero_pedido}</span>
-                              <span className="text-xs text-muted-foreground">·</span>
-                              <span className="text-sm font-medium truncate">{pedido.clientes?.nombre_razon_social}</span>
-                              {pedido.clientes?.cuit && <span className="text-xs text-muted-foreground hidden lg:inline">{pedido.clientes.cuit}</span>}
-                              {pedido.clientes?.localidad && (
-                                <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded hidden sm:inline">{pedido.clientes.localidad}</span>
-                              )}
-                            </div>
-                            {/* Línea 2: fecha + vendedor + estado */}
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs text-muted-foreground">{formatDateAR(pedido.fecha)}</span>
-                              {pedido.vendedores?.nombre && (
-                                <span className="text-xs text-muted-foreground">· {pedido.vendedores.nombre}</span>
-                              )}
-                              {getEstadoBadge(pedido.estado)}
-                              {pedido.viajes?.nombre && (
-                                <Badge variant="outline" className="text-xs">🚚 {pedido.viajes.nombre}</Badge>
-                              )}
-                            </div>
-                            {/* Línea 3: picking info si alguien lo prepara */}
-                            {picking && (
-                              <div className="mt-2 flex items-center gap-3">
-                                <div className="flex items-center gap-1.5">
-                                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                                  <span className="text-xs font-semibold text-green-700">
-                                    Preparando: {picking.operario}
-                                  </span>
-                                </div>
-                                <div className="flex-1 max-w-[200px]">
-                                  <div className="bg-neutral-200 rounded-full h-1.5 overflow-hidden">
-                                    <div
-                                      className="h-full bg-green-500 rounded-full transition-all"
-                                      style={{ width: `${picking.progreso.total > 0 ? Math.round(((picking.progreso.preparados + picking.progreso.faltantes) / picking.progreso.total) * 100) : 0}%` }}
-                                    />
-                                  </div>
-                                </div>
-                                <span className="text-[10px] text-muted-foreground">
-                                  {picking.progreso.preparados}✓ {picking.progreso.faltantes > 0 ? `${picking.progreso.faltantes}✕ ` : ""}{picking.progreso.pendientes}⏳
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                          {/* Solo eliminar — sin 3 puntitos */}
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            {pedido.total > 0 && (
-                              <span className="text-sm font-bold text-gray-700">${pedido.total.toLocaleString("es-AR")}</span>
-                            )}
-                            {puedeEliminarPedido(pedido.estado) && (
-                              <Button
-                                variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50"
-                                onClick={(e) => { e.stopPropagation(); setPedidoAEliminar(pedido) }}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+        <TablaPedidos
+          pedidos={pedidosLista}
+          seleccion={seleccion}
+          onToggle={toggleSel}
+          onToggleTodos={toggleTodos}
+          onAbrir={(p) => abrirPedido(p as unknown as Pedido)}
+          onPrioridad={(p, n) => cambiarPrioridad(p.id, n)}
+          onEliminar={(p) => setPedidoAEliminar(p as unknown as Pedido)}
+          puedeEliminar={puedeEliminarPedido}
+          estadoBadge={getEstadoBadge}
+          picking={pickingStatus}
+          orden={orden}
+          dir={dir}
+          onOrdenar={ordenar}
+          onArrastrar={(ids) => { arrastreRef.current = ids }}
+        />
       )}
+
+      {/* ═══ BARRA DE SELECCIÓN ═══ */}
+      {seleccionados.length > 0 && (
+        <div className="sticky bottom-3 z-30 mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl bg-azul-900 px-4 py-3 text-white shadow-[0_18px_40px_-12px_rgba(23,26,69,0.6)]">
+          <div className="mr-auto">
+            <div className="text-sm font-semibold tabular-nums">
+              {seleccionados.length === 1 ? "1 pedido" : `${seleccionados.length} pedidos`} · {formatCurrency(totalSel)}
+            </div>
+            {bultosSel > 0 && <div className="text-xs text-azul-200 tabular-nums">{bultosSel} bultos</div>}
+          </div>
+          <Select value="" onValueChange={(viajeId) => {
+            const v = viajes.find(x => x.id === viajeId)
+            if (v) subirPedidosAViaje(v.id, v.nombre, seleccionados.map(p => p.id))
+          }}>
+            <SelectTrigger className="h-9 w-auto min-w-44 border-white/20 bg-white/10 text-white data-[placeholder]:text-white [&_svg:not([class*='text-'])]:text-white">
+              <SelectValue placeholder="Subir a un viaje…" />
+            </SelectTrigger>
+            <SelectContent>
+              {viajes.length === 0 && <div className="px-3 py-2 text-sm text-muted-foreground">No hay viajes programados</div>}
+              {viajes.map(v => (
+                <SelectItem key={v.id} value={v.id}>{v.nombre} · {formatDateAR(v.fecha)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value="" onValueChange={(v) => cambiarPrioridadVarios(seleccionados.map(p => p.id), Number(v) as 1 | 2 | 3)}>
+            <SelectTrigger className="h-9 w-auto min-w-36 border-white/20 bg-white/10 text-white data-[placeholder]:text-white [&_svg:not([class*='text-'])]:text-white">
+              <SelectValue placeholder="Prioridad…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">Urgente</SelectItem>
+              <SelectItem value="2">Alta</SelectItem>
+              <SelectItem value="3">Normal</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => setSeleccion(new Set())}>
+            Quitar selección
+          </Button>
+        </div>
+      )}
+
+      <ProgramarViajeDialog
+        open={progAbierto}
+        onOpenChange={setProgAbierto}
+        fechaInicial={progFecha}
+        zonaIdsIniciales={progZonas}
+        aviso={progAviso}
+        onProgramado={async (v) => {
+          const ids = progPedidosRef.current
+          progPedidosRef.current = []
+          if (ids.length) await subirPedidosAViaje(v.id, "el viaje nuevo", ids)
+          else recargarViajesCal(true)
+          cargarViajes()
+        }}
+      />
+
+      <AlertDialog open={!!propuesta} onOpenChange={(o) => { if (!o) setPropuesta(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{propuesta?.titulo}</AlertDialogTitle>
+            <AlertDialogDescription>{propuesta?.texto}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { const a = propuesta?.accion; setPropuesta(null); a?.() }}>{propuesta?.boton}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Sheet
         open={modalDetalleAbierto}
