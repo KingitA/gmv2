@@ -89,31 +89,40 @@ async function calcularBajasExtra(
       devPorPago.set(d.pago_id, (devPorPago.get(d.pago_id) || 0) + Number(d.monto))
   }
 
-  // Cubierto por pago sobre débitos BONIFICABLES (para la NC del 10%):
-  // plata imputada + créditos tildados + devoluciones descontadas.
-  // REGLA 01/10: la NC proyectada es cubierto/9 (10% de lo que ESTE cobro
-  // salda), nunca 10% del total histórico del comprobante.
-  const cashBonifPorPago = new Map<string, number>()
-  for (const i of imps || []) {
-    if (!totalDe.has(i.comprobante_id)) continue // solo FA/FB/FC/PRES vivos
-    cashBonifPorPago.set(i.pago_id, (cashBonifPorPago.get(i.pago_id) ?? 0) + Number(i.monto_imputado || 0))
+  // REGLA 07/10 (dueño, reemplaza la del 01/10): la NC del 10% contado es por el
+  // TOTAL de cada comprobante y una sola vez. Los que ya tienen su NC/REV viva no
+  // la vuelven a recibir (misma regla que la emisión: ya-bonificados).
+  const yaBonificados = new Set<string>()
+  {
+    const { cargarMarcasBonificacion, separarYaBonificados } = await import("@/lib/comprobantes/ya-bonificados")
+    const porCliente = new Map<string, Set<string>>()
+    for (const p of pagosPend) {
+      if (!p.cliente_id || !(p.observaciones || "").includes(MARCA_CONTADO)) continue
+      if (!porCliente.has(p.cliente_id)) porCliente.set(p.cliente_id, new Set())
+      for (const d of debitosPorPago.get(p.id) || []) if (totalDe.has(d)) porCliente.get(p.cliente_id)!.add(d)
+    }
+    if (porCliente.size) {
+      const { data: nums } = await supabase
+        .from("comprobantes_venta")
+        .select("id, numero_comprobante")
+        .in("id", [...new Set([...porCliente.values()].flatMap((s) => [...s]))])
+      const numDe = new Map((nums || []).map((n: any) => [n.id, String(n.numero_comprobante || "")]))
+      for (const [clienteId, debs] of porCliente) {
+        const lista = [...debs].map((id) => ({ id, numero_comprobante: numDe.get(id) || "" }))
+        const marcas = await cargarMarcasBonificacion(supabase, clienteId, lista.map((c) => c.id))
+        for (const c of separarYaBonificados(lista, marcas).yaBonificados) yaBonificados.add(c.id)
+      }
+    }
   }
 
   for (const p of pagosPend) {
     let extra = 0
     const contado = (p.observaciones || "").includes(MARCA_CONTADO)
     if (contado) {
-      const cubierto =
-        (cashBonifPorPago.get(p.id) ?? 0) +
-        (paresPorPago.get(p.id) || []).reduce((s, par) => s + Number(par.monto || 0), 0) +
-        (devPorPago.get(p.id) || 0)
-      // TOPE (02/10, fantasma WENG BIAO): la NC proyectada nunca supera el 10%
-      // de los débitos del pago — la emisión capea la fracción en 1 por
-      // comprobante; sin este tope, créditos aplicados por encima del 90%
-      // proyectaban una NC imposible y el saldo mostraba un "a favor" falso.
-      let topeNC = 0
-      for (const d of debitosPorPago.get(p.id) || []) topeNC += (totalDe.get(d) ?? 0) * 0.1
-      extra += Math.min(cubierto / 9, topeNC)
+      // NC = 10% del total de cada débito bonificable del pago que todavía no la tenga
+      let ncProyectada = 0
+      for (const d of debitosPorPago.get(p.id) || []) if (!yaBonificados.has(d)) ncProyectada += (totalDe.get(d) ?? 0) * 0.1
+      extra += ncProyectada
       for (const par of paresPorPago.get(p.id) || []) if (par.aplicar_10) extra -= par.monto * 0.1
     }
     extra += parsearMarcaAjuste(p.observaciones)

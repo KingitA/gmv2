@@ -57,7 +57,8 @@ export function CuentaAgregada({ viajeId, cliente, onResumen, onQuitar }: {
       const imp = sel[cp.id]
       if (imp === undefined || dtosHechos.has(cp.id)) continue
       if (!TIPOS_BONIFICABLES.includes(String(cp.tipo_comprobante || "").toUpperCase())) continue
-      if (Math.abs(imp - Number(cp.saldo_pendiente)) < 0.01) b += Number(cp.total_factura) * 0.1
+      // REGLA 07/10 (dueño): 10% del TOTAL, una sola vez, aunque pague una parte
+      b += Math.min(imp, Math.abs(Number(cp.total_factura) || 0) * 0.1)
     }
     return r2(b)
   }, [contadoGeneral, comps, sel, dtosHechos])

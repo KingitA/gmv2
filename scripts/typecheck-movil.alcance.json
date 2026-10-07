@@ -46,6 +46,26 @@
     "app/chofer/[viajeId]/cliente/[clienteId]/page.tsx",
     "app/vendedor/clientes/[id]/cobrar/page.tsx",
     "app/vendedor/layout.tsx",
-    "app/chofer/layout.tsx"
+    "app/chofer/layout.tsx",
+    "lib/pedidos/",
+    "lib/actions/condiciones-cliente.ts",
+    "lib/actions/mercaderia.ts",
+    "lib/comisiones/",
+    "lib/kardex/sincronizar-pedido.ts",
+    "lib/comprobantes/armar-comprobantes-preview.ts",
+    "app/api/comprobantes-venta/generar/route.ts",
+    "app/api/mostrador/venta/route.ts",
+    "components/pedidos/CondicionesPedidoPanel.tsx",
+    "components/pedidos/MercaderiaCuposPedido.tsx",
+    "components/pedidos/NuevoPedidoDialog.tsx",
+    "components/pedidos/SegmentacionCondiciones.tsx",
+    "hooks/use-order-queue.ts",
+    "app/clientes-pedidos/nuevo/page.tsx",
+    "app/clientes-pedidos/[id]/page.tsx",
+    "app/clientes/[id]/page.tsx",
+    "app/mostrador/page.tsx",
+    "app/vendedor/pedido/nuevo/page.tsx",
+    "lib/comprobantes/comprobantes-de-pedido.ts",
+    "app/api/comprobantes-venta/pedido/"
   ]
 }

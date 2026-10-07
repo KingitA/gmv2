@@ -1,17 +1,13 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
-import { createClient } from "@/lib/supabase/client"
-import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
+import { useState, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Upload, Plus, X, Search, Check, FileText, MapPin } from "lucide-react"
 import type { PedidoOverrides } from "@/hooks/use-order-queue"
-import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
-import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION, condRowsToProveedor, condRowsToMarca } from "@/components/pedidos/SegmentacionCondiciones"
+import { CondicionesPedidoPanel, useCondicionesPedido } from "@/components/pedidos/CondicionesPedidoPanel"
 
 type Cliente = {
   id: string
@@ -20,11 +16,7 @@ type Cliente = {
   codigo_cliente?: string
   direccion?: string
   localidad?: string
-  metodo_facturacion?: string | null
-  lista_precio_id?: string | null
 }
-
-type LP = { id: string; nombre: string; codigo?: string }
 
 interface Props {
   open: boolean
@@ -32,179 +24,20 @@ interface Props {
   onAddToQueue: (clienteId: string, clienteNombre: string, files: File[], overrides?: PedidoOverrides) => void
 }
 
-const METODOS = [
-  { value: "Factura", label: "Factura (21% IVA)" },
-  { value: "Final",   label: "Final (Mixto)"     },
-  { value: "Presupuesto", label: "Presupuesto"   },
-]
-
-const BONIF_TIPOS = [
-  { key: "general",    label: "General",    cls: "text-blue-700 bg-blue-50 border-blue-200" },
-  { key: "mercaderia", label: "Mercadería", cls: "text-green-700 bg-green-50 border-green-200" },
-  { key: "viajante",   label: "Viajante",   cls: "text-orange-700 bg-orange-50 border-orange-200" },
-] as const
-
-const SEGMENTOS = [
-  { key: "limpieza_bazar", label: "LIMPIEZA / BAZAR",  listaState: "listaLimpieza",  metodoState: "metodoLimpieza"  },
-  { key: "perf0",          label: "PERFUMERÍA PERF0",  listaState: "listaPerf0",     metodoState: "metodoPerf0"     },
-  { key: "perf_plus",      label: "PERFUMERÍA PLUS",   listaState: "listaPerfPlus",  metodoState: "metodoPerfPlus"  },
-] as const
-
+// Importación de pedidos (xlsx / imagen / pdf / eml): archivos + cliente +
+// condiciones del pedido (panel compartido con el alta manual y el mostrador).
 export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
-  const sb = createClient()
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const [files, setFiles]           = useState<File[]>([])
-  const [cliente, setCliente]       = useState<Cliente | null>(null)
-  const [query, setQuery]           = useState("")
-  const [results, setResults]       = useState<any[]>([])
-  const [showDrop, setShowDrop]     = useState(false)
-  const [listas, setListas]         = useState<LP[]>([])
+  const [files, setFiles]       = useState<File[]>([])
+  const [cliente, setCliente]   = useState<Cliente | null>(null)
+  const [query, setQuery]       = useState("")
+  const [results, setResults]   = useState<any[]>([])
+  const [showDrop, setShowDrop] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const [error, setError]       = useState<string | null>(null)
 
-  // Condición general
-  const [metodo, setMetodo]         = useState("")
-  const [listaId, setListaId]       = useState("")
-  const [listaPorSegmento, setListaPorSegmento] = useState(false)
-
-  // Condiciones por segmento
-  const [listaLimpieza, setListaLimpieza]   = useState("")
-  const [metodoLimpieza, setMetodoLimpieza] = useState("")
-  const [listaPerf0, setListaPerf0]         = useState("")
-  const [metodoPerf0, setMetodoPerf0]       = useState("")
-  const [listaPerfPlus, setListaPerfPlus]   = useState("")
-  const [metodoPerfPlus, setMetodoPerfPlus] = useState("")
-
-  // Descuentos por segmento
-  const [bonifGrid, setBonifGrid]               = useState<Record<string, number>>({})
-  const [bonifGridOriginal, setBonifGridOriginal] = useState<Record<string, number>>({})
-
-  const [saveMode, setSaveMode]     = useState<"temp" | "permanent" | null>(null)
-  const [bonifMercaderia, setBonifMercaderia] = useState<any[]>([])
-
-  // Toggles independientes de segmentación (lista ya está en listaPorSegmento)
-  const [segMetodo, setSegMetodo]         = useState(false)
-  const [segDescuentos, setSegDescuentos] = useState(false)
-  // Segmentación por proveedor / marca (este pedido)
-  const [segmentacion, setSegmentacion] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
-
-  // Mercadería bonificada: artículos a regalar elegidos para este pedido
-  const [mercArticulos, setMercArticulos] = useState<Array<{ id: string; descripcion: string; sku: string }>>([])
-  const [mercQuery, setMercQuery]   = useState("")
-  const [mercResults, setMercResults] = useState<any[]>([])
-
-  // % de mercadería bonificada cargado en la grilla (cualquier segmento)
-  const mercPct = Math.max(0, ...Object.entries(bonifGrid)
-    .filter(([k]) => k.endsWith("__mercaderia"))
-    .map(([, v]) => Number(v) || 0))
-
-  const buscarMercArticulo = useCallback(async (term: string) => {
-    setMercQuery(term)
-    if (term.trim().length < 2) { setMercResults([]); return }
-    const { searchProductos } = await import("@/lib/actions/productos")
-    setMercResults((await searchProductos(term)) || [])
-  }, [])
-
-  const addMercArticulo = (p: any) => {
-    setMercArticulos(prev => prev.some(a => a.id === p.id) ? prev : [...prev, { id: p.id, descripcion: p.descripcion || "", sku: p.sku || "" }])
-    setMercQuery(""); setMercResults([])
-  }
-  const removeMercArticulo = (id: string) => setMercArticulos(prev => prev.filter(a => a.id !== id))
-
-  const metodoPorSegmento = segMetodo
-  const mostrarSegmentos  = segMetodo || listaPorSegmento || segDescuentos
-
-  // Cargar listas + proveedores con lista especial al abrir
-  useEffect(() => {
-    if (!open) return
-    sb.from("listas_precio").select("id,nombre,codigo").eq("activo", true).order("nombre")
-      .then(({ data }: any) => setListas(data || []))
-  }, [open])
-
-  // Inicializar condiciones cuando se selecciona cliente
-  useEffect(() => {
-    if (!cliente) { setBonifMercaderia([]); return }
-
-    const c = cliente as any
-    const ES_CENTINELA = (v?: string) => !!v && ["PorSegmento", "__por_segmento__", "porsegmento"].includes(v)
-    setMetodo(c.metodo_facturacion && !ES_CENTINELA(c.metodo_facturacion) ? c.metodo_facturacion : "")
-    setListaId(c.lista_precio_id || "")
-    setSegMetodo(!!(c.metodo_limpieza || c.metodo_perf0 || c.metodo_perf_plus) || ES_CENTINELA(c.metodo_facturacion))
-    setListaPorSegmento(!!(c.lista_limpieza_id || c.lista_perf0_id || c.lista_perf_plus_id))
-    setListaLimpieza(c.lista_limpieza_id || "")
-    setMetodoLimpieza(c.metodo_limpieza || "")
-    setListaPerf0(c.lista_perf0_id || "")
-    setMetodoPerf0(c.metodo_perf0 || "")
-    setListaPerfPlus(c.lista_perf_plus_id || "")
-    setMetodoPerfPlus(c.metodo_perf_plus || "")
-    setSaveMode(null)
-
-    // Segmentación ya guardada en la ficha del cliente (proveedor + marca)
-    Promise.all([
-      sb.from("cliente_proveedor_condicion")
-        .select("proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, proveedores:proveedor_id(nombre)")
-        .eq("cliente_id", cliente.id),
-      sb.from("cliente_marca_condicion")
-        .select("marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, marcas:marca_id(descripcion)")
-        .eq("cliente_id", cliente.id),
-    ]).then(([prov, marca]: any) => {
-      setSegmentacion({
-        proveedor: (prov.data || []).map((r: any) => ({
-          ref_id: r.proveedor_id, nombre: r.proveedores?.nombre || "—",
-          lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
-          dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
-        })),
-        marca: (marca.data || []).map((r: any) => ({
-          ref_id: r.marca_id, nombre: r.marcas?.descripcion || "—",
-          lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
-          dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
-        })),
-      })
-    })
-
-    // Cargar bonificaciones del cliente
-    sb.from("bonificaciones")
-      .select("tipo, porcentaje, segmento")
-      .eq("cliente_id", cliente.id)
-      .eq("activo", true)
-      .in("tipo", ["general", "mercaderia", "viajante"])
-      .then(({ data }: any) => {
-        const grid: Record<string, number> = {}
-        let haySeg = false
-        for (const b of (data || [])) {
-          const segKey = b.segmento || "todos"
-          grid[`${segKey}__${b.tipo}`] = b.porcentaje
-          if (b.segmento) haySeg = true
-        }
-        setBonifGrid(grid)
-        setBonifGridOriginal(grid)
-        setSegDescuentos(haySeg)
-      })
-
-    // Alerta mercadería bonificada
-    sb.from("bonificaciones")
-      .select("porcentaje,segmento,observaciones")
-      .eq("cliente_id", cliente.id)
-      .eq("tipo", "mercaderia")
-      .eq("activo", true)
-      .then(({ data }: any) => setBonifMercaderia(data || []))
-  }, [cliente])
-
-  const c = cliente as any
-  const bonifChanged = Object.keys({ ...bonifGrid, ...bonifGridOriginal }).some(
-    k => (bonifGrid[k] || 0) !== (bonifGridOriginal[k] || 0)
-  )
-  const conditionsChanged = !!cliente && (
-    metodo      !== (c?.metodo_facturacion  || "") ||
-    (listaPorSegmento ? (c?.lista_precio_id || "") !== "" : listaId !== (c?.lista_precio_id || "")) ||
-    listaLimpieza  !== (c?.lista_limpieza_id || "") ||
-    metodoLimpieza !== (c?.metodo_limpieza   || "") ||
-    listaPerf0     !== (c?.lista_perf0_id    || "") ||
-    metodoPerf0    !== (c?.metodo_perf0      || "") ||
-    listaPerfPlus  !== (c?.lista_perf_plus_id || "") ||
-    metodoPerfPlus !== (c?.metodo_perf_plus    || "") ||
-    bonifChanged
-  )
-
+  const cond = useCondicionesPedido(cliente?.id)
   const clienteNombre = cliente?.nombre_razon_social || cliente?.razon_social || ""
 
   const handleFiles = useCallback((selected: FileList | null) => {
@@ -233,156 +66,35 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     setShowDrop(false)
   }
 
-  const clearCliente = () => {
-    setCliente(null)
-    setQuery("")
-    setMetodo("")
-    setListaId("")
-    setListaPorSegmento(false)
-    setSaveMode(null)
-  }
-
   const reset = () => {
     setFiles([])
     setCliente(null)
     setQuery("")
     setResults([])
     setShowDrop(false)
-    setMetodo("")
-    setListaId("")
-    setListaPorSegmento(false)
-    setListaLimpieza("")
-    setMetodoLimpieza("")
-    setListaPerf0("")
-    setMetodoPerf0("")
-    setListaPerfPlus("")
-    setMetodoPerfPlus("")
-    setBonifGrid({})
-    setBonifGridOriginal({})
-    setSaveMode(null)
-    setBonifMercaderia([])
-    setMercArticulos([]); setMercQuery(""); setMercResults([])
-    setSegMetodo(false); setSegDescuentos(false)
-    setSegmentacion(EMPTY_SEGMENTACION)
+    setError(null)
   }
 
   const handleSubmit = async () => {
-    if (!cliente || files.length === 0) return
-    if (conditionsChanged && !saveMode) return
-
-    const SEGS = ["limpieza_bazar", "perf0", "perf_plus"]
-    let overrides: PedidoOverrides = {}
-    if (conditionsChanged) {
-      // General: solo si la dimensión NO está segmentada
-      if (!segMetodo && metodo) overrides.metodo_facturacion_pedido = metodo
-      if (!listaPorSegmento && listaId) overrides.lista_precio_pedido_id = listaId
-      // Por segmento: solo de la dimensión segmentada; vacío = heredar (no se manda)
-      if (segMetodo) {
-        if (metodoLimpieza) overrides.metodo_limpieza_pedido   = metodoLimpieza
-        if (metodoPerf0)    overrides.metodo_perf0_pedido       = metodoPerf0
-        if (metodoPerfPlus) overrides.metodo_perf_plus_pedido   = metodoPerfPlus
-      }
-      if (listaPorSegmento) {
-        if (listaLimpieza)  overrides.lista_limpieza_pedido_id  = listaLimpieza
-        if (listaPerf0)     overrides.lista_perf0_pedido_id     = listaPerf0
-        if (listaPerfPlus)  overrides.lista_perf_plus_pedido_id = listaPerfPlus
-      }
-
-      // Descuentos: general (segmento null) o por segmento — aplican a este pedido
-      {
-        const bonifs: Array<{ tipo: string; segmento: string | null; porcentaje: number }> = []
-        if (segDescuentos) {
-          for (const seg of SEGS) for (const tipo of BONIF_TIPOS) {
-            const pct = bonifGrid[`${seg}__${tipo.key}`] || 0
-            if (pct > 0) bonifs.push({ tipo: tipo.key, segmento: seg, porcentaje: pct })
-          }
-        } else {
-          for (const tipo of BONIF_TIPOS) {
-            const pct = bonifGrid[`todos__${tipo.key}`] || 0
-            if (pct > 0) bonifs.push({ tipo: tipo.key, segmento: null, porcentaje: pct })
-          }
-        }
-        if (bonifs.length > 0) overrides.bonificaciones_pedido = bonifs
-      }
-
-      // Guardar al cliente (permanente): cada dimensión escribe solo lo que corresponde
-      if (saveMode === "permanent") {
-        const upd: any = {
-          metodo_facturacion: !segMetodo ? (metodo || null) : null,
-          lista_precio_id:    !listaPorSegmento ? (listaId || null) : null,
-          metodo_limpieza:    segMetodo ? (metodoLimpieza || null) : null,
-          metodo_perf0:       segMetodo ? (metodoPerf0 || null) : null,
-          metodo_perf_plus:   segMetodo ? (metodoPerfPlus || null) : null,
-          lista_limpieza_id:  listaPorSegmento ? (listaLimpieza || null) : null,
-          lista_perf0_id:     listaPorSegmento ? (listaPerf0 || null) : null,
-          lista_perf_plus_id: listaPorSegmento ? (listaPerfPlus || null) : null,
-        }
-        await sb.from("clientes").update(upd).eq("id", cliente.id)
-
-        if (bonifChanged) {
-          await sb.from("bonificaciones").delete()
-            .eq("cliente_id", cliente.id).in("tipo", ["general", "mercaderia", "viajante"])
-          const toInsert: any[] = []
-          if (segDescuentos) {
-            for (const seg of SEGS) for (const tipo of BONIF_TIPOS) {
-              const pct = bonifGrid[`${seg}__${tipo.key}`] || 0
-              if (pct > 0) toInsert.push({ cliente_id: cliente.id, tipo: tipo.key, porcentaje: pct, activo: true, segmento: seg })
-            }
-          } else {
-            for (const tipo of BONIF_TIPOS) {
-              const pct = bonifGrid[`todos__${tipo.key}`] || 0
-              if (pct > 0) toInsert.push({ cliente_id: cliente.id, tipo: tipo.key, porcentaje: pct, activo: true, segmento: null })
-            }
-          }
-          if (toInsert.length > 0) await sb.from("bonificaciones").insert(toInsert)
-        }
-
-        // Cambió la config permanente del cliente: los pedidos abiertos
-        // (en_venta/pendiente) se re-precian para facturar con la nueva
-        try { await repreciarPedidosAbiertosCliente(cliente.id) } catch (e) { console.error("repreciar:", e) }
-      }
+    if (!cliente || files.length === 0 || cond.bloqueo) return
+    setEnviando(true)
+    setError(null)
+    try {
+      // "Guardar en la ficha": se guarda antes de encolar (el pedido congela la ficha nueva)
+      await cond.guardarFichaSiCorresponde()
+      onAddToQueue(cliente.id, clienteNombre, files, cond.condiciones() as PedidoOverrides)
+      reset()
+      onOpenChange(false)
+    } catch (e: any) {
+      setError(e?.message || "No se pudieron guardar las condiciones en la ficha")
+    } finally {
+      setEnviando(false)
     }
-
-    // Segmentación por proveedor / marca (este pedido)
-    if (segmentacion.proveedor.length > 0) overrides.condiciones_proveedor = condRowsToProveedor(segmentacion.proveedor)
-    if (segmentacion.marca.length > 0)     overrides.condiciones_marca     = condRowsToMarca(segmentacion.marca)
-
-    // Mercadería bonificada (artículos elegidos) — se pasa siempre que haya % y artículos,
-    // independientemente de si cambiaron las condiciones.
-    if (mercArticulos.length > 0 && mercPct > 0) {
-      overrides.mercaderia_bonificada = { pct: mercPct, articulo_ids: mercArticulos.map(a => a.id) }
-    }
-
-    const hayOverrides = conditionsChanged || !!overrides.mercaderia_bonificada
-      || !!overrides.condiciones_proveedor || !!overrides.condiciones_marca
-    onAddToQueue(cliente.id, clienteNombre, files, hayOverrides ? overrides : undefined)
-    reset()
-    onOpenChange(false)
   }
 
-  const canSubmit = !!cliente && files.length > 0 && (!conditionsChanged || !!saveMode)
-
-  // Helpers para leer/escribir los estados de segmento por key
-  const getSegValue = (stateKey: string): string => {
-    if (stateKey === "listaLimpieza")  return listaLimpieza
-    if (stateKey === "metodoLimpieza") return metodoLimpieza
-    if (stateKey === "listaPerf0")     return listaPerf0
-    if (stateKey === "metodoPerf0")    return metodoPerf0
-    if (stateKey === "listaPerfPlus")  return listaPerfPlus
-    if (stateKey === "metodoPerfPlus") return metodoPerfPlus
-    return ""
-  }
-  const setSegValue = (stateKey: string, v: string) => {
-    if (stateKey === "listaLimpieza")  setListaLimpieza(v)
-    if (stateKey === "metodoLimpieza") setMetodoLimpieza(v)
-    if (stateKey === "listaPerf0")     setListaPerf0(v)
-    if (stateKey === "metodoPerf0")    setMetodoPerf0(v)
-    if (stateKey === "listaPerfPlus")  setListaPerfPlus(v)
-    if (stateKey === "metodoPerfPlus") setMetodoPerfPlus(v)
-  }
+  const canSubmit = !!cliente && files.length > 0 && !cond.bloqueo && !enviando
 
   return (
-    <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v) }}>
       <DialogContent className="sm:max-w-[800px] w-[95vw] max-h-[90vh] flex flex-col overflow-hidden p-0">
         {/* ── Título fijo ── */}
@@ -442,26 +154,26 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   <p className="text-sm font-semibold text-slate-800 leading-snug">{clienteNombre}</p>
                   {(cliente.codigo_cliente || cliente.direccion) && (
                     <p className="text-xs text-slate-500 mt-0.5 leading-snug">
-                      {[cliente.codigo_cliente, cliente.direccion, (cliente as any).localidad].filter(Boolean).join(" · ")}
+                      {[cliente.codigo_cliente, cliente.direccion, cliente.localidad].filter(Boolean).join(" · ")}
                     </p>
                   )}
                 </div>
-                <button onClick={clearCliente} className="text-slate-400 hover:text-slate-600 shrink-0">
+                <button onClick={() => { setCliente(null); setQuery("") }} className="text-slate-400 hover:text-slate-600 shrink-0">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
             ) : (
               <div>
                 <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  className="pl-9 h-10"
-                  placeholder="Buscar por nombre, código o dirección..."
-                  value={query}
-                  onChange={e => handleSearch(e.target.value)}
-                  onFocus={() => { if (results.length) setShowDrop(true) }}
-                  onBlur={() => setTimeout(() => setShowDrop(false), 150)}
-                />
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    className="pl-9 h-10"
+                    placeholder="Buscar por nombre, código o dirección..."
+                    value={query}
+                    onChange={e => handleSearch(e.target.value)}
+                    onFocus={() => { if (results.length) setShowDrop(true) }}
+                    onBlur={() => setTimeout(() => setShowDrop(false), 150)}
+                  />
                 </div>
                 {showDrop && results.length > 0 && (
                   <div className="mt-1 border rounded-lg bg-background max-h-[240px] overflow-y-auto shadow-md">
@@ -489,248 +201,22 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
             )}
           </div>
 
-          {/* ── Alerta bonificación mercadería ────────────────────────────── */}
-          {cliente && bonifMercaderia.length > 0 && (
-            <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
-              <span className="text-amber-600 text-base leading-none mt-0.5">⚠</span>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-amber-800">Este cliente tiene bonificación de mercadería activa</p>
-                <ul className="mt-1 space-y-0.5">
-                  {bonifMercaderia.map((b: any, i: number) => (
-                    <li key={i} className="text-xs text-amber-700">
-                      • {b.porcentaje}%{b.segmento ? ` (${b.segmento})` : ""}{b.observaciones ? ` — ${b.observaciones}` : ""}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-
-          {/* ── Condiciones (solo si hay cliente) ─────────────────────────── */}
+          {/* ── Condiciones del pedido ─────────────────────────────────────── */}
           {cliente && (
-            <div className="space-y-3">
+            <div className="space-y-2">
               <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide block">
                 Condiciones del pedido
               </Label>
-
-              {/* Toggles independientes: cada dimensión General o Por segmento */}
-              {(() => {
-                const metodoGeneralVal = metodo || (cliente as any)?.metodo_facturacion || "Final"
-                const METODO_CORTO: Record<string, string> = { "Factura": "Factura", "Final": "Mixto", "Presupuesto": "Presupuesto" }
-                const metodoHeredarLabel = `Del cliente (${METODO_CORTO[metodoGeneralVal] ?? metodoGeneralVal})`
-                const listaGeneralNombre = listas.find(l => l.id === (listaId || (cliente as any)?.lista_precio_id))?.nombre ?? ""
-                const listaHeredarLabel = listaGeneralNombre ? `Del cliente (${listaGeneralNombre})` : "Del cliente (sin lista asignada)"
-                const SegToggle = ({ on, set }: { on: boolean; set: (b: boolean) => void }) => (
-                  <div className="flex rounded-md border border-slate-300 overflow-hidden shrink-0 text-[11px]">
-                    <button type="button" onClick={() => set(false)} className={`px-2 py-1.5 font-medium ${!on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>General</button>
-                    <button type="button" onClick={() => set(true)}  className={`px-2 py-1.5 font-medium ${on ? "bg-indigo-600 text-white" : "bg-white text-slate-500"}`}>Por segmento</button>
-                  </div>
-                )
-                return (
-                <div className="space-y-2.5">
-                  {/* LISTA */}
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs text-slate-600 w-20 shrink-0">Lista</Label>
-                    {!listaPorSegmento ? (
-                      <Select value={listaId || "__none__"} onValueChange={v => setListaId(v === "__none__" ? "" : v)}>
-                        <SelectTrigger className="h-9 text-sm flex-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">{listaHeredarLabel}</SelectItem>
-                          {listas.filter(l => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
-                    <SegToggle on={listaPorSegmento} set={setListaPorSegmento} />
-                  </div>
-                  {/* FACTURACIÓN */}
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs text-slate-600 w-20 shrink-0">Facturación</Label>
-                    {!segMetodo ? (
-                      <Select value={metodo || "__none__"} onValueChange={v => setMetodo(v === "__none__" ? "" : v)}>
-                        <SelectTrigger className="h-9 text-sm flex-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">{metodoHeredarLabel}</SelectItem>
-                          {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1">Definida por segmento ↓</span>}
-                    <SegToggle on={segMetodo} set={setSegMetodo} />
-                  </div>
-                  {/* DESCUENTOS */}
-                  <div className="flex items-start gap-2">
-                    <Label className="text-xs text-slate-600 w-20 shrink-0 pt-2">Descuentos</Label>
-                    {!segDescuentos ? (
-                      <div className="flex-1 flex flex-wrap gap-2 items-center">
-                        {BONIF_TIPOS.map(tipo => (
-                          <div key={tipo.key} className="flex items-center gap-1">
-                            <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
-                            <Input type="number" step="0.01" min="0" max="100" className="h-6 w-14 text-center text-xs font-bold px-1"
-                              value={bonifGrid[`todos__${tipo.key}`] || 0}
-                              onChange={e => setBonifGrid(prev => ({ ...prev, [`todos__${tipo.key}`]: parseFloat(e.target.value) || 0 }))} />
-                            <span className="text-[10px] text-slate-400">%</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1 pt-2">Definidos por segmento ↓</span>}
-                    <SegToggle on={segDescuentos} set={setSegDescuentos} />
-                  </div>
-
-                  {/* Grid por segmento — solo las dimensiones marcadas "Por segmento" */}
-                  {mostrarSegmentos && (
-                    <div className="border border-indigo-200 rounded-lg overflow-hidden bg-indigo-50/30">
-                      <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest px-3 pt-2.5 pb-1">Condiciones por segmento</p>
-                      <div className="divide-y divide-slate-200">
-                        {SEGMENTOS.map(seg => (
-                          <div key={seg.key} className="px-3 py-2.5 bg-white">
-                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">{seg.label}</p>
-                            <div className="grid grid-cols-2 gap-2 mb-2">
-                              {segMetodo && (
-                                <div>
-                                  <Label className="text-[11px] text-slate-500 mb-1 block">Facturación</Label>
-                                  <Select value={getSegValue(seg.metodoState) || "__heredar__"} onValueChange={v => setSegValue(seg.metodoState, v === "__heredar__" ? "" : v)}>
-                                    <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="__heredar__">{metodoHeredarLabel}</SelectItem>
-                                      {METODOS.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              )}
-                              {listaPorSegmento && (
-                                <div>
-                                  <Label className="text-[11px] text-slate-500 mb-1 block">Lista de precio</Label>
-                                  <Select value={getSegValue(seg.listaState) || "__heredar__"} onValueChange={v => setSegValue(seg.listaState, v === "__heredar__" ? "" : v)}>
-                                    <SelectTrigger className="h-8 text-xs w-full"><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="__heredar__">{listaHeredarLabel}</SelectItem>
-                                      {listas.filter(l => l.codigo !== "especial").map(l => <SelectItem key={l.id} value={l.id}>{l.nombre}</SelectItem>)}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              )}
-                            </div>
-                            {segDescuentos && (
-                              <div className="border-t border-slate-100 pt-2 space-y-1">
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descuentos</p>
-                                {BONIF_TIPOS.map(tipo => {
-                                  const k = `${seg.key}__${tipo.key}`
-                                  return (
-                                    <div key={tipo.key} className="flex items-center justify-between">
-                                      <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${tipo.cls}`}>{tipo.label}</span>
-                                      <div className="flex items-center gap-1">
-                                        <Input type="number" step="0.01" min="0" max="100" className="h-6 w-16 text-center text-xs font-bold px-1"
-                                          value={bonifGrid[k] || 0}
-                                          onChange={e => setBonifGrid(prev => ({ ...prev, [k]: parseFloat(e.target.value) || 0 }))} />
-                                        <span className="text-[10px] text-slate-400">%</span>
-                                      </div>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                )
-              })()}
-
-              {/* Segmentación por proveedor / marca (este pedido) */}
-              <SegmentacionCondiciones listas={listas} value={segmentacion} onChange={setSegmentacion} />
-
-              {/* Mercadería bonificada: elegir artículos a regalar (aparece si hay % de mercadería) */}
-              {mercPct > 0 && (
-                <div className="rounded-lg border border-green-200 bg-green-50/60 px-3 py-3 space-y-2">
-                  <p className="text-sm font-semibold text-green-800">
-                    Mercadería bonificada ({mercPct}%)
-                  </p>
-                  <p className="text-[11px] text-green-700">
-                    Elegí qué artículos regalar. Las cantidades se calculan por monto (% × neto del pedido,
-                    repartido parejo) y se reajustan al preparar en depósito.
-                  </p>
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-500" />
-                    <Input
-                      placeholder="Buscar artículo a bonificar..."
-                      className="pl-8 h-9 text-sm"
-                      value={mercQuery}
-                      onChange={e => buscarMercArticulo(e.target.value)}
-                    />
-                    {mercResults.length > 0 && (
-                      <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg mt-1 z-50 max-h-52 overflow-auto">
-                        {mercResults.map((p: any) => (
-                          <button
-                            type="button"
-                            key={p.id}
-                            onClick={() => addMercArticulo(p)}
-                            className="w-full text-left px-3 py-2 hover:bg-green-50 border-b border-slate-100 last:border-0"
-                          >
-                            <ArticuloResultRow articulo={p} size="sm" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {mercArticulos.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {mercArticulos.map(a => (
-                        <span key={a.id} className="inline-flex items-center gap-1 text-[11px] bg-white border border-green-300 text-green-800 rounded px-2 py-0.5">
-                          {a.descripcion}
-                          <button type="button" onClick={() => removeMercArticulo(a.id)} className="text-green-500 hover:text-green-700">
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5">
-                      <span className="text-amber-600 text-sm leading-none">⚠</span>
-                      <p className="text-[11px] font-medium text-amber-800">
-                        Sin mercadería bonificada asignada — completá desde edición de pedido.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Alerta de condiciones cambiadas */}
-              {conditionsChanged && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-3">
-                  <p className="text-xs text-amber-700 font-semibold mb-2">
-                    Cambiaste las condiciones — ¿cómo aplicar?
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setSaveMode("temp")}
-                      className={`flex-1 py-2 rounded border text-xs font-medium transition-all ${
-                        saveMode === "temp"
-                          ? "bg-amber-500 text-white border-amber-500"
-                          : "bg-white border-amber-300 text-amber-700 hover:bg-amber-50"
-                      }`}
-                    >
-                      Solo este pedido
-                    </button>
-                    <button
-                      onClick={() => setSaveMode("permanent")}
-                      className={`flex-1 py-2 rounded border text-xs font-medium transition-all ${
-                        saveMode === "permanent"
-                          ? "bg-amber-500 text-white border-amber-500"
-                          : "bg-white border-amber-300 text-amber-700 hover:bg-amber-50"
-                      }`}
-                    >
-                      Guardar al cliente
-                    </button>
-                  </div>
-                </div>
-              )}
+              <CondicionesPedidoPanel estado={cond} />
             </div>
           )}
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
 
         {/* ── Footer fijo ── */}
-        <div className="px-6 pb-5 pt-3 shrink-0 border-t flex gap-2">
+        <div className="px-6 pb-5 pt-3 shrink-0 border-t flex gap-2 items-center">
+          {cliente && cond.bloqueo && <p className="text-[11px] text-amber-700 flex-1">{cond.bloqueo}</p>}
           <Button variant="outline" className="flex-1" onClick={() => { reset(); onOpenChange(false) }}>
             Cancelar
           </Button>
@@ -741,7 +227,5 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
         </div>
       </DialogContent>
     </Dialog>
-
-    </>
   )
 }

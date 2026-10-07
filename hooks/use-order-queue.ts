@@ -6,40 +6,10 @@ import { createPedido } from "@/lib/actions/pedidos"
 
 export type QueueItemStatus = "waiting" | "processing" | "needs_review" | "done" | "error"
 
-export type PedidoOverrides = {
-  // General (todo el pedido)
-  metodo_facturacion_pedido?: string
-  lista_precio_pedido_id?: string
-  // Por segmento de proveedor
-  lista_limpieza_pedido_id?: string
-  metodo_limpieza_pedido?: string
-  lista_perf0_pedido_id?: string
-  metodo_perf0_pedido?: string
-  lista_perf_plus_pedido_id?: string
-  metodo_perf_plus_pedido?: string
-  // Descuentos por segmento cargados en el pedido (general/viajante/mercadería)
-  bonificaciones_pedido?: Array<{ tipo: string; segmento: string | null; porcentaje: number }>
-  // Mercadería bonificada elegida al crear el pedido (artículos a regalar + %)
-  mercaderia_bonificada?: { pct: number; articulo_ids: string[] }
-  // Segmentación por proveedor (este pedido): lista/método/descuentos propios, comprobante aparte
-  condiciones_proveedor?: Array<{
-    proveedor_id: string
-    lista_precio_id: string | null
-    metodo_facturacion: string | null
-    dto_general_pct: number | null
-    dto_viajante_pct: number | null
-    dto_mercaderia_pct: number | null
-  }>
-  // Segmentación por marca (este pedido): gana sobre proveedor; comprobante aparte
-  condiciones_marca?: Array<{
-    marca_id: string
-    lista_precio_id: string | null
-    metodo_facturacion: string | null
-    dto_general_pct: number | null
-    dto_viajante_pct: number | null
-    dto_mercaderia_pct: number | null
-  }>
-}
+// Condiciones del pedido tal como las recibe createPedido (las arma el panel
+// compartido: lib/pedidos/condiciones-form.ts → condicionesParaPedido).
+export type PedidoOverrides = Partial<Omit<Parameters<typeof createPedido>[0], "cliente_id" | "items" | "observaciones">>
+
 
 export type QueueItem = {
   id: string

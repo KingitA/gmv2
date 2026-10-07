@@ -1126,7 +1126,9 @@ function NuevoPedidoInner() {
   const cambiarMetodo = (metodo: string) => aplicarSoloPedido({ ...cond, metodo })
 
   // "Guardar para el cliente": escribe en la FICHA (queda para futuros
-  // pedidos), limpia los overrides del pedido y re-precia carrito + catálogo.
+  // pedidos) y deja los MISMOS valores en este pedido (igual que la app): el
+  // pedido congeló la ficha que tenía al empezar, así que limpiar sus overrides
+  // lo devolvería a la ficha vieja. Re-precia carrito + catálogo.
   const guardarParaCliente = (sel: { metodo?: string; lista?: string; bonif?: BonifPedidoUI | null }) => {
     if (!cliente) return
     setVerCliente(false)
@@ -1164,11 +1166,12 @@ function NuevoPedidoInner() {
         if (!dc.error && dc.cliente) setCliente(dc.cliente)
         cargarBonifCliente(cliente.id)
 
-        // El pedido pasa a heredar TODO del cliente (sin overrides)
+        // El pedido toma lo guardado en la ficha como condición propia
+        const listaGuardada = sel.lista !== undefined && !!catFicha?.puede_cambiar_lista
         const limpia: CondPedido = {
-          metodo: sel.metodo ? "" : cond.metodo,
-          lista: sel.lista !== undefined ? "" : cond.lista,
-          bonif: sel.bonif ? null : cond.bonif,
+          metodo: sel.metodo || cond.metodo,
+          lista: listaGuardada ? (sel.lista || "") : cond.lista,
+          bonif: sel.bonif ?? cond.bonif,
         }
         if (pedidoIdRef.current) {
           await aplicarCondicionesPedidoVendedor(

@@ -3,10 +3,11 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
-import { agregarItemPedido, agregarItemBonificado, eliminarItemPedido, guardarItemsPedido, actualizarCantidadItem, previewPrecioArticulo, repreciarPedido, actualizarEncabezadoPedido, guardarCondicionesPedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, eliminarItemPedido, guardarItemsPedido, repreciarPedido, actualizarEncabezadoPedido, guardarCondicionesPedido } from "@/lib/actions/pedidos"
+import { MercaderiaCuposPedido } from "@/components/pedidos/MercaderiaCuposPedido"
 import { SegmentacionCondiciones, condRowsToProveedor, condRowsToMarca, EMPTY_SEGMENTACION, type SegmentacionValue } from "@/components/pedidos/SegmentacionCondiciones"
 import { esPedidoEditable, puedeEditarEntrega, transicionesManuales, motivoBloqueo, ESTADO_LABEL } from "@/lib/pedidos/estados"
-import { detectarSegmentoBonif, SEGMENTOS_BONIF, SEGMENTO_LABEL, normalizarBonifPedido, type SegmentoBonif } from "@/lib/pricing/segmento"
+import { SEGMENTOS_BONIF, SEGMENTO_LABEL, normalizarBonifPedido, type SegmentoBonif } from "@/lib/pricing/segmento"
 import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
@@ -40,20 +41,16 @@ export default function PedidoEditPage() {
   const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
   const [savingAdd, setSavingAdd] = useState(false)
-  const [savingBonif, setSavingBonif] = useState(false)
-  const [bonifMercaderia, setBonifMercaderia] = useState<any[]>([])
-  const [queryBonif, setQueryBonif] = useState("")
-  const [foundBonif, setFoundBonif] = useState<any[]>([])
-  const [qtyBonif, setQtyBonif] = useState(0)
-  const [bonifPct, setBonifPct] = useState(0)
+  // Mercadería "todo el pedido" solo para este pedido (pedidos.bonif_mercaderia_pct).
+  // "" = hereda (ficha / por segmento). Solo se guarda si el usuario lo cambió.
+  const [mercTodo, setMercTodo] = useState("")
+  const [mercTodoInicial, setMercTodoInicial] = useState("")
   // Descuentos por segmento: ficha del cliente (general/viajante/mercadería) y
   // override "solo este pedido" (pedidos.bonif_pedido, el mismo que usa la app
   // del vendedor). Form: clave `${tipo}.${segmento}` → string ("" = hereda).
   const [bonifFicha, setBonifFicha] = useState<any[]>([])
   const [bonifPedidoForm, setBonifPedidoForm] = useState<Record<string, string>>({})
   const [condSegmento, setCondSegmento] = useState<any[]>([])
-  const [recalcBonif, setRecalcBonif] = useState(false)
-  const [showBonifPanel, setShowBonifPanel] = useState(false)
   const [headerOpen, setHeaderOpen] = useState(true)
   const [filterQuery, setFilterQuery] = useState("")
   const [showAddPanel, setShowAddPanel] = useState(false)
@@ -85,7 +82,7 @@ export default function PedidoEditPage() {
     setLoading(true)
     const [pedRes, itemsRes, listasRes, vendRes] = await Promise.all([
       supabase.from("pedidos").select(`
-        id, numero_pedido, fecha, estado, total, subtotal, cliente_id, bonif_mercaderia_pct, bonif_pedido,
+        id, numero_pedido, fecha, estado, total, subtotal, cliente_id, bonif_mercaderia_pct, bonif_pedido, condiciones_cliente,
         metodo_facturacion_pedido, condicion_entrega, observaciones,
         lista_precio_pedido_id, lista_limpieza_pedido_id, metodo_limpieza_pedido,
         lista_perf0_pedido_id, metodo_perf0_pedido,
@@ -109,23 +106,24 @@ export default function PedidoEditPage() {
     setVendedores(vendRes.data || [])
     if (p?.cliente_id) {
       const [{ data: bonifTodas }, { data: cmPed }, { data: cpPed }, { data: cmCli }, { data: cpCli }] = await Promise.all([
-        supabase.from("bonificaciones").select("id, tipo, porcentaje, segmento").eq("cliente_id", p.cliente_id).eq("activo", true).in("tipo", ["general", "viajante", "mercaderia"]),
-        supabase.from("pedido_marca_condicion").select("marca_id, lista_precio_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
-        supabase.from("pedido_proveedor_condicion").select("proveedor_id, lista_precio_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("pedido_id", id),
+        supabase.from("bonificaciones").select("id, tipo, porcentaje, segmento, proveedor_id").eq("cliente_id", p.cliente_id).eq("activo", true).in("tipo", ["general", "viajante", "mercaderia", "contado"]),
+        supabase.from("pedido_marca_condicion").select("marca_id, lista_precio_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion, contado").eq("pedido_id", id),
+        supabase.from("pedido_proveedor_condicion").select("proveedor_id, lista_precio_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion, contado").eq("pedido_id", id),
         supabase.from("cliente_marca_condicion").select("marca_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("cliente_id", p.cliente_id),
         supabase.from("cliente_proveedor_condicion").select("proveedor_id, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, metodo_facturacion").eq("cliente_id", p.cliente_id),
       ])
-      const bonif = (bonifTodas || []).filter((b: any) => b.tipo === "mercaderia")
-      setBonifFicha(bonifTodas || [])
-      setBonifMercaderia(bonif)
-      // % efectivo: override del pedido (si lo tiene) o el mayor de la ficha del cliente
-      const pctFicha = bonif.reduce((m: number, b: any) => Math.max(m, b.porcentaje || 0), 0)
-      setBonifPct(p.bonif_mercaderia_pct != null ? p.bonif_mercaderia_pct : pctFicha)
+      // Pedido con condiciones CONGELADAS: la "ficha" es la que tenía el cliente al
+      // tomarlo (pedidos.condiciones_cliente), no la actual.
+      const congelada = p.condiciones_cliente && typeof p.condiciones_cliente === "object" ? p.condiciones_cliente : null
+      setBonifFicha(congelada ? (congelada.bonificaciones || []) : (bonifTodas || []).filter((b: any) => !b.proveedor_id))
+      const mt = p.bonif_mercaderia_pct != null ? String(p.bonif_mercaderia_pct) : ""
+      setMercTodo(mt)
+      setMercTodoInicial(mt)
 
       // Override "solo este pedido" → form
       const ovr = normalizarBonifPedido(p.bonif_pedido)
       const form: Record<string, string> = {}
-      for (const tipo of ["general", "viajante", "mercaderia"] as const)
+      for (const tipo of ["general", "viajante", "mercaderia", "contado"] as const)
         for (const seg of SEGMENTOS_BONIF) {
           const v = ovr?.[tipo]?.[seg]
           form[`${tipo}.${seg}`] = typeof v === "number" ? String(v) : ""
@@ -143,9 +141,10 @@ export default function PedidoEditPage() {
       const np = new Map((provs || []).map((x: any) => [x.id, x.nombre]))
       const conds: any[] = []
       const vistas = new Set<string>()
+      // Pedido congelado: rigen SOLO sus condiciones (las de la ficha ya se copiaron al tomarlo)
       for (const [origen, rows, ambito] of [
         ["pedido", cmPed || [], "marca"], ["pedido", cpPed || [], "proveedor"],
-        ["ficha", cmCli || [], "marca"], ["ficha", cpCli || [], "proveedor"],
+        ["ficha", congelada ? [] : cmCli || [], "marca"], ["ficha", congelada ? [] : cpCli || [], "proveedor"],
       ] as const) {
         for (const c of rows as any[]) {
           const refId = ambito === "marca" ? c.marca_id : c.proveedor_id
@@ -160,10 +159,11 @@ export default function PedidoEditPage() {
       const aRow = (c: any, refId: string, nombre: string) => ({
         ref_id: refId, nombre,
         lista_precio_id: c.lista_precio_id ?? null,
-        metodo_facturacion: c.metodo_facturacion || "Factura",
+        metodo_facturacion: c.metodo_facturacion || null,
         dto_general_pct: c.dto_general_pct ?? null,
         dto_viajante_pct: c.dto_viajante_pct ?? null,
         dto_mercaderia_pct: c.dto_mercaderia_pct ?? null,
+        contado: c.contado ?? null,
       })
       const segCargado = {
         proveedor: (cpPed || []).map((c: any) => aRow(c, c.proveedor_id, String(np.get(c.proveedor_id) || "Proveedor"))),
@@ -244,8 +244,12 @@ export default function PedidoEditPage() {
         lista_perf_plus_pedido_id: headerForm.lista_perf_plus_pedido_id || null,
         metodo_perf_plus_pedido: headerForm.metodo_perf_plus_pedido || null,
         observaciones: headerForm.observaciones || null,
-        bonif_mercaderia_pct: bonifPct || null,
         bonif_pedido: bonifPedidoDesdeForm(),
+      }
+      // Mercadería "todo el pedido": solo si se tocó ("" = hereda; 0 = sin mercadería en este pedido)
+      if (mercTodo.trim() !== mercTodoInicial.trim()) {
+        const n = Number(mercTodo.trim().replace(",", "."))
+        headerUpdate.bonif_mercaderia_pct = mercTodo.trim() === "" || !Number.isFinite(n) ? null : n
       }
       // El servidor aplica la traba por estado: si el pedido ya no es editable,
       // solo toma condicion_entrega (y el estado si es una transición válida).
@@ -275,7 +279,7 @@ export default function PedidoEditPage() {
         ] as const
         const cambioBonif =
           JSON.stringify(normalizarBonifPedido(headerUpdate.bonif_pedido)) !== JSON.stringify(normalizarBonifPedido((pedido as any)?.bonif_pedido))
-        const cambioPrecio = cambioBonif || CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
+        const cambioPrecio = cambioBonif || "bonif_mercaderia_pct" in headerUpdate || CAMPOS_PRECIO.some((k) => (headerUpdate[k] || null) !== ((pedido as any)?.[k] || null))
         if (cambioPrecio && !cambioCond && esPedidoEditable(headerForm.estado)) {
           await repreciarPedido(id)
         }
@@ -312,23 +316,11 @@ export default function PedidoEditPage() {
     }
   }
 
-  async function buscarProductosBonif(q: string) {
-    setQueryBonif(q)
-    if (q.length < 2) { setFoundBonif([]); return }
-    const { searchProductos } = await import("@/lib/actions/productos")
-    setFoundBonif((await searchProductos(q)) || [])
-  }
-
-  // ── Mercadería bonificada por monto (Feature 3) ──────────────────────────
-  // Monto a bonificar = Σ por segmento (neto del segmento × % mercadería del
-  // segmento). El % de cada segmento sale de: override "solo este pedido"
-  // (pedidos.bonif_pedido.mercaderia, app vendedor) > % general del pedido
-  // (bonif_mercaderia_pct, este input) > ficha del cliente por segmento.
-  // Unidades por artículo = round(monto / precio).
-  // Form de descuentos por segmento → jsonb bonif_pedido (null = hereda todo de la ficha)
+  // Form de descuentos por segmento → jsonb bonif_pedido (null = hereda todo de
+  // la ficha congelada del pedido). contado: "10" = sí · "0" = no · "" = hereda.
   function bonifPedidoDesdeForm() {
     const out: any = {}
-    for (const tipo of ["general", "viajante", "mercaderia"] as const) {
+    for (const tipo of ["general", "viajante", "mercaderia", "contado"] as const) {
       const seg: Record<string, number> = {}
       for (const s of SEGMENTOS_BONIF) {
         const raw = (bonifPedidoForm[`${tipo}.${s}`] ?? "").trim().replace(",", ".")
@@ -340,100 +332,12 @@ export default function PedidoEditPage() {
     }
     return normalizarBonifPedido(out)
   }
-  // % de la ficha para un tipo/segmento (segmento específico > "todos")
+  // % de la ficha (la congelada al tomar el pedido) para un tipo/segmento (segmento específico > "todos")
   function pctFicha(tipo: string, seg: SegmentoBonif): number | null {
     const esp = bonifFicha.find((b: any) => b.tipo === tipo && b.segmento === seg)
     if (esp) return Number(esp.porcentaje) || 0
     const todos = bonifFicha.find((b: any) => b.tipo === tipo && !b.segmento)
     return todos ? Number(todos.porcentaje) || 0 : null
-  }
-
-  function pctMercaderiaSeg(seg: SegmentoBonif): number {
-    const ovr = pedido?.bonif_pedido?.mercaderia
-    if (ovr && typeof ovr[seg] === "number") return ovr[seg]
-    if (pedido?.bonif_mercaderia_pct != null) return bonifPct || 0
-    const ficha = bonifMercaderia.find((b: any) => b.segmento === seg) || bonifMercaderia.find((b: any) => !b.segmento)
-    return ficha?.porcentaje ?? (bonifPct || 0)
-  }
-  const hayMercPorSegmento = () => {
-    const ovr = pedido?.bonif_pedido?.mercaderia
-    if (ovr && Object.keys(ovr).length) return true
-    return pedido?.bonif_mercaderia_pct == null && bonifMercaderia.some((b: any) => !!b.segmento)
-  }
-  function calcBonifTotals() {
-    const porSeg: Record<SegmentoBonif, { base: number; pct: number; monto: number }> = {
-      limpieza_bazar: { base: 0, pct: pctMercaderiaSeg("limpieza_bazar"), monto: 0 },
-      perf0: { base: 0, pct: pctMercaderiaSeg("perf0"), monto: 0 },
-      perf_plus: { base: 0, pct: pctMercaderiaSeg("perf_plus"), monto: 0 },
-    }
-    let totalNoBonif = 0
-    for (const i of items.filter(i => !i.es_bonificado)) {
-      const d = getDisplayItem(i)
-      const v = (d.precio_final || 0) * (d.cantidad || 0)
-      totalNoBonif += v
-      porSeg[detectarSegmentoBonif(i.articulos || {})].base += v
-    }
-    let monto = 0
-    for (const seg of SEGMENTOS_BONIF) {
-      porSeg[seg].monto = Math.round(porSeg[seg].base * porSeg[seg].pct / 100 * 100) / 100
-      monto += porSeg[seg].monto
-    }
-    monto = Math.round(monto * 100) / 100
-    const asignado = items.filter(i => i.es_bonificado).reduce((s, i) => s + ((i.precio_final || 0) * (i.cantidad || 0)), 0)
-    return {
-      totalNoBonif: Math.round(totalNoBonif * 100) / 100,
-      monto,
-      asignado: Math.round(asignado * 100) / 100,
-      restante: Math.round((monto - asignado) * 100) / 100,
-      porSeg,
-    }
-  }
-
-  async function agregarItemBonif(producto: any) {
-    if (!pedido?.cliente_id) { alert("El pedido no tiene cliente"); return }
-    setSavingBonif(true)
-    try {
-      // Si el usuario tipeó cantidad manual (>0) se respeta; si no, se calcula por monto.
-      let units = qtyBonif && qtyBonif > 0 ? qtyBonif : 0
-      if (!units) {
-        const { monto, asignado } = calcBonifTotals()
-        const restante = Math.max(0, monto - asignado)
-        const preview = await previewPrecioArticulo(pedido.cliente_id, producto.id, {})
-        const precio = preview.precio || 0
-        units = precio > 0 ? Math.round(restante / precio) : 0
-      }
-      if (units <= 0) { alert("No queda monto de bonificación para asignar. Subí el % o agregá artículos al pedido."); setSavingBonif(false); return }
-      await agregarItemBonificado(id, producto.id, units)
-      setQueryBonif(""); setFoundBonif([]); setQtyBonif(0)
-      await loadAll()
-    } catch (err: any) {
-      alert(err.message || "Error al agregar artículo bonificado")
-    } finally {
-      setSavingBonif(false)
-    }
-  }
-
-  // Recalcula cantidades de los artículos ya bonificados según el % y el total actual.
-  async function recalcularBonificados() {
-    setRecalcBonif(true)
-    try {
-      await supabase.from("pedidos").update({ bonif_mercaderia_pct: bonifPct }).eq("id", id)
-      const bonif = items.filter(i => i.es_bonificado)
-      if (bonif.length > 0) {
-        const { monto } = calcBonifTotals()
-        const share = monto / bonif.length
-        for (const bi of bonif) {
-          const precio = bi.precio_final || 0
-          const units = precio > 0 ? Math.round(share / precio) : 0
-          if (units > 0 && units !== bi.cantidad) await actualizarCantidadItem(bi.id, id, units)
-        }
-      }
-      await loadAll()
-    } catch (err: any) {
-      alert(err.message || "Error al recalcular bonificación")
-    } finally {
-      setRecalcBonif(false)
-    }
   }
 
   async function eliminarItem(itemId: string, descripcion: string) {
@@ -472,13 +376,15 @@ export default function PedidoEditPage() {
     v === "transporte" ? "Transporte" :
     v === "entregamos_nosotros" ? "Entregamos Nosotros" : null
 
-  const defaultMetodo   = c?.metodo_facturacion || "—"
-  const defaultLista    = listaName(c?.lista_precio_id) || "Sin lista"
+  // "Del cliente" = la ficha CONGELADA al tomar el pedido (si la tiene)
+  const fc = (pedido as any)?.condiciones_cliente?.cliente || c
+  const defaultMetodo   = fc?.metodo_facturacion || "—"
+  const defaultLista    = listaName(fc?.lista_precio_id) || "Sin lista"
   const defaultEntrega  = entregaLabel(c?.condicion_entrega) || "—"
   const defaultVendedor = vendedores.find(v => v.id === c?.vendedor_id)?.nombre || "Sin vendedor"
-  const defaultLimpiezaLista = listaName(c?.lista_limpieza_id) || defaultLista
-  const defaultPerf0Lista    = listaName(c?.lista_perf0_id)    || defaultLista
-  const defaultPerfPlusLista = listaName(c?.lista_perf_plus_id) || defaultLista
+  const defaultLimpiezaLista = listaName(fc?.lista_limpieza_id) || defaultLista
+  const defaultPerf0Lista    = listaName(fc?.lista_perf0_id)    || defaultLista
+  const defaultPerfPlusLista = listaName(fc?.lista_perf_plus_id) || defaultLista
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -660,7 +566,7 @@ export default function PedidoEditPage() {
                 <div className="flex items-baseline justify-between mb-3">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Descuentos por segmento</p>
                   <p className="text-[11px] text-slate-400">
-                    Vacío = hereda de la ficha del cliente. Al guardar se re-precian los renglones y se actualiza el kardex.
+                    Vacío = hereda de la ficha (la que tenía el cliente al tomar el pedido). Al guardar se re-precian los renglones con los precios del pedido.
                   </p>
                 </div>
                 <div className="overflow-x-auto">
@@ -671,6 +577,7 @@ export default function PedidoEditPage() {
                         <th className="text-center font-bold pb-2 w-36 text-indigo-700">General</th>
                         <th className="text-center font-bold pb-2 w-36 text-orange-700">Viajante</th>
                         <th className="text-center font-bold pb-2 w-36 text-green-700">Mercadería</th>
+                        <th className="text-center font-bold pb-2 w-36 text-purple-700">Contado 10%</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -697,10 +604,33 @@ export default function PedidoEditPage() {
                               </td>
                             )
                           })}
+                          <td className="py-1.5 px-2">
+                            <Select
+                              value={bonifPedidoForm[`contado.${seg}`] || "__hereda__"}
+                              onValueChange={(v) => setBonifPedidoForm((prev) => ({ ...prev, [`contado.${seg}`]: v === "__hereda__" ? "" : v }))}
+                              disabled={!editable}
+                            >
+                              <SelectTrigger className={`h-8 text-xs ${bonifPedidoForm[`contado.${seg}`] ? "border-amber-400 bg-amber-50" : ""}`}><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__hereda__">Hereda ({(pctFicha("contado", seg) || 0) > 0 ? "sí" : "no"})</SelectItem>
+                                <SelectItem value="10">Sí</SelectItem>
+                                <SelectItem value="0">No</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <Label className="text-xs text-slate-500">Mercadería bonificada en TODO el pedido</Label>
+                  <div className="relative w-28">
+                    <Input className={`h-8 text-right pr-6 tabular-nums ${mercTodo !== "" ? "border-amber-400 bg-amber-50" : ""}`} value={mercTodo} placeholder="hereda" disabled={!editable} inputMode="decimal"
+                      onChange={(e) => setMercTodo(e.target.value.replace(/[^\d.,]/g, ""))} />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">%</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400">Vacío = hereda · los % por segmento de arriba ganan sobre este.</span>
                 </div>
                 {/* Condiciones por marca / proveedor: las de la FICHA se ven; las del PEDIDO se editan
                     (solo este pedido, pisan a la ficha para esa mercadería y se facturan aparte). */}
@@ -731,103 +661,13 @@ export default function PedidoEditPage() {
           )}
         </div>
 
-        {/* Mercadería bonificada — el panel SOLO aparece si el pedido lleva
-            bonificados, o si se abre manualmente para agregar (no confunde en
-            pedidos sin mercadería bonificada). */}
-        {(() => {
-          const hasBonif = items.some(i => i.es_bonificado)
-          if (!hasBonif && !editable) return null
-          if (!hasBonif && !showBonifPanel) {
-            return (
-              <button
-                type="button"
-                onClick={() => setShowBonifPanel(true)}
-                className="text-xs font-medium text-amber-700 hover:text-amber-800 hover:underline self-start flex items-center gap-1"
-              >
-                <Package className="h-3.5 w-3.5" /> Agregar mercadería bonificada
-              </button>
-            )
-          }
-          const bt = calcBonifTotals()
-          return (
-          <>
-            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
-              <Package className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-amber-800">Mercadería bonificada</p>
-                <p className="text-xs text-amber-600 mt-0.5">
-                  El monto a bonificar = neto de cada segmento × % mercadería del segmento. Las unidades de cada artículo se calculan
-                  para acercarse a ese monto (precio de lista, 100% bonificado).
-                  {hayMercPorSegmento() ? (
-                    <>
-                      {" "}% por segmento {pedido?.bonif_pedido?.mercaderia ? "(solo este pedido, app vendedor)" : "(ficha del cliente)"}:{" "}
-                      {SEGMENTOS_BONIF.map((s, i) => (
-                        <span key={s}>{i > 0 ? " · " : ""}{SEGMENTO_LABEL[s]} <b>{bt.porSeg[s].pct}%</b></span>
-                      ))}
-                      . Un % general cargado acá vale para los segmentos sin % propio de este pedido (y pisa la ficha).
-                    </>
-                  ) : (
-                    bonifMercaderia.length > 0 && <> El cliente tiene <b>{bonifPct}%</b> preasignado.</>
-                  )}
-                </p>
-              </div>
-            </div>
-
-            {editable && (
-            <div className="bg-white rounded-2xl border border-amber-200 p-5 shadow-sm space-y-4">
-              <div className="flex items-end gap-4 flex-wrap">
-                <div>
-                  <Label className="text-xs text-amber-700">% Mercadería bonificada</Label>
-                  <Input type="number" step="0.01" min={0} max={100} className="h-9 w-28 text-center font-semibold"
-                    value={bonifPct || ""} onChange={(e) => setBonifPct(parseFloat(e.target.value) || 0)} />
-                </div>
-                <div className="text-xs text-slate-600 space-y-0.5">
-                  <p>Base (sin bonificados): <b>${bt.totalNoBonif.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</b></p>
-                  <p>Monto a bonificar: <b className="text-amber-700">${bt.monto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</b></p>
-                  <p>Asignado: ${bt.asignado.toLocaleString("es-AR", { minimumFractionDigits: 2 })} · Saldo sin usar: <b className={bt.restante > 0.01 ? "text-orange-600" : "text-green-600"}>${bt.restante.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</b></p>
-                </div>
-                <Button type="button" size="sm" variant="outline" className="h-9 border-amber-300 text-amber-700 hover:bg-amber-50 ml-auto" onClick={recalcularBonificados} disabled={recalcBonif}>
-                  {recalcBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
-                  Recalcular cantidades
-                </Button>
-              </div>
-
-              <div className="flex gap-3">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input
-                    placeholder="Buscar artículo a bonificar..."
-                    className="pl-9 h-10"
-                    value={queryBonif}
-                    onChange={(e) => buscarProductosBonif(e.target.value)}
-                  />
-                  {foundBonif.length > 0 && (
-                    <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[260px] overflow-auto">
-                      {foundBonif.map((p: any) => (
-                        <div key={p.id}
-                          className="px-4 py-3 hover:bg-amber-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
-                          onClick={() => agregarItemBonif(p)}>
-                          <ArticuloResultRow articulo={p} size="sm" />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number" min={0} className="h-10 w-24 text-center font-semibold" placeholder="auto"
-                    value={qtyBonif || ""} onChange={(e) => setQtyBonif(parseInt(e.target.value) || 0)}
-                  />
-                  <span className="text-sm text-slate-400">uds.</span>
-                </div>
-                {savingBonif && <Loader2 className="h-5 w-5 animate-spin text-amber-600 self-center" />}
-              </div>
-              <p className="text-[11px] text-slate-400">Dejá las unidades en "auto" para que se calculen por monto, o tipeá una cantidad fija.</p>
-            </div>
-            )}
-          </>
-          )
-        })()}
+        {/* Mercadería bonificada por cupo (todo el pedido / segmento / proveedor / marca) */}
+        <MercaderiaCuposPedido
+          pedidoId={id}
+          editable={editable}
+          itemsBonificados={items.filter(i => i.es_bonificado)}
+          onCambio={loadAll}
+        />
 
         {/* Lista de artículos */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">

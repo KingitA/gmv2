@@ -14,7 +14,7 @@ import type { DatosLista, DescuentoTipado } from "./calculator"
 import { detectarSegmento, type BonifPedido, type Segmento } from "./segmento"
 import {
   toMetodoFacturacion,
-  resolverListaSegmento,
+  resolverListaMetodoConCondicion,
   resolverCondSegmento,
   resolverBonifItem,
   bonifGeneralViajanteDesdeFilas,
@@ -136,16 +136,7 @@ export function prepararMotorCliente(insumos: InsumosCliente, overrides: Overrid
     precio(articulo: ArticuloMotor): PrecioArticuloCliente {
       const segmento = detectarSegmento(articulo)
       const { cond } = resolverCondSegmento(articulo, condProv, condMarca)
-      let listaId: string | null
-      let metodoRaw: string
-      if (cond) {
-        listaId = cond.lista_precio_id
-        metodoRaw = cond.metodo_facturacion || "Final"
-      } else {
-        const r = resolverListaSegmento(segmento, overrides, insumos.cliente)
-        listaId = r.listaId
-        metodoRaw = r.metodoRaw
-      }
+      const { listaId, metodoRaw } = resolverListaMetodoConCondicion(segmento, cond, overrides, insumos.cliente)
       const bonif = resolverBonifItem(cond, general, viajante, segmento)
       const p = calcularPrecioPedido(articulo, datosLista(listaId), toMetodoFacturacion(metodoRaw), bonif)
       return {

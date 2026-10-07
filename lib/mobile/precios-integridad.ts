@@ -62,7 +62,7 @@ export async function insumosAFecha(admin: any, clienteId: string, articuloIds: 
     admin.from("listas_precio_reglas").select("id,grupo_precio,iva_compras,iva_ventas,formulas"),
     admin.from("cliente_proveedor_condicion").select(`id,${CONDICION_PROVEEDOR_COLS}`).eq("cliente_id", clienteId),
     admin.from("cliente_marca_condicion").select(`id,${CONDICION_MARCA_COLS}`).eq("cliente_id", clienteId),
-    admin.from("bonificaciones").select("id,tipo,segmento,porcentaje,activo").eq("cliente_id", clienteId),
+    admin.from("bonificaciones").select("id,tipo,segmento,porcentaje,activo,proveedor_id").eq("cliente_id", clienteId),
     admin.from("articulos").select(ARTICULO_PRECIO_COLS).in("id", articuloIds),
     admin.from("articulos_descuentos").select("id,articulo_id,tipo,porcentaje,orden").in("articulo_id", articuloIds),
   ])
@@ -95,8 +95,11 @@ export async function insumosAFecha(admin: any, clienteId: string, articuloIds: 
     reglas: at("listas_precio_reglas", reglasRes.data, hReglas),
     condicionesProveedor: at("cliente_proveedor_condicion", cpRes.data, hCp),
     condicionesMarca: at("cliente_marca_condicion", cmRes.data, hCm),
+    // Todos los tipos de la ficha: el motor de precio solo usa general/viajante
+    // (filtra por tipo), y la ficha congelada del pedido necesita además
+    // mercadería y contado (lib/pedidos/condiciones-pedido.ts).
     bonificaciones: at("bonificaciones", boRes.data, hBo).filter(
-      (b: any) => b.activo !== false && (b.tipo === "general" || b.tipo === "viajante"),
+      (b: any) => b.activo !== false && !b.proveedor_id && ["general", "viajante", "mercaderia", "contado"].includes(b.tipo),
     ),
   }
   const descuentos = at("articulos_descuentos", descRes.data, hDesc)

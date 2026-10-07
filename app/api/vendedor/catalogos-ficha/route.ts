@@ -37,7 +37,9 @@ export async function GET() {
       condiciones_entrega: entregaCat || [],
       zonas: zonas || [],
       localidades: localidades || [],
-      listas_precio: listas || [],
+      // Solo las listas del vendedor (Neco + las de sus viajantes): las demás se
+      // asignan desde el ERP. La app instalada ya filtra con esto (dato del servidor).
+      listas_precio: (listas || []).filter((l: any) => session.listasPermitidas.includes(l.id)),
       // lista_precio_id / lista_nombre: si el viajante impone lista, la UI
       // oculta el selector de lista y muestra "Lista: X (por viajante)"
       vendedores: (vendedores || []).map((v: any) => ({

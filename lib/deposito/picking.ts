@@ -13,7 +13,8 @@
  */
 
 import { nowArgentina } from "@/lib/utils"
-import { calcularBonificados, estadoItemPicking } from "./bonificados"
+import { estadoItemPicking } from "./bonificados"
+import { recalcularBonificadosPedido } from "@/lib/pedidos/mercaderia-bonificada"
 import { getOCrearSesion, getPreparadoresPedido, getUsuarioActual } from "./preparadores"
 
 export const ESTADOS_PREPARABLES = ["pendiente", "en_preparacion", "impreso"]
@@ -65,38 +66,12 @@ export async function abrirPicking(supabase: any, pedido_id: string, usuarioDado
 
 /**
  * Recalcula EN VIVO las cantidades de los artículos bonificados de un pedido
- * según lo realmente preparado. Devuelve [{ id, cantidad }] para la UI.
+ * según lo realmente preparado, cupo por cupo (lib/pedidos/mercaderia-bonificada.ts).
+ * Mientras se prepara es una estimación; al cerrar el picking queda fija.
+ * Devuelve [{ id, cantidad }] para la UI.
  */
 export async function recalcularBonificados(supabase: any, pedido_id: string) {
-  const [{ data: pedido }, { data: dets }] = await Promise.all([
-    supabase.from("pedidos").select("bonif_mercaderia_pct").eq("id", pedido_id).single(),
-    supabase
-      .from("pedidos_detalle")
-      .select("id, cantidad, cantidad_preparada, precio_base, lista_precio_id, es_bonificado")
-      .eq("pedido_id", pedido_id),
-  ])
-  const lineas = (dets || []) as any[]
-  if (!lineas.some((d) => d.es_bonificado)) return []
-  const pct = Number(pedido?.bonif_mercaderia_pct ?? 0)
-  // Lista especial: sus artículos NO entran en la base de bonificación.
-  let especialId: string | null = null
-  if (pct > 0) {
-    const { data: especial } = await supabase.from("listas_precio").select("id").eq("codigo", "especial").maybeSingle()
-    especialId = especial?.id ?? null
-  }
-  const calc = calcularBonificados(
-    pct,
-    lineas.map((d) => ({ ...d, excluye_bonif: !!especialId && d.lista_precio_id === especialId })),
-  )
-  for (const b of calc) {
-    if (b.cambia) {
-      await supabase
-        .from("pedidos_detalle")
-        .update({ cantidad: b.cantidad, cantidad_preparada: b.cantidad, estado_item: "COMPLETO" })
-        .eq("id", b.id)
-    }
-  }
-  return calc.map((b) => ({ id: b.id, cantidad: b.cantidad }))
+  return recalcularBonificadosPedido(supabase, pedido_id, { enPicking: true })
 }
 
 export interface ArgsPickingItem {
@@ -223,6 +198,11 @@ export async function cerrarPicking(supabase: any, pedido_id: string) {
     const { resumen } = await getPreparadoresPedido(supabase, pedido_id)
     return { ok: true, ya_cerrado: true, preparadores: resumen }
   }
+
+  // Mercadería bonificada: la cantidad queda FIJA sobre lo que realmente va
+  // (todos los renglones ya resueltos). Va antes del control de pendientes:
+  // deja preparados los renglones bonificados.
+  await recalcularBonificadosPedido(supabase, pedido_id, { enPicking: true })
 
   // Verificar que no haya items PENDIENTE
   const { data: items } = await supabase.from("pedidos_detalle").select("id, estado_item").eq("pedido_id", pedido_id)

@@ -14,7 +14,6 @@ import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, 
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
-import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
 import { formatDateAR } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ImportClientesDialog, clientesFieldLabel } from "@/components/clientes/ImportClientesDialog"
@@ -79,8 +78,6 @@ export default function ClientesPage() {
   // el array ya cargado por esos ids (no cambia la forma de la tabla).
   const [searchIds, setSearchIds] = useState<Set<string> | null>(null)
   const [bonificaciones, setBonificaciones] = useState<any[]>([])
-  const [proveedores, setProveedores] = useState<any[]>([])
-  const [newBonif, setNewBonif] = useState({ tipo: "general", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
   const [formData, setFormData] = useState({
     codigo_cliente: "",
     nombre_razon_social: "",
@@ -115,7 +112,6 @@ export default function ClientesPage() {
     loadVendedores()
     loadLocalidades()
     loadListasPrecio()
-    loadProveedores()
   }, [])
 
   // Búsqueda vía motor unificado (trigram + vector). Devuelve ids; filtramos local.
@@ -183,43 +179,10 @@ export default function ClientesPage() {
     setListasPrecio(data || [])
   }
 
-  async function loadProveedores() {
-    const supabase = createClient()
-    const { data } = await supabase.from("proveedores").select("id, nombre").eq("activo", true).order("nombre")
-    setProveedores(data || [])
-  }
-
   async function loadBonificaciones(clienteId: string) {
     const supabase = createClient()
     const { data } = await supabase.from("bonificaciones").select("*, proveedores(nombre)").eq("cliente_id", clienteId).order("created_at")
     setBonificaciones(data || [])
-  }
-
-  async function addBonificacion(clienteId: string) {
-    if (!newBonif.porcentaje || isNaN(parseFloat(newBonif.porcentaje))) return
-    const supabase = createClient()
-    await supabase.from("bonificaciones").insert({
-      cliente_id: clienteId,
-      tipo: newBonif.tipo,
-      porcentaje: parseFloat(newBonif.porcentaje),
-      segmento: newBonif.segmento || null,
-      proveedor_id: newBonif.proveedor_id || null,
-      observaciones: newBonif.observaciones || null,
-    })
-    setNewBonif({ tipo: "general", porcentaje: "", segmento: "", proveedor_id: "", observaciones: "" })
-    loadBonificaciones(clienteId)
-  }
-
-  async function toggleBonificacion(id: string, activo: boolean, clienteId: string) {
-    const supabase = createClient()
-    await supabase.from("bonificaciones").update({ activo }).eq("id", id)
-    loadBonificaciones(clienteId)
-  }
-
-  async function deleteBonificacion(id: string, clienteId: string) {
-    const supabase = createClient()
-    await supabase.from("bonificaciones").delete().eq("id", id)
-    loadBonificaciones(clienteId)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -250,13 +213,8 @@ export default function ClientesPage() {
         return
       }
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id: editingCliente.id }) }).catch(() => {})
-      // Lista/método/vendedor definen el precio: re-preciar pedidos abiertos del cliente
-      try {
-        const r = await repreciarPedidosAbiertosCliente(editingCliente.id)
-        if (r.repreciados > 0) alert(`Se re-preciaron ${r.repreciados} pedido(s) abierto(s) del cliente con la nueva configuración.`)
-      } catch (e: any) {
-        alert(`Cliente guardado, pero no se pudieron re-preciar los pedidos abiertos: ${e?.message || e}`)
-      }
+      // Los pedidos ya tomados NO se re-precian: su precio se cerró al tomarlos.
+      // La ficha nueva rige desde el próximo pedido (Repreciar, en el pedido).
     } else {
       const { data: newCliente, error } = await supabase.from("clientes").insert(dataToSave).select("id").single()
 
@@ -706,10 +664,11 @@ export default function ClientesPage() {
                         <div>
                           <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Bonificaciones</p>
 
-                          {/* Lista de bonificaciones existentes */}
-                          {bonificaciones.length > 0 && (
+                          {/* Solo lectura: los descuentos y el contado se editan en la ficha del
+                              cliente (un solo camino de guardado: lib/actions/condiciones-cliente.ts). */}
+                          {bonificaciones.filter((b: any) => b.activo).length > 0 ? (
                             <div className="flex flex-wrap gap-2 mb-3">
-                              {bonificaciones.map((b: any) => (
+                              {bonificaciones.filter((b: any) => b.activo).map((b: any) => (
                                 <div key={b.id} className={`flex items-center gap-1.5 border rounded-full px-3 py-1 text-sm font-medium ${!b.activo ? "opacity-40" : ""} ${
                                   b.tipo === "mercaderia" ? "border-green-300 bg-green-50 text-green-800" :
                                   b.tipo === "general"   ? "border-blue-300 bg-blue-50 text-blue-800" :
@@ -719,63 +678,17 @@ export default function ClientesPage() {
                                   <span className="font-bold">{b.porcentaje}%</span>
                                   {b.segmento && <span className="text-xs opacity-70">· {b.segmento}</span>}
                                   {b.proveedores?.nombre && <span className="text-xs opacity-70 truncate max-w-[80px]">· {b.proveedores.nombre}</span>}
-                                  <button type="button" onClick={() => toggleBonificacion(b.id, !b.activo, editingCliente.id)} className="ml-0.5 opacity-60 hover:opacity-100 text-xs">
-                                    {b.activo ? "●" : "○"}
-                                  </button>
-                                  <button type="button" onClick={() => deleteBonificacion(b.id, editingCliente.id)} className="opacity-50 hover:opacity-100 hover:text-red-600">
-                                    <X className="h-3 w-3" />
-                                  </button>
                                 </div>
                               ))}
                             </div>
+                          ) : (
+                            <p className="text-xs text-slate-400 mb-2">Sin descuentos cargados.</p>
                           )}
+                          <Link href={`/clientes/${editingCliente.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:underline">
+                            <ExternalLink className="h-3 w-3" />
+                            Editar descuentos, contado y condiciones en la ficha del cliente
+                          </Link>
 
-                          {/* Nueva bonificación */}
-                          <div className="flex items-end gap-2">
-                            <div className="w-28">
-                              <Label className="text-xs text-slate-500">Tipo</Label>
-                              <Select value={newBonif.tipo} onValueChange={(v) => setNewBonif({ ...newBonif, tipo: v })}>
-                                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="mercaderia">Mercadería</SelectItem>
-                                  <SelectItem value="general">General</SelectItem>
-                                  <SelectItem value="viajante">Viajante</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="w-20">
-                              <Label className="text-xs text-slate-500">% *</Label>
-                              <Input className="h-8 text-xs" type="number" step="0.01" min="0.01" max="100" placeholder="5" value={newBonif.porcentaje} onChange={(e) => setNewBonif({ ...newBonif, porcentaje: e.target.value })} />
-                            </div>
-                            <div className="w-36">
-                              <Label className="text-xs text-slate-500">Segmento</Label>
-                              <Select value={newBonif.segmento || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, segmento: v === "__none__" ? "" : v })}>
-                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">Todos</SelectItem>
-                                  <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
-                                  <SelectItem value="perfumeria">Perfumería</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="w-36">
-                              <Label className="text-xs text-slate-500">Proveedor</Label>
-                              <Select value={newBonif.proveedor_id || "__none__"} onValueChange={(v) => setNewBonif({ ...newBonif, proveedor_id: v === "__none__" ? "" : v })}>
-                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">Todos</SelectItem>
-                                  {proveedores.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="flex-1">
-                              <Label className="text-xs text-slate-500">Obs.</Label>
-                              <Input className="h-8 text-xs" placeholder="opcional" value={newBonif.observaciones} onChange={(e) => setNewBonif({ ...newBonif, observaciones: e.target.value })} />
-                            </div>
-                            <Button type="button" size="sm" className="h-8 px-3 shrink-0" onClick={() => addBonificacion(editingCliente.id)} disabled={!newBonif.porcentaje}>
-                              <Plus className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
                         </div>
                       )}
 

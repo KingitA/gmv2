@@ -358,17 +358,21 @@ export default function ArticulosPage() {
   const normIvaV=(v:any)=>v==="presupuesto"?"presupuesto":v==="0"?"presupuesto":"factura"
   const ofa=(a:any)=>{ setFa(a); setRubroQ(""); setCatQ(""); setSubcatQ(""); setFf({descripcion:a.descripcion||"",sku:a.sku||"",ean13:Array.isArray(a.ean13)?a.ean13:(a.ean13?[a.ean13]:[]),unidades_por_bulto:a.unidades_por_bulto||1,unidad_de_medida:a.unidad_de_medida||"",marca_id:a.marca_id||null,categoria:a.categoria||"",subcategoria:a.subcategoria||"",rubro:a.rubro||"",rubro_id:a.rubro_id||null,precio_compra:a.precio_compra||0,porcentaje_ganancia:a.porcentaje_ganancia||0,bonif_recargo:a.bonif_recargo||0,iva_compras:normIvaC(a.iva_compras),iva_ventas:normIvaV(a.iva_ventas),proveedor_id:a.proveedor_id||null,orden_deposito:a.orden_deposito||0,precio_base:a.precio_base??null,precio_base_contado:a.precio_base_contado??null,precio_lista_especial:a.precio_lista_especial??null,oferta_lista_especial:a.oferta_lista_especial??null,descuento_propio:a.descuento_propio??0,imagen_url:a.imagen_url||"",tipo_fraccion:a.tipo_fraccion||"",cantidad_fraccion:a.cantidad_fraccion??null,segmento_precio:a.segmento_precio??null}) }
   const openNew=()=>{ setFa({id:"__new__"}); setFf({...BLANK_FF}) }
+  // Campos con FK a catálogos (tipos_bulto / tipos_fraccion): "" no existe en la
+  // tabla referida → la base rechaza el guardado. Vacío = null.
+  const FK_TEXTO=["unidad_de_medida","tipo_fraccion"] as const
+  const sinVaciosFK=<T extends Record<string,any>>(o:T):T=>{ const r:Record<string,any>={...o}; for(const k of FK_TEXTO) if(k in r && (r[k]===""||r[k]===undefined)) r[k]=null; return r as T }
   const sfa=async()=>{
     if(!fa) return; setFs(true)
     const isNew=fa.id==="__new__"
     if(isNew){
       if(!ff.sku.trim()||!ff.descripcion.trim()){ alert("SKU y Descripción son obligatorios"); setFs(false); return }
-      const{data:newArt,error}=await sb.from("articulos").insert({...ff,activo:true}).select("id").single()
+      const{data:newArt,error}=await sb.from("articulos").insert({...sinVaciosFK(ff),activo:true}).select("id").single()
       if(error){ alert(`Error: ${error.message}`); setFs(false); return }
       if(newArt?.id) fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:newArt.id})}).catch(()=>{})
       setFa(null); load()
     } else {
-      const{error}=await sb.from("articulos").update(ff).eq("id",fa.id)
+      const{error}=await sb.from("articulos").update(sinVaciosFK(ff)).eq("id",fa.id)
       if(!error){
         const prov=provs.find((p:any)=>p.id===ff.proveedor_id)
         const marc=marcas.find((m:any)=>m.id===ff.marca_id)
@@ -487,6 +491,7 @@ export default function ArticulosPage() {
     setBulkSaving(true)
     const updates:Record<string,any>={}
     for(const f of bulkFields) updates[f]=bulkVals[f]??null
+    for(const k of FK_TEXTO) if(updates[k]==="") updates[k]=null
     // Rubro / Categoría / Subcategoría van juntos (cascada) y se guardan igual que la ficha:
     // rubro (texto) + rubro_id + categoria/subcategoria (texto); el trigger sincroniza los FK.
     if(bulkFields.has("taxonomia")){

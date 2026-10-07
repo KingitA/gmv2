@@ -13,8 +13,9 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { ShoppingCart, PackageCheck, Undo2, Trash2, Search, Loader2, Printer } from "lucide-react"
 import { searchProductos } from "@/lib/actions/productos"
-import { previewPrecioArticulo } from "@/lib/actions/pedidos"
+import { previewPrecioArticulo, previewPreciosArticulos } from "@/lib/actions/pedidos"
 import { createClient as createSupabase } from "@/lib/supabase/client"
+import { CondicionesPedidoPanel, useCondicionesPedido } from "@/components/pedidos/CondicionesPedidoPanel"
 
 const fmt = (n: number) =>
   n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
@@ -50,6 +51,10 @@ export default function MostradorPage() {
   const [vendiendo, setVendiendo] = useState(false)
   const [ultimaVenta, setUltimaVenta] = useState<any>(null)
   const prodTimer = useRef<any>(null)
+  // Condiciones de la venta (panel compartido con la importación y el alta manual)
+  const cond = useCondicionesPedido(cliente?.id)
+  const [verCondiciones, setVerCondiciones] = useState(false)
+  const ventaKeyRef = useRef<string | null>(null)
 
   // ── Para retirar ──
   const [paraRetirar, setParaRetirar] = useState<any[]>([])
@@ -102,10 +107,31 @@ export default function MostradorPage() {
   }, [])
   useEffect(() => { cargarParaRetirar() }, [cargarParaRetirar])
 
+  // Re-cotizar la venta cuando cambian las condiciones (precio mostrado = precio facturado)
+  const firmaCond = JSON.stringify(cond.form ? cond.condiciones() : null)
+  useEffect(() => {
+    if (!cliente || !items.length || cond.errorLista) return
+    let vivo = true
+    previewPreciosArticulos(cliente.id, items.map((i) => i.producto_id), cond.condiciones() as any)
+      .then((precios) => {
+        if (!vivo) return
+        const m = new Map(precios.map((p) => [p.articulo_id, p.precio]))
+        setItems((prev) => prev.map((i) => (m.has(i.producto_id) ? { ...i, precio_unitario: m.get(i.producto_id)! } : i)))
+      })
+      .catch(() => {})
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmaCond, cliente?.id])
+
   // ── Agregar artículo con precio en vivo ──
   const agregarItem = async (prod: any) => {
     if (!cliente) {
       toast({ variant: "destructive", title: "Elegí el cliente primero" })
+      return
+    }
+    if (cond.errorLista) {
+      toast({ variant: "destructive", title: "Sin lista de precios", description: cond.errorLista })
+      setVerCondiciones(true)
       return
     }
     setProdQuery("")
@@ -114,11 +140,17 @@ export default function MostradorPage() {
       setItems((prev) => prev.map((i) => i.producto_id === prod.id ? { ...i, cantidad: i.cantidad + 1 } : i))
       return
     }
-    let precio = Number(prod.precio_base || 0)
+    // Precio del motor con las condiciones de la venta. Sin precio calculable
+    // no se agrega (nunca un precio aproximado).
+    let precio: number
     try {
-      const preview = await previewPrecioArticulo(cliente.id, prod.id)
-      if (preview?.precio != null) precio = Number(preview.precio)
-    } catch { /* usa precio_base */ }
+      const preview = await previewPrecioArticulo(cliente.id, prod.id, cond.condiciones() as any)
+      precio = Number(preview.precio)
+      if (!(precio > 0)) throw new Error("sin precio")
+    } catch {
+      toast({ variant: "destructive", title: "Sin precio", description: `${prod.descripcion}: no tiene precio para este cliente.` })
+      return
+    }
     setItems((prev) => [...prev, {
       producto_id: prod.id,
       descripcion: prod.descripcion,
@@ -131,23 +163,36 @@ export default function MostradorPage() {
   // ── Facturar y cobrar ──
   const facturarYCobrar = async () => {
     if (!cliente || !items.length) return
+    if (cond.bloqueo) { toast({ variant: "destructive", title: "Revisá las condiciones", description: cond.bloqueo }); setVerCondiciones(true); return }
+    if (cond.sinArticulos.length) {
+      toast({ variant: "destructive", title: "Falta la mercadería bonificada", description: `Elegí qué regalar en: ${cond.sinArticulos.join(", ")}` })
+      setVerCondiciones(true)
+      return
+    }
     setVendiendo(true)
     setUltimaVenta(null)
+    // Una clave por venta: un reintento del cobro (doble click, corte) no lo duplica
+    ventaKeyRef.current ||= crypto.randomUUID()
     try {
+      await cond.guardarFichaSiCorresponde()
       const res = await fetch("/api/mostrador/venta", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cliente_id: cliente.id,
           items: items.map((i) => ({ producto_id: i.producto_id, cantidad: i.cantidad })),
-          metodos: [{ tipo: metodoTipo, monto: total }],
+          // El monto lo fija el servidor: se cobra lo realmente facturado
+          metodos: [{ tipo: metodoTipo }],
+          condiciones: cond.condiciones(),
+          idempotency_key: ventaKeyRef.current,
         }),
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error)
+      ventaKeyRef.current = null
       setUltimaVenta(d)
       setItems([])
-      toast({ title: d.mensaje })
+      toast({ title: d.mensaje, description: d.aviso })
       cargarParaRetirar()
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error", description: e.message })
@@ -237,7 +282,7 @@ export default function MostradorPage() {
             {cliente ? (
               <div className="flex items-center justify-between border-2 border-primary/40 rounded-lg px-3 py-2 bg-primary/5">
                 <span className="font-semibold truncate">{cliente.nombre}</span>
-                <Button variant="ghost" size="sm" onClick={() => setCliente(null)}>Cambiar</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setCliente(null); setItems([]) }}>Cambiar</Button>
               </div>
             ) : (
               <>
@@ -281,6 +326,19 @@ export default function MostradorPage() {
 
           {/* ══ VENTA ══ */}
           <TabsContent value="venta" className="mt-4 space-y-4">
+            {cliente && (
+              <Card>
+                <CardContent className="pt-4 space-y-3">
+                  <button type="button" className="text-sm font-semibold text-slate-700 hover:underline" onClick={() => setVerCondiciones((v) => !v)}>
+                    {verCondiciones ? "▾" : "▸"} Condiciones de la venta (lista, facturación, descuentos, contado)
+                  </button>
+                  {(cond.errorLista || cond.bloqueo) && !verCondiciones && (
+                    <p className="text-xs text-red-700">{cond.errorLista || cond.bloqueo}</p>
+                  )}
+                  {verCondiciones && <CondicionesPedidoPanel estado={cond} exigirMercaderia />}
+                </CardContent>
+              </Card>
+            )}
             <div className="relative max-w-xl">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -346,7 +404,7 @@ export default function MostradorPage() {
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <p className="text-xs text-muted-foreground">Total estimado (el motor fija el final)</p>
+                        <p className="text-xs text-muted-foreground">Total sin percepciones — se cobra lo facturado{cond.form && Object.values(cond.form.contado).some(Boolean) ? " (menos la NC del 10% contado)" : ""}</p>
                         <p className="text-2xl font-bold">{fmt(total)}</p>
                       </div>
                       <Button size="lg" onClick={facturarYCobrar} disabled={vendiendo}>
@@ -367,7 +425,9 @@ export default function MostradorPage() {
                       ✓ {ultimaVenta.mensaje} {ultimaVenta.numero_recibo && `· Recibo ${ultimaVenta.numero_recibo}`}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {ultimaVenta.comprobantes?.map((c: any) => `${c.tipo} ${c.numero}`).join(", ")} — {fmt(ultimaVenta.total_facturado)}
+                      {ultimaVenta.comprobantes?.map((c: any) => `${c.tipo} ${c.numero}`).join(", ")} — facturado {fmt(ultimaVenta.total_facturado)}
+                      {ultimaVenta.nc_contado > 0 && ` · NC contado ${fmt(ultimaVenta.nc_contado)}`}
+                      {` · cobrado ${fmt(ultimaVenta.total_cobrado ?? 0)}`}
                     </p>
                   </div>
                   {ultimaVenta.comprobantes?.[0]?.pdf_url && (

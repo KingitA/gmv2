@@ -28,19 +28,25 @@ export function topeAjuste(totalSeleccionado: number): number {
 }
 
 // ─── 10 % contado ────────────────────────────────────────────────────────────
-// REGLA (01/10, caso Urquiza PRES 3): la NC del 10% se calcula sobre lo que se
-// está saldando HOY de cada comprobante (lo seleccionado en ESTE cobro), nunca
-// sobre entregas a cuenta sin tildar ni sobre el total histórico. Si un
-// comprobante se completa en varios cobros contado, cada cobro genera SU parte
-// (cada NC lleva la marca [pago:<id>] de su pago).
+// REGLA (07/10/2026, dueño — reemplaza la del 01/10): la NC del 10% es SIEMPRE
+// por el TOTAL del comprobante y se emite UNA sola vez: el primer cobro contado
+// que lo toca la genera completa (aunque pague una parte) y después queda
+// bloqueado para otra NC de contado. Si el cliente no cumple, se anula la NC/REV
+// (y recién ahí se puede volver a emitir). Ej.: presupuesto $100 → NC $10, queda
+// en $90; el cliente puede pagarlo en 3 × $30 o 2 × $45.
 
-/** NC del 10% proyectada para lo seleccionado hoy de un comprobante. */
+/** NC del 10% de contado de un comprobante: 10% de su total. */
+export function ncContadoComprobante(totalFactura: number): number {
+  return r2(Math.abs(num(totalFactura)) * 0.1)
+}
+
+/** @deprecated regla del 01/10 (NC sobre lo seleccionado): solo la usan las APK
+ *  instaladas para estimar en pantalla; el servidor usa ncContadoComprobante. */
 export function ncContado(seleccionadoHoy: number): number {
   return r2(Math.max(0, num(seleccionadoHoy)) * 0.1)
 }
 
-/** El server reconstruye la NC desde lo CUBIERTO (plata + créditos + devolución
- *  neta = 90% de lo saldado): NC = cubierto / 9. Inversa exacta de ncContado. */
+/** @deprecated regla del 01/10: inversa de ncContado. Sin uso en el servidor. */
 export function ncContadoDesdeCubierto(cubierto: number): number {
   return r2(Math.max(0, num(cubierto)) / 9)
 }

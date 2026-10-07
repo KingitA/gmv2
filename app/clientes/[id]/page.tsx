@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Save, Loader2, ExternalLink, TrendingUp, TrendingDown, Minus, Trash2, Plus } from "lucide-react"
 import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION } from "@/components/pedidos/SegmentacionCondiciones"
-import { repreciarPedidosAbiertosCliente } from "@/lib/actions/pedidos"
+import { guardarFichaComercial, guardarSegmentacionCliente } from "@/lib/actions/condiciones-cliente"
 import Link from "next/link"
 
 function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
@@ -182,53 +182,41 @@ export default function ClienteDetailPage() {
   async function loadCondProv() {
     const [prov, marca] = await Promise.all([
       supabase.from("cliente_proveedor_condicion")
-        .select("proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, proveedores:proveedor_id(nombre)")
+        .select("proveedor_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, contado, proveedores:proveedor_id(nombre)")
         .eq("cliente_id", id).order("created_at"),
       supabase.from("cliente_marca_condicion")
-        .select("marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, marcas:marca_id(descripcion)")
+        .select("marca_id, lista_precio_id, metodo_facturacion, dto_general_pct, dto_viajante_pct, dto_mercaderia_pct, contado, marcas:marca_id(descripcion)")
         .eq("cliente_id", id).order("created_at"),
     ])
     setSegmentacion({
       proveedor: ((prov.data || []) as any[]).map(r => ({
         ref_id: r.proveedor_id, nombre: r.proveedores?.nombre || "—",
-        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || null,
         dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+        contado: r.contado ?? null,
       })),
       marca: ((marca.data || []) as any[]).map(r => ({
         ref_id: r.marca_id, nombre: r.marcas?.descripcion || "—",
-        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || "Factura",
+        lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion || null,
         dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+        contado: r.contado ?? null,
       })),
     })
   }
 
-  // Guarda la segmentación del cliente (reemplaza todo: borra y reinserta, como los descuentos)
+  // Guarda la segmentación del cliente (reemplaza todo). Los pedidos ya tomados
+  // no cambian: rige desde el próximo pedido.
   async function saveSegmentacion() {
     setSavingSeg(true)
     try {
-      const { error: delP } = await supabase.from("cliente_proveedor_condicion").delete().eq("cliente_id", id)
-      if (delP) throw delP
-      const { error: delM } = await supabase.from("cliente_marca_condicion").delete().eq("cliente_id", id)
-      if (delM) throw delM
-      if (segmentacion.proveedor.length > 0) {
-        const rows = segmentacion.proveedor.map(r => ({
-          cliente_id: id, proveedor_id: r.ref_id,
-          lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion,
-          dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
-        }))
-        const { error } = await supabase.from("cliente_proveedor_condicion").insert(rows)
-        if (error) throw error
-      }
-      if (segmentacion.marca.length > 0) {
-        const rows = segmentacion.marca.map(r => ({
-          cliente_id: id, marca_id: r.ref_id,
-          lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion,
-          dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
-        }))
-        const { error } = await supabase.from("cliente_marca_condicion").insert(rows)
-        if (error) throw error
-      }
+      const map = (rows: SegmentacionValue["proveedor"]) => rows.map(r => ({
+        ref_id: r.ref_id, lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion,
+        dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+        contado: r.contado ?? null,
+      }))
+      await guardarSegmentacionCliente(id, { proveedor: map(segmentacion.proveedor), marca: map(segmentacion.marca) })
       await loadCondProv()
+      alert("Segmentación guardada. Rige desde el próximo pedido (los pedidos ya tomados no cambian).")
     } catch (e: any) {
       alert(`Error al guardar la segmentación: ${e?.message || e}`)
     } finally {
@@ -249,10 +237,10 @@ export default function ClienteDetailPage() {
   ]
 
   async function loadBonificaciones() {
-    const { data } = await supabase.from("bonificaciones").select("tipo, porcentaje, segmento").eq("cliente_id", id).eq("activo", true)
+    const { data } = await supabase.from("bonificaciones").select("tipo, porcentaje, segmento, proveedor_id").eq("cliente_id", id).eq("activo", true)
     const grid: Record<string, number> = {}
     let haySeg = false
-    for (const b of (data || [])) {
+    for (const b of (data || []).filter((x: any) => !x.proveedor_id)) {
       const segKey = b.segmento || "todos"
       grid[`${segKey}__${b.tipo}`] = b.porcentaje
       if (b.segmento) haySeg = true
@@ -261,65 +249,33 @@ export default function ClienteDetailPage() {
     setSegDescuentos(haySeg)
   }
 
+  // Lista/método (según cada toggle General / Por segmento) y descuentos+contado
+  // de la ficha, por el camino único del ERP (lib/actions/condiciones-cliente.ts).
+  const listasDeFormulario = () => ({
+    metodo_facturacion: !segMetodo ? (formData.metodo_facturacion || null) : null,
+    lista_precio_id:    formData.lista_precio_id || null,
+    metodo_limpieza:    segMetodo ? (formData.metodo_limpieza || null) : null,
+    metodo_perf0:       segMetodo ? (formData.metodo_perf0 || null) : null,
+    metodo_perf_plus:   segMetodo ? (formData.metodo_perf_plus || null) : null,
+    lista_limpieza_id:  listaPorSegmento ? (formData.lista_limpieza_id || null) : null,
+    lista_perf0_id:     listaPorSegmento ? (formData.lista_perf0_id || null) : null,
+    lista_perf_plus_id: listaPorSegmento ? (formData.lista_perf_plus_id || null) : null,
+  })
+
   async function saveBonificaciones() {
     setSavingBonif(true)
-
-    // 1. Guardar campos en clientes según cada toggle (general vs por segmento).
-    //    Nunca se guarda el centinela; la dimensión segmentada deja el general en null.
-    const { error: updErr } = await supabase.from("clientes").update({
-      metodo_facturacion: !segMetodo ? (formData.metodo_facturacion || null) : null,
-      lista_precio_id:    !listaPorSegmento ? (formData.lista_precio_id || null) : null,
-      metodo_limpieza:    segMetodo ? (formData.metodo_limpieza || null) : null,
-      metodo_perf0:       segMetodo ? (formData.metodo_perf0 || null) : null,
-      metodo_perf_plus:   segMetodo ? (formData.metodo_perf_plus || null) : null,
-      lista_limpieza_id:  listaPorSegmento ? (formData.lista_limpieza_id || null) : null,
-      lista_perf0_id:     listaPorSegmento ? (formData.lista_perf0_id || null) : null,
-      lista_perf_plus_id: listaPorSegmento ? (formData.lista_perf_plus_id || null) : null,
-    }).eq("id", id)
-    if (updErr) { alert(`Error al guardar cliente: ${updErr.message}`); setSavingBonif(false); return }
-
-    // 2. Eliminar TODOS los descuentos manejados para este cliente (un solo query)
-    const { error: delErr } = await supabase
-      .from("bonificaciones")
-      .delete()
-      .eq("cliente_id", id)
-      .in("tipo", ["general", "mercaderia", "viajante"])
-    if (delErr) { alert(`Error al limpiar descuentos: ${delErr.message}`); setSavingBonif(false); return }
-
-    // 3. Insertar los descuentos del set activo (general → segmento null; por segmento → seg)
-    const segsToSave = segDescuentos ? ["limpieza_bazar", "perf0", "perf_plus"] : ["todos"]
-    const toInsert: any[] = []
-    for (const segKey of segsToSave) {
-      for (const tipo of BONIF_TIPOS) {
-        const pct = bonifGrid[`${segKey}__${tipo.key}`] || 0
-        if (pct > 0) {
-          toInsert.push({
-            cliente_id: id,
-            tipo: tipo.key,
-            porcentaje: pct,
-            activo: true,
-            segmento: segKey === "todos" ? null : segKey,
-          })
-        }
-      }
-    }
-    if (toInsert.length > 0) {
-      const { error: insErr } = await supabase.from("bonificaciones").insert(toInsert)
-      if (insErr) { alert(`Error al guardar descuentos: ${insErr.message}`); setSavingBonif(false); return }
-    }
-
-    // 4. Lista/método/bonificaciones definen el precio: los pedidos abiertos
-    //    (en_venta/pendiente) del cliente se re-precian con la config nueva
     try {
-      const r = await repreciarPedidosAbiertosCliente(id)
-      if (r.repreciados > 0) alert(`Se re-preciaron ${r.repreciados} pedido(s) abierto(s) del cliente con la nueva configuración.`)
+      await guardarFichaComercial(id, {
+        listas: listasDeFormulario(),
+        descuentos: { porSegmento: segDescuentos, valores: bonifGrid },
+      })
+      await loadBonificaciones()
+      alert("Condiciones guardadas. Rigen desde el próximo pedido (los pedidos ya tomados no cambian; para llevarlos a precios de hoy usá Repreciar en el pedido).")
     } catch (e: any) {
-      alert(`Cliente guardado, pero no se pudieron re-preciar los pedidos abiertos: ${e?.message || e}`)
+      alert(`Error al guardar: ${e?.message || e}`)
+    } finally {
+      setSavingBonif(false)
     }
-
-    // 5. Recargar para confirmar
-    await loadBonificaciones()
-    setSavingBonif(false)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -331,13 +287,11 @@ export default function ClienteDetailPage() {
       razon_social: formData.nombre_razon_social,
       vendedor_id: formData.vendedor_id && formData.vendedor_id !== "none" ? formData.vendedor_id : null,
       localidad_id: formData.localidad_id || null,
-      lista_precio_id: formData.lista_precio_id && formData.lista_precio_id !== "__none__" ? formData.lista_precio_id : null,
-      lista_limpieza_id: formData.lista_limpieza_id || null,
-      metodo_limpieza: formData.metodo_limpieza || null,
-      lista_perf0_id: formData.lista_perf0_id || null,
-      metodo_perf0: formData.metodo_perf0 || null,
-      lista_perf_plus_id: formData.lista_perf_plus_id || null,
-      metodo_perf_plus: formData.metodo_perf_plus || null,
+    }
+    // Lista/método/descuentos no van en este update: se guardan con los toggles
+    // General / Por segmento por el camino único (guardarFichaComercial).
+    for (const k of ["metodo_facturacion", "lista_precio_id", "lista_limpieza_id", "metodo_limpieza", "lista_perf0_id", "metodo_perf0", "lista_perf_plus_id", "metodo_perf_plus"]) {
+      delete (dataToSave as any)[k]
     }
     const { error } = await supabase.from("clientes").update(dataToSave).eq("id", id)
     if (error) {
@@ -355,12 +309,16 @@ export default function ClienteDetailPage() {
         }
       } catch {}
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id }) }).catch(() => {})
-      // El formulario general también guarda lista/método/vendedor: re-preciar abiertos
+      // Lista, método, descuentos y contado (mismo guardado que el botón de la sección)
       try {
-        const r = await repreciarPedidosAbiertosCliente(id)
-        if (r.repreciados > 0) alert(`Se re-preciaron ${r.repreciados} pedido(s) abierto(s) del cliente con la nueva configuración.`)
+        await guardarFichaComercial(id, {
+          listas: listasDeFormulario(),
+          descuentos: { porSegmento: segDescuentos, valores: bonifGrid },
+        })
       } catch (e: any) {
-        alert(`Cliente guardado, pero no se pudieron re-preciar los pedidos abiertos: ${e?.message || e}`)
+        alert(`Cliente guardado, pero no se pudieron guardar lista/descuentos: ${e?.message || e}`)
+        setSaving(false)
+        return
       }
       router.push("/clientes")
     }
@@ -573,6 +531,11 @@ export default function ClienteDetailPage() {
                                 <span className="text-[10px] text-slate-400">%</span>
                               </div>
                             ))}
+                            <label className="flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded border text-purple-700 bg-purple-50 border-purple-200 cursor-pointer select-none">
+                              <input type="checkbox" className="h-3.5 w-3.5" checked={(bonifGrid["todos__contado"] || 0) > 0}
+                                onChange={(e) => setBonifGrid({ ...bonifGrid, ["todos__contado"]: e.target.checked ? 10 : 0 })} />
+                              Contado 10%
+                            </label>
                           </div>
                         ) : <span className="flex-1 text-xs text-indigo-600 font-medium pl-1 pt-2">Definidos por segmento ↓</span>}
                         <SegToggle on={segDescuentos} set={setSegDescuentos} />
@@ -642,6 +605,11 @@ export default function ClienteDetailPage() {
                                     </div>
                                   )
                                 })}
+                                <label className="flex items-center gap-1 text-[11px] font-semibold text-purple-700 cursor-pointer select-none">
+                                  <input type="checkbox" className="h-3.5 w-3.5" checked={(bonifGrid[`${segKey}__contado`] || 0) > 0}
+                                    onChange={(e) => setBonifGrid({ ...bonifGrid, [`${segKey}__contado`]: e.target.checked ? 10 : 0 })} />
+                                  Contado 10% (NC aparte al facturar)
+                                </label>
                               </div>
                             )}
                           </div>
@@ -656,7 +624,7 @@ export default function ClienteDetailPage() {
               {/* Guardar segmentos + descuentos (siempre visible) */}
               <Button type="button" size="sm" className="w-full h-9 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={saveBonificaciones} disabled={savingBonif}>
                 {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-                Guardar lista, facturación y descuentos
+                Guardar lista, facturación, descuentos y contado
               </Button>
 
               {/* Segmentación por proveedor / marca */}
@@ -670,7 +638,7 @@ export default function ClienteDetailPage() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <SegmentacionCondiciones listas={listasPrecio} value={segmentacion} onChange={setSegmentacion} />
-                  <Button onClick={saveSegmentacion} disabled={savingSeg} className="w-full bg-teal-600 hover:bg-teal-700">
+                  <Button type="button" onClick={saveSegmentacion} disabled={savingSeg} className="w-full bg-teal-600 hover:bg-teal-700">
                     {savingSeg ? "Guardando..." : "Guardar segmentación"}
                   </Button>
                 </CardContent>

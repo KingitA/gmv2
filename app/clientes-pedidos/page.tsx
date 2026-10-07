@@ -43,9 +43,10 @@ import { NuevoPedidoDialog } from "@/components/pedidos/NuevoPedidoDialog"
 import { ReviewPedidoDialog } from "@/components/pedidos/ReviewPedidoDialog"
 import { useOrderQueue } from "@/hooks/use-order-queue"
 import type { QueueItem } from "@/hooks/use-order-queue"
-import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido, marcarPedidoImpreso, cambiarEstadoPedidoManual, softDeletePedido } from "@/lib/actions/pedidos"
+import { agregarItemPedido, actualizarCantidadItem, eliminarItemPedido, marcarPedidoImpreso, cambiarEstadoPedidoManual, softDeletePedido, repreciarPedidoPreciosActuales } from "@/lib/actions/pedidos"
 import { transicionesManuales, puedeEliminarPedido, puedeAsignarViaje, ESTADO_LABEL } from "@/lib/pedidos/estados"
 import { calcularDescuentosPedido, type DescuentosPedido } from "@/lib/pedidos/descuentos-cabecera"
+import { comprobantesDePedidos } from "@/lib/comprobantes/comprobantes-de-pedido"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -194,6 +195,7 @@ export default function ClientesPedidosPage() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   const [guardandoCambios, setGuardandoCambios] = useState(false)
   const [generandoComprobante, setGenerandoComprobante] = useState<string | null>(null)
+  const [repreciando, setRepreciando] = useState<string | null>(null)
   const [comprobantesGenerados, setComprobantesGenerados] = useState<{ [pedidoId: string]: Comprobante[] }>({})
   const [remitosGenerados, setRemitosGenerados] = useState<{ [pedidoId: string]: Remito[] }>({})
   const [generandoRemitos, setGenerandoRemitos] = useState(false)
@@ -316,26 +318,17 @@ export default function ClientesPedidosPage() {
   const cargarComprobantesExistentes = async () => {
     try {
       const pedidoIds = pedidos.map((p) => p.id)
-      // El .in() con cientos de UUIDs revienta el límite de URL de PostgREST
-      // y la query fallaba en silencio (el panel nunca veía los comprobantes).
-      // Se consulta en tandas de 100.
-      const data: any[] = []
-      for (let i = 0; i < pedidoIds.length; i += 100) {
-        const { data: page, error } = await supabase
-          .from("comprobantes_venta")
-          .select("id, tipo_comprobante, numero_comprobante, total_factura, pedido_id, anulado_en")
-          .in("pedido_id", pedidoIds.slice(i, i + 100))
-        if (error) throw error
-        data.push(...(page || []))
-      }
+      // Comprobantes del pedido + sus NC/REV (10% contado, etc.), en tandas de
+      // 100 ids (el .in() con cientos de UUIDs revienta el límite de URL).
+      const data = await comprobantesDePedidos(supabase, pedidoIds)
 
-      // Agrupar comprobantes por pedido_id
+      // Agrupar comprobantes por pedido (las NC/REV van con el pedido de su comprobante)
       const comprobantesAgrupados: { [pedidoId: string]: Comprobante[] } = {}
       data.forEach((comp: any) => {
-        if (!comprobantesAgrupados[comp.pedido_id]) {
-          comprobantesAgrupados[comp.pedido_id] = []
+        if (!comprobantesAgrupados[comp.pedido_ref]) {
+          comprobantesAgrupados[comp.pedido_ref] = []
         }
-        comprobantesAgrupados[comp.pedido_id].push(comp)
+        comprobantesAgrupados[comp.pedido_ref].push(comp)
       })
       setComprobantesGenerados(comprobantesAgrupados)
 
@@ -414,6 +407,25 @@ export default function ClientesPedidosPage() {
   }
 
   const detallesReqRef = useRef(0)
+  // Repreciar: el precio del pedido se cerró al tomarlo; esto lo lleva a los
+  // precios de HOY con las condiciones que el pedido ya tiene. Hasta facturar.
+  const repreciarPedidoActual = async (pedido: Pedido) => {
+    if (!confirm(`Repreciar el pedido ${pedido.numero_pedido} con los precios de HOY?\n\nSe mantienen sus condiciones (lista, método, descuentos, contado). Cambia lo que se va a facturar.`)) return
+    setRepreciando(pedido.id)
+    try {
+      const r = await repreciarPedidoPreciosActuales(pedido.id)
+      const fmt = (n: number) => `$${(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      alert(`Pedido ${pedido.numero_pedido} repreciado: ${fmt(r.total_anterior)} → ${fmt(r.total)}`)
+      await cargarPedidos()
+      await cargarDetallesPedido(pedido.id)
+      setPedidoSeleccionado((prev: any) => (prev && prev.id === pedido.id ? { ...prev, total: r.total } : prev))
+    } catch (e: any) {
+      alert(e?.message || "No se pudo repreciar el pedido")
+    } finally {
+      setRepreciando(null)
+    }
+  }
+
   const cargarDetallesPedido = async (pedidoId: string) => {
     // Token de orden: si mientras esta consulta viaja se pidió cargar otro
     // pedido, descartamos esta respuesta para no mostrar ítems ajenos.
@@ -510,9 +522,8 @@ export default function ClientesPedidosPage() {
       await cargarPedidos()
       await cargarComprobantesExistentes()
 
-      // Abrir el PDF del primer comprobante generado (si el navegador lo permite)
-      const primero = result.comprobantes?.[0]
-      if (primero?.id) window.open(`/api/comprobantes-venta/${primero.id}/pdf`, "_blank")
+      // Abrir UN solo PDF con todos los comprobantes del pedido (incluida la NC/REV del contado)
+      if (result.comprobantes?.length) verComprobantesPedido(pedidoId)
     } catch (error: any) {
       console.error("Error generando comprobantes:", error)
       alert(error.message || "Error al generar comprobantes")
@@ -523,6 +534,11 @@ export default function ClientesPedidosPage() {
 
   const verComprobante = (comprobanteId: string) => {
     window.open(`/api/comprobantes-venta/${comprobanteId}/pdf`, "_blank")
+  }
+
+  // Todos los comprobantes vivos del pedido (facturas/presupuestos + NC/REV) en un solo PDF
+  const verComprobantesPedido = (pedidoId: string) => {
+    window.open(`/api/comprobantes-venta/pedido/${pedidoId}/pdf`, "_blank")
   }
 
   const verRemito = (remitoId: string) => {
@@ -699,6 +715,17 @@ export default function ClientesPedidosPage() {
                 <div class="value">${pedido.vendedores?.nombre || "Sin asignar"}</div>
               </div>
             </div>
+
+            ${desc.contado ? `
+            <div class="info-box" style="margin-bottom: 20px; border: 2px solid #7c3aed;">
+              <div class="value" style="color:#6d28d9;">PAGO CONTADO — 10% de descuento por pago contado</div>
+              <div style="font-size:12px;color:#475569;margin-top:2px;">No va en la factura: se entrega una nota de crédito aparte por el 10%. Si no se paga de contado, esa nota se anula.</div>
+            </div>` : ""}
+
+            ${desc.mercaderiaPendiente ? `
+            <div class="info-box" style="margin-bottom: 20px; border: 2px solid #dc2626;">
+              <div class="value" style="color:#b91c1c;">MERCADERÍA BONIFICADA SIN DEFINIR — elegir qué se regala antes de facturar</div>
+            </div>` : ""}
 
             ${desc.aparte.length ? `
             <div class="info-box" style="margin-bottom: 20px;">
@@ -910,7 +937,9 @@ export default function ClientesPedidosPage() {
   // Solo los comprobantes vigentes (no anulados) blindan el pedido.
   // Un pedido con todos sus comprobantes anulados puede modificarse y re-facturarse.
   const tieneComprobantes = (pedidoId: string) => {
-    return comprobantesGenerados[pedidoId]?.some((c) => !c.anulado_en) ?? false
+    // Solo los emitidos AL facturar el pedido (llevan pedido_id); sus NC/REV no
+    // impiden volver a facturar si se anularon los comprobantes.
+    return comprobantesGenerados[pedidoId]?.some((c: any) => !c.anulado_en && c.pedido_id === pedidoId) ?? false
   }
 
   const listaName = (id: string | null | undefined) =>
@@ -1277,12 +1306,9 @@ export default function ClientesPedidosPage() {
                 ) : (
                   // Ya tiene comprobantes: acceso directo al PDF del primero vigente
                   <Button size="sm"
-                    onClick={() => {
-                      const vigente = (comprobantesGenerados[pedidoSeleccionado.id] || []).find((c) => !c.anulado_en)
-                      if (vigente) verComprobante(vigente.id)
-                    }}
+                    onClick={() => verComprobantesPedido(pedidoSeleccionado.id)}
                     className="bg-emerald-500 text-white hover:bg-emerald-600 font-semibold shadow-sm">
-                    <Receipt className="h-3.5 w-3.5 mr-1.5" />Ver comprobante
+                    <Receipt className="h-3.5 w-3.5 mr-1.5" />Ver comprobantes
                   </Button>
                 )}
                 <Button size="sm" onClick={() => window.open(`/api/comprobantes-venta/preview?pedido_id=${pedidoSeleccionado.id}`, "_blank")}
@@ -1293,6 +1319,16 @@ export default function ClientesPedidosPage() {
                   className="bg-transparent border border-white/40 text-white hover:bg-white/15 font-medium">
                   <Printer className="h-3.5 w-3.5 mr-1.5" />Imprimir
                 </Button>
+                {!tieneComprobantes(pedidoSeleccionado.id) && pedidoSeleccionado.estado !== "eliminado" && (
+                  <Button size="sm" onClick={() => repreciarPedidoActual(pedidoSeleccionado)}
+                    disabled={repreciando === pedidoSeleccionado.id}
+                    title="Recalcula el pedido con los precios de hoy, manteniendo sus condiciones"
+                    className="bg-transparent border border-amber-300/70 text-amber-100 hover:bg-amber-400/20 font-medium">
+                    {repreciando === pedidoSeleccionado.id
+                      ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Repreciando</>
+                      : <><RefreshCw className="h-3.5 w-3.5 mr-1.5" />Repreciar</>}
+                  </Button>
+                )}
                 <Link href={`/pagos-clientes?cliente_id=${pedidoSeleccionado.cliente_id}`} className="contents">
                   <Button size="sm" className="bg-emerald-500 text-white hover:bg-emerald-600 font-semibold shadow-sm">
                     <DollarSign className="h-3.5 w-3.5 mr-1.5" />Registrar pago
