@@ -18,6 +18,7 @@ import {
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
+import { FormVencimientoDialog } from "@/components/finanzas/form-vencimiento"
 import Link from "next/link"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
@@ -289,93 +290,8 @@ export default function VencimientosPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <Dialog open={isDialogOpen} onOpenChange={(o) => { setIsDialogOpen(o); if (!o) resetForm() }}>
-                                    <DialogTrigger asChild>
-                                        <Button className="gap-2"><Plus className="h-4 w-4" /> Nuevo Vencimiento</Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                                        <DialogHeader>
-                                            <DialogTitle>Nuevo Vencimiento</DialogTitle>
-                                        </DialogHeader>
-                                        <form onSubmit={handleSubmit} className="space-y-4">
-                                            <div>
-                                                <Label>Proveedor (opcional)</Label>
-                                                <EntitySearchSelect
-                                                    entity="proveedores"
-                                                    placeholder="Sin proveedor..."
-                                                    value={formData.proveedor_id ? ((proveedores.find((p: any) => p.id === formData.proveedor_id) as any) ?? null) : null}
-                                                    onSelect={(p: any) => setFormData({ ...formData, proveedor_id: p ? p.id : "" })}
-                                                />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label>Tipo *</Label>
-                                                    <Select value={formData.tipo} onValueChange={(v) => setFormData({ ...formData, tipo: v })}>
-                                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                                        <SelectContent>
-                                                            {tiposLista.map(t => (
-                                                                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                                <div>
-                                                    <Label>Monto</Label>
-                                                    <Input type="number" step="0.01" value={formData.monto}
-                                                        onChange={(e) => setFormData({ ...formData, monto: parseFloat(e.target.value) || 0 })} />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <Label>Concepto *</Label>
-                                                <Input value={formData.concepto} required
-                                                    onChange={(e) => setFormData({ ...formData, concepto: e.target.value })}
-                                                    placeholder="Ej: Factura A 0001-00045678, IIBB Marzo, Seguro camión..." />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label>Fecha Vencimiento *</Label>
-                                                    <Input type="date" value={formData.fecha_vencimiento}
-                                                        onChange={(e) => setFormData({ ...formData, fecha_vencimiento: e.target.value })} />
-                                                </div>
-                                                <div>
-                                                    <Label>Días alerta</Label>
-                                                    <Input type="number" value={formData.dias_alerta}
-                                                        onChange={(e) => setFormData({ ...formData, dias_alerta: parseInt(e.target.value) || 3 })} />
-                                                </div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label>Recurrencia</Label>
-                                                    <Select value={formData.recurrencia || "none"} onValueChange={(v) => setFormData({ ...formData, recurrencia: v === "none" ? "" : v })}>
-                                                        <SelectTrigger><SelectValue placeholder="Sin recurrencia" /></SelectTrigger>
-                                                        <SelectContent>
-                                                            {RECURRENCIAS.map(r => (
-                                                                <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                                {formData.recurrencia && (
-                                                    <div>
-                                                        <Label>Hasta (opcional)</Label>
-                                                        <Input type="date" value={formData.recurrencia_hasta}
-                                                            onChange={(e) => setFormData({ ...formData, recurrencia_hasta: e.target.value })} />
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div>
-                                                <Label>Observaciones</Label>
-                                                <Textarea value={formData.observaciones}
-                                                    onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
-                                                    rows={2} />
-                                            </div>
-                                            <div className="flex gap-2 justify-end">
-                                                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
-                                                <Button type="submit">Crear</Button>
-                                            </div>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
+                                <Button className="gap-2" onClick={() => setIsDialogOpen(true)}><Plus className="h-4 w-4" /> Nuevo vencimiento</Button>
+                                <FormVencimientoDialog open={isDialogOpen} onOpenChange={setIsDialogOpen} onSaved={() => loadVencimientos()} />
                             </div>
                         </div>
                     </CardHeader>

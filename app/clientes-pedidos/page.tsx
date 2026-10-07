@@ -1189,33 +1189,38 @@ export default function ClientesPedidosPage() {
     const ids = arrastreRef.current
     if (!ids.length) return
     const fechaTxt = `${Number(dia.slice(8))}/${Number(dia.slice(5, 7))}`
-    // Un solo pedido: queda para ese día, sin viaje
-    if (ids.length === 1) { setFechaEntrega(ids, dia); return }
     const zonas = zonasDeIds(ids)
     const distintas = new Set(zonas.map(z => z?.id ?? "?"))
-    // Zonas distintas: nunca se juntan solos en un viaje → quedan sueltos ese día
+    // Zonas distintas (o sin zona): nunca se juntan solos en un viaje → quedan para ese día
     if (distintas.size > 1 || distintas.has("?")) { setFechaEntrega(ids, dia); return }
     const zona = zonas[0]!
-    const cantidad = `${ids.length} pedidos`
-    // ¿Ya hay un viaje ese día que vaya a esa zona?
+    // Lo que ya hay ese día de la misma zona: un viaje, o pedidos sueltos
     const existente = viajesCal.find(v => v.zonas.some(z => z.id === zona.id) && viajeMovible(v.estado) &&
       dia >= String(v.fecha).slice(0, 10) && dia <= sumarDias(String(v.fecha).slice(0, 10), Math.max(1, v.dias) - 1))
+    const sueltosMismaZona = sueltosCal.filter(p => p.fecha_entrega === dia && p.zona?.id === zona.id && !ids.includes(p.id)).map(p => p.id)
+    const nuevos = ids.length === 1 ? "este pedido" : `estos ${ids.length} pedidos`
+
     if (existente) {
+      const todos = [...ids, ...sueltosMismaZona]
       setPropuesta({
         titulo: `Ya hay un viaje a ${zona.nombre} el ${fechaTxt}`,
-        texto: <>¿Subir los {cantidad} de <b>{zona.nombre}</b> al viaje <b>{existente.nombre}</b>, o dejarlos para ese día sin viaje?</>,
+        texto: <>¿Subir {nuevos}{sueltosMismaZona.length ? <> (y {sueltosMismaZona.length === 1 ? "el otro suelto" : `los otros ${sueltosMismaZona.length} sueltos`} de ese día)</> : null} al viaje <b>{existente.nombre}</b>, o dejarlos para ese día sin viaje?</>,
         boton: "Subir al viaje",
-        accion: () => subirPedidosAViaje(existente.id, existente.nombre, ids),
+        accion: () => subirPedidosAViaje(existente.id, existente.nombre, todos),
         boton2: "Dejarlos sin viaje",
         accion2: () => setFechaEntrega(ids, dia),
       })
       return
     }
+    // Un solo pedido y nada más de esa zona ese día: queda suelto, sin preguntar
+    if (ids.length === 1 && sueltosMismaZona.length === 0) { setFechaEntrega(ids, dia); return }
+    // Dos o más de la misma zona ese día (entre los que soltás y los que ya estaban): ofrecer el viaje
+    const todos = [...ids, ...sueltosMismaZona]
     setPropuesta({
-      titulo: `${cantidad} de ${zona.nombre} para el ${fechaTxt}`,
-      texto: <>No hay viaje a <b>{zona.nombre}</b> ese día. ¿Querés programar uno y subirlos, o dejarlos para ese día sin viaje?</>,
+      titulo: `${todos.length} pedidos de ${zona.nombre} para el ${fechaTxt}`,
+      texto: <>{sueltosMismaZona.length ? <>Ese día ya {sueltosMismaZona.length === 1 ? "hay 1 pedido suelto" : `hay ${sueltosMismaZona.length} pedidos sueltos`} de <b>{zona.nombre}</b>. </> : null}¿Querés programar un viaje con los {todos.length} pedidos, o dejar {nuevos} para ese día sin viaje?</>,
       boton: "Programar viaje",
-      accion: () => abrirProgramar(dia, [zona.id], ids, <>Al programarlo se le suben los {cantidad} de <b>{zona.nombre}</b>.</>),
+      accion: () => abrirProgramar(dia, [zona.id], todos, <>Al programarlo se le suben los {todos.length} pedidos de <b>{zona.nombre}</b>.</>),
       boton2: "Dejarlos sin viaje",
       accion2: () => setFechaEntrega(ids, dia),
     })

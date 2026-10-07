@@ -15,6 +15,7 @@ import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
+import { FormVencimientoDialog } from "@/components/finanzas/form-vencimiento"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { useUrlParams } from "@/lib/hooks/use-url-state"
@@ -668,132 +669,14 @@ export function CalendarioPagos({
                     </div>
                 )}
                 <div className="ml-auto">
-                    <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm() }}>
-                        <DialogTrigger asChild>
-                            <Button size="sm" className="gap-1"><Plus className="h-4 w-4" /> Nuevo pago</Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                            <DialogHeader><DialogTitle>{editando ? "Editar pago / gasto" : "Nuevo pago / gasto"}</DialogTitle></DialogHeader>
-                            <form onSubmit={guardarVencimiento} className="space-y-4">
-                                <div className="grid grid-cols-[130px_1fr] gap-4">
-                                    <div>
-                                        <Label>Tipo *</Label>
-                                        <Select value={form.tipo} onValueChange={(v) => setForm({ ...form, tipo: v })}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="factura">Factura de proveedor</SelectItem>
-                                                {soyAdmin && <SelectItem value="sueldos">Sueldos</SelectItem>}
-                                                <SelectItem value="cargas_sociales">Cargas sociales (931, sindicatos, OS)</SelectItem>
-                                                <SelectItem value="impuestos">Impuestos (IVA, IIBB, CM, municipal)</SelectItem>
-                                                <SelectItem value="servicios">Servicios (luz, expensas, teléfono, web)</SelectItem>
-                                                <SelectItem value="honorarios">Honorarios (contador, programador)</SelectItem>
-                                                <SelectItem value="seguros">Seguros (vida, flota)</SelectItem>
-                                                <SelectItem value="vehiculos">Vehículos (gastos extra de flota)</SelectItem>
-                                                {soyAdmin && <SelectItem value="socios">Socios (adelantos / participaciones)</SelectItem>}
-                                                <SelectItem value="otro">Otro gasto</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div>
-                                        <Label>Proveedor {form.tipo === "factura" ? "" : "(opcional)"}</Label>
-                                        <EntitySearchSelect
-                                            entity="proveedores"
-                                            placeholder={form.tipo === "factura" ? "Buscar proveedor..." : "Gasto sin proveedor..."}
-                                            value={form.proveedor}
-                                            onSelect={(p: any) => setForm({ ...form, proveedor: p })}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <Label>Concepto {form.proveedor ? "" : "*"}</Label>
-                                    <Input
-                                        value={form.concepto}
-                                        onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-                                        placeholder={form.proveedor?.nombre ? `${form.proveedor.nombre} (por defecto)` : "Ej: SICORE, VEP 931, expensas, seguro cuota 3..."}
-                                    />
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <Label>Monto *</Label>
-                                        <Input
-                                            inputMode="decimal"
-                                            value={form.monto}
-                                            onChange={(e) => setForm({ ...form, monto: e.target.value })}
-                                            placeholder="0"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label>Forma de pago *</Label>
-                                        <Select value={form.forma_pago} onValueChange={(v) => setForm({ ...form, forma_pago: v })}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="efectivo">Efectivo</SelectItem>
-                                                <SelectItem value="transferencia">Transferencia</SelectItem>
-                                                <SelectItem value="cheque">Cheque</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <Label>Fecha de pago *</Label>
-                                        <FechaInput
-                                            value={form.fecha_vencimiento}
-                                            onChange={(iso) => setForm({ ...form, fecha_vencimiento: iso })}
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label>Fecha validez</Label>
-                                        <FechaInput
-                                            value={form.fecha_validez}
-                                            onChange={(iso) => setForm({ ...form, fecha_validez: iso })}
-                                        />
-                                        <p className="mt-1 text-[11px] text-muted-foreground">
-                                            Ej: cheques a 30 días. Vacío = misma fecha.
-                                        </p>
-                                    </div>
-                                </div>
-                                <div>
-                                    <Label>Modalidad</Label>
-                                    <Select value={form.modalidad} onValueChange={(v) => setForm({ ...form, modalidad: v })}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="deposito">Depósito (lo deposito yo)</SelectItem>
-                                            <SelectItem value="entrega">Entrega (queda en caja, lo retira el proveedor)</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <label className="flex items-start gap-2 rounded-lg border p-3 cursor-pointer">
-                                    <Checkbox
-                                        checked={form.descuentos_aplicados}
-                                        onCheckedChange={(c) => setForm({ ...form, descuentos_aplicados: !!c })}
-                                        className="mt-0.5"
-                                    />
-                                    <span className="text-sm">
-                                        <span className="font-medium">Descuentos ya aplicados</span>
-                                        <span className="block text-xs text-muted-foreground">
-                                            Si queda desmarcado, el calendario lo señala para chequear notas de crédito / retenciones.
-                                        </span>
-                                    </span>
-                                </label>
-                                <div>
-                                    <Label>Observaciones</Label>
-                                    <Input
-                                        value={form.observaciones}
-                                        onChange={(e) => setForm({ ...form, observaciones: e.target.value })}
-                                    />
-                                </div>
-                                <div className="flex justify-end gap-2">
-                                    <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm() }}>Cancelar</Button>
-                                    <Button type="submit" disabled={saving}>
-                                        {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} {editando ? "Guardar cambios" : "Crear"}
-                                    </Button>
-                                </div>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
+                    <Button size="sm" className="gap-1" onClick={() => { resetForm(); setDialogOpen(true) }}><Plus className="h-4 w-4" /> Nuevo pago</Button>
+                    {/* Formulario único de vencimientos (alta y edición) */}
+                    <FormVencimientoDialog
+                        open={dialogOpen}
+                        onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm() }}
+                        venc={editando}
+                        onSaved={async () => { await load(); onDataChanged?.() }}
+                    />
                 </div>
             </div>
 
