@@ -76,7 +76,7 @@ function getHref(classification: string | null, bandeja: Bandeja): string | unde
     case 'factura_proveedor':
       return '/ordenes-compra'
     case 'pago':
-      return '/revision-pagos'
+      return '/caja'
     case 'cambio_precio':
       return '/articulos/precios'
     case 'reclamo':
