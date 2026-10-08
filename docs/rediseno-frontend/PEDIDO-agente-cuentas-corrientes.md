@@ -52,19 +52,23 @@ Para pensar con el dueño y acomodar (proponer antes de cambiar lógica):
    - `components/ui/carga-progreso.tsx` para las esperas, en lugar de redondeles.
    - Mirar la ficha de artículo o proveedor como ejemplo.
 
-## 2. Formularios de cobro duplicados: `/caja` vs Cobros
+## 2. Dos sectores, dos funciones (DECIDIDO por el dueño, 08/10)
 
-`/caja` tiene su propio formulario de cobro, `components/caja/registrar-cobro.tsx` (la barra de arriba de la caja). Cobros tiene el suyo. **Son dos formularios para la misma acción**, y además tienen diferencias:
-- La caja **no** tiene retenciones, ni depósito con varios ítems, ni cobro conjunto, ni link al recibo.
-- La caja **sí** tiene el redondeo y la opción "dejar a cuenta" más a mano.
+**Son dos sectores distintos y NO se unifican:**
+- **Cobros (CLIENTES)** lo usa quien **atiende gente** en el mostrador o la oficina: **ingresa** el pago. Todo lo que se ingresa ahí queda **pendiente de verificación**.
+- **Caja (FINANZAS)** lo usa quien **ve los números** y decide qué hacer con la plata: **verifica** (confirma o rechaza) lo que ingresó el otro sector, controla rendiciones y mueve la plata.
 
-**Proponer al dueño una sola forma de cobrar.** Por ejemplo:
-- La barra de la caja abre o lleva a Cobros.
-- O ambas usan los mismos componentes.
-
-Así no se mantienen dos formularios que se van separando.
-- Hay un aviso en `components/caja/registrar-cobro.tsx` (~206): *"Los depósitos con varios ítems se cargan desde Pagos Clientes"*. Cambiar "Pagos Clientes" por "Cobros".
-- `app/api/mostrador/venta/route.ts` (~177, y el comentario ~27) dice *"…Cobrar desde Pagos Clientes."*. Cambiar "Pagos Clientes" por "Cobros".
+Qué hacer:
+1. **Cobros tiene que ser tan cómodo como la barra de Caja**, que el dueño considera bien armada. Traer a Cobros lo que la barra tiene y Cobros no, **reutilizando el código de la barra** () en lugar de escribirlo de nuevo:
+   - pegar una captura con Ctrl+V para el OCR;
+   - los carteles "falta plata → ajuste por redondeo o dejar saldo" y "sobra plata → ajustar o dejar a cuenta" (con el tope de );
+   - el resumen de la cuenta con el switch Facturados / Todos;
+   - el aviso de deudor del BCRA con todos los titulares del cheque.
+   Mostrarle al dueño la lista exacta antes de empezar.
+2. **La barra de cobro de Caja:** preguntarle al dueño si Finanzas también tiene que poder ingresar cobros o si eso queda solo para Cobros. No sacarla sin su OK.
+3. Textos que todavía dicen "Pagos Clientes" y deben decir "Cobros":
+   -  (~206): *"Los depósitos con varios ítems se cargan desde Pagos Clientes"*.
+   -  (~177, y el comentario ~27).
 
 ## 3. Pantallas a eliminar (cuando el dueño dé el OK)
 
