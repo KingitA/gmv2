@@ -26,7 +26,7 @@ import { BcraDeudorMulti } from "@/components/pagos/BcraDeudorChip"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
 import { MARCA_CONTADO } from "@/lib/constants"
-import { topeAjuste } from "@/lib/cobranzas/ajuste"
+import { DialogoFalta, DialogoSobra } from "@/components/pagos/DialogoDiferencia"
 import { Camera, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
 
 export interface CuentaFondos {
@@ -797,100 +797,26 @@ export function RegistrarCobro({
         </div>
       )}
 
-      {/* ── Cartel: SOBRA plata — ¿ajustar (no queda a favor) o a cuenta? ── */}
+      {/* ── Carteles de diferencia (compartidos con Cobros): sobra / falta ── */}
       {dialogoSobra != null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDialogoSobra(null)}>
-          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-slate-900">
-              Sobran <span style={NUM}>$ {fmt(dialogoSobra)}</span>
-            </h3>
-            <p className="mt-1 text-xs text-slate-500">
-              Lo entregado{aplicarContado ? " (más la NC del 10%)" : ""} supera lo seleccionado.
-              ¿Qué hacemos con el resto?
-            </p>
-            <div className="mt-4 flex flex-col gap-2">
-              {dialogoSobra <= topeAjuste(totalSeleccionado) + 0.005 ? (
-                <button
-                  onClick={() => registrar("sobra_ajuste")}
-                  className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700"
-                >
-                  Ajustar por redondeo — no queda a favor
-                  <span className="block text-[11px] font-normal opacity-80">
-                    La cuenta queda en cero; los $ {fmt(dialogoSobra)} se asientan como ajuste (débito)
-                  </span>
-                </button>
-              ) : (
-                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  Supera el tope de ajuste por redondeo (1% de lo seleccionado = $ {fmt(topeAjuste(totalSeleccionado))}).
-                  Un sobrante así de grande queda a cuenta del cliente (o revisá los montos).
-                </p>
-              )}
-              <button
-                onClick={() => registrar("sobra_cuenta")}
-                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Dejar a cuenta
-                <span className="block text-[11px] font-normal text-slate-400">
-                  Los $ {fmt(dialogoSobra)} quedan a favor del cliente para su próxima compra
-                </span>
-              </button>
-              <button
-                onClick={() => setDialogoSobra(null)}
-                className="w-full rounded-lg px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+        <DialogoSobra
+          monto={dialogoSobra}
+          baseTope={totalSeleccionado}
+          conContado={aplicarContado}
+          onAjustar={() => registrar("sobra_ajuste")}
+          onACuenta={() => registrar("sobra_cuenta")}
+          onCancelar={() => setDialogoSobra(null)}
+        />
       )}
-
-      {/* ── Cartel: falta plata para lo seleccionado — ¿redondeo o saldo? ── */}
       {dialogoFalta != null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDialogoFalta(null)}>
-          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-slate-900">
-              Falta pagar <span style={NUM}>$ {fmt(dialogoFalta)}</span>
-            </h3>
-            <p className="mt-1 text-xs text-slate-500">
-              Lo entregado{aplicarContado ? " (más la NC del 10%)" : ""} no llega a cubrir lo
-              seleccionado. ¿Qué hacemos con la diferencia?
-            </p>
-            <div className="mt-4 flex flex-col gap-2">
-              {dialogoFalta <= topeAjuste(totalSeleccionado) + 0.005 ? (
-                <button
-                  onClick={() => registrar("ajuste")}
-                  className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700"
-                >
-                  Pasar como ajuste por redondeo
-                  <span className="block text-[11px] font-normal opacity-80">
-                    El comprobante queda saldado; los $ {fmt(dialogoFalta)} se acreditan como ajuste en la cuenta
-                  </span>
-                </button>
-              ) : (
-                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  Supera el tope de ajuste por redondeo (1% de lo seleccionado = $ {fmt(topeAjuste(totalSeleccionado))}).
-                  Perdonar más que eso es una decisión de cuentas corrientes: dejá el saldo pendiente y resolvelo desde la cuenta del cliente.
-                </p>
-              )}
-              <button
-                onClick={() => registrar("saldo")}
-                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Dejar saldo pendiente
-                <span className="block text-[11px] font-normal text-slate-400">
-                  El comprobante queda parcial, con $ {fmt(dialogoFalta)} por cobrar
-                </span>
-              </button>
-              <button
-                onClick={() => setDialogoFalta(null)}
-                className="w-full rounded-lg px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+        <DialogoFalta
+          monto={dialogoFalta}
+          baseTope={totalSeleccionado}
+          conContado={aplicarContado}
+          onAjustar={() => registrar("ajuste")}
+          onSaldo={() => registrar("saldo")}
+          onCancelar={() => setDialogoFalta(null)}
+        />
       )}
     </div>
   )
