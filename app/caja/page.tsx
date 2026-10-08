@@ -18,6 +18,7 @@ import { RegistrarCobro, type CuentaFondos } from "@/components/caja/registrar-c
 import { MoverPlata } from "@/components/caja/mover-plata"
 import { ConfirmarDialog, type PagoAConfirmar } from "@/components/caja/confirmar-dialog"
 import { ControlarRendicion } from "@/components/caja/controlar-rendicion"
+import { PorRendir } from "@/components/caja/por-rendir"
 import { TareasFallidas } from "@/components/caja/tareas-fallidas"
 import { CerrarDia } from "@/components/caja/cerrar-dia"
 import { ImputarPago, type PagoAImputar } from "@/components/caja/imputar-pago"
@@ -240,6 +241,7 @@ export default function CajaDelDiaPage() {
   const [rendicionAControlar, setRendicionAControlar] = useState<string | null>(null)
   const [pagoAImputar, setPagoAImputar] = useState<PagoAImputar | null>(null)
   const [cerrandoDia, setCerrandoDia] = useState(false)
+  const [refrescoPR, setRefrescoPR] = useState(0)
   const [pagoAAnular, setPagoAAnular] = useState<{ pago_id: string; quien: string } | null>(null)
   const [motivoAnulacion, setMotivoAnulacion] = useState("")
   const [anulando, setAnulando] = useState(false)
@@ -253,6 +255,7 @@ export default function CajaDelDiaPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Error al cargar la caja")
       setFeed(data)
+      setRefrescoPR((n) => n + 1)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -512,6 +515,9 @@ export default function CajaDelDiaPage() {
                 </div>
               </div>
             )}
+
+            {/* Por rendir: viajes/vendedores sin declarar + confirmadas con detalle */}
+            {(tab === "todo" || tab === "rendicion") && <PorRendir recarga={refrescoPR} />}
 
             {/* Pendientes de días anteriores */}
             {filasAnteriores.length > 0 && (
