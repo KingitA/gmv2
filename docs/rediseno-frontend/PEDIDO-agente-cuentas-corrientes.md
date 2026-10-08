@@ -59,16 +59,16 @@ Para pensar con el dueño y acomodar (proponer antes de cambiar lógica):
 - **Caja (FINANZAS)** lo usa quien **ve los números** y decide qué hacer con la plata: **verifica** (confirma o rechaza) lo que ingresó el otro sector, controla rendiciones y mueve la plata.
 
 Qué hacer:
-1. **Cobros tiene que ser tan cómodo como la barra de Caja**, que el dueño considera bien armada. Traer a Cobros lo que la barra tiene y Cobros no, **reutilizando el código de la barra** () en lugar de escribirlo de nuevo:
+1. **Cobros tiene que ser tan cómodo como la barra de Caja**, que el dueño considera bien armada. Traer a Cobros lo que la barra tiene y Cobros no, **reutilizando el código de la barra** (`components/caja/registrar-cobro.tsx`) en lugar de escribirlo de nuevo:
    - pegar una captura con Ctrl+V para el OCR;
-   - los carteles "falta plata → ajuste por redondeo o dejar saldo" y "sobra plata → ajustar o dejar a cuenta" (con el tope de );
+   - los carteles "falta plata → ajuste por redondeo o dejar saldo" y "sobra plata → ajustar o dejar a cuenta" (con el tope de `lib/cobranzas/ajuste.ts`);
    - el resumen de la cuenta con el switch Facturados / Todos;
    - el aviso de deudor del BCRA con todos los titulares del cheque.
    Mostrarle al dueño la lista exacta antes de empezar.
 2. **La barra de cobro de Caja:** preguntarle al dueño si Finanzas también tiene que poder ingresar cobros o si eso queda solo para Cobros. No sacarla sin su OK.
 3. Textos que todavía dicen "Pagos Clientes" y deben decir "Cobros":
-   -  (~206): *"Los depósitos con varios ítems se cargan desde Pagos Clientes"*.
-   -  (~177, y el comentario ~27).
+   - `components/caja/registrar-cobro.tsx` (~206): *"Los depósitos con varios ítems se cargan desde Pagos Clientes"*.
+   - `app/api/mostrador/venta/route.ts` (~177, y el comentario ~27).
 
 ## 3. Pantallas a eliminar (cuando el dueño dé el OK)
 
