@@ -57,7 +57,7 @@ En Supabase → **SQL Editor** → pegar el texto de cada archivo → **Run**. N
 - [ ] **Importar pedido**: subir archivo + buscar cliente (la lista de clientes se ve entera y se puede bajar con la barra). Ver la barra "Leyendo archivo… Descifrando cantidades…" mientras importa.
 - [ ] **Mostrador** abre lo de siempre. **Programar viaje** abre el formulario.
 
-**Otras pantallas de Clientes** (chips de arriba): Viajes, Fichas de clientes, Comprobantes, Revisión de devoluciones, Caja, Viajantes, Transportes.
+**Otras pantallas de Clientes** (chips de arriba): Viajes, Fichas de clientes, Comprobantes, Revisión de devoluciones, **Cobros** (ex "Pagos de clientes": pestañas Nuevo cobro / Historial / Rendición; "atrás" vuelve a la misma pestaña), Viajantes, Transportes. Caja ya no está acá: está en Finanzas.
 - [ ] Viajes: igual que antes (calendario del mes + lista).
 - [ ] Fichas de clientes: ya no dice "No hay clientes" mientras carga.
 - [ ] Cuenta corriente: el número de pedido abre el pedido.
@@ -92,8 +92,8 @@ En Supabase → **SQL Editor** → pegar el texto de cada archivo → **Run**. N
 ## 6. Decisiones pendientes (no bloquean el pase a main)
 
 1. **Ficha de cliente**: tiene 3 botones de guardar (datos / condiciones / segmentación) porque guardan cosas distintas. ¿Unificamos en uno? (toca cómo se guarda → necesita tu OK).
-2. **Pagos de clientes y Revisión de pagos** no están en el menú (dijiste que cobranzas/rendiciones van por Caja). Siguen funcionando por su dirección. ¿Las borramos o las dejamos ocultas?
-3. **Caja** aparece en los accesos de Clientes pero pertenece a Finanzas: al tocarla cambia la pestaña activa. ¿Te molesta?
+2. ~~Pagos de clientes y Revisión de pagos~~ — RESUELTO 08/10: Pagos de clientes pasa a ser **Cobros** (Clientes); Revisión de pagos y Cobranza nueva las borra el agente de cuentas corrientes cuando des el OK.
+3. ~~Caja en Clientes~~ — RESUELTO 08/10: Caja quedó solo en Finanzas.
 4. **Dashboard** viejo: salió del menú. ¿Lo borramos?
 5. Próximas etapas (otro día): Artículos, Finanzas y Playroom por dentro; ficha de cliente por secciones; quitar los redondeles de carga que quedan en pantallas viejas.
 
