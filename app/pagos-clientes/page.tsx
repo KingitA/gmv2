@@ -3,6 +3,7 @@ import { formatDateAR } from "@/lib/utils"
 
 import { useRef, useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -74,11 +75,17 @@ function PagosClientesContent() {
   const [clientesExtra, setClientesExtra] = useState<Array<{ cliente: Cliente; seleccionados: Record<string, number> }>>([])
   const [mostrarBuscarExtra, setMostrarBuscarExtra] = useState(false)
   const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())  // anticipos con 10% contado (cliente principal)
+  // "A cuenta (extra)" por cliente en cobro conjunto: plata que entrega de más
+  // y queda a favor (permite también cobrarle a un cliente sin comprobantes).
+  const [aCuentaExtra, setACuentaExtra] = useState<Record<string, number>>({})
   const [comprobanteArchivos, setComprobanteArchivos] = useState<{ url: string; nombre: string }[]>([])  // fotos de comprobantes (OCR)
   const esMulti = clientesExtra.length > 0
 
   // ── Historial ──
   const [historial, setHistorial] = useState<PagoHistorial[]>([])
+  const [filtroCliente, setFiltroCliente] = useState("")
+  const [filtroDesde, setFiltroDesde] = useState("")
+  const [filtroHasta, setFiltroHasta] = useState("")
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [historialCargado, setHistorialCargado] = useState(false)
 
@@ -121,12 +128,20 @@ function PagosClientesContent() {
       .then(({ data }) => { if (data) setCliente(data) })
   }, [searchParams])
 
+  // Si se llegó desde "Registrar pago" del pedido, ofrecer volver a ese pedido
+  const pedidoOrigen = searchParams.get("pedido_id")
+
   const totalComprobantes = Object.values(seleccionados).reduce((s, v) => s + v, 0)
-  // Total combinado (incluye clientes adicionales en cobranza conjunta)
+  // Total combinado (incluye clientes adicionales y a cuenta extra en cobranza conjunta)
   const totalExtra = clientesExtra.reduce((s, c) => s + Object.values(c.seleccionados).reduce((a, v) => a + v, 0), 0)
-  const totalSeleccionadoUI = totalComprobantes + totalExtra
-  // Solo efectivo → se confirma en el acto (mostrador). Cheque/transferencia/depósito → pendiente de verificación.
-  const soloEfectivo = metodos.length > 0 && metodos.every((m) => m.tipo === "efectivo")
+  // Solo los clientes presentes en la cobranza (si quitaron uno, su extra no suma)
+  const totalACuentaExtra = esMulti
+    ? [cliente?.id, ...clientesExtra.map((c) => c.cliente.id)].reduce((s, id) => s + (id ? aCuentaExtra[id] || 0 : 0), 0)
+    : 0
+  const totalSeleccionadoUI = totalComprobantes + totalExtra + totalACuentaExtra
+  // Regla del dueño (08/10): TODO lo que se ingresa en Cobros queda pendiente
+  // de verificación — incluido el efectivo. Finanzas cuenta la plata y confirma
+  // en /caja (ahí sale el recibo). Antes el efectivo se confirmaba en el acto.
 
   const resetForm = () => {
     setCliente(null)
@@ -219,13 +234,21 @@ function PagosClientesContent() {
         imputaciones: Object.entries(c.seleccionados)
           .filter(([k]) => !k.startsWith("pedido:"))
           .map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado })),
-        portion: Object.values(c.seleccionados).reduce((a, v) => a + v, 0),
+        // Porción del cliente = lo tildado + su "a cuenta (extra)". Con extra
+        // solo (sin comprobantes) también participa: todo queda a su favor.
+        portion: Object.values(c.seleccionados).reduce((a, v) => a + v, 0) + (aCuentaExtra[c.cliente_id] || 0),
       }))
       .filter((c) => c.portion > 0)
 
-    if (clientes.length === 0) { toast.error("Seleccioná comprobantes a afectar"); return }
+    if (clientes.length === 0) { toast.error("Seleccioná comprobantes o cargá un a cuenta (extra)"); return }
     if (metodos.filter((m) => m.tipo === "cheque").length > 1) {
       toast.error("En cobranza multi-cliente usá un solo cheque (compartido)"); return
+    }
+    // El depósito con ítems no se reparte entre clientes: cada ítem-cheque crea
+    // SU fila en cheques y partirlo duplicaría el papel (antes además entraba
+    // en $0: el server suma los items y el reparto los perdía).
+    if (metodos.some((m) => m.tipo === "deposito")) {
+      toast.error("El depósito con varios ítems no se puede repartir entre clientes: cobralo por cliente individual"); return
     }
 
     const montoMetodo = (m: any) => m.tipo === "deposito"
@@ -278,7 +301,7 @@ function PagosClientesContent() {
       toast.success(confirmar
         ? `Cobranza confirmada: ${data.clientes?.length || 0} cliente(s), recibos generados.`
         : "Cobranza registrada como PENDIENTE de verificación.")
-      setCliente(null); setClientesExtra([]); setSeleccionados({}); setMetodos([]); setRetenciones([]); setPagoACuenta(false)
+      setCliente(null); setClientesExtra([]); setSeleccionados({}); setMetodos([]); setRetenciones([]); setPagoACuenta(false); setACuentaExtra({})
       setHistorialCargado(false)
     } catch (err: any) {
       toast.error("Error: " + err.message)
@@ -630,9 +653,19 @@ function PagosClientesContent() {
 
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Pagos de Clientes</h1>
-        <p className="text-sm text-muted-foreground">Registrá cobros, imputá comprobantes y generá recibos</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Pagos de Clientes</h1>
+          <p className="text-sm text-muted-foreground">Registrá cobros, imputá comprobantes y generá recibos</p>
+        </div>
+        {pedidoOrigen && (
+          <Link
+            href={`/clientes-pedidos?pedido=${pedidoOrigen}`}
+            className="shrink-0 rounded-lg border px-3 py-2 text-sm text-blue-600 hover:bg-blue-50"
+          >
+            ← Volver al pedido
+          </Link>
+        )}
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -711,6 +744,12 @@ function PagosClientesContent() {
                     onDtosHechosLoaded={setDtosHechos}
                     onContadoPedidosChange={setContadoPedidos}
                   />
+                  {esMulti && (
+                    <ACuentaExtraInput
+                      valor={aCuentaExtra[cliente.id] || 0}
+                      onChange={(v) => setACuentaExtra((prev) => ({ ...prev, [cliente.id]: v }))}
+                    />
+                  )}
                 </section>
               )}
 
@@ -749,11 +788,16 @@ function PagosClientesContent() {
                         seleccionados={ce.seleccionados}
                         onChange={(sel) => setClientesExtra((prev) => prev.map((c, i) => (i === idx ? { ...c, seleccionados: sel } : c)))}
                       />
+                      <ACuentaExtraInput
+                        valor={aCuentaExtra[ce.cliente.id] || 0}
+                        onChange={(v) => setACuentaExtra((prev) => ({ ...prev, [ce.cliente.id]: v }))}
+                      />
                     </section>
                   ))}
                   {esMulti && (
                     <p className="text-xs text-amber-700 px-1">
-                      Cobranza conjunta: los métodos de pago se reparten entre los clientes según lo seleccionado.
+                      Cobranza conjunta: los métodos de pago se reparten entre los clientes según lo seleccionado
+                      más su a cuenta (extra). Un cliente puede ir solo con a cuenta, sin comprobantes.
                       Si pagan con cheque, usá un solo cheque (se registra compartido).
                     </p>
                   )}
@@ -823,22 +867,16 @@ function PagosClientesContent() {
               <Button
                 className="w-full"
                 size="lg"
-                onClick={() => handleGuardar(soloEfectivo)}
+                onClick={() => handleGuardar(false)}
                 disabled={guardando || !cliente || metodos.length === 0}
               >
                 {guardando ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-                {guardando
-                  ? "Guardando..."
-                  : soloEfectivo
-                    ? "Cobrar (efectivo) y generar recibo"
-                    : "Registrar pago (queda pendiente de verificación)"}
+                {guardando ? "Guardando..." : "Registrar cobro (queda pendiente de verificación)"}
               </Button>
 
               {metodos.length > 0 && (
                 <p className="text-xs text-muted-foreground text-center">
-                  {soloEfectivo
-                    ? "Pago en efectivo: se confirma en el acto e impacta el saldo."
-                    : "Incluye cheque o transferencia: queda pendiente de verificación (se confirma en Historial cuando se acredite/reciba)."}
+                  Todo cobro ingresado acá queda pendiente: Finanzas lo cuenta y lo confirma en Caja, y ahí sale el recibo.
                 </p>
               )}
 
@@ -869,6 +907,30 @@ function PagosClientesContent() {
                 </Button>
               </div>
 
+              {/* Filtros del administrativo: por cliente y por rango de fechas.
+                  Con un filtro activo se ocultan las filas de rendiciones/viajes
+                  (son otra cosa: acá se busca un pago puntual). */}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={filtroCliente}
+                  onChange={(e) => setFiltroCliente(e.target.value)}
+                  placeholder="Filtrar por cliente…"
+                  className="rounded-md border px-3 py-1.5 text-sm w-56"
+                />
+                <input type="date" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} className="rounded-md border px-2 py-1.5 text-sm" />
+                <span className="text-xs text-muted-foreground">a</span>
+                <input type="date" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} className="rounded-md border px-2 py-1.5 text-sm" />
+                {(filtroCliente || filtroDesde || filtroHasta) && (
+                  <button
+                    onClick={() => { setFiltroCliente(""); setFiltroDesde(""); setFiltroHasta("") }}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
+
               {historial.length === 0 && rendicionesU.length === 0 && viajesPendU.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">No hay pagos registrados</div>
               ) : (
@@ -893,28 +955,42 @@ function PagosClientesContent() {
                         const enRendicion = new Set<string>(rendicionesU.flatMap((r: any) => r.pago_ids || []))
                         const enViajePend = new Set<string>(viajesPendU.flatMap((v: any) => v.pago_ids || []))
                         const enVendPend = new Set<string>(vendedoresPendU.flatMap((v: any) => v.pago_ids || []))
+                        const hayFiltro = Boolean(filtroCliente || filtroDesde || filtroHasta)
+                        const pasaFiltros = (p: PagoHistorial) => {
+                          if (filtroCliente) {
+                            const nombre = `${p.clientes?.nombre || ""} ${p.clientes?.razon_social || ""}`.toLowerCase()
+                            if (!nombre.includes(filtroCliente.toLowerCase())) return false
+                          }
+                          const f = (p.fecha_pago || "").slice(0, 10)
+                          if (filtroDesde && f < filtroDesde) return false
+                          if (filtroHasta && f > filtroHasta) return false
+                          return true
+                        }
                         const filas: Array<{ key: string; orden: string; tipo: string; data: any }> = [
                           ...historial
                             .filter((p) => !enRendicion.has(p.id) && !enViajePend.has(p.id) && !enVendPend.has(p.id))
+                            .filter(pasaFiltros)
                             .map((p) => ({ key: `p-${p.id}`, orden: p.fecha_pago || "", tipo: "pago", data: p })),
-                          ...rendicionesU.map((r: any) => ({
-                            key: `r-${r.id}`,
-                            orden: r.created_at || r.fecha || "",
-                            tipo: "rendicion",
-                            data: r,
-                          })),
-                          ...viajesPendU.map((v: any) => ({
-                            key: `v-${v.viaje_id}`,
-                            orden: v.ultima_fecha || "",
-                            tipo: "viaje",
-                            data: v,
-                          })),
-                          ...vendedoresPendU.map((v: any) => ({
-                            key: `vp-${v.cobrador_id}`,
-                            orden: v.ultima_fecha || "",
-                            tipo: "vendedor_pendiente",
-                            data: v,
-                          })),
+                          ...(hayFiltro ? [] : [
+                            ...rendicionesU.map((r: any) => ({
+                              key: `r-${r.id}`,
+                              orden: r.created_at || r.fecha || "",
+                              tipo: "rendicion",
+                              data: r,
+                            })),
+                            ...viajesPendU.map((v: any) => ({
+                              key: `v-${v.viaje_id}`,
+                              orden: v.ultima_fecha || "",
+                              tipo: "viaje",
+                              data: v,
+                            })),
+                            ...vendedoresPendU.map((v: any) => ({
+                              key: `vp-${v.cobrador_id}`,
+                              orden: v.ultima_fecha || "",
+                              tipo: "vendedor_pendiente",
+                              data: v,
+                            })),
+                          ]),
                         ].sort((a, b) => b.orden.localeCompare(a.orden))
 
                         return filas.map((fila) => {
@@ -1379,6 +1455,29 @@ function PagosClientesContent() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+// "A cuenta (extra)" de un cliente en cobro conjunto: plata que entrega por
+// encima de lo tildado (o sin tildar nada) y queda a su favor al confirmarse.
+function ACuentaExtraInput({ valor, onChange }: { valor: number; onChange: (v: number) => void }) {
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <label className="text-sm text-muted-foreground whitespace-nowrap">A cuenta (extra):</label>
+      <div className="relative w-40">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          value={valor || ""}
+          onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+          className="w-full rounded-md border px-2 py-1.5 pl-5 text-sm"
+          placeholder="0"
+        />
+      </div>
+      {valor > 0 && <span className="text-xs text-amber-700">queda a favor del cliente</span>}
     </div>
   )
 }

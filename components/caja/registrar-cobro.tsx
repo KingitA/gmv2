@@ -203,7 +203,7 @@ export function RegistrarCobro({
         } else {
           toast({
             title: "Depósito detectado",
-            description: "Los depósitos con varios ítems se cargan desde Pagos Clientes; la foto igual queda adjunta.",
+            description: "Los depósitos con varios ítems se cargan desde Cobros (Clientes); la foto igual queda adjunta.",
           })
         }
         if (resultados.length > 1) {
@@ -343,7 +343,7 @@ export function RegistrarCobro({
       toast({ variant: "destructive", title: "Monto inválido", description: "Ingresá un monto mayor a 0" })
       return
     }
-    // Igual que Pagos Clientes: los "pedido:<id>" son anticipos (no se imputan)
+    // Igual que Cobros: los "pedido:<id>" son anticipos (no se imputan)
     let imputaciones = Object.entries(seleccionados)
       .filter(([k, v]) => !k.startsWith(PEDIDO_PREFIX) && Number(v) > 0)
       .map(([comprobante_id, v]) => ({ comprobante_id, monto_imputado: Number(v) }))
@@ -408,7 +408,7 @@ export function RegistrarCobro({
       : obsAnticipo
 
     // Solo-efectivo confirma en el acto; si hay algún valor (transf/cheque/echeq)
-    // el cobro completo queda pendiente hasta su Confirmar (regla de Pagos Clientes).
+    // el cobro completo queda pendiente hasta su Confirmar (regla de Cobros).
     const esEfectivo = metodosCobro.every((m) => m.payload.tipo === "efectivo")
     setGuardando(true)
     try {

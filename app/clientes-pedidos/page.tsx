@@ -1343,7 +1343,7 @@ export default function ClientesPedidosPage() {
                       : <><RefreshCw className="h-3.5 w-3.5 mr-1.5" />Repreciar</>}
                   </Button>
                 )}
-                <Link href={`/pagos-clientes?cliente_id=${pedidoSeleccionado.cliente_id}`} className="contents">
+                <Link href={`/pagos-clientes?cliente_id=${pedidoSeleccionado.cliente_id}&pedido_id=${pedidoSeleccionado.id}`} className="contents">
                   <Button size="sm" className="bg-emerald-500 text-white hover:bg-emerald-600 font-semibold shadow-sm">
                     <DollarSign className="h-3.5 w-3.5 mr-1.5" />Registrar pago
                   </Button>
