@@ -96,7 +96,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v) }}>
-      <DialogContent className="sm:max-w-[800px] w-[95vw] max-h-[90vh] flex flex-col overflow-hidden p-0">
+      {/* Alto fijo generoso: la lista de clientes tiene lugar para mostrarse entera */}
+      <DialogContent className="sm:max-w-[800px] w-[95vw] h-[min(88dvh,760px)] flex flex-col overflow-hidden p-0">
         {/* ── Título fijo ── */}
         <div className="px-6 pt-6 pb-3 shrink-0 border-b">
           <DialogTitle className="text-base font-semibold">Nuevo Pedido</DialogTitle>
@@ -176,7 +177,8 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   />
                 </div>
                 {showDrop && results.length > 0 && (
-                  <div className="mt-1 border rounded-lg bg-background max-h-[240px] overflow-y-auto shadow-md">
+                  // onMouseDown: tocar la barra de scroll de la lista no saca el foco del buscador (antes la cerraba)
+                  <div onMouseDown={e => e.preventDefault()} className="mt-1 border rounded-lg bg-background max-h-[min(52dvh,440px)] overflow-y-auto shadow-md">
                     {results.map(c => (
                       <div
                         key={c.id}

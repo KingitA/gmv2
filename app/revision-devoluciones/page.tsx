@@ -14,6 +14,7 @@ import { useEffect, useState } from "react"
 import { Loader2, ChevronDown, ChevronRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { formatCurrency } from "@/lib/utils"
+import { useRealtime } from "@/lib/hooks/use-realtime"
 
 const ESTADO_UI: Record<string, { label: string; cls: string }> = {
   pendiente: { label: "Pendiente depósito", cls: "bg-amber-100 text-amber-800 border-amber-300" },
@@ -32,9 +33,11 @@ export default function RevisionDevolucionesPage() {
   const { toast } = useToast()
 
   useEffect(() => { cargar() }, [])
+  // En vivo: devoluciones que carga el chofer/vendedor o controla el depósito
+  useRealtime(["devoluciones"], () => cargar(true))
 
-  async function cargar() {
-    setLoading(true)
+  async function cargar(silencioso = false) {
+    if (!silencioso) setLoading(true)
     try {
       const res = await fetch("/api/devoluciones?estado=revision")
       const data = await res.json()

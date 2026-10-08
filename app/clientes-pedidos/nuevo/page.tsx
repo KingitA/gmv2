@@ -253,7 +253,7 @@ export default function NuevoPedidoPage() {
                 onFocus={() => { if (clienteResults.length) setClienteOpen(true) }}
               />
               {clienteOpen && clienteResults.length > 0 && (
-                <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[280px] overflow-auto">
+                <div onMouseDown={e => e.preventDefault()} className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-xl shadow-lg mt-1 z-50 max-h-[280px] overflow-auto">
                   {clienteResults.map((c: any) => (
                     <div key={c.id} className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 last:border-0" onMouseDown={() => selectCliente(c)}>
                       <div className="font-medium text-slate-800">{c.nombre_razon_social || c.razon_social}</div>

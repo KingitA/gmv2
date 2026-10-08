@@ -3,6 +3,8 @@ import { formatDateAR } from "@/lib/utils"
 
 import { useRef, useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
+import Link from "next/link"
+import { useUrlParams } from "@/lib/hooks/use-url-state"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -24,9 +26,10 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { ClienteSearchCombobox } from "@/components/pagos/ClienteSearchCombobox"
-import { ComprobantesSelector, type Comprobante } from "@/components/pagos/ComprobantesSelector"
+import { ComprobantesSelector, type Comprobante, type ModoPedidos, type ResumenCuenta } from "@/components/pagos/ComprobantesSelector"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { MetodoPagoForm, type MetodoPago } from "@/components/pagos/MetodoPagoForm"
+import { DialogoFalta, DialogoSobra } from "@/components/pagos/DialogoDiferencia"
 import { RetencionForm, type Retencion } from "@/components/pagos/RetencionForm"
 import { ResumenPago } from "@/components/pagos/ResumenPago"
 
@@ -62,23 +65,38 @@ function PagosClientesContent() {
   const [retenciones, setRetenciones] = useState<Retencion[]>([])
   const [pagoACuenta, setPagoACuenta] = useState(false)
   const [comprobantesData, setComprobantesData] = useState<Comprobante[]>([])
+  const [modoPedidos, setModoPedidos] = useState<ModoPedidos>("todos")
+  const [resumenCuenta, setResumenCuenta] = useState<ResumenCuenta | null>(null)
   const [dtosHechos, setDtosHechos] = useState<Set<string>>(new Set())
   const [guardando, setGuardando] = useState(false)
   // Clave de idempotencia: estable ante doble click/reintento, rota al éxito
   const idemKeyRef = useRef<string>(crypto.randomUUID())
   const [ocrProcesando, setOcrProcesando] = useState(false)
   const [aplicarContado, setAplicarContado] = useState(false)
-  const [activeTab, setActiveTab] = useState("nuevo")
+  // Pestaña en la URL (?tab=historial): "atrás" vuelve a la misma pestaña
+  const urlTab = useUrlParams()
+  const tabParam = urlTab.get("tab", "nuevo")
+  const activeTab = ["nuevo", "historial"].includes(tabParam) ? tabParam : "nuevo"
+  const setActiveTab = (t: string) => urlTab.set({ tab: t }, "push", { tab: "nuevo" })
 
   // ── Multi-cliente (caso "Tandil"): clientes adicionales en la misma cobranza ──
   const [clientesExtra, setClientesExtra] = useState<Array<{ cliente: Cliente; seleccionados: Record<string, number> }>>([])
   const [mostrarBuscarExtra, setMostrarBuscarExtra] = useState(false)
   const [contadoPedidos, setContadoPedidos] = useState<Set<string>>(new Set())  // anticipos con 10% contado (cliente principal)
+  // "A cuenta (extra)" por cliente en cobro conjunto: plata que entrega de más
+  // y queda a favor (permite también cobrarle a un cliente sin comprobantes).
+  const [aCuentaExtra, setACuentaExtra] = useState<Record<string, number>>({})
   const [comprobanteArchivos, setComprobanteArchivos] = useState<{ url: string; nombre: string }[]>([])  // fotos de comprobantes (OCR)
   const esMulti = clientesExtra.length > 0
 
   // ── Historial ──
   const [historial, setHistorial] = useState<PagoHistorial[]>([])
+  // Carteles de diferencia (compartidos con la barra de Caja)
+  const [dialogoFalta, setDialogoFalta] = useState<number | null>(null)
+  const [dialogoSobra, setDialogoSobra] = useState<number | null>(null)
+  const [filtroCliente, setFiltroCliente] = useState("")
+  const [filtroDesde, setFiltroDesde] = useState("")
+  const [filtroHasta, setFiltroHasta] = useState("")
   const [cargandoHistorial, setCargandoHistorial] = useState(false)
   const [historialCargado, setHistorialCargado] = useState(false)
 
@@ -92,9 +110,6 @@ function PagosClientesContent() {
   const [confirmandoRend, setConfirmandoRend] = useState(false)
 
   // ── Rendición de viajes ──
-  const [viajesRendicion, setViajesRendicion] = useState<any[]>([])
-  const [cargandoViajes, setCargandoViajes] = useState(false)
-  const [viajesCargados, setViajesCargados] = useState(false)
 
   // ── Post-guardado ──
   const [reciboGenerado, setReciboGenerado] = useState<{ pagoId: string; numero: string } | null>(null)
@@ -106,6 +121,7 @@ function PagosClientesContent() {
   const [confirmAnularId, setConfirmAnularId] = useState<string | null>(null)
 
   const ocrFileRef = useRef<HTMLInputElement>(null)
+  const ocrCamRef = useRef<HTMLInputElement>(null)
   const searchParams = useSearchParams()
   const supabase = createClient()
 
@@ -121,12 +137,20 @@ function PagosClientesContent() {
       .then(({ data }) => { if (data) setCliente(data) })
   }, [searchParams])
 
+  // Si se llegó desde "Registrar pago" del pedido, ofrecer volver a ese pedido
+  const pedidoOrigen = searchParams.get("pedido_id")
+
   const totalComprobantes = Object.values(seleccionados).reduce((s, v) => s + v, 0)
-  // Total combinado (incluye clientes adicionales en cobranza conjunta)
+  // Total combinado (incluye clientes adicionales y a cuenta extra en cobranza conjunta)
   const totalExtra = clientesExtra.reduce((s, c) => s + Object.values(c.seleccionados).reduce((a, v) => a + v, 0), 0)
-  const totalSeleccionadoUI = totalComprobantes + totalExtra
-  // Solo efectivo → se confirma en el acto (mostrador). Cheque/transferencia/depósito → pendiente de verificación.
-  const soloEfectivo = metodos.length > 0 && metodos.every((m) => m.tipo === "efectivo")
+  // Solo los clientes presentes en la cobranza (si quitaron uno, su extra no suma)
+  const totalACuentaExtra = esMulti
+    ? [cliente?.id, ...clientesExtra.map((c) => c.cliente.id)].reduce((s, id) => s + (id ? aCuentaExtra[id] || 0 : 0), 0)
+    : 0
+  const totalSeleccionadoUI = totalComprobantes + totalExtra + totalACuentaExtra
+  // Regla del dueño (08/10): TODO lo que se ingresa en Cobros queda pendiente
+  // de verificación — incluido el efectivo. Finanzas cuenta la plata y confirma
+  // en /caja (ahí sale el recibo). Antes el efectivo se confirmaba en el acto.
 
   const resetForm = () => {
     setCliente(null)
@@ -145,6 +169,27 @@ function PagosClientesContent() {
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
+    e.target.value = ""
+    return procesarArchivosOCR(files)
+  }
+
+  // Pegar una captura con Ctrl+V en cualquier parte de la pantalla (igual que
+  // la barra de Caja): la imagen va al mismo OCR que el botón de subir.
+  const onPasteCaptura = (e: React.ClipboardEvent) => {
+    const files: File[] = []
+    for (const item of Array.from(e.clipboardData?.items || [])) {
+      if (item.type.startsWith("image/")) {
+        const f = item.getAsFile()
+        if (f) files.push(new File([f], `captura-${Date.now()}.png`, { type: f.type }))
+      }
+    }
+    if (files.length) {
+      e.preventDefault()
+      procesarArchivosOCR(files)
+    }
+  }
+
+  const procesarArchivosOCR = async (files: File[]) => {
     if (!files.length) return
     setOcrProcesando(true)
     try {
@@ -174,6 +219,7 @@ function PagosClientesContent() {
           fecha_emision: r.fecha_emision || "",
           fecha_cheque: r.fecha_cheque || "",
           cuit_emisor: r.cuit_emisor || "",
+          cuits_titulares: Array.isArray(r.cuits_titulares) ? r.cuits_titulares : [],
           localidad: r.localidad || "",
           // El OCR solo detecta ECHEQ; el color BLANCO/NEGRO lo deriva el
           // backend según la imputación (o queda PENDIENTE si es a cuenta).
@@ -200,7 +246,6 @@ function PagosClientesContent() {
       toast.error("Error procesando OCR: " + err.message)
     } finally {
       setOcrProcesando(false)
-      e.target.value = ""
     }
   }
 
@@ -219,13 +264,21 @@ function PagosClientesContent() {
         imputaciones: Object.entries(c.seleccionados)
           .filter(([k]) => !k.startsWith("pedido:"))
           .map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado })),
-        portion: Object.values(c.seleccionados).reduce((a, v) => a + v, 0),
+        // Porción del cliente = lo tildado + su "a cuenta (extra)". Con extra
+        // solo (sin comprobantes) también participa: todo queda a su favor.
+        portion: Object.values(c.seleccionados).reduce((a, v) => a + v, 0) + (aCuentaExtra[c.cliente_id] || 0),
       }))
       .filter((c) => c.portion > 0)
 
-    if (clientes.length === 0) { toast.error("Seleccioná comprobantes a afectar"); return }
+    if (clientes.length === 0) { toast.error("Seleccioná comprobantes o cargá un a cuenta (extra)"); return }
     if (metodos.filter((m) => m.tipo === "cheque").length > 1) {
       toast.error("En cobranza multi-cliente usá un solo cheque (compartido)"); return
+    }
+    // El depósito con ítems no se reparte entre clientes: cada ítem-cheque crea
+    // SU fila en cheques y partirlo duplicaría el papel (antes además entraba
+    // en $0: el server suma los items y el reparto los perdía).
+    if (metodos.some((m) => m.tipo === "deposito")) {
+      toast.error("El depósito con varios ítems no se puede repartir entre clientes: cobralo por cliente individual"); return
     }
 
     const montoMetodo = (m: any) => m.tipo === "deposito"
@@ -278,7 +331,7 @@ function PagosClientesContent() {
       toast.success(confirmar
         ? `Cobranza confirmada: ${data.clientes?.length || 0} cliente(s), recibos generados.`
         : "Cobranza registrada como PENDIENTE de verificación.")
-      setCliente(null); setClientesExtra([]); setSeleccionados({}); setMetodos([]); setRetenciones([]); setPagoACuenta(false)
+      setCliente(null); setClientesExtra([]); setSeleccionados({}); setMetodos([]); setRetenciones([]); setPagoACuenta(false); setACuentaExtra({})
       setHistorialCargado(false)
     } catch (err: any) {
       toast.error("Error: " + err.message)
@@ -287,17 +340,63 @@ function PagosClientesContent() {
     }
   }
 
-  const handleGuardar = async (confirmar: boolean = true) => {
+  const handleGuardar = async (
+    confirmar: boolean = false,
+    modoDiferencia?: "ajuste" | "saldo" | "sobra_ajuste" | "sobra_cuenta",
+  ) => {
     if (esMulti) return handleGuardarMulti(confirmar)
     if (!cliente) { toast.error("Seleccioná un cliente"); return }
     if (metodos.length === 0) { toast.error("Agregá al menos un método de pago"); return }
 
     // Imputaciones = solo comprobantes reales. Las claves "pedido:<id>" son anticipos
     // a pedidos sin facturar → quedan como pago a cuenta (saldo a favor) y se anotan.
-    const imputaciones = pagoACuenta ? [] : Object.entries(seleccionados)
+    let imputaciones = pagoACuenta ? [] : Object.entries(seleccionados)
       .filter(([k]) => !k.startsWith("pedido:"))
       .map(([comprobante_id, monto_imputado]) => ({ comprobante_id, monto_imputado }))
     const anticipos = pagoACuenta ? [] : Object.keys(seleccionados).filter((k) => k.startsWith("pedido:"))
+
+    // ── Diferencia entre lo entregado y lo seleccionado (misma regla y carteles
+    // que la barra de Caja): falta → ajuste por redondeo (tope 1%) o saldo;
+    // sobra → ajuste (débito) o a cuenta. El ajuste viaja como ajuste_redondeo.
+    const r2 = (n: number) => Math.round(n * 100) / 100
+    const montoMetodo = (m: any) => m.tipo === "deposito"
+      ? (m.items || []).reduce((a: number, it: any) => a + Number(it.monto || 0), 0)
+      : Number(m.monto || 0)
+    const totalMetodos = metodos.reduce((s, m) => s + montoMetodo(m), 0)
+    const bonifEstimada = calcBonificacion()
+    const cubierto = r2(totalMetodos + (aplicarContado ? bonifEstimada : 0))
+    const totalSeleccionado = r2(Object.values(seleccionados).reduce((s, v) => s + (Number(v) || 0), 0))
+    const falta = r2(totalSeleccionado - cubierto)
+    const totalImputable = imputaciones.reduce((s, i) => s + Number(i.monto_imputado || 0), 0)
+
+    if (!pagoACuenta && falta > 0.01) {
+      if (falta > totalImputable + 0.01) {
+        toast.error(`Entre métodos${aplicarContado ? " + NC 10%" : ""} cubrís $${fmtARS(cubierto)} y seleccionaste $${fmtARS(totalSeleccionado)}. Bajá la selección o agregá un método.`)
+        return
+      }
+      if (!modoDiferencia) { setDialogoFalta(falta); return }
+      if (modoDiferencia === "saldo") {
+        let excedente = falta
+        for (let i = imputaciones.length - 1; i >= 0 && excedente > 0.005; i--) {
+          const rebaja = Math.min(Number(imputaciones[i].monto_imputado), excedente)
+          imputaciones[i].monto_imputado = r2(Number(imputaciones[i].monto_imputado) - rebaja)
+          excedente = r2(excedente - rebaja)
+        }
+        imputaciones = imputaciones.filter((i) => Number(i.monto_imputado) > 0.009)
+      }
+    }
+    const sobra = r2(-falta)
+    if (!pagoACuenta && sobra > 0.01 && imputaciones.length && !modoDiferencia) {
+      setDialogoSobra(sobra)
+      return
+    }
+    const ajusteRedondeo =
+      modoDiferencia === "ajuste" && falta > 0.01
+        ? falta
+        : modoDiferencia === "sobra_ajuste" && sobra > 0.01
+          ? -sobra
+          : 0
+    setDialogoFalta(null); setDialogoSobra(null)
     const obsAnticipo = anticipos.length
       ? `Anticipo a pedido(s) sin facturar: ${anticipos.map((k) => k.replace("pedido:", "")).join(", ")}`
       : null
@@ -335,6 +434,12 @@ function PagosClientesContent() {
           })),
           imputaciones,
           observaciones: obsFinal,
+          // Anticipos con su monto: entran a la BASE del tope de ajuste
+          pedidos_anticipo: Object.entries(seleccionados)
+            .filter(([k, v]) => k.startsWith("pedido:") && Number(v) > 0)
+            .map(([k, v]) => ({ pedido_id: k.replace("pedido:", ""), monto: Number(v) })),
+          // Ajuste por redondeo: positivo = falta (crédito) · negativo = sobrante (débito)
+          ajuste_redondeo: ajusteRedondeo,
           pedidos_contado: [...contadoPedidos],
           comprobante_urls: comprobanteArchivos,
           retenciones: retenciones.map((r) => ({
@@ -384,23 +489,6 @@ function PagosClientesContent() {
     }
   }
 
-  const loadViajesRendicion = async () => {
-    setCargandoViajes(true)
-    try {
-      const { data: viajes } = await supabase
-        .from("viajes")
-        .select("id, nombre, fecha, estado, chofer")
-        .in("estado", ["en_rendicion", "en_curso", "en_viaje"])
-        .order("fecha", { ascending: false })
-      setViajesRendicion(viajes || [])
-      setViajesCargados(true)
-    } catch {
-      toast.error("Error cargando viajes")
-    } finally {
-      setCargandoViajes(false)
-    }
-  }
-
   const loadHistorial = async () => {
     setCargandoHistorial(true)
     try {
@@ -430,6 +518,12 @@ function PagosClientesContent() {
       setCargandoHistorial(false)
     }
   }
+
+  // Al entrar a una pestaña (click o link con ?tab=), se carga una vez
+  useEffect(() => {
+    if (activeTab === "historial" && !historialCargado && !cargandoHistorial) loadHistorial()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
 
   // Confirmar una rendición completa (todos sus pagos de una) desde el historial
   const confirmarRendicion = async (forzar = false) => {
@@ -607,18 +701,21 @@ function PagosClientesContent() {
     }
   }
 
-  // La NC del 10% es proporcional a TODOS los componentes de la factura
-  // (neto + IVA + percepciones) → exactamente 10% del total facturado.
+  // Preview del 10% contado — misma regla que la barra de Caja (dueño 07/10):
+  // por comprobante, el menor entre lo imputado en ESTE cobro y el 10% de su
+  // total (la NC es 10% del total, una sola vez, nunca más que lo que se paga hoy).
   const calcBonificacion = (): number => {
     if (!aplicarContado) return 0
-    return comprobantesData
+    const total = comprobantesData
       .filter(c => seleccionados[c.id] !== undefined && !dtosHechos.has(c.id))
       .reduce((sum, c) => {
         if (["PRES", "FA", "FB", "FC"].includes(c.tipo_comprobante)) {
-          return sum + Math.abs(Number(c.total_factura)) * 0.1
+          const imputado = Math.max(0, Number(seleccionados[c.id]) || 0)
+          return sum + Math.min(imputado, Math.abs(Number(c.total_factura)) * 0.1)
         }
         return sum
       }, 0)
+    return Math.round(total * 100) / 100
   }
 
   const tiposBadge: Record<string, string> = {
@@ -629,20 +726,27 @@ function PagosClientesContent() {
   }
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Pagos de Clientes</h1>
-        <p className="text-sm text-muted-foreground">Registrá cobros, imputá comprobantes y generá recibos</p>
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto" onPaste={onPasteCaptura}>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Cobros</h1>
+          <p className="text-sm text-neutro-500">Cobrale a un cliente en la oficina: el pedido que retira o los anteriores. Queda pendiente hasta que Finanzas lo verifica en Caja.</p>
+        </div>
+        {pedidoOrigen && (
+          <Link
+            href={`/clientes-pedidos?pedido=${pedidoOrigen}`}
+            className="shrink-0 rounded-lg border px-3 py-2 text-sm text-blue-600 hover:bg-blue-50"
+          >
+            ← Volver al pedido
+          </Link>
+        )}
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-6">
-          <TabsTrigger value="nuevo">Nuevo Pago</TabsTrigger>
-          <TabsTrigger value="historial" onClick={() => !historialCargado && loadHistorial()}>
+          <TabsTrigger value="nuevo">Nuevo cobro</TabsTrigger>
+          <TabsTrigger value="historial">
             Historial
-          </TabsTrigger>
-          <TabsTrigger value="rendicion" onClick={() => !viajesCargados && loadViajesRendicion()}>
-            Rendición de viajes
           </TabsTrigger>
         </TabsList>
 
@@ -703,6 +807,34 @@ function PagosClientesContent() {
                       Pago a cuenta (sin imputar)
                     </button>
                   </div>
+                  {/* Switch Facturados/Todos + línea de saldos (traído de la barra de Caja) */}
+                  <div className="mb-2 flex flex-wrap items-center gap-2.5">
+                    <div className="inline-flex rounded-lg bg-muted p-0.5" role="tablist" aria-label="Pedidos a mostrar">
+                      {([{ key: "facturados", label: "Facturados" }, { key: "todos", label: "Todos" }] as { key: ModoPedidos; label: string }[]).map((m) => (
+                        <button
+                          key={m.key}
+                          role="tab"
+                          aria-selected={modoPedidos === m.key}
+                          onClick={() => setModoPedidos(m.key)}
+                          className={`rounded-md px-3 py-1 text-xs font-semibold transition ${modoPedidos === m.key ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                    {resumenCuenta && (
+                      <span className="text-xs text-muted-foreground">
+                        Saldo a cobrar <b className="text-foreground">$ {fmtARS(resumenCuenta.saldoACobrar)}</b>
+                        {" · "}{resumenCuenta.pedidosFacturados} facturado{resumenCuenta.pedidosFacturados === 1 ? "" : "s"}
+                        {resumenCuenta.otrosComprobantes > 0 && ` + ${resumenCuenta.otrosComprobantes} sin pedido`}
+                        {" · "}{resumenCuenta.pedidosSinFacturar} sin facturar
+                        {resumenCuenta.pedidosSaldados > 0 && ` · ${resumenCuenta.pedidosSaldados} saldado${resumenCuenta.pedidosSaldados === 1 ? "" : "s"}`}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-muted-foreground">
+                      {totalComprobantes > 0 ? "Se imputa a lo tildado" : "Sin tildar nada, queda pendiente de imputación"}
+                    </span>
+                  </div>
                   <ComprobantesSelector
                     clienteId={cliente.id}
                     seleccionados={seleccionados}
@@ -710,7 +842,15 @@ function PagosClientesContent() {
                     onComprobantesLoaded={setComprobantesData}
                     onDtosHechosLoaded={setDtosHechos}
                     onContadoPedidosChange={setContadoPedidos}
+                    modo={modoPedidos}
+                    onResumenLoaded={setResumenCuenta}
                   />
+                  {esMulti && (
+                    <ACuentaExtraInput
+                      valor={aCuentaExtra[cliente.id] || 0}
+                      onChange={(v) => setACuentaExtra((prev) => ({ ...prev, [cliente.id]: v }))}
+                    />
+                  )}
                 </section>
               )}
 
@@ -749,11 +889,16 @@ function PagosClientesContent() {
                         seleccionados={ce.seleccionados}
                         onChange={(sel) => setClientesExtra((prev) => prev.map((c, i) => (i === idx ? { ...c, seleccionados: sel } : c)))}
                       />
+                      <ACuentaExtraInput
+                        valor={aCuentaExtra[ce.cliente.id] || 0}
+                        onChange={(v) => setACuentaExtra((prev) => ({ ...prev, [ce.cliente.id]: v }))}
+                      />
                     </section>
                   ))}
                   {esMulti && (
                     <p className="text-xs text-amber-700 px-1">
-                      Cobranza conjunta: los métodos de pago se reparten entre los clientes según lo seleccionado.
+                      Cobranza conjunta: los métodos de pago se reparten entre los clientes según lo seleccionado
+                      más su a cuenta (extra). Un cliente puede ir solo con a cuenta, sin comprobantes.
                       Si pagan con cheque, usá un solo cheque (se registra compartido).
                     </p>
                   )}
@@ -773,6 +918,14 @@ function PagosClientesContent() {
                       className="hidden"
                       onChange={handleOCR}
                     />
+                    <input
+                      ref={ocrCamRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={handleOCR}
+                    />
                     <Button
                       type="button"
                       variant="outline"
@@ -785,6 +938,16 @@ function PagosClientesContent() {
                         : <Upload className="h-4 w-4 mr-1" />}
                       {ocrProcesando ? "Procesando..." : "Subir foto / comprobante"}
                     </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => ocrCamRef.current?.click()}
+                      disabled={ocrProcesando}
+                    >
+                      📷 Sacar foto
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground hidden lg:inline">o pegá una captura (Ctrl+V)</span>
                   </div>
                 </div>
                 <MetodoPagoForm metodos={metodos} onChange={setMetodos} />
@@ -823,22 +986,16 @@ function PagosClientesContent() {
               <Button
                 className="w-full"
                 size="lg"
-                onClick={() => handleGuardar(soloEfectivo)}
+                onClick={() => handleGuardar(false)}
                 disabled={guardando || !cliente || metodos.length === 0}
               >
                 {guardando ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-                {guardando
-                  ? "Guardando..."
-                  : soloEfectivo
-                    ? "Cobrar (efectivo) y generar recibo"
-                    : "Registrar pago (queda pendiente de verificación)"}
+                {guardando ? "Guardando..." : "Registrar cobro (queda pendiente de verificación)"}
               </Button>
 
               {metodos.length > 0 && (
                 <p className="text-xs text-muted-foreground text-center">
-                  {soloEfectivo
-                    ? "Pago en efectivo: se confirma en el acto e impacta el saldo."
-                    : "Incluye cheque o transferencia: queda pendiente de verificación (se confirma en Historial cuando se acredite/reciba)."}
+                  Todo cobro ingresado acá queda pendiente: Finanzas lo cuenta y lo confirma en Caja, y ahí sale el recibo.
                 </p>
               )}
 
@@ -869,6 +1026,30 @@ function PagosClientesContent() {
                 </Button>
               </div>
 
+              {/* Filtros del administrativo: por cliente y por rango de fechas.
+                  Con un filtro activo se ocultan las filas de rendiciones/viajes
+                  (son otra cosa: acá se busca un pago puntual). */}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={filtroCliente}
+                  onChange={(e) => setFiltroCliente(e.target.value)}
+                  placeholder="Filtrar por cliente…"
+                  className="rounded-md border px-3 py-1.5 text-sm w-56"
+                />
+                <input type="date" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} className="rounded-md border px-2 py-1.5 text-sm" />
+                <span className="text-xs text-muted-foreground">a</span>
+                <input type="date" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} className="rounded-md border px-2 py-1.5 text-sm" />
+                {(filtroCliente || filtroDesde || filtroHasta) && (
+                  <button
+                    onClick={() => { setFiltroCliente(""); setFiltroDesde(""); setFiltroHasta("") }}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
+
               {historial.length === 0 && rendicionesU.length === 0 && viajesPendU.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">No hay pagos registrados</div>
               ) : (
@@ -893,28 +1074,42 @@ function PagosClientesContent() {
                         const enRendicion = new Set<string>(rendicionesU.flatMap((r: any) => r.pago_ids || []))
                         const enViajePend = new Set<string>(viajesPendU.flatMap((v: any) => v.pago_ids || []))
                         const enVendPend = new Set<string>(vendedoresPendU.flatMap((v: any) => v.pago_ids || []))
+                        const hayFiltro = Boolean(filtroCliente || filtroDesde || filtroHasta)
+                        const pasaFiltros = (p: PagoHistorial) => {
+                          if (filtroCliente) {
+                            const nombre = `${p.clientes?.nombre || ""} ${p.clientes?.razon_social || ""}`.toLowerCase()
+                            if (!nombre.includes(filtroCliente.toLowerCase())) return false
+                          }
+                          const f = (p.fecha_pago || "").slice(0, 10)
+                          if (filtroDesde && f < filtroDesde) return false
+                          if (filtroHasta && f > filtroHasta) return false
+                          return true
+                        }
                         const filas: Array<{ key: string; orden: string; tipo: string; data: any }> = [
                           ...historial
                             .filter((p) => !enRendicion.has(p.id) && !enViajePend.has(p.id) && !enVendPend.has(p.id))
+                            .filter(pasaFiltros)
                             .map((p) => ({ key: `p-${p.id}`, orden: p.fecha_pago || "", tipo: "pago", data: p })),
-                          ...rendicionesU.map((r: any) => ({
-                            key: `r-${r.id}`,
-                            orden: r.created_at || r.fecha || "",
-                            tipo: "rendicion",
-                            data: r,
-                          })),
-                          ...viajesPendU.map((v: any) => ({
-                            key: `v-${v.viaje_id}`,
-                            orden: v.ultima_fecha || "",
-                            tipo: "viaje",
-                            data: v,
-                          })),
-                          ...vendedoresPendU.map((v: any) => ({
-                            key: `vp-${v.cobrador_id}`,
-                            orden: v.ultima_fecha || "",
-                            tipo: "vendedor_pendiente",
-                            data: v,
-                          })),
+                          ...(hayFiltro ? [] : [
+                            ...rendicionesU.map((r: any) => ({
+                              key: `r-${r.id}`,
+                              orden: r.created_at || r.fecha || "",
+                              tipo: "rendicion",
+                              data: r,
+                            })),
+                            ...viajesPendU.map((v: any) => ({
+                              key: `v-${v.viaje_id}`,
+                              orden: v.ultima_fecha || "",
+                              tipo: "viaje",
+                              data: v,
+                            })),
+                            ...vendedoresPendU.map((v: any) => ({
+                              key: `vp-${v.cobrador_id}`,
+                              orden: v.ultima_fecha || "",
+                              tipo: "vendedor_pendiente",
+                              data: v,
+                            })),
+                          ]),
                         ].sort((a, b) => b.orden.localeCompare(a.orden))
 
                         return filas.map((fila) => {
@@ -1025,65 +1220,7 @@ function PagosClientesContent() {
         </TabsContent>
 
         {/* ════ TAB RENDICIÓN DE VIAJES ════ */}
-        <TabsContent value="rendicion">
-          {cargandoViajes ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <p className="text-sm text-muted-foreground">
-                  Viajes con cobranzas a rendir. Al confirmar la rendición se cierran los cobros en
-                  efectivo y cheque; las transferencias se confirman desde Historial al acreditarse.
-                </p>
-                <Button variant="ghost" size="sm" onClick={loadViajesRendicion}>
-                  <RotateCcw className="h-4 w-4 mr-1" /> Actualizar
-                </Button>
-              </div>
-
-              {viajesRendicion.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">No hay viajes pendientes de rendición</div>
-              ) : (
-                <div className="border rounded-xl overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50">
-                      <tr>
-                        <th className="p-3 text-left">Viaje</th>
-                        <th className="p-3 text-left">Fecha</th>
-                        <th className="p-3 text-left">Chofer</th>
-                        <th className="p-3 text-center">Estado</th>
-                        <th className="p-3 text-center">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {viajesRendicion.map((v) => (
-                        <tr key={v.id} className="border-t hover:bg-muted/20">
-                          <td className="p-3 font-medium">{v.nombre}</td>
-                          <td className="p-3">{fmtFecha(v.fecha)}</td>
-                          <td className="p-3">{v.chofer || "—"}</td>
-                          <td className="p-3 text-center">
-                            <Badge className="bg-blue-100 text-blue-700 border-0">{v.estado}</Badge>
-                          </td>
-                          <td className="p-3 text-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7"
-                              onClick={() => window.open(`/viajes/${v.id}/rendicion`, "_blank")}
-                            >
-                              <ExternalLink className="h-3.5 w-3.5 mr-1" /> Abrir rendición
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-        </TabsContent>
+        {/* La pestaña "Rendición de viajes" se mudó a /caja → sección "Por rendir" (dueño 08/10) */}
       </Tabs>
 
       {/* ── Modal: ver comprobantes (fotos) ── */}
@@ -1362,8 +1499,7 @@ function PagosClientesContent() {
                 onClick={() => {
                   setShowSuccess(false)
                   resetForm()
-                  setActiveTab("historial")
-                  if (!historialCargado) loadHistorial()
+                  setActiveTab("historial") // la pestaña carga el historial al abrirse
                 }}
               >
                 Ver Historial
@@ -1379,6 +1515,51 @@ function PagosClientesContent() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Carteles de diferencia (misma pieza que la barra de Caja) */}
+      {dialogoSobra != null && (
+        <DialogoSobra
+          monto={dialogoSobra}
+          baseTope={totalComprobantes}
+          conContado={aplicarContado}
+          onAjustar={() => handleGuardar(false, "sobra_ajuste")}
+          onACuenta={() => handleGuardar(false, "sobra_cuenta")}
+          onCancelar={() => setDialogoSobra(null)}
+        />
+      )}
+      {dialogoFalta != null && (
+        <DialogoFalta
+          monto={dialogoFalta}
+          baseTope={totalComprobantes}
+          conContado={aplicarContado}
+          onAjustar={() => handleGuardar(false, "ajuste")}
+          onSaldo={() => handleGuardar(false, "saldo")}
+          onCancelar={() => setDialogoFalta(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// "A cuenta (extra)" de un cliente en cobro conjunto: plata que entrega por
+// encima de lo tildado (o sin tildar nada) y queda a su favor al confirmarse.
+function ACuentaExtraInput({ valor, onChange }: { valor: number; onChange: (v: number) => void }) {
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <label className="text-sm text-muted-foreground whitespace-nowrap">A cuenta (extra):</label>
+      <div className="relative w-40">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          value={valor || ""}
+          onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+          className="w-full rounded-md border px-2 py-1.5 pl-5 text-sm"
+          placeholder="0"
+        />
+      </div>
+      {valor > 0 && <span className="text-xs text-amber-700">queda a favor del cliente</span>}
     </div>
   )
 }

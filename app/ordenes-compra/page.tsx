@@ -1,5 +1,7 @@
 "use client"
 
+import { useSearchParams } from "next/navigation"
+
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
@@ -329,6 +331,11 @@ export default function OrdenesCompraPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [isCreating, setIsCreating] = useState(false)
+  const busqueda = useSearchParams()
+  useEffect(() => {
+    if (busqueda.get("nueva") === "1") setIsCreating(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [selectedProveedor, setSelectedProveedor] = useState<string>("")
   const [articulosTabla, setArticulosTabla] = useState<any[]>([])
   const [observaciones, setObservaciones] = useState("")

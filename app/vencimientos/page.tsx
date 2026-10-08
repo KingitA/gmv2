@@ -18,10 +18,13 @@ import {
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
+import { FormVencimientoDialog } from "@/components/finanzas/form-vencimiento"
 import Link from "next/link"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { tiposVisibles } from "@/lib/finanzas/tipos-reservados"
+import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const TIPOS_VENCIMIENTO = [
     { value: "factura", label: "Factura de proveedor" },
@@ -87,6 +90,9 @@ export default function VencimientosPage() {
         loadProveedores()
     }, [filtroEstado, filtroTipo])
 
+    // En vivo (la lista; el calendario tiene su propia suscripción)
+    useRealtime(["vencimientos"], () => loadVencimientos(true))
+
     async function loadProveedores() {
         const supabase = createClient()
         const { data } = await supabase
@@ -97,8 +103,8 @@ export default function VencimientosPage() {
         setProveedores(data || [])
     }
 
-    async function loadVencimientos() {
-        setLoading(true)
+    async function loadVencimientos(silencioso = false) {
+        if (!silencioso) setLoading(true)
         try {
             let url = `/api/vencimientos?estado=${filtroEstado}`
             if (filtroTipo !== "todos") url += `&tipo=${filtroTipo}`
@@ -143,6 +149,8 @@ export default function VencimientosPage() {
     }
 
     async function marcarPagado(id: string) {
+        const v = vencimientos.find(x => x.id === id)
+        if (v?.proveedor_id && !confirm("Es un pago a proveedor. Marcado así (sin orden de pago) NO descuenta de la caja ni del banco, NO lo registra en la cuenta corriente del proveedor y NO calcula la retención de Ganancias: queda como \"pagado sin OP\".\n\n¿Marcarlo pagado igual? (Para hacerlo completo, usá el botón $ de Orden de pago)")) return
         await fetch("/api/vencimientos", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -204,31 +212,22 @@ export default function VencimientosPage() {
     )
 
     return (
-        <div className="min-h-screen bg-background">
-            <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
-                <div className="container mx-auto px-6 py-4">
-                    <div className="flex items-center gap-4">
-                        <Link href="/proveedores">
-                            <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
-                        </Link>
-                        <div>
-                            <h1 className="text-2xl font-bold">Vencimientos</h1>
-                            <p className="text-sm text-muted-foreground">Agenda de pagos — facturas, servicios, impuestos, seguros</p>
-                        </div>
-                    </div>
+        <div className="space-y-6 p-4 sm:p-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Pagos y vencimientos</h1>
+                    <p className="text-sm text-neutro-500">Facturas de proveedores, servicios, impuestos y gastos</p>
                 </div>
-            </header>
+                <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" asChild><Link href="/ordenes-compra?nueva=1"><Plus className="h-4 w-4" /> Orden de compra</Link></Button>
+                    <Button variant="outline" asChild><Link href="/ordenes-pago/nueva"><DollarSign className="h-4 w-4" /> Orden de pago</Link></Button>
+                </div>
+            </div>
 
-            <main className="container mx-auto px-6 py-8 space-y-6">
-                <Tabs defaultValue="calendario">
-                    <TabsList>
-                        <TabsTrigger value="calendario">Calendario</TabsTrigger>
-                        <TabsTrigger value="lista">Lista</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="calendario" className="mt-4">
-                        <CalendarioPagos showCheques={false} onDataChanged={loadVencimientos} />
-                    </TabsContent>
-                    <TabsContent value="lista" className="mt-4 space-y-6">
+            <CalendarioPagos showCheques={false} conSemana onDataChanged={loadVencimientos} />
+
+            <section className="space-y-4">
+                <h2 className="text-lg font-bold text-azul-900">Lista de vencimientos</h2>
                 {/* Resumen */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <Card className="border-l-4 border-l-blue-500">
@@ -291,93 +290,8 @@ export default function VencimientosPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <Dialog open={isDialogOpen} onOpenChange={(o) => { setIsDialogOpen(o); if (!o) resetForm() }}>
-                                    <DialogTrigger asChild>
-                                        <Button className="gap-2"><Plus className="h-4 w-4" /> Nuevo Vencimiento</Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                                        <DialogHeader>
-                                            <DialogTitle>Nuevo Vencimiento</DialogTitle>
-                                        </DialogHeader>
-                                        <form onSubmit={handleSubmit} className="space-y-4">
-                                            <div>
-                                                <Label>Proveedor (opcional)</Label>
-                                                <EntitySearchSelect
-                                                    entity="proveedores"
-                                                    placeholder="Sin proveedor..."
-                                                    value={formData.proveedor_id ? ((proveedores.find((p: any) => p.id === formData.proveedor_id) as any) ?? null) : null}
-                                                    onSelect={(p: any) => setFormData({ ...formData, proveedor_id: p ? p.id : "" })}
-                                                />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label>Tipo *</Label>
-                                                    <Select value={formData.tipo} onValueChange={(v) => setFormData({ ...formData, tipo: v })}>
-                                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                                        <SelectContent>
-                                                            {tiposLista.map(t => (
-                                                                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                                <div>
-                                                    <Label>Monto</Label>
-                                                    <Input type="number" step="0.01" value={formData.monto}
-                                                        onChange={(e) => setFormData({ ...formData, monto: parseFloat(e.target.value) || 0 })} />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <Label>Concepto *</Label>
-                                                <Input value={formData.concepto} required
-                                                    onChange={(e) => setFormData({ ...formData, concepto: e.target.value })}
-                                                    placeholder="Ej: Factura A 0001-00045678, IIBB Marzo, Seguro camión..." />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label>Fecha Vencimiento *</Label>
-                                                    <Input type="date" value={formData.fecha_vencimiento}
-                                                        onChange={(e) => setFormData({ ...formData, fecha_vencimiento: e.target.value })} />
-                                                </div>
-                                                <div>
-                                                    <Label>Días alerta</Label>
-                                                    <Input type="number" value={formData.dias_alerta}
-                                                        onChange={(e) => setFormData({ ...formData, dias_alerta: parseInt(e.target.value) || 3 })} />
-                                                </div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label>Recurrencia</Label>
-                                                    <Select value={formData.recurrencia || "none"} onValueChange={(v) => setFormData({ ...formData, recurrencia: v === "none" ? "" : v })}>
-                                                        <SelectTrigger><SelectValue placeholder="Sin recurrencia" /></SelectTrigger>
-                                                        <SelectContent>
-                                                            {RECURRENCIAS.map(r => (
-                                                                <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                                {formData.recurrencia && (
-                                                    <div>
-                                                        <Label>Hasta (opcional)</Label>
-                                                        <Input type="date" value={formData.recurrencia_hasta}
-                                                            onChange={(e) => setFormData({ ...formData, recurrencia_hasta: e.target.value })} />
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div>
-                                                <Label>Observaciones</Label>
-                                                <Textarea value={formData.observaciones}
-                                                    onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
-                                                    rows={2} />
-                                            </div>
-                                            <div className="flex gap-2 justify-end">
-                                                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancelar</Button>
-                                                <Button type="submit">Crear</Button>
-                                            </div>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
+                                <Button className="gap-2" onClick={() => setIsDialogOpen(true)}><Plus className="h-4 w-4" /> Nuevo vencimiento</Button>
+                                <FormVencimientoDialog open={isDialogOpen} onOpenChange={setIsDialogOpen} onSaved={() => loadVencimientos()} />
                             </div>
                         </div>
                     </CardHeader>
@@ -398,8 +312,8 @@ export default function VencimientosPage() {
                                 <TableBody>
                                     {loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                                                Cargando...
+                                            <TableCell colSpan={7}>
+                                                <CargaProgreso compacto mensajes={MENSAJES.vencimientos} className="mx-auto max-w-sm py-6" />
                                             </TableCell>
                                         </TableRow>
                                     ) : vencimientos.length === 0 ? (
@@ -465,9 +379,7 @@ export default function VencimientosPage() {
                         </div>
                     </CardContent>
                 </Card>
-                    </TabsContent>
-                </Tabs>
-            </main>
+            </section>
         </div>
     )
 }

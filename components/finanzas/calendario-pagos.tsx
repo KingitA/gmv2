@@ -12,10 +12,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
-import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight } from "lucide-react"
+import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog, type PrefillEmitidos } from "@/components/finanzas/cheques-emitidos-dialog"
+import { FormVencimientoDialog } from "@/components/finanzas/form-vencimiento"
 import { useMisRoles } from "@/lib/hooks/useMisRoles"
+import { useRealtime } from "@/lib/hooks/use-realtime"
+import { useUrlParams } from "@/lib/hooks/use-url-state"
+import { celdasSemana } from "@/components/viajes/calendario-viajes"
+import { sumarDias } from "@/lib/viajes/use-viajes-rango"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +39,7 @@ interface Vencimiento {
     descuentos_aplicados: boolean
     estado: string
     observaciones: string | null
+    orden_pago_id?: string | null
     proveedores?: { id: string; nombre: string; sigla: string | null } | null
 }
 
@@ -71,10 +79,13 @@ const fmtCorta = (iso: string) => {
 export function CalendarioPagos({
     showCheques = false,
     onDataChanged,
+    conSemana = false,
 }: {
     /** Mostrar los cheques en cartera como entradas verdes (solo /finanzas) */
     showCheques?: boolean
     onDataChanged?: () => void
+    /** Ofrecer la vista semana (por defecto) además del mes (PROVEEDORES) */
+    conSemana?: boolean
 }) {
     const [vencimientos, setVencimientos] = useState<Vencimiento[]>([])
     const [cheques, setCheques] = useState<ChequeCartera[]>([])
@@ -97,6 +108,15 @@ export function CalendarioPagos({
     const [verEmitidos, setVerEmitidos] = useState(true)
     const [verSaldados, setVerSaldados] = useState(false)
 
+    // Vista semana / mes (solo donde se pide: PROVEEDORES). En la URL (?cal=mes&dia=…)
+    const url = useUrlParams()
+    const vista: "semana" | "mes" = conSemana && url.get("cal") !== "mes" ? "semana" : "mes"
+    const semanaDe = /^\d{4}-\d{2}-\d{2}$/.test(url.get("dia")) ? url.get("dia") : todayArgentina()
+    const diasSemana = celdasSemana(semanaDe)
+    // Arrastrar un pago a otro día = cambiar la fecha
+    const [arrastrandoVenc, setArrastrandoVenc] = useState<string | null>(null)
+    const [sobreDia, setSobreDia] = useState<string | null>(null)
+
     // Selección (cinta)
     const [seleccion, setSeleccion] = useState<Set<string>>(new Set())
     const [diasExpandidos, setDiasExpandidos] = useState<Set<string>>(new Set())
@@ -117,8 +137,10 @@ export function CalendarioPagos({
         observaciones: "",
     })
 
+    const cargadoRef = useRef(false)
     const load = useCallback(async () => {
-        setLoading(true)
+        // Solo la primera carga muestra "cargando"; las recargas en vivo no tapan el calendario
+        if (!cargadoRef.current) setLoading(true)
         try {
             const reqs: Promise<any>[] = [fetch("/api/vencimientos?estado=todos").then((r) => r.json())]
             if (showCheques) {
@@ -135,11 +157,15 @@ export function CalendarioPagos({
             console.error(e)
             toast.error("Error cargando el calendario")
         } finally {
+            cargadoRef.current = true
             setLoading(false)
         }
     }, [showCheques])
 
     useEffect(() => { load() }, [load])
+
+    // En vivo: vencimientos cargados/pagados/movidos por otro usuario, cheques que entran o salen
+    useRealtime(showCheques ? ["vencimientos", "cheques"] : ["vencimientos"], load)
 
     // ── Derivados ──────────────────────────────────────────────────────────
     const pasaFiltros = useCallback(
@@ -259,18 +285,21 @@ export function CalendarioPagos({
         // Circuito único (S5): los pagos a PROVEEDORES van por Orden de Pago
         // (CC + kardex + retención + certificado). El atajo queda solo para
         // gastos sin proveedor (VEP, servicios, etc.).
+        // Decisión del dueño (07/10/2026): a proveedores también se puede marcar
+        // pagado SIN orden de pago, avisando qué no hace. Queda como "pagado sin OP".
         const deProveedor = vencimientos.filter((v) => ids.includes(v.id) && v.proveedor_id)
-        if (deProveedor.length === 1 && ids.length === 1) {
-            if (confirm(`"${deProveedor[0].concepto || 'Este pago'}" es de un proveedor: se paga por Orden de Pago (queda cuenta corriente, kardex y retención). ¿Ir a generar la OP?`)) {
-                window.location.href = `/ordenes-pago/nueva?proveedor_id=${deProveedor[0].proveedor_id}&vencimiento_id=${deProveedor[0].id}`
-            }
-            return
-        }
         if (deProveedor.length > 0) {
-            toast.error(`${deProveedor.length} de los seleccionados son pagos a proveedores — esos se pagan por Orden de Pago (uno por vez desde el ✓ del chip). Destildalos para marcar el resto.`)
+            setAvisoSinOP({ ids, vencCheque, cantidad: deProveedor.length })
             return
         }
         if (!confirm(`¿Marcar ${ids.length === 1 ? "este pago" : `estos ${ids.length} pagos`} como pagado${ids.length > 1 ? "s" : ""}?`)) return
+        await confirmarPagados(ids, vencCheque)
+    }
+
+    // "Pagado sin OP": aviso antes de marcar pagos a proveedores
+    const [avisoSinOP, setAvisoSinOP] = useState<{ ids: string[]; vencCheque?: Vencimiento; cantidad: number } | null>(null)
+
+    async function confirmarPagados(ids: string[], vencCheque?: Vencimiento) {
         setSaving(true)
         try {
             const results = await Promise.all(
@@ -299,6 +328,24 @@ export function CalendarioPagos({
         } finally {
             setSaving(false)
         }
+    }
+
+    async function moverVencimiento(id: string, nuevaFecha: string) {
+        setArrastrandoVenc(null)
+        setSobreDia(null)
+        const v = vencimientos.find((x) => x.id === id)
+        if (!v || v.fecha_vencimiento === nuevaFecha) return
+        // Optimista: se ve movido al instante
+        setVencimientos((prev) => prev.map((x) => (x.id === id ? { ...x, fecha_vencimiento: nuevaFecha } : x)))
+        const res = await fetch("/api/vencimientos", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, fecha_vencimiento: nuevaFecha }),
+        })
+        if (!res.ok) toast.error("No se pudo cambiar la fecha")
+        else toast.success(`${v.proveedores?.nombre || v.concepto} pasa al ${fmtCorta(nuevaFecha)}`)
+        await load()
+        onDataChanged?.()
     }
 
     async function volverAPendiente(id: string) {
@@ -389,253 +436,9 @@ export function CalendarioPagos({
     // ── Render ─────────────────────────────────────────────────────────────
     const hoy = hoyISO()
 
-    return (
-        <div className="space-y-4">
-            {/* Filtros + alta */}
-            <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mr-1">
-                    Forma de pago
-                </span>
-                {Object.entries(FORMAS).map(([k, f]) => (
-                    <button
-                        key={k}
-                        onClick={() => toggleForma(k)}
-                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${formasActivas.has(k) ? "bg-white shadow-sm" : "opacity-40 line-through"}`}
-                        style={{ borderColor: f.color, color: f.color }}
-                    >
-                        <span className="h-2 w-2 rounded-full" style={{ background: f.color }} />
-                        {f.label}
-                    </button>
-                ))}
-                <Select value={filtroModalidad} onValueChange={setFiltroModalidad}>
-                    <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="todas">Depósito y entrega</SelectItem>
-                        <SelectItem value="deposito">Solo depósito</SelectItem>
-                        <SelectItem value="entrega">Solo entrega</SelectItem>
-                    </SelectContent>
-                </Select>
-                <button
-                    onClick={() => setVerSaldados((v) => !v)}
-                    className={`flex items-center gap-1.5 rounded-full border border-slate-400 px-3 py-1 text-xs font-semibold text-slate-600 transition-all ${verSaldados ? "bg-slate-100 shadow-sm" : "opacity-40"}`}
-                >
-                    <CheckCircle2 className="h-3 w-3" />
-                    Saldados
-                </button>
-                {showCheques && (
-                    <>
-                        <button
-                            onClick={() => setVerCheques((v) => !v)}
-                            className={`flex items-center gap-1.5 rounded-full border border-emerald-600 px-3 py-1 text-xs font-semibold text-emerald-700 transition-all ${verCheques ? "bg-emerald-50" : "opacity-40 line-through"}`}
-                        >
-                            <span className="h-2 w-2 rounded-sm bg-emerald-600" />
-                            Cheques en cartera
-                        </button>
-                        <button
-                            onClick={() => setVerEmitidos((v) => !v)}
-                            className={`flex items-center gap-1.5 rounded-full border border-red-500 px-3 py-1 text-xs font-semibold text-red-600 transition-all ${verEmitidos ? "bg-red-50" : "opacity-40 line-through"}`}
-                        >
-                            <span className="h-2 w-2 rounded-sm bg-red-500" />
-                            Cheques emitidos
-                        </button>
-                    </>
-                )}
-                <div className="ml-auto">
-                    <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm() }}>
-                        <DialogTrigger asChild>
-                            <Button size="sm" className="gap-1"><Plus className="h-4 w-4" /> Nuevo pago</Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                            <DialogHeader><DialogTitle>{editando ? "Editar pago / gasto" : "Nuevo pago / gasto"}</DialogTitle></DialogHeader>
-                            <form onSubmit={guardarVencimiento} className="space-y-4">
-                                <div className="grid grid-cols-[130px_1fr] gap-4">
-                                    <div>
-                                        <Label>Tipo *</Label>
-                                        <Select value={form.tipo} onValueChange={(v) => setForm({ ...form, tipo: v })}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="factura">Factura de proveedor</SelectItem>
-                                                {soyAdmin && <SelectItem value="sueldos">Sueldos</SelectItem>}
-                                                <SelectItem value="cargas_sociales">Cargas sociales (931, sindicatos, OS)</SelectItem>
-                                                <SelectItem value="impuestos">Impuestos (IVA, IIBB, CM, municipal)</SelectItem>
-                                                <SelectItem value="servicios">Servicios (luz, expensas, teléfono, web)</SelectItem>
-                                                <SelectItem value="honorarios">Honorarios (contador, programador)</SelectItem>
-                                                <SelectItem value="seguros">Seguros (vida, flota)</SelectItem>
-                                                <SelectItem value="vehiculos">Vehículos (gastos extra de flota)</SelectItem>
-                                                {soyAdmin && <SelectItem value="socios">Socios (adelantos / participaciones)</SelectItem>}
-                                                <SelectItem value="otro">Otro gasto</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div>
-                                        <Label>Proveedor {form.tipo === "factura" ? "" : "(opcional)"}</Label>
-                                        <EntitySearchSelect
-                                            entity="proveedores"
-                                            placeholder={form.tipo === "factura" ? "Buscar proveedor..." : "Gasto sin proveedor..."}
-                                            value={form.proveedor}
-                                            onSelect={(p: any) => setForm({ ...form, proveedor: p })}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <Label>Concepto {form.proveedor ? "" : "*"}</Label>
-                                    <Input
-                                        value={form.concepto}
-                                        onChange={(e) => setForm({ ...form, concepto: e.target.value })}
-                                        placeholder={form.proveedor?.nombre ? `${form.proveedor.nombre} (por defecto)` : "Ej: SICORE, VEP 931, expensas, seguro cuota 3..."}
-                                    />
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <Label>Monto *</Label>
-                                        <Input
-                                            inputMode="decimal"
-                                            value={form.monto}
-                                            onChange={(e) => setForm({ ...form, monto: e.target.value })}
-                                            placeholder="0"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label>Forma de pago *</Label>
-                                        <Select value={form.forma_pago} onValueChange={(v) => setForm({ ...form, forma_pago: v })}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="efectivo">Efectivo</SelectItem>
-                                                <SelectItem value="transferencia">Transferencia</SelectItem>
-                                                <SelectItem value="cheque">Cheque</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <Label>Fecha de pago *</Label>
-                                        <FechaInput
-                                            value={form.fecha_vencimiento}
-                                            onChange={(iso) => setForm({ ...form, fecha_vencimiento: iso })}
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label>Fecha validez</Label>
-                                        <FechaInput
-                                            value={form.fecha_validez}
-                                            onChange={(iso) => setForm({ ...form, fecha_validez: iso })}
-                                        />
-                                        <p className="mt-1 text-[11px] text-muted-foreground">
-                                            Ej: cheques a 30 días. Vacío = misma fecha.
-                                        </p>
-                                    </div>
-                                </div>
-                                <div>
-                                    <Label>Modalidad</Label>
-                                    <Select value={form.modalidad} onValueChange={(v) => setForm({ ...form, modalidad: v })}>
-                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="deposito">Depósito (lo deposito yo)</SelectItem>
-                                            <SelectItem value="entrega">Entrega (queda en caja, lo retira el proveedor)</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <label className="flex items-start gap-2 rounded-lg border p-3 cursor-pointer">
-                                    <Checkbox
-                                        checked={form.descuentos_aplicados}
-                                        onCheckedChange={(c) => setForm({ ...form, descuentos_aplicados: !!c })}
-                                        className="mt-0.5"
-                                    />
-                                    <span className="text-sm">
-                                        <span className="font-medium">Descuentos ya aplicados</span>
-                                        <span className="block text-xs text-muted-foreground">
-                                            Si queda desmarcado, el calendario lo señala para chequear notas de crédito / retenciones.
-                                        </span>
-                                    </span>
-                                </label>
-                                <div>
-                                    <Label>Observaciones</Label>
-                                    <Input
-                                        value={form.observaciones}
-                                        onChange={(e) => setForm({ ...form, observaciones: e.target.value })}
-                                    />
-                                </div>
-                                <div className="flex justify-end gap-2">
-                                    <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm() }}>Cancelar</Button>
-                                    <Button type="submit" disabled={saving}>
-                                        {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} {editando ? "Guardar cambios" : "Crear"}
-                                    </Button>
-                                </div>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
-                </div>
-            </div>
-
-            {/* Calendario + cinta */}
-            <div className="grid gap-5 lg:grid-cols-[1fr_300px] items-start">
-                <div className="space-y-6">
-                    {loading ? (
-                        <div className="rounded-xl border bg-white p-10 text-center text-sm text-muted-foreground">
-                            Cargando calendario...
-                        </div>
-                    ) : meses.length === 0 ? (
-                        <div className="rounded-xl border bg-white p-10 text-center text-sm text-muted-foreground">
-                            No hay pagos pendientes con estos filtros.
-                        </div>
-                    ) : (
-                        meses.map(({ y, m }) => {
-                            const mtot = visibles
-                                .filter((v) => v.fecha_vencimiento.startsWith(`${y}-${String(m + 1).padStart(2, "0")}`))
-                                .reduce((a, v) => a + Number(v.monto), 0)
-                            const min = showCheques && verCheques
-                                ? cheques
-                                    .filter((c) => c.fecha_vencimiento.startsWith(`${y}-${String(m + 1).padStart(2, "0")}`))
-                                    .reduce((a, c) => a + Number(c.monto), 0)
-                                : 0
-                            const first = new Date(y, m, 1)
-                            const startIdx = (first.getDay() + 6) % 7
-                            const daysInMonth = new Date(y, m + 1, 0).getDate()
-
-                            const mesKey = `${y}-${String(m + 1).padStart(2, "0")}`
-                            const plegado = mesesPlegados.has(mesKey)
-                            return (
-                                <section key={mesKey} className="rounded-xl border bg-white p-4 shadow-sm">
-                                    <h2 className={`flex flex-wrap items-center gap-3 px-1 text-base font-bold ${plegado ? "mb-0" : "mb-3"}`}>
-                                        <button
-                                            onClick={() =>
-                                                setMesesPlegados((prev) => {
-                                                    const n = new Set(prev)
-                                                    n.has(mesKey) ? n.delete(mesKey) : n.add(mesKey)
-                                                    return n
-                                                })
-                                            }
-                                            title={plegado ? "Desplegar mes" : "Plegar mes"}
-                                            className="flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-slate-100"
-                                        >
-                                            {plegado
-                                                ? <ChevronRight className="h-4 w-4 text-slate-400" />
-                                                : <ChevronDown className="h-4 w-4 text-slate-400" />}
-                                            {MES_NOMBRES[m]} {y}
-                                        </button>
-                                        {min > 0 && (
-                                            <span className="text-xs font-semibold text-emerald-600">▲ entra {formatCurrency(min)}</span>
-                                        )}
-                                        <span className="ml-auto font-mono text-xs font-medium text-muted-foreground">
-                                            ▼ sale {formatCurrency(mtot)}
-                                        </span>
-                                    </h2>
-                                    {!plegado && (<>
-                                    <div className="mb-1 grid grid-cols-7 gap-1">
-                                        {DOW.map((d) => (
-                                            <span key={d} className="pl-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{d}</span>
-                                        ))}
-                                    </div>
-                                    <div className="grid grid-cols-7 gap-1">
-                                        {Array.from({ length: startIdx }).map((_, i) => (
-                                            <div key={`e${i}`} className="min-h-[84px] rounded-md border border-dashed border-slate-100" />
-                                        ))}
-                                        {Array.from({ length: daysInMonth }).map((_, i) => {
-                                            const d = i + 1
-                                            const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+    // ── Un día del calendario (lo usan la vista mes y la vista semana) ─────
+    const celdaDia = (key: string) => {
+        const d = Number(key.slice(8))
                                             const pagos = porFecha[key] || []
                                             const pagados = saldadosPorFecha[key] || []
                                             const chqs = chequesPorFecha[key] || []
@@ -647,10 +450,13 @@ export function CalendarioPagos({
                                             return (
                                                 <div
                                                     key={key}
-                                                    className={`flex min-h-[84px] flex-col gap-1 rounded-md border p-1 ${pagos.length || pagados.length || chqs.length || emits.length ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50/50"} ${key === hoy ? "ring-2 ring-amber-400" : ""}`}
+                                                    onDragOver={(e) => { if (arrastrandoVenc) { e.preventDefault(); if (sobreDia !== key) setSobreDia(key) } }}
+                                                    onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node) && sobreDia === key) setSobreDia(null) }}
+                                                    onDrop={(e) => { e.preventDefault(); if (arrastrandoVenc) moverVencimiento(arrastrandoVenc, key) }}
+                                                    className={`flex flex-col gap-1 rounded-md border p-1 ${vista === "semana" ? "min-h-[64px] md:min-h-[140px]" : "min-h-[84px]"} ${pagos.length || pagados.length || chqs.length || emits.length ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50/50"} ${key === hoy ? "ring-2 ring-amber-400" : ""} ${sobreDia === key && arrastrandoVenc ? "bg-amber-50 ring-2 ring-amber-400" : ""}`}
                                                 >
                                                     <div className="flex items-center justify-between px-0.5">
-                                                        <span className={`font-mono text-[11px] font-semibold ${pagos.length ? "text-slate-700" : "text-slate-400"}`}>{d}</span>
+                                                        <span className={`font-mono text-[11px] font-semibold ${pagos.length ? "text-slate-700" : "text-slate-400"}`}>{vista === "semana" && <span className="mr-1 font-sans md:hidden">{DOW[(new Date(key + "T00:00:00Z").getUTCDay() + 6) % 7]}</span>}{d}</span>
                                                         {dsum > 0 && (
                                                             <span className="font-mono text-[9px] text-slate-400">{formatCurrency(dsum)}</span>
                                                         )}
@@ -662,6 +468,9 @@ export function CalendarioPagos({
                                                         return (
                                                             <div key={p.id} className="group/chip relative">
                                                                 <button
+                                                                    draggable
+                                                                    onDragStart={(e) => { setArrastrandoVenc(p.id); e.dataTransfer.effectAllowed = "move" }}
+                                                                    onDragEnd={() => { setArrastrandoVenc(null); setSobreDia(null) }}
                                                                     onClick={() => toggleSel(p.id)}
                                                                     title={`${p.concepto} · ${f.label} · ${formatCurrency(Number(p.monto))}${p.fecha_validez ? ` · validez ${fmtCorta(p.fecha_validez)}` : ""}${p.modalidad ? ` · ${p.modalidad}` : ""}${!p.descuentos_aplicados ? " · ⚠ chequear NC/retenciones" : ""}`}
                                                                     className="w-full rounded-md border px-1.5 py-1 text-left transition-all hover:-translate-y-px hover:shadow"
@@ -721,6 +530,7 @@ export function CalendarioPagos({
                                                                     <span className="flex items-center gap-1 text-[10px] font-semibold leading-tight text-slate-500">
                                                                         <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600" />
                                                                         <span className="truncate line-through">{nombre}</span>
+                                                                        {p.proveedor_id && !p.orden_pago_id && <span className="shrink-0 rounded bg-amber-100 px-1 text-[8.5px] font-bold text-amber-800 no-underline">sin OP</span>}
                                                                     </span>
                                                                     <span className="block font-mono text-[9.5px] text-slate-400 line-through">
                                                                         {formatCurrency(Number(p.monto))}
@@ -794,7 +604,177 @@ export function CalendarioPagos({
                                                     )}
                                                 </div>
                                             )
-                                        })}
+    }
+
+    return (
+        <div className="space-y-4">
+            {/* Filtros + alta */}
+            <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mr-1">
+                    Forma de pago
+                </span>
+                {Object.entries(FORMAS).map(([k, f]) => (
+                    <button
+                        key={k}
+                        onClick={() => toggleForma(k)}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${formasActivas.has(k) ? "bg-white shadow-sm" : "opacity-40 line-through"}`}
+                        style={{ borderColor: f.color, color: f.color }}
+                    >
+                        <span className="h-2 w-2 rounded-full" style={{ background: f.color }} />
+                        {f.label}
+                    </button>
+                ))}
+                <Select value={filtroModalidad} onValueChange={setFiltroModalidad}>
+                    <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="todas">Depósito y entrega</SelectItem>
+                        <SelectItem value="deposito">Solo depósito</SelectItem>
+                        <SelectItem value="entrega">Solo entrega</SelectItem>
+                    </SelectContent>
+                </Select>
+                <button
+                    onClick={() => setVerSaldados((v) => !v)}
+                    className={`flex items-center gap-1.5 rounded-full border border-slate-400 px-3 py-1 text-xs font-semibold text-slate-600 transition-all ${verSaldados ? "bg-slate-100 shadow-sm" : "opacity-40"}`}
+                >
+                    <CheckCircle2 className="h-3 w-3" />
+                    Saldados
+                </button>
+                {showCheques && (
+                    <>
+                        <button
+                            onClick={() => setVerCheques((v) => !v)}
+                            className={`flex items-center gap-1.5 rounded-full border border-emerald-600 px-3 py-1 text-xs font-semibold text-emerald-700 transition-all ${verCheques ? "bg-emerald-50" : "opacity-40 line-through"}`}
+                        >
+                            <span className="h-2 w-2 rounded-sm bg-emerald-600" />
+                            Cheques en cartera
+                        </button>
+                        <button
+                            onClick={() => setVerEmitidos((v) => !v)}
+                            className={`flex items-center gap-1.5 rounded-full border border-red-500 px-3 py-1 text-xs font-semibold text-red-600 transition-all ${verEmitidos ? "bg-red-50" : "opacity-40 line-through"}`}
+                        >
+                            <span className="h-2 w-2 rounded-sm bg-red-500" />
+                            Cheques emitidos
+                        </button>
+                    </>
+                )}
+                {conSemana && (
+                    <div className="inline-flex rounded-lg border bg-white p-0.5" role="group" aria-label="Vista del calendario">
+                        {(["semana", "mes"] as const).map((m) => (
+                            <button key={m} type="button" aria-pressed={vista === m}
+                                onClick={() => url.set({ cal: m }, "replace", { cal: "semana" })}
+                                className={`rounded-md px-3 py-1 text-[13px] font-semibold ${vista === m ? "bg-azul-600 text-white" : "text-neutro-600 hover:bg-neutro-100"}`}>
+                                {m === "semana" ? "Semana" : "Meses"}
+                            </button>
+                        ))}
+                    </div>
+                )}
+                <div className="ml-auto">
+                    <Button size="sm" className="gap-1" onClick={() => { resetForm(); setDialogOpen(true) }}><Plus className="h-4 w-4" /> Nuevo pago</Button>
+                    {/* Formulario único de vencimientos (alta y edición) */}
+                    <FormVencimientoDialog
+                        open={dialogOpen}
+                        onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm() }}
+                        venc={editando}
+                        onSaved={async () => { await load(); onDataChanged?.() }}
+                        onPagadoConCheque={(v) => setChequeChoice(v as Vencimiento)}
+                    />
+                </div>
+            </div>
+
+            {/* Calendario + cinta */}
+            <div className="grid gap-5 lg:grid-cols-[1fr_300px] items-start">
+                <div className="space-y-6">
+                    {loading ? (
+                        <div className="rounded-xl border bg-white">
+                            <CargaProgreso mensajes={MENSAJES.vencimientos} />
+                        </div>
+                    ) : vista === "semana" ? (
+                        <section className="rounded-xl border bg-white p-3 shadow-sm sm:p-4">
+                            <h2 className="mb-3 flex flex-wrap items-center gap-2 px-1 text-base font-bold">
+                                <span className="mr-auto">
+                                    Semana del {Number(diasSemana[0].slice(8))}/{Number(diasSemana[0].slice(5, 7))} al {Number(diasSemana[6].slice(8))}/{Number(diasSemana[6].slice(5, 7))}
+                                </span>
+                                <span className="font-mono text-xs font-medium text-muted-foreground">
+                                    ▼ sale {formatCurrency(visibles.filter((v) => v.fecha_vencimiento >= diasSemana[0] && v.fecha_vencimiento <= diasSemana[6]).reduce((a, v) => a + Number(v.monto), 0))}
+                                </span>
+                                <Button variant="outline" size="icon" className="h-8 w-8" aria-label="Semana anterior" onClick={() => url.set({ dia: sumarDias(semanaDe, -7) }, "replace")}><ChevronLeft className="h-4 w-4" /></Button>
+                                <Button variant="outline" size="sm" className="h-8" onClick={() => url.set({ dia: null }, "replace")}>Hoy</Button>
+                                <Button variant="outline" size="icon" className="h-8 w-8" aria-label="Semana siguiente" onClick={() => url.set({ dia: sumarDias(semanaDe, 7) }, "replace")}><ChevronRight className="h-4 w-4" /></Button>
+                            </h2>
+                            <div className="mb-1 hidden grid-cols-7 gap-1 md:grid">
+                                {DOW.map((d) => (
+                                    <span key={d} className="pl-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{d}</span>
+                                ))}
+                            </div>
+                            <div className="grid grid-cols-1 gap-1 md:grid-cols-7">
+                                {diasSemana.map((k) => celdaDia(k))}
+                            </div>
+                            {visibles.some((v) => v.fecha_vencimiento < diasSemana[0]) && (
+                                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                    Hay pagos pendientes de semanas anteriores: pasá a <button type="button" className="font-semibold underline" onClick={() => url.set({ cal: "mes" }, "replace", { cal: "semana" })}>Meses</button> para verlos.
+                                </p>
+                            )}
+                            <p className="mt-2 hidden text-[11px] text-muted-foreground md:block">Arrastrá un pago a otro día para cambiarle la fecha.</p>
+                        </section>
+                    ) : meses.length === 0 ? (
+                        <div className="rounded-xl border bg-white p-10 text-center text-sm text-muted-foreground">
+                            No hay pagos pendientes con estos filtros.
+                        </div>
+                    ) : (
+                        meses.map(({ y, m }) => {
+                            const mtot = visibles
+                                .filter((v) => v.fecha_vencimiento.startsWith(`${y}-${String(m + 1).padStart(2, "0")}`))
+                                .reduce((a, v) => a + Number(v.monto), 0)
+                            const min = showCheques && verCheques
+                                ? cheques
+                                    .filter((c) => c.fecha_vencimiento.startsWith(`${y}-${String(m + 1).padStart(2, "0")}`))
+                                    .reduce((a, c) => a + Number(c.monto), 0)
+                                : 0
+                            const first = new Date(y, m, 1)
+                            const startIdx = (first.getDay() + 6) % 7
+                            const daysInMonth = new Date(y, m + 1, 0).getDate()
+
+                            const mesKey = `${y}-${String(m + 1).padStart(2, "0")}`
+                            const plegado = mesesPlegados.has(mesKey)
+                            return (
+                                <section key={mesKey} className="rounded-xl border bg-white p-4 shadow-sm">
+                                    <h2 className={`flex flex-wrap items-center gap-3 px-1 text-base font-bold ${plegado ? "mb-0" : "mb-3"}`}>
+                                        <button
+                                            onClick={() =>
+                                                setMesesPlegados((prev) => {
+                                                    const n = new Set(prev)
+                                                    n.has(mesKey) ? n.delete(mesKey) : n.add(mesKey)
+                                                    return n
+                                                })
+                                            }
+                                            title={plegado ? "Desplegar mes" : "Plegar mes"}
+                                            className="flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-slate-100"
+                                        >
+                                            {plegado
+                                                ? <ChevronRight className="h-4 w-4 text-slate-400" />
+                                                : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                                            {MES_NOMBRES[m]} {y}
+                                        </button>
+                                        {min > 0 && (
+                                            <span className="text-xs font-semibold text-emerald-600">▲ entra {formatCurrency(min)}</span>
+                                        )}
+                                        <span className="ml-auto font-mono text-xs font-medium text-muted-foreground">
+                                            ▼ sale {formatCurrency(mtot)}
+                                        </span>
+                                    </h2>
+                                    {!plegado && (<>
+                                    <div className="mb-1 grid grid-cols-7 gap-1">
+                                        {DOW.map((d) => (
+                                            <span key={d} className="pl-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{d}</span>
+                                        ))}
+                                    </div>
+                                    <div className="grid grid-cols-7 gap-1">
+                                        {Array.from({ length: startIdx }).map((_, i) => (
+                                            <div key={`e${i}`} className="min-h-[84px] rounded-md border border-dashed border-slate-100" />
+                                        ))}
+                                        {Array.from({ length: daysInMonth }).map((_, i) =>
+                                            celdaDia(`${y}-${String(m + 1).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`)
+                                        )}
                                     </div>
                                     </>)}
                                 </section>
@@ -1006,6 +986,34 @@ export function CalendarioPagos({
                 prefill={prefillEmitidos}
                 onSaved={() => { load(); onDataChanged?.() }}
             />
+            <AlertDialog open={!!avisoSinOP} onOpenChange={(o) => { if (!o) setAvisoSinOP(null) }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>¿Marcar como pagado sin orden de pago?</AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="space-y-2 text-sm">
+                                <p>{avisoSinOP?.cantidad === 1 ? "Es un pago a proveedor." : `${avisoSinOP?.cantidad} son pagos a proveedores.`} Marcado así:</p>
+                                <ul className="list-disc space-y-0.5 pl-5">
+                                    <li>no descuenta de la caja ni del banco,</li>
+                                    <li>no registra el pago en la cuenta corriente del proveedor,</li>
+                                    <li>no calcula la retención de Ganancias.</li>
+                                </ul>
+                                <p>Queda marcado como <b>pagado sin OP</b>. Para hacerlo completo, usá <b>Generar OP</b>.</p>
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        {avisoSinOP?.ids.length === 1 && (() => {
+                            const v = vencimientos.find((x) => x.id === avisoSinOP.ids[0])
+                            return v?.proveedor_id ? (
+                                <Button variant="outline" onClick={() => { window.location.href = `/ordenes-pago/nueva?proveedor_id=${v.proveedor_id}&vencimiento_id=${v.id}` }}>Generar OP</Button>
+                            ) : null
+                        })()}
+                        <AlertDialogAction onClick={() => { const a = avisoSinOP; setAvisoSinOP(null); if (a) confirmarPagados(a.ids, a.vencCheque) }}>Marcar pagado sin OP</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     )
 }

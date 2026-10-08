@@ -1,5 +1,6 @@
 "use client"
 
+import { FichaArticulo } from "@/components/articulos/ficha-articulo"
 import { useState, useEffect, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
@@ -984,305 +985,26 @@ export default function ArticulosPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Ficha unificada (crear + editar) */}
-      <Dialog open={!!fa} onOpenChange={o=>{if(!o)setFa(null)}}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-semibold">
-              {fa?.id==="__new__" ? "Nuevo Artículo" : <>Ficha — <span className="font-mono">{fa?.sku}</span></>}
-            </DialogTitle>
-          </DialogHeader>
-          {fa&&<div className="space-y-4">
-
-            {/* Imagen */}
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0">
-                {ff.imagen_url
-                  ? <img src={ff.imagen_url} alt="imagen" className="w-20 h-20 object-cover rounded-lg border border-slate-200"/>
-                  : <div className="w-20 h-20 rounded-lg border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-300"><Upload className="h-6 w-6"/></div>
-                }
-              </div>
-              <div className="flex-1 space-y-1">
-                <Label className="text-xs">Imagen del artículo</Label>
-                <label className="block">
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImgUpload} disabled={imgUploading}/>
-                  <span className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 text-xs font-medium cursor-pointer hover:bg-slate-50 transition-colors ${imgUploading?"opacity-50 pointer-events-none":""}`}>
-                    <Upload className="h-3.5 w-3.5"/>{imgUploading?"Subiendo...":"Subir imagen"}
-                  </span>
-                </label>
-                {ff.imagen_url&&<button className="text-[10px] text-red-400 hover:text-red-600" onClick={()=>setFf(p=>({...p,imagen_url:""}))}>Quitar imagen</button>}
-              </div>
-            </div>
-
-            {/* Descripción */}
-            <div><Label className="text-xs">Descripción {fa?.id==="__new__"&&<span className="text-red-500">*</span>}</Label>
-              <Input className="h-8 text-xs" value={ff.descripcion} onChange={e=>setFf(p=>({...p,descripcion:e.target.value}))}/>
-            </div>
-
-            {/* SKU / EAN / Unid/Bulto / Unidad medida */}
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">SKU {fa?.id==="__new__"&&<span className="text-red-500">*</span>}</Label><Input className="h-8 text-xs font-mono" value={ff.sku} onChange={e=>setFf(p=>({...p,sku:e.target.value}))}/></div>
-              <div><Label className="text-xs">Unid/Bulto</Label><Input type="number" className="h-8 text-xs" value={ff.unidades_por_bulto||""} onChange={e=>setFf(p=>({...p,unidades_por_bulto:parseInt(e.target.value)||1}))}/></div>
-              <div><Label className="text-xs">Tipo de bulto</Label>
-                <Select value={ff.unidad_de_medida||"none"} onValueChange={v=>setFf(p=>({...p,unidad_de_medida:v==="none"?"":v}))}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="—"/></SelectTrigger>
-                  <SelectContent><SelectItem value="none">—</SelectItem>{opcionesCon(UNIDADES_MEDIDA,ff.unidad_de_medida).map(u=><SelectItem key={u} value={u}>{u}{!UNIDADES_MEDIDA.includes(u)?" (actual)":""}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
-            {/* Fracción / pack */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Tipo de fracción <span className="text-slate-400 font-normal">(se edita en Tablas)</span></Label>
-                <Select value={ff.tipo_fraccion||"none"} onValueChange={v=>setFf(p=>({...p,tipo_fraccion:v==="none"?"":v}))}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="—"/></SelectTrigger>
-                  <SelectContent><SelectItem value="none">—</SelectItem>{opcionesCon(TIPOS_FRACCION,ff.tipo_fraccion).map(t=><SelectItem key={t} value={t}>{t}{!TIPOS_FRACCION.includes(t)?" (actual)":""}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">Unidades por fracción</Label>
-                <Input type="number" className="h-8 text-xs" placeholder="Ej: 12, 24, 6" value={ff.cantidad_fraccion??""} onChange={e=>setFf(p=>({...p,cantidad_fraccion:e.target.value?parseInt(e.target.value):null}))}/>
-              </div>
-            </div>
-            {/* EAN 13 — múltiples */}
-            <div>
-              <Label className="text-xs">EAN 13 <span className="text-slate-400 font-normal">(puede tener varios)</span></Label>
-              <div className="flex flex-wrap gap-1.5 mt-1 min-h-[32px] border rounded-md px-2 py-1.5 bg-white">
-                {ff.ean13.map((e:string,i:number)=>(
-                  <span key={i} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 text-[11px] font-mono px-2 py-0.5 rounded-full">
-                    {e}
-                    <button type="button" className="text-slate-400 hover:text-red-500 leading-none" onClick={()=>setFf(p=>({...p,ean13:p.ean13.filter((_:string,j:number)=>j!==i)}))}>×</button>
-                  </span>
-                ))}
-                <input
-                  type="text" inputMode="numeric"
-                  placeholder={ff.ean13.length===0?"Agregar EAN...":""}
-                  className="flex-1 min-w-[120px] text-[11px] font-mono outline-none bg-transparent placeholder:text-slate-300"
-                  onKeyDown={e=>{
-                    if((e.key==="Enter"||e.key===","||e.key===" ")&&e.currentTarget.value.trim()){
-                      e.preventDefault()
-                      const v=e.currentTarget.value.trim()
-                      if(!ff.ean13.includes(v)) setFf(p=>({...p,ean13:[...p.ean13,v]}))
-                      e.currentTarget.value=""
-                    }
-                  }}
-                  onBlur={e=>{
-                    if(e.target.value.trim()){
-                      const v=e.target.value.trim()
-                      if(!ff.ean13.includes(v)) setFf(p=>({...p,ean13:[...p.ean13,v]}))
-                      e.target.value=""
-                    }
-                  }}
-                />
-              </div>
-              <p className="text-[10px] text-slate-400 mt-0.5">Enter o coma para agregar · × para quitar</p>
-            </div>
-
-            {/* Proveedor / Marca */}
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Proveedor</Label>
-                <Select value={ff.proveedor_id||"none"} onValueChange={v=>setFf(p=>({...p,proveedor_id:v==="none"?null:v}))}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin proveedor"/></SelectTrigger>
-                  <SelectContent>{[{id:"none",nombre:"Sin proveedor"},...provs,...(ff.proveedor_id&&!provs.find((p:any)=>p.id===ff.proveedor_id)?[{id:ff.proveedor_id,nombre:`${fa?.proveedor?.nombre||"Proveedor"} (inactivo)`}]:[])].map(p=><SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div><Label className="text-xs">Marca</Label>
-                <Select value={ff.marca_id||"none"} onValueChange={v=>setFf(p=>({...p,marca_id:v==="none"?null:v}))}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin marca"/></SelectTrigger>
-                  <SelectContent><SelectItem value="none">Sin marca</SelectItem>{marcas.map((m:any)=><SelectItem key={m.id} value={m.id}>{m.descripcion}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Rubro / Categoría / Subcategoría — comboboxes en cascada */}
-            {(()=>{
-              const selRubro = rubrosData.find(r=>r.id===ff.rubro_id)
-              const catsFiltradas = selRubro ? categoriasData.filter(c=>c.rubro_id===selRubro.id) : []
-              const selCat = catsFiltradas.find(c=>c.nombre===ff.categoria)
-              const subcatsFiltradas = selCat ? subcategoriasData.filter(s=>s.categoria_id===selCat.id) : []
-
-              const rubrosOpts = rubrosData.filter(r=>r.nombre.toLowerCase().includes(rubroQ.toLowerCase()))
-              const catsOpts   = catsFiltradas.filter(c=>c.nombre.toLowerCase().includes(catQ.toLowerCase()))
-              const subcatsOpts= subcatsFiltradas.filter(s=>s.nombre.toLowerCase().includes(subcatQ.toLowerCase()))
-
-              return (
-                <div className="grid grid-cols-3 gap-3">
-                  {/* Rubro */}
-                  <div>
-                    <Label className="text-xs">Rubro</Label>
-                    <div className="relative">
-                      <Input
-                        className="h-8 text-xs"
-                        placeholder="Buscar rubro..."
-                        value={rubroOpen ? rubroQ : (ff.rubro||"")}
-                        onFocus={()=>{ setRubroOpen(true); setRubroQ("") }}
-                        onChange={e=>setRubroQ(e.target.value)}
-                        onBlur={()=>setTimeout(()=>setRubroOpen(false),150)}
-                      />
-                      {rubroOpen && (
-                        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-[180px] overflow-auto mt-0.5">
-                          {rubrosOpts.length===0
-                            ? <p className="px-3 py-2 text-xs text-slate-400">Sin resultados</p>
-                            : rubrosOpts.map((r:any)=>(
-                              <div key={r.id}
-                                className={`px-3 py-1.5 text-xs cursor-pointer hover:bg-indigo-50 ${ff.rubro_id===r.id?"font-semibold text-indigo-700":""}`}
-                                onMouseDown={()=>{ setFf(p=>({...p,rubro:r.nombre,rubro_id:r.id,categoria:"",subcategoria:""})); setRubroOpen(false); setRubroQ(""); setCatQ(""); setSubcatQ("") }}>
-                                {r.nombre}
-                              </div>
-                            ))
-                          }
-                          {ff.rubro_id && (
-                            <div className="px-3 py-1.5 text-xs cursor-pointer text-slate-400 hover:bg-red-50 border-t border-slate-100"
-                              onMouseDown={()=>{ setFf(p=>({...p,rubro:"",rubro_id:null,categoria:"",subcategoria:""})); setRubroOpen(false) }}>
-                              × Quitar rubro
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Categoría */}
-                  <div>
-                    <Label className="text-xs">Categoría</Label>
-                    <div className="relative">
-                      <Input
-                        className={`h-8 text-xs ${!selRubro?"opacity-50":""}`}
-                        placeholder={selRubro?"Buscar categoría...":"Seleccioná un rubro"}
-                        disabled={!selRubro}
-                        value={catOpen ? catQ : (ff.categoria||"")}
-                        onFocus={()=>{ setCatOpen(true); setCatQ("") }}
-                        onChange={e=>setCatQ(e.target.value)}
-                        onBlur={()=>setTimeout(()=>setCatOpen(false),150)}
-                      />
-                      {catOpen && selRubro && (
-                        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-[180px] overflow-auto mt-0.5">
-                          {catsOpts.length===0
-                            ? <p className="px-3 py-2 text-xs text-slate-400">Sin categorías</p>
-                            : catsOpts.map((c:any)=>(
-                              <div key={c.id}
-                                className={`px-3 py-1.5 text-xs cursor-pointer hover:bg-indigo-50 ${ff.categoria===c.nombre?"font-semibold text-indigo-700":""}`}
-                                onMouseDown={()=>{ setFf(p=>({...p,categoria:c.nombre,subcategoria:""})); setCatOpen(false); setCatQ(""); setSubcatQ("") }}>
-                                {c.nombre}
-                              </div>
-                            ))
-                          }
-                          {ff.categoria && (
-                            <div className="px-3 py-1.5 text-xs cursor-pointer text-slate-400 hover:bg-red-50 border-t border-slate-100"
-                              onMouseDown={()=>{ setFf(p=>({...p,categoria:"",subcategoria:""})); setCatOpen(false) }}>
-                              × Quitar categoría
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Subcategoría */}
-                  <div>
-                    <Label className="text-xs">Subcategoría</Label>
-                    <div className="relative">
-                      <Input
-                        className={`h-8 text-xs ${!selCat?"opacity-50":""}`}
-                        placeholder={selCat?"Buscar subcategoría...":"Seleccioná una categoría"}
-                        disabled={!selCat}
-                        value={subcatOpen ? subcatQ : (ff.subcategoria||"")}
-                        onFocus={()=>{ setSubcatOpen(true); setSubcatQ("") }}
-                        onChange={e=>setSubcatQ(e.target.value)}
-                        onBlur={()=>setTimeout(()=>setSubcatOpen(false),150)}
-                      />
-                      {subcatOpen && selCat && (
-                        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-[180px] overflow-auto mt-0.5">
-                          {subcatsOpts.length===0
-                            ? <p className="px-3 py-2 text-xs text-slate-400">Sin subcategorías</p>
-                            : subcatsOpts.map((s:any)=>(
-                              <div key={s.id}
-                                className={`px-3 py-1.5 text-xs cursor-pointer hover:bg-indigo-50 ${ff.subcategoria===s.nombre?"font-semibold text-indigo-700":""}`}
-                                onMouseDown={()=>{ setFf(p=>({...p,subcategoria:s.nombre})); setSubcatOpen(false); setSubcatQ("") }}>
-                                {s.nombre}
-                              </div>
-                            ))
-                          }
-                          {ff.subcategoria && (
-                            <div className="px-3 py-1.5 text-xs cursor-pointer text-slate-400 hover:bg-red-50 border-t border-slate-100"
-                              onMouseDown={()=>{ setFf(p=>({...p,subcategoria:""})); setSubcatOpen(false) }}>
-                              × Quitar subcategoría
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )
-            })()}
-
-            {/* IVA Compras / IVA Ventas / Orden depósito */}
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">IVA Compras</Label>
-                <Select value={ff.iva_compras} onValueChange={v=>setFf(p=>({...p,iva_compras:v}))}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
-                  <SelectContent><SelectItem value="factura">Blanco (+IVA)</SelectItem><SelectItem value="adquisicion_stock">Negro (sin IVA)</SelectItem><SelectItem value="mixto">Mixto</SelectItem></SelectContent>
-                </Select>
-              </div>
-              <div><Label className="text-xs">IVA Ventas</Label>
-                <Select value={ff.iva_ventas} onValueChange={v=>setFf(p=>({...p,iva_ventas:v}))}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
-                  <SelectContent><SelectItem value="factura">Blanco (factura)</SelectItem><SelectItem value="presupuesto">Negro (presupuesto)</SelectItem></SelectContent>
-                </Select>
-              </div>
-              <div><Label className="text-xs">Orden Depósito</Label><Input type="number" className="h-8 text-xs" value={ff.orden_deposito||""} onChange={e=>setFf(p=>({...p,orden_deposito:parseInt(e.target.value)||0}))}/></div>
-            </div>
-
-            {/* Segmento de precio */}
-            <div>
-              <Label className="text-xs">Segmento de precio</Label>
-              <Select value={ff.segmento_precio??"auto"} onValueChange={v=>setFf(p=>({...p,segmento_precio:v==="auto"?null:v}))}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue/></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Auto (detectado por rubro/categoría)</SelectItem>
-                  <SelectItem value="limpieza_bazar">Limpieza / Bazar</SelectItem>
-                  <SelectItem value="perfumeria">Perfumería</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-[10px] text-slate-400 mt-0.5">Override explícito del coeficiente de precio. Útil cuando el artículo pertenece a un rubro diferente al de su proveedor.</p>
-            </div>
-
-            {/* Precios */}
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">P. Compra (lista)</Label><Input type="number" step="0.01" className="h-8 text-xs" value={ff.precio_compra||""} onChange={e=>setFf(p=>({...p,precio_compra:parseFloat(e.target.value)||0}))}/></div>
-              <div><Label className="text-xs">Margen %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.porcentaje_ganancia||""} onChange={e=>setFf(p=>({...p,porcentaje_ganancia:parseFloat(e.target.value)||0}))}/></div>
-              <div><Label className="text-xs text-orange-700">Oferta %</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="0" value={ff.descuento_propio||""} onChange={e=>setFf(p=>({...p,descuento_propio:parseFloat(e.target.value)||0}))}/></div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">B/R %</Label><Input type="number" step="0.1" className="h-8 text-xs" value={ff.bonif_recargo||""} onChange={e=>setFf(p=>({...p,bonif_recargo:parseFloat(e.target.value)||0}))}/></div>
-              <div><Label className="text-xs">P. Base</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="Calculado" value={ff.precio_base??""} onChange={e=>setFf(p=>({...p,precio_base:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
-              <div><Label className="text-xs">P. Base Contado</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="Calculado" value={ff.precio_base_contado??""} onChange={e=>setFf(p=>({...p,precio_base_contado:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs text-teal-700">P. Lista Especial (neto)</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="Sin precio especial" value={ff.precio_lista_especial??""} onChange={e=>setFf(p=>({...p,precio_lista_especial:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
-              <div><Label className="text-xs text-teal-700">Oferta Especial %</Label><Input type="number" step="0.01" className="h-8 text-xs" placeholder="0" value={ff.oferta_lista_especial??""} onChange={e=>setFf(p=>({...p,oferta_lista_especial:e.target.value===""?null:parseFloat(e.target.value)||0}))}/></div>
-            </div>
-
-            {/* Descuentos (solo en modo edición) */}
-            {fa?.id!=="__new__"&&(
-              <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
-                <span className="text-xs font-medium text-slate-600 flex-1">Descuentos tipados</span>
-                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={()=>{ setFa(null); setTimeout(()=>odm(fa),50) }}>
-                  Gestionar descuentos
-                </Button>
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2 pt-1 border-t border-slate-100">
-              <Button variant="outline" size="sm" onClick={()=>setFa(null)}>Cancelar</Button>
-              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={sfa} disabled={fs||imgUploading}>
-                {fs?"Guardando...":fa?.id==="__new__"?"Crear artículo":"Guardar cambios"}
-              </Button>
-            </div>
-          </div>}
-        </DialogContent>
-      </Dialog>
+      {/* Ficha unificada (crear + editar): solo presentación, mismo estado y guardado (sfa) */}
+      <FichaArticulo
+        fa={fa}
+        ff={ff}
+        setFf={setFf}
+        descuentos={fa && fa.id !== "__new__" ? (dm[fa.id] || []) : []}
+        onGestionarDescuentos={() => { const a = fa; setFa(null); setTimeout(() => odm(a), 50) }}
+        provs={provs}
+        marcas={marcas}
+        rubros={rubrosData}
+        categorias={categoriasData}
+        subcategorias={subcategoriasData}
+        tiposBulto={UNIDADES_MEDIDA}
+        tiposFraccion={TIPOS_FRACCION}
+        imgSubiendo={imgUploading}
+        onSubirImagen={handleImgUpload}
+        guardando={fs}
+        onGuardar={sfa}
+        onCerrar={() => setFa(null)}
+      />
 
       {/* Import / Export */}
       <Dialog open={showImpExp} onOpenChange={setShowImpExp}>

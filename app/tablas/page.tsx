@@ -1,171 +1,111 @@
 export const dynamic = 'force-dynamic'
+// AJUSTES: todas las tablas y configuraciones de la empresa en un solo lugar,
+// agrupadas por tema (rediseño 2026-10). Cada tarjeta lleva a su pantalla de
+// siempre (no se movió ni duplicó ninguna). Lo que es solo de admin se oculta
+// para los demás (la ruta también lo protege, ver lib/role-utils.ts).
 import Link from "next/link"
-import { Card, CardContent } from "@/components/ui/card"
+import { headers } from "next/headers"
 import {
-  Truck,
-  UserCheck,
-  MapPin,
-  MapPinned,
-  CreditCard,
-  Tags,
-  PackageCheck,
-  DollarSign,
-  Bookmark,
-  Layers,
-  Building2,
-  Boxes,
-  Grid2x2,
-  CarFront,
+  Banknote, Boxes, Building2, CalendarClock, CarFront, ChevronRight, CreditCard, FileSpreadsheet, Globe2, Grid2x2,
+  Layers, MapPin, MapPinned, PackageCheck, ShieldCheck, Tags, Truck, UserCheck, type LucideIcon,
 } from "lucide-react"
 
-const TABLAS = [
+type Item = { href: string; icon: LucideIcon; title: string; desc: string; soloAdmin?: boolean }
+type Grupo = { titulo: string; desc: string; items: Item[] }
+
+const GRUPOS: Grupo[] = [
   {
-    href: "/tablas/viajantes",
-    icon: UserCheck,
-    color: "blue",
-    title: "Viajantes",
-    desc: "Vendedores y comisiones",
+    titulo: "Personas",
+    desc: "Quién usa el sistema y las apps",
+    items: [
+      { href: "/admin/usuarios", icon: ShieldCheck, title: "Usuarios y roles", desc: "Accesos al ERP y a las apps de depósito, chofer y vendedor", soloAdmin: true },
+      { href: "/tablas/viajantes", icon: UserCheck, title: "Vendedores y viajantes", desc: "Datos, listas que pueden usar y comisiones" },
+      { href: "/usuarios-crm", icon: Globe2, title: "Usuarios del portal", desc: "Clientes y vendedores del portal web: altas y aprobaciones" },
+    ],
   },
   {
-    href: "/tablas/transportes",
-    icon: Truck,
-    color: "orange",
-    title: "Transportes",
-    desc: "Empresas de transporte",
+    titulo: "Logística",
+    desc: "Repartos, zonas y cómo se entrega",
+    items: [
+      { href: "/tablas/zonas", icon: MapPin, title: "Zonas", desc: "Zonas de reparto que usan los viajes" },
+      { href: "/tablas/localidades", icon: MapPinned, title: "Localidades", desc: "Cada localidad con su zona" },
+      { href: "/tablas/vehiculos", icon: CarFront, title: "Vehículos", desc: "Camiones y utilitarios propios" },
+      { href: "/tablas/transportes", icon: Truck, title: "Transportes", desc: "Empresas de transporte y sus destinos" },
+      { href: "/tablas/condiciones-entrega", icon: PackageCheck, title: "Condiciones de entrega", desc: "Retira, transporte, entregamos nosotros" },
+    ],
   },
   {
-    href: "/tablas/vehiculos",
-    icon: CarFront,
-    color: "orange",
-    title: "Vehículos",
-    desc: "Camiones y utilitarios propios para los viajes",
+    titulo: "Comercial",
+    desc: "Listas, condiciones y canales de venta",
+    items: [
+      { href: "/tablas/listas-precio", icon: Banknote, title: "Listas de precio", desc: "Bahía, Neco, Viajante y recargos por segmento", soloAdmin: true },
+      { href: "/tablas/precios-programados", icon: CalendarClock, title: "Precios programados", desc: "Cambios de precio con fecha de vigencia" },
+      { href: "/tablas/condiciones-pago", icon: CreditCard, title: "Condiciones de pago", desc: "Efectivo, cheque a 30 días, etc." },
+      { href: "/tablas/tipos-canal", icon: Tags, title: "Tipos de canal", desc: "Mayorista, minorista, etc." },
+    ],
   },
   {
-    href: "/tablas/zonas",
-    icon: MapPin,
-    color: "green",
-    title: "Zonas",
-    desc: "Zonas de reparto",
+    titulo: "Artículos",
+    desc: "Catálogos que usa la ficha de artículo",
+    items: [
+      { href: "/tablas/marcas", icon: Layers, title: "Marcas", desc: "Marcas de artículos: código y descripción" },
+      { href: "/tablas/categorias", icon: Grid2x2, title: "Rubros y categorías", desc: "Rubros, categorías y subcategorías" },
+      { href: "/tablas/tipos-bulto", icon: Boxes, title: "Tipos de bulto", desc: "Unidad, bulto, caja, pack…" },
+      { href: "/tablas/tipos-fraccion", icon: Boxes, title: "Tipos de fracción", desc: "Pack, blíster, docena…" },
+    ],
   },
   {
-    href: "/tablas/localidades",
-    icon: MapPinned,
-    color: "purple",
-    title: "Localidades",
-    desc: "Localidades y zonas asignadas",
-  },
-  {
-    href: "/tablas/tipos-canal",
-    icon: Tags,
-    color: "teal",
-    title: "Tipos de Canal",
-    desc: "Mayorista, Minorista, etc.",
-  },
-  {
-    href: "/tablas/condiciones-pago",
-    icon: CreditCard,
-    color: "amber",
-    title: "Condiciones de Pago",
-    desc: "Efectivo, Cheque 30 días, etc.",
-  },
-  {
-    href: "/tablas/condiciones-entrega",
-    icon: PackageCheck,
-    color: "rose",
-    title: "Condiciones de Entrega",
-    desc: "Retira, Transporte, Entregamos",
-  },
-  {
-    href: "/tablas/listas-precio",
-    icon: DollarSign,
-    color: "emerald",
-    title: "Listas de Precio",
-    desc: "Bahía, Neco, Viajante — recargos por categoría",
-  },
-  {
-    href: "/tablas/marcas",
-    icon: Bookmark,
-    color: "indigo",
-    title: "Marcas",
-    desc: "Marcas de artículos — código y descripción",
-  },
-  {
-    href: "/tablas/categorias",
-    icon: Layers,
-    color: "violet",
-    title: "Categorías",
-    desc: "Rubros, categorías y subcategorías de artículos",
-  },
-  {
-    href: "/tablas/tipos-bulto",
-    icon: Boxes,
-    color: "cyan",
-    title: "Tipos de Bulto",
-    desc: "UN, BULTO, CAJA, PACK — opciones de la ficha de artículo",
-  },
-  {
-    href: "/tablas/tipos-fraccion",
-    icon: Grid2x2,
-    color: "fuchsia",
-    title: "Tipos de Fracción",
-    desc: "PACK, BLISTER, DOCENA — fracción intermedia del artículo",
-  },
-  {
-    href: "/tablas/bancos",
-    icon: Building2,
-    color: "slate",
-    title: "Bancos",
-    desc: "Cuentas bancarias propias — CBU/CVU para matching automático",
+    titulo: "Fiscal y bancos",
+    desc: "Cuentas propias e impuestos",
+    items: [
+      { href: "/tablas/bancos", icon: Building2, title: "Bancos y cuentas", desc: "Cuentas propias y CBU/CVU para reconocer pagos" },
+      { href: "/tablas/padron-iibb", icon: FileSpreadsheet, title: "Padrón de IIBB", desc: "Alícuotas de percepción por CUIT" },
+    ],
   },
 ]
 
-const colorMap: Record<string, { border: string; bg: string; text: string }> = {
-  blue: { border: "border-l-blue-500", bg: "bg-blue-50 group-hover:bg-blue-100", text: "text-blue-600" },
-  orange: { border: "border-l-orange-500", bg: "bg-orange-50 group-hover:bg-orange-100", text: "text-orange-600" },
-  green: { border: "border-l-green-500", bg: "bg-green-50 group-hover:bg-green-100", text: "text-green-600" },
-  purple: { border: "border-l-purple-500", bg: "bg-purple-50 group-hover:bg-purple-100", text: "text-purple-600" },
-  teal: { border: "border-l-teal-500", bg: "bg-teal-50 group-hover:bg-teal-100", text: "text-teal-600" },
-  amber: { border: "border-l-amber-500", bg: "bg-amber-50 group-hover:bg-amber-100", text: "text-amber-600" },
-  rose: { border: "border-l-rose-500", bg: "bg-rose-50 group-hover:bg-rose-100", text: "text-rose-600" },
-  emerald: { border: "border-l-emerald-500", bg: "bg-emerald-50 group-hover:bg-emerald-100", text: "text-emerald-600" },
-  indigo:  { border: "border-l-indigo-500",  bg: "bg-indigo-50 group-hover:bg-indigo-100",  text: "text-indigo-600"  },
-  violet:  { border: "border-l-violet-500",  bg: "bg-violet-50 group-hover:bg-violet-100",  text: "text-violet-600"  },
-  slate:   { border: "border-l-slate-500",   bg: "bg-slate-50 group-hover:bg-slate-100",   text: "text-slate-600"   },
-  cyan:    { border: "border-l-cyan-500",    bg: "bg-cyan-50 group-hover:bg-cyan-100",     text: "text-cyan-600"    },
-  fuchsia: { border: "border-l-fuchsia-500", bg: "bg-fuchsia-50 group-hover:bg-fuchsia-100", text: "text-fuchsia-600" },
-}
+export default async function AjustesPage() {
+  const h = await headers()
+  const roles = h.get("x-user-roles")?.split(",").filter(Boolean) ?? []
+  const esAdmin = roles.includes("admin")
 
-export default function TablasPage() {
   return (
-    <div className="p-6 lg:p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Tablas</h1>
-        <p className="text-sm text-muted-foreground">Configuración de datos maestros del sistema</p>
+    <div className="mx-auto max-w-6xl space-y-8 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Ajustes</h1>
+        <p className="text-sm text-neutro-500">Tablas, usuarios y configuración de la empresa</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {TABLAS.map((tabla) => {
-          const c = colorMap[tabla.color]
-          const Icon = tabla.icon
-          return (
-            <Link key={tabla.href} href={tabla.href} className="group">
-              <Card className={`duration-200 hover:shadow-lg cursor-pointer border-l-4 ${c.border} h-full`}>
-                <CardContent className="p-5">
-                  <div className="flex flex-col gap-3">
-                    <div className={`p-2.5 rounded-lg transition-colors w-fit ${c.bg}`}>
-                      <Icon className={`h-5 w-5 ${c.text}`} />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-sm mb-0.5">{tabla.title}</h3>
-                      <p className="text-xs text-muted-foreground">{tabla.desc}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          )
-        })}
-      </div>
+      {GRUPOS.map((g) => {
+        const items = g.items.filter((i) => esAdmin || !i.soloAdmin)
+        if (!items.length) return null
+        return (
+          <section key={g.titulo}>
+            <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
+              <h2 className="text-lg font-bold text-azul-900">{g.titulo}</h2>
+              <p className="text-[13px] text-neutro-500">{g.desc}</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {items.map((i) => {
+                const Icono = i.icon
+                return (
+                  <Link key={i.href} href={i.href}
+                    className="group flex items-center gap-3 rounded-xl border bg-white px-4 py-3 transition-colors hover:border-azul-200 hover:bg-azul-50/40">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-azul-50 text-azul-600">
+                      <Icono className="size-[18px]" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold text-azul-900">{i.title}</span>
+                      <span className="block truncate text-[13px] text-neutro-500">{i.desc}</span>
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 text-neutro-300 group-hover:text-azul-600" />
+                  </Link>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }

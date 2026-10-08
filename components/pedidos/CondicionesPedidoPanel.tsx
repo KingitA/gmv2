@@ -7,7 +7,8 @@
 // cambios van "solo a este pedido" o "a la ficha del cliente".
 // Lógica pura: lib/pedidos/condiciones-form.ts.
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, useRef } from "react"
+import { useDentroDeModal } from "@/lib/hooks/use-dentro-de-modal"
 import { createClient } from "@/lib/supabase/client"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -143,6 +144,8 @@ function ContadoCheck({ checked, onChange }: { checked: boolean; onChange: (b: b
 function ElegirArticulos({ elegidos, onChange }: { elegidos: ArticuloElegido[]; onChange: (a: ArticuloElegido[]) => void }) {
   const [q, setQ] = useState("")
   const [res, setRes] = useState<any[]>([])
+  const cajaRef = useRef<HTMLDivElement>(null)
+  const enModal = useDentroDeModal(cajaRef, res.length > 0)
   const buscar = useCallback(async (t: string) => {
     setQ(t)
     if (t.trim().length < 2) { setRes([]); return }
@@ -151,11 +154,11 @@ function ElegirArticulos({ elegidos, onChange }: { elegidos: ArticuloElegido[]; 
   }, [])
   return (
     <div className="space-y-1.5">
-      <div className="relative">
+      <div ref={cajaRef} className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-green-500" />
         <Input placeholder="Buscar artículo a regalar..." className="pl-8 h-8 text-xs" value={q} onChange={(e) => buscar(e.target.value)} />
         {res.length > 0 && (
-          <div className="absolute top-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-lg mt-1 z-50 max-h-52 overflow-auto">
+          <div className={`${enModal ? "relative" : "absolute top-full left-0 z-50"} w-full bg-white border border-slate-200 rounded-lg shadow-lg mt-1 max-h-52 overflow-auto`}>
             {res.map((p: any) => (
               <button type="button" key={p.id}
                 onClick={() => { if (!elegidos.some((a) => a.id === p.id)) onChange([...elegidos, { id: p.id, descripcion: p.descripcion || "", sku: p.sku || "" }]); setQ(""); setRes([]) }}

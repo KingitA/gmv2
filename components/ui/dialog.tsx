@@ -44,6 +44,11 @@ function DialogOverlay({
   )
 }
 
+/** ¿El modal define su propio ancho máximo (max-w-*, sm:max-w-*, !max-w-*)? */
+export function pideAncho(className?: string) {
+  return /(^|\s)([a-z0-9-]+:)*!?max-w-/.test(className ?? '')
+}
+
 function DialogContent({
   className,
   children,
@@ -58,7 +63,12 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          'bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-[100] grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg',
+          // Ancho: ocupa la pantalla menos un margen y lo limita el max-w que pida
+          // cada modal. Antes el default "sm:max-w-lg" le ganaba al max-w-2xl/3xl
+          // del que llamaba (twMerge no los considera en conflicto) y todos quedaban
+          // en 512px, apretados. Alto: nunca más que la pantalla, con scroll adentro.
+          'bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-[100] grid w-[calc(100%-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto overscroll-contain translate-x-[-50%] translate-y-[-50%] gap-4 rounded-2xl border p-6 shadow-[0_24px_60px_-20px_rgba(23,26,69,0.45)] duration-200',
+          !pideAncho(className) && 'sm:max-w-lg',
           className,
         )}
         {...props}

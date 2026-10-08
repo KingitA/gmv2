@@ -206,15 +206,19 @@ export default function ClienteDetailPage() {
 
   // Guarda la segmentación del cliente (reemplaza todo). Los pedidos ya tomados
   // no cambian: rige desde el próximo pedido.
+  // Botón único (08/10/2026): la segmentación se guarda junto con el resto, pero
+  // solo si se tocó (así un error al cargarla nunca la borra al guardar la ficha).
+  const [segTocada, setSegTocada] = useState(false)
+  const mapSegmentacion = (rows: SegmentacionValue["proveedor"]) => rows.map(r => ({
+    ref_id: r.ref_id, lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion,
+    dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
+    contado: r.contado ?? null,
+  }))
+
   async function saveSegmentacion() {
     setSavingSeg(true)
     try {
-      const map = (rows: SegmentacionValue["proveedor"]) => rows.map(r => ({
-        ref_id: r.ref_id, lista_precio_id: r.lista_precio_id, metodo_facturacion: r.metodo_facturacion,
-        dto_general_pct: r.dto_general_pct, dto_viajante_pct: r.dto_viajante_pct, dto_mercaderia_pct: r.dto_mercaderia_pct,
-        contado: r.contado ?? null,
-      }))
-      await guardarSegmentacionCliente(id, { proveedor: map(segmentacion.proveedor), marca: map(segmentacion.marca) })
+      await guardarSegmentacionCliente(id, { proveedor: mapSegmentacion(segmentacion.proveedor), marca: mapSegmentacion(segmentacion.marca) })
       await loadCondProv()
       alert("Segmentación guardada. Rige desde el próximo pedido (los pedidos ya tomados no cambian).")
     } catch (e: any) {
@@ -320,6 +324,16 @@ export default function ClienteDetailPage() {
         setSaving(false)
         return
       }
+      // Segmentación por proveedor/marca (mismo guardado que tenía su botón), solo si se tocó
+      if (segTocada) {
+        try {
+          await guardarSegmentacionCliente(id, { proveedor: mapSegmentacion(segmentacion.proveedor), marca: mapSegmentacion(segmentacion.marca) })
+        } catch (e: any) {
+          alert(`Cliente y condiciones guardados, pero no se pudo guardar la segmentación: ${e?.message || e}`)
+          setSaving(false)
+          return
+        }
+      }
       router.push("/clientes")
     }
     setSaving(false)
@@ -362,7 +376,7 @@ export default function ClienteDetailPage() {
             </Link>
             <Button form="cliente-form" type="submit" disabled={saving} className="gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Guardar
+              {saving ? "Guardando…" : "Guardar cambios"}
             </Button>
           </div>
         </div>
@@ -621,11 +635,6 @@ export default function ClienteDetailPage() {
                 </Card>
               )}
 
-              {/* Guardar segmentos + descuentos (siempre visible) */}
-              <Button type="button" size="sm" className="w-full h-9 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={saveBonificaciones} disabled={savingBonif}>
-                {savingBonif ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-                Guardar lista, facturación, descuentos y contado
-              </Button>
 
               {/* Segmentación por proveedor / marca */}
               <Card className="border-teal-200 bg-teal-50/30">
@@ -637,10 +646,7 @@ export default function ClienteDetailPage() {
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <SegmentacionCondiciones listas={listasPrecio} value={segmentacion} onChange={setSegmentacion} />
-                  <Button type="button" onClick={saveSegmentacion} disabled={savingSeg} className="w-full bg-teal-600 hover:bg-teal-700">
-                    {savingSeg ? "Guardando..." : "Guardar segmentación"}
-                  </Button>
+                  <SegmentacionCondiciones listas={listasPrecio} value={segmentacion} onChange={(v) => { setSegmentacion(v); setSegTocada(true) }} />
                 </CardContent>
               </Card>
             </div>

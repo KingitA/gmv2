@@ -19,6 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ImportClientesDialog, clientesFieldLabel } from "@/components/clientes/ImportClientesDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import { History } from "lucide-react"
+import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface Cliente {
   id: string
@@ -107,12 +109,19 @@ export default function ClientesPage() {
     metodo_perf_plus: "",
   })
 
+  // Hasta que llega la primera lectura se muestra "trabajando" (antes decía
+  // "No hay clientes registrados" unos segundos y confundía).
+  const [cargandoClientes, setCargandoClientes] = useState(true)
+
   useEffect(() => {
     loadClientes()
     loadVendedores()
     loadLocalidades()
     loadListasPrecio()
   }, [])
+
+  // En vivo: altas/cambios de clientes hechos por otro usuario o por la app del vendedor
+  useRealtime(["clientes"], () => loadClientes(), { esperaMs: 1500 })
 
   // Búsqueda vía motor unificado (trigram + vector). Devuelve ids; filtramos local.
   useEffect(() => {
@@ -143,10 +152,12 @@ export default function ClientesPage() {
         .order("nombre_razon_social"), "id")
     } catch (error) {
       console.error("[v0] Error loading clientes:", error)
+      setCargandoClientes(false)
       return
     }
 
     setClientes(data || [])
+    setCargandoClientes(false)
   }
 
   async function loadVendedores() {
@@ -348,70 +359,11 @@ export default function ClientesPage() {
   const zonaAsignada = selectedLocalidad?.zonas?.nombre
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Link href="/">
-              <Button variant="ghost" size="icon" className="hover:bg-accent">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Clientes</h1>
-              <p className="text-sm text-muted-foreground">Gestión de clientes y ventas</p>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto px-6 py-8 space-y-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Link href="/clientes-pedidos" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-purple-500 hover:border-l-purple-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-purple-50 rounded-lg group-hover:bg-purple-100 transition-colors">
-                    <ShoppingBag className="h-6 w-6 text-purple-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Pedidos</h3>
-                    <p className="text-sm text-muted-foreground">Gestionar pedidos de clientes</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/viajes" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-orange-50 rounded-lg group-hover:bg-orange-100 transition-colors">
-                    <Truck className="h-6 w-6 text-orange-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Viajes</h3>
-                    <p className="text-sm text-muted-foreground">Organizar entregas y rutas</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/comprobantes-venta" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-green-500 hover:border-l-green-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-green-50 rounded-lg group-hover:bg-green-100 transition-colors">
-                    <FileText className="h-6 w-6 text-green-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Comprobantes</h3>
-                    <p className="text-sm text-muted-foreground">Ver facturas de venta</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
+    <div className="min-h-screen">
+      <main className="container mx-auto space-y-6 px-4 py-6 sm:px-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Fichas de clientes</h1>
+          <p className="text-sm text-neutro-500">Datos, condiciones y cuenta corriente de cada cliente</p>
         </div>
 
         <Card className="shadow-sm">
@@ -719,7 +671,13 @@ export default function ClientesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredClientes.length === 0 ? (
+                  {cargandoClientes ? (
+                    <TableRow>
+                      <TableCell colSpan={7}>
+                        <CargaProgreso compacto mensajes={MENSAJES.clientes} className="mx-auto max-w-sm py-8" />
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredClientes.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                         {searchTerm ? "No se encontraron clientes" : "No hay clientes registrados"}

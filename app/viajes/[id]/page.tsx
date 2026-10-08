@@ -16,6 +16,7 @@ import { ViajePedidos } from "@/components/viajes/viaje-pedidos"
 import { ViajeArqueo } from "@/components/viajes/viaje-arqueo"
 import { ViajeDatos } from "@/components/viajes/viaje-datos"
 import { EntregarDinero } from "@/components/viajes/entregar-dinero"
+import { useRealtime } from "@/lib/hooks/use-realtime"
 
 // Detalle del viaje = la hoja de ruta, en una sola pantalla: KPIs arriba,
 // paradas en vivo (qué se entregó, cuánto y cómo se cobró), pedidos y el
@@ -47,6 +48,9 @@ export default function ViajeDetallePage() {
   }, [id])
 
   useEffect(() => { cargar() }, [cargar])
+
+  // En vivo: cambios del viaje o de sus pedidos hechos desde otra PC
+  useRealtime(["viajes", "viaje_zonas", "pedidos"], cargar)
 
   // En la calle la hoja se actualiza sola (cobros, entregas, gastos)
   useEffect(() => {

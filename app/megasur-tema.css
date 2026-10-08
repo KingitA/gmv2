@@ -1,0 +1,115 @@
+/* Sistema visual del ERP: paleta Megasur (docs/marca/Megasur_Sistema_de_Color_v1.pdf),
+   la misma que usa la app Vendedor (mobile/apps/vendedor/src/tema.css).
+
+   Cómo funciona: las pantallas siguen escribiendo las clases de Tailwind de siempre
+   (bg-blue-600, text-slate-500, bg-green-50…) y acá se redefine cada familia con su
+   equivalente Megasur. Así todo el sistema toma la identidad sin tocar pantalla por
+   pantalla:
+     blue / indigo        → Azul Megasur (marca, acciones principales)
+     sky / cyan           → Cian (información, "el sistema", foco)
+     violet / purple      → Lavanda
+     slate / gray / zinc / neutral / stone → neutros tintados de azul
+     green / emerald / teal → éxito      amber / yellow → Ámbar      orange → alerta
+     red / rose           → error
+   Para usar la paleta por su nombre: bg-azul-600, text-cian-500, bg-ambar-50, etc. */
+
+@theme {
+  /* ── Paleta Megasur por nombre ─────────────────────────────── */
+  --color-azul-50: #EEEEF6;  --color-azul-100: #CFD0E4; --color-azul-200: #B0B1D3; --color-azul-300: #9093C2;
+  --color-azul-400: #7174B1; --color-azul-500: #52569F; --color-azul-600: #33378E; --color-azul-700: #2A2E77;
+  --color-azul-800: #222561; --color-azul-900: #171A45; --color-azul-950: #12142A;
+
+  --color-cian-50: #E9F7FA;  --color-cian-100: #BEE7F1; --color-cian-200: #93D6E7; --color-cian-300: #69C6DE;
+  --color-cian-400: #3EB6D4; --color-cian-500: #13A6CB; --color-cian-600: #128BAE; --color-cian-700: #106F90;
+  --color-cian-800: #0F5473; --color-cian-900: #0D3955; --color-cian-950: #0A2638;
+
+  --color-lavanda-50: #F2F3FB;  --color-lavanda-100: #D9DAF3; --color-lavanda-200: #BFC1EB; --color-lavanda-300: #A5A8E3;
+  --color-lavanda-400: #8B8FDB; --color-lavanda-500: #787BC0; --color-lavanda-600: #6468A4; --color-lavanda-700: #515489;
+  --color-lavanda-800: #3D406D; --color-lavanda-900: #2A2D52; --color-lavanda-950: #1C1E38;
+
+  --color-ambar-50: #FFF7E6;  --color-ambar-100: #FFE7B4; --color-ambar-200: #FFD881; --color-ambar-300: #FFC84F;
+  --color-ambar-400: #FFB81C; --color-ambar-500: #E6A418; --color-ambar-600: #CD9014; --color-ambar-700: #B47C0F;
+  --color-ambar-800: #9B670B; --color-ambar-900: #825307; --color-ambar-950: #5A3905;
+
+  --color-neutro-50: #F7F8FC;  --color-neutro-100: #F0F1F7; --color-neutro-200: #E3E5EF; --color-neutro-300: #CDD0DF;
+  --color-neutro-400: #8187A1; --color-neutro-500: #5E6480; --color-neutro-600: #454A63; --color-neutro-700: #31354A;
+  --color-neutro-800: #20233A; --color-neutro-900: #171A45; --color-neutro-950: #12142A;
+
+  --color-exito-50: #E6F4EE;  --color-exito-100: #C5E6D7; --color-exito-200: #9DD3BA; --color-exito-300: #6BBB97;
+  --color-exito-400: #3FA276; --color-exito-500: #1F8F62; --color-exito-600: #15805A; --color-exito-700: #126E4D;
+  --color-exito-800: #0F5A3F; --color-exito-900: #0B4430; --color-exito-950: #082E21;
+
+  --color-alerta-50: #FDF0E6;  --color-alerta-100: #FADCC2; --color-alerta-200: #F6C196; --color-alerta-300: #F1A566;
+  --color-alerta-400: #EC8A3E; --color-alerta-500: #E8711A; --color-alerta-600: #B8560F; --color-alerta-700: #9C490D;
+  --color-alerta-800: #7D3A0A; --color-alerta-900: #5E2C08; --color-alerta-950: #3F1D05;
+
+  --color-error-50: #FBEBED;  --color-error-100: #F6D0D5; --color-error-200: #EFB0B9; --color-error-300: #E68594;
+  --color-error-400: #DC5A6D; --color-error-500: #D84459; --color-error-600: #D2364B; --color-error-700: #B02A3D;
+  --color-error-800: #8C2231; --color-error-900: #6A1A25; --color-error-950: #46111A;
+
+  /* ── Familias de Tailwind → Megasur ────────────────────────── */
+  --color-blue-50: #EEEEF6;  --color-blue-100: #CFD0E4; --color-blue-200: #B0B1D3; --color-blue-300: #9093C2;
+  --color-blue-400: #7174B1; --color-blue-500: #52569F; --color-blue-600: #33378E; --color-blue-700: #2A2E77;
+  --color-blue-800: #222561; --color-blue-900: #171A45; --color-blue-950: #12142A;
+  --color-indigo-50: #EEEEF6;  --color-indigo-100: #CFD0E4; --color-indigo-200: #B0B1D3; --color-indigo-300: #9093C2;
+  --color-indigo-400: #7174B1; --color-indigo-500: #52569F; --color-indigo-600: #33378E; --color-indigo-700: #2A2E77;
+  --color-indigo-800: #222561; --color-indigo-900: #171A45; --color-indigo-950: #12142A;
+
+  --color-sky-50: #E9F7FA;  --color-sky-100: #BEE7F1; --color-sky-200: #93D6E7; --color-sky-300: #69C6DE;
+  --color-sky-400: #3EB6D4; --color-sky-500: #13A6CB; --color-sky-600: #128BAE; --color-sky-700: #106F90;
+  --color-sky-800: #0F5473; --color-sky-900: #0D3955; --color-sky-950: #0A2638;
+  --color-cyan-50: #E9F7FA;  --color-cyan-100: #BEE7F1; --color-cyan-200: #93D6E7; --color-cyan-300: #69C6DE;
+  --color-cyan-400: #3EB6D4; --color-cyan-500: #13A6CB; --color-cyan-600: #128BAE; --color-cyan-700: #106F90;
+  --color-cyan-800: #0F5473; --color-cyan-900: #0D3955; --color-cyan-950: #0A2638;
+
+  --color-violet-50: #F2F3FB;  --color-violet-100: #D9DAF3; --color-violet-200: #BFC1EB; --color-violet-300: #A5A8E3;
+  --color-violet-400: #8B8FDB; --color-violet-500: #787BC0; --color-violet-600: #6468A4; --color-violet-700: #515489;
+  --color-violet-800: #3D406D; --color-violet-900: #2A2D52; --color-violet-950: #1C1E38;
+  --color-purple-50: #F2F3FB;  --color-purple-100: #D9DAF3; --color-purple-200: #BFC1EB; --color-purple-300: #A5A8E3;
+  --color-purple-400: #8B8FDB; --color-purple-500: #787BC0; --color-purple-600: #6468A4; --color-purple-700: #515489;
+  --color-purple-800: #3D406D; --color-purple-900: #2A2D52; --color-purple-950: #1C1E38;
+
+  --color-slate-50: #F7F8FC;  --color-slate-100: #F0F1F7; --color-slate-200: #E3E5EF; --color-slate-300: #CDD0DF;
+  --color-slate-400: #8187A1; --color-slate-500: #5E6480; --color-slate-600: #454A63; --color-slate-700: #31354A;
+  --color-slate-800: #20233A; --color-slate-900: #171A45; --color-slate-950: #12142A;
+  --color-gray-50: #F7F8FC;  --color-gray-100: #F0F1F7; --color-gray-200: #E3E5EF; --color-gray-300: #CDD0DF;
+  --color-gray-400: #8187A1; --color-gray-500: #5E6480; --color-gray-600: #454A63; --color-gray-700: #31354A;
+  --color-gray-800: #20233A; --color-gray-900: #171A45; --color-gray-950: #12142A;
+  --color-zinc-50: #F7F8FC;  --color-zinc-100: #F0F1F7; --color-zinc-200: #E3E5EF; --color-zinc-300: #CDD0DF;
+  --color-zinc-400: #8187A1; --color-zinc-500: #5E6480; --color-zinc-600: #454A63; --color-zinc-700: #31354A;
+  --color-zinc-800: #20233A; --color-zinc-900: #171A45; --color-zinc-950: #12142A;
+  --color-neutral-50: #F7F8FC;  --color-neutral-100: #F0F1F7; --color-neutral-200: #E3E5EF; --color-neutral-300: #CDD0DF;
+  --color-neutral-400: #8187A1; --color-neutral-500: #5E6480; --color-neutral-600: #454A63; --color-neutral-700: #31354A;
+  --color-neutral-800: #20233A; --color-neutral-900: #171A45; --color-neutral-950: #12142A;
+  --color-stone-50: #F7F8FC;  --color-stone-100: #F0F1F7; --color-stone-200: #E3E5EF; --color-stone-300: #CDD0DF;
+  --color-stone-400: #8187A1; --color-stone-500: #5E6480; --color-stone-600: #454A63; --color-stone-700: #31354A;
+  --color-stone-800: #20233A; --color-stone-900: #171A45; --color-stone-950: #12142A;
+
+  --color-green-50: #E6F4EE;  --color-green-100: #C5E6D7; --color-green-200: #9DD3BA; --color-green-300: #6BBB97;
+  --color-green-400: #3FA276; --color-green-500: #1F8F62; --color-green-600: #15805A; --color-green-700: #126E4D;
+  --color-green-800: #0F5A3F; --color-green-900: #0B4430; --color-green-950: #082E21;
+  --color-emerald-50: #E6F4EE;  --color-emerald-100: #C5E6D7; --color-emerald-200: #9DD3BA; --color-emerald-300: #6BBB97;
+  --color-emerald-400: #3FA276; --color-emerald-500: #1F8F62; --color-emerald-600: #15805A; --color-emerald-700: #126E4D;
+  --color-emerald-800: #0F5A3F; --color-emerald-900: #0B4430; --color-emerald-950: #082E21;
+  --color-teal-50: #E6F4EE;  --color-teal-100: #C5E6D7; --color-teal-200: #9DD3BA; --color-teal-300: #6BBB97;
+  --color-teal-400: #3FA276; --color-teal-500: #1F8F62; --color-teal-600: #15805A; --color-teal-700: #126E4D;
+  --color-teal-800: #0F5A3F; --color-teal-900: #0B4430; --color-teal-950: #082E21;
+
+  --color-amber-50: #FFF7E6;  --color-amber-100: #FFE7B4; --color-amber-200: #FFD881; --color-amber-300: #FFC84F;
+  --color-amber-400: #FFB81C; --color-amber-500: #E6A418; --color-amber-600: #CD9014; --color-amber-700: #B47C0F;
+  --color-amber-800: #9B670B; --color-amber-900: #825307; --color-amber-950: #5A3905;
+  --color-yellow-50: #FFF7E6;  --color-yellow-100: #FFE7B4; --color-yellow-200: #FFD881; --color-yellow-300: #FFC84F;
+  --color-yellow-400: #FFB81C; --color-yellow-500: #E6A418; --color-yellow-600: #CD9014; --color-yellow-700: #B47C0F;
+  --color-yellow-800: #9B670B; --color-yellow-900: #825307; --color-yellow-950: #5A3905;
+
+  --color-orange-50: #FDF0E6;  --color-orange-100: #FADCC2; --color-orange-200: #F6C196; --color-orange-300: #F1A566;
+  --color-orange-400: #EC8A3E; --color-orange-500: #E8711A; --color-orange-600: #B8560F; --color-orange-700: #9C490D;
+  --color-orange-800: #7D3A0A; --color-orange-900: #5E2C08; --color-orange-950: #3F1D05;
+
+  --color-red-50: #FBEBED;  --color-red-100: #F6D0D5; --color-red-200: #EFB0B9; --color-red-300: #E68594;
+  --color-red-400: #DC5A6D; --color-red-500: #D84459; --color-red-600: #D2364B; --color-red-700: #B02A3D;
+  --color-red-800: #8C2231; --color-red-900: #6A1A25; --color-red-950: #46111A;
+  --color-rose-50: #FBEBED;  --color-rose-100: #F6D0D5; --color-rose-200: #EFB0B9; --color-rose-300: #E68594;
+  --color-rose-400: #DC5A6D; --color-rose-500: #D84459; --color-rose-600: #D2364B; --color-rose-700: #B02A3D;
+  --color-rose-800: #8C2231; --color-rose-900: #6A1A25; --color-rose-950: #46111A;
+}

@@ -53,9 +53,13 @@ export function ControlarRendicion({
   // Pagos declarados (para rechazar uno que no llegó / está mal / era prueba)
   const [pagosDeclarados, setPagosDeclarados] = useState<{ id: string; cliente: string; monto: number; medios: string }[]>([])
   const [rechazando, setRechazando] = useState<string | null>(null)
+  // Detalle uno por uno (gastos, fondos, retiros de comisión): misma fuente que
+  // el historial de Cobros (rendiciones-resumen) — informativo, no bloquea.
+  const [detalle, setDetalle] = useState<any | null>(null)
   const [recarga, setRecarga] = useState(0)
 
   const cajas = useMemo(() => cuentas.filter((c) => c.grupo === "EFECTIVO"), [cuentas])
+  const bancos = useMemo(() => cuentas.filter((c) => c.grupo === "BANCOS"), [cuentas])
 
   useEffect(() => {
     const cargar = async () => {
@@ -93,6 +97,11 @@ export function ControlarRendicion({
         }
         setFondos(Math.round(fondosViaje * 100) / 100)
         setGastos(Math.round(gastosViaje * 100) / 100)
+
+        fetch("/api/pagos-clientes/rendiciones-resumen")
+          .then((r) => r.json())
+          .then((d) => setDetalle((d.rendiciones || []).find((x: any) => x.id === rendicionId) || null))
+          .catch(() => {})
 
         const fisicos: ChequeFisico[] = []
         const digs: { desc: string; monto: number }[] = []
@@ -203,7 +212,7 @@ export function ControlarRendicion({
 
   const confirmar = async (forzar: boolean) => {
     if (!cajaDestino) {
-      toast({ variant: "destructive", title: "Falta la caja destino", description: "Elegí a qué caja entra el efectivo" })
+      toast({ variant: "destructive", title: "Falta el destino", description: "Elegí a qué caja o banco entra el efectivo" })
       return
     }
     const faltanColores = pagosSinColor.filter((s) => !colores[s.pago_id])
@@ -228,8 +237,8 @@ export function ControlarRendicion({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          caja_destino_tipo: "CAJA",
-          caja_destino_id: cajaDestino,
+          caja_destino_tipo: cajaDestino.split(":")[0] || "CAJA",
+          caja_destino_id: cajaDestino.split(":")[1] || cajaDestino,
           efectivo_declarado: contadoNum,
           pagos_verificados: pagosVerificados,
           forzar_diferencia: forzar,
@@ -509,23 +518,61 @@ export function ControlarRendicion({
               </div>
             )}
 
+            {/* Detalle del viaje: gastos y fondos uno por uno, retiros, observaciones */}
+            {detalle && ((detalle.gastos?.length ?? 0) + (detalle.fondos?.length ?? 0) + (detalle.retiros?.length ?? 0) > 0 || detalle.observaciones) && (
+              <div className="mt-3 grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-3">
+                {[
+                  { titulo: "Fondos del viaje", items: detalle.fondos },
+                  { titulo: "Gastos del viaje", items: detalle.gastos },
+                  { titulo: "Retiros de comisión del período", items: detalle.retiros },
+                ].map(
+                  (sec) =>
+                    (sec.items?.length ?? 0) > 0 && (
+                      <div key={sec.titulo}>
+                        <p className="text-[10px] font-bold uppercase text-slate-400">{sec.titulo}</p>
+                        {sec.items.map((m: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between text-[11px] text-slate-600">
+                            <span className="truncate">{m.concepto || m.descripcion || "—"}</span>
+                            <span style={NUM}>$ {fmt(Math.abs(Number(m.monto)))}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                )}
+                {detalle.observaciones && (
+                  <p className="text-[11px] text-slate-500 md:col-span-3">💬 {detalle.observaciones}</p>
+                )}
+              </div>
+            )}
+
             {/* Caja destino + acciones */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">Caja destino del efectivo:</span>
+              <span className="text-xs font-semibold text-slate-500">Destino del efectivo:</span>
               <select
                 value={cajaDestino}
                 onChange={(e) => setCajaDestino(e.target.value)}
                 className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-blue-500"
               >
-                <option value="">Elegir caja…</option>
-                {cajas.map((c) => (
-                  <option key={c.cuenta_id} value={c.cuenta_id}>
-                    💵 {c.nombre}
-                  </option>
-                ))}
+                <option value="">Elegir destino…</option>
+                <optgroup label="Cajas">
+                  {cajas.map((c) => (
+                    <option key={c.cuenta_id} value={`CAJA:${c.cuenta_id}`}>
+                      💵 {c.nombre}
+                    </option>
+                  ))}
+                </optgroup>
+                {/* Depósito directo del efectivo en el banco (lo tenía el
+                    historial de Cobros; el RPC ya acepta BANCO) */}
+                <optgroup label="Bancos">
+                  {bancos.map((c) => (
+                    <option key={c.cuenta_id} value={`BANCO:${c.cuenta_id}`}>
+                      🏦 {c.nombre}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
               {!cajaDestino && (
-                <span className="text-xs font-semibold text-amber-600">← Falta indicar caja</span>
+                <span className="text-xs font-semibold text-amber-600">← Falta indicar destino</span>
               )}
             </div>
 
@@ -534,7 +581,7 @@ export function ControlarRendicion({
                 <button
                   onClick={() => confirmar(true)}
                   disabled={guardando || !cajaDestino}
-                  title={!cajaDestino ? "Falta indicar caja destino" : undefined}
+                  title={!cajaDestino ? "Falta indicar el destino del efectivo" : undefined}
                   className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                 >
                   {guardando && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -544,7 +591,7 @@ export function ControlarRendicion({
                 <button
                   onClick={() => confirmar(false)}
                   disabled={guardando || !cajaDestino}
-                  title={!cajaDestino ? "Falta indicar caja destino" : undefined}
+                  title={!cajaDestino ? "Falta indicar el destino del efectivo" : undefined}
                   className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                 >
                   {guardando && <Loader2 className="h-4 w-4 animate-spin" />}

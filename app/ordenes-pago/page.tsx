@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Plus, DollarSign, CheckCircle2, XCircle, Eye, FileText, Receipt, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
+import { useRealtime } from "@/lib/hooks/use-realtime"
 
 export default function OrdenesPagoPage() {
     const [ordenes, setOrdenes] = useState<any[]>([])
@@ -23,9 +24,11 @@ export default function OrdenesPagoPage() {
     }
 
     useEffect(() => { loadOrdenes() }, [filtroEstado])
+    // En vivo: OPs creadas/confirmadas desde otra PC
+    useRealtime(["ordenes_pago"], () => loadOrdenes(true))
 
-    async function loadOrdenes() {
-        setLoading(true)
+    async function loadOrdenes(silencioso = false) {
+        if (!silencioso) setLoading(true)
         try {
             const res = await fetch(`/api/ordenes-pago?estado=${filtroEstado}`)
             const data = await res.json()

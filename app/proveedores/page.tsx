@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label"
 import { Plus, Pencil, Trash2, ArrowLeft, Upload, Download, ShoppingCart, FileText, Search, History, ShieldCheck } from "lucide-react"
 import { FichaFiscalDialog } from "@/components/proveedores/ficha-fiscal-dialog"
+import { FichaProveedor } from "@/components/proveedores/ficha-proveedor"
 import { ImportProveedoresDialog, proveedoresFieldLabel } from "@/components/proveedores/ImportProveedoresDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import Link from "next/link"
@@ -18,6 +19,7 @@ import type { Proveedor } from "@/lib/types"
 import * as XLSX from "xlsx"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PROVINCIAS_ARGENTINA, TIPOS_IVA_DJ, CONDICIONES_PAGO } from "@/lib/constants"
+import { useRealtime } from "@/lib/hooks/use-realtime"
 
 export default function ProveedoresPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
@@ -67,6 +69,8 @@ export default function ProveedoresPage() {
   useEffect(() => {
     loadProveedores()
   }, [])
+  // En vivo: altas/cambios de proveedores hechos desde otra PC
+  useRealtime(["proveedores"], () => loadProveedores(), { esperaMs: 1500 })
 
   useEffect(() => {
     const q = searchTerm.trim()
@@ -268,87 +272,12 @@ export default function ProveedoresPage() {
     : proveedores.filter((proveedor) => searchIds.has(proveedor.id))
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Link href="/">
-              <Button variant="ghost" size="icon" className="hover:bg-accent">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Proveedores</h1>
-              <p className="text-sm text-muted-foreground">Gestión de proveedores y compras</p>
-            </div>
-          </div>
+    <div className="min-h-screen">
+      <main className="container mx-auto space-y-6 px-4 py-6 sm:px-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Fichas de proveedores</h1>
+          <p className="text-sm text-neutro-500">Datos, condiciones de compra, fiscal y cuenta corriente</p>
         </div>
-      </header>
-
-      <main className="container mx-auto px-6 py-8 space-y-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Link href="/ordenes-compra" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-blue-500 hover:border-l-blue-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
-                    <ShoppingCart className="h-6 w-6 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Órdenes de Compra</h3>
-                    <p className="text-sm text-muted-foreground">Pedidos a proveedores</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/ordenes-compra/nc-pendientes" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-green-500 hover:border-l-green-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-green-50 rounded-lg group-hover:bg-green-100 transition-colors">
-                    <FileText className="h-6 w-6 text-green-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">NC Proveedores</h3>
-                    <p className="text-sm text-muted-foreground">Notas de crédito esperadas y sin imputar</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/ordenes-pago" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-purple-500 hover:border-l-purple-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-purple-50 rounded-lg group-hover:bg-purple-100 transition-colors">
-                    <Search className="h-6 w-6 text-purple-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Órdenes de Pago</h3>
-                    <p className="text-sm text-muted-foreground">Pagos a proveedores</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/vencimientos" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-orange-50 rounded-lg group-hover:bg-orange-100 transition-colors">
-                    <Search className="h-6 w-6 text-orange-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Vencimientos</h3>
-                    <p className="text-sm text-muted-foreground">Agenda de pagos</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
-
         <Card className="shadow-sm">
           <CardHeader className="border-b bg-muted/30">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -399,380 +328,16 @@ export default function ProveedoresPage() {
                       Nuevo Proveedor
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle>{editingProveedor ? "Editar Proveedor" : "Nuevo Proveedor"}</DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Datos Básicos</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="nombre">Nombre *</Label>
-                            <Input
-                              id="nombre"
-                              value={formData.nombre}
-                              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                              required
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="sigla">Sigla</Label>
-                            <Input
-                              id="sigla"
-                              value={formData.sigla}
-                              onChange={(e) => setFormData({ ...formData, sigla: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="codigo_proveedor">Código Proveedor</Label>
-                            <Input
-                              id="codigo_proveedor"
-                              value={formData.codigo_proveedor}
-                              onChange={(e) => setFormData({ ...formData, codigo_proveedor: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="cuit">CUIT *</Label>
-                            <Input
-                              id="cuit"
-                              value={formData.cuit}
-                              onChange={(e) => setFormData({ ...formData, cuit: e.target.value })}
-                              placeholder="20-12345678-9"
-                              required
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Dirección</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="col-span-2">
-                            <Label htmlFor="direccion">Dirección</Label>
-                            <Input
-                              id="direccion"
-                              value={formData.direccion}
-                              onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="localidad">Localidad</Label>
-                            <Input
-                              id="localidad"
-                              value={formData.localidad}
-                              onChange={(e) => setFormData({ ...formData, localidad: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="codigo_postal">Código Postal</Label>
-                            <Input
-                              id="codigo_postal"
-                              value={formData.codigo_postal}
-                              onChange={(e) => setFormData({ ...formData, codigo_postal: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="provincia">Provincia *</Label>
-                            <Select
-                              value={formData.provincia}
-                              onValueChange={(value) => {
-                                const prov = PROVINCIAS_ARGENTINA.find((p) => p.nombre === value)
-                                setFormData({
-                                  ...formData,
-                                  provincia: value,
-                                  codigo_provincia_dj: prov?.codigo || 1,
-                                })
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Seleccionar provincia" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PROVINCIAS_ARGENTINA.map((prov) => (
-                                  <SelectItem key={prov.codigo} value={prov.nombre}>
-                                    {prov.nombre}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label>Código Provincia (DJ)</Label>
-                            <Input value={formData.codigo_provincia_dj} disabled className="bg-muted" />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Contacto</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="telefono_oficina">Teléfono Oficina</Label>
-                            <Input
-                              id="telefono_oficina"
-                              value={formData.telefono_oficina}
-                              onChange={(e) => setFormData({ ...formData, telefono_oficina: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="mail_oficina">Email Oficina</Label>
-                            <Input
-                              id="mail_oficina"
-                              type="email"
-                              value={formData.mail_oficina}
-                              onChange={(e) => setFormData({ ...formData, mail_oficina: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="telefono_vendedor">Teléfono Vendedor</Label>
-                            <Input
-                              id="telefono_vendedor"
-                              value={formData.telefono_vendedor}
-                              onChange={(e) => setFormData({ ...formData, telefono_vendedor: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="mail_vendedor">Email Vendedor</Label>
-                            <Input
-                              id="mail_vendedor"
-                              type="email"
-                              value={formData.mail_vendedor}
-                              onChange={(e) => setFormData({ ...formData, mail_vendedor: e.target.value })}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Datos Fiscales y Comerciales</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="tipo_descuento">Tipo de Descuento *</Label>
-                            <Select
-                              value={formData.tipo_descuento}
-                              onValueChange={(value: "cascada" | "sobre_lista") =>
-                                setFormData({ ...formData, tipo_descuento: value })
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="cascada">En Cascada (uno sobre otro)</SelectItem>
-                                <SelectItem value="sobre_lista">
-                                  Sobre Precio Lista (todos sobre el precio base)
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Define cómo se aplican los descuentos en los artículos de este proveedor
-                            </p>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="default_unidad_factura">Unidad de Facturación (Default) *</Label>
-                            <Select
-                              value={formData.default_unidad_factura}
-                              onValueChange={(value: "UNIDAD" | "BULTO" | "CAJA" | "PACK" | "DOCENA") =>
-                                setFormData({ ...formData, default_unidad_factura: value })
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="UNIDAD">UNIDAD (Cantidad exacta)</SelectItem>
-                                <SelectItem value="BULTO">BULTO (Multiplica por un/bulto)</SelectItem>
-                                <SelectItem value="CAJA">CAJA (Multiplica por un/bulto)</SelectItem>
-                                <SelectItem value="PACK">PACK (Multiplica por un/bulto)</SelectItem>
-                                <SelectItem value="DOCENA">DOCENA (Multiplica por 12)</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Se usa si el artículo no tiene configuración específica
-                            </p>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="tipo_iva">Tipo de IVA (DJ GESTION) *</Label>
-                            <Select
-                              value={String(formData.tipo_iva)}
-                              onValueChange={(value) => setFormData({ ...formData, tipo_iva: Number.parseInt(value) })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {TIPOS_IVA_DJ.map((tipo) => (
-                                  <SelectItem key={tipo.codigo} value={String(tipo.codigo)}>
-                                    {tipo.codigo} - {tipo.nombre}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="condicion_pago_tipo">Condición de Pago *</Label>
-                            <Select
-                              value={formData.condicion_pago_tipo}
-                              onValueChange={(value: "cuenta_corriente" | "contado" | "anticipado") =>
-                                setFormData({ ...formData, condicion_pago_tipo: value })
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {CONDICIONES_PAGO.map((cond) => (
-                                  <SelectItem key={cond.valor} value={cond.valor}>
-                                    {cond.nombre} ({cond.codigo})
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {formData.condicion_pago_tipo !== "anticipado" && (
-                            <>
-                              <div>
-                                <Label htmlFor="plazo_dias">Días de Plazo *</Label>
-                                <Input
-                                  id="plazo_dias"
-                                  type="number"
-                                  value={formData.plazo_dias}
-                                  onChange={(e) =>
-                                    setFormData({ ...formData, plazo_dias: Number.parseInt(e.target.value) })
-                                  }
-                                  placeholder="30"
-                                  required
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor="plazo_desde">Plazo desde *</Label>
-                                <Select
-                                  value={formData.plazo_desde}
-                                  onValueChange={(value: "fecha_factura" | "fecha_recepcion") =>
-                                    setFormData({ ...formData, plazo_desde: value })
-                                  }
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="fecha_factura">Fecha de Factura</SelectItem>
-                                    <SelectItem value="fecha_recepcion">Fecha de Recepción</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </>
-                          )}
-
-                          <div>
-                            <Label htmlFor="tipo_proveedor">Tipo de Proveedor</Label>
-                            <Select
-                              value={formData.tipo_proveedor}
-                              onValueChange={(value: "mercaderia_general" | "servicios" | "transporte") =>
-                                setFormData({ ...formData, tipo_proveedor: value })
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="mercaderia_general">Mercadería General</SelectItem>
-                                <SelectItem value="servicios">Servicios</SelectItem>
-                                <SelectItem value="transporte">Transporte</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2 pt-4 border-t">
-                          <h4 className="font-medium text-sm text-muted-foreground">
-                            Retenciones y Percepciones (solo aplican a comprobantes con IVA)
-                          </h4>
-                          <p className="text-xs text-muted-foreground -mt-1 mb-2">
-                            La retención de Ganancias NO se configura acá: sale del régimen de la Ficha Fiscal (botón 🛡 en el listado).
-                          </p>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <Label htmlFor="percepcion_iva">% Percepción IVA</Label>
-                              <Input
-                                id="percepcion_iva"
-                                type="number"
-                                step="0.01"
-                                value={formData.percepcion_iva}
-                                onChange={(e) =>
-                                  setFormData({ ...formData, percepcion_iva: Number.parseFloat(e.target.value) || 0 })
-                                }
-                                placeholder="0.00"
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="percepcion_iibb">% Percepción IIBB</Label>
-                              <Input
-                                id="percepcion_iibb"
-                                type="number"
-                                step="0.01"
-                                value={formData.percepcion_iibb}
-                                onChange={(e) =>
-                                  setFormData({ ...formData, percepcion_iibb: Number.parseFloat(e.target.value) || 0 })
-                                }
-                                placeholder="0.00"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h3 className="font-semibold text-lg">Datos Bancarios</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="banco_nombre">Banco</Label>
-                            <Input
-                              id="banco_nombre"
-                              value={formData.banco_nombre}
-                              onChange={(e) => setFormData({ ...formData, banco_nombre: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="banco_tipo_cuenta">Tipo de Cuenta</Label>
-                            <Input
-                              id="banco_tipo_cuenta"
-                              value={formData.banco_tipo_cuenta}
-                              onChange={(e) => setFormData({ ...formData, banco_tipo_cuenta: e.target.value })}
-                              placeholder="Ej: CC, CA"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="banco_numero_cuenta">Número de Cuenta</Label>
-                            <Input
-                              id="banco_numero_cuenta"
-                              value={formData.banco_numero_cuenta}
-                              onChange={(e) => setFormData({ ...formData, banco_numero_cuenta: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="banco_cuenta">CBU/Alias</Label>
-                            <Input
-                              id="banco_cuenta"
-                              value={formData.banco_cuenta}
-                              onChange={(e) => setFormData({ ...formData, banco_cuenta: e.target.value })}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2 justify-end">
-                        <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                          Cancelar
-                        </Button>
-                        <Button type="submit">{editingProveedor ? "Actualizar" : "Crear"}</Button>
-                      </div>
-                    </form>
+                  <DialogContent className="flex h-[min(92dvh,900px)] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+                    {/* Ficha de proveedor: solo presentación, mismo formData y mismo handleSubmit */}
+                    <FichaProveedor
+                      formData={formData}
+                      setFormData={setFormData}
+                      editando={!!editingProveedor}
+                      onSubmit={handleSubmit}
+                      onCancelar={() => setIsDialogOpen(false)}
+                      onFichaFiscal={editingProveedor ? () => setFichaFiscal({ id: editingProveedor.id, nombre: editingProveedor.nombre }) : undefined}
+                    />
                   </DialogContent>
                 </Dialog>
               </div>

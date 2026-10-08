@@ -15,6 +15,7 @@ import { Search, FileText, Loader2, CheckCircle2, Plus, AlertTriangle, ExternalL
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { localMatch } from "@/lib/search/local-match"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useRealtime } from "@/lib/hooks/use-realtime"
 
 const TIPO_INVERSO_LABEL: Record<string, string> = {
   FA: 'Nota de Crédito A', FB: 'Nota de Crédito B',
@@ -190,6 +191,9 @@ export default function ComprobantesVentaPage() {
   useEffect(() => {
     cargarComprobantes()
   }, [])
+
+  // En vivo: comprobantes emitidos/anulados o cobrados desde otra PC
+  useRealtime(["comprobantes_venta"], () => cargarComprobantes(), { esperaMs: 1500 })
 
   const anularComprobante = async (comp: Comprobante) => {
     setAnulando(comp.id)
