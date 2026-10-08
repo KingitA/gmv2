@@ -58,14 +58,19 @@ Para pensar con el dueño y acomodar (proponer antes de cambiar lógica):
 - **Cobros (CLIENTES)** lo usa quien **atiende gente** en el mostrador o la oficina: **ingresa** el pago. Todo lo que se ingresa ahí queda **pendiente de verificación**.
 - **Caja (FINANZAS)** lo usa quien **ve los números** y decide qué hacer con la plata: **verifica** (confirma o rechaza) lo que ingresó el otro sector, controla rendiciones y mueve la plata.
 
+**Cómo funciona (en palabras del dueño):** la compañera de atención al público entrega el pedido, cobra y registra el pago en Cobros. Le deja la plata en el escritorio a Finanzas. Finanzas cuenta que esté lo que ella registró (por ejemplo, un cheque y $ 10 en efectivo). Si está bien, aprieta el botón de verificado y la plata entra a la caja. **Esto ya funciona así:** los pagos pendientes aparecen en la planilla de `/caja` con su botón Confirmar o Rechazar. **No hace falta una bandeja nueva ni un circuito tipo rendición.** Si el cliente quiere el recibo en el momento, Finanzas lo confirma ahí mismo y sale el recibo.
+
+La **barra de cobro de Caja se queda** como está: es para la plata que le llega directo a Finanzas.
+
 Qué hacer:
 1. **Cobros tiene que ser tan cómodo como la barra de Caja**, que el dueño considera bien armada. Traer a Cobros lo que la barra tiene y Cobros no, **reutilizando el código de la barra** (`components/caja/registrar-cobro.tsx`) en lugar de escribirlo de nuevo:
    - pegar una captura con Ctrl+V para el OCR;
    - los carteles "falta plata → ajuste por redondeo o dejar saldo" y "sobra plata → ajustar o dejar a cuenta" (con el tope de `lib/cobranzas/ajuste.ts`);
    - el resumen de la cuenta con el switch Facturados / Todos;
    - el aviso de deudor del BCRA con todos los titulares del cheque.
-   Mostrarle al dueño la lista exacta antes de empezar.
-2. **La barra de cobro de Caja:** preguntarle al dueño si Finanzas también tiene que poder ingresar cobros o si eso queda solo para Cobros. No sacarla sin su OK.
+
+   Lo que se ingresa en Cobros **sigue quedando pendiente**, incluso el efectivo. Mostrarle al dueño la lista exacta antes de empezar.
+2. Verificar que en la planilla de `/caja` se distinga bien un cobro de mostrador pendiente: quién lo registró, el cliente y el detalle de cada renglón (cheque nº, efectivo). Así Finanzas puede contar contra eso antes de apretar Confirmar. Si falta algún dato, proponerlo.
 3. Textos que todavía dicen "Pagos Clientes" y deben decir "Cobros":
    - `components/caja/registrar-cobro.tsx` (~206): *"Los depósitos con varios ítems se cargan desde Pagos Clientes"*.
    - `app/api/mostrador/venta/route.ts` (~177, y el comentario ~27).
