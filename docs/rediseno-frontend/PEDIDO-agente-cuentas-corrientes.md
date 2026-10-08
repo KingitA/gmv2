@@ -42,9 +42,9 @@ Lo que ya tiene, y hay que **conservar**:
 
 Para pensar con el dueño y acomodar (proponer antes de cambiar lógica):
 
-1. **Flujo de mostrador.** Hoy el botón dice *"Registrar pago (queda pendiente de verificación)"*. En la oficina el cliente paga en el momento y la plata entra a caja ahí mismo. ¿Debe quedar pendiente igual, o confirmarse en el acto contra la caja que corresponda? (`/caja` confirma con `components/caja/confirmar-dialog.tsx` → `PATCH /api/pagos/[id]/confirmar`.) **Decisión del dueño.**
+1. **Flujo de mostrador.** DECIDIDO (dueño, 08/10): el cobro de la oficina **queda pendiente de verificación**, como hoy. No cambiar.
 2. **Volver al pedido.** Cuando se llega desde "Registrar pago" del pedido (`app/clientes-pedidos/page.tsx`, panel del pedido), después de cobrar conviene ofrecer volver al pedido. El "atrás" del navegador ya funciona.
-3. **Pestaña "Rendición de viajes".** Las rendiciones son plata de choferes y vendedores, así que corresponden a **Finanzas**. `/caja` ya tiene "Controlar rendición" (`components/caja/controlar-rendicion.tsx`), y `/finanzas/pendiente-rendir` lista los viajes por rendir. Proponer al dueño sacar esta pestaña de Cobros, o moverla.
+3. **Pestaña "Rendición de viajes".** DECIDIDO (dueño, 08/10): las rendiciones de choferes y viajantes van en **/caja** (ya se ven ahí). Sacar esta pestaña de Cobros, verificando antes que /caja (`controlar-rendicion.tsx`) haga todo lo que hace esta pestaña.
 4. **Historial.** Que sirva para el administrativo: filtrar por cliente y por fecha, y el recibo a mano.
 5. **Estilo.** Usar el sistema visual del rediseño:
    - `app/megasur-tema.css`;
