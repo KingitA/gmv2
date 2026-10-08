@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Trash2, Plus } from "lucide-react"
 import { DepositoItemsForm } from "./DepositoItemsForm"
 import { DateInputAR } from "@/components/ui/date-input-ar"
-import { BcraDeudorChip } from "./BcraDeudorChip"
+import { BcraDeudorMulti } from "./BcraDeudorChip"
 
 export type TipoPago = "efectivo" | "transferencia" | "cheque" | "deposito"
 
@@ -30,6 +30,8 @@ export interface MetodoPago {
   fecha_cheque?: string
   localidad?: string
   cuit_emisor?: string
+  /** Titulares de la cuenta (OCR de cuentas conjuntas): se consultan todos en BCRA */
+  cuits_titulares?: string[]
   color_cheque?: "BLANCO" | "NEGRO" | "ECHEQ"
   // deposito
   fecha_deposito?: string
@@ -224,7 +226,9 @@ export function MetodoPagoForm({ metodos, onChange }: Props) {
                 </Select>
               </div>
               <div className="col-span-2">
-                <BcraDeudorChip cuit={m.cuit_emisor} />
+                {/* Central de Deudores: TODOS los titulares de la cuenta (cuenta
+                    conjunta detectada por OCR), no solo el CUIT del emisor. */}
+                <BcraDeudorMulti cuits={[m.cuit_emisor, ...(m.cuits_titulares || [])]} bancoEmisor={m.banco_emisor} />
               </div>
             </div>
           )}

@@ -40,9 +40,13 @@ interface FilaCaja {
    *  sus métodos son digitales, o es un cobro de oficina). Un pago mixto de la
    *  calle espera su rendición. */
   confirmable?: boolean
-  detalles_resumen?: { tipo: string; monto: number; descripcion: string }[]
+  detalles_resumen?: { tipo: string; monto: number; color?: string | null; descripcion: string }[]
   /** Cheques a cuenta sin color: la confirmación exige elegir BLANCO/NEGRO. */
   requiere_color?: boolean
+  /** Observaciones del pago (visibles antes de confirmar) */
+  observaciones?: string | null
+  /** Pago sin imputaciones (a cuenta): el diálogo ofrece imputar al confirmar */
+  sin_imputaciones?: boolean
   /** Cobro confirmado con plata sin aplicar a comprobantes: abre el modal de
    *  imputación (los de choferes/viajantes suelen venir ya imputados). */
   imputable?: boolean
@@ -81,7 +85,7 @@ export async function GET(request: NextRequest) {
       supabase
         .from("pagos_clientes")
         .select(
-          "id, cliente_id, monto, fecha_pago, estado, cobrador_tipo, creado_por, created_at, observaciones, clientes(nombre), pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, color_cheque, referencia, numero_comprobante_pago, fecha_transferencia)"
+          "id, cliente_id, monto, fecha_pago, estado, cobrador_tipo, creado_por, created_at, observaciones, clientes(nombre), pagos_detalle(tipo_pago, monto, banco, numero_cheque, fecha_cheque, color_cheque, referencia, numero_comprobante_pago, fecha_transferencia), imputaciones(estado)"
         )
         .in("estado", ["pendiente", "pendiente_rendicion"])
         .order("created_at", { ascending: true }),
@@ -475,6 +479,17 @@ export async function GET(request: NextRequest) {
     const filasPend: FilaCaja[] = []
     const filasPendAnteriores: FilaCaja[] = []
 
+    // Quién registró cada pago pendiente (Finanzas cuenta la plata contra esto)
+    const creadoIds = [...new Set((pendientes as any[]).map((p) => p.creado_por).filter(Boolean) as string[])]
+    const nombreUsuario = new Map<string, string>()
+    if (creadoIds.length) {
+      const usrs = await fetchByIds<any>(
+        (chunk) => supabase.from("usuarios").select("id, nombre").in("id", chunk),
+        creadoIds
+      )
+      for (const u of usrs) nombreUsuario.set(u.id, u.nombre)
+    }
+
     for (const p of pendientes as any[]) {
       const enRendicion = pagosEnRendicion.has(p.id)
       const detalles: any[] = p.pagos_detalle || []
@@ -497,21 +512,27 @@ export async function GET(request: NextRequest) {
       if (tieneEcheq) pendPanel.echeqs++
       if (tieneTransf) pendPanel.transferencias++
 
+      // Cada renglón con SU monto a la vista: Finanzas cuenta la plata del
+      // escritorio contra esta fila antes de apretar Confirmar (dueño 08/10).
+      const conMonto = (txt: string, d: any) => `${txt} · $ ${num(d.monto).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
       const partes = relevantes.map((d) => {
         if (d.tipo_pago === "transferencia")
-          return `🏦 Transferencia${d.banco ? ` → ${d.banco}` : ""}${d.numero_comprobante_pago || d.referencia ? ` · op. ${d.numero_comprobante_pago || d.referencia}` : ""}`
-        if (d.tipo_pago === "deposito") return `🏧 Depósito${d.banco ? ` → ${d.banco}` : ""}`
+          return conMonto(`🏦 Transferencia${d.banco ? ` → ${d.banco}` : ""}${d.numero_comprobante_pago || d.referencia ? ` · op. ${d.numero_comprobante_pago || d.referencia}` : ""}`, d)
+        if (d.tipo_pago === "deposito") return conMonto(`🏧 Depósito${d.banco ? ` → ${d.banco}` : ""}`, d)
         if (esEcheq(d))
-          return `⚡ Echeq${d.banco ? ` · ${d.banco}` : ""}${d.numero_cheque ? ` ${d.numero_cheque}` : ""}${d.fecha_cheque ? ` · vence ${d.fecha_cheque.split("-").reverse().join("/")}` : ""}`
+          return conMonto(`⚡ Echeq${d.banco ? ` · ${d.banco}` : ""}${d.numero_cheque ? ` ${d.numero_cheque}` : ""}${d.fecha_cheque ? ` · vence ${d.fecha_cheque.split("-").reverse().join("/")}` : ""}`, d)
         if (d.tipo_pago === "cheque")
-          return `📄 Cheque${d.banco ? ` ${d.banco}` : ""}${d.numero_cheque ? ` ${d.numero_cheque}` : ""}`
-        return `💵 Efectivo`
+          return conMonto(`📄 Cheque${d.banco ? ` ${d.banco}` : ""}${d.numero_cheque ? ` ${d.numero_cheque}` : ""}${d.color_cheque && d.color_cheque !== "PENDIENTE" ? ` · ${d.color_cheque}` : ""}`, d)
+        return conMonto(`💵 Efectivo`, d)
       })
 
+      const registrador = p.creado_por ? nombreUsuario.get(p.creado_por) : null
       const origen =
         (p.cobrador_tipo && p.cobrador_tipo !== "oficina"
           ? `cargó ${p.cobrador_tipo}`
-          : "Cobro en oficina") + (enRendicion ? " · declarado en rendición" : "")
+          : "Cobro en oficina") +
+        (registrador ? ` · registró ${registrador}` : "") +
+        (enRendicion ? " · declarado en rendición" : "")
 
       // Confirmable entero desde /caja: pago de oficina, o pago de la calle
       // cuyos métodos son TODOS digitales. Mixto → espera su rendición.
@@ -525,6 +546,7 @@ export async function GET(request: NextRequest) {
       const detallesResumen = relevantes.map((d) => ({
         tipo: esEcheq(d) ? "echeq" : d.tipo_pago,
         monto: num(d.monto),
+        color: d.color_cheque || null,
         descripcion:
           d.tipo_pago === "cheque"
             ? `${d.banco ?? ""} ${d.numero_cheque ?? ""}`.trim()
@@ -532,6 +554,8 @@ export async function GET(request: NextRequest) {
               ? `${d.banco ?? ""}${d.numero_comprobante_pago || d.referencia ? ` · op. ${d.numero_comprobante_pago || d.referencia}` : ""}`.trim()
               : "",
       }))
+      // ¿El pago vino sin imputar (a cuenta)? → el diálogo ofrece imputar al confirmar
+      const sinImputar = !((p.imputaciones || []).some((i: any) => i.estado !== "anulado"))
       const fila: FilaCaja = {
         id: `p-${p.id}`,
         fuente: "pago",
@@ -560,9 +584,13 @@ export async function GET(request: NextRequest) {
         confirmable,
         detalles_resumen: detallesResumen,
         requiere_color: requiereColor,
+        observaciones: p.observaciones || null,
+        sin_imputaciones: sinImputar,
       }
+      // Pendientes de OTRAS fechas (anteriores O futuras): todos visibles y
+      // confirmables — antes los de fecha futura desaparecían de la planilla.
       if (p.fecha_pago === fecha) filasPend.push(fila)
-      else if (p.fecha_pago < fecha) filasPendAnteriores.push(fila)
+      else filasPendAnteriores.push(fila)
     }
 
     // ── 3) Rendiciones abiertas: "Esperando la plata" ──

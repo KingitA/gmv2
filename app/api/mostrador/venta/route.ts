@@ -24,7 +24,7 @@ import { esErrorReglaPedido } from "@/lib/pedidos/errores"
  * condición de IVA): un error ahí ya no deja un pedido huérfano.
  *
  * Si algo falla DESPUÉS de facturar, devuelve el estado parcial: la FA queda
- * con saldo y se cobra desde /pagos-clientes (nada se pierde ni duplica).
+ * con saldo y se cobra desde Cobros (/pagos-clientes) — nada se pierde ni duplica.
  *
  * Body: {
  *   cliente_id, items: [{ producto_id, cantidad }],
@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
       if (!pagoRes.ok) {
         return NextResponse.json(
           {
-            error: `Pedido ${numeroPedido} facturado, pero falló el cobro: ${pagoData.error}. Cobrar desde Pagos Clientes.`,
+            error: `Pedido ${numeroPedido} facturado, pero falló el cobro: ${pagoData.error}. Cobrar desde Cobros (Clientes → Cobros).`,
             paso,
             pedido_id: pedidoId,
             comprobantes,

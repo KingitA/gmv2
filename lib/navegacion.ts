@@ -26,7 +26,7 @@ export const SECCIONES: Seccion[] = [
     href: "/clientes-pedidos",
     prefijos: [
       "/clientes-pedidos", "/clientes", "/viajes", "/comprobantes-venta", "/revision-devoluciones",
-      "/revision-pagos", "/pagos-clientes", "/cobranzas", "/viajantes", "/transportes", "/mostrador", "/imports",
+      "/pagos-clientes", "/viajantes", "/transportes", "/mostrador", "/imports",
     ],
     accesos: [
       { label: "Pedidos y viajes", href: "/clientes-pedidos" },
