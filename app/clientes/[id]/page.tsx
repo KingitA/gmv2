@@ -395,7 +395,7 @@ export default function ClienteDetailPage() {
   const listaHeredar = listaGenNombre ? `Como la general (${listaGenNombre})` : "Como la general (sin lista)"
 
   return (
-    <form id="cliente-form" onSubmit={handleSubmit} className="mx-auto flex h-full max-w-6xl flex-col bg-white lg:border-x">
+    <form id="cliente-form" onSubmit={handleSubmit} className="mx-auto flex min-h-full max-w-6xl flex-col bg-white md:h-full lg:border-x">
       <FichaCabecera
         className="pr-5 sm:pr-6"
         foto={
@@ -715,7 +715,7 @@ export default function ClienteDetailPage() {
         </FichaSeccion>
       </FichaCuerpo>
 
-      <FichaPie mensaje="Un solo botón guarda todo: datos, condiciones y segmentación.">
+      <FichaPie className="sticky bottom-0 z-10 md:static" mensaje={<span className="hidden sm:inline">Un solo botón guarda todo: datos, condiciones y segmentación.</span>}>
         <Button type="button" variant="outline" asChild><Link href="/clientes">Cancelar</Link></Button>
         <Button type="submit" disabled={saving} className="gap-2">
           {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}

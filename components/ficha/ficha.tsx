@@ -100,7 +100,9 @@ export function FichaCuerpo({ secciones, children }: { secciones: SeccionIndice[
           </button>
         ))}
       </nav>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-7">
+      {/* relative: los <select> ocultos de Radix (position absolute) quedan adentro
+          del scroll y no estiran la página cuando la ficha no está en un modal */}
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-7">
         {children}
       </div>
     </div>
@@ -173,9 +175,9 @@ export function ConUnidad({ unidad, children }: { unidad: string; children: Reac
 }
 
 /* ── Pie ──────────────────────────────────────────────────── */
-export function FichaPie({ mensaje, children }: { mensaje?: ReactNode; children: ReactNode }) {
+export function FichaPie({ mensaje, children, className }: { mensaje?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <footer className="flex flex-wrap items-center justify-between gap-3 border-t bg-neutro-50 px-5 py-3 sm:px-6">
+    <footer className={cn('flex flex-wrap items-center justify-between gap-3 border-t bg-neutro-50 px-5 py-3 sm:px-6', className)}>
       <p className="text-[13px] text-neutro-500">{mensaje}</p>
       <div className="flex flex-1 justify-end gap-2 sm:flex-none [&>*]:flex-1 sm:[&>*]:flex-none">{children}</div>
     </footer>
