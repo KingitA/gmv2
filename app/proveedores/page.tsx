@@ -272,87 +272,12 @@ export default function ProveedoresPage() {
     : proveedores.filter((proveedor) => searchIds.has(proveedor.id))
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Link href="/">
-              <Button variant="ghost" size="icon" className="hover:bg-accent">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Proveedores</h1>
-              <p className="text-sm text-muted-foreground">Gestión de proveedores y compras</p>
-            </div>
-          </div>
+    <div className="min-h-screen">
+      <main className="container mx-auto space-y-6 px-4 py-6 sm:px-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Fichas de proveedores</h1>
+          <p className="text-sm text-neutro-500">Datos, condiciones de compra, fiscal y cuenta corriente</p>
         </div>
-      </header>
-
-      <main className="container mx-auto px-6 py-8 space-y-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Link href="/ordenes-compra" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-blue-500 hover:border-l-blue-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
-                    <ShoppingCart className="h-6 w-6 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Órdenes de Compra</h3>
-                    <p className="text-sm text-muted-foreground">Pedidos a proveedores</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/ordenes-compra/nc-pendientes" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-green-500 hover:border-l-green-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-green-50 rounded-lg group-hover:bg-green-100 transition-colors">
-                    <FileText className="h-6 w-6 text-green-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">NC Proveedores</h3>
-                    <p className="text-sm text-muted-foreground">Notas de crédito esperadas y sin imputar</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/ordenes-pago" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-purple-500 hover:border-l-purple-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-purple-50 rounded-lg group-hover:bg-purple-100 transition-colors">
-                    <Search className="h-6 w-6 text-purple-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Órdenes de Pago</h3>
-                    <p className="text-sm text-muted-foreground">Pagos a proveedores</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/vencimientos" className="group">
-            <Card className="transition-all duration-200 hover:shadow-lg hover:scale-105 cursor-pointer border-l-4 border-l-orange-500 hover:border-l-orange-600">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-orange-50 rounded-lg group-hover:bg-orange-100 transition-colors">
-                    <Search className="h-6 w-6 text-orange-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">Vencimientos</h3>
-                    <p className="text-sm text-muted-foreground">Agenda de pagos</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
-
         <Card className="shadow-sm">
           <CardHeader className="border-b bg-muted/30">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">

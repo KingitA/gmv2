@@ -33,8 +33,8 @@ export function ClientesDemo() {
         onAbrirViaje={id => setMsg(`Abre la hoja de ruta del viaje ${id}`)} onProgramar={d => setMsg(`Programar viaje el ${d}`)}
         onMoverViaje={(id, d) => setMsg(`Mueve el viaje ${id} al ${d}`)}
         onSoltarPedidosEnViaje={v => setMsg(`Sube los pedidos al viaje ${v.nombre}`)} onSoltarPedidosEnDia={d => setMsg(`Pedidos soltados el ${d}`)}
-        sueltos={new Map([["2026-10-09", [{ zonaId: "z1", zona: "PUNTA ALTA", cantidad: 3 }]], ["2026-10-06", [{ zonaId: "z3", zona: "BAHIA", cantidad: 1 }]]])}
-        onAbrirSueltos={(d, z) => setMsg(`Filtra la lista: sueltos del ${d} zona ${z}`)} />
+        sueltos={new Map([["2026-10-09", [{ id: "s1", cliente: "DISTRIBUIDORA URQUIZA", zona: "PUNTA ALTA" }, { id: "s2", cliente: "CAROLINA GARCIA FAATH", zona: "PUNTA ALTA" }]], ["2026-10-06", [{ id: "s3", cliente: "VITALI SERGIO", zona: "BAHIA" }]]])}
+        onAbrirSuelto={(id) => setMsg(`Abre el pedido suelto ${id}`)} onQuitarSuelto={(id) => setMsg(`Saca la fecha al suelto ${id}`)} onArrastrarSuelto={() => {}} />
       <FiltrosPedidos f={f} set={c => setF(p => ({ ...p, ...c }))} vendedores={[{ id: "a", nombre: "LAUMANN KARINA" }]} zonas={[{ id: "z2", nombre: "ALTO VALLE" }]} hayFiltrosExtra={false} onLimpiar={() => {}} />
       <TablaPedidos pedidos={PEDIDOS} seleccion={sel}
         onToggle={id => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import { ESTADOS_PREPARABLES } from "@/lib/deposito/picking"
 
 interface UrgentOrder {
   id: string
@@ -49,8 +50,9 @@ export function UrgentOrderNotification() {
           const pedido = payload.new
           if (!pedido || pedido.prioridad !== 1) return
 
-          // Solo mostrar si está en estado pendiente o en_preparacion
-          if (!["pendiente", "en_preparacion"].includes(pedido.estado)) return
+          // Solo si está en la cola del depósito (pendiente, en preparación o impreso:
+          // casi todos los pedidos importados quedan "impreso", y antes no avisaban)
+          if (!ESTADOS_PREPARABLES.includes(pedido.estado)) return
 
           // Verificar que no haya alguien ya preparándolo
           const { data: sesionExistente } = await supabase

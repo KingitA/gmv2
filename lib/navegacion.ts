@@ -93,6 +93,7 @@ export const SECCIONES: Seccion[] = [
 export const APPS: Acceso[] = [
   { label: "App Depósito", href: "/deposito", roles: ["admin", "deposito"] },
   { label: "App Vendedores", href: "/vendedor", roles: ["admin", "vendedor"] },
+  { label: "App Chofer", href: "/chofer", roles: ["admin", "chofer"] },
 ]
 
 /** Rutas que NO llevan la barra del ERP (apps propias o login). */

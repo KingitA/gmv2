@@ -37,7 +37,7 @@ export const PRIORIDAD = {
 
 const pesos = (n: number) => `$ ${Math.round(n || 0).toLocaleString('es-AR')}`
 
-export type Orden = 'prioridad' | 'numero' | 'fecha' | 'cliente' | 'total'
+export type Orden = 'prioridad' | 'numero' | 'fecha' | 'cliente' | 'zona' | 'estado' | 'viaje' | 'total'
 
 interface Props {
   pedidos: PedidoFila[]
@@ -102,9 +102,9 @@ export function TablaPedidos(p: Props) {
               <Encabezado id="numero" className="w-[78px]">N°</Encabezado>
               <Encabezado id="fecha" className="w-[92px]">Fecha</Encabezado>
               <Encabezado id="cliente">Cliente</Encabezado>
-              <th className="hidden h-10 w-[120px] px-2 text-left text-[12.5px] font-semibold text-neutro-500 lg:table-cell">Zona</th>
-                            <th className="h-10 w-[112px] px-2 text-left text-[12.5px] font-semibold text-neutro-500">Estado</th>
-              <th className="h-10 w-[140px] px-2 text-left text-[12.5px] font-semibold text-neutro-500">Viaje</th>
+              <Encabezado id="zona" className="hidden w-[120px] lg:table-cell">Zona</Encabezado>
+                            <Encabezado id="estado" className="w-[112px]">Estado</Encabezado>
+              <Encabezado id="viaje" className="w-[140px]">Viaje</Encabezado>
               <Encabezado id="total" className="w-[120px] text-right">Total</Encabezado>
               <th className="w-10" />
             </tr>

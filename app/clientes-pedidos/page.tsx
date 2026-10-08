@@ -10,7 +10,7 @@ import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { TablaPedidos, type Orden, type PedidoFila } from "@/components/clientes/tabla-pedidos"
 import { FiltrosPedidos, type Filtros } from "@/components/clientes/filtros-pedidos"
-import { CalendarioViajes, celdasMes, celdasSemana, type GrupoSuelto } from "@/components/viajes/calendario-viajes"
+import { CalendarioViajes, celdasMes, celdasSemana, type PedidoSuelto } from "@/components/viajes/calendario-viajes"
 import { ProgramarViajeDialog } from "@/components/viajes/programar-viaje-dialog"
 import { useViajesRango, sumarDias, viajeMovible, type ViajeCal } from "@/lib/viajes/use-viajes-rango"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
@@ -1036,6 +1036,9 @@ export default function ClientesPedidosPage() {
         case "fecha": return ((a.fecha || "").localeCompare(b.fecha || "") || (a.numero_pedido || "").localeCompare(b.numero_pedido || "")) * s
         case "cliente": return (a.clientes?.nombre_razon_social || "").localeCompare(b.clientes?.nombre_razon_social || "") * s
         case "total": return ((a.total || 0) - (b.total || 0)) * s
+        case "zona": return ((zonaDe(a)?.nombre || "~").localeCompare(zonaDe(b)?.nombre || "~") || porFecha) * s
+        case "estado": return ((ESTADO_LABEL[a.estado] || a.estado || "").localeCompare(ESTADO_LABEL[b.estado] || b.estado || "") || porFecha) * s
+        case "viaje": return (((a.viajes?.fecha || "~") + (a.viajes?.nombre || "")).localeCompare((b.viajes?.fecha || "~") + (b.viajes?.nombre || "")) || porFecha) * s
         default: return ((a.prioridad || 3) - (b.prioridad || 3)) * (dir === "desc" ? 1 : -1) || porFecha
       }
     })
@@ -1099,7 +1102,8 @@ export default function ClientesPedidosPage() {
 
   // ── Subir pedidos a un viaje (misma API que la hoja de ruta y el panel) ──
   const subirPedidosAViaje = async (viajeId: string, viajeNombre: string, ids: string[]) => {
-    const elegibles = ids.filter(id => puedeAsignarViaje(pedidos.find(p => p.id === id)?.estado))
+    const estadoDe = (id: string) => pedidos.find(p => p.id === id)?.estado ?? sueltosCal.find(s => s.id === id)?.estado
+    const elegibles = ids.filter(id => puedeAsignarViaje(estadoDe(id)))
     const noElegibles = ids.length - elegibles.length
     if (!elegibles.length) {
       toast.error(ids.length === 1 ? "Ese pedido ya no se puede subir a un viaje." : "Ninguno de esos pedidos se puede subir a un viaje.")
@@ -1128,7 +1132,7 @@ export default function ClientesPedidosPage() {
   }
 
   const arrastreRef = useRef<string[]>([])
-  const zonasDeIds = (ids: string[]) => ids.map(id => { const p = pedidos.find(x => x.id === id); return p ? zonaDe(p) : null })
+  const zonasDeIds = (ids: string[]) => ids.map(id => { const p = pedidos.find(x => x.id === id); return p ? zonaDe(p) : (sueltosCal.find(s => s.id === id)?.zona ?? null) })
 
   const soltarEnViaje = (v: ViajeCal) => {
     const ids = arrastreRef.current
@@ -1149,33 +1153,34 @@ export default function ClientesPedidosPage() {
   }
 
   // ── Pedidos "sueltos": con fecha de entrega y todavía sin viaje ──
-  const [sueltosCal, setSueltosCal] = useState<{ id: string; fecha_entrega: string; zona: { id: string; nombre: string } | null }[]>([])
+  const [sueltosCal, setSueltosCal] = useState<{ id: string; numero_pedido: string; estado: string; cliente: string; fecha_entrega: string; zona: { id: string; nombre: string } | null }[]>([])
   const cargarSueltos = async () => {
     const { data, error } = await supabase
       .from("pedidos")
-      .select("id, fecha_entrega, clientes (localidades (zonas (id, nombre)))")
+      .select("id, numero_pedido, estado, fecha_entrega, clientes (nombre_razon_social, localidades (zonas (id, nombre)))")
       .is("viaje_id", null)
       .not("estado", "in", "(entregado,eliminado,rechazado)")
       .gte("fecha_entrega", diasCal[0])
       .lte("fecha_entrega", diasCal[diasCal.length - 1])
     if (error) return // sin la migración de fecha_entrega todavía: el calendario no muestra sueltos
-    setSueltosCal((data || []).map((p: any) => ({ id: p.id, fecha_entrega: p.fecha_entrega, zona: p.clientes?.localidades?.zonas ?? null })))
+    setSueltosCal((data || []).map((p: any) => ({ id: p.id, numero_pedido: p.numero_pedido, estado: p.estado, cliente: p.clientes?.nombre_razon_social || "Sin cliente", fecha_entrega: p.fecha_entrega, zona: p.clientes?.localidades?.zonas ?? null })))
   }
   useEffect(() => { cargarSueltos() }, [diasCal[0], diasCal[diasCal.length - 1]])
   cargarSueltosRef.current = cargarSueltos
+  // Un chip por pedido suelto: cliente y zona chica abajo (ordenados por zona y cliente)
   const sueltosPorDia = (() => {
-    const m = new Map<string, GrupoSuelto[]>()
-    for (const p of sueltosCal) {
-      const grupos = m.get(p.fecha_entrega) ?? []
-      const g = grupos.find(x => x.zonaId === (p.zona?.id ?? null))
-      if (g) g.cantidad++
-      else grupos.push({ zonaId: p.zona?.id ?? null, zona: p.zona?.nombre ?? "Sin zona", cantidad: 1 })
-      m.set(p.fecha_entrega, grupos)
+    const m = new Map<string, PedidoSuelto[]>()
+    const orden = [...sueltosCal].sort((a, b) => (a.zona?.nombre || "").localeCompare(b.zona?.nombre || "") || a.cliente.localeCompare(b.cliente))
+    for (const p of orden) {
+      const lista = m.get(p.fecha_entrega) ?? []
+      lista.push({ id: p.id, cliente: p.cliente, zona: p.zona?.nombre ?? null })
+      m.set(p.fecha_entrega, lista)
     }
     return m
   })()
-  const abrirSueltos = (dia: string, zonaId: string | null) => {
-    url.set({ entrega: dia, zona: zonaId, desde: "todo", estados: "todos" }, "push", DEF)
+  const abrirSuelto = (id: string) => {
+    const p = sueltosCal.find(x => x.id === id)
+    if (p) { abiertoDesdeListaRef.current = true; cerrandoRef.current = false; url.set({ pedido: p.numero_pedido }, "push") }
   }
 
   /** Deja pedidos para un día sin viaje (fecha null = sacarles la fecha). */
@@ -1245,6 +1250,29 @@ export default function ClientesPedidosPage() {
     const ids = seleccionados.map(p => p.id)
     const zonas = [...new Map(seleccionados.map(p => p.zona).filter(Boolean).map(z => [z!.id, z!])).values()]
     abrirProgramar("", zonas.map(z => z.id), ids, <>Se le van a subir {ids.length === 1 ? "el pedido seleccionado" : `los ${ids.length} pedidos seleccionados`}{zonas.length > 1 ? <> (son de {zonas.length} zonas: {zonas.map(z => z.nombre).join(", ")})</> : null}.</>)
+  }
+
+  const eliminarVarios = async (lista: PedidoFila[]) => {
+    const elegibles = lista.filter(p => puedeEliminarPedido(p.estado))
+    let ok = 0
+    for (const p of elegibles) {
+      try { await softDeletePedido(p.id); ok++ } catch (e: any) { console.error("Error eliminando pedido:", e) }
+    }
+    if (ok) toast.success(ok === 1 ? "1 pedido eliminado" : `${ok} pedidos eliminados`)
+    if (ok < elegibles.length) toast.error(`${elegibles.length - ok} no se pudieron eliminar`)
+    if (lista.length > elegibles.length) toast.message(`${lista.length - elegibles.length} no se pueden eliminar por su estado (ya facturados, en viaje o entregados).`)
+    setSeleccion(new Set())
+    await cargarPedidos(true)
+    cargarSueltos()
+  }
+  const pedirEliminarSeleccion = () => {
+    const elegibles = seleccionados.filter(p => puedeEliminarPedido(p.estado)).length
+    setPropuesta({
+      titulo: `¿Eliminar ${seleccionados.length === 1 ? "el pedido seleccionado" : `los ${seleccionados.length} pedidos seleccionados`}?`,
+      texto: <>Se van a eliminar <b>{elegibles}</b>{elegibles !== seleccionados.length ? <> (los otros {seleccionados.length - elegibles} no se pueden por su estado)</> : null}. Quedan en la papelera 45 días (filtro "Eliminado"), igual que al eliminar uno por uno.</>,
+      boton: "Eliminar",
+      accion: () => eliminarVarios(seleccionados),
+    })
   }
 
   const cambiarPrioridadVarios = async (ids: string[], prioridad: 1 | 2 | 3) => {
@@ -1427,7 +1455,9 @@ export default function ClientesPedidosPage() {
                 onSoltarPedidosEnViaje={soltarEnViaje}
                 onSoltarPedidosEnDia={soltarEnDia}
                 sueltos={sueltosPorDia}
-                onAbrirSueltos={abrirSueltos}
+                onAbrirSuelto={abrirSuelto}
+                onQuitarSuelto={(id) => setFechaEntrega([id], null)}
+                onArrastrarSuelto={(id) => { arrastreRef.current = [id] }}
               />
             </div>
           </div>
@@ -1575,6 +1605,10 @@ export default function ClientesPedidosPage() {
           </Select>
           <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => setSeleccion(new Set())}>
             Quitar selección
+          </Button>
+          <Button size="icon" variant="ghost" className="h-9 w-9 text-error-200 hover:bg-error-500 hover:text-white" onClick={pedirEliminarSeleccion}
+            aria-label="Eliminar los pedidos seleccionados" title="Eliminar los pedidos seleccionados">
+            <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       )}

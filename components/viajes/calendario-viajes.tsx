@@ -30,21 +30,33 @@ interface Props {
   /** Si se pasan, el calendario acepta pedidos arrastrados. */
   onSoltarPedidosEnViaje?: (viaje: ViajeCal) => void
   onSoltarPedidosEnDia?: (dia: string) => void
-  /** Pedidos con fecha de entrega y sin viaje, por día y zona (CLIENTES). */
-  sueltos?: Map<string, GrupoSuelto[]>
-  onAbrirSueltos?: (dia: string, zonaId: string | null) => void
+  /** Pedidos con fecha de entrega y sin viaje, por día (CLIENTES). */
+  sueltos?: Map<string, PedidoSuelto[]>
+  onAbrirSuelto?: (id: string) => void
+  onQuitarSuelto?: (id: string) => void
+  /** Al empezar a arrastrar un suelto (para subirlo a un viaje o moverlo de día). */
+  onArrastrarSuelto?: (id: string) => void
 }
 
-export type GrupoSuelto = { zonaId: string | null; zona: string; cantidad: number }
+export type PedidoSuelto = { id: string; cliente: string; zona: string | null }
 
-function ChipSueltos({ g, onClick }: { g: GrupoSuelto; onClick?: () => void }) {
+function ChipSuelto({ s, onAbrir, onQuitar, onArrastrar }: { s: PedidoSuelto; onAbrir?: () => void; onQuitar?: () => void; onArrastrar?: () => void }) {
   return (
-    <button type="button" onClick={onClick}
-      title="Pedidos con fecha de entrega y sin viaje: tocá para verlos en la lista"
-      className="flex w-full items-center gap-1.5 rounded-lg border border-dashed border-ambar-400 bg-ambar-50/70 px-2 py-1 text-left text-[11px] font-semibold text-ambar-800 hover:bg-ambar-50">
-      <span className="tabular-nums">{g.cantidad}</span>
-      <span className="truncate">{g.cantidad === 1 ? 'suelto' : 'sueltos'} · {g.zona}</span>
-    </button>
+    <div
+      draggable={!!onArrastrar}
+      onDragStart={(e) => { e.dataTransfer.setData(TIPO_ARRASTRE_PEDIDOS, JSON.stringify([s.id])); e.dataTransfer.effectAllowed = 'move'; onArrastrar?.() }}
+      className="group/suelto flex w-full items-start gap-1 rounded-lg border border-dashed border-ambar-400 bg-ambar-50/70 px-2 py-1 text-left hover:bg-ambar-50"
+      title="Pedido sin viaje para este día: tocá para abrirlo, arrastralo a un viaje o a otro día"
+    >
+      <button type="button" onClick={onAbrir} className="min-w-0 flex-1 text-left">
+        <span className="block truncate text-[11px] font-semibold uppercase text-ambar-900">{s.cliente}</span>
+        {s.zona && <span className="block truncate text-[10px] uppercase text-ambar-700/80">{s.zona}</span>}
+      </button>
+      {onQuitar && (
+        <button type="button" onClick={onQuitar} aria-label={`Sacar a ${s.cliente} de este día`}
+          className="shrink-0 rounded px-0.5 text-[13px] leading-none text-ambar-600 hover:bg-ambar-100 hover:text-error-500">×</button>
+      )}
+    </div>
   )
 }
 
@@ -96,7 +108,7 @@ export function CalendarioViajes(p: Props) {
             </div>
             <div className="min-w-0 flex-1 space-y-1.5">
               {vs.length === 0 && !(p.sueltos?.get(d)?.length) && <div className="pt-1.5 text-[13px] text-neutro-400">Sin viajes</div>}
-              {(p.sueltos?.get(d) || []).map(g => <ChipSueltos key={g.zonaId ?? 'x'} g={g} onClick={() => p.onAbrirSueltos?.(d, g.zonaId)} />)}
+              {(p.sueltos?.get(d) || []).map(x => <ChipSuelto key={x.id} s={x} onAbrir={() => p.onAbrirSuelto?.(x.id)} onQuitar={p.onQuitarSuelto ? () => p.onQuitarSuelto!(x.id) : undefined} />)}
               {vs.map(v => (
                 <button key={`${v.id}-${v.dia_n}`} type="button" onClick={() => p.onAbrirViaje(v.id)}
                   className="flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left active:bg-azul-50">
@@ -209,7 +221,7 @@ export function CalendarioViajes(p: Props) {
                         </button>
                       )
                     })}
-                    {(p.sueltos?.get(dia) || []).map(g => <ChipSueltos key={g.zonaId ?? 'x'} g={g} onClick={() => p.onAbrirSueltos?.(dia, g.zonaId)} />)}
+                    {(p.sueltos?.get(dia) || []).map(x => <ChipSuelto key={x.id} s={x} onAbrir={() => p.onAbrirSuelto?.(x.id)} onQuitar={p.onQuitarSuelto ? () => p.onQuitarSuelto!(x.id) : undefined} onArrastrar={p.onArrastrarSuelto ? () => p.onArrastrarSuelto!(x.id) : undefined} />)}
                     {resaltado && aceptaPedidos && !viajeArr && (
                       <div className="rounded-md border border-dashed border-ambar-400 px-2 py-1 text-[11px] font-medium text-ambar-800">
                         Soltá para dejarlos este día

@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { DateInputAR } from '@/components/ui/date-input-ar'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface Props {
@@ -34,10 +35,22 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
   const [dias, setDias] = useState('1')
   const [nombre, setNombre] = useState('')
   const [guardando, setGuardando] = useState(false)
+  // Chofer y acompañantes (opcionales: el viaje se puede programar sin chofer)
+  const [choferes, setChoferes] = useState<{ id: string; nombre: string }[]>([])
+  const [titularId, setTitularId] = useState('')
+  const [acompananteIds, setAcompananteIds] = useState<string[]>([])
 
   useEffect(() => {
-    createClient().from('zonas').select('id, nombre').order('nombre')
+    const sb = createClient()
+    sb.from('zonas').select('id, nombre').order('nombre')
       .then((r: { data: { id: string; nombre: string }[] | null }) => setZonas(r.data || []))
+    // Misma lista de choferes que la edición del viaje (components/viajes/viaje-datos.tsx)
+    sb.from('usuarios')
+      .select('id, nombre, usuarios_roles!inner(roles!inner(nombre))')
+      .eq('usuarios_roles.roles.nombre', 'chofer')
+      .eq('estado', 'activo')
+      .order('nombre')
+      .then((r: { data: any[] | null }) => setChoferes((r.data || []).map((c: any) => ({ id: c.id, nombre: c.nombre }))))
   }, [])
 
   // Cada vez que se abre arranca limpio (con lo que traiga el que lo abre)
@@ -48,6 +61,8 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
     setPorTransporte(false)
     setDias('1')
     setNombre('')
+    setTitularId('')
+    setAcompananteIds([])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
@@ -71,6 +86,15 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      // Chofer / acompañantes: con el mismo guardado que la edición del viaje
+      if (!porTransporte && (titularId || acompananteIds.length) && data.id) {
+        const r2 = await fetch(`/api/viajes/${data.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chofer_id: titularId || null, acompanante_ids: acompananteIds }),
+        })
+        if (!r2.ok) toast.error('El viaje se programó, pero no se pudo asignar el chofer: cargalo desde el viaje')
+      }
       toast.success('Viaje programado')
       onOpenChange(false)
       onProgramado?.({ id: data.id, fecha })
@@ -120,6 +144,35 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
             <Checkbox checked={porTransporte} onCheckedChange={c => setPorTransporte(Boolean(c))} />
             Sale por transporte tercerizado (sin chofer propio ni rendición)
           </label>
+          {!porTransporte && (
+            <div className="space-y-3 rounded-lg border p-3">
+              <div className="space-y-1.5">
+                <Label>Chofer <span className="font-medium text-neutro-400">opcional</span></Label>
+                <Select value={titularId || 'ninguno'} onValueChange={(v) => { const id = v === 'ninguno' ? '' : v; setTitularId(id); setAcompananteIds(prev => prev.filter(x => x !== id)) }}>
+                  <SelectTrigger><SelectValue placeholder="Sin chofer por ahora" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ninguno">Sin chofer por ahora</SelectItem>
+                    {choferes.map(c => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {choferes.filter(c => c.id !== titularId).length > 0 && (
+                <div className="space-y-1.5">
+                  <Label>Acompañantes <span className="font-medium text-neutro-400">opcional</span></Label>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                    {choferes.filter(c => c.id !== titularId).map(c => (
+                      <label key={c.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                        <Checkbox checked={acompananteIds.includes(c.id)}
+                          onCheckedChange={(v) => setAcompananteIds(prev => (v ? [...prev, c.id] : prev.filter(x => x !== c.id)))} />
+                        {c.nombre}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p className="text-[12px] text-neutro-500">Después se cambia desde la edición del viaje.</p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label>Nombre <span className="font-medium text-neutro-400">opcional</span></Label>
             <Input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Si lo dejás vacío: zonas y fecha" />

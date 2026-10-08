@@ -100,6 +100,8 @@
     "components/finanzas/calendario-pagos.tsx",
     "components/finanzas/form-vencimiento.tsx",
     "components/finanzas/nuevo-gasto-dialog.tsx",
-    "components/finanzas/vencimiento-edit-dialog.tsx"
+    "components/finanzas/vencimiento-edit-dialog.tsx",
+    "components/deposito/urgent-notification.tsx",
+    "app/page.tsx"
   ]
 }
