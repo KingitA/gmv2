@@ -34,7 +34,7 @@ export const SECCIONES: Seccion[] = [
       { label: "Fichas de clientes", href: "/clientes" },
       { label: "Comprobantes emitidos", href: "/comprobantes-venta" },
       { label: "Revisión de devoluciones", href: "/revision-devoluciones" },
-      { label: "Caja (cobranzas y rendiciones)", href: "/caja" },
+      { label: "Cobros", href: "/pagos-clientes" },
       { label: "Viajantes", href: "/viajantes", roles: ["admin"] },
       { label: "Transportes", href: "/transportes" },
     ],

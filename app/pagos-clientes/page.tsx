@@ -3,6 +3,7 @@ import { formatDateAR } from "@/lib/utils"
 
 import { useRef, useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
+import { useUrlParams } from "@/lib/hooks/use-url-state"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -68,7 +69,11 @@ function PagosClientesContent() {
   const idemKeyRef = useRef<string>(crypto.randomUUID())
   const [ocrProcesando, setOcrProcesando] = useState(false)
   const [aplicarContado, setAplicarContado] = useState(false)
-  const [activeTab, setActiveTab] = useState("nuevo")
+  // Pestaña en la URL (?tab=historial): "atrás" vuelve a la misma pestaña
+  const urlTab = useUrlParams()
+  const tabParam = urlTab.get("tab", "nuevo")
+  const activeTab = ["nuevo", "historial", "rendicion"].includes(tabParam) ? tabParam : "nuevo"
+  const setActiveTab = (t: string) => urlTab.set({ tab: t }, "push", { tab: "nuevo" })
 
   // ── Multi-cliente (caso "Tandil"): clientes adicionales en la misma cobranza ──
   const [clientesExtra, setClientesExtra] = useState<Array<{ cliente: Cliente; seleccionados: Record<string, number> }>>([])
@@ -431,6 +436,13 @@ function PagosClientesContent() {
     }
   }
 
+  // Al entrar a una pestaña (click o link con ?tab=), se carga una vez
+  useEffect(() => {
+    if (activeTab === "historial" && !historialCargado && !cargandoHistorial) loadHistorial()
+    if (activeTab === "rendicion" && !viajesCargados && !cargandoViajes) loadViajesRendicion()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
   // Confirmar una rendición completa (todos sus pagos de una) desde el historial
   const confirmarRendicion = async (forzar = false) => {
     if (!rendicionSel || !cajaSel || confirmandoRend) return
@@ -629,19 +641,19 @@ function PagosClientesContent() {
   }
 
   return (
-    <div className="p-6 lg:p-8 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">Pagos de Clientes</h1>
-        <p className="text-sm text-muted-foreground">Registrá cobros, imputá comprobantes y generá recibos</p>
+        <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Cobros</h1>
+        <p className="text-sm text-neutro-500">Cobrale a un cliente en la oficina: el pedido que retira o los anteriores, imputando comprobantes y generando el recibo.</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-6">
-          <TabsTrigger value="nuevo">Nuevo Pago</TabsTrigger>
-          <TabsTrigger value="historial" onClick={() => !historialCargado && loadHistorial()}>
+          <TabsTrigger value="nuevo">Nuevo cobro</TabsTrigger>
+          <TabsTrigger value="historial">
             Historial
           </TabsTrigger>
-          <TabsTrigger value="rendicion" onClick={() => !viajesCargados && loadViajesRendicion()}>
+          <TabsTrigger value="rendicion">
             Rendición de viajes
           </TabsTrigger>
         </TabsList>
@@ -1362,8 +1374,7 @@ function PagosClientesContent() {
                 onClick={() => {
                   setShowSuccess(false)
                   resetForm()
-                  setActiveTab("historial")
-                  if (!historialCargado) loadHistorial()
+                  setActiveTab("historial") // la pestaña carga el historial al abrirse
                 }}
               >
                 Ver Historial

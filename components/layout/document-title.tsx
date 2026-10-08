@@ -31,7 +31,7 @@ const RUTAS: Record<string, string> = {
   "/cuenta-corriente": "Cuenta Corriente",
   "/ordenes-compra": "Órdenes de Compra",
   "/ordenes-pago": "Órdenes de Pago",
-  "/pagos-clientes": "Pagos de Clientes",
+  "/pagos-clientes": "Cobros",
   "/cobranzas": "Cobranzas",
   "/vencimientos": "Vencimientos",
   "/devoluciones": "Devoluciones",
