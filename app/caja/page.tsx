@@ -42,8 +42,10 @@ interface FilaCaja {
   pago_id?: string | null
   rendicion_id?: string | null
   confirmable?: boolean
-  detalles_resumen?: { tipo: string; monto: number; descripcion: string }[]
+  detalles_resumen?: { tipo: string; monto: number; color?: string | null; descripcion: string }[]
   requiere_color?: boolean
+  observaciones?: string | null
+  sin_imputaciones?: boolean
   imputable?: boolean
   imputacion_disponible?: number
 }
@@ -198,7 +200,13 @@ function Fila({
         <span className="block truncate text-[13px] font-bold text-slate-900">{f.quien}</span>
         <span className="block truncate text-[11px] text-slate-500">{f.sub}</span>
       </span>
-      <span className="flex-1 min-w-0 truncate text-[12.5px] text-slate-600">{f.medio}</span>
+      <span
+        className="flex-1 min-w-0 truncate text-[12.5px] text-slate-600"
+        title={f.observaciones ? `${f.medio}\n💬 ${f.observaciones}` : f.medio}
+      >
+        {f.medio}
+        {f.observaciones ? <span className="text-slate-400"> · 💬 {f.observaciones}</span> : null}
+      </span>
       <span className="w-[130px] flex-none text-right text-[13.5px] font-bold">{monto}</span>
       <span className="w-[220px] flex-none text-right">
         <EstadoChip estado={f.estado} fila={f} onAccion={onAccion} />
@@ -291,8 +299,44 @@ export default function CajaDelDiaPage() {
       detalles: f.detalles_resumen ?? [],
       requiere_color: f.requiere_color ?? false,
       accion_texto: f.estado.texto,
+      cliente_id: f.cliente_id ?? null,
+      sin_imputaciones: f.sin_imputaciones ?? false,
+      observaciones: f.observaciones ?? null,
     })
   }, [])
+
+  // Confirmar en lote todos los pendientes confirmables (los cheques a cuenta
+  // sin color quedan afuera: su confirmación exige elegir BLANCO/NEGRO una por una)
+  const [confirmandoLote, setConfirmandoLote] = useState(false)
+  const confirmablesLote = useMemo(() => {
+    const todas = [...(feed?.filas ?? []), ...(feed?.pendientes_anteriores ?? [])]
+    return todas.filter((f) => f.fuente === "pago" && f.confirmable && !f.requiere_color && f.pago_id)
+  }, [feed])
+  const confirmarTodos = async () => {
+    if (!confirmablesLote.length) return
+    if (!window.confirm(`¿Confirmar los ${confirmablesLote.length} pagos pendientes de una sola vez? Se generan sus recibos y asientan en caja.`)) return
+    setConfirmandoLote(true)
+    try {
+      const res = await fetch("/api/pagos/confirmar-lote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pago_ids: confirmablesLote.map((f) => f.pago_id) }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Error confirmando el lote")
+      const nErr = (data.errores || []).length
+      toast({
+        title: `${(data.confirmados || []).length} pagos confirmados`,
+        description: nErr ? `⚠ ${nErr} con error: ${(data.errores || []).join(" · ")}` : "Recibos generados y asentados en caja.",
+        ...(nErr ? { variant: "destructive" as const } : {}),
+      })
+      cargar(fecha)
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: e.message })
+    } finally {
+      setConfirmandoLote(false)
+    }
+  }
 
   const filtrar = useCallback(
     (filas: FilaCaja[]) => {
@@ -473,7 +517,7 @@ export default function CajaDelDiaPage() {
             {filasAnteriores.length > 0 && (
               <div className="mb-4">
                 <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-amber-600">
-                  Pendientes de días anteriores
+                  Pendientes de otras fechas
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {filasAnteriores.map((f) => (
@@ -487,8 +531,19 @@ export default function CajaDelDiaPage() {
               <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
                 {esHoy ? "Hoy" : "Movimientos del día"}
               </span>
-              <span className="text-[11px] text-slate-400">
-                {filasDia.length} movimiento{filasDia.length !== 1 ? "s" : ""}
+              <span className="flex items-center gap-3">
+                {confirmablesLote.length > 1 && (
+                  <button
+                    onClick={confirmarTodos}
+                    disabled={confirmandoLote}
+                    className="rounded-lg bg-green-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {confirmandoLote ? "Confirmando…" : `✓ Confirmar todos los pendientes (${confirmablesLote.length})`}
+                  </button>
+                )}
+                <span className="text-[11px] text-slate-400">
+                  {filasDia.length} movimiento{filasDia.length !== 1 ? "s" : ""}
+                </span>
               </span>
             </div>
             {cargando && !feed ? (
