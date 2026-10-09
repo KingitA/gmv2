@@ -16,6 +16,8 @@ import {
 import { ImportArticulosDialog, articulosFieldLabel, articulosValueFormat } from "@/components/articulos/ImportArticulosDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import { History } from "lucide-react"
+import { toast } from "sonner"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FiltroColumnaMenu, ChipsFiltros, textoChip } from "@/components/search/filtro-columna"
 import { filtroActivo, type Filtros, type FiltroColumna, type OpcionFiltro } from "@/lib/search/facetas"
@@ -31,32 +33,50 @@ interface ReglaPrecioFila { grupo_precio:string; iva_compras:string; iva_ventas:
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 const BASE_COLS = [
-  { id:"desc",   label:"Descripción",  dw:230, mw:120 },
-  { id:"sku",    label:"SKU",          dw:90,  mw:60  },
-  { id:"ean13",  label:"EAN 13",       dw:110, mw:70  },
-  { id:"ubulto", label:"×Bulto",       dw:55,  mw:40  },
-  { id:"prov",   label:"Proveedor",    dw:110, mw:60  },
-  { id:"marca",  label:"Marca",        dw:90,  mw:60  },
-  { id:"cat",    label:"Categoría",    dw:100, mw:60  },
-  { id:"subcat", label:"Subcategoría", dw:100, mw:60  },
-  { id:"oferta",    label:"Oferta",       dw:60,  mw:45  },
-  { id:"segprecio", label:"Seg. Precio",  dw:90,  mw:60  },
+  { id:"desc",   label:"Descripción",  dw:290, mw:140 },
+  { id:"sku",    label:"SKU",          dw:95,  mw:65  },
+  { id:"ean13",  label:"EAN 13",       dw:135, mw:80  },
+  { id:"ubulto", label:"×Bulto",       dw:75,  mw:55  },
+  { id:"prov",   label:"Proveedor",    dw:150, mw:70  },
+  { id:"marca",  label:"Marca",        dw:120, mw:70  },
+  { id:"cat",    label:"Categoría",    dw:140, mw:70  },
+  { id:"subcat", label:"Subcategoría", dw:150, mw:70  },
+  { id:"oferta",    label:"Oferta",       dw:85,  mw:60  },
+  { id:"segprecio", label:"Seg. precio",  dw:110, mw:75  },
 ]
 const COMPRAS_COLS = [
-  { id:"plista",  label:"P. Lista",    dw:90,  mw:60 },
-  { id:"desctos", label:"Desc.",       dw:80,  mw:55 },
-  { id:"marg",    label:"Margen %",    dw:70,  mw:45 },
-  { id:"br",      label:"B/R %",       dw:60,  mw:40 },
-  { id:"ucosto",  label:"Últ. Costo",  dw:90,  mw:60 },
-  { id:"ivac",    label:"IVA C.",      dw:50,  mw:40 },
-  { id:"ivav",    label:"IVA V.",      dw:50,  mw:40 },
+  { id:"plista",  label:"P. lista",    dw:120, mw:80 },
+  { id:"desctos", label:"Desc.",       dw:100, mw:65 },
+  { id:"marg",    label:"Margen %",    dw:95,  mw:60 },
+  { id:"br",      label:"B/R %",       dw:80,  mw:55 },
+  { id:"ucosto",  label:"Últ. costo",  dw:120, mw:80 },
+  { id:"ivac",    label:"IVA C.",      dw:75,  mw:55 },
+  { id:"ivav",    label:"IVA V.",      dw:75,  mw:55 },
 ]
 const VENTAS_COLS = [
-  { id:"pbase",   label:"P. Base",    dw:115, mw:75 },
-  { id:"pbcont",  label:"Contado",    dw:115, mw:75 },
-  { id:"ivac_v",  label:"IVA C.",     dw:50, mw:40 },
-  { id:"ivav_v",  label:"IVA V.",     dw:50, mw:40 },
+  { id:"pbase",   label:"P. base",    dw:140, mw:90 },
+  { id:"pbcont",  label:"Contado",    dw:135, mw:90 },
+  { id:"ivac_v",  label:"IVA C.",     dw:75, mw:55 },
+  { id:"ivav_v",  label:"IVA V.",     dw:75, mw:55 },
 ]
+// Ancho de cada columna de lista de precios (Bahía, Neco, Viajante) si no se ajustó a mano
+const ANCHO_SUBLISTA = 150
+// Lo que cada usuario acomoda (columnas, anchos, listas, modo) queda guardado en su computadora
+const VISTA_KEY = "articulos:vista:v1"
+// "$ 1.234,56" para mostrar; el valor guardado no cambia
+const fmtPrecio=(n:number|null|undefined)=>n==null||!isFinite(n)?"—":"$ "+n.toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2})
+
+// Celda de precio: muestra el número con formato y al tocarla abre la casilla de edición de siempre
+function PrecioEditable({ texto, tono = "", children }: { texto: React.ReactNode; tono?: string; children: React.ReactNode }) {
+  const [editando, setEditando] = useState(false)
+  if (editando) return <div onBlur={() => setEditando(false)}>{children}</div>
+  return (
+    <button type="button" onClick={() => setEditando(true)} onFocus={() => setEditando(true)}
+      className={`block w-full truncate rounded px-1 py-0.5 text-right font-mono text-[13px] font-semibold tabular-nums hover:bg-white/80 hover:ring-1 hover:ring-neutro-200 ${tono}`}>
+      {texto}
+    </button>
+  )
+}
 const SL_ACCENT: Record<string,{dot:string;th:string;border:string;cell:string;name:string;price:string}> = {
   bahia:    { dot:"bg-sky-500",    th:"bg-sky-50 text-sky-800",       border:"border-sky-200",    cell:"bg-sky-50/20",    name:"text-sky-600",    price:"text-sky-700"    },
   neco:     { dot:"bg-violet-500", th:"bg-violet-50 text-violet-800", border:"border-violet-200", cell:"bg-violet-50/20", name:"text-violet-600", price:"text-violet-700" },
@@ -198,6 +218,26 @@ export default function ArticulosPage() {
   const [tiposBulto,setTiposBulto] = useState<string[]>(TIPOS_BULTO_DEFAULT)
   const [tiposFraccion,setTiposFraccion] = useState<string[]>(TIPOS_FRACCION_DEFAULT)
 
+  // ── Vista guardada (columnas ocultas, anchos, listas y modo) ─────────────────
+  const [vistaLista,setVistaLista]=useState(false)
+  useEffect(()=>{
+    try{
+      const v=JSON.parse(localStorage.getItem(VISTA_KEY)||"null")
+      if(v){
+        if(Array.isArray(v.hid)) setHid(new Set(v.hid))
+        if(v.cw&&typeof v.cw==="object") setCw(p=>({...p,...v.cw}))
+        if(v.lcw&&typeof v.lcw==="object") setLcw(v.lcw)
+        if(Array.isArray(v.sub)) setActiveSublistas(v.sub.filter((c:string)=>(SUBLISTA_CODIGOS as readonly string[]).includes(c)))
+        if(v.mode==="compras"||v.mode==="ventas") setMode(v.mode)
+      }
+    }catch{}
+    setVistaLista(true)
+  },[])
+  useEffect(()=>{
+    if(!vistaLista||rc) return // mientras se arrastra un ancho no se guarda en cada movimiento
+    try{ localStorage.setItem(VISTA_KEY,JSON.stringify({hid:[...hid],cw,lcw,sub:activeSublistas,mode})) }catch{}
+  },[vistaLista,rc,hid,cw,lcw,activeSublistas,mode])
+
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(()=>{
     (async()=>{
@@ -306,7 +346,7 @@ export default function ArticulosPage() {
   const gsv=async()=>{
     if(ed.size===0) return; setSav(true); let ok=0
     for(const[id,c] of ed.entries()){const{error}=await sb.from("articulos").update(c).eq("id",id);if(!error)ok++}
-    setSav(false); setEd(new Map()); sucio.current=true; alert(`${ok} artículo(s) actualizados`)
+    setSav(false); setEd(new Map()); sucio.current=true; toast.success(`${ok} artículo(s) actualizados`)
   }
 
   // Descuentos
@@ -339,9 +379,9 @@ export default function ArticulosPage() {
     if(!fa) return; setFs(true)
     const isNew=fa.id==="__new__"
     if(isNew){
-      if(!ff.sku.trim()||!ff.descripcion.trim()){ alert("SKU y Descripción son obligatorios"); setFs(false); return }
+      if(!ff.sku.trim()||!ff.descripcion.trim()){ toast.error("SKU y Descripción son obligatorios"); setFs(false); return }
       const{data:newArt,error}=await sb.from("articulos").insert({...sinVaciosFK(ff),activo:true}).select("id").single()
-      if(error){ alert(`Error: ${error.message}`); setFs(false); return }
+      if(error){ toast.error(`Error: ${error.message}`); setFs(false); return }
       if(newArt?.id) fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:newArt.id})}).catch(()=>{})
       setFa(null); load(true)
     } else {
@@ -353,7 +393,7 @@ export default function ArticulosPage() {
         fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:fa.id})}).catch(()=>{})
         sucio.current=true
         setFa(null)
-      } else alert(`Error: ${error.message}`)
+      } else toast.error(`Error: ${error.message}`)
     }
     setFs(false)
   }
@@ -367,8 +407,8 @@ export default function ArticulosPage() {
       const res=await fetch("/api/articulos/imagen",{method:"POST",body:fd})
       const data=await res.json()
       if(res.ok && data.url){ setFf(p=>({...p,imagen_url:data.url})) }
-      else alert(`Error subiendo imagen: ${data.error||res.statusText}`)
-    }catch(err:any){ alert(`Error subiendo imagen: ${err.message}`) }
+      else toast.error(`Error subiendo imagen: ${data.error||res.statusText}`)
+    }catch(err:any){ toast.error(`Error subiendo imagen: ${err.message}`) }
     finally{ setImgUploading(false); e.target.value="" }
   }
 
@@ -406,12 +446,12 @@ export default function ArticulosPage() {
         "IVA Compras":a=>a.iva_compras||"","IVA Ventas":a=>a.iva_ventas||"","P. Base":a=>a.precio_base||"","P. Contado":a=>a.precio_base_contado||"",
       }
       const cols=expCols.size>0?[...expCols]:ALL_EXPORT_FIELDS
-      if(data.length===0){ alert("No hay artículos para exportar con el filtro actual."); setExporting(false); return }
+      if(data.length===0){ toast.error("No hay artículos para exportar con el filtro actual."); setExporting(false); return }
       const rows=data.map((a:any)=>Object.fromEntries(cols.map(c=>[c,fieldMap[c]?.(a)??""]) ))
       const ws=XLSX.utils.json_to_sheet(rows); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Artículos")
       const wo=XLSX.write(wb,{bookType:"xlsx",type:"array"}); const bl=new Blob([wo],{type:"application/octet-stream"})
       const u=URL.createObjectURL(bl); const lk=document.createElement("a"); lk.href=u; lk.download="articulos.xlsx"; lk.click(); URL.revokeObjectURL(u)
-    } catch(e:any){ alert(`Error: ${e.message}`) }
+    } catch(e:any){ toast.error(`Error: ${e.message}`) }
     setExporting(false)
   }
 
@@ -479,7 +519,7 @@ export default function ArticulosPage() {
     if(bulkFields.has("taxonomia")){
       delete updates.taxonomia
       const r=rubrosData.find((x:any)=>x.id===bulkVals.tax_rubro_id)
-      if(!r){ alert("Elegí un rubro para aplicar la clasificación"); setBulkSaving(false); return }
+      if(!r){ toast.error("Elegí un rubro para aplicar la clasificación"); setBulkSaving(false); return }
       updates.rubro=r.nombre; updates.rubro_id=r.id
       updates.categoria=bulkVals.tax_categoria||""; updates.subcategoria=bulkVals.tax_subcategoria||""
     }
@@ -494,7 +534,7 @@ export default function ArticulosPage() {
     setArts(p=>applyUpdates(p))
     sucio.current=true // lo editado puede haber cambiado de filtro: la próxima carga pide la lista de nuevo
     setBulkSaving(false); setShowBulkEdit(false); setBulkFields(new Set()); setBulkVals({}); clearSel()
-    alert(`${ok} artículo(s) actualizados`)
+    toast.success(`${ok} artículo(s) actualizados`)
   }
 
   const bulkDelete = async () => {
@@ -502,7 +542,7 @@ export default function ArticulosPage() {
     if(!confirm(`¿Dar de baja ${sel.size} artículo(s) seleccionados? Quedarán inactivos y no aparecerán en búsquedas ni pedidos.`)) return
     let ok=0
     for(const id of sel){ const{error}=await sb.from("articulos").update({activo:false}).eq("id",id); if(!error) ok++ }
-    clearSel(); await load(true); alert(`${ok} artículo(s) dado(s) de baja`)
+    clearSel(); await load(true); toast.success(`${ok} artículo(s) dado(s) de baja`)
   }
 
   const toggleBulkField = (f:string, defaultVal:any=null) => {
@@ -517,88 +557,92 @@ export default function ArticulosPage() {
   const visVentas=VENTAS_COLS.filter(c=>isVis(c.id))
   const isVisIvaC=isVis("ivac")&&isVis("ivac_v")
   const isVisIvaV=isVis("ivav")&&isVis("ivav_v")
-  const listRowH=mode==="ventas"&&activeSublistas.length>0?46:34
+  const listRowH=mode==="ventas"&&activeSublistas.length>0?54:42
+  const ANCHO_CHECK=36
+  const anchoTabla=ANCHO_CHECK
+    +visBase.reduce((t,c)=>t+(cw[c.id]??c.dw),0)
+    +(mode==="compras"?visCompras.reduce((t,c)=>t+(cw[c.id]??c.dw),0):0)
+    +(mode==="ventas"?visVentas.reduce((t,c)=>t+(cw[c.id]??c.dw),0)+activeSublistas.reduce((t,c)=>t+(lcw[c]||ANCHO_SUBLISTA),0):0)
+    +(mode==="gestion"?120:0)
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50" style={{userSelect:rc?"none":undefined}}>
+    <div className="flex h-full flex-col bg-neutro-50" style={{userSelect:rc?"none":undefined}}>
 
       {/* ═══ HEADER ═══════════════════════════════════════════════════════════ */}
-      <div className="bg-white border-b px-5 py-3 flex items-center justify-between gap-3 flex-shrink-0 shadow-sm">
+      <div className="bg-white border-b px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
         <div>
-          <h1 className="text-lg font-bold text-slate-800 leading-tight">Artículos</h1>
-          <p className="text-[11px] text-slate-400">{tc.toLocaleString()} artículos · Pág {pg+1}/{tp||1}</p>
+          <h1 className="text-2xl font-bold tracking-tight text-azul-900">Artículos</h1>
+          <p className="text-sm text-neutro-500">{tc.toLocaleString("es-AR")} artículos · página {pg+1} de {tp||1}</p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           {/* Mode tabs */}
-          <div className="flex rounded-xl overflow-hidden border border-slate-200 shadow-sm text-[11px] font-semibold">
-            <button onClick={()=>setMode("compras")} className={`px-3.5 py-2 flex items-center gap-1.5 transition-all ${mode==="compras"?"bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-inner":"bg-white text-slate-500 hover:bg-amber-50 hover:text-amber-700"}`}>
-              <ShoppingCart className="h-3.5 w-3.5"/>Compras
+          <div className="inline-flex rounded-lg bg-neutro-100 p-0.5 text-sm font-semibold" role="tablist" aria-label="Qué precios ver">
+            <button onClick={()=>setMode("compras")} role="tab" aria-selected={mode==="compras"} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${mode==="compras"?"bg-white text-ambar-700 shadow-sm":"text-neutro-500 hover:text-neutro-800"}`}>
+              <ShoppingCart className="h-4 w-4"/>Compras
             </button>
-            <button onClick={()=>setMode("ventas")} className={`px-3.5 py-2 border-x border-slate-200 flex items-center gap-1.5 transition-all ${mode==="ventas"?"bg-gradient-to-br from-indigo-600 to-blue-600 text-white shadow-inner":"bg-white text-slate-500 hover:bg-indigo-50 hover:text-indigo-700"}`}>
-              <TrendingUp className="h-3.5 w-3.5"/>Ventas
+            <button onClick={()=>setMode("ventas")} role="tab" aria-selected={mode==="ventas"} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${mode==="ventas"?"bg-white text-azul-700 shadow-sm":"text-neutro-500 hover:text-neutro-800"}`}>
+              <TrendingUp className="h-4 w-4"/>Ventas
             </button>
-            <button onClick={()=>setMode("gestion")} className={`px-3.5 py-2 flex items-center gap-1.5 transition-all ${mode==="gestion"?"bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-inner":"bg-white text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"}`}>
-              <Package className="h-3.5 w-3.5"/>Gestión
-              <span className="text-[8px] px-1 py-0.5 rounded bg-slate-100 text-slate-400 font-bold leading-none">soon</span>
+            <button disabled title="Próximamente: stock y depósito" className="flex cursor-not-allowed items-center gap-1.5 rounded-md px-3 py-1.5 text-neutro-300">
+              <Package className="h-4 w-4"/>Gestión
             </button>
           </div>
 
-          <div className="w-px h-7 bg-slate-200"/>
+          <div className="hidden h-7 w-px bg-neutro-200 sm:block"/>
 
-          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={openNew}>
-            <Plus className="h-3.5 w-3.5"/>Nuevo
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={openNew}>
+            <Plus className="h-4 w-4"/>Nuevo
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={()=>{setShowImpExp(true);setIeTab("export")}}>
-            <FileDown className="h-3.5 w-3.5"/>Exportar
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={()=>{setShowImpExp(true);setIeTab("export")}}>
+            <FileDown className="h-4 w-4"/>Exportar
           </Button>
-          <Button size="sm" className="h-8 text-xs gap-1.5 bg-indigo-600 hover:bg-indigo-700" onClick={()=>{setShowImpExp(true);setIeTab("import")}}>
-            <FileUp className="h-3.5 w-3.5"/>Importar
+          <Button size="sm" className="h-9 gap-1.5" onClick={()=>{setShowImpExp(true);setIeTab("import")}}>
+            <FileUp className="h-4 w-4"/>Importar
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={()=>setShowHistorial(true)}>
-            <History className="h-3.5 w-3.5"/>Historial
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={()=>setShowHistorial(true)}>
+            <History className="h-4 w-4"/>Historial
           </Button>
           {ed.size>0&&(
-            <Button size="sm" className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={gsv} disabled={sav}>
-              <Save className="h-3.5 w-3.5"/>{sav?"Guardando...":`Guardar (${ed.size})`}
+            <Button size="sm" className="h-9 gap-1.5 bg-exito-600 hover:bg-exito-700" onClick={gsv} disabled={sav}>
+              <Save className="h-4 w-4"/>{sav?"Guardando...":`Guardar cambios (${ed.size})`}
             </Button>
           )}
         </div>
       </div>
 
       {/* ═══ FILTER BAR ════════════════════════════════════════════════════════ */}
-      <div className="bg-white border-b px-5 py-2.5 flex gap-3 items-center flex-wrap flex-shrink-0">
+      <div className="bg-white border-b px-4 py-2.5 sm:px-6 flex gap-3 items-center flex-wrap flex-shrink-0">
         {/* Proveedor */}
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Proveedor</span>
+          <span className="text-[13px] font-semibold text-neutro-600">Proveedor</span>
           <EntitySearchSelect
             entity="proveedores"
-            compact
-            className="w-[180px]"
+            className="w-[220px]"
             placeholder="Todos..."
             value={pf !== "todos" ? ((provs.find((p: any) => p.id === pf) as any) ?? null) : null}
             onSelect={(p: any) => { setPf(p ? p.id : "todos"); setPg(0) }}
           />
         </div>
         {/* Search */}
-        <div className="relative min-w-[200px] flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"/>
-          <Input value={st} onChange={e=>setSt(e.target.value)} placeholder="Descripción, SKU, EAN..." className="pl-8 h-7 text-xs bg-slate-50"/>
+        <div className="relative min-w-[220px] flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutro-400"/>
+          <Input value={st} onChange={e=>setSt(e.target.value)} placeholder="Descripción, SKU, EAN..." className="pl-9"/>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
           {/* Listas panel (Ventas only) */}
           {mode==="ventas"&&(
             <div className="relative" ref={listaRef}>
-              <button onClick={()=>setShowListaPanel(p=>!p)} className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-lg border text-[11px] font-semibold transition-all ${showListaPanel?"bg-indigo-600 text-white border-indigo-600":"bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-700"}`}>
+              <button onClick={()=>setShowListaPanel(p=>!p)} className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[13px] font-semibold transition-all ${showListaPanel?"bg-indigo-600 text-white border-indigo-600":"bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-700"}`}>
                 <TrendingUp className="h-3 w-3"/>Listas
-                {activeSublistas.length>0&&<span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold leading-none ${showListaPanel?"bg-white/20 text-white":"bg-indigo-100 text-indigo-700"}`}>{activeSublistas.length}</span>}
+                {activeSublistas.length>0&&<span className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none ${showListaPanel?"bg-white/20 text-white":"bg-indigo-100 text-indigo-700"}`}>{activeSublistas.length}</span>}
                 <ChevronDown className={`h-3 w-3 transition-transform ${showListaPanel?"rotate-180":""}`}/>
               </button>
               {showListaPanel&&(
                 <div className="absolute right-0 top-full mt-1.5 z-50 bg-white border border-slate-200 rounded-2xl shadow-2xl w-56 py-3 overflow-hidden">
                   <div className="px-3 pb-2 mb-1 border-b border-slate-100 flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Columnas de precios</span>
+                    <span className="text-xs font-semibold text-neutro-500">Columnas de precios</span>
                     {activeSublistas.length>0&&<button onClick={()=>setActiveSublistas([])} className="text-[10px] text-red-500 font-semibold hover:text-red-700">Limpiar</button>}
                   </div>
                   {(["bahia","neco","viajante"] as const).map(grupo=>{
@@ -608,7 +652,7 @@ export default function ArticulosPage() {
                       <div key={grupo} className="mb-2 last:mb-0">
                         <div className="flex items-center gap-1.5 px-3 py-1.5">
                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${ac.dot}`}/>
-                          <span className={`text-[11px] font-bold uppercase tracking-wide ${ac.name}`}>{grupo==="bahia"?"Bahía":grupo==="neco"?"Neco":"Viajante"}</span>
+                          <span className={`text-xs font-bold ${ac.name}`}>{grupo==="bahia"?"Bahía":grupo==="neco"?"Neco":"Viajante"}</span>
                         </div>
                         {codigos.map(c=>{
                           const on=activeSublistas.includes(c)
@@ -631,15 +675,15 @@ export default function ArticulosPage() {
 
           {/* Column visibility */}
           <div className="relative" ref={colRef}>
-            <button onClick={()=>setShowColPanel(p=>!p)} className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-lg border text-[11px] font-semibold transition-all ${showColPanel?"bg-slate-800 text-white border-slate-800":"bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}>
+            <button onClick={()=>setShowColPanel(p=>!p)} className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[13px] font-semibold transition-all ${showColPanel?"bg-slate-800 text-white border-slate-800":"bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}>
               <SlidersHorizontal className="h-3 w-3"/>Columnas
-              {hid.size>0&&<span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold leading-none ${showColPanel?"bg-white/20 text-white":"bg-orange-100 text-orange-700"}`}>{hid.size}</span>}
+              {hid.size>0&&<span className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none ${showColPanel?"bg-white/20 text-white":"bg-orange-100 text-orange-700"}`}>{hid.size}</span>}
               <ChevronDown className={`h-3 w-3 transition-transform ${showColPanel?"rotate-180":""}`}/>
             </button>
             {showColPanel&&(
               <div className="absolute right-0 top-full mt-1.5 z-50 bg-white border border-slate-200 rounded-2xl shadow-2xl w-52 py-2">
                 <div className="px-3 pb-1.5 mb-1 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Columnas base</span>
+                  <span className="text-xs font-semibold text-neutro-500">Columnas base</span>
                   {hid.size>0&&<button onClick={()=>setHid(new Set())} className="text-[10px] text-indigo-600 font-semibold hover:text-indigo-800">Mostrar todas</button>}
                 </div>
                 {BASE_COLS.map(c=>(
@@ -651,7 +695,7 @@ export default function ArticulosPage() {
                   </button>
                 ))}
                 <div className="px-3 pt-2 pb-1 mt-0.5 border-t border-slate-100">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">IVA / Seg. Precio</span>
+                  <span className="text-xs font-semibold text-neutro-500">IVA / Seg. Precio</span>
                 </div>
                 {[
                   {vis:isVisIvaC, label:"IVA Compras", fn:()=>setHid(p=>{const n=new Set(p);isVisIvaC?(n.add("ivac"),n.add("ivac_v")):(n.delete("ivac"),n.delete("ivac_v"));return n})},
@@ -673,14 +717,14 @@ export default function ArticulosPage() {
 
       {/* ═══ FILTROS ACTIVOS ═══════════════════════════════════════════════════ */}
       {chips.length>0&&(
-        <div className="bg-white border-b px-5 py-1.5 flex-shrink-0">
+        <div className="bg-white border-b px-4 py-1.5 sm:px-6 flex-shrink-0">
           <ChipsFiltros chips={chips} onQuitar={k=>setFiltro(k,null)} onLimpiar={()=>{setFiltros({});setPg(0)}}/>
         </div>
       )}
 
       {/* ═══ BULK ACTION BAR ═══════════════════════════════════════════════════ */}
       {sel.size>0&&(
-        <div className="bg-indigo-600 text-white px-5 py-2 flex items-center gap-3 flex-shrink-0 shadow-sm">
+        <div className="bg-azul-700 text-white px-4 py-2 sm:px-6 flex items-center gap-3 flex-shrink-0">
           <span className="text-sm font-semibold">{sel.size} artículo{sel.size>1?"s":""} seleccionado{sel.size>1?"s":""}</span>
           <div className="flex-1"/>
           <Button size="sm" variant="ghost" className="h-7 text-xs text-white hover:bg-white/20 gap-1.5" onClick={()=>setShowBulkEdit(true)}>
@@ -698,12 +742,12 @@ export default function ArticulosPage() {
       {/* ═══ TABLE ════════════════════════════════════════════════════════════ */}
       <div className="flex-1 overflow-hidden">
         <div className="h-full overflow-auto">
-          <table className="w-full text-xs border-collapse">
+          <table className="text-[13px] border-collapse" style={{tableLayout:"fixed",width:anchoTabla,minWidth:"100%"}}>
             {/* ── THEAD ── */}
             <thead className="sticky top-0 z-20">
-              <tr style={{height:32}}>
+              <tr style={{height:38}}>
                 {/* Checkbox col */}
-                <th className="sticky left-0 z-30 w-9 px-2 bg-slate-100 border-r border-slate-200">
+                <th className="sticky left-0 z-30 px-2 bg-neutro-100 border-r border-neutro-200" style={{width:ANCHO_CHECK}}>
                   <input type="checkbox" className="w-3.5 h-3.5 rounded cursor-pointer accent-indigo-600"
                     checked={allPageSelected} ref={el=>{if(el)el.indeterminate=somePageSelected&&!allPageSelected}}
                     onChange={toggleSelAll}/>
@@ -711,7 +755,7 @@ export default function ArticulosPage() {
                 {/* Base col headers */}
                 {visBase.map((c,i)=>(
                   <th key={c.id}
-                    className={`relative px-2 py-1.5 font-semibold text-[10px] uppercase tracking-wider border-r border-slate-200 select-none whitespace-nowrap ${i===0?"sticky left-0 z-30 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]":""} ${sortCol===c.id?"bg-indigo-50 text-indigo-700":"bg-slate-100 text-slate-500"}`}
+                    className={`relative px-2 py-1.5 font-semibold text-xs border-r border-slate-200 select-none whitespace-nowrap ${i===0?"sticky left-9 z-30 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]":""} ${sortCol===c.id?"bg-indigo-50 text-indigo-700":"bg-slate-100 text-slate-500"}`}
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)} title="Doble click para ocultar"
                   >
@@ -727,7 +771,7 @@ export default function ArticulosPage() {
                 {/* Compras col headers */}
                 {mode==="compras"&&visCompras.map(c=>(
                   <th key={c.id}
-                    className={`relative px-2 py-1.5 text-right font-semibold text-[10px] uppercase tracking-wider text-amber-700 bg-amber-50 border-r border-amber-100 select-none whitespace-nowrap ${sortCol===c.id?"!bg-amber-100":""}`}
+                    className={`relative px-2 py-1.5 text-right font-semibold text-xs text-amber-700 bg-amber-50 border-r border-amber-100 select-none whitespace-nowrap ${sortCol===c.id?"!bg-amber-100":""}`}
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)}
                   >
@@ -743,7 +787,7 @@ export default function ArticulosPage() {
                 {/* Ventas fixed col headers */}
                 {mode==="ventas"&&visVentas.map(c=>(
                   <th key={c.id}
-                    className={`relative px-2 py-1.5 text-right font-semibold text-[10px] uppercase tracking-wider text-indigo-700 bg-indigo-50 border-r border-indigo-100 select-none whitespace-nowrap ${c.id==="pbcont"?"border-r-2 border-indigo-200":""} ${sortCol===c.id?"!bg-indigo-100":""}`}
+                    className={`relative px-2 py-1.5 text-right font-semibold text-xs text-indigo-700 bg-indigo-50 border-r border-indigo-100 select-none whitespace-nowrap ${c.id==="pbcont"?"border-r-2 border-indigo-200":""} ${sortCol===c.id?"!bg-indigo-100":""}`}
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)}
                   >
@@ -764,15 +808,15 @@ export default function ArticulosPage() {
                   return(
                     <th key={codigo}
                       className={`relative px-2 py-1 border-l-2 ${ac.border} ${ac.th} cursor-grab select-none ${dli===i?"opacity-40":""}`}
-                      style={{width:lcw[codigo]||120,minWidth:80}}
+                      style={{width:lcw[codigo]||ANCHO_SUBLISTA,minWidth:90}}
                       draggable onDragStart={()=>dds(i)} onDragOver={e=>ddo(e,i)} onDragEnd={()=>setDli(null)}
                     >
                       <div className="flex items-center justify-between gap-1">
                         <div className="flex items-center gap-1.5">
                           <GripVertical className="h-3 w-3 opacity-40"/>
                           <div>
-                            <div className={`text-[9px] font-bold uppercase tracking-wider ${ac.name}`}>{grupoLabel}</div>
-                            <div className="text-[10px] font-semibold">{meta.label}</div>
+                            <div className={`text-[11px] font-bold ${ac.name}`}>{grupoLabel}</div>
+                            <div className="text-xs font-semibold">{meta.label}</div>
                           </div>
                         </div>
                         <button onClick={()=>tglSublista(codigo)} className="opacity-30 hover:opacity-100 hover:text-red-500 transition-all leading-none text-base">×</button>
@@ -783,7 +827,7 @@ export default function ArticulosPage() {
                 })}
                 {/* Gestión placeholder */}
                 {mode==="gestion"&&(
-                  <th className="px-3 py-1.5 text-center font-semibold text-[10px] uppercase tracking-wider text-emerald-700 bg-emerald-50 border-r border-emerald-100">
+                  <th className="px-3 py-1.5 text-center font-semibold text-xs text-emerald-700 bg-emerald-50 border-r border-emerald-100" style={{width:120}}>
                     Stock
                   </th>
                 )}
@@ -793,99 +837,105 @@ export default function ArticulosPage() {
             {/* ── TBODY ── */}
             <tbody>
               {ld?(
-                <tr><td colSpan={99} className="py-20 text-center">
-                  <div className="inline-flex items-center gap-2 text-slate-400 text-sm">
-                    <div className="w-4 h-4 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"/>Cargando artículos...
-                  </div>
+                <tr><td colSpan={99} className="py-16">
+                  <div className="sticky left-0 mx-auto w-full max-w-md"><CargaProgreso compacto mensajes={MENSAJES.articulos} className="px-6"/></div>
                 </td></tr>
               ):arts.length===0?(
-                <tr><td colSpan={99} className="py-20 text-center text-slate-400 text-sm">Sin artículos</td></tr>
+                <tr><td colSpan={99} className="py-16 text-center text-neutro-400 text-sm normal-case">No hay artículos con esa búsqueda o filtros</td></tr>
               ):arts.map((a,idx)=>{
                 const ds=dm[a.id]||[]; const dt=articuloToDatosArticulo(a,ds); const bs=calcularPrecioBase(dt); const rs=resumirDescuentos(ds)
                 const ie=ed.has(a.id)
-                const stripe=idx%2===0?"bg-white":"bg-slate-50/70"
-                const rowCls=`border-b border-slate-100 hover:bg-indigo-50/20 transition-colors ${ie?"!bg-amber-50":stripe}`
+                const stripe=idx%2===0?"bg-white":"bg-neutro-50/70"
+                const rowCls=`border-b border-neutro-100 hover:bg-azul-50/30 transition-colors ${ie?"!bg-ambar-50":stripe}`
                 const stickyBg=ie?"#fffbeb":idx%2===0?"#ffffff":"#f8fafc"
                 return(
                   <tr key={a.id} className={rowCls} style={{height:listRowH}}>
                     {/* ── Checkbox ── */}
-                    <td className="sticky left-0 z-10 w-9 px-2 border-r border-slate-100" style={{background:stickyBg}}>
+                    <td className="sticky left-0 z-10 px-2 border-r border-neutro-100" style={{width:ANCHO_CHECK,background:stickyBg}}>
                       <input type="checkbox" className="w-3.5 h-3.5 rounded cursor-pointer accent-indigo-600"
                         checked={sel.has(a.id)} onChange={()=>toggleSel(a.id)}/>
                     </td>
                     {/* ── Base cells ── */}
                     {isVis("desc")&&(
-                      <td className="px-2.5 py-0 sticky left-0 z-10 border-r border-slate-100 overflow-hidden" style={{width:cw.desc,maxWidth:cw.desc,background:stickyBg}}>
+                      <td className="px-2.5 py-0 sticky left-9 z-10 border-r border-neutro-100 overflow-hidden shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]" style={{width:cw.desc,maxWidth:cw.desc,background:stickyBg}}>
                         <button onClick={()=>ofa(a)} className="text-left block w-full overflow-hidden group">
-                          <div className="font-semibold text-[11px] leading-tight truncate text-slate-800 group-hover:text-indigo-600 transition-colors">{a.descripcion}</div>
-                          <div className="text-[10px] text-slate-400 font-mono truncate leading-tight">{a.sku}</div>
+                          <div className="font-semibold text-[13px] leading-tight truncate text-azul-900 group-hover:text-azul-600 transition-colors" title={a.descripcion}>{a.descripcion}</div>
+                          {!isVis("sku")&&<div className="text-xs text-neutro-400 font-mono truncate leading-tight">{a.sku}</div>}
                         </button>
                       </td>
                     )}
-                    {isVis("sku")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-[11px] text-slate-500 overflow-hidden" style={{width:cw.sku,maxWidth:cw.sku}}>{a.sku}</td>}
-                    {isVis("ean13")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-[10px] text-slate-400 text-center overflow-hidden" style={{width:cw.ean13,maxWidth:cw.ean13}}>{a.ean13?.join(', ')||"—"}</td>}
-                    {isVis("ubulto")&&<td className="px-2 py-0 border-r border-slate-100 text-center text-[11px] font-bold text-slate-600" style={{width:cw.ubulto,maxWidth:cw.ubulto}}>{a.unidades_por_bulto||"—"}</td>}
-                    {isVis("prov")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.prov,maxWidth:cw.prov}}><span className="text-[10px] text-slate-500 truncate block">{a.proveedor?.nombre||"—"}</span></td>}
-                    {isVis("marca")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.marca,maxWidth:cw.marca}}><span className="text-[10px] text-slate-500 truncate block">{a.marca?.descripcion||"—"}</span></td>}
-                    {isVis("cat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.cat,maxWidth:cw.cat}}><span className="text-[10px] text-slate-500 truncate block">{a.categoria||"—"}</span></td>}
-                    {isVis("subcat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.subcat,maxWidth:cw.subcat}}><span className="text-[10px] text-slate-500 truncate block">{a.subcategoria||"—"}</span></td>}
-                    {isVis("oferta")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.oferta,maxWidth:cw.oferta}}>{a.descuento_propio>0?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700">{a.descuento_propio}%</span>:<span className="text-[10px] text-slate-300">—</span>}</td>}
+                    {isVis("sku")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-[13px] text-neutro-600 overflow-hidden truncate" style={{width:cw.sku,maxWidth:cw.sku}}>{a.sku}</td>}
+                    {isVis("ean13")&&<td className="px-2 py-0 border-r border-slate-100 font-mono text-xs text-neutro-500 text-center overflow-hidden truncate" style={{width:cw.ean13,maxWidth:cw.ean13}}>{a.ean13?.join(', ')||"—"}</td>}
+                    {isVis("ubulto")&&<td className="px-2 py-0 border-r border-slate-100 text-center text-[13px] font-bold text-neutro-700" style={{width:cw.ubulto,maxWidth:cw.ubulto}}>{a.unidades_por_bulto||"—"}</td>}
+                    {isVis("prov")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.prov,maxWidth:cw.prov}}><span className="text-[13px] text-neutro-600 truncate block" title={a.proveedor?.nombre||undefined}>{a.proveedor?.nombre||"—"}</span></td>}
+                    {isVis("marca")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.marca,maxWidth:cw.marca}}><span className="text-[13px] text-neutro-600 truncate block" title={a.marca?.descripcion||undefined}>{a.marca?.descripcion||"—"}</span></td>}
+                    {isVis("cat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.cat,maxWidth:cw.cat}}><span className="text-[13px] text-neutro-600 truncate block" title={a.categoria||undefined}>{a.categoria||"—"}</span></td>}
+                    {isVis("subcat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.subcat,maxWidth:cw.subcat}}><span className="text-[13px] text-neutro-600 truncate block" title={a.subcategoria||undefined}>{a.subcategoria||"—"}</span></td>}
+                    {isVis("oferta")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.oferta,maxWidth:cw.oferta}}>{a.descuento_propio>0?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-alerta-50 text-alerta-600">{a.descuento_propio}%</span>:<span className="text-xs text-neutro-300">—</span>}</td>}
                     {isVis("segprecio")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.segprecio,maxWidth:cw.segprecio}}>
                       {a.segmento_precio==="limpieza_bazar"
-                        ?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">L/B</span>
+                        ?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-ambar-100 text-ambar-700">L/B</span>
                         :a.segmento_precio==="perfumeria"
-                        ?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-pink-100 text-pink-700">Perf</span>
-                        :<span className="text-[10px] text-slate-300">auto</span>}
+                        ?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-pink-100 text-pink-700">Perf</span>
+                        :<span className="inline-flex items-center rounded border border-dashed border-neutro-300 px-1.5 py-0.5 text-xs font-medium normal-case text-neutro-500" title="Se define solo, según la categoría">Auto</span>}
                     </td>}
 
                     {/* ── Compras cells ── */}
                     {mode==="compras"&&<>
-                      {isVis("plista")&&<td className="px-1 py-0 border-r border-amber-100 bg-amber-50/30" style={{width:cw.plista,maxWidth:cw.plista}}>
-                        <input type="number" step="0.01" className="w-full text-right text-[11px] font-mono text-amber-900 bg-transparent border-b border-transparent hover:border-amber-300 focus:border-amber-500 focus:outline-none py-0.5" value={a.precio_compra||""} onChange={e=>edt(a.id,"precio_compra",parseFloat(e.target.value)||0)}/>
+                      {isVis("plista")&&<td className="px-1 py-0 border-r border-amber-100 bg-amber-50/30 overflow-hidden" style={{width:cw.plista,maxWidth:cw.plista}}>
+                        <PrecioEditable texto={a.precio_compra?fmtPrecio(a.precio_compra):"—"} tono="text-amber-900">
+                          <input autoFocus type="number" step="0.01" className="w-full text-right text-[13px] font-mono text-amber-900 bg-white border-b border-amber-500 focus:outline-none py-0.5" value={a.precio_compra||""} onChange={e=>edt(a.id,"precio_compra",parseFloat(e.target.value)||0)}/>
+                        </PrecioEditable>
                       </td>}
                       {isVis("desctos")&&<td className="px-1 py-0 text-center border-r border-amber-100 bg-amber-50/30" style={{width:cw.desctos,maxWidth:cw.desctos}}>
                         <button onClick={()=>odm(a)} className="inline-flex flex-wrap gap-px px-1 py-0.5 rounded hover:bg-amber-100 transition-colors min-w-full justify-center">
-                          {ds.length===0?<span className="text-[10px] text-slate-300">+</span>:<>
-                            {rs.totalComercial>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-blue-100 text-blue-700">{rs.totalComercial}%</span>}
-                            {rs.totalFinanciero>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-emerald-100 text-emerald-700">{rs.totalFinanciero}%</span>}
-                            {rs.totalPromocional>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-purple-100 text-purple-700">{rs.totalPromocional}%</span>}
+                          {ds.length===0?<span className="text-xs text-neutro-300">+</span>:<>
+                            {rs.totalComercial>0&&<span className="inline-flex items-center px-1 h-[18px] rounded text-[10px] font-bold bg-blue-100 text-blue-700">{rs.totalComercial}%</span>}
+                            {rs.totalFinanciero>0&&<span className="inline-flex items-center px-1 h-[18px] rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">{rs.totalFinanciero}%</span>}
+                            {rs.totalPromocional>0&&<span className="inline-flex items-center px-1 h-[18px] rounded text-[10px] font-bold bg-purple-100 text-purple-700">{rs.totalPromocional}%</span>}
                           </>}
                         </button>
                       </td>}
                       {isVis("marg")&&<td className="px-1 py-0 border-r border-amber-100 bg-amber-50/30" style={{width:cw.marg,maxWidth:cw.marg}}>
-                        <input type="number" step="0.1" className="w-full text-center text-[11px] font-bold text-emerald-700 bg-transparent border-b border-transparent hover:border-emerald-300 focus:border-emerald-500 focus:outline-none py-0.5" value={a.porcentaje_ganancia||""} placeholder="—" onChange={e=>edt(a.id,"porcentaje_ganancia",parseFloat(e.target.value)||0)}/>
+                        <input type="number" step="0.1" className="w-full text-center text-[13px] font-bold text-emerald-700 bg-transparent border-b border-transparent hover:border-emerald-300 focus:border-emerald-500 focus:outline-none py-0.5" value={a.porcentaje_ganancia||""} placeholder="—" onChange={e=>edt(a.id,"porcentaje_ganancia",parseFloat(e.target.value)||0)}/>
                       </td>}
                       {isVis("br")&&<td className="px-1 py-0 border-r border-amber-100 bg-amber-50/30" style={{width:cw.br,maxWidth:cw.br}}>
                         <input type="number" step="0.1" className={`w-full text-center text-[11px] font-bold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 ${(a.bonif_recargo||0)<0?"text-red-600":(a.bonif_recargo||0)>0?"text-amber-600":"text-slate-300"}`} value={a.bonif_recargo||""} placeholder="—" onChange={e=>edt(a.id,"bonif_recargo",parseFloat(e.target.value)||0)}/>
                       </td>}
                       {isVis("ucosto")&&<td className="px-2 py-0 text-right border-r border-amber-100 bg-amber-50/30" style={{width:cw.ucosto,maxWidth:cw.ucosto}}>
-                        <span className="text-[11px] font-bold font-mono text-amber-800">{fmt(bs.costoNeto)}</span>
+                        <span className="text-[13px] font-bold font-mono text-amber-800">{fmt(bs.costoNeto)}</span>
                       </td>}
                       {isVis("ivac")&&<td className="px-1 py-0 text-center border-r border-amber-100 bg-amber-50/30" style={{width:cw.ivac,maxWidth:cw.ivac}}>
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-bold ${ccC(a.iva_compras||"factura")}`}>{icC(a.iva_compras||"factura")}</span>
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-xs font-bold ${ccC(a.iva_compras||"factura")}`}>{icC(a.iva_compras||"factura")}</span>
                       </td>}
                       {isVis("ivav")&&<td className="px-1 py-0 text-center border-r border-amber-100 bg-amber-50/30" style={{width:cw.ivav,maxWidth:cw.ivav}}>
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-bold ${ccV(a.iva_ventas||"factura")}`}>{icV(a.iva_ventas||"factura")}</span>
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-xs font-bold ${ccV(a.iva_ventas||"factura")}`}>{icV(a.iva_ventas||"factura")}</span>
                       </td>}
                     </>}
 
                     {/* ── Ventas fixed cells ── */}
                     {mode==="ventas"&&<>
-                      {isVis("pbase")&&<td className="px-1 py-0 border-r border-indigo-100 bg-indigo-50/20" style={{width:cw.pbase,maxWidth:cw.pbase}}>
-                        <div className="flex items-center gap-0.5">
-                          <input type="number" step="0.01" className={`flex-1 text-right text-[11px] font-mono font-bold bg-transparent border-b border-transparent hover:border-indigo-300 focus:border-indigo-500 focus:outline-none py-0.5 ${a.precio_base!=null?"text-indigo-700":"text-slate-400"}`} value={a.precio_base!=null?a.precio_base:""} placeholder={fmt(bs.precioBase)} onChange={e=>{const v=e.target.value;edt(a.id,"precio_base",v===""?null:parseFloat(v)||0);edt(a.id,"precio_base_contado",v===""?null:Math.round((parseFloat(v)||0)*0.9*100)/100)}}/>
-                          {a.precio_base!=null&&<button className="text-[9px] text-slate-300 hover:text-red-500 flex-shrink-0 leading-none" onClick={()=>{edt(a.id,"precio_base",null);edt(a.id,"precio_base_contado",null)}}>×</button>}
+                      {isVis("pbase")&&<td className="px-1 py-0 border-r border-indigo-100 bg-indigo-50/20 overflow-hidden" style={{width:cw.pbase,maxWidth:cw.pbase}}>
+                        <div className="flex min-w-0 items-center gap-0.5">
+                          <div className="min-w-0 flex-1">
+                            <PrecioEditable texto={a.precio_base!=null?fmtPrecio(a.precio_base):(bs.precioBase>0?fmtPrecio(bs.precioBase):"—")} tono={a.precio_base!=null?"text-indigo-700":"text-neutro-400"}>
+                              <input autoFocus type="number" step="0.01" className={`w-full min-w-0 text-right text-[13px] font-mono font-bold bg-white border-b border-indigo-500 focus:outline-none py-0.5 ${a.precio_base!=null?"text-indigo-700":"text-slate-400"}`} value={a.precio_base!=null?a.precio_base:""} placeholder={fmt(bs.precioBase)} onChange={e=>{const v=e.target.value;edt(a.id,"precio_base",v===""?null:parseFloat(v)||0);edt(a.id,"precio_base_contado",v===""?null:Math.round((parseFloat(v)||0)*0.9*100)/100)}}/>
+                            </PrecioEditable>
+                          </div>
+                          {a.precio_base!=null&&<button className="text-xs text-neutro-300 hover:text-red-500 flex-shrink-0 leading-none" title="Volver al precio calculado" onClick={()=>{edt(a.id,"precio_base",null);edt(a.id,"precio_base_contado",null)}}>×</button>}
                         </div>
-                        {a.precio_base==null&&<div className="text-[8px] text-slate-300 text-right leading-none">calc.</div>}
+                        {a.precio_base==null&&<div className="text-[10px] text-neutro-400 text-right leading-none normal-case">calculado</div>}
                       </td>}
-                      {isVis("pbcont")&&<td className="px-1 py-0 border-r-2 border-indigo-200 bg-indigo-50/20" style={{width:cw.pbcont,maxWidth:cw.pbcont}}>
-                        <input type="number" step="0.01" className="w-full text-right text-[11px] font-mono font-bold text-amber-600 bg-transparent border-b border-transparent hover:border-amber-300 focus:border-amber-500 focus:outline-none py-0.5" value={a.precio_base_contado!=null?a.precio_base_contado:""} placeholder={a.precio_base!=null?fmt(Math.round(a.precio_base*0.9*100)/100):"—"} onChange={e=>edt(a.id,"precio_base_contado",parseFloat(e.target.value)||0)}/>
+                      {isVis("pbcont")&&<td className="px-1 py-0 border-r-2 border-indigo-200 bg-indigo-50/20 overflow-hidden" style={{width:cw.pbcont,maxWidth:cw.pbcont}}>
+                        <PrecioEditable texto={a.precio_base_contado!=null?fmtPrecio(a.precio_base_contado):(a.precio_base!=null?fmtPrecio(Math.round(a.precio_base*0.9*100)/100):"—")} tono={a.precio_base_contado!=null?"text-amber-600":"text-neutro-400"}>
+                          <input autoFocus type="number" step="0.01" className="w-full text-right text-[13px] font-mono font-bold text-amber-600 bg-white border-b border-amber-500 focus:outline-none py-0.5" value={a.precio_base_contado!=null?a.precio_base_contado:""} placeholder={a.precio_base!=null?fmt(Math.round(a.precio_base*0.9*100)/100):"—"} onChange={e=>edt(a.id,"precio_base_contado",parseFloat(e.target.value)||0)}/>
+                        </PrecioEditable>
                       </td>}
                       {isVis("ivac_v")&&<td className="px-1 py-0 text-center border-r border-indigo-100 bg-indigo-50/20" style={{width:cw.ivac_v,maxWidth:cw.ivac_v}}>
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-bold ${ccC(a.iva_compras||"factura")}`}>{icC(a.iva_compras||"factura")}</span>
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-xs font-bold ${ccC(a.iva_compras||"factura")}`}>{icC(a.iva_compras||"factura")}</span>
                       </td>}
                       {isVis("ivav_v")&&<td className="px-1 py-0 text-center border-r border-indigo-100 bg-indigo-50/20" style={{width:cw.ivav_v,maxWidth:cw.ivav_v}}>
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-bold ${ccV(a.iva_ventas||"factura")}`}>{icV(a.iva_ventas||"factura")}</span>
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-xs font-bold ${ccV(a.iva_ventas||"factura")}`}>{icV(a.iva_ventas||"factura")}</span>
                       </td>}
                       {/* Sublista price cells */}
                       {activeSublistas.map(codigo=>{
@@ -914,17 +964,17 @@ export default function ArticulosPage() {
                         }
                         const precioContado=precio!=null?Math.round(precio*0.9*100)/100:null
                         return(
-                          <td key={codigo} className={`px-2.5 py-0 border-l-2 ${ac.border} ${ac.cell}`} style={{width:lcw[codigo]||120,maxWidth:lcw[codigo]||120}}>
+                          <td key={codigo} className={`px-2.5 py-0 border-l-2 ${ac.border} ${ac.cell}`} style={{width:lcw[codigo]||ANCHO_SUBLISTA,maxWidth:lcw[codigo]||ANCHO_SUBLISTA}}>
                             <div className="flex flex-col items-end gap-0.5 py-0.5">
                               <div className="flex items-baseline gap-1">
-                                <span className="text-[8px] font-medium text-slate-400 leading-none">cte</span>
-                                <span className={`text-[11px] font-bold font-mono leading-none ${ac.price}`}>{precio!=null?fmt(precio):"—"}</span>
+                                <span className="text-[10px] font-medium text-neutro-400 leading-none">cte</span>
+                                <span className={`text-xs font-semibold font-mono leading-none ${ac.price}`}>{precio!=null?fmt(precio):"—"}</span>
                               </div>
                               <div className="flex items-baseline gap-1">
-                                <span className={`text-[8px] font-bold leading-none ${ac.name}`}>ctdo</span>
-                                <span className={`text-[12px] font-bold font-mono leading-none ${ac.price}`}>{precioContado!=null?fmt(precioContado):"—"}</span>
+                                <span className={`text-[10px] font-bold leading-none ${ac.name}`}>ctdo</span>
+                                <span className={`text-[13px] font-bold font-mono leading-none ${ac.price}`}>{precioContado!=null?fmt(precioContado):"—"}</span>
                               </div>
-                              {isLegacy&&<span className="text-[8px] text-slate-300 leading-none">legacy</span>}
+                              {isLegacy&&<span className="text-[10px] text-neutro-300 leading-none">legacy</span>}
                             </div>
                           </td>
                         )
@@ -947,12 +997,12 @@ export default function ArticulosPage() {
 
       {/* ═══ PAGINATION ════════════════════════════════════════════════════════ */}
       {tp>1&&(
-        <div className="flex items-center justify-between px-5 py-2 border-t bg-white flex-shrink-0 shadow-[0_-1px_3px_rgba(0,0,0,0.04)]">
-          <span className="text-[11px] text-slate-400">{pg*PS+1}–{Math.min((pg+1)*PS,tc)} de {tc.toLocaleString()} artículos</span>
+        <div className="flex items-center justify-between px-4 py-2 sm:px-6 border-t bg-white flex-shrink-0">
+          <span className="text-[13px] text-neutro-500">{pg*PS+1}–{Math.min((pg+1)*PS,tc)} de {tc.toLocaleString()} artículos</span>
           <div className="flex gap-1">
-            <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={pg===0} onClick={()=>setPg(p=>p-1)}><ChevronLeft className="h-3 w-3"/></Button>
-            {Array.from({length:Math.min(tp,7)},(_,i)=>{ let pn=tp<=7?i:pg<3?i:pg>tp-4?tp-7+i:pg-3+i; return <Button key={pn} variant={pn===pg?"default":"outline"} size="sm" className={`h-7 w-7 p-0 text-[10px] ${pn===pg?"bg-indigo-600 hover:bg-indigo-700 border-indigo-600 text-white":""}`} onClick={()=>setPg(pn)}>{pn+1}</Button> })}
-            <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={pg>=tp-1} onClick={()=>setPg(p=>p+1)}><ChevronRight className="h-3 w-3"/></Button>
+            <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pg===0} onClick={()=>setPg(p=>p-1)}><ChevronLeft className="h-3 w-3"/></Button>
+            {Array.from({length:Math.min(tp,7)},(_,i)=>{ let pn=tp<=7?i:pg<3?i:pg>tp-4?tp-7+i:pg-3+i; return <Button key={pn} variant={pn===pg?"default":"outline"} size="sm" className={`h-8 w-8 p-0 text-xs ${pn===pg?"bg-azul-600 hover:bg-azul-700 border-azul-600 text-white":""}`} onClick={()=>setPg(pn)}>{pn+1}</Button> })}
+            <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pg>=tp-1} onClick={()=>setPg(p=>p+1)}><ChevronRight className="h-3 w-3"/></Button>
           </div>
         </div>
       )}
@@ -1071,7 +1121,7 @@ export default function ArticulosPage() {
           <div className="space-y-4 mt-2">
             {/* PRECIOS */}
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Precios</p>
+              <p className="text-xs font-semibold text-neutro-500 mb-2">Precios</p>
               <div className="space-y-2">
                 {[
                   {f:"precio_base",       label:"P. Base",         type:"number", def:0},
@@ -1101,7 +1151,7 @@ export default function ArticulosPage() {
 
             {/* IVA */}
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">IVA</p>
+              <p className="text-xs font-semibold text-neutro-500 mb-2">IVA</p>
               <div className="space-y-2">
                 <div className="flex items-center gap-3">
                   <button onClick={()=>toggleBulkField("iva_compras","factura")}
@@ -1152,7 +1202,7 @@ export default function ArticulosPage() {
 
             {/* CLASIFICACIÓN */}
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Clasificación</p>
+              <p className="text-xs font-semibold text-neutro-500 mb-2">Clasificación</p>
               <div className="space-y-2">
                 <div className="flex items-center gap-3">
                   <button onClick={()=>toggleBulkField("proveedor_id",null)}
