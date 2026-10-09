@@ -11,6 +11,7 @@ import { AlertCircle, Loader2, Upload, ArrowRight, Search, Save, FileText } from
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { createClient } from "@/lib/supabase/client"
 import { parsePriceList } from "@/lib/parsing/price_list_parser"
+import { localMatch } from "@/lib/search/local-match"
 
 interface ImportPriceListDialogProps {
     proveedores: any[]
@@ -36,8 +37,6 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
     // For manual matching
     const [searchTerm, setSearchTerm] = useState("")
     const [searchResults, setSearchResults] = useState<any[]>([])
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const [isSearching, setIsSearching] = useState(false)
     const [selectedMappingItem, setSelectedMappingItem] = useState<number | null>(null) // Index of item being mapped
 
     const [pendingDbItems, setPendingDbItems] = useState<any[]>([])
@@ -121,16 +120,6 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
     }
 
     // --- MANUAL MATCHING LOGIC ---
-    const searchArticles = async (term: string) => {
-        if (!term || term.length < 2) return
-        setIsSearching(true)
-        // Motor unificado (léxico trigram + vector de fallback)
-        const res = await fetch(`/api/articulos/buscar?q=${encodeURIComponent(term)}`)
-        const data = res.ok ? await res.json() : []
-        setSearchResults(Array.isArray(data) ? data : [])
-        setIsSearching(false)
-    }
-
     const saveMapping = async (itemIndex: number, article: any) => {
         if (!proveedorId) {
             alert("Seleccione un proveedor primero")
@@ -417,9 +406,7 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
                                                                 {/* File Item Search Results */}
                                                                 <div className="border rounded-md max-h-60 overflow-y-auto bg-white shadow-lg space-y-1 p-1 z-20 relative">
                                                                     {availableFileItems
-                                                                        .filter(fi => !searchTerm ||
-                                                                            fi.original_desc.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                                                            (fi.original_code && fi.original_code.includes(searchTerm)))
+                                                                        .filter(fi => !searchTerm || localMatch(searchTerm, fi.original_desc, fi.original_code))
                                                                         .slice(0, 50) // Limit results
                                                                         .map((fi, idx) => (
                                                                             <div

@@ -63,8 +63,9 @@ export default function ProveedoresPage() {
     default_unidad_factura: "UNIDAD" as "UNIDAD" | "BULTO" | "CAJA" | "PACK" | "DOCENA",
   })
   const [searchTerm, setSearchTerm] = useState("")
-  // Motor unificado: el endpoint decide qué matchea (ids); filtramos el array cargado.
-  const [searchIds, setSearchIds] = useState<Set<string> | null>(null)
+  // Motor unificado: el endpoint decide qué matchea y en qué orden (id → posición
+  // y si vino solo por parecido); se muestra el array cargado en ese orden.
+  const [searchIds, setSearchIds] = useState<Map<string, { pos: number; parecido: boolean }> | null>(null)
 
   useEffect(() => {
     loadProveedores()
@@ -78,11 +79,11 @@ export default function ProveedoresPage() {
     const ctrl = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/proveedores/buscar?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
+        const res = await fetch(`/api/proveedores/buscar?q=${encodeURIComponent(q)}&limit=300&inactivos=1`, { signal: ctrl.signal })
         const data = res.ok ? await res.json() : []
-        setSearchIds(new Set((Array.isArray(data) ? data : []).map((p: any) => p.id)))
+        setSearchIds(new Map((Array.isArray(data) ? data : []).map((p: any, i: number) => [p.id, { pos: i, parecido: !!p._parecido }])))
       } catch (e: any) {
-        if (e?.name !== "AbortError") setSearchIds(new Set())
+        if (e?.name !== "AbortError") setSearchIds(new Map())
       }
     }, 250)
     return () => { clearTimeout(timer); ctrl.abort() }
@@ -269,7 +270,9 @@ export default function ProveedoresPage() {
 
   const filteredProveedores = searchIds === null
     ? proveedores
-    : proveedores.filter((proveedor) => searchIds.has(proveedor.id))
+    : proveedores
+        .filter((proveedor) => searchIds.has(proveedor.id))
+        .sort((a, b) => searchIds.get(a.id)!.pos - searchIds.get(b.id)!.pos)
 
   return (
     <div className="min-h-screen">
@@ -377,7 +380,12 @@ export default function ProveedoresPage() {
                   ) : (
                     filteredProveedores.map((proveedor) => (
                       <TableRow key={proveedor.id} className="hover:bg-muted/50 transition-colors">
-                        <TableCell className="font-medium">{proveedor.nombre}</TableCell>
+                        <TableCell className="font-medium">
+                          {proveedor.nombre}
+                          {searchIds?.get(proveedor.id)?.parecido && (
+                            <span className="ml-2 text-xs font-normal text-muted-foreground">parecido</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-muted-foreground">{proveedor.cuit || "-"}</TableCell>
                         <TableCell className="text-muted-foreground">
                           {proveedor.mail_oficina || proveedor.email || "-"}

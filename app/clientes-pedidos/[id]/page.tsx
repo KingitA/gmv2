@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { agregarItemPedido, eliminarItemPedido, guardarItemsPedido, repreciarPedido, actualizarEncabezadoPedido, guardarCondicionesPedido } from "@/lib/actions/pedidos"
@@ -38,6 +38,8 @@ export default function PedidoEditPage() {
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState("")
   const [found, setFound] = useState<any[]>([])
+  const buscarTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const buscarSeq = useRef(0)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
@@ -297,18 +299,27 @@ export default function PedidoEditPage() {
     }
   }
 
-  async function buscarProductos(q: string) {
+  // Debounce de 300 ms; el número de secuencia descarta respuestas viejas
+  function cancelarBusqueda() { clearTimeout(buscarTimer.current); buscarSeq.current++ }
+
+  function buscarProductos(q: string) {
     setQuery(q)
+    clearTimeout(buscarTimer.current)
+    const seq = ++buscarSeq.current
     if (q.length < 2) { setFound([]); return }
-    const { searchProductos } = await import("@/lib/actions/productos")
-    setFound((await searchProductos(q)) || [])
+    buscarTimer.current = setTimeout(async () => {
+      const { searchProductos } = await import("@/lib/actions/productos")
+      const res = await searchProductos(q)
+      if (seq !== buscarSeq.current) return
+      setFound(res || [])
+    }, 300)
   }
 
   async function agregarItem(producto: any, cantidad: number) {
     setSavingAdd(true)
     try {
       await agregarItemPedido(id, producto.id, cantidad)
-      setQuery(""); setFound([]); setQty(1); setSelectedProduct(null)
+      cancelarBusqueda(); setQuery(""); setFound([]); setQty(1); setSelectedProduct(null)
       await loadAll()
     } catch (err: any) {
       alert(err.message || "Error al agregar artículo")
@@ -687,7 +698,7 @@ export default function PedidoEditPage() {
               <Button
                 size="sm"
                 className="gap-1.5 shrink-0"
-                onClick={() => { setShowAddPanel(o => !o); setQuery(""); setFound([]); setSelectedProduct(null); setQty(1) }}
+                onClick={() => { setShowAddPanel(o => !o); cancelarBusqueda(); setQuery(""); setFound([]); setSelectedProduct(null); setQty(1) }}
               >
                 <Plus className="h-4 w-4" />
                 Agregar artículo
@@ -714,7 +725,7 @@ export default function PedidoEditPage() {
                       {found.map((p: any) => (
                         <div key={p.id}
                           className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors"
-                          onClick={() => { setSelectedProduct(p); setFound([]); setQuery(""); setQty(1) }}>
+                          onClick={() => { cancelarBusqueda(); setSelectedProduct(p); setFound([]); setQuery(""); setQty(1) }}>
                           <ArticuloResultRow articulo={p} size="sm" />
                         </div>
                       ))}

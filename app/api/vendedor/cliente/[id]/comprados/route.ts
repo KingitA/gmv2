@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { cargarComprados } from "@/lib/vendedor/comprados"
+import { localMatch } from "@/lib/search/local-match"
 
 // GET /api/vendedor/cliente/[id]/comprados?q=
 // Artículos que el cliente COMPRÓ (facturados en comprobantes_venta), con el
@@ -15,7 +16,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const supabase = await createClient()
     const { id } = await params
-    const q = new URL(request.url).searchParams.get("q")?.trim().toLowerCase() || ""
+    const q = new URL(request.url).searchParams.get("q")?.trim() || ""
 
     const { data: cliente } = await supabase
       .from("clientes")
@@ -31,11 +32,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (!comprados.length) return NextResponse.json({ comprados: [] })
 
     if (q) {
-      comprados = comprados.filter(
-        (c: any) =>
-          c.descripcion?.toLowerCase().includes(q) ||
-          c.sku?.toLowerCase?.().includes(q) ||
-          (Array.isArray(c.ean13) ? c.ean13.some((e: string) => e?.includes(q)) : String(c.ean13 || "").includes(q))
+      comprados = comprados.filter((c: any) =>
+        localMatch(q, c.descripcion, c.sku, Array.isArray(c.ean13) ? c.ean13 : String(c.ean13 || ""))
       )
     }
 

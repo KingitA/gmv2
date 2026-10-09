@@ -120,9 +120,11 @@ export async function POST(request: Request) {
       }
 
       let recargoPuntaje = 0
-      if (cliente.nivel_puntaje === "RIESGO") {
+      // El nivel está cargado con mayúsculas distintas ("Regular" / "REGULAR"): comparar sin distinguir
+      const nivel = String(cliente.nivel_puntaje || "").toUpperCase()
+      if (nivel === "RIESGO") {
         recargoPuntaje = precioBase * 0.05
-      } else if (cliente.nivel_puntaje === "CRITICO") {
+      } else if (nivel === "CRITICO") {
         recargoPuntaje = precioBase * 0.15
       }
 

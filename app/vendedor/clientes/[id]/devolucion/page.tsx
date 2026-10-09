@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { previewPrecioArticulo } from "@/lib/actions/pedidos"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { localMatch } from "@/lib/search/local-match"
 
 // Devolución en la calle — la devolución NO es sobre un pedido: se busca en
 // las COMPRAS FACTURADAS del cliente y se devuelve al último precio al que se
@@ -88,11 +89,7 @@ export default function VendedorDevolucionPage() {
   }, [id])
 
   const filtrados = q.trim()
-    ? comprados.filter(
-        (c) =>
-          c.descripcion?.toLowerCase().includes(q.toLowerCase()) ||
-          (c.sku || "").toLowerCase().includes(q.toLowerCase())
-      )
+    ? comprados.filter((c) => localMatch(q, c.descripcion, c.sku))
     : comprados
 
   const buscarCatalogo = (valor: string) => {

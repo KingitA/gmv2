@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation"
 
 import { useState, useEffect } from "react"
+import { useDebounced } from "@/lib/hooks/use-debounced"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -437,18 +438,21 @@ export default function OrdenesCompraPage() {
     }
   }
 
-  const buscarArticulosExternos = async (term: string) => {
+  // Búsqueda de artículo externo: debounce de 300 ms + abort de la búsqueda anterior
+  const searchArticuloExternoDeb = useDebounced(searchArticuloExterno, 300)
+  useEffect(() => {
+    const term = searchArticuloExternoDeb
     if (!term || term.length < 2) { setArticulosExternos([]); return }
+    const ctrl = new AbortController()
     setLoadingArticulosExternos(true)
-    try {
-      // Motor unificado (léxico trigram + vector de fallback)
-      const res = await fetch(`/api/articulos/buscar?q=${encodeURIComponent(term)}`)
-      const data = res.ok ? await res.json() : []
-      setArticulosExternos(Array.isArray(data) ? data.slice(0, 20) : [])
-    } finally {
-      setLoadingArticulosExternos(false)
-    }
-  }
+    // Motor unificado (léxico trigram + vector de fallback)
+    fetch(`/api/articulos/buscar?q=${encodeURIComponent(term)}`, { signal: ctrl.signal })
+      .then(res => (res.ok ? res.json() : []))
+      .then(data => { if (!ctrl.signal.aborted) setArticulosExternos(Array.isArray(data) ? data.slice(0, 20) : []) })
+      .catch(() => {})
+      .finally(() => { if (!ctrl.signal.aborted) setLoadingArticulosExternos(false) })
+    return () => { ctrl.abort(); setLoadingArticulosExternos(false) }
+  }, [searchArticuloExternoDeb])
 
   const agregarArticuloExterno = (art: any) => {
     if (articulosTabla.some(a => a.articulo_id === art.id)) { alert('Este artículo ya está en la tabla'); return }
@@ -1232,7 +1236,7 @@ export default function OrdenesCompraPage() {
               <Input
                 placeholder="Buscar por descripción o SKU..."
                 value={searchArticuloExterno}
-                onChange={(e) => { setSearchArticuloExterno(e.target.value); buscarArticulosExternos(e.target.value) }}
+                onChange={(e) => { setSearchArticuloExterno(e.target.value); if (e.target.value.length < 2) setArticulosExternos([]) }}
                 className="pl-10"
                 autoFocus
               />

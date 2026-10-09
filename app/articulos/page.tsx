@@ -17,6 +17,8 @@ import { ImportArticulosDialog, articulosFieldLabel, articulosValueFormat } from
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import { History } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
+import { FiltroColumnaMenu, ChipsFiltros, textoChip } from "@/components/search/filtro-columna"
+import { filtroActivo, type Filtros, type FiltroColumna, type OpcionFiltro } from "@/lib/search/facetas"
 import * as XLSX from "xlsx"
 import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, determinarGrupoPrecio, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
 import { calcularPreciosConFormulas, SUBLISTA_CODIGOS, SUBLISTA_META, type SublistaCodigo } from "@/lib/pricing/formula-evaluator"
@@ -95,24 +97,20 @@ const COL_DB: Record<string, string> = {
   ivav:   "iva_ventas",
   pbase:  "precio_base",
   pbcont: "precio_base_contado",
+  ucosto: "ultimo_costo",
   ivac_v:    "iva_compras",
   ivav_v:    "iva_ventas",
   segprecio: "segmento_precio",
 }
-// Map column ID → foreign table sort (joined columns)
-// "table" must match the alias used in the select(), not the real table name
-const COL_FOREIGN: Record<string, {field: string; table: string}> = {
-  prov:  { field: "nombre",      table: "proveedor" },
-  marca: { field: "descripcion", table: "marca"     },
-}
-const isSortable = (col: string) => !!(COL_DB[col] || COL_FOREIGN[col])
-// Value extractor for client-side sort (search results)
-const clientSortVal = (art: any, col: string): any => {
-  if (col === "prov")  return art.proveedor?.nombre ?? ""
-  if (col === "marca") return art.marca?.descripcion ?? ""
-  if (col === "ean13") return (Array.isArray(art.ean13) ? art.ean13[0] : (art.ean13 ?? ""))
-  const f = COL_DB[col]; return f ? (art[f] ?? "") : ""
-}
+// Orden y filtros los resuelve /api/articulos/listado (mismos ids de columna)
+const isSortable = (col: string) => !!COL_DB[col] || col === "prov" || col === "marca" || col === "ucosto"
+// Filtros por encabezado (tipo Excel): columnas con "tildar valores" y con "desde / hasta".
+// Las de IVA existen en modo compras y ventas: comparten el mismo filtro.
+const FILTRO_VALORES = new Set(["ubulto","prov","marca","cat","subcat","oferta","segprecio","ivac","ivav"])
+const FILTRO_NUMERO  = new Set(["plista","marg","br","ucosto","pbase","pbcont"])
+const filtroKey = (col: string) => col === "ivac_v" ? "ivac" : col === "ivav_v" ? "ivav" : col
+const COL_TITULO: Record<string,string> = Object.fromEntries([...BASE_COLS,...COMPRAS_COLS,...VENTAS_COLS].map(c=>[c.id,c.label]))
+const SELECT_FILA = "*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)"
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function ArticulosPage() {
@@ -123,7 +121,13 @@ export default function ArticulosPage() {
   const [dm,setDm]       = useState<Record<string,DescuentoTipado[]>>({})
   const [tc,setTc]       = useState(0)
   const [pg,setPg]       = useState(0)
-  const searchCache = useRef<{q:string; pf:string; results:any[]}|null>(null)
+  // Lista completa de ids (ya filtrada y ordenada por el servidor) para la combinación
+  // actual de texto + proveedor + filtros + orden. Cambiar de página no vuelve a pedirla.
+  const listado = useRef<{key:string; ids:string[]}|null>(null)
+  // Hubo cambios guardados desde esta pantalla: la próxima lista se pide sin caché
+  const sucio = useRef(false)
+  const [filtros,setFiltros] = useState<Filtros>({})
+  const [facetas,setFacetas] = useState<Record<string,OpcionFiltro[]>>({})
   const [provs,setProvs] = useState<any[]>([])
   const [marcas,setMarcas] = useState<any[]>([])
   const [listas,setListas] = useState<LP[]>([])
@@ -217,9 +221,8 @@ export default function ArticulosPage() {
       if(sub) setSubcategoriasData(sub)
     })()
   },[])
-  useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0);searchCache.current=null},400); return()=>clearTimeout(t) },[st])
-  useEffect(()=>{ if(sortCol||sortDir) searchCache.current=null },[sortCol,sortDir])
-  useEffect(()=>{ load() },[pf,sd,pg,sortCol,sortDir])
+  useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0)},400); return()=>clearTimeout(t) },[st])
+  useEffect(()=>{ load() },[pf,sd,pg,sortCol,sortDir,filtros])
 
   // Close panels on outside click
   useEffect(()=>{
@@ -249,72 +252,41 @@ export default function ArticulosPage() {
   const sr=(id:string,e:React.MouseEvent)=>{ e.preventDefault(); setRc(id); rsx.current=e.clientX; rsw.current=cw[id]??lcw[id]??100 }
 
   // ── Data ──────────────────────────────────────────────────────────────────
-  const load=async()=>{
+  // Ids de TODOS los artículos que cumplen texto + proveedor + filtros, en el orden
+  // pedido. Lo resuelve /api/articulos/listado (que también devuelve las opciones de
+  // cada filtro con su cantidad). Se guarda en `listado` y se reutiliza al paginar.
+  const pedirListado=async(forzar=false):Promise<string[]>=>{
+    const cuerpo={q:sd.trim(),proveedor:pf!=="todos"?pf:null,filtros,orden:sortCol?{col:sortCol,dir:sortDir}:null}
+    const key=JSON.stringify(cuerpo)
+    if(!forzar&&!sucio.current&&listado.current?.key===key) return listado.current.ids
+    const fresco=forzar||sucio.current; sucio.current=false
+    const res=await fetch("/api/articulos/listado",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...cuerpo,fresco})})
+    if(!res.ok) throw new Error((await res.json().catch(()=>({}))).error||`Error ${res.status}`)
+    const data=await res.json()
+    listado.current={key,ids:data.ids||[]}
+    setFacetas(data.facetas||{})
+    return listado.current.ids
+  }
+  // Trae las filas completas de unos ids, respetando su orden
+  const hidratar=async(ids:string[],select=SELECT_FILA):Promise<any[]>=>{
+    if(ids.length===0) return []
+    const{data}=await sb.from("articulos").select(select).in("id",ids)
+    const pos=new Map(ids.map((id,i)=>[id,i]))
+    return (data||[]).sort((x:any,y:any)=>pos.get(x.id)!-pos.get(y.id)!)
+  }
+
+  const pedido=useRef(0)
+  const load=async(forzar=false)=>{
+    const mio=++pedido.current
     setLd(true)
     let a:any[]=[], total=0
-
-    if(sd.trim()){
-      try {
-        // Usar caché si la query y el filtro no cambiaron (solo cambió la página)
-        let results:any[]
-        if(searchCache.current?.q===sd.trim()&&searchCache.current?.pf===pf){
-          results=searchCache.current.results
-        } else {
-          const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}${pf!=="todos"?`&proveedor=${pf}`:""}`)
-          results=res.ok?await res.json():[]
-          // El filtro de proveedor ya lo aplica el servidor (busca dentro del proveedor).
-          if(sortCol && isSortable(sortCol)){
-            results.sort((a:any,b:any)=>{
-              const av=clientSortVal(a,sortCol)
-              const bv=clientSortVal(b,sortCol)
-              if(typeof av==="number"&&typeof bv==="number") return sortDir==="asc"?av-bv:bv-av
-              return sortDir==="asc"?String(av).localeCompare(String(bv),"es"):String(bv).localeCompare(String(av),"es")
-            })
-          }
-          searchCache.current={q:sd.trim(),pf,results}
-        }
-        a=results.slice(pg*PS,(pg+1)*PS); total=results.length
-      } catch { a=[]; total=0 }
-    } else {
-      const ascending=!sortCol||sortDir==="asc"
-
-      if(sortCol==="prov"||sortCol==="marca") {
-        // Supabase no soporta ORDER BY por columna de tabla joinada desde el query builder.
-        // Solución: cargar solo id+FK para todos los artículos del filtro (payload pequeño),
-        // ordenar en memoria con los datos de provs/marcas ya cargados, luego cargar la página.
-        // Supabase tiene un límite hardcodeado de 1000 filas por request.
-        // Traemos todos los artículos en tandas de 1000 en paralelo.
-        const{count:totalCount}=await sb.from("articulos").select("*",{count:"exact",head:true}).eq("activo",true)
-        const batchSize=1000
-        const numBatches=Math.ceil((totalCount||0)/batchSize)
-        const batches=await Promise.all(
-          Array.from({length:numBatches},(_,i)=>{
-            let q=sb.from("articulos").select("id,proveedor_id,marca_id,proveedor:proveedores(nombre),marca:marca_id(descripcion)").eq("activo",true).range(i*batchSize,(i+1)*batchSize-1)
-            if(pf!=="todos") q=q.eq("proveedor_id",pf)
-            return q
-          })
-        )
-        const slim=batches.flatMap(b=>b.data||[])
-        const sorted=(slim||[]).sort((x:any,y:any)=>{
-          const av=sortCol==="prov"?(x.proveedor?.nombre??""):(x.marca?.descripcion??"")
-          const bv=sortCol==="prov"?(y.proveedor?.nombre??""):(y.marca?.descripcion??"")
-          return ascending?av.localeCompare(bv,"es"):bv.localeCompare(av,"es")
-        })
-        total=sorted.length
-        const pageIds=sorted.slice(pg*PS,(pg+1)*PS).map((x:any)=>x.id)
-        if(pageIds.length>0){
-          const{data}=await sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)").in("id",pageIds)
-          const orderMap=Object.fromEntries(pageIds.map((id:string,i:number)=>[id,i]))
-          a=(data||[]).sort((x:any,y:any)=>orderMap[x.id]-orderMap[y.id])
-        }
-      } else {
-        let q=sb.from("articulos").select("*,proveedor:proveedores(nombre,tipo_descuento),marca:marca_id(codigo,descripcion)",{count:"exact"}).eq("activo",true)
-        if(pf!=="todos") q=q.eq("proveedor_id",pf)
-        q=q.order(sortCol&&COL_DB[sortCol]?COL_DB[sortCol]:"descripcion",{ascending})
-        const{data,count}=await q.range(pg*PS,(pg+1)*PS-1)
-        a=data||[]; total=count||0
-      }
-    }
+    try {
+      const ids=await pedirListado(forzar)
+      total=ids.length
+      a=await hidratar(ids.slice(pg*PS,(pg+1)*PS))
+    } catch(e:any) { console.error("[articulos] listado:",e?.message); a=[]; total=0 }
+    // Si mientras tanto se pidió otra cosa (otra tecla, otro filtro), esta respuesta ya no sirve
+    if(mio!==pedido.current) return
 
     setArts(a); setTc(total)
     if(a.length>0){
@@ -334,7 +306,7 @@ export default function ArticulosPage() {
   const gsv=async()=>{
     if(ed.size===0) return; setSav(true); let ok=0
     for(const[id,c] of ed.entries()){const{error}=await sb.from("articulos").update(c).eq("id",id);if(!error)ok++}
-    setSav(false); setEd(new Map()); alert(`${ok} artículo(s) actualizados`)
+    setSav(false); setEd(new Map()); sucio.current=true; alert(`${ok} artículo(s) actualizados`)
   }
 
   // Descuentos
@@ -371,7 +343,7 @@ export default function ArticulosPage() {
       const{data:newArt,error}=await sb.from("articulos").insert({...sinVaciosFK(ff),activo:true}).select("id").single()
       if(error){ alert(`Error: ${error.message}`); setFs(false); return }
       if(newArt?.id) fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:newArt.id})}).catch(()=>{})
-      setFa(null); load()
+      setFa(null); load(true)
     } else {
       const{error}=await sb.from("articulos").update(sinVaciosFK(ff)).eq("id",fa.id)
       if(!error){
@@ -379,6 +351,7 @@ export default function ArticulosPage() {
         const marc=marcas.find((m:any)=>m.id===ff.marca_id)
         setArts(p=>p.map(a=>a.id===fa.id?{...a,...ff,proveedor:prov?{nombre:prov.nombre}:null,marca:marc?{codigo:marc.codigo,descripcion:marc.descripcion}:null}:a))
         fetch("/api/embed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({entity:"articulos",id:fa.id})}).catch(()=>{})
+        sucio.current=true
         setFa(null)
       } else alert(`Error: ${error.message}`)
     }
@@ -419,30 +392,13 @@ export default function ArticulosPage() {
   const handleExport=async()=>{
     setExporting(true)
     try{
-      // Respeta el filtro que se ve en pantalla (búsqueda de texto + proveedor) y trae TODO.
-      let data:any[]=[]
-      if(sd.trim()){
-        // Búsqueda de texto activa → exporta lo mismo que muestra el buscador (respeta proveedor)
-        const res=await fetch(`/api/articulos/buscar?q=${encodeURIComponent(sd.trim())}${pf!=="todos"?`&proveedor=${pf}`:""}`)
-        const results=res.ok?await res.json():[]
-        data=results
-      } else {
-        // Sin búsqueda → todos los activos (respetando proveedor), en tandas de 1000 para
-        // saltar el tope de 1000 filas por request de Supabase.
-        let countQ=sb.from("articulos").select("*",{count:"exact",head:true}).eq("activo",true)
-        if(pf!=="todos") countQ=countQ.eq("proveedor_id",pf)
-        const{count:totalCount}=await countQ
-        const batchSize=1000
-        const numBatches=Math.max(1,Math.ceil((totalCount||0)/batchSize))
-        const batches=await Promise.all(
-          Array.from({length:numBatches},(_,i)=>{
-            let q=sb.from("articulos").select("*,proveedor:proveedores(nombre),marca:marca_id(descripcion)").eq("activo",true).order("descripcion").range(i*batchSize,(i+1)*batchSize-1)
-            if(pf!=="todos") q=q.eq("proveedor_id",pf)
-            return q
-          })
-        )
-        data=batches.flatMap(b=>b.data||[])
-      }
+      // Exporta exactamente lo que se ve: texto + proveedor + filtros por columna, en el
+      // mismo orden. Las filas se traen en tandas (el .in() de muchos ids no entra en una URL).
+      const ids=await pedirListado()
+      const tandas:string[][]=[]
+      for(let i=0;i<ids.length;i+=300) tandas.push(ids.slice(i,i+300))
+      const partes=await Promise.all(tandas.map(t=>hidratar(t,"*,proveedor:proveedores(nombre),marca:marca_id(descripcion)")))
+      const data:any[]=partes.flat()
       const fieldMap:Record<string,(a:any)=>any>={
         "SKU":a=>a.sku,"EAN13":a=>a.ean13?.join(', ')||"","Descripción":a=>a.descripcion,"Unid/Bulto":a=>a.unidades_por_bulto||"",
         "Proveedor":a=>a.proveedor?.nombre||"","Marca":a=>a.marca?.descripcion||"","Categoría":a=>a.categoria||"","Subcategoría":a=>a.subcategoria||"",
@@ -479,6 +435,31 @@ export default function ArticulosPage() {
     else { setSortCol(colId); setSortDir("asc") }
     setPg(0)
   }
+  // Filtros por encabezado
+  const setFiltro=(col:string,f:FiltroColumna|null)=>{
+    const k=filtroKey(col)
+    setFiltros(p=>{ const n={...p}; if(f) n[k]=f; else delete n[k]; return n })
+    setPg(0)
+  }
+  const ordenarCol=(col:string,dir:"asc"|"desc")=>{ setSortCol(col); setSortDir(dir); setPg(0) }
+  // Función (no componente) para que el menú no se desmonte en cada render
+  const menuFiltro=(col:string)=>{
+    const tipo=FILTRO_VALORES.has(filtroKey(col))?"valores":FILTRO_NUMERO.has(col)?"numero":null
+    if(!tipo) return null
+    return(
+      <FiltroColumnaMenu
+        titulo={COL_TITULO[col]||col}
+        tipo={tipo}
+        opciones={facetas[filtroKey(col)]}
+        cargando={ld}
+        filtro={filtros[filtroKey(col)]}
+        onFiltro={f=>setFiltro(col,f)}
+        orden={sortCol===col?sortDir:null}
+        onOrden={isSortable(col)?(d=>ordenarCol(col,d)):undefined}
+      />
+    )
+  }
+  const chips=Object.entries(filtros).filter(([,f])=>filtroActivo(f)).map(([k,f])=>({id:k,texto:textoChip(COL_TITULO[k]||k,f,facetas[k])}))
   const SortIcon = ({col}:{col:string}) => {
     if(!isSortable(col)) return null
     if(sortCol!==col) return <ArrowUpDown className="h-2.5 w-2.5 opacity-0 group-hover:opacity-40 transition-opacity flex-shrink-0"/>
@@ -511,7 +492,7 @@ export default function ArticulosPage() {
     // Actualizar arts y caché de búsqueda con los nuevos valores
     const applyUpdates=(list:any[])=>list.map(a=>updatedIds.has(a.id)?{...a,...updates}:a)
     setArts(p=>applyUpdates(p))
-    if(searchCache.current) searchCache.current={...searchCache.current,results:applyUpdates(searchCache.current.results)}
+    sucio.current=true // lo editado puede haber cambiado de filtro: la próxima carga pide la lista de nuevo
     setBulkSaving(false); setShowBulkEdit(false); setBulkFields(new Set()); setBulkVals({}); clearSel()
     alert(`${ok} artículo(s) actualizados`)
   }
@@ -521,7 +502,7 @@ export default function ArticulosPage() {
     if(!confirm(`¿Dar de baja ${sel.size} artículo(s) seleccionados? Quedarán inactivos y no aparecerán en búsquedas ni pedidos.`)) return
     let ok=0
     for(const id of sel){ const{error}=await sb.from("articulos").update({activo:false}).eq("id",id); if(!error) ok++ }
-    clearSel(); await load(); alert(`${ok} artículo(s) dado(s) de baja`)
+    clearSel(); await load(true); alert(`${ok} artículo(s) dado(s) de baja`)
   }
 
   const toggleBulkField = (f:string, defaultVal:any=null) => {
@@ -690,6 +671,13 @@ export default function ArticulosPage() {
         </div>
       </div>
 
+      {/* ═══ FILTROS ACTIVOS ═══════════════════════════════════════════════════ */}
+      {chips.length>0&&(
+        <div className="bg-white border-b px-5 py-1.5 flex-shrink-0">
+          <ChipsFiltros chips={chips} onQuitar={k=>setFiltro(k,null)} onLimpiar={()=>{setFiltros({});setPg(0)}}/>
+        </div>
+      )}
+
       {/* ═══ BULK ACTION BAR ═══════════════════════════════════════════════════ */}
       {sel.size>0&&(
         <div className="bg-indigo-600 text-white px-5 py-2 flex items-center gap-3 flex-shrink-0 shadow-sm">
@@ -727,8 +715,11 @@ export default function ArticulosPage() {
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)} title="Doble click para ocultar"
                   >
-                    <div className={`flex items-center gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
-                      {c.label}<SortIcon col={c.id}/>
+                    <div className="flex items-center gap-1">
+                      <div className={`flex min-w-0 items-center gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                        {c.label}<SortIcon col={c.id}/>
+                      </div>
+                      {menuFiltro(c.id)}
                     </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
                   </th>
@@ -740,8 +731,11 @@ export default function ArticulosPage() {
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)}
                   >
-                    <div className={`flex items-center justify-end gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
-                      {c.label}<SortIcon col={c.id}/>
+                    <div className="flex items-center justify-end gap-1">
+                      <div className={`flex items-center justify-end gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                        {c.label}<SortIcon col={c.id}/>
+                      </div>
+                      {menuFiltro(c.id)}
                     </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-amber-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
                   </th>
@@ -753,8 +747,11 @@ export default function ArticulosPage() {
                     style={{width:cw[c.id],minWidth:c.mw,maxWidth:cw[c.id]}}
                     onDoubleClick={()=>tglCol(c.id)}
                   >
-                    <div className={`flex items-center justify-end gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
-                      {c.label}<SortIcon col={c.id}/>
+                    <div className="flex items-center justify-end gap-1">
+                      <div className={`flex items-center justify-end gap-1 group ${isSortable(c.id)?"cursor-pointer":""}`} onClick={()=>handleSort(c.id)}>
+                        {c.label}<SortIcon col={c.id}/>
+                      </div>
+                      {menuFiltro(c.id)}
                     </div>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-400 z-10" onMouseDown={e=>sr(c.id,e)}/>
                   </th>
@@ -1258,7 +1255,7 @@ export default function ArticulosPage() {
         </DialogContent>
       </Dialog>
 
-      <ImportArticulosDialog open={showImporter} onOpenChange={setShowImporter} onImportComplete={()=>load()}/>
+      <ImportArticulosDialog open={showImporter} onOpenChange={setShowImporter} onImportComplete={()=>load(true)}/>
       <HistorialImportacionesDialog
         open={showHistorial}
         onOpenChange={setShowHistorial}

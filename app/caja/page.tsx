@@ -25,6 +25,7 @@ import { CerrarDia } from "@/components/caja/cerrar-dia"
 import { ImputarPago, type PagoAImputar } from "@/components/caja/imputar-pago"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
+import { localMatch } from "@/lib/search/local-match"
 import { useUrlParams } from "@/lib/hooks/use-url-state"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 
@@ -365,11 +366,9 @@ export default function CajaDelDiaPage() {
     (filas: FilaCaja[]) => {
       let out = filas
       if (tab !== "todo") out = out.filter((f) => f.categoria === tab)
-      const q = busqueda.trim().toLowerCase()
+      const q = busqueda.trim()
       if (q)
-        out = out.filter((f) =>
-          `${f.quien} ${f.sub} ${f.medio} ${f.estado.texto}`.toLowerCase().includes(q)
-        )
+        out = out.filter((f) => localMatch(q, `${f.quien} ${f.sub} ${f.medio} ${f.estado.texto}`))
       return out
     },
     [tab, busqueda]

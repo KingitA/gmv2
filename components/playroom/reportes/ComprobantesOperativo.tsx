@@ -6,6 +6,7 @@ import DataTable from '@/components/playroom/DataTable'
 import PlayroomFilters, { defaultFilters } from '@/components/playroom/PlayroomFilters'
 import ComparativoBadge from '@/components/playroom/ComparativoBadge'
 import { formatDateAR } from '@/lib/utils'
+import { localMatch } from '@/lib/search/local-match'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
 
@@ -144,7 +145,7 @@ export default function ComprobantesOperativo() {
   const summary = apiData?.summary ?? { total_nc: 0, total_nc_prev: 0, total_facturado: 0, ratio_pct: 0, variacion_nc_pct: 0 }
 
   const filtered = useMemo(() => rows.filter(r => {
-    if (searchText && !r.nombre.toLowerCase().includes(searchText.toLowerCase())) return false
+    if (searchText && !localMatch(searchText, r.nombre)) return false
     if (ratioMin > 0 && (r.ratio_nc_pct ?? 0) < ratioMin) return false
     return true
   }), [rows, searchText, ratioMin])

@@ -15,6 +15,8 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url)
         const q = searchParams.get("q")?.trim()
         const proveedor = searchParams.get("proveedor")?.trim() || null
+        // ?limit=N acota el top global (los autocompletes piden 8); por defecto 50
+        const limit = Math.min(300, Math.max(1, Number(searchParams.get("limit")) || 50))
 
         if (!q || q.length < 2) return NextResponse.json([])
 
@@ -48,8 +50,8 @@ export async function GET(request: NextRequest) {
             return NextResponse.json(data)
         }
 
-        // Sin filtro: búsqueda híbrida unificada global (léxica trigram + vector), top-50
-        const ids = await hybridSearchIds("articulos", q, 50)
+        // Sin filtro: búsqueda híbrida unificada global (léxica trigram + vector), top-N
+        const ids = await hybridSearchIds("articulos", q, limit)
         if (ids.length === 0) return NextResponse.json([])
 
         const { data, error } = await supabase

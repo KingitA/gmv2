@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -46,14 +46,23 @@ export function ReviewPedidoDialog({
   const [productsFound, setProductsFound] = useState<any[]>([])
   const [creating, setCreating] = useState(false)
 
-  const handleSearchProducts = async (term: string) => {
+  // Debounce de 300 ms; el número de secuencia descarta respuestas viejas
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const searchSeq = useRef(0)
+  const handleSearchProducts = (term: string) => {
+    clearTimeout(searchTimer.current)
+    const seq = ++searchSeq.current
     if (term.length < 2) return
-    const { searchProductos } = await import("@/lib/actions/productos")
-    const results = await searchProductos(term)
-    setProductsFound(results || [])
+    searchTimer.current = setTimeout(async () => {
+      const { searchProductos } = await import("@/lib/actions/productos")
+      const results = await searchProductos(term)
+      if (seq !== searchSeq.current) return
+      setProductsFound(results || [])
+    }, 300)
   }
 
   const linkProduct = (idx: number, product: any) => {
+    clearTimeout(searchTimer.current); searchSeq.current++
     setItems(prev => prev.map((item, i) => i === idx
       ? { ...item, matchedProduct: product, confidence: "HIGH" }
       : item

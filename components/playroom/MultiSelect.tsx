@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronDown, Check, X } from 'lucide-react'
+import { localMatch } from '@/lib/search/local-match'
 
 export interface MultiSelectOption {
   value: string
@@ -45,8 +46,7 @@ export default function MultiSelect({
 
   const filtered = useMemo(() => {
     if (!search) return options
-    const q = search.toLowerCase()
-    return options.filter(o => o.label.toLowerCase().includes(q))
+    return options.filter(o => localMatch(search, o.label))
   }, [options, search])
 
   const toggle = (value: string) =>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { previewPrecioArticulo, previewPreciosArticulos, createPedido, actualizarEncabezadoPedido } from "@/lib/actions/pedidos"
 import { searchProductos } from "@/lib/actions/productos"
@@ -58,15 +58,26 @@ export default function NuevoPedidoPage() {
   const [cart, setCart]                 = useState<CartItem[]>([])
   const [creating, setCreating]         = useState(false)
 
-  const searchClientes = useCallback(async (q: string) => {
+  // Búsquedas con debounce de 300 ms; el número de secuencia descarta respuestas viejas
+  const cliTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const cliSeq = useRef(0)
+  const cancelarBusquedaCliente = () => { clearTimeout(cliTimer.current); cliSeq.current++ }
+
+  const searchClientes = useCallback((q: string) => {
     setClienteQ(q)
+    clearTimeout(cliTimer.current)
+    const seq = ++cliSeq.current
     if (q.length < 2) { setClienteResults([]); setClienteOpen(false); return }
-    const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(q)}`).then(r => r.json())
-    setClienteResults(res || [])
-    setClienteOpen(true)
+    cliTimer.current = setTimeout(async () => {
+      const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(q)}`).then(r => r.json()).catch(() => [])
+      if (seq !== cliSeq.current) return
+      setClienteResults(res || [])
+      setClienteOpen(true)
+    }, 300)
   }, [])
 
   const selectCliente = (c: any) => {
+    cancelarBusquedaCliente()
     setCliente(c)
     setClienteQ(c.nombre_razon_social || c.razon_social || "")
     setClienteOpen(false)
@@ -75,6 +86,7 @@ export default function NuevoPedidoPage() {
   }
 
   const clearCliente = () => {
+    cancelarBusquedaCliente()
     setCliente(null)
     setClienteQ("")
     setCart([])
@@ -100,15 +112,25 @@ export default function NuevoPedidoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firmaCond, cliente?.id])
 
-  const buscarArticulos = useCallback(async (q: string) => {
+  const artTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const artSeq = useRef(0)
+  const cancelarBusquedaArt = () => { clearTimeout(artTimer.current); artSeq.current++ }
+
+  const buscarArticulos = useCallback((q: string) => {
     setArtQ(q)
     setSelectedArt(null)
+    clearTimeout(artTimer.current)
+    const seq = ++artSeq.current
     if (q.length < 2) { setArtFound([]); return }
-    const res = await searchProductos(q)
-    setArtFound(res || [])
+    artTimer.current = setTimeout(async () => {
+      const res = await searchProductos(q)
+      if (seq !== artSeq.current) return
+      setArtFound(res || [])
+    }, 300)
   }, [])
 
   const seleccionarArticulo = async (art: any) => {
+    cancelarBusquedaArt()
     setSelectedArt(art)
     setSelectedPreview(null)
     setArtFound([])
@@ -160,6 +182,7 @@ export default function NuevoPedidoPage() {
     setSelectedArt(null)
     setSelectedPreview(null)
     setArtQ("")
+    cancelarBusquedaArt()
     setArtFound([])
     setQty(1)
   }

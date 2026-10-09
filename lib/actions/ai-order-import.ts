@@ -5,6 +5,7 @@ import { GEMINI_MODEL, GEMINI_MODEL_FALLBACK } from "@/lib/ai/gemini-model"
 import Anthropic from "@anthropic-ai/sdk"
 import { searchProductsByVector } from "./embeddings"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { sanitizarOr } from "@/lib/search/hybrid"
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" })
 
@@ -791,13 +792,17 @@ Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON
         try {
             const supabase = createAdminClient()
             let cleanStr = customerStr.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/cliente:?\s*/g, '')
+            // Comas, paréntesis y % rompen el filtro .or() de PostgREST
+            cleanStr = sanitizarOr(cleanStr)
 
-            let { data: exactClientMatch } = await supabase
-                .from("clientes")
-                .select("id, razon_social, nombre")
-                .or(`razon_social.ilike.%${cleanStr}%,nombre.ilike.%${cleanStr}%`)
-                .limit(1)
-                .maybeSingle()
+            let { data: exactClientMatch } = cleanStr
+                ? await supabase
+                    .from("clientes")
+                    .select("id, razon_social, nombre")
+                    .or(`razon_social.ilike.%${cleanStr}%,nombre.ilike.%${cleanStr}%`)
+                    .limit(1)
+                    .maybeSingle()
+                : { data: null }
 
             if (exactClientMatch) {
                 candidateCustomerData = exactClientMatch
