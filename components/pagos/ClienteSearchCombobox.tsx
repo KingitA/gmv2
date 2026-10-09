@@ -11,7 +11,12 @@ interface Cliente {
   razon_social: string | null
   cuit: string | null
   codigo_cliente: string | null
+  direccion?: string | null
+  localidad?: string | null
 }
+
+// "SARMIENTO 111 - CARMEN DE PATAGONES" (igual que el buscador de la Caja)
+const ubicacion = (c: Cliente) => [c.direccion, c.localidad].filter(x => x && String(x).trim()).join(" - ")
 
 interface Props {
   onSelect: (cliente: Cliente | null) => void
@@ -59,6 +64,7 @@ export function ClienteSearchCombobox({ onSelect, value }: Props) {
       <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
         <div className="flex-1">
           <p className="font-semibold text-sm">{value.razon_social || value.nombre}</p>
+          {ubicacion(value) && <p className="text-xs text-foreground/80">{ubicacion(value)}</p>}
           <p className="text-xs text-muted-foreground">CUIT: {value.cuit || "—"} {value.codigo_cliente ? `· Cód: ${value.codigo_cliente}` : ""}</p>
         </div>
         <button onClick={() => onSelect(null)} className="text-muted-foreground hover:text-foreground">
@@ -98,6 +104,7 @@ export function ClienteSearchCombobox({ onSelect, value }: Props) {
               onClick={() => { onSelect(c); setQuery(""); setOpen(false) }}
             >
               <p className="font-medium text-sm">{c.razon_social || c.nombre}</p>
+              {ubicacion(c) && <p className="text-xs text-foreground/80">{ubicacion(c)}</p>}
               <p className="text-xs text-muted-foreground">CUIT: {c.cuit || "—"} {c.codigo_cliente ? `· Cód: ${c.codigo_cliente}` : ""}</p>
             </button>
           ))}
