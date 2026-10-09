@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { localMatch } from "@/lib/search/local-match"
 
 // GET /api/vendedor/pedidos?q=&estado=&cliente=
 // Pedidos de los clientes de los vendedores del usuario.
@@ -32,12 +33,7 @@ export async function GET(request: Request) {
 
     let resultado = pedidos || []
     if (q) {
-      const term = q.toLowerCase()
-      resultado = resultado.filter(
-        (p: any) =>
-          p.clientes?.nombre?.toLowerCase().includes(term) ||
-          p.numero_pedido?.toLowerCase().includes(term)
-      )
+      resultado = resultado.filter((p: any) => localMatch(q, p.clientes?.nombre, p.numero_pedido))
     }
 
     return NextResponse.json({ pedidos: resultado })

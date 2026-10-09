@@ -15,7 +15,6 @@ import {
     ArrowLeft, Plus, Calendar, AlertTriangle, CheckCircle2,
     Clock, XCircle, Filter, DollarSign
 } from "lucide-react"
-import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CalendarioPagos } from "@/components/finanzas/calendario-pagos"
 import { FormVencimientoDialog } from "@/components/finanzas/form-vencimiento"

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -10,7 +10,6 @@ import { getPendingImports, approveImport, rejectImport } from "@/lib/actions/im
 import { Input } from "@/components/ui/input"
 import { searchClientes } from "@/lib/actions/clientes"
 import { searchProductos } from "@/lib/actions/productos"
-import { localMatch } from "@/lib/search/local-match"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { createClient } from "@/lib/supabase/client"
@@ -131,22 +130,32 @@ export default function ImportReviewPage() {
     setItems(transformed)
     setClienteId(imp.meta?.cliente_id || "")
     setSelectedClienteName(imp.meta?.cliente_nombre || "")
+    clearTimeout(cliTimer.current); cliSeq.current++
     setClienteSearchTerm(imp.meta?.cliente_nombre || "")
     loadCondProvForCliente(imp.meta?.cliente_id || "")
   }
 
   // ── Client search ──
-  const handleClienteSearch = async (term: string) => {
+  // Debounce de 300 ms; el número de secuencia descarta respuestas viejas
+  const cliTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const cliSeq = useRef(0)
+  const handleClienteSearch = (term: string) => {
     setClienteSearchTerm(term)
     setSelectedClienteName(term)
     setClienteId("") // Clear confirmed ID when typing
+    clearTimeout(cliTimer.current)
+    const seq = ++cliSeq.current
     if (term.length < 2) { setClienteSearchOpen(false); return }
-    const res = await searchClientes(term)
-    setClientesEncontrados(res || [])
-    setClienteSearchOpen(true)
+    cliTimer.current = setTimeout(async () => {
+      const res = await searchClientes(term)
+      if (seq !== cliSeq.current) return
+      setClientesEncontrados(res || [])
+      setClienteSearchOpen(true)
+    }, 300)
   }
 
   const handleSelectCliente = (c: any) => {
+    clearTimeout(cliTimer.current); cliSeq.current++
     setClienteId(c.id)
     const name = c.nombre_razon_social || c.razon_social || c.nombre || ""
     setSelectedClienteName(name)
@@ -178,18 +187,27 @@ export default function ImportReviewPage() {
     setItemSearch(prev => ({ ...prev, [idx]: { ...prev[idx], open: false } }))
   }
 
-  const handleItemSearchChange = useCallback(async (idx: number, term: string) => {
+  // Por renglón: debounce de 300 ms + secuencia para descartar respuestas viejas
+  const itemTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
+  const itemSeq = useRef<Record<number, number>>({})
+  const handleItemSearchChange = useCallback((idx: number, term: string) => {
     setItemSearch(prev => ({ ...prev, [idx]: { ...prev[idx], term, open: true, loading: true } }))
+    clearTimeout(itemTimers.current[idx])
+    const seq = (itemSeq.current[idx] = (itemSeq.current[idx] || 0) + 1)
     if (term.length < 2) {
       setItemSearch(prev => ({ ...prev, [idx]: { ...prev[idx], results: [], loading: false } }))
       return
     }
-    try {
-      const res = await searchProductos(term)
-      setItemSearch(prev => ({ ...prev, [idx]: { ...prev[idx], results: res || [], loading: false } }))
-    } catch {
-      setItemSearch(prev => ({ ...prev, [idx]: { ...prev[idx], loading: false } }))
-    }
+    itemTimers.current[idx] = setTimeout(async () => {
+      try {
+        const res = await searchProductos(term)
+        if (seq !== itemSeq.current[idx]) return
+        setItemSearch(prev => ({ ...prev, [idx]: { ...prev[idx], results: res || [], loading: false } }))
+      } catch {
+        if (seq !== itemSeq.current[idx]) return
+        setItemSearch(prev => ({ ...prev, [idx]: { ...prev[idx], loading: false } }))
+      }
+    }, 300)
   }, [])
 
   const handleAssignProduct = (idx: number, product: any) => {

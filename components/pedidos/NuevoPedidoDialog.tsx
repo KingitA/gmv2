@@ -52,21 +52,33 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
     })
   }, [])
 
-  const handleSearch = useCallback(async (term: string) => {
+  // Debounce de 300 ms; el número de secuencia descarta respuestas viejas
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const searchSeq = useRef(0)
+  const cancelarBusqueda = () => { clearTimeout(searchTimer.current); searchSeq.current++ }
+
+  const handleSearch = useCallback((term: string) => {
     setQuery(term)
+    clearTimeout(searchTimer.current)
+    const seq = ++searchSeq.current
     if (term.length < 2) { setShowDrop(false); return }
-    const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(term)}`).then(r => r.json())
-    setResults(res)
-    setShowDrop(true)
+    searchTimer.current = setTimeout(async () => {
+      const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(term)}`).then(r => r.json()).catch(() => [])
+      if (seq !== searchSeq.current) return
+      setResults(res)
+      setShowDrop(true)
+    }, 300)
   }, [])
 
   const selectCliente = (c: any) => {
+    cancelarBusqueda()
     setCliente(c)
     setQuery(c.nombre_razon_social || c.razon_social || "")
     setShowDrop(false)
   }
 
   const reset = () => {
+    cancelarBusqueda()
     setFiles([])
     setCliente(null)
     setQuery("")

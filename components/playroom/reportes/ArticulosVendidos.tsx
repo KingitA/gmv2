@@ -8,6 +8,7 @@ import DataTable from '@/components/playroom/DataTable'
 import PlayroomFilters, { defaultFilters } from '@/components/playroom/PlayroomFilters'
 import ComparativoBadge from '@/components/playroom/ComparativoBadge'
 import MultiSelect from '@/components/playroom/MultiSelect'
+import { localMatch } from '@/lib/search/local-match'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
 
@@ -317,10 +318,7 @@ export default function ArticulosVendidos() {
       if (rubroFiltro.length && !rubroFiltro.includes(r.rubro)) return false
       if (proveedorFiltro.length && !proveedorFiltro.includes(r.proveedor)) return false
       if (marcaFiltro.length && !marcaFiltro.includes(r.marca)) return false
-      if (searchText) {
-        const q = searchText.toLowerCase()
-        if (!r.descripcion.toLowerCase().includes(q) && !r.sku.toLowerCase().includes(q)) return false
-      }
+      if (searchText && !localMatch(searchText, r.descripcion, r.sku)) return false
       return true
     })
     if (sortBy === 'unidades') return [...base].sort((a, b) => b.unidades - a.unidades)

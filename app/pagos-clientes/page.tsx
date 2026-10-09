@@ -28,6 +28,7 @@ import { Label } from "@/components/ui/label"
 import { ClienteSearchCombobox } from "@/components/pagos/ClienteSearchCombobox"
 import { ComprobantesSelector, type Comprobante, type ModoPedidos, type ResumenCuenta } from "@/components/pagos/ComprobantesSelector"
 import { MARCA_CONTADO } from "@/lib/constants"
+import { localMatch } from "@/lib/search/local-match"
 import { MetodoPagoForm, type MetodoPago } from "@/components/pagos/MetodoPagoForm"
 import { DialogoFalta, DialogoSobra } from "@/components/pagos/DialogoDiferencia"
 import { RetencionForm, type Retencion } from "@/components/pagos/RetencionForm"
@@ -1076,10 +1077,7 @@ function PagosClientesContent() {
                         const enVendPend = new Set<string>(vendedoresPendU.flatMap((v: any) => v.pago_ids || []))
                         const hayFiltro = Boolean(filtroCliente || filtroDesde || filtroHasta)
                         const pasaFiltros = (p: PagoHistorial) => {
-                          if (filtroCliente) {
-                            const nombre = `${p.clientes?.nombre || ""} ${p.clientes?.razon_social || ""}`.toLowerCase()
-                            if (!nombre.includes(filtroCliente.toLowerCase())) return false
-                          }
+                          if (filtroCliente && !localMatch(filtroCliente, p.clientes?.nombre, p.clientes?.razon_social)) return false
                           const f = (p.fecha_pago || "").slice(0, 10)
                           if (filtroDesde && f < filtroDesde) return false
                           if (filtroHasta && f > filtroHasta) return false

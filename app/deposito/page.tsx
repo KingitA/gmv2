@@ -54,8 +54,9 @@ export default function DepositoPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
       setLoading(true)
-      const data = await buscarArticulosDeposito(query)
-      setResults(data as Articulo[])
+      // La action devuelve { data, error } (antes se usaba el objeto como si fuera la lista)
+      const res = await buscarArticulosDeposito(query)
+      setResults((res.data || []) as Articulo[])
       setLoading(false)
     }, 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
@@ -80,7 +81,7 @@ export default function DepositoPage() {
   const onScanCodigo = useCallback(async (code: string) => {
     setQuery(code)
     try {
-      const data = await buscarArticulosDeposito(code) as Articulo[]
+      const data = ((await buscarArticulosDeposito(code)).data || []) as Articulo[]
       if (data && data.length > 0) {
         scanOk(); setResults(data); openArticulo(data[0])
       } else {

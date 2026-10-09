@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } fro
 import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
 import { formatDateAR } from '@/lib/utils'
+import { localMatch } from '@/lib/search/local-match'
 import type { Column } from '@/components/playroom/DataTable'
 
 interface CCRow {
@@ -184,10 +185,7 @@ export default function CuentasCorrientes() {
   const summary = apiData?.summary ?? { total: 0, t0_30: 0, t31_60: 0, t61_90: 0, t90_mas: 0 }
 
   const filtered = useMemo(() => rows.filter(r => {
-    if (search) {
-      const q = search.toLowerCase()
-      if (!r.nombre.toLowerCase().includes(q) && !r.vendedor_nombre.toLowerCase().includes(q)) return false
-    }
+    if (search && !localMatch(search, r.nombre, r.vendedor_nombre)) return false
     if (moraMin > 0) {
       const mora = r.t31_60 + r.t61_90 + r.t90_mas
       if (moraMin === 30 && mora <= 0) return false

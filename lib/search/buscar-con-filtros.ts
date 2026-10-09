@@ -1,4 +1,5 @@
 import { hybridSearchIds } from "@/lib/search/hybrid"
+import { normalizeLocal } from "@/lib/search/local-match"
 
 /**
  * Búsqueda con filtros que COMPONE bien texto + filtros, sin el bug de "filtrar
@@ -48,9 +49,11 @@ export async function buscarConFiltros(opts: {
   if (!hayFiltro) return ranked
 
   // 2. Completitud literal DENTRO del filtro (garantiza no perder ninguno del subconjunto)
+  // search_text se guarda normalizado (minúsculas, sin acentos, solo letras y
+  // números): los tokens se normalizan igual o "jabón" no encuentra "jabon".
   let lq = aplicarFiltros(sb.from(table).select(select))
-  for (const tok of q.split(/\s+/).filter((t) => t.length >= 2)) {
-    lq = lq.ilike("search_text", `%${tok.replace(/[%_]/g, "")}%`)
+  for (const tok of normalizeLocal(q).split(" ").filter((t) => t.length >= 2)) {
+    lq = lq.ilike("search_text", `%${tok}%`)
   }
   const { data: lit } = await lq.limit(opts.literalLimit ?? 500)
 

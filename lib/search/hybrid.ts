@@ -13,14 +13,32 @@ const RPC: Record<SearchEntity, string> = {
     proveedores: "search_proveedores",
 }
 
+// v2 (migración 20261009_busquedas_v2.sql): ranking por CAMPO (nombre/dirección
+// pesan igual, localidad un poco menos, código y CUIT exactos arriba de todo),
+// fonética del castellano y coincidencia parcial. Si la función todavía no está
+// aplicada en la base, se usa la v1 sin romper nada.
+const RPC_V2: Partial<Record<SearchEntity, string>> = {
+    clientes: "search_clientes_v2",
+    proveedores: "search_proveedores_v2",
+}
+const v2NoDisponible = new Set<SearchEntity>()
+
 // Si la búsqueda léxica trae al menos esto, NO se llama al vector (instantáneo/gratis).
 // El vector (Gemini) solo complementa cuando lo léxico trae poco/nada.
 const FALLBACK_MIN = 4
 
 // Devuelve null si la RPC no está disponible (aún no aplicado el SQL) para poder
 // degradar a ilike sin regresión; [] significa "RPC OK pero sin resultados".
-async function lexicalIds(entity: SearchEntity, q: string, matchCount: number): Promise<string[] | null> {
+async function lexicalIds(entity: SearchEntity, q: string, matchCount: number, incluirInactivos = false): Promise<string[] | null> {
     const supabase = createAdminClient()
+    const v2 = RPC_V2[entity]
+    if (v2 && !v2NoDisponible.has(entity)) {
+        const r = await supabase.rpc(v2, { q, match_count: matchCount, incluir_inactivos: incluirInactivos })
+        if (!r.error) return (r.data || []).map((x: any) => x.id as string)
+        // PGRST202 = la función no existe (migración sin aplicar): no reintentar en esta instancia
+        if (r.error.code === "PGRST202" || /could not find the function/i.test(r.error.message)) v2NoDisponible.add(entity)
+        console.error(`[search] RPC ${v2} error, uso v1:`, r.error.message)
+    }
     const { data, error } = await supabase.rpc(RPC[entity], { q, match_count: matchCount })
     if (error) {
         console.error(`[search] RPC ${RPC[entity]} error:`, error.message)
@@ -59,13 +77,13 @@ async function substringMatchIds(entity: SearchEntity, q: string, ids: string[])
 // RPC todavía no fue aplicada en la base. Garantiza que nunca haya regresión.
 async function ilikeFallbackIds(entity: SearchEntity, q: string, matchCount: number): Promise<string[]> {
     const supabase = createAdminClient()
-    const like = `%${q}%`
+    const like = `%${sanitizarOr(q)}%`
     if (entity === "clientes") {
         const { data } = await supabase
             .from("clientes")
             .select("id")
             .eq("activo", true)
-            .or(`nombre.ilike.${like},razon_social.ilike.${like},nombre_razon_social.ilike.${like},direccion.ilike.${like},localidad.ilike.${like},cuit.ilike.${like}`)
+            .or(`nombre.ilike.${like},razon_social.ilike.${like},nombre_razon_social.ilike.${like},direccion.ilike.${like},localidad.ilike.${like},cuit.ilike.${like},codigo_cliente.ilike.${like}`)
             .limit(matchCount)
         return (data || []).map((r: any) => r.id)
     }
@@ -86,6 +104,20 @@ async function ilikeFallbackIds(entity: SearchEntity, q: string, matchCount: num
         .or(`descripcion.ilike.${like},sku.ilike.${like}`)
         .limit(matchCount)
     return (data || []).map((r: any) => r.id)
+}
+
+// Texto seguro para meter dentro de un .or() de PostgREST: la coma, los
+// paréntesis y el % rompen o alteran el filtro.
+export function sanitizarOr(q: string): string {
+    return q.replace(/[,()%*\\]/g, " ").replace(/\s+/g, " ").trim()
+}
+
+// El vector no sabe de altas y bajas: se descartan los inactivos.
+async function soloActivos(entity: SearchEntity, ids: string[]): Promise<string[]> {
+    if (!ids.length) return ids
+    const { data } = await createAdminClient().from(entity).select("id").in("id", ids).eq("activo", true)
+    const ok = new Set((data || []).map((r: any) => r.id))
+    return ids.filter((id) => ok.has(id))
 }
 
 async function vectorIds(entity: SearchEntity, q: string, matchCount: number): Promise<string[]> {
@@ -146,13 +178,47 @@ async function codigoIds(q: string, matchCount: number): Promise<string[]> {
     return out
 }
 
+export interface ResultadoBusqueda {
+    ids: string[]
+    /** Ids que vinieron SOLO por parecido (vector), no porque contengan lo escrito. */
+    parecidos: Set<string>
+}
+
+/**
+ * Clientes y proveedores: lo ESCRITO manda. Si la búsqueda por texto (v2, con
+ * fonética y tolerancia a errores) encontró algo, se devuelve solo eso, en su
+ * orden. El vector (Gemini) entra únicamente cuando el texto no encontró NADA,
+ * y sus resultados se marcan como "parecidos". Antes el vector completaba cuando
+ * había menos de 4 y metía ~16 clientes sin relación (buscar "urquiza" traía
+ * Casa Novick), además de sumar ~1 s por la llamada a Gemini.
+ * Artículos mantienen la política original (el vector ayuda con sinónimos).
+ */
+export async function buscarEntidad(
+    entity: SearchEntity,
+    q: string,
+    opts: { limit?: number; incluirInactivos?: boolean } = {},
+): Promise<ResultadoBusqueda> {
+    const limit = opts.limit ?? 30
+    if (entity === "articulos") return { ids: await hybridSearchIds(entity, q, limit), parecidos: new Set() }
+
+    const lex = await lexicalIds(entity, q, limit, !!opts.incluirInactivos)
+    if (lex === null) return { ids: await ilikeFallbackIds(entity, q, limit), parecidos: new Set() }
+    if (lex.length > 0 || q.trim().length < 3) return { ids: lex, parecidos: new Set() }
+
+    let vec = await vectorIds(entity, q, limit)
+    if (!opts.incluirInactivos) vec = await soloActivos(entity, vec)
+    return { ids: vec, parecidos: new Set(vec) }
+}
+
 /**
  * Búsqueda híbrida: léxica (trigram, Postgres) primaria; vector (Gemini) como
  * complemento solo cuando lo léxico trae menos de FALLBACK_MIN resultados.
  * Para artículos, una consulta numérica resuelve primero por código exacto/prefijo.
  * Devuelve ids ordenados por relevancia. El caller hidrata las columnas que necesita.
+ * Clientes y proveedores delegan en buscarEntidad (política "lo escrito manda").
  */
 export async function hybridSearchIds(entity: SearchEntity, q: string, matchCount = 30): Promise<string[]> {
+    if (entity !== "articulos") return (await buscarEntidad(entity, q, { limit: matchCount })).ids
     // Códigos: exacto > prefijo > difuso. La coincidencia exacta SIEMPRE primera.
     const porCodigo = entity === "articulos" && esCodigo(q) ? await codigoIds(q, matchCount) : []
 

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { esUuid } from "@/lib/mobile/uuid"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
+import { sanitizarOr } from "@/lib/search/hybrid"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -26,8 +27,12 @@ export async function GET(request: Request) {
       .order("nombre")
 
     // Mismos campos que el buscador del ERP/importador: un cliente se encuentra
-    // también por su dirección ("belgrano" → el de calle Belgrano), código o localidad
-    if (q) query = query.or(`nombre.ilike.%${q}%,razon_social.ilike.%${q}%,cuit.ilike.%${q}%,codigo_cliente.ilike.%${q}%,direccion.ilike.%${q}%,localidad.ilike.%${q}%`)
+    // también por su dirección ("belgrano" → el de calle Belgrano), código o localidad.
+    // Varias palabras: cada una tiene que aparecer en algún campo (un .or() por
+    // palabra; PostgREST hace AND entre .or() sucesivos).
+    for (const tok of sanitizarOr(q).split(" ").filter(Boolean)) {
+      query = query.or(`nombre.ilike.%${tok}%,razon_social.ilike.%${tok}%,cuit.ilike.%${tok}%,codigo_cliente.ilike.%${tok}%,direccion.ilike.%${tok}%,localidad.ilike.%${tok}%`)
+    }
     if (localidad) query = query.eq("localidad", localidad)
 
     const { data: clientes, error } = await query

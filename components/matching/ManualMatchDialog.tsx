@@ -46,7 +46,9 @@ export function ManualMatchDialog({ open, onOpenChange, onSelect, itemName, prov
         console.log("Searching for:", cleanQuery);
 
         // 1. Search in Provider Links (if providerId exists) - Highest Priority
-        if (providerId && providerId !== 'undefined') {
+        // Comas, paréntesis y % rompen el filtro .or() de PostgREST
+        const orQuery = cleanQuery.replace(/[,()%*\\]/g, " ").replace(/\s+/g, " ").trim();
+        if (providerId && providerId !== 'undefined' && orQuery) {
             const { data: linkData, error: linkError } = await supabase
                 .from('articulos_proveedores')
                 .select(`
@@ -55,7 +57,7 @@ export function ManualMatchDialog({ open, onOpenChange, onSelect, itemName, prov
                     articulos (id, descripcion, sku, ean13)
                 `)
                 .eq('proveedor_id', providerId)
-                .or(`codigo_proveedor.ilike.%${cleanQuery}%,descripcion_proveedor.ilike.%${cleanQuery}%`) // Removed space
+                .or(`codigo_proveedor.ilike.%${orQuery}%,descripcion_proveedor.ilike.%${orQuery}%`) // Removed space
                 .limit(5);
 
             if (linkError) {

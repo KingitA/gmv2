@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -14,14 +14,6 @@ import { createPedido } from "@/lib/actions/pedidos"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
-import {
-    Command,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
-} from "@/components/ui/command"
 import {
     Popover,
     PopoverContent,
@@ -51,14 +43,22 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
     const [clientesEncontrados, setClientesEncontrados] = useState<any[]>([])
     const [selectedClienteName, setSelectedClienteName] = useState("")
 
-    const handleSearchClientes = async (term: string) => {
+    // Debounce de 300 ms; el número de secuencia descarta respuestas viejas
+    const cliTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+    const cliSeq = useRef(0)
+    const handleSearchClientes = (term: string) => {
+        clearTimeout(cliTimer.current)
+        const seq = ++cliSeq.current
         if (term.length < 2) return
-        try {
-            const res = await searchClientes(term)
-            setClientesEncontrados(res || [])
-        } catch (error) {
-            console.error(error)
-        }
+        cliTimer.current = setTimeout(async () => {
+            try {
+                const res = await searchClientes(term)
+                if (seq !== cliSeq.current) return
+                setClientesEncontrados(res || [])
+            } catch (error) {
+                console.error(error)
+            }
+        }, 300)
     }
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,13 +139,22 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
     const [productSearchQuery, setProductSearchQuery] = useState("")
     const [productsFound, setProductsFound] = useState<any[]>([])
 
-    const handleSearchProducts = async (term: string) => {
-        const { searchProductos } = await import("@/lib/actions/productos")
-        const results = await searchProductos(term)
-        setProductsFound(results || [])
+    const prodTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+    const prodSeq = useRef(0)
+    const cancelarBusquedaProductos = () => { clearTimeout(prodTimer.current); prodSeq.current++ }
+    const handleSearchProducts = (term: string) => {
+        cancelarBusquedaProductos()
+        const seq = prodSeq.current
+        prodTimer.current = setTimeout(async () => {
+            const { searchProductos } = await import("@/lib/actions/productos")
+            const results = await searchProductos(term)
+            if (seq !== prodSeq.current) return
+            setProductsFound(results || [])
+        }, 300)
     }
 
     const updateItemProduct = (idx: number, product: any) => {
+        cancelarBusquedaProductos()
         const newItems = [...items]
         newItems[idx] = {
             ...newItems[idx],
@@ -318,6 +327,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                                                         key={c.id}
                                                         className="px-3 py-2 hover:bg-muted cursor-pointer text-sm flex items-center justify-between"
                                                         onClick={() => {
+                                                            clearTimeout(cliTimer.current); cliSeq.current++
                                                             setClienteId(c.id)
                                                             setSelectedClienteName(c.razon_social)
                                                             setClienteSearchOpen(false)
@@ -364,6 +374,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                                                                     if (e.target.value.length >= 2) {
                                                                         handleSearchProducts(e.target.value)
                                                                     } else {
+                                                                        cancelarBusquedaProductos()
                                                                         setProductsFound([])
                                                                     }
                                                                 }}

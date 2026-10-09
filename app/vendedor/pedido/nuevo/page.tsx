@@ -1826,12 +1826,7 @@ function NuevoPedidoInner() {
             ) : (
               <div className="grid grid-cols-2 gap-2.5">
                 {proveedores
-                  .filter(
-                    (p) =>
-                      !qProv.trim() ||
-                      p.nombre.toLowerCase().includes(qProv.toLowerCase()) ||
-                      (p.sigla || "").toLowerCase().includes(qProv.toLowerCase())
-                  )
+                  .filter((p) => !qProv.trim() || localMatch(qProv, p.nombre, p.sigla))
                   .map((p) => (
                     <button
                       key={p.id}

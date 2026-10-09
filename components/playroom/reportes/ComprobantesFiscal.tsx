@@ -5,6 +5,7 @@ import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
 import PlayroomFilters, { defaultFilters } from '@/components/playroom/PlayroomFilters'
 import { exportLibroIVACSV, exportLibroIVATXTFormatted } from '@/lib/playroom/exporters'
+import { localMatch } from '@/lib/search/local-match'
 import type { FiscalARCARow } from '@/lib/playroom/exporters'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
@@ -296,10 +297,7 @@ export default function ComprobantesFiscal() {
   const filtered = useMemo(() => {
     let r = rows
     if (tipoFiltro !== 'Todos') r = r.filter(x => x.tipo_comprobante === tipoFiltro)
-    if (searchText) {
-      const q = searchText.toLowerCase()
-      r = r.filter(x => x.cliente_nombre.toLowerCase().includes(q) || x.cuit.includes(q) || x.numero_comprobante.includes(q))
-    }
+    if (searchText) r = r.filter(x => localMatch(searchText, x.cliente_nombre, x.cuit, x.numero_comprobante))
     return r
   }, [rows, tipoFiltro, searchText])
 

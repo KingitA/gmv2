@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react"
 import { useDentroDeModal } from "@/lib/hooks/use-dentro-de-modal"
+import { useDebounced } from "@/lib/hooks/use-debounced"
 import { createClient } from "@/lib/supabase/client"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -146,11 +147,19 @@ function ElegirArticulos({ elegidos, onChange }: { elegidos: ArticuloElegido[]; 
   const [res, setRes] = useState<any[]>([])
   const cajaRef = useRef<HTMLDivElement>(null)
   const enModal = useDentroDeModal(cajaRef, res.length > 0)
-  const buscar = useCallback(async (t: string) => {
+  const qDeb = useDebounced(q, 300)
+  useEffect(() => {
+    if (qDeb.trim().length < 2) { setRes([]); return }
+    let vivo = true // descarta respuestas de búsquedas viejas
+    import("@/lib/actions/productos")
+      .then(({ searchProductos }) => searchProductos(qDeb))
+      .then((r) => { if (vivo) setRes(r || []) })
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [qDeb])
+  const buscar = useCallback((t: string) => {
     setQ(t)
-    if (t.trim().length < 2) { setRes([]); return }
-    const { searchProductos } = await import("@/lib/actions/productos")
-    setRes((await searchProductos(t)) || [])
+    if (t.trim().length < 2) setRes([])
   }, [])
   return (
     <div className="space-y-1.5">

@@ -9,7 +9,6 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { Plus, CheckCircle2, AlertTriangle, Landmark, HandCoins, Loader2, Pencil, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react"

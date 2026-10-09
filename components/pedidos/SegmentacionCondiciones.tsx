@@ -11,6 +11,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { localMatch } from "@/lib/search/local-match"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Trash2 } from "lucide-react"
@@ -154,7 +155,7 @@ function Seccion({
 
   const disponibles = opciones
     .filter(o => !rows.some(r => r.ref_id === o.id))
-    .filter(o => !search || o.nombre.toLowerCase().includes(search.toLowerCase()))
+    .filter(o => !search || localMatch(search, o.nombre))
     .slice(0, 40)
 
   return (

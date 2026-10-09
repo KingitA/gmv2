@@ -2,16 +2,19 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet"
-import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, X, ExternalLink } from "lucide-react"
+import { Plus, Pencil, Trash2, FileText, Search, X, ExternalLink, ArrowUp, ArrowDown } from "lucide-react"
+import { FiltroColumnaMenu, ChipsFiltros, textoChip } from "@/components/search/filtro-columna"
+import { aplicarFiltros, calcularFacetas, ordenarPor, filtroActivo, type DefColumna, type FiltroColumna, type Filtros } from "@/lib/search/facetas"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { normalizeLocal } from "@/lib/search/local-match"
 import { formatDateAR } from "@/lib/utils"
 import { ImportClientesDialog, clientesFieldLabel } from "@/components/clientes/ImportClientesDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
@@ -22,7 +25,13 @@ import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 interface Cliente {
   id: string
   codigo_cliente?: string | null
+  /** Cómo lo conocemos (nombre de fantasía) */
+  nombre: string | null
+  /** A quién se le factura */
+  razon_social: string | null
   nombre_razon_social: string
+  localidad: string | null
+  lista_precio_id?: string | null
   direccion: string | null
   cuit: string | null
   condicion_iva: string
@@ -44,6 +53,18 @@ interface Cliente {
   activo: boolean
   condicion_entrega: string | null
   localidades?: { nombre: string; zonas?: { nombre: string } }
+}
+
+const CLAVE_GUARDADO = "clientes:lista"
+function leerGuardado(): { q?: string; filtros?: Filtros; orden?: { col: string; dir: "asc" | "desc" }; estado?: "activos" | "inactivos" | "todos" } {
+  try { return JSON.parse(sessionStorage.getItem(CLAVE_GUARDADO) || "{}") || {} } catch { return {} }
+}
+const ENTREGA: Record<string, string> = { entregamos_nosotros: "Entregamos nosotros", retira_mostrador: "Retira en mostrador", transporte: "Transporte" }
+const FACETAS_CLIENTES = ["localidad", "zona", "viajante", "nivel", "iva", "pago", "facturacion", "lista", "canal", "entrega"]
+const TITULOS: Record<string, string> = {
+  codigo: "Código", nombre: "Nombre", direccion: "Dirección", localidad: "Localidad", zona: "Zona", viajante: "Viajante",
+  puntaje: "Puntaje", nivel: "Nivel", iva: "Condición IVA", pago: "Condición de pago", facturacion: "Facturación",
+  lista: "Lista de precios", canal: "Canal", entrega: "Entrega",
 }
 
 interface Vendedor {
@@ -70,10 +91,16 @@ export default function ClientesPage() {
   const [sheetPedidos, setSheetPedidos] = useState<any[]>([])
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isHistorialOpen, setIsHistorialOpen] = useState(false)
+  // Búsqueda, filtros, orden y estado: se recuerdan al volver de una ficha (sessionStorage)
   const [searchTerm, setSearchTerm] = useState("")
-  // Motor de búsqueda unificado: el endpoint decide qué matchea (ids), filtramos
-  // el array ya cargado por esos ids (no cambia la forma de la tabla).
-  const [searchIds, setSearchIds] = useState<Set<string> | null>(null)
+  const [filtros, setFiltros] = useState<Filtros>({})
+  const [orden, setOrden] = useState<{ col: string; dir: "asc" | "desc" } | null>(null)
+  const [estado, setEstado] = useState<"activos" | "inactivos" | "todos">("activos")
+  const [restaurado, setRestaurado] = useState(false)
+  // Motor de búsqueda unificado: el endpoint devuelve los ids EN ORDEN de relevancia
+  // (se respeta ese orden en la tabla) y marca los que vinieron solo por parecido.
+  const [busqueda, setBusqueda] = useState<{ ids: string[]; parecidos: Set<string> } | null>(null)
+  const [buscando, setBuscando] = useState(false)
   // Hasta que llega la primera lectura se muestra "trabajando" (antes decía
   // "No hay clientes registrados" unos segundos y confundía).
   const [cargandoClientes, setCargandoClientes] = useState(true)
@@ -88,32 +115,49 @@ export default function ClientesPage() {
   // En vivo: altas/cambios de clientes hechos por otro usuario o por la app del vendedor
   useRealtime(["clientes"], () => loadClientes(), { esperaMs: 1500 })
 
-  // Búsqueda vía motor unificado (trigram + vector). Devuelve ids; filtramos local.
+  // Búsqueda vía motor unificado (ranking por campo en la base). Incluye dados de
+  // baja: el selector Activos / Inactivos / Todos decide qué se ve.
   useEffect(() => {
     const q = searchTerm.trim()
-    if (q.length < 2) { setSearchIds(null); return }
+    if (q.length < 2) { setBusqueda(null); setBuscando(false); return }
     const ctrl = new AbortController()
+    setBuscando(true)
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(q)}`, { signal: ctrl.signal })
+        const res = await fetch(`/api/clientes/buscar?q=${encodeURIComponent(q)}&limit=300&inactivos=1`, { signal: ctrl.signal })
         const data = await res.json()
-        setSearchIds(new Set((Array.isArray(data) ? data : []).map((c: any) => c.id)))
+        const lista = Array.isArray(data) ? data : []
+        setBusqueda({ ids: lista.map((c: any) => c.id), parecidos: new Set(lista.filter((c: any) => c._parecido).map((c: any) => c.id)) })
+        setBuscando(false)
       } catch (e: any) {
-        if (e?.name !== "AbortError") setSearchIds(new Set())
+        if (e?.name !== "AbortError") { setBusqueda({ ids: [], parecidos: new Set() }); setBuscando(false) }
       }
     }, 250)
     return () => { clearTimeout(timer); ctrl.abort() }
   }, [searchTerm])
 
+  useEffect(() => {
+    const g = leerGuardado()
+    if (g.q) setSearchTerm(g.q)
+    if (g.filtros) setFiltros(g.filtros)
+    if (g.orden) setOrden(g.orden)
+    if (g.estado) setEstado(g.estado)
+    setRestaurado(true)
+  }, [])
+  useEffect(() => {
+    if (!restaurado) return
+    try { sessionStorage.setItem(CLAVE_GUARDADO, JSON.stringify({ q: searchTerm, filtros, orden, estado })) } catch { /* sin storage */ }
+  }, [restaurado, searchTerm, filtros, orden, estado])
+
   async function loadClientes() {
     const supabase = createClient()
-    // Paginado interno para no cortar en 1000 (el padrón crece).
+    // Paginado interno para no cortar en 1000 (el padrón crece). Trae también los
+    // dados de baja: el selector de estado los muestra a pedido.
     let data: any[]
     try {
       data = await fetchAllRows(() => supabase
         .from("clientes")
         .select("*, localidades(nombre, zonas(nombre))")
-        .eq("activo", true)
         .order("nombre_razon_social"), "id")
     } catch (error) {
       console.error("[v0] Error loading clientes:", error)
@@ -188,9 +232,75 @@ export default function ClientesPage() {
     setSheetPedidos(pedidosRes.data || [])
   }
 
-  const filteredClientes = searchIds === null
-    ? clientes
-    : clientes.filter((cliente) => searchIds.has(cliente.id))
+  // ── Filtros por encabezado (tipo Excel), todo en memoria: el padrón entero ya está cargado ──
+  const nombreVendedor = useMemo(() => new Map(vendedores.map((v) => [v.id, v.nombre])), [vendedores])
+  const nombreLista = useMemo(() => new Map(listasPrecio.map((l: any) => [l.id, l.nombre])), [listasPrecio])
+  const defs = useMemo<DefColumna<Cliente>[]>(() => [
+    { id: "codigo", valor: (c) => c.codigo_cliente, numero: (c) => (c.codigo_cliente && /^\d+$/.test(c.codigo_cliente) ? Number(c.codigo_cliente) : null) },
+    { id: "nombre", valor: (c) => c.nombre || c.nombre_razon_social },
+    { id: "direccion", valor: (c) => c.direccion },
+    { id: "localidad", valor: (c) => c.localidades?.nombre || c.localidad },
+    { id: "zona", valor: (c) => c.localidades?.zonas?.nombre },
+    { id: "viajante", valor: (c) => (c.vendedor_id ? nombreVendedor.get(c.vendedor_id) ?? "(viajante dado de baja)" : null) },
+    { id: "puntaje", numero: (c) => Number(c.puntaje) },
+    { id: "nivel", valor: (c) => c.nivel_puntaje },
+    { id: "iva", valor: (c) => c.condicion_iva },
+    { id: "pago", valor: (c) => c.condicion_pago },
+    { id: "facturacion", valor: (c) => c.metodo_facturacion },
+    { id: "lista", valor: (c) => (c.lista_precio_id ? nombreLista.get(c.lista_precio_id) ?? "(lista dada de baja)" : null) },
+    { id: "canal", valor: (c) => c.tipo_canal },
+    { id: "entrega", valor: (c) => ENTREGA[c.condicion_entrega ?? ""] ?? c.condicion_entrega },
+  ], [nombreVendedor, nombreLista])
+
+  // 1) estado  2) búsqueda (en orden de relevancia)  3) filtros  4) orden elegido
+  const universo = useMemo(() => {
+    let rows = estado === "todos" ? clientes : clientes.filter((c) => (estado === "activos" ? c.activo : !c.activo))
+    if (busqueda) {
+      const pos = new Map(busqueda.ids.map((id, i) => [id, i]))
+      rows = rows.filter((c) => pos.has(c.id)).sort((a, b) => pos.get(a.id)! - pos.get(b.id)!)
+    }
+    return rows
+  }, [clientes, estado, busqueda])
+  const facetas = useMemo(() => calcularFacetas(universo, defs, filtros, FACETAS_CLIENTES), [universo, defs, filtros])
+  const filteredClientes = useMemo(() => {
+    const rows = aplicarFiltros(universo, defs, filtros)
+    const def = orden ? defs.find((d) => d.id === orden.col) : null
+    return def ? ordenarPor(rows, def, orden!.dir) : rows
+  }, [universo, defs, filtros, orden])
+
+  const setFiltro = (id: string, f: FiltroColumna | null) =>
+    setFiltros((p) => { const n = { ...p }; if (f) n[id] = f; else delete n[id]; return n })
+  const alternarOrden = (col: string) =>
+    setOrden((o) => (o?.col === col ? (o.dir === "asc" ? { col, dir: "desc" } : null) : { col, dir: "asc" }))
+  const menu = (id: string, titulo: string, tipo: "valores" | "numero" = "valores", boton?: string) => (
+    <FiltroColumnaMenu
+      titulo={titulo}
+      tipo={tipo}
+      boton={boton}
+      opciones={facetas[id]}
+      filtro={filtros[id]}
+      onFiltro={(f) => setFiltro(id, f)}
+      orden={boton ? undefined : orden?.col === id ? orden.dir : null}
+      onOrden={boton ? undefined : (dir) => setOrden({ col: id, dir })}
+    />
+  )
+  // Encabezado: click en el texto ordena (A→Z, Z→A, sin orden); el embudo abre el filtro
+  const encabezado = (id: string, titulo: string, tipo?: "valores" | "numero" | null) => (
+    <TableHead className="font-semibold">
+      <div className="flex items-center gap-1">
+        <button type="button" onClick={() => alternarOrden(id)} className="inline-flex items-center gap-1 hover:text-foreground">
+          {titulo}
+          {orden?.col === id ? (orden.dir === "asc" ? <ArrowUp className="h-3 w-3 text-indigo-600" /> : <ArrowDown className="h-3 w-3 text-indigo-600" />) : null}
+        </button>
+        {tipo ? menu(id, titulo, tipo) : null}
+      </div>
+    </TableHead>
+  )
+  const chips = Object.entries(filtros)
+    .filter(([, f]) => filtroActivo(f))
+    .map(([id, f]) => ({ id, texto: textoChip(TITULOS[id] ?? id, f, facetas[id]) }))
+  const hayAlgo = chips.length > 0 || searchTerm.trim() !== "" || estado !== "activos" || orden !== null
+  const limpiarTodo = () => { setFiltros({}); setSearchTerm(""); setEstado("activos"); setOrden(null) }
 
 
   return (
@@ -207,19 +317,29 @@ export default function ClientesPage() {
               <div>
                 <CardTitle className="text-xl">Lista de Clientes</CardTitle>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {filteredClientes.length} cliente{filteredClientes.length !== 1 ? "s" : ""} registrado
-                  {filteredClientes.length !== 1 ? "s" : ""}
+                  {buscando ? "Buscando…" : (
+                    <>
+                      {filteredClientes.length} cliente{filteredClientes.length !== 1 ? "s" : ""}
+                      {hayAlgo && clientes.length > 0 && <> de {clientes.filter((c) => c.activo).length} activos</>}
+                    </>
+                  )}
                 </p>
               </div>
               <div className="flex gap-2">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Buscar cliente..."
+                    placeholder="Nombre, dirección, localidad, código, CUIT…"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 w-64"
+                    className="pl-10 pr-8 w-80"
                   />
+                  {searchTerm && (
+                    <button type="button" onClick={() => setSearchTerm("")} aria-label="Borrar búsqueda"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
                 <Button variant="outline" className="gap-2" onClick={() => setIsImportDialogOpen(true)}>
                   <FileText className="h-4 w-4" />
@@ -254,43 +374,84 @@ export default function ClientesPage() {
             </div>
           </CardHeader>
           <CardContent className="p-6">
+            {/* Estado + filtros que no son columnas + filtros activos */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <div className="inline-flex overflow-hidden rounded-md border text-xs font-medium">
+                {(["activos", "inactivos", "todos"] as const).map((e) => (
+                  <button key={e} type="button" onClick={() => setEstado(e)}
+                    className={`px-3 py-1.5 capitalize transition-colors ${estado === e ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                    {e}
+                  </button>
+                ))}
+              </div>
+              {menu("iva", "Condición IVA", "valores", "Condición IVA")}
+              {menu("pago", "Condición de pago", "valores", "Pago")}
+              {menu("facturacion", "Facturación", "valores", "Facturación")}
+              {menu("lista", "Lista de precios", "valores", "Lista")}
+              {menu("canal", "Canal", "valores", "Canal")}
+              {menu("entrega", "Entrega", "valores", "Entrega")}
+              {hayAlgo && (
+                <button type="button" onClick={limpiarTodo} className="ml-auto text-xs font-semibold text-slate-500 hover:text-red-600">
+                  Limpiar todo
+                </button>
+              )}
+            </div>
+            {chips.length > 0 && (
+              <div className="mb-3">
+                <ChipsFiltros chips={chips} onQuitar={(id) => setFiltro(id, null)} onLimpiar={() => setFiltros({})} />
+              </div>
+            )}
             <div className="rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50">
-                    <TableHead className="font-semibold">Código</TableHead>
-                    <TableHead className="font-semibold">Nombre</TableHead>
-                    <TableHead className="font-semibold">Dirección</TableHead>
-                    <TableHead className="font-semibold">Localidad</TableHead>
-                    <TableHead className="font-semibold">Puntaje</TableHead>
-                    <TableHead className="font-semibold">Nivel</TableHead>
+                    {encabezado("codigo", "Código", "numero")}
+                    {encabezado("nombre", "Nombre")}
+                    {encabezado("direccion", "Dirección")}
+                    {encabezado("localidad", "Localidad", "valores")}
+                    {encabezado("zona", "Zona", "valores")}
+                    {encabezado("viajante", "Viajante", "valores")}
+                    {encabezado("puntaje", "Puntaje", "numero")}
+                    {encabezado("nivel", "Nivel", "valores")}
                     <TableHead className="font-semibold">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {cargandoClientes ? (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={9}>
                         <CargaProgreso compacto mensajes={MENSAJES.clientes} className="mx-auto max-w-sm py-8" />
                       </TableCell>
                     </TableRow>
                   ) : filteredClientes.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                        {searchTerm ? "No se encontraron clientes" : "No hay clientes registrados"}
+                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                        {buscando ? "Buscando…" : hayAlgo ? "No hay clientes con esa búsqueda o filtros" : "No hay clientes registrados"}
                       </TableCell>
                     </TableRow>
                   ) : (
                     filteredClientes.map((cliente) => (
                       <TableRow
                         key={cliente.id}
-                        className="hover:bg-muted/50 transition-colors cursor-pointer"
+                        className={`hover:bg-muted/50 transition-colors cursor-pointer ${cliente.activo ? "" : "opacity-60"}`}
                         onClick={() => openClienteSheet(cliente)}
                       >
-                        <TableCell className="font-medium">{cliente.codigo_cliente || "-"}</TableCell>
-                        <TableCell className="font-medium">{cliente.nombre_razon_social}</TableCell>
+                        <TableCell className="font-medium tabular-nums">{cliente.codigo_cliente || "-"}</TableCell>
+                        <TableCell>
+                          {/* Nombre = cómo lo conocemos; debajo la razón social si es otra */}
+                          <div className="font-medium">
+                            {cliente.nombre || cliente.nombre_razon_social}
+                            {!cliente.activo && <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">baja</span>}
+                            {busqueda?.parecidos.has(cliente.id) && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800" title="No contiene lo escrito; se parece">parecido</span>}
+                          </div>
+                          {cliente.razon_social && cliente.nombre && normalizeLocal(cliente.razon_social) !== normalizeLocal(cliente.nombre) && (
+                            <div className="text-xs text-muted-foreground">{cliente.razon_social}</div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-muted-foreground">{cliente.direccion || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground">{cliente.localidades?.nombre || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground">{cliente.localidades?.nombre || cliente.localidad || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground">{cliente.localidades?.zonas?.nombre || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground">{(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || "-"}</TableCell>
                         <TableCell>
                           <span className="font-semibold">{cliente.puntaje.toFixed(0)}</span>
                           <span className="text-muted-foreground text-sm">/100</span>

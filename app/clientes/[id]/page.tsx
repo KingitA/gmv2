@@ -92,6 +92,8 @@ export default function ClienteDetailPage() {
   const [savingSeg, setSavingSeg] = useState(false)
   const [formData, setFormData] = useState({
     codigo_cliente: "",
+    // nombre = cómo lo conocemos (nombre de fantasía); nombre_razon_social = a quién se factura
+    nombre: "",
     nombre_razon_social: "",
     direccion: "",
     cuit: "",
@@ -150,7 +152,8 @@ export default function ClienteDetailPage() {
       const c = clienteRes.data as any
       setFormData({
         codigo_cliente: c.codigo_cliente || "",
-        nombre_razon_social: c.nombre_razon_social || "",
+        nombre: c.nombre || "",
+        nombre_razon_social: c.nombre_razon_social || c.razon_social || "",
         direccion: c.direccion || "",
         cuit: c.cuit || "",
         condicion_iva: normalizeEnum(c.condicion_iva, IVA_MAP, "Consumidor Final"),
@@ -305,7 +308,9 @@ export default function ClienteDetailPage() {
     setSaving(true)
     const dataToSave = {
       ...formData,
-      nombre: formData.nombre_razon_social,
+      // Antes los dos campos se pisaban con la razón social y se perdía el nombre
+      // de fantasía que carga el vendedor ("Súper Eco 17"). Vacío = igual a la razón social.
+      nombre: formData.nombre.trim() || formData.nombre_razon_social,
       razon_social: formData.nombre_razon_social,
       vendedor_id: formData.vendedor_id && formData.vendedor_id !== "none" ? formData.vendedor_id : null,
       localidad_id: formData.localidad_id || null,
@@ -426,12 +431,15 @@ export default function ClienteDetailPage() {
             <Link href="/clientes" aria-label="Volver a clientes" className="grid size-9 place-items-center rounded-lg text-neutro-500 hover:bg-neutro-100">
               <ArrowLeft className="size-5" />
             </Link>
-            <div className="grid size-14 place-items-center rounded-xl bg-azul-600 text-lg font-bold text-white sm:size-16">{iniciales(formData.nombre_razon_social)}</div>
+            <div className="grid size-14 place-items-center rounded-xl bg-azul-600 text-lg font-bold text-white sm:size-16">{iniciales(formData.nombre || formData.nombre_razon_social)}</div>
           </div>
         }
-        titulo={formData.nombre_razon_social || (esNuevo ? "Nuevo cliente" : "Cliente sin nombre")}
+        titulo={formData.nombre || formData.nombre_razon_social || (esNuevo ? "Nuevo cliente" : "Cliente sin nombre")}
         meta={
           <>
+            {formData.nombre && formData.nombre_razon_social && formData.nombre.trim() !== formData.nombre_razon_social.trim() && (
+              <FichaMeta label="Razón social">{formData.nombre_razon_social}</FichaMeta>
+            )}
             {formData.codigo_cliente && <FichaMeta label="Código">{formData.codigo_cliente}</FichaMeta>}
             {formData.cuit && <FichaMeta label="CUIT">{formData.cuit}</FichaMeta>}
             {localidadSel && <FichaMeta>{localidadSel.nombre}{localidadSel.zonas?.nombre ? ` · ${localidadSel.zonas.nombre}` : ""}</FichaMeta>}
@@ -466,8 +474,11 @@ export default function ClienteDetailPage() {
       ]}>
         <FichaSeccion id="datos" titulo="Datos y contacto" icono={Store} ayuda="Quién es el cliente y dónde lo encontramos.">
           <Campos>
-            <Campo label="Nombre o razón social" nota="obligatorio" ancho={2}>
+            <Campo label="Razón social" nota="a quién se factura · obligatorio" ancho={2}>
               <Input value={formData.nombre_razon_social} onChange={(e) => set("nombre_razon_social", e.target.value)} required />
+            </Campo>
+            <Campo label="Nombre" nota="cómo lo conocemos · vacío = razón social" ancho={2}>
+              <Input value={formData.nombre} onChange={(e) => set("nombre", e.target.value)} placeholder={formData.nombre_razon_social || "Ej.: Súper Eco 17"} />
             </Campo>
             <Campo label="Código">
               <Input className="tabular-nums" value={formData.codigo_cliente} onChange={(e) => set("codigo_cliente", e.target.value)} placeholder="CL-001" />

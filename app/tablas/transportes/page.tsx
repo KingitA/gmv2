@@ -3,6 +3,7 @@
 import type React from "react"
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { useDebounced } from "@/lib/hooks/use-debounced"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -81,17 +82,33 @@ export default function TransportesPage() {
     setDestinos(mapped)
   }
 
-  const searchLocalidades = async (term: string) => {
+  const searchLocalidades = (term: string) => {
     setBusquedaLoc(term)
-    if (term.length < 2) { setLocResults([]); return }
-    const { data } = await supabase
-      .from("localidades")
-      .select("id, nombre, provincia")
-      .ilike("nombre", `%${term}%`)
-      .limit(10)
-    const assignedIds = new Set(destinos.map(d => d.localidad_id))
-    setLocResults((data || []).filter((l: Localidad) => !assignedIds.has(l.id)))
+    if (term.length < 2) setLocResults([])
   }
+
+  // Debounce de 300 ms; `vivo` descarta respuestas de búsquedas viejas
+  const busquedaLocDeb = useDebounced(busquedaLoc, 300)
+  useEffect(() => {
+    const term = busquedaLocDeb
+    if (term.length < 2) { setLocResults([]); return }
+    // %, coma y paréntesis rompen el patrón ilike / filtros de PostgREST
+    const limpio = term.replace(/[,()%*\\]/g, " ").replace(/\s+/g, " ").trim()
+    if (!limpio) { setLocResults([]); return }
+    let vivo = true
+    ;(async () => {
+      const { data } = await supabase
+        .from("localidades")
+        .select("id, nombre, provincia")
+        .ilike("nombre", `%${limpio}%`)
+        .limit(10)
+      if (!vivo) return
+      const assignedIds = new Set(destinos.map(d => d.localidad_id))
+      setLocResults((data || []).filter((l: Localidad) => !assignedIds.has(l.id)))
+    })()
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busquedaLocDeb])
 
   const addDestino = async (localidad: Localidad) => {
     setBusquedaLoc("")
