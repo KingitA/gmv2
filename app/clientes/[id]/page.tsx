@@ -8,7 +8,7 @@ import { localMatch } from "@/lib/search/local-match"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Save, Loader2, Store, Truck, Tags, Layers, Receipt, Wallet, HandCoins } from "lucide-react"
+import { ArrowLeft, Save, Loader2, Store, Truck, Tags, Receipt, Wallet, HandCoins } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Campo, Campos, ConUnidad, FichaCabecera, FichaCuerpo, FichaMeta, FichaPie, FichaSeccion } from "@/components/ficha/ficha"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
@@ -436,8 +436,7 @@ export default function ClienteDetailPage() {
       <FichaCuerpo secciones={[
         { id: "datos", titulo: "Datos y contacto" },
         { id: "venta", titulo: "Venta y entrega" },
-        { id: "precios", titulo: "Lista y descuentos", nota: algunoPorSegmento ? "por segmento" : undefined },
-        { id: "marcas", titulo: "Por proveedor o marca", nota: cantSegmentacion ? String(cantSegmentacion) : undefined },
+        { id: "precios", titulo: "Lista y descuentos", nota: cantSegmentacion ? `+${cantSegmentacion}` : algunoPorSegmento ? "por segmento" : undefined },
         { id: "fiscal", titulo: "Fiscal" },
         { id: "cuenta", titulo: "Cuenta y pedidos" },
       ]}>
@@ -632,12 +631,16 @@ export default function ClienteDetailPage() {
                 ))}
               </div>
             )}
-          </div>
-        </FichaSeccion>
 
-        <FichaSeccion id="marcas" titulo="Por proveedor o marca" icono={Layers}
-          ayuda={<>Lista, facturación y descuentos propios para la mercadería de un proveedor o una marca. Esa mercadería se factura aparte. La opción <b className="font-semibold text-neutro-600">Especial</b> aparece solo si el proveedor o la marca tiene precio especial cargado.</>}>
-          <SegmentacionCondiciones listas={listasPrecio} value={segmentacion} onChange={(v) => { setSegmentacion(v); setSegTocada(true) }} />
+            <div className="border-t border-neutro-200 pt-5">
+              <p className="text-[13px] font-semibold text-neutro-600">Por proveedor o marca</p>
+              <p className="mb-3 mt-0.5 max-w-[62ch] text-xs text-neutro-500">
+                Lista, facturación y descuentos propios para la mercadería de un proveedor o una marca; esa mercadería se factura aparte.
+                La opción <b className="font-semibold text-neutro-600">Especial</b> aparece solo si el proveedor o la marca tiene precio especial cargado.
+              </p>
+              <SegmentacionCondiciones listas={listasPrecio} value={segmentacion} onChange={(v) => { setSegmentacion(v); setSegTocada(true) }} />
+            </div>
+          </div>
         </FichaSeccion>
 
         <FichaSeccion id="fiscal" titulo="Fiscal" icono={Receipt} ayuda="Cómo se le factura y qué percepciones lleva.">
