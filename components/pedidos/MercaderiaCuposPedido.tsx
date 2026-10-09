@@ -14,8 +14,8 @@ import { Loader2, Package, Search, Trash2, AlertTriangle } from "lucide-react"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { getCuposMercaderiaPedido, agregarArticuloACupo, quitarArticuloBonificado, type CupoMercaderiaVista } from "@/lib/actions/mercaderia"
 import { agregarItemBonificado } from "@/lib/actions/pedidos"
-
-const $ = (n: number) => `$${(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+import { moneda } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 function Buscador({ onElegir, disabled }: { onElegir: (p: any) => void; disabled?: boolean }) {
   const [q, setQ] = useState("")
@@ -113,7 +113,7 @@ export function MercaderiaCuposPedido({
                 accion("manual", () => agregarItemBonificado(pedidoId, p.id, qtyManual, null))
               }} />
             </div>
-            <Input type="number" min={0} className="h-9 w-24 text-center" placeholder="uds." value={qtyManual || ""} onChange={(e) => setQtyManual(parseInt(e.target.value) || 0)} />
+            <InputMonto decimales={0} soloPositivos className="h-9 w-24 text-center" placeholder="uds." value={qtyManual || ""} onChange={(n) => setQtyManual(Math.trunc(n ?? 0))} />
           </div>
         )}
       </div>
@@ -149,7 +149,7 @@ export function MercaderiaCuposPedido({
         <div key={c.origen} className={`rounded-lg border px-3 py-3 space-y-2 ${c.articulos.length ? "border-amber-200" : "border-red-200 bg-red-50/40"}`}>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-sm font-semibold text-slate-800">{c.nombre} · {c.pct}%</p>
-            <p className="text-xs text-slate-500">Base {$(c.base)} · a bonificar <b className="text-amber-700">{$(c.monto)}</b></p>
+            <p className="text-xs text-slate-500">Base {moneda(c.base || 0)} · a bonificar <b className="text-amber-700">{moneda(c.monto || 0)}</b></p>
           </div>
           {c.articulos.length > 0 && (
             <div className="space-y-1">
@@ -157,7 +157,7 @@ export function MercaderiaCuposPedido({
                 <div key={a.detalle_id} className="flex items-center gap-2 text-xs">
                   <span className="flex-1 truncate">{a.sku} · {a.descripcion}</span>
                   <span className="font-semibold tabular-nums">{a.cantidad} u.</span>
-                  <span className="text-slate-400 tabular-nums">({$(a.precio_neto)} c/u)</span>
+                  <span className="text-slate-400 tabular-nums">({moneda(a.precio_neto || 0)} c/u)</span>
                   {editable && (
                     <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={!!trabajando}
                       onClick={() => accion(a.detalle_id, () => quitarArticuloBonificado(pedidoId, a.detalle_id))}>

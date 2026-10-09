@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
+import { fechaCorta, sumarDiasISO } from "@/lib/formato"
 
 /**
  * HOJA DE RUTA — vista calculada de un viaje. Única función para la pantalla
@@ -124,9 +125,7 @@ export interface HojaRuta {
 const r2 = (n: number) => Math.round(n * 100) / 100
 /** Último día del viaje: fecha de salida + (dias − 1). */
 export function fechaFin(fecha: string, dias: number | null | undefined): string {
-  const d = new Date(String(fecha).slice(0, 10) + "T00:00:00Z")
-  d.setUTCDate(d.getUTCDate() + Math.max(1, Number(dias) || 1) - 1)
-  return d.toISOString().slice(0, 10)
+  return sumarDiasISO(String(fecha).slice(0, 10), Math.max(1, Number(dias) || 1) - 1)
 }
 const PEDIDO_FACTURADO = ["facturado", "listo_para_enviar", "listo_para_retirar", "en_viaje", "entregado"]
 
@@ -272,7 +271,7 @@ export async function armarHojaRuta(supabase: SupabaseClient, viajeId: string): 
         monto: Number(d.monto) || 0,
         detalle:
           d.tipo_pago === "cheque"
-            ? [d.banco, d.numero_cheque, d.fecha_cheque ? `vto ${String(d.fecha_cheque).slice(8, 10)}/${String(d.fecha_cheque).slice(5, 7)}` : ""].filter(Boolean).join(" · ")
+            ? [d.banco, d.numero_cheque, d.fecha_cheque ? `vto ${fechaCorta(d.fecha_cheque)}` : ""].filter(Boolean).join(" · ")
             : d.tipo_pago === "transferencia" || d.tipo_pago === "deposito"
               ? d.numero_comprobante_pago || ""
               : "",

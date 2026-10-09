@@ -4,22 +4,16 @@ import { useEffect, useState, useCallback, useMemo } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 import { ArrowLeft, RefreshCw, Lock, Banknote, ShieldCheck, CheckCircle2 } from "lucide-react"
 import Link from "next/link"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { todayArgentina, formatDateAR } from "@/lib/utils"
+import { InputMonto } from "@/components/ui/input-monto"
+import { moneda } from "@/lib/formato"
 
-// Regla del sistema: el punto delimita centavos → "1000.5" = $1.000,50
-const parseMonto = (raw: string): number | null => {
-  const limpio = raw.trim().replace(",", ".")
-  if (!limpio || !/^\d+(\.\d{0,2})?$/.test(limpio)) return null
-  return Number(limpio)
-}
-const fmt = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmt = (n: number) => moneda(n)
 
 const BILLETES = [20000, 10000, 2000, 1000, 500, 200, 100]
 
@@ -67,10 +61,11 @@ export default function CierresCajaPage() {
   }
 
   const sumaDesglose = useMemo(
-    () => BILLETES.reduce((acc, b) => acc + b * (parseInt(desglose[b] || "0", 10) || 0), 0),
+    () => BILLETES.reduce((acc, b) => acc + b * (Math.trunc(Number(desglose[b])) || 0), 0),
     [desglose]
   )
-  const contado = contadoManual ? parseMonto(contadoTexto) : sumaDesglose
+  // contadoTexto guarda el número que entrega InputMonto (formato de máquina)
+  const contado = contadoManual ? (contadoTexto === "" ? null : Number(contadoTexto)) : sumaDesglose
   const teorico = caja ? caja.saldos.BLANCO : 0
   const diferencia = contado === null ? null : contado - teorico
 
@@ -106,14 +101,14 @@ export default function CierresCajaPage() {
 
   const confirmar = async () => {
     if (contado === null) {
-      toast({ variant: "destructive", title: "Monto contado inválido", description: "Usá punto para los centavos: 1000.5 = $1.000,50" })
+      toast({ variant: "destructive", title: "Monto contado inválido", description: "Formato: 1.500,50" })
       return
     }
     setConfirmando(true)
     try {
       const desgloseJson: Record<string, number> = {}
       for (const b of BILLETES) {
-        const n = parseInt(desglose[b] || "0", 10) || 0
+        const n = Math.trunc(Number(desglose[b])) || 0
         if (n > 0) desgloseJson[String(b)] = n
       }
       const res = await fetch("/api/finanzas/cierres", {
@@ -242,13 +237,14 @@ export default function CierresCajaPage() {
                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
                     {BILLETES.map((b) => (
                       <div key={b}>
-                        <p className="text-xs text-muted-foreground mb-1">$ {b.toLocaleString("es-AR")}</p>
-                        <Input
-                          inputMode="numeric"
+                        <p className="text-xs text-muted-foreground mb-1">{moneda(b, 0)}</p>
+                        <InputMonto
+                          decimales={0}
+                          soloPositivos
                           placeholder="0"
                           value={desglose[b] || ""}
-                          onChange={(e) => {
-                            const v = e.target.value.replace(/\D/g, "")
+                          onChange={(n) => {
+                            const v = n == null ? "" : String(Math.trunc(n))
                             setDesglose((prev) => ({ ...prev, [b]: v }))
                             setContadoManual(false)
                           }}
@@ -258,13 +254,13 @@ export default function CierresCajaPage() {
                   </div>
                   <div className="flex flex-wrap items-end gap-4 pt-2 border-t">
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1">Total contado (punto = centavos: 1000.5 → $1.000,50)</p>
-                      <Input
-                        className="w-48 tabular-nums"
-                        inputMode="decimal"
-                        value={contadoManual ? contadoTexto : String(sumaDesglose || "")}
+                      <p className="text-xs text-muted-foreground mb-1">Total contado (formato: 1.500,50)</p>
+                      <InputMonto
+                        className="w-48"
+                        soloPositivos
+                        value={contadoManual ? contadoTexto : (sumaDesglose || null)}
                         placeholder="0"
-                        onChange={(e) => { setContadoManual(true); setContadoTexto(e.target.value) }}
+                        onChange={(n) => { setContadoManual(true); setContadoTexto(n == null ? "" : String(n)) }}
                       />
                     </div>
                     <div className="text-sm space-y-1">

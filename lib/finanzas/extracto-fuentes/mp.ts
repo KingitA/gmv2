@@ -1,4 +1,5 @@
 import type { MovImport } from "@/lib/finanzas/extractos-import"
+import { fechaISO } from "@/lib/formato"
 
 /**
  * Fuente de extracto: MercadoPago API (token en env MP_ACCESS_TOKEN).
@@ -18,8 +19,7 @@ import type { MovImport } from "@/lib/finanzas/extractos-import"
 const TZ_OFFSET = "-03:00"
 
 function fechaAR(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+  return fechaISO(iso) // día argentino del instante
 }
 
 async function mpGet(path: string, token: string): Promise<{ ok: boolean; status: number; data: any }> {

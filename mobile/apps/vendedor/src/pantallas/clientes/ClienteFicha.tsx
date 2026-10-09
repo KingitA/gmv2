@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOverlay, type ItemOutbox } from "@gm/core"
+import { errorCuit, fechaHora, fecha, formatCuit, mismoCuit, normalizarCuit, numero, parseMonto, porcentaje } from "@gm/formato"
 import { DS, SEGS, SEG_LABEL, type BonifSeg, type OpBonificaciones, type OpClienteEditar, type OpCobroAnular } from "../../datasets"
 import { rechazosDe, useCatalogosFicha, useCliente, useCuenta, useEncolar } from "../../datos/hooks"
-import { AvisosBcra, HojaConfirmar, Pantalla, Rechazos, SinEnviar, formatCurrency, useAvisoEntrante, useToast } from "../../ui"
+import { AvisosBcra, CuitInput, HojaConfirmar, Pantalla, Rechazos, SinEnviar, formatCurrency, useAvisoEntrante, useToast } from "../../ui"
 import { HojaNuevaLocalidad, type LocalidadCreada } from "./ClienteNuevo"
 
 // Port de app/vendedor/clientes/[id]/page.tsx. Lee la cuenta del cliente de la réplica
@@ -33,7 +34,7 @@ function badgePago(estado: string, verificado: boolean) {
   return { label: estado, cls: "bg-gray-100 text-gray-600" }
 }
 
-const fechaLocal = (f: string) => new Date(`${String(f).slice(0, 10)}T00:00:00`).toLocaleDateString("es-AR")
+const fechaLocal = (f: string) => fecha(f)
 
 /** Igual que el PATCH del servidor: texto recortado, "" = null. */
 const normal = (v: unknown): unknown => {
@@ -104,8 +105,8 @@ export function ClienteFicha() {
   const bonifInicial = (): Record<string, string> => {
     const init: Record<string, string> = {}
     for (const s of segmentos) {
-      init[`viajante.${s.key}`] = bonif.viajante[s.key] ? String(bonif.viajante[s.key]) : ""
-      init[`mercaderia.${s.key}`] = bonif.mercaderia[s.key] ? String(bonif.mercaderia[s.key]) : ""
+      init[`viajante.${s.key}`] = bonif.viajante[s.key] ? numero(bonif.viajante[s.key], 0, 2) : ""
+      init[`mercaderia.${s.key}`] = bonif.mercaderia[s.key] ? numero(bonif.mercaderia[s.key], 0, 2) : ""
     }
     return init
   }
@@ -169,11 +170,22 @@ export function ClienteFicha() {
       mostrar("El nombre no puede quedar vacío.", "err")
       return
     }
+    const errCuit = errorCuit(form.cuit)
+    if (errCuit) {
+      mostrar(errCuit, "err")
+      return
+    }
     // Compare-and-set por campo: viaja SOLO lo que cambió, con el valor que se estaba viendo
     const actual = cliente as unknown as Record<string, unknown>
     const cambios: OpClienteEditar["cambios"] = {}
     for (const [campo, valor] of Object.entries(form)) {
       const antes = normal(actual[campo])
+      if (campo === "cuit") {
+        // CUIT: se guarda "xx-xxxxxxxx-x"; el mismo número escrito distinto no es un cambio
+        const despues = normalizarCuit(valor as string | null)
+        if (!(mismoCuit(antes as string | null, despues) || (!antes && !despues))) cambios[campo] = { antes, despues }
+        continue
+      }
       const despues = normal(valor)
       if (antes !== despues) cambios[campo] = { antes, despues }
     }
@@ -224,7 +236,7 @@ export function ClienteFicha() {
       const body: { viajante: Record<string, number>; mercaderia: Record<string, number> } = { viajante: {}, mercaderia: {} }
       for (const [k, v] of Object.entries(bonifEdit)) {
         const [tipo, seg] = k.split(".") as ["viajante" | "mercaderia", string]
-        body[tipo][seg] = parseFloat(String(v).replace(",", ".")) || 0
+        body[tipo][seg] = parseMonto(v) ?? 0
       }
       await encolar<OpBonificaciones>("cliente.bonificaciones", { cliente_id: id, viajante: body.viajante, mercaderia: body.mercaderia }, `Descuentos de ${cliente.nombre}`)
       setBonifEdit(null)
@@ -264,7 +276,7 @@ export function ClienteFicha() {
 
       <div className="mx-auto w-full max-w-2xl space-y-5 p-4">
         <p className="flex items-center gap-2 text-sm text-gray-500">
-          <span className="truncate">{[cliente.localidad, cliente.cuit].filter(Boolean).join(" · ")}</span>
+          <span className="truncate">{[cliente.localidad, cliente.cuit ? formatCuit(cliente.cuit) : null].filter(Boolean).join(" · ")}</span>
           {cliente.sinEnviar && <SinEnviar />}
         </p>
 
@@ -381,12 +393,20 @@ export function ClienteFicha() {
               {CAMPOS_TEXTO.map((campo) => (
                 <div key={campo.key}>
                   <label className="mb-1 block text-sm text-gray-500">{campo.label}</label>
-                  <input
-                    type={campo.tipo || "text"}
-                    value={form[campo.key] || ""}
-                    onChange={(e) => setForm((prev) => ({ ...(prev || {}), [campo.key]: e.target.value }))}
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900"
-                  />
+                  {campo.key === "cuit" ? (
+                    <CuitInput
+                      value={form.cuit || ""}
+                      onChange={(v) => setForm((prev) => ({ ...(prev || {}), cuit: v }))}
+                      className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900"
+                    />
+                  ) : (
+                    <input
+                      type={campo.tipo || "text"}
+                      value={form[campo.key] || ""}
+                      onChange={(e) => setForm((prev) => ({ ...(prev || {}), [campo.key]: e.target.value }))}
+                      className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900"
+                    />
+                  )}
                 </div>
               ))}
 
@@ -464,7 +484,7 @@ export function ClienteFicha() {
           ) : (
             <>
               {cliente.razon_social && <Dato label="Razón social" valor={cliente.razon_social} />}
-              <Dato label="CUIT" valor={cliente.cuit} />
+              <Dato label="CUIT" valor={cliente.cuit ? formatCuit(cliente.cuit) : cliente.cuit} />
               <Dato label="Condición IVA" valor={cliente.condicion_iva} />
               <Dato label="Método facturación" valor={cliente.metodo_facturacion} />
               <Dato label="Lista de precios" valor={nombreLista + (listaImpuesta ? " (por viajante)" : "")} />
@@ -554,7 +574,7 @@ export function ClienteFicha() {
                     <span className={`w-20 text-[11px] font-bold uppercase ${tipo === "viajante" ? "text-orange-600" : "text-green-700"}`}>{tipo === "viajante" ? "Viajante" : "Mercadería"}</span>
                     {segmentos.map((s) => (
                       <span key={s.key} className={`rounded-full px-2.5 py-1 text-xs font-bold ${bonif[tipo][s.key] ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-400"}`}>
-                        {s.label}: {bonif[tipo][s.key] ? `${bonif[tipo][s.key]}%` : "—"}
+                        {s.label}: {bonif[tipo][s.key] ? porcentaje(bonif[tipo][s.key]) : "—"}
                       </span>
                     ))}
                   </div>
@@ -566,7 +586,7 @@ export function ClienteFicha() {
           {cliente.actualizado_at && (
             <p className="pt-2 text-xs text-gray-400">
               Última modificación:{" "}
-              {new Date(cliente.actualizado_at).toLocaleString("es-AR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              {fechaHora(cliente.actualizado_at)}
               {cliente.actualizado_por_nombre ? ` · por ${cliente.actualizado_por_nombre}` : ""}
             </p>
           )}

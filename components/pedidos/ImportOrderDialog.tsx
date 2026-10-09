@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/popover"
 import { searchClientes } from "@/lib/actions/clientes"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { moneda } from "@/lib/formato"
 
 // Helper for confidence color
 const getConfidenceColor = (conf: string) => {
@@ -389,7 +391,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                                                                             onClick={() => updateItemProduct(idx, p)}
                                                                         >
                                                                             <ArticuloResultRow articulo={p} size="sm" />
-                                                                            <div className="text-[10px] text-muted-foreground mt-0.5">${p.precio_venta || p.precio_base}</div>
+                                                                            <div className="text-[10px] text-muted-foreground mt-0.5">{moneda(p.precio_venta || p.precio_base)}</div>
                                                                         </div>
                                                                     ))}
                                                                 </div>
@@ -431,13 +433,13 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
                                                     )}
                                                 </TableCell>
                                                 <TableCell className="text-center">
-                                                    <Input
-                                                        type="number"
+                                                    <InputMonto
+                                                        decimales={0} soloPositivos
                                                         className="h-8 w-20 mx-auto text-center"
                                                         value={item.quantity}
-                                                        onChange={(e) => {
+                                                        onChange={(n) => {
                                                             const newItems = [...items]
-                                                            newItems[idx].quantity = parseInt(e.target.value) || 0
+                                                            newItems[idx].quantity = Math.trunc(n ?? 0)
                                                             setItems(newItems)
                                                         }}
                                                     />

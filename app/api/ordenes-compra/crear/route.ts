@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { nowArgentina } from '@/lib/utils';
+import { hoyISO, mediodiaAR, sumarDiasISO } from '@/lib/formato';
 
 async function calcularFechaEstimadaRecepcion(supabase: any, proveedorId: string): Promise<string> {
     // Try AVG of actual receipt times for this provider
@@ -10,9 +11,7 @@ async function calcularFechaEstimadaRecepcion(supabase: any, proveedorId: string
     const avgDias = avg?.avg_dias;
 
     if (avgDias && avgDias > 0) {
-        const fecha = new Date();
-        fecha.setDate(fecha.getDate() + Math.round(avgDias));
-        return fecha.toISOString().split('T')[0];
+        return sumarDiasISO(hoyISO(), Math.round(Number(avgDias)));
     }
 
     // Fallback: proveedor.dias_vencimiento
@@ -23,9 +22,7 @@ async function calcularFechaEstimadaRecepcion(supabase: any, proveedorId: string
         .single();
 
     const dias = proveedor?.dias_vencimiento || 7;
-    const fecha = new Date();
-    fecha.setDate(fecha.getDate() + dias);
-    return fecha.toISOString().split('T')[0];
+    return sumarDiasISO(hoyISO(), Number(dias));
 }
 
 export async function POST(request: NextRequest) {
@@ -60,9 +57,7 @@ export async function POST(request: NextRequest) {
             fechaEstimada = await calcularFechaEstimadaRecepcion(supabase, proveedor_id);
         } catch {
             // If RPC doesn't exist yet, fallback to 7 days
-            const fecha = new Date();
-            fecha.setDate(fecha.getDate() + 7);
-            fechaEstimada = fecha.toISOString().split('T')[0];
+            fechaEstimada = sumarDiasISO(hoyISO(), 7);
         }
 
         // 3. Create OC
@@ -160,7 +155,7 @@ export async function POST(request: NextRequest) {
                 {
                     tipo_movimiento: 'compra',
                     estado: 'pendiente',
-                    fecha: fechaEstimada + 'T00:00:00.000Z',
+                    fecha: mediodiaAR(fechaEstimada), // timestamptz: 00 UTC caía el día anterior en Argentina
                     articulo_id: item.articulo_id,
                     cantidad: cantidadBase,
                     precio_lista: item.precio_unitario || 0,

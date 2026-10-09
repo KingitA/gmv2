@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth"
 import { createPedido } from "@/lib/actions/pedidos"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 import { esErrorReglaPedido } from "@/lib/pedidos/errores"
+import { errorCuit } from "@/lib/formato"
 
 /**
  * POST /api/mostrador/venta — venta de mostrador en UN paso (Fase D).
@@ -75,6 +76,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         error: `El cliente "${cli.nombre_razon_social}" no tiene CUIT configurado. Cargalo en la ficha antes de vender: sin CUIT no se puede emitir el comprobante.`,
         error_code: "CLIENTE_SIN_CUIT",
+      }, { status: 422 })
+    }
+    const errCuit = errorCuit(cli.cuit)
+    if (errCuit) {
+      return NextResponse.json({
+        error: `El CUIT del cliente "${cli.nombre_razon_social}" no es válido (${cli.cuit}): corregilo en la ficha antes de vender. ${errCuit}.`,
+        error_code: "CLIENTE_CUIT_INVALIDO",
       }, { status: 422 })
     }
     if (!determinarTipoFactura(cli.condicion_iva)) {

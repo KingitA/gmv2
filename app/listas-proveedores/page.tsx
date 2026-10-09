@@ -15,6 +15,8 @@ import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { fecha } from "@/lib/formato"
 
 export default function ListasProveedoresPage() {
     const supabase = createClient()
@@ -142,8 +144,8 @@ export default function ListasProveedoresPage() {
                                 <TableRow key={lista.id}>
                                     <TableCell>{(lista.proveedor as any)?.nombre || '—'}</TableCell>
                                     <TableCell className="font-medium">{lista.nombre || '—'}</TableCell>
-                                    <TableCell>{lista.fecha_vigencia}</TableCell>
-                                    <TableCell>{lista.fecha_fin || '—'}</TableCell>
+                                    <TableCell>{fecha(lista.fecha_vigencia)}</TableCell>
+                                    <TableCell>{fecha(lista.fecha_fin) || '—'}</TableCell>
                                     <TableCell>
                                         <Badge className={estadoColor[lista.estado] || ''}>{lista.estado}</Badge>
                                     </TableCell>
@@ -184,11 +186,11 @@ export default function ListasProveedoresPage() {
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <Label>Fecha vigencia *</Label>
-                                <Input type="date" value={fechaVigencia} onChange={e => setFechaVigencia(e.target.value)} />
+                                <DateInputAR value={fechaVigencia} onChange={setFechaVigencia} />
                             </div>
                             <div>
                                 <Label>Hasta (opcional)</Label>
-                                <Input type="date" value={fechaFin} onChange={e => setFechaFin(e.target.value)} />
+                                <DateInputAR value={fechaFin} onChange={setFechaFin} />
                             </div>
                         </div>
                         <div>

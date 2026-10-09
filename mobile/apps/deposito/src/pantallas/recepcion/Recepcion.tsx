@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { ErrorHttp, esQrOUrl, lecturaError, lecturaOk, useLector, useNoEnviados, useOnline, useRuntime } from "@gm/core"
+import { fecha, moneda, parseMonto } from "@gm/formato"
 import { DS } from "../../datasets"
 import { buscarPorCodigo, eansDe, padEan13 } from "../../datos/busqueda"
 import { useArticulos, useCatalogos, useEncolar, useRecepcion, useRecepciones, useRefrescarAlEntrar } from "../../datos/hooks"
@@ -13,11 +14,8 @@ import { PanelCantidad } from "../comunes/Cantidad"
 const DATASET = DS.recepciones
 type Mostrar = (m: string, t?: "ok" | "err") => void
 
-/** Fecha sin corrimiento de huso: "2026-09-15" es el 15, no el 14 a las 21 h. */
-const fechaAR = (f: string) => {
-  const [a, m, d] = (f || "").slice(0, 10).split("-")
-  return d ? `${Number(d)}/${Number(m)}/${a}` : f
-}
+/** "15/09/2026" sin corrimiento de huso: "2026-09-15" es el 15, no el 14 a las 21 h. */
+const fechaAR = (f: string) => fecha(f) || f
 
 const resumen = (r: RecepcionVista) => {
   const ok = r.lineas.filter((l) => l.estado_linea === "ok").length
@@ -211,8 +209,8 @@ function ControlBultos({ r, mostrar }: { r: RecepcionVista; mostrar: Mostrar }) 
   const [declarados, setDeclarados] = useState("")
   const [recibidos, setRecibidos] = useState("")
   const [obs, setObs] = useState("")
-  const decl = parseInt(declarados) || 0
-  const recib = parseInt(recibidos) || 0
+  const decl = Math.trunc(parseMonto(declarados) ?? 0)
+  const recib = Math.trunc(parseMonto(recibidos) ?? 0)
   const difieren = decl > 0 && recibidos !== "" && decl !== recib
 
   const guardar = (estado: "conforme" | "no_conforme" | "omitida") => {
@@ -254,11 +252,11 @@ function ControlBultos({ r, mostrar }: { r: RecepcionVista; mostrar: Mostrar }) 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <div style={{ color: C.sub, fontSize: 14, marginBottom: 6 }}>Bultos según remito</div>
-            <input type="number" inputMode="numeric" value={declarados} onChange={(e) => setDeclarados(e.target.value)} style={campo} />
+            <input type="text" inputMode="numeric" value={declarados} onChange={(e) => setDeclarados(e.target.value.replace(/\D/g, ""))} style={campo} />
           </div>
           <div>
             <div style={{ color: C.sub, fontSize: 14, marginBottom: 6 }}>Bultos contados</div>
-            <input type="number" inputMode="numeric" value={recibidos} onChange={(e) => setRecibidos(e.target.value)} style={{ ...campo, background: difieren ? C.redL : C.bg, color: difieren ? C.red : C.text, border: `2px solid ${difieren ? C.redB : C.border}` }} />
+            <input type="text" inputMode="numeric" value={recibidos} onChange={(e) => setRecibidos(e.target.value.replace(/\D/g, ""))} style={{ ...campo, background: difieren ? C.redL : C.bg, color: difieren ? C.red : C.text, border: `2px solid ${difieren ? C.redB : C.border}` }} />
           </div>
         </div>
         {difieren && (
@@ -598,7 +596,7 @@ export function RecepcionDocumentos() {
                   <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 11, background: "#e0f2fe", color: "#0369a1", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>{doc.tipo_documento}</span>
                     {nro && <span style={{ fontSize: 11, color: C.sub }}>{nro}</span>}
-                    {total != null && <span style={{ fontSize: 11, color: C.sub }}>${Number(total).toFixed(2)}</span>}
+                    {total != null && parseMonto(total) != null && <span style={{ fontSize: 11, color: C.sub }}>{moneda(parseMonto(total))}</span>}
                     {doc.procesado && <span style={{ fontSize: 11, background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>OCR ✓</span>}
                   </div>
                 </div>

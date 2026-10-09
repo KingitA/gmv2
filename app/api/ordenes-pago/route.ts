@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
+import { moneda } from '@/lib/formato'
 
 // GET /api/ordenes-pago
 export async function GET(request: Request) {
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
         const netoEsperado = Math.round((totalImputado - totalRetenciones) * 100) / 100
         if (Math.abs(totalMedios - netoEsperado) > 0.01) {
             return NextResponse.json({
-                error: `No cuadra: imputado $${totalImputado.toFixed(2)} − retenciones $${totalRetenciones.toFixed(2)} = neto $${netoEsperado.toFixed(2)}, pero los medios suman $${totalMedios.toFixed(2)}`,
+                error: `No cuadra: imputado ${moneda(totalImputado)} − retenciones ${moneda(totalRetenciones)} = neto ${moneda(netoEsperado)}, pero los medios suman ${moneda(totalMedios)}`,
             }, { status: 400 })
         }
     }

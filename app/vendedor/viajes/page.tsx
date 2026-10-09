@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { fechaCorta } from "@/lib/formato"
 
 interface ViajeItem {
   id: string
@@ -11,9 +12,6 @@ interface ViajeItem {
   fecha_fin_estimada: string | null
   zonas: { id: string; nombre: string }[]
 }
-
-const fechaCorta = (f: string | null) =>
-  f ? new Date(f + "T00:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" }) : "—"
 
 export default function VendedorViajesPage() {
   const router = useRouter()
@@ -40,7 +38,7 @@ export default function VendedorViajesPage() {
         <div className="min-w-0">
           <p className="font-bold text-gray-900 truncate">{v.nombre}</p>
           <p className="text-gray-500 text-sm mt-0.5">
-            {fechaCorta(v.fecha_inicio)} → {fechaCorta(v.fecha_fin_estimada)}
+            {(fechaCorta(v.fecha_inicio) || "—")} → {(fechaCorta(v.fecha_fin_estimada) || "—")}
           </p>
           <div className="flex flex-wrap gap-1 mt-1.5">
             {v.zonas.map((z) => (

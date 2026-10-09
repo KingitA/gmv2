@@ -24,6 +24,7 @@ import { generarRemitosParaPedido, type ResultadoRemitos } from "@/lib/remitos/g
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { recalcularBonificadosPedido, cuposMercaderiaPedido, etiquetasCupos } from "@/lib/pedidos/mercaderia-bonificada"
 import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
+import { cuitDigitos, cuitValido } from "@/lib/formato"
 
 type CondicionSegmento = {
   lista_precio_id: string | null
@@ -428,6 +429,17 @@ export async function POST(request: Request) {
       )
     }
 
+    // CUIT del cliente: validar (dígito verificador) ANTES de hablar con ARCA,
+    // en vez de mandarle basura y recibir un rechazo críptico.
+    if (algunGrupoNecesitaCAE && !cuitValido(pedido.cliente.cuit)) {
+      return NextResponse.json({
+        error: `El CUIT del cliente "${pedido.cliente.nombre_razon_social}" no es válido (${pedido.cliente.cuit}): corregilo en la ficha del cliente.`,
+        error_code: "CLIENTE_CUIT_INVALIDO",
+        cliente_id: pedido.cliente.id,
+        cliente_nombre: pedido.cliente.nombre_razon_social,
+      }, { status: 422 })
+    }
+
     if (certDisponible && empresaConfig && algunGrupoNecesitaCAE) {
       // Única fuente del PV fiscal: configuracion_empresa. Sin default — si falta, error explícito.
       if (!empresaConfig.arca_punto_venta) {
@@ -443,7 +455,7 @@ export async function POST(request: Request) {
         puntoVenta: String(empresaConfig.arca_punto_venta).padStart(4, '0'),
         token:       ta.token,
         sign:        ta.sign,
-        cuitEmpresa: (empresaConfig.cuit ?? '').replace(/-/g, ''),
+        cuitEmpresa: cuitDigitos(empresaConfig.cuit),
       }
     }
 
@@ -795,7 +807,7 @@ async function generarComprobante(
   let vencimientoCae: string | null = null
 
   if (esFiscal && arca) {
-    const clienteCuit = (pedido.cliente.cuit ?? '').replace(/-/g, '')
+    const clienteCuit = cuitDigitos(pedido.cliente.cuit)
     const fecha = todayArgentina().replace(/-/g, '') // YYYYMMDD
 
     // RG 5616/2024: condición IVA del receptor es obligatoria — sin mapeo no se emite

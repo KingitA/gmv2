@@ -6,13 +6,11 @@
  */
 
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
+import { fecha as fechaAR, moneda, numero, porcentaje, formatCuit } from '@/lib/formato'
 
-const fmt = (n: number) =>
-  n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtFecha = (v?: string | null) => {
-  const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
-}
+const fmt = (n: number) => numero(n)
+// "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
+const fmtFecha = (v?: string | null) => fechaAR(v) || '—'
 
 export interface RetencionPDFData {
   empresa: { razon_social: string; cuit: string; direccion?: string | null; logo_url?: string | null }
@@ -103,7 +101,7 @@ export function RetencionPDF({ data }: { data: RetencionPDFData }) {
           <View style={{ flex: 1 }}>
             {empresa.logo_url ? <Image src={empresa.logo_url} style={s.emLogo} /> : null}
             <Text style={s.emNombre}>{empresa.razon_social}</Text>
-            <Text style={s.emSub}>CUIT {empresa.cuit} — Agente de Retención</Text>
+            <Text style={s.emSub}>CUIT {formatCuit(empresa.cuit)} — Agente de Retención</Text>
             {empresa.direccion ? <Text style={s.emSub}>{empresa.direccion}</Text> : null}
           </View>
           <View style={s.nroBlock}>
@@ -121,7 +119,7 @@ export function RetencionPDF({ data }: { data: RetencionPDFData }) {
           <View style={[s.box, s.half]}>
             <Text style={s.boxTit}>SUJETO RETENIDO</Text>
             <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', marginBottom: 2 }}>{proveedor.nombre}</Text>
-            <Text style={{ fontSize: 8.5, color: '#444' }}>CUIT {proveedor.cuit ?? '—'}</Text>
+            <Text style={{ fontSize: 8.5, color: '#444' }}>CUIT {formatCuit(proveedor.cuit) || '—'}</Text>
             {(proveedor.direccion || proveedor.localidad) ? (
               <Text style={{ fontSize: 8.5, color: '#444' }}>{[proveedor.direccion, proveedor.localidad].filter(Boolean).join(' · ')}</Text>
             ) : null}
@@ -130,15 +128,15 @@ export function RetencionPDF({ data }: { data: RetencionPDFData }) {
             <Text style={s.boxTit}>DATOS DE LA RETENCIÓN</Text>
             <View style={s.row}><Text style={s.rLbl}>Régimen</Text><Text style={s.rVal}>{cert.regimen_descripcion ?? 'RG 830'}</Text></View>
             <View style={s.row}><Text style={s.rLbl}>Orden de pago</Text><Text style={s.rVal}>{op.numero_op} ({fmtFecha(op.fecha)})</Text></View>
-            <View style={s.row}><Text style={s.rLbl}>Base de cálculo</Text><Text style={s.rVal}>$ {fmt(cert.base_calculo)}</Text></View>
-            <View style={s.row}><Text style={s.rLbl}>Alícuota</Text><Text style={s.rVal}>{Number(cert.alicuota)} %</Text></View>
+            <View style={s.row}><Text style={s.rLbl}>Base de cálculo</Text><Text style={s.rVal}>{moneda(cert.base_calculo)}</Text></View>
+            <View style={s.row}><Text style={s.rLbl}>Alícuota</Text><Text style={s.rVal}>{porcentaje(cert.alicuota)}</Text></View>
           </View>
         </View>
 
         <View style={s.montoBox}>
           <View style={s.montoRow}>
             <Text style={s.montoLbl}>IMPORTE RETENIDO</Text>
-            <Text style={s.montoVal}>$ {fmt(cert.monto)}</Text>
+            <Text style={s.montoVal}>{moneda(cert.monto)}</Text>
           </View>
           <Text style={s.letras}>SON PESOS: {enLetras(cert.monto)}</Text>
         </View>
@@ -154,7 +152,7 @@ export function RetencionPDF({ data }: { data: RetencionPDFData }) {
               <View key={x} style={s.tr}>
                 <Text style={[s.td, { width: 70 }]}>{fmtFecha(c.fecha)}</Text>
                 <Text style={[s.td, { flex: 1 }]}>{c.etiqueta}</Text>
-                <Text style={[s.td, { width: 90, textAlign: 'right' }]}>$ {fmt(c.monto)}</Text>
+                <Text style={[s.td, { width: 90, textAlign: 'right' }]}>{moneda(c.monto)}</Text>
               </View>
             ))}
           </>

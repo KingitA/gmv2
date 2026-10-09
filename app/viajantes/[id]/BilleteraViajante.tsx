@@ -5,6 +5,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { ArrowLeft, RefreshCw, Wallet, TrendingDown, Plus, Minus, CheckSquare, Square } from 'lucide-react'
 import Link from 'next/link'
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { moneda } from "@/lib/formato"
 
 interface Vendedor {
   id: string
@@ -48,7 +50,7 @@ interface BilleteraData {
 }
 
 function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
+  return moneda(n)
 }
 
 function tipoLabel(tipo: string) {
@@ -139,7 +141,7 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tipo: movForm.tipo,
-          monto: parseFloat(movForm.monto),
+          monto: Number(movForm.monto),
           concepto: movForm.concepto,
           medio: movForm.medio || null,
         }),
@@ -189,7 +191,7 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
             <span className="text-white/40 text-xs uppercase tracking-wide font-semibold">Balance</span>
           </div>
           <p className={`text-2xl font-bold font-mono ${(data?.balance ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {loading ? '...' : ars(data?.balance ?? 0)}
+            {loading ? '...' : moneda(data?.balance ?? 0, 0)}
           </p>
           {!loading && (data?.en_viaje ?? 0) > 0 && (
             <p className="text-xs text-amber-300 mt-1">
@@ -342,13 +344,13 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
             <div className="space-y-3">
               <div>
                 <label className="text-white/50 text-xs block mb-1">Monto</label>
-                <input
-                  type="number"
+                <InputMonto
+                  soloPositivos
                   value={movForm.monto}
-                  onChange={e => setMovForm(f => ({ ...f, monto: e.target.value }))}
+                  onChange={n => setMovForm(f => ({ ...f, monto: n == null ? '' : String(n) }))}
                   className="w-full rounded-lg px-3 py-2 text-white text-sm"
                   style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
-                  placeholder="0.00"
+                  placeholder="0,00"
                 />
               </div>
               <div>

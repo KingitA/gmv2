@@ -20,6 +20,7 @@ import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { TIPO_CBTE_ARCA, type AmbienteARCA } from '@/lib/arca/tipos'
 import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, consultarComprobante } from '@/lib/arca/wsfev1'
+import { cuitDigitos } from '@/lib/formato'
 
 const TIPOS_FISCALES = ['FA', 'FB', 'NCA', 'NCB', 'NDA', 'NDB']
 const MAX_CONSULTAS_DETALLE = 50  // tope de FECompConsultar por corrida
@@ -61,7 +62,7 @@ export async function GET() {
 
     const ambiente    = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
     const ta          = await obtenerTAConCache(supabase, ambiente)
-    const cuitEmpresa = (empresaConfig.cuit ?? '').replace(/-/g, '')
+    const cuitEmpresa = cuitDigitos(empresaConfig.cuit)
     const puntoVenta  = String(empresaConfig.arca_punto_venta).padStart(4, '0')
     const pvNum       = parseInt(puntoVenta, 10)
 

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from "@/lib/utils"
+import { fecha as fechaAR, moneda } from "@/lib/formato"
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 
 // ─── La Caja del Día — Etapa 1 (lectura) ────────────────────────────────────
@@ -271,7 +272,7 @@ export async function GET(request: NextRequest) {
       const monto = Math.abs(num(k.monto))
       const cheque = k.cheque_id ? chequeDe.get(k.cheque_id) : null
       const chequeTxt = cheque
-        ? `${cheque.es_echeq ? "⚡ Echeq" : "📄 Cheque"} ${cheque.banco} ${cheque.numero} · venc ${cheque.fecha_vencimiento?.split("-").reverse().join("/") ?? "—"}`
+        ? `${cheque.es_echeq ? "⚡ Echeq" : "📄 Cheque"} ${cheque.banco} ${cheque.numero} · venc ${fechaAR(cheque.fecha_vencimiento) || "—"}`
         : null
       const esDeCajaChica = cajaChica && k.origen_tipo === "CAJA" && k.origen_id === cajaChica.id
       const haciaCajaChica = cajaChica && k.destino_tipo === "CAJA" && k.destino_id === cajaChica.id
@@ -514,13 +515,13 @@ export async function GET(request: NextRequest) {
 
       // Cada renglón con SU monto a la vista: Finanzas cuenta la plata del
       // escritorio contra esta fila antes de apretar Confirmar (dueño 08/10).
-      const conMonto = (txt: string, d: any) => `${txt} · $ ${num(d.monto).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
+      const conMonto = (txt: string, d: any) => `${txt} · ${moneda(num(d.monto))}`
       const partes = relevantes.map((d) => {
         if (d.tipo_pago === "transferencia")
           return conMonto(`🏦 Transferencia${d.banco ? ` → ${d.banco}` : ""}${d.numero_comprobante_pago || d.referencia ? ` · op. ${d.numero_comprobante_pago || d.referencia}` : ""}`, d)
         if (d.tipo_pago === "deposito") return conMonto(`🏧 Depósito${d.banco ? ` → ${d.banco}` : ""}`, d)
         if (esEcheq(d))
-          return conMonto(`⚡ Echeq${d.banco ? ` · ${d.banco}` : ""}${d.numero_cheque ? ` ${d.numero_cheque}` : ""}${d.fecha_cheque ? ` · vence ${d.fecha_cheque.split("-").reverse().join("/")}` : ""}`, d)
+          return conMonto(`⚡ Echeq${d.banco ? ` · ${d.banco}` : ""}${d.numero_cheque ? ` ${d.numero_cheque}` : ""}${d.fecha_cheque ? ` · vence ${fechaAR(d.fecha_cheque)}` : ""}`, d)
         if (d.tipo_pago === "cheque")
           return conMonto(`📄 Cheque${d.banco ? ` ${d.banco}` : ""}${d.numero_cheque ? ` ${d.numero_cheque}` : ""}${d.color_cheque && d.color_cheque !== "PENDIENTE" ? ` · ${d.color_cheque}` : ""}`, d)
         return conMonto(`💵 Efectivo`, d)
@@ -629,8 +630,8 @@ export async function GET(request: NextRequest) {
       }
       const efectivo = num(r.efectivo_declarado)
       const partes: string[] = []
-      if (efectivo) partes.push(`💵 ${efectivo.toLocaleString("es-AR")} efectivo`)
-      if (cantCheques) partes.push(`📄 ${cantCheques} cheque${cantCheques > 1 ? "s" : ""} físico${cantCheques > 1 ? "s" : ""} ($ ${cheques.toLocaleString("es-AR")})`)
+      if (efectivo) partes.push(`💵 ${moneda(efectivo)} efectivo`)
+      if (cantCheques) partes.push(`📄 ${cantCheques} cheque${cantCheques > 1 ? "s" : ""} físico${cantCheques > 1 ? "s" : ""} (${moneda(cheques)})`)
       return {
         id: `r-${r.id}`,
         fuente: "rendicion",

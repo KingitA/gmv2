@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from "react"
 import { esQrOUrl, lecturaError, lecturaOk, useLector } from "@gm/core"
+import { parseMonto } from "@gm/formato"
 import { eansDe, lineaInfo, padEan13, sufijoMarca, type Buscable } from "../../datos/busqueda"
 import { C, useCampoSinRafaga } from "../../ui"
 
@@ -32,8 +33,9 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
   }
   /** Una cantidad de 7+ cifras no es una cantidad: es un código que el lector tipeó en el campo. */
   const cantidadValida = (txt: string): number | null => {
-    const n = parseFloat(txt) || 0
-    if (n < 0 || n >= 1_000_000) {
+    // Formato argentino: "1.500" = mil quinientos, "1,5" = uno y medio (parseMonto)
+    const n = txt.trim() ? parseMonto(txt) : 0
+    if (n === null || n < 0 || n >= 1_000_000) {
       cambiar("")
       mostrar("Esa cantidad no es válida (¿se leyó un código en el campo?). Cargala de nuevo.", "err")
       return null
@@ -78,7 +80,7 @@ export function PanelCantidad({ articulo, titulo, cabecera, etiquetaInput, inici
       <div style={{ background: C.white, border: `1.5px solid ${C.border}`, borderRadius: 20, padding: 18 }}>
         <div style={{ color: C.sub, fontSize: 14, marginBottom: 10 }}>{etiquetaInput}</div>
         <input
-          type="number" inputMode="decimal" value={valor} autoFocus
+          type="text" inputMode="decimal" value={valor} autoFocus
           onChange={(e) => cambiar(e.target.value)}
           onFocus={(e) => e.target.select()}
           style={{ width: "100%", background: C.bg, color: C.text, fontSize: 48, fontWeight: 800, textAlign: "center", borderRadius: 16, padding: 16, border: `2px solid ${C.border}`, outline: "none", boxSizing: "border-box" }}

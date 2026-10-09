@@ -4,9 +4,10 @@
 // sirve para el cliente de la parada y para cada cliente AGREGADO a un cobro conjunto.
 
 import { anticiposDeSeleccion, PEDIDO_PREFIX, pedidosContadoAEnviar, pedidosContadoAlAplicarTodo } from "@gm/cobro"
+import { redondear } from "@gm/formato"
 import type { ComprobanteCobro, CuentaCobro, PedidoCobro } from "../datasets"
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+const r2 = (n: number) => redondear(n)
 const TIPOS_BONIFICABLES = ["FA", "FB", "FC", "PRES"]
 
 /** Lo que el chofer eligió para UN cliente. Serializable (se guarda tal cual en el estado de la pantalla). */

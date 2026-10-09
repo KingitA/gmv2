@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { hoyISO } from "@/lib/formato"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 
 interface Zona {
   id: string
@@ -12,7 +14,7 @@ interface Zona {
   mis_clientes: number
 }
 
-const hoy = () => new Date().toISOString().slice(0, 10)
+const hoy = () => hoyISO()
 
 export default function NuevoViajePage() {
   const router = useRouter()
@@ -91,21 +93,19 @@ export default function NuevoViajePage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-gray-500 text-sm block mb-1">Inicio de pedidos</label>
-              <input
-                type="date"
+              <DateInputAR
                 value={fechaInicio}
-                onChange={(e) => setFechaInicio(e.target.value)}
-                className="w-full rounded-xl border border-gray-300 px-3 py-3"
+                onChange={setFechaInicio}
+                className="h-auto w-full rounded-xl border border-gray-300 px-3 py-3"
               />
             </div>
             <div>
               <label className="text-gray-500 text-sm block mb-1">Fin estimado</label>
-              <input
-                type="date"
+              <DateInputAR
                 value={fechaFin}
                 min={fechaInicio}
-                onChange={(e) => setFechaFin(e.target.value)}
-                className="w-full rounded-xl border border-gray-300 px-3 py-3"
+                onChange={setFechaFin}
+                className="h-auto w-full rounded-xl border border-gray-300 px-3 py-3"
               />
             </div>
           </div>

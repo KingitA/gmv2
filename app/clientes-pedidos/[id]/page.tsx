@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Loader2, Plus, Trash2, Search, Package, Save, ChevronDown, ChevronRight, Undo2 } from "lucide-react"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { moneda, numero, porcentaje, parseMonto } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 type ItemEdit = { precio_final: number; cantidad: number; estado_item: string }
 
@@ -119,7 +121,7 @@ export default function PedidoEditPage() {
       // tomarlo (pedidos.condiciones_cliente), no la actual.
       const congelada = p.condiciones_cliente && typeof p.condiciones_cliente === "object" ? p.condiciones_cliente : null
       setBonifFicha(congelada ? (congelada.bonificaciones || []) : (bonifTodas || []).filter((b: any) => !b.proveedor_id))
-      const mt = p.bonif_mercaderia_pct != null ? String(p.bonif_mercaderia_pct) : ""
+      const mt = p.bonif_mercaderia_pct != null ? numero(p.bonif_mercaderia_pct, 0, 2) : ""
       setMercTodo(mt)
       setMercTodoInicial(mt)
 
@@ -129,7 +131,7 @@ export default function PedidoEditPage() {
       for (const tipo of ["general", "viajante", "mercaderia", "contado"] as const)
         for (const seg of SEGMENTOS_BONIF) {
           const v = ovr?.[tipo]?.[seg]
-          form[`${tipo}.${seg}`] = typeof v === "number" ? String(v) : ""
+          form[`${tipo}.${seg}`] = typeof v === "number" ? numero(v, 0, 2) : ""
         }
       setBonifPedidoForm(form)
 
@@ -251,8 +253,8 @@ export default function PedidoEditPage() {
       }
       // Mercadería "todo el pedido": solo si se tocó ("" = hereda; 0 = sin mercadería en este pedido)
       if (mercTodo.trim() !== mercTodoInicial.trim()) {
-        const n = Number(mercTodo.trim().replace(",", "."))
-        headerUpdate.bonif_mercaderia_pct = mercTodo.trim() === "" || !Number.isFinite(n) ? null : n
+        const n = parseMonto(mercTodo)
+        headerUpdate.bonif_mercaderia_pct = mercTodo.trim() === "" || n == null ? null : n
       }
       // El servidor aplica la traba por estado: si el pedido ya no es editable,
       // solo toma condicion_entrega (y el estado si es una transición válida).
@@ -335,10 +337,10 @@ export default function PedidoEditPage() {
     for (const tipo of ["general", "viajante", "mercaderia", "contado"] as const) {
       const seg: Record<string, number> = {}
       for (const s of SEGMENTOS_BONIF) {
-        const raw = (bonifPedidoForm[`${tipo}.${s}`] ?? "").trim().replace(",", ".")
+        const raw = (bonifPedidoForm[`${tipo}.${s}`] ?? "").trim()
         if (raw === "") continue
-        const n = Number(raw)
-        if (Number.isFinite(n)) seg[s] = n
+        const n = parseMonto(raw)
+        if (n != null) seg[s] = n
       }
       if (Object.keys(seg).length) out[tipo] = seg
     }
@@ -420,7 +422,7 @@ export default function PedidoEditPage() {
               {ESTADO_LABEL[pedido?.estado] || pedido?.estado}
             </span>
             <span className="text-xl font-bold text-slate-800">
-              ${liveTotal.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {moneda(liveTotal)}
             </span>
             <Button onClick={savePedido} disabled={saving || !puedeGuardar} className="gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -606,7 +608,7 @@ export default function PedidoEditPage() {
                                   <Input
                                     className={`h-8 text-right pr-6 tabular-nums ${val !== "" ? "border-amber-400 bg-amber-50" : ""}`}
                                     value={val}
-                                    placeholder={ficha != null ? `${ficha}` : "0"}
+                                    placeholder={ficha != null ? numero(ficha, 0, 2) : "0"}
                                     disabled={!editable}
                                     inputMode="decimal"
                                     onChange={(e) => setBonifPedidoForm((prev) => ({ ...prev, [`${tipo}.${seg}`]: e.target.value.replace(/[^\d.,]/g, "") }))}
@@ -653,7 +655,7 @@ export default function PedidoEditPage() {
                       <p key={`${c.ambito}:${c.marca_id || c.proveedor_id}`}>
                         <span className="font-semibold">{c.nombre}</span>
                         <span className="text-slate-400"> · {c.ambito} · ficha del cliente</span>
-                        {" — "}general {Number(c.dto_general_pct || 0)}% · viajante {Number(c.dto_viajante_pct || 0)}% · mercadería {Number(c.dto_mercaderia_pct || 0)}%
+                        {" — "}general {porcentaje(Number(c.dto_general_pct || 0))} · viajante {porcentaje(Number(c.dto_viajante_pct || 0))} · mercadería {porcentaje(Number(c.dto_mercaderia_pct || 0))}
                         {c.metodo_facturacion ? ` · ${c.metodo_facturacion}` : ""}
                         {segPedido.marca.some(r => r.ref_id === c.marca_id) || segPedido.proveedor.some(r => r.ref_id === c.proveedor_id)
                           ? <span className="text-teal-700 font-semibold"> · pisada por este pedido</span> : null}
@@ -744,11 +746,11 @@ export default function PedidoEditPage() {
                   >
                     Cambiar
                   </button>
-                  <Input
-                    type="number" min={1}
+                  <InputMonto
+                    decimales={0} soloPositivos
                     className="h-10 w-24 text-center font-bold text-lg bg-white shrink-0"
                     value={qty}
-                    onChange={(e) => setQty(parseInt(e.target.value) || 1)}
+                    onChange={(n) => setQty(Math.trunc(n ?? 0) || 1)}
                     onKeyDown={(e) => { if (e.key === "Enter") agregarItem(selectedProduct, qty) }}
                     autoFocus
                   />
@@ -816,16 +818,17 @@ export default function PedidoEditPage() {
                     <div className="col-span-2">
                       <div className="relative">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
-                        <Input
+                        <InputMonto
                           key={`p-${item.id}-${displayItem.precio_final ?? 0}`}
-                          type="number" step="0.01" min={0}
+                          soloPositivos
                           className="h-8 pl-5 text-right text-sm font-semibold"
                           disabled={!editable}
-                          defaultValue={displayItem.precio_final ?? 0}
+                          value={displayItem.precio_final ?? 0}
+                          onChange={() => {}}
                           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur() }}
                           onBlur={(e) => {
-                            const val = parseFloat(e.target.value)
-                            if (!isNaN(val)) {
+                            const val = parseMonto(e.target.value)
+                            if (val != null) {
                               const base = getBaseEdit(item)
                               setItemEdits(prev => ({ ...prev, [item.id]: { ...base, precio_final: val } }))
                             }
@@ -839,15 +842,17 @@ export default function PedidoEditPage() {
 
                     {/* Cantidad */}
                     <div className="col-span-2 flex items-center justify-center gap-1">
-                      <Input
+                      <InputMonto
                         key={`q-${item.id}-${displayItem.cantidad ?? 0}`}
-                        type="number" min={0}
+                        decimales={0} soloPositivos
                         className="h-8 w-20 text-center font-semibold text-sm"
                         disabled={!editable}
-                        defaultValue={displayItem.cantidad ?? 0}
+                        value={displayItem.cantidad ?? 0}
+                        onChange={() => {}}
                         onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur() }}
                         onBlur={(e) => {
-                          const val = parseInt(e.target.value)
+                          const n = parseMonto(e.target.value)
+                          const val = n == null ? NaN : Math.trunc(n)
                           if (!isNaN(val) && val >= 0) {
                             const base = getBaseEdit(item)
                             setItemEdits(prev => ({ ...prev, [item.id]: { ...base, cantidad: val } }))
@@ -860,7 +865,7 @@ export default function PedidoEditPage() {
                     {/* Subtotal */}
                     <div className="col-span-2 text-right">
                       <p className={`text-sm font-bold ${isFaltante ? "text-slate-400 line-through" : "text-slate-800"}`}>
-                        ${subtotalDisplay.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {moneda(subtotalDisplay)}
                       </p>
                       {displayItem.cantidad_preparada != null && displayItem.cantidad_preparada > 0 && (
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
@@ -921,7 +926,7 @@ export default function PedidoEditPage() {
                 <div className="text-right">
                   <p className="text-white/50 text-xs">Total del pedido</p>
                   <p className="text-2xl font-bold">
-                    ${liveTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    {moneda(liveTotal)}
                   </p>
                 </div>
               </div>

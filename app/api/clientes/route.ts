@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
 import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar"
+import { errorCuit, normalizarCuit } from "@/lib/formato"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -116,6 +117,10 @@ export async function POST(request: NextRequest) {
     if (!nombre || !vendedor_id) {
       return NextResponse.json({ error: "Nombre y vendedor_id son requeridos" }, { status: 400 })
     }
+    const errCuit = errorCuit(cuit)
+    if (errCuit) {
+      return NextResponse.json({ error: errCuit }, { status: 400 })
+    }
 
     // Crear cliente
     const { data: cliente, error: clienteError } = await supabase
@@ -124,7 +129,7 @@ export async function POST(request: NextRequest) {
         nombre,
         razon_social,
         nombre_razon_social: razon_social || nombre,
-        cuit,
+        cuit: normalizarCuit(cuit),
         direccion,
         localidad_id,
         telefono,

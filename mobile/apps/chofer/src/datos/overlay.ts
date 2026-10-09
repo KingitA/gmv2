@@ -9,13 +9,14 @@
 
 import type { ItemOutbox } from "@gm/core"
 import { cierreDeParadaPorCobro } from "@gm/cobro"
+import { moneda, redondear } from "@gm/formato"
 import { montoDelPrincipal, repartirMetodos } from "@gm/cobro/conjunto"
 import type {
   BilleteraData, ClienteViajeRow, DineroHoja, MetodoPayload, OpCobrar, OpCobroAnular, OpDevolucion, OpFinalizar, OpGasto, OpIniciar, OpParada,
   PagoHoja, ParadaHoja, ViajeDetalle,
 } from "../datasets"
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+const r2 = (n: number) => redondear(n)
 const de = <P,>(ops: ItemOutbox[], tipo: string) => ops.filter((o) => o.tipo === tipo).map((o) => ({ op: o, p: o.payload as P }))
 /** Una operación RECHAZADA no se aplicó ni se va a aplicar: no forma parte de lo que "va a pasar". */
 const vivas = (ops: ItemOutbox[]) => ops.filter((o) => o.estado !== "rechazado")
@@ -208,14 +209,13 @@ export function cierreAConservar(v: ViajeVista, clienteId: string, pagoId: strin
   if (!par || par.estado === "pendiente" || par.cerradaPorCobro !== keyDeIdLocal(pagoId)) return null
   const pago = par.pagos.find((p) => p.id === pagoId)
   const cobradoSin = r2(par.cobrado - (pago?.monto || 0))
-  const pesos = (n: number) => `$ ${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   return {
     viaje_id: v.id,
     parada_id: par.id,
     cliente_id: clienteId,
     estado: par.estado,
     // "Cobrar sí o sí" sin alcanzar el mínimo: el servidor pide el motivo (nunca bloquea)
-    ...(cobradoSin + 0.01 < par.minimo_exigido ? { motivo_no_cobro: `Cobro anulado: quedó cobrado ${pesos(cobradoSin)} de ${pesos(par.minimo_exigido)} exigidos` } : {}),
+    ...(cobradoSin + 0.01 < par.minimo_exigido ? { motivo_no_cobro: `Cobro anulado: quedó cobrado ${moneda(cobradoSin)} de ${moneda(par.minimo_exigido)} exigidos` } : {}),
   }
 }
 

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { FileText, Download, X, Loader2, Mail, Paperclip, ExternalLink } from 'lucide-react'
+import { numero, fechaHora } from "@/lib/formato"
 
 interface Attachment {
     id: string
@@ -44,19 +45,13 @@ const FILE_ICONS: Record<string, string> = {
 
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    if (bytes < 1024 * 1024) return `${numero(bytes / 1024, 1)} KB`
+    return `${numero(bytes / (1024 * 1024), 1)} MB`
 }
 
 function formatDate(dateStr: string | null): string {
     if (!dateStr) return '—'
-    try {
-        return new Date(dateStr).toLocaleString('es-AR', {
-            day: '2-digit', month: '2-digit', year: 'numeric',
-            hour: '2-digit', minute: '2-digit',
-            timeZone: 'America/Argentina/Buenos_Aires',
-        })
-    } catch { return dateStr }
+    return fechaHora(dateStr) || dateStr
 }
 
 export function EmailPreviewModal({ emailId, open, onClose }: Props) {

@@ -29,7 +29,7 @@ const STATUS_LABEL: Record<string, string> = {
 const defaultValueFormat: ValueFormat = (_campo, valor) => {
   if (valor === null || valor === undefined || valor === "") return "—"
   const s = String(valor).trim()
-  if (/^-?\d+\.\d+$/.test(s)) return (Math.round(parseFloat(s) * 100) / 100).toString()
+  if (/^-?\d+\.\d+$/.test(s)) return (Math.round(parseFloat(s) * 100) / 100).toString() // formato-ok: valor de máquina para Excel
   return s
 }
 

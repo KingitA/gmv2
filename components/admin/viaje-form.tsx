@@ -8,23 +8,31 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card } from "@/components/ui/card"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 import { createViaje } from "@/lib/actions/admin"
 import { useRouter } from "next/navigation"
 
 export function ViajeForm() {
   const [loading, setLoading] = useState(false)
+  // Fechas en ISO "AAAA-MM-DD" (el campo muestra dd/mm/aaaa)
+  const [fechaInicio, setFechaInicio] = useState("")
+  const [fechaFin, setFechaFin] = useState("")
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (!fechaInicio || !fechaFin) {
+      alert("Completá las fechas de inicio y fin (dd/mm/aaaa)")
+      return
+    }
     setLoading(true)
 
     const formData = new FormData(e.currentTarget)
     const data = {
       viajante_id: formData.get("viajante_id") as string,
       zona: formData.get("zona") as string,
-      fecha_salida: formData.get("fecha_inicio") as string,
-      fecha_retorno: formData.get("fecha_fin") as string,
+      fecha_salida: fechaInicio,
+      fecha_retorno: fechaFin,
       descripcion: formData.get("descripcion") as string,
     }
 
@@ -55,12 +63,12 @@ export function ViajeForm() {
         <div className="grid gap-6 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="fecha_inicio">Fecha de Inicio</Label>
-            <Input id="fecha_inicio" name="fecha_inicio" type="date" required />
+            <DateInputAR id="fecha_inicio" value={fechaInicio} onChange={setFechaInicio} required />
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="fecha_fin">Fecha de Fin</Label>
-            <Input id="fecha_fin" name="fecha_fin" type="date" required />
+            <DateInputAR id="fecha_fin" value={fechaFin} onChange={setFechaFin} required />
           </div>
         </div>
 

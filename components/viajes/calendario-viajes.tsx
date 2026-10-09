@@ -92,7 +92,7 @@ export function CalendarioViajes(p: Props) {
   // Celular: agenda vertical (un día por fila). En el mes, solo los días con viajes y hoy.
   const diasAgenda = (p.celdas.filter(Boolean) as string[])
     .filter(d => p.modo === 'semana' || d === p.hoy || (porDia.get(d)?.length ?? 0) > 0 || (p.sueltos?.get(d)?.length ?? 0) > 0)
-  const nombreDia = (d: string) => DIAS_SEMANA[(new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7]
+  const nombreDia = (d: string) => DIAS_SEMANA[(new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7] // formato-ok: día de semana en UTC (cálculo, no se muestra la fecha)
 
   return (
     <>
@@ -241,7 +241,7 @@ export function CalendarioViajes(p: Props) {
 
 /** Celdas de la semana (lunes→domingo) que contiene `fecha`. */
 export function celdasSemana(fecha: string): string[] {
-  const d = new Date(fecha + 'T00:00:00Z')
+  const d = new Date(fecha + 'T00:00:00Z') // formato-ok: día de semana en UTC (cálculo)
   const lunes = sumarDias(fecha, -((d.getUTCDay() + 6) % 7))
   return Array.from({ length: 7 }, (_, i) => sumarDias(lunes, i))
 }

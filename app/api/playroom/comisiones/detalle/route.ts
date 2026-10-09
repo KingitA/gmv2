@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import { fechaISO } from '@/lib/formato'
 
 export async function GET(req: NextRequest) {
   try {
@@ -95,7 +96,7 @@ export async function GET(req: NextRequest) {
           comprobante_id: cid,
           numero: comp ? `${comp.tipo_comprobante} ${comp.numero}` : '—',
           tipo_comprobante: comp?.tipo_comprobante ?? '—',
-          fecha_cobro: r.fecha_comprobante_cobrado?.slice(0, 10) ?? '',
+          fecha_cobro: fechaISO(r.fecha_comprobante_cobrado), // timestamptz → día argentino
           total_neto: comp?.total_neto ?? 0,
           total_iva: comp?.total_iva ?? 0,
           total: comp?.total ?? 0,

@@ -1,4 +1,5 @@
 import { Link } from "react-router"
+import { fecha } from "@gm/formato"
 import { useNoEnviados, useParamEstado } from "@gm/core"
 import { usePedidos, useRefrescarAlEntrar } from "../../datos/hooks"
 import type { PedidoVista } from "../../datos/overlay"
@@ -11,10 +12,8 @@ const PRIORIDADES = [
   { nivel: 3, label: "Normal", bg: C.greenL, border: C.greenB, color: C.green },
 ]
 
-const fechaAR = (f: string) => {
-  const [a, m, d] = (f || "").slice(0, 10).split("-")
-  return d ? `${d}/${m}/${a}` : f
-}
+/** "15/09/2026" (fecha DATE o timestamp, día argentino). */
+const fechaAR = (f: string) => fecha(f) || f
 
 function FilaPedido({ pedido, ultimo, color }: { pedido: PedidoVista; ultimo: boolean; color: string }) {
   const { total, resueltos } = pedido.progreso

@@ -12,10 +12,10 @@ import {
 } from "@/components/ui/select"
 import { ImportExtractoDialog } from "@/components/finanzas/import-extracto-dialog"
 import { formatDateAR } from "@/lib/utils"
+import { fecha, moneda } from "@/lib/formato"
 import { labelCategoria, egresoDeCategoria } from "@/lib/finanzas/categorias-gasto"
 
-const fmt = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmt = (n: number) => moneda(n)
 
 const CATEGORIAS = ["IMPUESTOS", "OPERATIVO", "SUELDOS", "INVERSION", "CREDITO", "OTROS"]
 
@@ -373,7 +373,7 @@ export default function ConciliacionPage() {
                       <div className="min-w-0">
                         <p className="font-medium text-sm">{i.cliente}</p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(i.fecha).toLocaleDateString("es-AR")}
+                          {fecha(i.fecha)}
                           {i.viaje && ` · ${i.viaje}`}
                           <Badge variant="outline" className="ml-2 capitalize">{i.cobrador_tipo}</Badge>
                           {i.referencias.length > 0 && ` · Ref: ${i.referencias.join(", ")}`}

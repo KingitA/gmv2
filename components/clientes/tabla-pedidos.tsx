@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { TIPO_ARRASTRE_PEDIDOS } from '@/components/viajes/calendario-viajes'
 import { formatDateAR } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { moneda } from "@/lib/formato"
 
 export type PedidoFila = {
   id: string
@@ -34,8 +35,6 @@ export const PRIORIDAD = {
   2: { label: 'Alta', punto: 'bg-alerta-500', texto: 'text-alerta-600', fondo: 'bg-alerta-50' },
   3: { label: 'Normal', punto: 'bg-neutro-300', texto: 'text-neutro-500', fondo: '' },
 } as const
-
-const pesos = (n: number) => `$ ${Math.round(n || 0).toLocaleString('es-AR')}`
 
 export type Orden = 'prioridad' | 'numero' | 'fecha' | 'cliente' | 'zona' | 'estado' | 'viaje' | 'total'
 
@@ -166,7 +165,7 @@ export function TablaPedidos(p: Props) {
                           </span>
                         : <span className="text-neutro-300">—</span>}
                   </td>
-                  <td className="px-2 text-right font-semibold whitespace-nowrap tabular-nums text-azul-900">{x.total > 0 ? pesos(x.total) : '—'}</td>
+                  <td className="px-2 text-right font-semibold whitespace-nowrap tabular-nums text-azul-900">{x.total > 0 ? moneda(x.total || 0, 0) : '—'}</td>
                   <td className="pr-2 text-right" onClick={e => e.stopPropagation()}>
                     {p.onEliminar && p.puedeEliminar(x.estado) && (
                       <button type="button" onClick={() => p.onEliminar!(x)} aria-label={`Eliminar pedido ${x.numero_pedido}`}
@@ -201,7 +200,7 @@ export function TablaPedidos(p: Props) {
                       N° {x.numero_pedido} · {formatDateAR(x.fecha)}
                     </div>
                   </div>
-                  <div className="shrink-0 text-right font-semibold tabular-nums text-azul-900">{x.total > 0 ? pesos(x.total) : '—'}</div>
+                  <div className="shrink-0 text-right font-semibold tabular-nums text-azul-900">{x.total > 0 ? moneda(x.total || 0, 0) : '—'}</div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
                   {p.estadoBadge(x.estado)}

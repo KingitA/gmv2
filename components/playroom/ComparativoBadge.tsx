@@ -1,4 +1,5 @@
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { porcentaje } from "@/lib/formato"
 
 interface ComparativoBadgeProps {
   pct: number
@@ -33,7 +34,7 @@ export default function ComparativoBadge({
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-semibold ${colorClass} ${textSize}`}>
       <Icon className={iconSize} />
-      {Math.abs(pct).toFixed(1)}%
+      {porcentaje(Math.abs(pct), 1)}
       {label && <span className="font-normal opacity-70 ml-0.5">{label}</span>}
     </span>
   )

@@ -6,7 +6,7 @@ import { DS } from "../../datasets"
 import { useBorradores, type Borrador } from "../../datos/borradores"
 import { usePedidos, useRefrescarAlEntrar } from "../../datos/hooks"
 import type { PedidoVista } from "../../datos/overlay"
-import { BadgeEstado, fechaCorta, formatCurrency, Pantalla, SinEnviar } from "../../ui"
+import { BadgeEstado, fechaAR, formatCurrency, Pantalla, SinEnviar } from "../../ui"
 
 // Mis pedidos (= app/vendedor/pedidos/page.tsx). El filtro ?estado= que la web resolvía en
 // el servidor (.eq("estado", …)) se aplica LOCAL sobre la réplica + lo tomado acá sin enviar.
@@ -107,7 +107,7 @@ export function Pedidos() {
 }
 
 function TarjetaPedido({ p, onAbrir }: { p: PedidoVista; onAbrir: () => void }) {
-  const fecha = fechaCorta(p.fecha, { day: "numeric", month: "short", year: "numeric" })
+  const fecha = fechaAR(p.fecha)
   return (
     <button onClick={onAbrir} className="flex h-full w-full items-center justify-between overflow-hidden rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm active:bg-gray-50">
       <div className="min-w-0">

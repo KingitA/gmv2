@@ -11,6 +11,7 @@ import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCh
 import { MARCA_CONTADO } from "@/lib/constants"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { numero, parseMonto, redondear, fecha } from "@/lib/formato"
 
 // Cobro del viajante — espejo del patrón de /caja (Caja del Día):
 //  · "¿Qué paga?": pedidos con estado; tilde directa (sin casilla emergente),
@@ -99,7 +100,7 @@ const ESTADO_PEDIDO: Record<string, { label: string; cls: string }> = {
 let seqMetodo = 0
 const nuevoMetodo = (tipo: Metodo["tipo"]): Metodo => filaVacia(`m-${Date.now().toString(36)}-${(seqMetodo++).toString(36)}`, tipo)
 
-const round2 = (n: number) => Math.round(n * 100) / 100
+const round2 = (n: number) => redondear(n)
 
 // Input de monto que NO hace bailar el resumen: confirma con Enter o al salir
 function MontoInput({
@@ -113,11 +114,17 @@ function MontoInput({
   className?: string
   placeholder?: string
 }) {
-  const [texto, setTexto] = useState(valor ? String(valor) : "")
+  // Fuera de edición se ve "1.500,00"; lo tipeado se entiende en formato argentino (parseMonto)
+  const mostrar = (v: number) => (v ? numero(v) : "")
+  const [texto, setTexto] = useState(mostrar(valor))
   useEffect(() => {
-    setTexto(valor ? String(valor) : "")
+    setTexto(mostrar(valor))
   }, [valor])
-  const commit = () => onCommit(Math.max(0, parseFloat(texto.replace(",", ".")) || 0))
+  const commit = () => {
+    const v = Math.max(0, parseMonto(texto) ?? 0)
+    onCommit(v)
+    setTexto(mostrar(v))
+  }
   return (
     <input
       type="text"
@@ -516,7 +523,7 @@ export default function VendedorCobrarPage() {
               {cp.tipo_comprobante} {cp.numero_comprobante}
             </p>
             <p className="text-gray-400 text-xs">
-              {cp.fecha ? `${cp.fecha.slice(0, 10).split("-").reverse().join("/")} · ` : ""}saldo {formatCurrency(cp.saldo_pendiente)}
+              {cp.fecha ? `${fecha(cp.fecha)} · ` : ""}saldo {formatCurrency(cp.saldo_pendiente)}
             </p>
             {(cp.en_cobro || 0) > 0.005 && (
               <p className="text-sky-600 text-xs font-bold">
@@ -785,7 +792,7 @@ export default function VendedorCobrarPage() {
                           <span className="text-lg shrink-0">{rechazada ? "•" : activo ? "☑" : "☐"}</span>
                           <div className="min-w-0">
                             <p className="font-bold text-gray-900 text-sm">
-                              Entrega a cuenta {p.fecha?.split("-").reverse().join("/")}
+                              Entrega a cuenta {fecha(p.fecha)}
                               {p.monto ? ` · ${formatCurrency(p.monto)}` : ""}
                             </p>
                             <p className={`text-xs font-bold ${seguimiento.cls}`}>{seguimiento.label}</p>

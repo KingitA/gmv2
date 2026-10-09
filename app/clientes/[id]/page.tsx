@@ -15,6 +15,9 @@ import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION } from "@/components/pedidos/SegmentacionCondiciones"
 import { guardarFichaComercial, guardarSegmentacionCliente } from "@/lib/actions/condiciones-cliente"
 import Link from "next/link"
+import { moneda, redondear, formatCuit, errorCuit, normalizarCuit } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
+import { InputCUIT } from "@/components/ui/input-cuit"
 
 function normalizeEnum(v: string | null | undefined, map: Record<string, string>, fallback: string): string {
   if (!v) return fallback
@@ -185,7 +188,7 @@ export default function ClienteDetailPage() {
     setListasPrecio(listasRes.data || [])
     // Saldo desde el libro mayor (fuente única): Σdebe − Σhaber
     const balance = Number((ccRes.data as any)?.saldo_actual ?? 0)
-    setCcBalance(Math.round(balance * 100) / 100)
+    setCcBalance(redondear(balance))
     setPedidosCliente(pedRes.data || [])
     if (clienteRes.data) {
       const c = clienteRes.data as any
@@ -305,9 +308,15 @@ export default function ClienteDetailPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const errCuit = errorCuit(formData.cuit)
+    if (errCuit) {
+      alert(errCuit)
+      return
+    }
     setSaving(true)
     const dataToSave = {
       ...formData,
+      cuit: normalizarCuit(formData.cuit),
       // Antes los dos campos se pisaban con la razón social y se perdía el nombre
       // de fantasía que carga el vendedor ("Súper Eco 17"). Vacío = igual a la razón social.
       nombre: formData.nombre.trim() || formData.nombre_razon_social,
@@ -390,7 +399,6 @@ export default function ClienteDetailPage() {
   const vendedorSel = vendedores.find((v: any) => v.id === formData.vendedor_id)
   const algunoPorSegmento = segMetodo || listaPorSegmento || segDescuentos
   const cantSegmentacion = segmentacion.proveedor.length + segmentacion.marca.length
-  const fmtPesos = (n: number) => "$ " + Math.abs(n).toLocaleString("es-AR", { maximumFractionDigits: 0 })
 
   // General / Por segmento: mismo comportamiento de siempre, con el estilo de la ficha
   const SegToggle = ({ on, set: cambiar }: { on: boolean; set: (b: boolean) => void }) => (
@@ -441,7 +449,7 @@ export default function ClienteDetailPage() {
               <FichaMeta label="Razón social">{formData.nombre_razon_social}</FichaMeta>
             )}
             {formData.codigo_cliente && <FichaMeta label="Código">{formData.codigo_cliente}</FichaMeta>}
-            {formData.cuit && <FichaMeta label="CUIT">{formData.cuit}</FichaMeta>}
+            {formData.cuit && <FichaMeta label="CUIT">{formatCuit(formData.cuit)}</FichaMeta>}
             {localidadSel && <FichaMeta>{localidadSel.nombre}{localidadSel.zonas?.nombre ? ` · ${localidadSel.zonas.nombre}` : ""}</FichaMeta>}
             {vendedorSel && <FichaMeta label="Vendedor">{vendedorSel.nombre}</FichaMeta>}
             {esNuevo && !formData.nombre_razon_social && <span>Completá al menos el nombre</span>}
@@ -454,7 +462,7 @@ export default function ClienteDetailPage() {
                 <Wallet className="size-4" />
                 Cuenta corriente
                 {ccBalance !== null && ccBalance !== 0 && (
-                  <span className={cn("font-bold tabular-nums", ccBalance > 0 ? "text-alerta-600" : "text-exito-600")}>{fmtPesos(ccBalance)}</span>
+                  <span className={cn("font-bold tabular-nums", ccBalance > 0 ? "text-alerta-600" : "text-exito-600")}>{moneda(Math.abs(ccBalance), 0)}</span>
                 )}
               </Link>
             </Button>
@@ -484,7 +492,7 @@ export default function ClienteDetailPage() {
               <Input className="tabular-nums" value={formData.codigo_cliente} onChange={(e) => set("codigo_cliente", e.target.value)} placeholder="CL-001" />
             </Campo>
             <Campo label="CUIT">
-              <Input className="tabular-nums" value={formData.cuit} onChange={(e) => set("cuit", e.target.value)} placeholder="20-12345678-9" />
+              <InputCUIT value={formData.cuit} onChange={(v) => set("cuit", v)} />
             </Campo>
             <Campo label="Dirección" ancho={2}>
               <Input value={formData.direccion} onChange={(e) => set("direccion", e.target.value)} />
@@ -601,9 +609,9 @@ export default function ClienteDetailPage() {
                   {BONIF_TIPOS.map(tipo => (
                     <Campo key={tipo.key} label={tipo.label}>
                       <ConUnidad unidad="%">
-                        <Input type="number" step="0.01" min="0" max="100" className="tabular-nums"
+                        <InputMonto soloPositivos
                           value={bonifGrid[`todos__${tipo.key}`] || 0}
-                          onChange={(e) => setBonifGrid({ ...bonifGrid, [`todos__${tipo.key}`]: parseFloat(e.target.value) || 0 })} />
+                          onChange={(n) => setBonifGrid({ ...bonifGrid, [`todos__${tipo.key}`]: n ?? 0 })} />
                       </ConUnidad>
                     </Campo>
                   ))}
@@ -650,9 +658,9 @@ export default function ClienteDetailPage() {
                           return (
                             <Campo key={tipo.key} label={tipo.label}>
                               <ConUnidad unidad="%">
-                                <Input type="number" step="0.01" min="0" max="100" className="bg-white px-2 tabular-nums"
+                                <InputMonto soloPositivos className="bg-white px-2"
                                   value={bonifGrid[key] || 0}
-                                  onChange={(e) => setBonifGrid({ ...bonifGrid, [key]: parseFloat(e.target.value) || 0 })} />
+                                  onChange={(n) => setBonifGrid({ ...bonifGrid, [key]: n ?? 0 })} />
                               </ConUnidad>
                             </Campo>
                           )
@@ -697,7 +705,7 @@ export default function ClienteDetailPage() {
             </Campo>
             <Campo label="Percepción IIBB">
               <ConUnidad unidad="%">
-                <Input type="number" step="0.01" className="tabular-nums" value={formData.percepcion_iibb} onChange={(e) => set("percepcion_iibb", parseFloat(e.target.value) || 0)} />
+                <InputMonto value={formData.percepcion_iibb} onChange={(n) => set("percepcion_iibb", n ?? 0)} />
               </ConUnidad>
             </Campo>
             <Campo label="Exenciones" ancho={2}>
@@ -721,7 +729,7 @@ export default function ClienteDetailPage() {
                 <p className="mt-1 text-sm text-neutro-400">Sin datos</p>
               ) : (
                 <>
-                  <p className={cn("mt-1 text-2xl font-bold tabular-nums", ccBalance > 0 ? "text-alerta-600" : ccBalance < 0 ? "text-exito-600" : "text-neutro-500")}>{fmtPesos(ccBalance)}</p>
+                  <p className={cn("mt-1 text-2xl font-bold tabular-nums", ccBalance > 0 ? "text-alerta-600" : ccBalance < 0 ? "text-exito-600" : "text-neutro-500")}>{moneda(Math.abs(ccBalance), 0)}</p>
                   <p className="text-xs font-medium text-neutro-500">{ccBalance > 0 ? "Nos debe" : ccBalance < 0 ? "A favor del cliente" : "Al día"}</p>
                 </>
               )}
@@ -742,7 +750,7 @@ export default function ClienteDetailPage() {
                         </div>
                         <div className="flex items-center gap-3">
                           <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", ESTADO_COLORS[p.estado] || "bg-neutro-100 text-neutro-600")}>{(p.estado || "").replace(/_/g, " ")}</span>
-                          <span className="w-24 text-right text-sm font-bold tabular-nums text-azul-900">$ {(p.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>
+                          <span className="w-24 text-right text-sm font-bold tabular-nums text-azul-900">{moneda(p.total || 0, 0)}</span>
                         </div>
                       </Link>
                     </li>

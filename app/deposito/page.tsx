@@ -12,6 +12,7 @@ import { toast } from "sonner"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
+import { InputMonto } from "@/components/ui/input-monto"
 
 type Articulo = {
   id: string
@@ -251,11 +252,11 @@ export default function DepositoPage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label className="text-xs font-medium text-slate-600">Unidades por bulto</Label>
-                        <Input type="number" className="h-11 text-sm mt-1" value={editDatos.unidades_por_bulto || ""} onChange={e => setEditDatos(p => ({ ...p, unidades_por_bulto: parseInt(e.target.value) || 1 }))}/>
+                        <InputMonto decimales={0} soloPositivos className="h-11 text-sm mt-1" value={editDatos.unidades_por_bulto || ""} onChange={n => setEditDatos(p => ({ ...p, unidades_por_bulto: Math.trunc(n ?? 0) || 1 }))}/>
                       </div>
                       <div>
                         <Label className="text-xs font-medium text-slate-600">Orden depósito</Label>
-                        <Input type="number" className="h-11 text-sm mt-1" value={editDatos.orden_deposito || ""} onChange={e => setEditDatos(p => ({ ...p, orden_deposito: parseInt(e.target.value) || 0 }))}/>
+                        <InputMonto decimales={0} soloPositivos className="h-11 text-sm mt-1" value={editDatos.orden_deposito || ""} onChange={n => setEditDatos(p => ({ ...p, orden_deposito: Math.trunc(n ?? 0) }))}/>
                       </div>
                     </div>
                     <Button onClick={guardarDatos} disabled={savingDatos} className="w-full h-11 bg-indigo-600 hover:bg-indigo-700 text-sm font-semibold">
@@ -302,11 +303,11 @@ export default function DepositoPage() {
                         >
                           <Minus className="h-5 w-5"/>
                         </button>
-                        <Input
-                          type="number"
+                        <InputMonto
+                          decimales={3}
                           className="flex-1 h-12 text-center text-xl font-bold"
                           value={ajusteCantidad}
-                          onChange={e => setAjusteCantidad(parseFloat(e.target.value) || 0)}
+                          onChange={n => setAjusteCantidad(n ?? 0)}
                         />
                         <button
                           onClick={() => setAjusteCantidad(p => p + 1)}

@@ -1,4 +1,5 @@
 import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { hoyISO } from "@/lib/formato"
 import { NextRequest, NextResponse } from "next/server"
 import { processOrder, processOrderText } from "@/lib/actions/ai-order-import"
 import { createAdminClient } from "@/lib/supabase/admin"
@@ -158,7 +159,7 @@ async function createOrderAutomated(supabase: any, clienteId: string, items: any
         numero_pedido: numeroPedido,
         cliente_id: clienteId,
         vendedor_id: cliente.vendedor_id,
-        fecha: nowArgentina(),
+        fecha: hoyISO(), // día argentino (con el instante UTC, después de las 21 h quedaba mañana)
         estado: "pendiente",
         subtotal,
         descuento_general: 0,

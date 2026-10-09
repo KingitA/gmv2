@@ -21,7 +21,8 @@ import {
 import { blobABase64, comprimirFoto, urlLocal } from "@gm/cheques/foto"
 import { DS, type ComprobanteCC, type DevolucionPendiente, type PedidoCobro } from "../../datasets"
 import { rechazosDe, useCuenta, useCuentasBancarias, useEncolar, uuidv4 } from "../../datos/hooks"
-import { AvisosBcra, FechaInput, MontoInput, Pantalla, Rechazos, dejarAviso, dejarAvisoSinCuit, formatCurrency, round2, useToast } from "../../ui"
+import { fecha, normalizarCuit } from "@gm/formato"
+import { AvisosBcra, CuitInput, FechaInput, MontoInput, Pantalla, Rechazos, dejarAviso, dejarAvisoSinCuit, formatCurrency, round2, useToast } from "../../ui"
 
 // Port de app/vendedor/clientes/[id]/cobrar/page.tsx — espejo del patrón de /caja (Caja del Día):
 //  · "¿Qué paga?": pedidos con estado; tilde directa, monto editable inline que se confirma
@@ -408,7 +409,7 @@ export function Cobrar() {
           banco: m.tipo === "cheque" ? m.banco : null,
           numero_cheque: m.tipo === "cheque" ? m.numero_cheque : null,
           fecha_cheque: m.tipo === "cheque" ? m.fecha_cheque : null,
-          cuit_emisor: m.tipo === "cheque" ? m.cuit_emisor || null : null,
+          cuit_emisor: m.tipo === "cheque" ? normalizarCuit(m.cuit_emisor) : null,
           es_echeq: m.tipo === "cheque" ? m.es_echeq : false,
           referencia_transferencia: m.tipo === "transferencia" ? m.referencia_transferencia || null : null,
           cuenta_bancaria_id: m.tipo === "transferencia" ? m.cuenta_bancaria_id : null,
@@ -499,7 +500,7 @@ export function Cobrar() {
           <div className="min-w-0">
             <p className="text-sm font-bold text-gray-900">{cp.tipo_comprobante} {cp.numero_comprobante}</p>
             <p className="text-xs text-gray-400">
-              {cp.fecha ? `${cp.fecha.slice(0, 10).split("-").reverse().join("/")} · ` : ""}saldo {formatCurrency(cp.saldo_pendiente)}
+              {cp.fecha ? `${fecha(cp.fecha)} · ` : ""}saldo {formatCurrency(cp.saldo_pendiente)}
             </p>
             {(cp.en_cobro || 0) > 0.005 && (
               <p className="text-xs font-bold text-sky-600">
@@ -730,7 +731,7 @@ export function Cobrar() {
                           <span className="shrink-0 text-lg">{rechazada ? "•" : activo ? "☑" : "☐"}</span>
                           <div className="min-w-0">
                             <p className="text-sm font-bold text-gray-900">
-                              Entrega a cuenta {p.fecha?.split("-").reverse().join("/")}
+                              Entrega a cuenta {fecha(p.fecha)}
                               {p.monto ? ` · ${formatCurrency(p.monto)}` : ""}
                             </p>
                             <p className={`text-xs font-bold ${seguimiento.cls}`}>{seguimiento.label}</p>
@@ -841,7 +842,7 @@ export function Cobrar() {
                         <input value={m.banco} onChange={(e) => updateMetodo(idx, { banco: e.target.value })} placeholder="Banco *" className={clsOcr(m, "banco")} />
                         <input value={m.numero_cheque} onChange={(e) => updateMetodo(idx, { numero_cheque: e.target.value })} placeholder="N° cheque *" inputMode="numeric" className={clsOcr(m, "numero_cheque")} />
                         <FechaInput valor={m.fecha_cheque} onCambio={(v) => updateMetodo(idx, { fecha_cheque: v })} className={clsOcr(m, "fecha_cheque")} />
-                        <input value={m.cuit_emisor} onChange={(e) => updateMetodo(idx, { cuit_emisor: e.target.value })} placeholder="CUIT emisor" inputMode="numeric" className={clsOcr(m, "cuit_emisor")} />
+                        <CuitInput sinError value={m.cuit_emisor} onChange={(v) => updateMetodo(idx, { cuit_emisor: v })} placeholder="CUIT emisor" className={clsOcr(m, "cuit_emisor")} />
                         {m.cuit_emisor && !cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs font-medium text-red-600">⚠️ El CUIT no cierra (dígito verificador): revisalo en el cheque. Se registra igual, pero no se consulta en el BCRA.</p>}
                         {!m.cuit_emisor && <p className="col-span-2 text-xs font-medium text-amber-700">⚠️ Sin CUIT: este cheque no se consulta en el BCRA (queda sin control de riesgo).</p>}
                         {cuitValido(m.cuit_emisor) && <p className="col-span-2 text-xs text-gray-500">Al registrar, el CUIT se consulta en el BCRA en segundo plano; el resultado llega como aviso.</p>}

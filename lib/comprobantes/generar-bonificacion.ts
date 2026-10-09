@@ -24,6 +24,7 @@ import { SupabaseClient } from "@supabase/supabase-js"
 import { getBonificacionArticuloId } from "@/lib/articulos/bonificacion"
 import { marcaPagoBonif } from "@/lib/cobranzas/marca-pago"
 import { todayArgentina, nowArgentina } from "@/lib/utils"
+import { cuitDigitos, cuitValido } from "@/lib/formato"
 import { actualizarDescuentoFinancieroKardex } from "@/lib/kardex/insertar-kardex"
 import { TIPO_CBTE_ARCA, DOC_TIPO, CONCEPTO, IVA_ID, TRIBUTO_ID, condicionIvaReceptorId, type AmbienteARCA } from "@/lib/arca/tipos"
 import { obtenerTAConCache } from "@/lib/arca/cache"
@@ -499,6 +500,12 @@ export async function generarBonificacionContado(
     if (!cliente?.cuit) {
       throw new Error("El cliente no tiene CUIT configurado. No se puede emitir la NC fiscal por pago contado.")
     }
+    if (!cuitValido(cliente.cuit)) {
+      throw new Error(
+        `El CUIT del cliente "${cliente.nombre_razon_social ?? cliente.nombre ?? ""}" no es válido (${cliente.cuit}): ` +
+        `corregilo en la ficha del cliente. No se puede emitir la NC fiscal por pago contado.`
+      )
+    }
     const condIvaReceptor = condicionIvaReceptorId(cliente.condicion_iva)
     if (condIvaReceptor === null) {
       throw new Error(
@@ -518,7 +525,7 @@ export async function generarBonificacionContado(
     }
     const puntoVentaFiscal = String(empresaConfig.arca_punto_venta).padStart(4, "0")
     const ambiente = (empresaConfig.arca_ambiente ?? "produccion") as AmbienteARCA
-    const cuitEmpresa = (empresaConfig.cuit ?? "").replace(/-/g, "")
+    const cuitEmpresa = cuitDigitos(empresaConfig.cuit)
 
     // Numeración fiscal + sync con ARCA
     const ta = await obtenerTAConCache(supabase, ambiente)
@@ -605,7 +612,7 @@ export async function generarBonificacionContado(
       cbteHasta: nuevoNumero,
       concepto:  CONCEPTO.PRODUCTOS,
       docTipo:   DOC_TIPO.CUIT,
-      docNro:    cliente.cuit.replace(/-/g, ""),
+      docNro:    cuitDigitos(cliente.cuit),
       fecha:     todayArgentina().replace(/-/g, ""),
       impTotal:   totalFactura,
       impTotConc: 0,

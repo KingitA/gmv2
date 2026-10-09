@@ -242,7 +242,7 @@ describe("Chofer · cobrar cierra la parada", () => {
   it("regla: 'cobrar sí o sí' sin alcanzar el mínimo NO bloquea: cierra y deja constancia", () => {
     const c = cierreDeParadaPorCobro({ estado: "pendiente", bultos: 3, tienePedidos: true, minimoExigido: 5000, cobrado: 3000 })!
     expect(c.estado).toBe("entregado")
-    expect(c.motivo_no_cobro).toContain("$ 3.000,00 de $ 5.000,00")
+    expect(c.motivo_no_cobro).toContain("$3.000,00 de $5.000,00")
     expect(cierreDeParadaPorCobro({ estado: "pendiente", bultos: 3, tienePedidos: true, minimoExigido: 5000, cobrado: 5000 })!.motivo_no_cobro).toBeNull()
   })
 
@@ -318,7 +318,7 @@ describe("Chofer · anular un cobro no reabre la entrega", () => {
     const cobroOp = op("viaje.cobrar", cobro(C2, 5000))
     const conservar = cierreAConservar(viajeVisible(viaje(), [cobroOp]), C2, idLocal(cobroOp.key))!
     expect(conservar.estado).toBe("entregado")
-    expect(conservar.motivo_no_cobro).toContain("$ 0,00 de $ 5.000,00")
+    expect(conservar.motivo_no_cobro).toContain("$0,00 de $5.000,00")
   })
 
   it("no hay nada que conservar si la parada la cerró el chofer o el cobro es del servidor", () => {
@@ -331,6 +331,6 @@ describe("Chofer · anular un cobro no reabre la entrega", () => {
   it("cobro parcial (menos que lo exigido) cierra igual", () => {
     const v = viajeVisible(viaje(), [op("viaje.cobrar", cobro(C2, 1000))])
     expect(v.paradas[1]).toMatchObject({ estado: "entregado", cobro_cumplido: false })
-    expect(v.paradas[1]!.motivo_no_cobro).toContain("$ 1.000,00 de $ 5.000,00")
+    expect(v.paradas[1]!.motivo_no_cobro).toContain("$1.000,00 de $5.000,00")
   })
 })

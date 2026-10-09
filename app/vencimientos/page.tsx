@@ -24,6 +24,7 @@ import { useMisRoles } from "@/lib/hooks/useMisRoles"
 import { tiposVisibles } from "@/lib/finanzas/tipos-reservados"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { diasEntre, hoyISO, fecha } from "@/lib/formato"
 
 const TIPOS_VENCIMIENTO = [
     { value: "factura", label: "Factura de proveedor" },
@@ -179,10 +180,7 @@ export default function VencimientosPage() {
     }
 
     function diasHastaVencimiento(fecha: string) {
-        const hoy = new Date()
-        hoy.setHours(0, 0, 0, 0)
-        const venc = new Date(fecha + "T00:00:00")
-        return Math.ceil((venc.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+        return diasEntre(hoyISO(), fecha)
     }
 
     function getBadgeEstado(estado: string, fechaVenc: string) {
@@ -327,7 +325,7 @@ export default function VencimientosPage() {
                                                 <TableCell className="font-medium">
                                                     <div className="flex items-center gap-2">
                                                         <Calendar className="h-4 w-4 text-muted-foreground" />
-                                                        {new Date(v.fecha_vencimiento + "T00:00:00").toLocaleDateString("es-AR")}
+                                                        {fecha(v.fecha_vencimiento)}
                                                     </div>
                                                     {v.recurrencia && (
                                                         <span className="text-xs text-muted-foreground ml-6">🔄 {v.recurrencia}</span>

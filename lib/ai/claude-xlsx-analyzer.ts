@@ -5,6 +5,7 @@
 // =====================================================
 
 import Anthropic from '@anthropic-ai/sdk'
+import { parseMonto } from '@/lib/formato'
 import {
     SYSTEM_PROMPT_XLSX_ORDER,
     SYSTEM_PROMPT_XLSX_PRICELIST,
@@ -196,7 +197,7 @@ function formatSheetsForClaude(sheets: ParsedSheetData[], filename: string, mode
                     const colIdx = sheet.pedidoColumnIndices[i]
                     const val = row[colIdx]
                     if (!val || val === '' || val === '0') continue
-                    const num = parseFloat(val.replace(',', '.'))
+                    const num = parseMonto(val) ?? NaN // formato argentino ("1.500" = 1500)
 
                     if (!isNaN(num) && num > 0) {
                         const newRow = new Array(row.length).fill('')

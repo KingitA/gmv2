@@ -6,9 +6,10 @@ import { useEffect, useRef, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { CargaProgreso } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { fecha, moneda, redondear } from "@/lib/formato"
 
 export interface Comprobante {
   id: string
@@ -67,8 +68,6 @@ export interface ResumenCuenta {
   pedidosSaldados: number     // pedidos facturados sin saldo (historial)
   otrosComprobantes: number   // comprobantes cobrables sin pedido vivo
 }
-
-const fmtARS = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })
 
 export function ComprobantesSelector({ clienteId, seleccionados, onChange, onComprobantesLoaded, onDtosHechosLoaded, onContadoPedidosChange, modo = "todos", onResumenLoaded, seleccionTotal, contadoGeneral, onContadoGeneralChange, contadoEnBarra = true }: Props) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([])
@@ -180,7 +179,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
     onChange(next)
   }
 
-  const montoAnticipo = (ped: Pedido) => (contado.has(ped.id) ? Math.round(Number(ped.total) * 0.9 * 100) / 100 : Number(ped.total))
+  const montoAnticipo = (ped: Pedido) => (contado.has(ped.id) ? redondear(Number(ped.total) * 0.9) : Number(ped.total))
 
   const cambiarContado = (next: Set<string>) => { setContado(next); onContadoPedidosChange?.(next) }
 
@@ -195,7 +194,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
       else next.delete(ped.id)
       cambiarContado(next)
     }
-    setSel(PEDIDO_PREFIX + ped.id, estaba ? null : conContado ? Math.round(Number(ped.total) * 0.9 * 100) / 100 : Number(ped.total))
+    setSel(PEDIDO_PREFIX + ped.id, estaba ? null : conContado ? redondear(Number(ped.total) * 0.9) : Number(ped.total))
   }
 
   const toggleContado = (ped: Pedido) => {
@@ -206,7 +205,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
     onContadoPedidosChange?.(next)
     // Si el anticipo ya está seleccionado, recalcular su monto (90% / 100%)
     if (seleccionados[PEDIDO_PREFIX + ped.id] !== undefined) {
-      const monto = next.has(ped.id) ? Math.round(Number(ped.total) * 0.9 * 100) / 100 : Number(ped.total)
+      const monto = next.has(ped.id) ? redondear(Number(ped.total) * 0.9) : Number(ped.total)
       setSel(PEDIDO_PREFIX + ped.id, monto)
     }
   }
@@ -224,7 +223,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
     if (contadoGeneral) cambiarContado(conContado)
     const next: Record<string, number> = { ...seleccionados }
     for (const c of comprobantes) next[c.id] = Number(c.saldo_pendiente)
-    for (const p of pedidosSinFacturar) next[PEDIDO_PREFIX + p.id] = conContado.has(p.id) ? Math.round(Number(p.total) * 0.9 * 100) / 100 : Number(p.total)
+    for (const p of pedidosSinFacturar) next[PEDIDO_PREFIX + p.id] = conContado.has(p.id) ? redondear(Number(p.total) * 0.9) : Number(p.total)
     onChange(next)
   }
   // El padre cambió "10% contado a todo" (toggle fuera del selector): los anticipos siguen
@@ -251,7 +250,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
     const sel = { ...seleccionados }
     for (const p of pedidosSinFacturar) {
       if (sel[PEDIDO_PREFIX + p.id] !== undefined)
-        sel[PEDIDO_PREFIX + p.id] = activar ? Math.round(Number(p.total) * 0.9 * 100) / 100 : Number(p.total)
+        sel[PEDIDO_PREFIX + p.id] = activar ? redondear(Number(p.total) * 0.9) : Number(p.total)
     }
     onChange(sel)
   }
@@ -312,7 +311,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
                 <span className="font-semibold text-sm">Pedido #{ped.numero_pedido}</span>
                 <span className="text-xs">{formatDateAR(ped.fecha)}</span>
                 <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200">Saldado</Badge>
-                <span className="ml-auto font-mono text-sm">${fmtARS(Number(ped.total))}</span>
+                <span className="ml-auto font-mono text-sm">{moneda(Number(ped.total))}</span>
               </div>
             </div>
           )
@@ -344,7 +343,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
                   10% contado
                 </label>
               )}
-              <span className="font-mono text-sm">${fmtARS(facturado ? comps.reduce((s, c) => s + Number(c.saldo_pendiente), 0) : montoAnticipo(ped))}</span>
+              <span className="font-mono text-sm">{moneda(facturado ? comps.reduce((s, c) => s + Number(c.saldo_pendiente), 0) : montoAnticipo(ped))}</span>
             </div>
 
             {facturado && abierto && (
@@ -357,14 +356,14 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
                       <Checkbox checked={checked} onCheckedChange={() => toggleComprobante(comp)} />
                       <Badge variant="outline" className="text-xs">{comp.tipo_comprobante}</Badge>
                       <span className="font-mono text-xs">{comp.numero_comprobante}</span>
-                      <span className="text-[10px] text-muted-foreground">{comp.fecha ? comp.fecha.slice(0, 10).split("-").reverse().join("/") : ""}</span>
+                      <span className="text-[10px] text-muted-foreground">{fecha(comp.fecha)}</span>
                       {dtoHecho && <span className="text-[10px] font-semibold text-green-700 bg-green-100 rounded px-1.5 py-0.5">Dto. ctdo</span>}
-                      <span className="ml-auto font-mono text-orange-600">saldo ${fmtARS(Number(comp.saldo_pendiente))}</span>
+                      <span className="ml-auto font-mono text-orange-600">saldo {moneda(Number(comp.saldo_pendiente))}</span>
                       {checked ? (
-                        <Input
-                          type="number" min={0} max={comp.saldo_pendiente} step="0.01"
+                        <InputMonto
+                          soloPositivos
                           value={seleccionados[comp.id]}
-                          onChange={(e) => setSel(comp.id, parseFloat(e.target.value) || 0)}
+                          onChange={(n) => setSel(comp.id, n ?? 0)}
                           className="w-28 h-7 text-right text-sm"
                         />
                       ) : <span className="w-28 text-right text-muted-foreground">—</span>}
@@ -388,7 +387,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
             />
             <span>Otros comprobantes</span>
             <span className="ml-auto font-mono text-orange-600">
-              saldo ${fmtARS(sinPedido.reduce((s, c) => s + Number(c.saldo_pendiente), 0))}
+              saldo {moneda(sinPedido.reduce((s, c) => s + Number(c.saldo_pendiente), 0))}
             </span>
           </div>
           {sinPedido.map((comp) => {
@@ -398,16 +397,16 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
                 <Checkbox checked={checked} onCheckedChange={() => toggleComprobante(comp)} />
                 <Badge variant="outline" className="text-xs">{comp.tipo_comprobante}</Badge>
                 <span className="font-mono text-xs">{comp.numero_comprobante}</span>
-                <span className="text-[10px] text-muted-foreground">{comp.fecha ? comp.fecha.slice(0, 10).split("-").reverse().join("/") : ""}</span>
+                <span className="text-[10px] text-muted-foreground">{fecha(comp.fecha)}</span>
                 {comp.pedido_id && (
                   <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-500 border-slate-200">pedido eliminado</Badge>
                 )}
-                <span className="ml-auto font-mono text-orange-600">saldo ${fmtARS(Number(comp.saldo_pendiente))}</span>
+                <span className="ml-auto font-mono text-orange-600">saldo {moneda(Number(comp.saldo_pendiente))}</span>
                 {checked ? (
-                  <Input
-                    type="number" min={0} max={comp.saldo_pendiente} step="0.01"
+                  <InputMonto
+                    soloPositivos
                     value={seleccionados[comp.id]}
-                    onChange={(e) => setSel(comp.id, parseFloat(e.target.value) || 0)}
+                    onChange={(n) => setSel(comp.id, n ?? 0)}
                     className="w-28 h-7 text-right text-sm"
                   />
                 ) : <span className="w-28 text-right text-muted-foreground">—</span>}
@@ -419,7 +418,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
 
       {Object.keys(seleccionados).length > 0 && (
         <div className="flex justify-end text-sm font-semibold pt-1">
-          Total a pagar: <span className="ml-2 text-blue-700">${fmtARS(totalSeleccionado)}</span>
+          Total a pagar: <span className="ml-2 text-blue-700">{moneda(totalSeleccionado)}</span>
         </div>
       )}
     </div>

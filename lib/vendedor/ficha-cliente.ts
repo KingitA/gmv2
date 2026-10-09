@@ -7,6 +7,7 @@ import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { getSaldosCliente } from "@/lib/cuenta-corriente/saldo"
 import { MARCA_CONTADO } from "@/lib/constants"
+import { hoyISO, sumarDiasISO } from "@/lib/formato"
 
 export interface SesionFicha {
   vendedorIds: string[]
@@ -169,7 +170,7 @@ export async function cargarFichaCliente(supabase: any, session: SesionFicha, id
       impsPorPagoConf.get(i.pago_id)!.push(i)
     }
   }
-  const cutoffRechazadas = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+  const cutoffRechazadas = sumarDiasISO(hoyISO(), -30)
   const aCuenta = (pagosConfirmados || [])
     .map((p: any) => ({
       pago_id: p.id,

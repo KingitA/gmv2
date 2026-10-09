@@ -51,7 +51,7 @@ function provinciaKey(provincia: string | null | undefined): 'BSAS' | 'RN' | 'LP
 
 // Formato decimal con 2 decimales, sin separador de miles
 function fmt(n: number): string {
-  return n.toFixed(2)
+  return n.toFixed(2) // formato-ok: TXT/CSV fiscal (punto decimal, sin miles)
 }
 
 // Padding derecha en campo de ancho fijo (right-aligned)

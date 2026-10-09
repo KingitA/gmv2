@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { fechaISO } from "@/lib/formato"
 
 /**
  * GET /api/finanzas/evolucion — serie diaria de saldos por cuenta, derivada
@@ -39,7 +40,7 @@ export async function GET() {
       if (!cuentaId || saldo === null || saldo === undefined) return
       const nombre = nombres.get(cuentaId)
       if (!nombre) return
-      const dia = new Date(fechaIso).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+      const dia = fechaISO(fechaIso)
       if (!porDia.has(dia)) porDia.set(dia, new Map())
       porDia.get(dia)!.set(nombre, Number(saldo))
     }

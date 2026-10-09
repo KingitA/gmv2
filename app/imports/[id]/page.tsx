@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { MatchReviewTable } from '@/components/matching/MatchReviewTable';
 import { notFound } from 'next/navigation';
+import { fecha } from '@/lib/formato';
 
 export default async function ImportReviewPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
@@ -21,7 +22,7 @@ export default async function ImportReviewPage({ params }: { params: Promise<{ i
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Revisión de Importación</h1>
                     <p className="text-muted-foreground">
-                        {importHeader.type.toUpperCase()} • {new Date(importHeader.created_at).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}
+                        {importHeader.type.toUpperCase()} • {fecha(importHeader.created_at)}
                     </p>
                 </div>
                 <div className="text-right">

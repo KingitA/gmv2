@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { updateClienteEmbedding } from "@/lib/actions/embeddings"
+import { errorCuit, normalizarCuit } from "@/lib/formato"
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireAuth()
@@ -33,6 +34,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         datosActualizar[campo] = body[campo]
       }
     })
+
+    if (datosActualizar.cuit !== undefined) {
+      const errCuit = errorCuit(datosActualizar.cuit)
+      if (errCuit) return NextResponse.json({ error: errCuit }, { status: 400 })
+      datosActualizar.cuit = normalizarCuit(datosActualizar.cuit)
+    }
 
     // Actualizar nombre_razon_social si se actualiza razon_social o nombre
     if (datosActualizar.razon_social || datosActualizar.nombre) {

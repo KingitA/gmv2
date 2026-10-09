@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireOficina, errorJson } from "@/lib/viajes/servidor"
 import { nowArgentina } from "@/lib/utils"
+import { moneda } from "@/lib/formato"
 
 // POST /api/viajes/[id]/reintegro — el chofer puso plata de su bolsillo
 // (gastó más que el fondo + lo cobrado en efectivo): su billetera quedó
@@ -33,7 +34,7 @@ export async function POST(
       .eq("cuenta_id", viaje.chofer_id)
     const aFavor = -((saldo || []).reduce((s: number, x: any) => s + Number(x.saldo), 0))
     if (aFavor < 0.01) return errorJson("La billetera del chofer no tiene saldo a favor")
-    if (monto > aFavor + 0.01) return errorJson(`El chofer tiene a favor ${aFavor.toFixed(2)}: no se reintegra más que eso`)
+    if (monto > aFavor + 0.01) return errorJson(`El chofer tiene a favor ${moneda(aFavor)}: no se reintegra más que eso`)
 
     const { data: u } = await supabase.from("usuarios").select("nombre").eq("id", viaje.chofer_id).maybeSingle()
     const concepto = `Reintegro a ${u?.nombre || "chofer"} — puso de su bolsillo en viaje ${viaje.nombre}`

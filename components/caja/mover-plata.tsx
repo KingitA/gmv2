@@ -11,6 +11,8 @@ import { createClient } from "@/lib/supabase/client"
 import { useToast } from "@/hooks/use-toast"
 import { ArrowRightLeft, Loader2, X } from "lucide-react"
 import type { CuentaFondos } from "./registrar-cobro"
+import { InputMonto } from "@/components/ui/input-monto"
+import { moneda } from "@/lib/formato"
 
 const CATEGORIAS_EGRESO = ["OPERATIVO", "SUELDOS", "INVERSION", "CREDITO", "IMPUESTOS", "OTROS"]
 
@@ -30,8 +32,8 @@ export function MoverPlata({
   const [origen, setOrigen] = useState("")
   const [destino, setDestino] = useState("")
   const [categoria, setCategoria] = useState("OPERATIVO")
-  const [monto, setMonto] = useState("")
-  const [gastos, setGastos] = useState("")
+  const [monto, setMonto] = useState<number | null>(null)
+  const [gastos, setGastos] = useState<number | null>(null)
   const [concepto, setConcepto] = useState("")
   const [guardando, setGuardando] = useState(false)
   const [viajantes, setViajantes] = useState<{ id: string; nombre: string }[]>([])
@@ -65,7 +67,7 @@ export function MoverPlata({
   }
 
   const mover = async () => {
-    const montoNum = Number(monto.replace(",", "."))
+    const montoNum = monto ?? 0
     const origenKey = origen || (origenDefault ? clave(origenDefault) : "")
     if (!origenKey || !montoNum || montoNum <= 0) {
       toast({ variant: "destructive", title: "Faltan datos", description: "Elegí la cuenta y un monto mayor a 0" })
@@ -91,7 +93,7 @@ export function MoverPlata({
             destino_tipo: d.tipo,
             destino_id: d.id,
             monto: montoNum,
-            gastos: Number(gastos.replace(",", ".")) || 0,
+            gastos: gastos ?? 0,
             color: "BLANCO",
             concepto: concepto || undefined,
           }),
@@ -143,13 +145,13 @@ export function MoverPlata({
               : "Egreso registrado",
         description:
           modo === "transferencia" && data.neto_acreditado != null
-            ? `El destino recibió $ ${Number(data.neto_acreditado).toLocaleString("es-AR")}.`
+            ? `El destino recibió ${moneda(Number(data.neto_acreditado))}.`
             : modo === "billetera"
               ? `Acreditado en la billetera de ${data.viajante ?? "el cobrador"}.`
               : "Quedó asentado en el libro del día.",
       })
-      setMonto("")
-      setGastos("")
+      setMonto(null)
+      setGastos(null)
       setConcepto("")
       onMovido()
     } catch (e: any) {
@@ -211,11 +213,11 @@ export function MoverPlata({
                 </option>
               ))}
             </select>
-            <input
+            <InputMonto
               value={gastos}
-              onChange={(e) => setGastos(e.target.value.replace(/[^\d.,]/g, ""))}
+              onChange={setGastos}
+              soloPositivos
               placeholder="Gastos banc."
-              inputMode="decimal"
               className={`${inputCls} w-28 text-right`}
             />
           </>
@@ -241,12 +243,12 @@ export function MoverPlata({
           </select>
         )}
 
-        <input
+        <InputMonto
           value={monto}
-          onChange={(e) => setMonto(e.target.value.replace(/[^\d.,]/g, ""))}
+          onChange={setMonto}
+          soloPositivos
           onKeyDown={(e) => e.key === "Enter" && mover()}
           placeholder="$ monto"
-          inputMode="decimal"
           className={`${inputCls} w-32 text-right font-semibold`}
           style={{ fontVariantNumeric: "tabular-nums" }}
         />

@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { DateInputAR } from '@/components/ui/date-input-ar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { InputMonto } from "@/components/ui/input-monto"
 
 interface Props {
   open: boolean
@@ -123,7 +124,7 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
             </div>
             <div className="space-y-1.5">
               <Label>Duración (días)</Label>
-              <Input type="number" min="1" max="15" value={dias} onChange={e => setDias(e.target.value)} />
+              <InputMonto decimales={0} soloPositivos value={dias} onChange={n => setDias(n == null ? "" : String(Math.trunc(n)))} />
             </div>
           </div>
           <div className="space-y-1.5">

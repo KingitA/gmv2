@@ -17,6 +17,8 @@
 //
 // Puro (sin imports): lo testea mobile/packages/core/test/vendedor-reglas.test.ts.
 
+import { fecha } from "../formato"
+
 export const SQLSTATE_REGLA_NEGOCIO = "P0001"
 export const SQLSTATE_UNICIDAD = "23505"
 
@@ -91,7 +93,7 @@ export function mensajeChequeDuplicado(
   const que = numero ? `El cheque N° ${numero}${banco ? ` (${banco})` : ""}` : "Ese cheque"
   let ref = ""
   if (donde && (donde.fecha || donde.cliente || donde.estado)) {
-    const partes = [donde.fecha ? `cobro del ${String(donde.fecha).slice(0, 10).split("-").reverse().join("/")}` : "un cobro", donde.cliente ? `a ${donde.cliente}` : "", donde.estado ? `(${ESTADO_PAGO_TEXTO[donde.estado] || donde.estado})` : ""].filter(Boolean)
+    const partes = [donde.fecha ? `cobro del ${fecha(donde.fecha)}` : "un cobro", donde.cliente ? `a ${donde.cliente}` : "", donde.estado ? `(${ESTADO_PAGO_TEXTO[donde.estado] || donde.estado})` : ""].filter(Boolean)
     ref = `: está en el ${partes.join(" ")}`
   }
   if (donde?.cheque_estado === "ANULADO") {

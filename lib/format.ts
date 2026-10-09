@@ -1,54 +1,34 @@
-/**
- * Formatea un número con punto decimal y coma para miles
- * Ejemplo: 1000.23 -> "1,000.23"
- */
+// Nombres viejos que delegan en lib/formato (formato único del sistema, ver
+// docs/FORMATOS.md). ANTES estas funciones eran en-US ("1,000.23") y
+// parseFormattedNumber("1.000,50") devolvía 1. Para código nuevo, usar @/lib/formato.
+import { numero, parseMonto, cuitDigitos, cuitValido } from "@/lib/formato"
+
+/** "1.000,23" (formato argentino). */
 export function formatNumber(value: number | string, decimals = 2): string {
-  const num = typeof value === "string" ? Number.parseFloat(value) : value
-  if (isNaN(num)) return "0.00"
-
-  const parts = num.toFixed(decimals).split(".")
-  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-  return parts.join(".")
+  return numero(value, decimals) || numero(0, decimals)
 }
 
-/**
- * Parsea un string formateado a número
- * Ejemplo: "1,000.23" -> 1000.23
- */
+/** Entiende "1.000,23", "1000,23", "1.500" (mil quinientos) y también "1,000.23". */
 export function parseFormattedNumber(value: string): number {
-  const cleaned = value.replace(/,/g, "")
-  return Number.parseFloat(cleaned) || 0
+  return parseMonto(value) ?? 0
 }
 
 /**
- * Formatea un CUIT con guiones automáticamente
- * Ejemplo: "20123456789" -> "20-12345678-9"
+ * Máscara progresiva de CUIT mientras se tipea: "2012" → "20-12", "20123456789" → "20-12345678-9".
  */
 export function formatCUIT(value: string): string {
-  // Remover todo lo que no sea número
-  const numbers = value.replace(/\D/g, "")
-
-  // Limitar a 11 dígitos
-  const limited = numbers.slice(0, 11)
-
-  // Formatear con guiones
+  const limited = cuitDigitos(value).slice(0, 11)
   if (limited.length <= 2) return limited
   if (limited.length <= 10) return `${limited.slice(0, 2)}-${limited.slice(2)}`
   return `${limited.slice(0, 2)}-${limited.slice(2, 10)}-${limited.slice(10)}`
 }
 
-/**
- * Parsea un CUIT formateado a solo números
- * Ejemplo: "20-12345678-9" -> "20123456789"
- */
+/** Solo los dígitos ("20-12345678-9" → "20123456789"). */
 export function parseCUIT(value: string): string {
-  return value.replace(/\D/g, "")
+  return cuitDigitos(value)
 }
 
-/**
- * Valida que un CUIT tenga 11 dígitos
- */
+/** 11 dígitos y dígito verificador correcto. */
 export function isValidCUIT(value: string): boolean {
-  const numbers = parseCUIT(value)
-  return numbers.length === 11
+  return cuitValido(value)
 }

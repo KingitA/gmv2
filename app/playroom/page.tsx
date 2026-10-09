@@ -10,6 +10,7 @@ import CuentasCorrientes from '@/components/playroom/reportes/CuentasCorrientes'
 import ArticulosVendidos from '@/components/playroom/reportes/ArticulosVendidos'
 import ComisionesViajantes from '@/components/playroom/reportes/ComisionesViajantes'
 import ComprobantesFiscal from '@/components/playroom/reportes/ComprobantesFiscal'
+import { fecha } from "@/lib/formato"
 
 const TABS = [
   {
@@ -93,13 +94,7 @@ export default function PlayroomPage() {
           </p>
         </div>
         <p className="text-xs" style={{ color: 'rgba(255,255,255,0.15)' }}>
-          {new Date().toLocaleDateString('es-AR', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            timeZone: 'America/Argentina/Buenos_Aires',
-          })}
+          {fecha(new Date())}
         </p>
       </div>
 

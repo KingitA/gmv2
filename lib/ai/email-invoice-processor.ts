@@ -12,6 +12,32 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { MatchingEngine } from '@/lib/matching/matcher'
 import { processWithGemini } from '@/lib/services/ocr'
 import { resolveFactorConversion, type UnidadFactura } from '@/lib/services/conversion'
+import { cuitDigitos, fechaISO, hoyISO, moneda, normalizarCuit, parseFecha, parseMonto, sumarDiasISO } from '@/lib/formato'
+
+/** Instrucción de formato para la IA (docs/FORMATOS.md). */
+const INSTRUCCION_FORMATO_AR = `Los documentos son de Argentina: las fechas vienen dd/mm/aaaa (día primero, NUNCA mes/día) y los montos 1.234,56 (punto = miles, coma = decimales). Devolvé las fechas como AAAA-MM-DD y los montos como número JSON con punto decimal y sin separador de miles (ej: 1234.56).`
+
+/**
+ * Lo que devuelve la IA puede traer strings ("1.234,56", "05/03/2026", "20123456789"):
+ * se pasa todo por parseMonto / parseFecha / normalizarCuit antes de guardar.
+ * Muta el objeto (conserva campos extra como _sourceFilename) y lo devuelve.
+ */
+function sanearInvoiceData<T extends ParsedInvoiceData>(d: T): T {
+    for (const k of ['total', 'subtotal_neto', 'iva', 'percepciones'] as const) {
+        const crudo = (d as any)[k]
+        const n = parseMonto(crudo)
+        if (crudo != null && crudo !== '' && n === null) console.warn(`[InvoiceProcessor] ⚠️ Monto ilegible en ${k}: ${JSON.stringify(crudo)} — se descarta`)
+        ;(d as any)[k] = n
+    }
+    for (const k of ['fecha_comprobante', 'fecha_vencimiento'] as const) {
+        const crudo = (d as any)[k]
+        const f = parseFecha(crudo)
+        if (crudo != null && crudo !== '' && f === null) console.warn(`[InvoiceProcessor] ⚠️ Fecha ilegible en ${k}: ${JSON.stringify(crudo)} — se descarta`)
+        ;(d as any)[k] = f
+    }
+    d.cuit_emisor = normalizarCuit(d.cuit_emisor)
+    return d
+}
 
 const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
 const genAI = new GoogleGenerativeAI(apiKey)
@@ -61,7 +87,7 @@ export async function processEmailAsInvoice(
     preDownloadedAttachments?: AttachmentContent[]
 ): Promise<InvoiceProcessingResult> {
     const db = getSupabaseAdmin()
-    const fechaHoy = new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0]
+    const fechaHoy = hoyISO()
 
     console.log(`[InvoiceProcessor] Processing invoice email: "${emailData.subject}" from ${emailData.from}`)
 
@@ -71,7 +97,7 @@ export async function processEmailAsInvoice(
     // Priority 1: Use pre-extracted data from Claude unified classifier
     if (preExtractedData && (preExtractedData.total || preExtractedData.numero_comprobante)) {
         invoiceData = preExtractedData
-        console.log(`[InvoiceProcessor] ✅ Using Claude pre-extracted data: ${invoiceData.tipo_comprobante} ${invoiceData.numero_comprobante} — $${invoiceData.total}`)
+        console.log(`[InvoiceProcessor] ✅ Using Claude pre-extracted data: ${invoiceData.tipo_comprobante} ${invoiceData.numero_comprobante} — ${invoiceData.total}`)
     }
 
     // Priority 2: Try pre-downloaded XLSX attachments via Claude
@@ -150,6 +176,14 @@ export async function processEmailAsInvoice(
         }
     }
 
+    // Todo lo que vino de la IA pasa por parseMonto / parseFecha / normalizarCuit
+    if (invoiceData) {
+        invoiceData = invoiceData === preExtractedData
+            ? sanearInvoiceData({ ...invoiceData })
+            : sanearInvoiceData(invoiceData)
+    }
+    for (const pi of parsedInvoices) sanearInvoiceData(pi)
+
     if (!invoiceData) {
         console.log(`[InvoiceProcessor] Could not parse invoice data from email`)
         return {
@@ -168,50 +202,24 @@ export async function processEmailAsInvoice(
     let proveedorName: string | null = null
 
     // ── Step 1: By CUIT from invoice (most reliable)
-    if (invoiceData.cuit_emisor) {
-        const cuitClean = invoiceData.cuit_emisor.replace(/[-\s]/g, '')
-        console.log(`[InvoiceProcessor] 🔍 Step 1: Searching by CUIT: ${cuitClean}`)
+    if (invoiceData.cuit_emisor && cuitDigitos(invoiceData.cuit_emisor).length === 11) {
+        // La base guarda el CUIT normalizado (xx-xxxxxxxx-x, trigger trg_normalizar_cuit)
+        // en proveedores.cuit y proveedores.numero_cuit. Se busca también en dígitos
+        // por si quedó algún dato viejo sin guiones.
+        const cuitNorm = normalizarCuit(invoiceData.cuit_emisor)!
+        const valores = `"${cuitNorm}","${cuitDigitos(cuitNorm)}"`
+        console.log(`[InvoiceProcessor] 🔍 Step 1: Searching by CUIT: ${cuitNorm}`)
 
-        // Try exact match
-        const { data: prov } = await db
+        const { data: provs } = await db
             .from('proveedores')
             .select('id, nombre')
-            .eq('cuit', cuitClean)
-            .maybeSingle()
+            .or(`cuit.in.(${valores}),numero_cuit.in.(${valores})`)
+            .limit(1)
+        const prov = provs?.[0]
         if (prov) {
             proveedorId = prov.id
             proveedorName = prov.nombre
-            console.log(`[InvoiceProcessor] ✅ Found by CUIT (clean): ${proveedorName}`)
-        }
-
-        // Try with dashes format (XX-XXXXXXXX-X)
-        if (!proveedorId && cuitClean.length === 11) {
-            const cuitFormatted = `${cuitClean.slice(0, 2)}-${cuitClean.slice(2, 10)}-${cuitClean.slice(10)}`
-            const { data: prov2 } = await db
-                .from('proveedores')
-                .select('id, nombre')
-                .eq('cuit', cuitFormatted)
-                .maybeSingle()
-            if (prov2) {
-                proveedorId = prov2.id
-                proveedorName = prov2.nombre
-                console.log(`[InvoiceProcessor] ✅ Found by CUIT (formatted): ${proveedorName}`)
-            }
-        }
-
-        // Try ILIKE for partial CUIT matches
-        if (!proveedorId) {
-            const { data: prov3 } = await db
-                .from('proveedores')
-                .select('id, nombre')
-                .ilike('cuit', `%${cuitClean}%`)
-                .limit(1)
-                .maybeSingle()
-            if (prov3) {
-                proveedorId = prov3.id
-                proveedorName = prov3.nombre
-                console.log(`[InvoiceProcessor] ✅ Found by CUIT (partial): ${proveedorName}`)
-            }
+            console.log(`[InvoiceProcessor] ✅ Found by CUIT: ${proveedorName}`)
         }
 
         if (!proveedorId) console.log(`[InvoiceProcessor] ❌ Not found by CUIT`)
@@ -335,7 +343,7 @@ export async function processEmailAsInvoice(
             await db.from('ai_agenda_events').insert({
                 title: `Factura pendiente de ${invoiceData.razon_social_emisor || emailData.fromName || emailData.from}`,
                 description: `Se detectó una factura pero no se pudo identificar de qué proveedor es.\n\n` +
-                    `Monto: $${invoiceData.total || 'N/A'}\n` +
+                    `Monto: ${invoiceData.total ? moneda(invoiceData.total) : 'N/A'}\n` +
                     `Comprobante: ${invoiceData.tipo_comprobante || ''} ${invoiceData.numero_comprobante || 'N/A'}\n` +
                     `CUIT Extraído: ${invoiceData.cuit_emisor || 'N/A'}\n\n` +
                     `Por favor, buscala en tu correo ("${emailData.subject}") y cargala manualmente.`,
@@ -461,12 +469,11 @@ export async function processEmailAsInvoice(
                             .eq('estado', 'finalizada')
                             .limit(1)
                             .maybeSingle()
-                        if (rec?.fecha_fin) fechaBase = rec.fecha_fin.split('T')[0]
+                        // fecha_fin es timestamptz: el día argentino, no el UTC
+                        if (rec?.fecha_fin) fechaBase = fechaISO(rec.fecha_fin)
                     }
 
-                    const fechaVenc = new Date(fechaBase + 'T00:00:00')
-                    fechaVenc.setDate(fechaVenc.getDate() + plazoDias)
-                    const fechaVencStr = invoiceData.fecha_vencimiento || fechaVenc.toISOString().split('T')[0]
+                    const fechaVencStr = invoiceData.fecha_vencimiento || sumarDiasISO(fechaBase, Number(plazoDias))
 
                     // Update CC with vencimiento
                     await db.from('cuenta_corriente_proveedores')
@@ -672,6 +679,8 @@ async function parseInvoiceWithGemini(
 
     const prompt = `Analizá este documento y extraé los datos fiscales de la factura/comprobante.
 
+${INSTRUCCION_FORMATO_AR}
+
 Respondé SOLO con JSON válido, sin comentarios:
 {
   "tipo_comprobante": "FA" | "FB" | "FC" | "NCA" | "NCB" | "NCC" | "NDA" | "NDB" | "NDC" | "PRESUPUESTO" | "ADQ" | null,
@@ -724,6 +733,8 @@ async function parseInvoiceFromText(bodyText: string): Promise<ParsedInvoiceData
 
 TEXTO DEL EMAIL:
 ${bodyText.substring(0, 3000)}
+
+${INSTRUCCION_FORMATO_AR}
 
 Respondé SOLO con JSON válido:
 {
@@ -812,11 +823,9 @@ async function createCCMovement(
 
             const plazoDias = prov?.plazo_dias || 30
             const fechaBase = invoiceData.fecha_comprobante || fechaHoy
-            const fechaVenc = new Date(fechaBase + 'T00:00:00')
-            fechaVenc.setDate(fechaVenc.getDate() + plazoDias)
 
             // Use fecha_vencimiento from invoice if available, otherwise calculate
-            const fechaVencFinal = invoiceData.fecha_vencimiento || fechaVenc.toISOString().split('T')[0]
+            const fechaVencFinal = invoiceData.fecha_vencimiento || sumarDiasISO(fechaBase, Number(plazoDias))
 
             const conceptoVenc = `${tipoComp} ${invoiceData.numero_comprobante || ''} — ${invoiceData.razon_social_emisor || prov?.nombre || ''}`.trim()
 
@@ -975,7 +984,7 @@ async function runArticleLevelOCR(
                     }
 
                     matched++
-                    console.log(`[InvoiceProcessor] ✅ ${item.descripcion} → ${matchResult.bestCandidate.sku_name} (${matchResult.bestCandidate.method}, ${(matchResult.bestCandidate.score * 100).toFixed(0)}%)`)
+                    console.log(`[InvoiceProcessor] ✅ ${item.descripcion} → ${matchResult.bestCandidate.sku_name} (${matchResult.bestCandidate.method}, ${(matchResult.bestCandidate.score * 100).toFixed(0)}%)`) // formato-ok: log interno
                 }
             } else {
                 console.log(`[InvoiceProcessor] ⚠️ No match: ${item.codigo} "${item.descripcion}"`)

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import type { PlayroomFiltersState } from './types'
+import { diasEntre, sumarDiasISO } from '@/lib/formato'
 
 // Paginación segura: helpers compartidos por toda la app (re-export para
 // mantener los imports existentes del Playroom)
@@ -7,14 +8,12 @@ export { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all'
 
 // Calcula el rango comparativo anterior dado el período actual
 export function getPreviousPeriod(from: string, to: string): { from: string; to: string } {
-  const start = new Date(from)
-  const end = new Date(to)
-  const diffMs = end.getTime() - start.getTime()
-  const prevEnd = new Date(start.getTime() - 1)
-  const prevStart = new Date(prevEnd.getTime() - diffMs)
+  // Fechas de calendario: mismo largo, terminando el día anterior a `from`
+  const dias = diasEntre(from, to) || 0
+  const prevTo = sumarDiasISO(from.slice(0, 10), -1)
   return {
-    from: prevStart.toISOString().slice(0, 10),
-    to: prevEnd.toISOString().slice(0, 10),
+    from: sumarDiasISO(prevTo, -dias),
+    to: prevTo,
   }
 }
 

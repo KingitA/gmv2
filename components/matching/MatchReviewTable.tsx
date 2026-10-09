@@ -8,6 +8,7 @@ import { ManualMatchDialog } from './ManualMatchDialog';
 import { Badge } from '@/components/ui/badge';
 import { Filter } from 'lucide-react';
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { moneda } from "@/lib/formato"
 
 interface ImportItem {
     id: string;
@@ -125,7 +126,7 @@ export function MatchReviewTable({ importId, providerId }: { importId: string, p
                             <div className="text-sm text-muted-foregrounds flex gap-3 mt-1">
                                 {item.raw_data.code && <Badge variant="secondary">Code: {item.raw_data.code}</Badge>}
                                 {item.raw_data.ean && <Badge variant="secondary">EAN: {item.raw_data.ean}</Badge>}
-                                {item.raw_data.price && <div>${item.raw_data.price}</div>}
+                                {item.raw_data.price && <div>{moneda(item.raw_data.price)}</div>}
                             </div>
                             {item.status !== 'pending' && <Badge className="mt-2" variant={item.status === 'approved' ? 'default' : 'destructive'}>{item.status}</Badge>}
 

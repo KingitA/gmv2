@@ -3,6 +3,7 @@ import { useOnline, useRuntime } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
 import { CATEGORIAS_GASTO, type OpGasto } from "../datasets"
 import { useEncolar } from "../datos/hooks"
+import { numero, parseMonto, redondear } from "@gm/formato"
 import { formatCurrency } from "../ui"
 
 // Hoja "Cargar un gasto" (= components/chofer/gasto-sheet.tsx): a mano o por foto del
@@ -50,7 +51,7 @@ export function GastoHoja({ viajeId, viajeNombre, abierta, onCerrar, onGuardado 
       if (d.foto_url) setFotoUrl(d.foto_url)
       if (d.success && d.categoria && d.monto) {
         setCategoria(d.categoria)
-        setMonto(String(d.monto))
+        setMonto(numero(d.monto))
         if (d.detalle) setObs(d.detalle)
         setAviso(`✓ Ticket leído: ${d.categoria} ${formatCurrency(d.monto)}. Revisá y guardá.`)
       } else {
@@ -64,12 +65,12 @@ export function GastoHoja({ viajeId, viajeNombre, abierta, onCerrar, onGuardado 
   }
 
   const guardar = async () => {
-    const m = Number(String(monto).replace(",", "."))
+    const m = parseMonto(monto) ?? 0
     if (!m || m <= 0) { setAviso("Poné el importe del gasto"); return }
     setOcupado(true)
     setAviso("")
     try {
-      const payload: OpGasto = { viaje_id: viajeId, viaje_nombre: viajeNombre || undefined, categoria, monto: Math.round(m * 100) / 100, observaciones: obs.trim() || null, foto_url: fotoUrl }
+      const payload: OpGasto = { viaje_id: viajeId, viaje_nombre: viajeNombre || undefined, categoria, monto: redondear(m), observaciones: obs.trim() || null, foto_url: fotoUrl }
       const etiqueta = `Gasto ${categoria} ${formatCurrency(payload.monto)}`
       await encolar("viaje.gasto", payload, etiqueta)
       onGuardado(online ? `✓ ${etiqueta} registrado.` : `✓ ${etiqueta} guardado en el equipo: se envía al volver la señal.`)
@@ -114,7 +115,7 @@ export function GastoHoja({ viajeId, viajeNombre, abierta, onCerrar, onGuardado 
           ))}
         </div>
         <input
-          type="number" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="Importe"
+          type="text" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value.replace(/[^\d.,]/g, ""))} placeholder="Importe"
           className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
         />
         <input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Detalle (opcional)" className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3" />

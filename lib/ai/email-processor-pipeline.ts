@@ -13,6 +13,7 @@ import { processEmailAsPayment } from './email-payment-processor'
 import { processEmailAsPriceChange } from './email-pricelist-processor'
 import { processEmailAsReclamo } from './email-reclamo-processor'
 import type { EnrichedClassificationResult } from './types'
+import { fecha, hoyISO, moneda } from '@/lib/formato'
 
 // ─── Types ─────────────────────────────────────────────
 
@@ -295,7 +296,7 @@ export async function processIncomingEmail(
     }
 
     // 6. Process based on classification
-    const fechaHoy = new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0]
+    const fechaHoy = hoyISO()
 
     try {
         if (classification.classification === 'pedido') {
@@ -456,7 +457,7 @@ async function processAsInvoice(db: any, emailData: ParsedEmail, targetEmail: st
         if (invoiceResult.comprobanteCreated) {
             await db.from('ai_agenda_events').insert({
                 title: `🧾 Factura cargada — ${invoiceResult.proveedorName || emailData.fromName || emailData.from}`,
-                description: `Se cargó automáticamente ${invoiceResult.invoiceData?.tipo_comprobante || 'comprobante'} ${invoiceResult.invoiceData?.numero_comprobante || ''} por $${invoiceResult.invoiceData?.total?.toLocaleString('es-AR') || '?'} vinculado a OC.${invoiceResult.invoiceData?.fecha_vencimiento ? ` Vence: ${invoiceResult.invoiceData.fecha_vencimiento}` : ''}`,
+                description: `Se cargó automáticamente ${invoiceResult.invoiceData?.tipo_comprobante || 'comprobante'} ${invoiceResult.invoiceData?.numero_comprobante || ''} por ${invoiceResult.invoiceData?.total ? moneda(invoiceResult.invoiceData.total) : '$?'} vinculado a OC.${invoiceResult.invoiceData?.fecha_vencimiento ? ` Vence: ${fecha(invoiceResult.invoiceData.fecha_vencimiento)}` : ''}`,
                 event_type: 'vencimiento_proveedor',
                 priority: 'alta',
                 status: 'pendiente',
@@ -471,7 +472,7 @@ async function processAsInvoice(db: any, emailData: ParsedEmail, targetEmail: st
         } else if (invoiceResult.ccMovementCreated) {
             await db.from('ai_agenda_events').insert({
                 title: `🧾 Factura de servicio — ${invoiceResult.proveedorName || emailData.fromName || emailData.from}`,
-                description: `Se registró automáticamente en la cuenta corriente del proveedor: ${invoiceResult.invoiceData?.tipo_comprobante || ''} ${invoiceResult.invoiceData?.numero_comprobante || ''} por $${invoiceResult.invoiceData?.total?.toLocaleString('es-AR') || '?'}.${invoiceResult.invoiceData?.fecha_vencimiento ? ` Vence: ${invoiceResult.invoiceData.fecha_vencimiento}` : ''}`,
+                description: `Se registró automáticamente en la cuenta corriente del proveedor: ${invoiceResult.invoiceData?.tipo_comprobante || ''} ${invoiceResult.invoiceData?.numero_comprobante || ''} por ${invoiceResult.invoiceData?.total ? moneda(invoiceResult.invoiceData.total) : '$?'}.${invoiceResult.invoiceData?.fecha_vencimiento ? ` Vence: ${fecha(invoiceResult.invoiceData.fecha_vencimiento)}` : ''}`,
                 event_type: 'vencimiento_proveedor',
                 priority: 'alta',
                 status: 'pendiente',
@@ -527,7 +528,7 @@ async function processAsPayment(db: any, emailData: ParsedEmail, savedEmailId: s
         if (paymentResult.paymentCreated) {
             await db.from('ai_agenda_events').insert({
                 title: `💰 Pago registrado — ${paymentResult.entityName || emailData.fromName || emailData.from}`,
-                description: `Se registró un pago de $${paymentResult.amount?.toLocaleString('es-AR') || '?'} de ${paymentResult.entityType === 'cliente' ? 'cliente' : 'proveedor'} ${paymentResult.entityName || ''}.${paymentData?.medio_pago ? ` Medio: ${paymentData.medio_pago}.` : ''}${paymentData?.banco ? ` Banco: ${paymentData.banco}.` : ''}`,
+                description: `Se registró un pago de ${paymentResult.amount ? moneda(paymentResult.amount) : '$?'} de ${paymentResult.entityType === 'cliente' ? 'cliente' : 'proveedor'} ${paymentResult.entityName || ''}.${paymentData?.medio_pago ? ` Medio: ${paymentData.medio_pago}.` : ''}${paymentData?.banco ? ` Banco: ${paymentData.banco}.` : ''}`,
                 event_type: 'pago_imputar',
                 priority: 'media',
                 status: 'pendiente',

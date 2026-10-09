@@ -4,7 +4,7 @@ import { DS } from "../datasets"
 import { useBorradores } from "../datos/borradores"
 import { rechazosDe, useClientes, useMe, usePedidos, useRefrescarAlEntrar, useYo } from "../datos/hooks"
 import { usePreciosVencidos } from "../datos/precios"
-import { AvisosBcra, BadgeEstado, fechaCorta, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useEnterCierraTeclado, useToast } from "../ui"
+import { AvisosBcra, BadgeEstado, fechaConDia, fechaCorta, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useEnterCierraTeclado, useToast } from "../ui"
 
 // Inicio del vendedor (port de app/vendedor/page.tsx). Atrás acá MINIMIZA la app (lo
 // resuelve el core): no existe ninguna ruta del ERP a la que se pueda llegar.
@@ -131,7 +131,7 @@ export function Inicio() {
                   <div className="flex items-center justify-between">
                     <div className="min-w-0">
                       <p className="truncate font-bold text-gray-900">📍 {z.zonas?.nombre || z.nombre}</p>
-                      <p className="text-sm text-gray-500">{fechaCorta(z.fecha, { weekday: "long", day: "numeric", month: "long" })}{z.zonas?.descripcion ? ` · ${z.zonas.descripcion}` : ""}</p>
+                      <p className="text-sm text-gray-500">{fechaConDia(z.fecha)}{z.zonas?.descripcion ? ` · ${z.zonas.descripcion}` : ""}</p>
                     </div>
                     <div className="ml-3 shrink-0 text-right">
                       {z.estado === "en_curso" && <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700">EN CURSO</span>}

@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react"
 import { formatCurrency } from "@/lib/utils"
+import { parseMonto } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // Hoja "Cargar un gasto" del chofer: a mano o por foto del ticket (OCR:
 // detecta tipo e importe, la foto queda adjunta al gasto). Se usa desde el
@@ -15,7 +17,7 @@ export const CATEGORIAS_GASTO = [
 export function GastoSheet({ viajeId, onClose, onGuardado }: { viajeId: string | null; onClose: () => void; onGuardado: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [categoria, setCategoria] = useState("nafta")
-  const [monto, setMonto] = useState("")
+  const [monto, setMonto] = useState<number | null>(null)
   const [obs, setObs] = useState("")
   const [fotoUrl, setFotoUrl] = useState<string | null>(null)
   const [leyendo, setLeyendo] = useState(false)
@@ -35,7 +37,7 @@ export function GastoSheet({ viajeId, onClose, onGuardado }: { viajeId: string |
       if (d.foto_url) setFotoUrl(d.foto_url)
       if (d.success) {
         setCategoria(d.categoria)
-        setMonto(String(d.monto))
+        setMonto(parseMonto(d.monto))
         if (d.detalle) setObs(d.detalle)
         setAviso(`✓ Ticket leído: ${d.categoria} ${formatCurrency(d.monto)}. Revisá y guardá.`)
       } else {
@@ -49,7 +51,7 @@ export function GastoSheet({ viajeId, onClose, onGuardado }: { viajeId: string |
   }
 
   const guardar = async () => {
-    const m = Number(String(monto).replace(",", "."))
+    const m = monto ?? 0
     if (!m || m <= 0) { setAviso("Poné el importe del gasto"); return }
     setOcupado(true)
     setAviso("")
@@ -103,9 +105,9 @@ export function GastoSheet({ viajeId, onClose, onGuardado }: { viajeId: string |
             </button>
           ))}
         </div>
-        <input
-          type="number" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="Importe"
-          className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
+        <InputMonto
+          soloPositivos value={monto} onChange={setMonto} placeholder="Importe"
+          className="h-auto w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-left text-lg"
         />
         <input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Detalle (opcional)" className="w-full rounded-xl border-2 border-gray-200 px-4 py-3" />
         <p className="text-center text-xs text-gray-500">Oficina aprueba cada gasto al rendir el viaje.</p>

@@ -34,6 +34,8 @@ import { FechaInput } from "@/components/finanzas/fecha-input";
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { moneda, formatCuit } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 const ArrowLeftIcon = () => (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -168,7 +170,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
 
     // Adjustment form
     const [selectedComprobanteForAdjustment, setSelectedComprobanteForAdjustment] = useState<string>("");
-    const [adjustmentMonto, setAdjustmentMonto] = useState("");
+    const [adjustmentMonto, setAdjustmentMonto] = useState<number | null>(null);
     const [adjustmentMotivo, setAdjustmentMotivo] = useState("");
 
     useEffect(() => {
@@ -298,7 +300,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
 
 
     const handleSubmitAdjustment = async () => {
-        if (!selectedComprobanteForAdjustment || !adjustmentMonto || !adjustmentMotivo) {
+        if (!selectedComprobanteForAdjustment || adjustmentMonto == null || !adjustmentMotivo) {
             toast({ variant: "destructive", title: "Error", description: "Completa todos los campos" });
             return;
         }
@@ -309,7 +311,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     comprobante_id: selectedComprobanteForAdjustment,
-                    monto: parseFloat(adjustmentMonto),
+                    monto: adjustmentMonto,
                     motivo: adjustmentMotivo
                 }),
             });
@@ -320,7 +322,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
             toast({ title: "Éxito", description: result.mensaje });
             setShowAdjustmentModal(false);
             setSelectedComprobanteForAdjustment("");
-            setAdjustmentMonto("");
+            setAdjustmentMonto(null);
             setAdjustmentMotivo("");
             fetchData();
         } catch (error) {
@@ -483,18 +485,18 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         </Button>
                         <div>
                             <h1 className="text-2xl font-bold">{data.cliente.razon_social || data.cliente.nombre}</h1>
-                            <p className="text-sm text-gray-500">CUIT: {data.cliente.cuit}</p>
+                            <p className="text-sm text-gray-500">CUIT: {formatCuit(data.cliente.cuit)}</p>
                         </div>
                     </div>
                     <div className="text-right">
                         <p className="text-sm text-gray-500">Saldo Real</p>
                         <p className={`text-3xl font-bold ${data.cliente.saldo_total > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            ${data.cliente.saldo_total.toLocaleString('es-AR')}
+                            {moneda(data.cliente.saldo_total)}
                         </p>
                         {(data.cliente.pendiente_verificacion ?? 0) > 0 && (
                             <p className="text-xs text-amber-600 mt-1">
-                                Pendiente de verificación: ${(data.cliente.pendiente_verificacion ?? 0).toLocaleString('es-AR')}
-                                {' · '}Proyectado: ${(data.cliente.saldo_proyectado ?? 0).toLocaleString('es-AR')}
+                                Pendiente de verificación: {moneda((data.cliente.pendiente_verificacion ?? 0))}
+                                {' · '}Proyectado: {moneda((data.cliente.saldo_proyectado ?? 0))}
                             </p>
                         )}
                     </div>
@@ -608,13 +610,13 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                     {m.observaciones || "—"}
                                                 </TableCell>
                                                 <TableCell className="text-right tabular-nums">
-                                                    {Number(m.debe) > 0 ? `$${Number(m.debe).toLocaleString('es-AR')}` : ""}
+                                                    {Number(m.debe) > 0 ? moneda(Number(m.debe)) : ""}
                                                 </TableCell>
                                                 <TableCell className="text-right tabular-nums text-green-700">
-                                                    {Number(m.haber) > 0 ? `−$${Number(m.haber).toLocaleString('es-AR')}` : ""}
+                                                    {Number(m.haber) > 0 ? `−${moneda(Number(m.haber))}` : ""}
                                                 </TableCell>
                                                 <TableCell className={`text-right font-bold tabular-nums ${m.saldo_acumulado > 0 ? "text-red-600" : "text-green-600"}`}>
-                                                    ${m.saldo_acumulado.toLocaleString('es-AR')}
+                                                    {moneda(m.saldo_acumulado)}
                                                     {m.tipo_movimiento === "ajuste" && m.referencia_tipo === "ajuste_manual" && m.id && (
                                                         <button
                                                             onClick={() => eliminarAjuste(m.id!)}
@@ -632,7 +634,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                         <TableRow className="bg-gray-50 border-t-2">
                                             <TableCell colSpan={5} className="font-bold">Saldo actual</TableCell>
                                             <TableCell className={`text-right font-bold text-base tabular-nums ${data.cliente.saldo_total > 0 ? "text-red-600" : "text-green-600"}`}>
-                                                ${data.cliente.saldo_total.toLocaleString('es-AR')}
+                                                {moneda(data.cliente.saldo_total)}
                                             </TableCell>
                                         </TableRow>
                                     )}
@@ -646,7 +648,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 {(p.observaciones || "").includes("[10% CONTADO]") ? " · con 10% contado" : ""}
                                             </TableCell>
                                             <TableCell />
-                                            <TableCell className="text-right tabular-nums">(−${Number(p.monto).toLocaleString('es-AR')})</TableCell>
+                                            <TableCell className="text-right tabular-nums">(−{moneda(Number(p.monto))})</TableCell>
                                             <TableCell />
                                         </TableRow>
                                     ))}
@@ -656,7 +658,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                 Saldo proyectado (si la oficina confirma lo cobrado en calle, con su 10%, créditos y ajustes)
                                             </TableCell>
                                             <TableCell className={`text-right font-bold tabular-nums ${data.cliente.saldo_proyectado > 0 ? "text-red-500" : "text-green-600"}`}>
-                                                ${data.cliente.saldo_proyectado.toLocaleString('es-AR')}
+                                                {moneda(data.cliente.saldo_proyectado)}
                                             </TableCell>
                                         </TableRow>
                                     )}
@@ -736,13 +738,13 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                                     )}
                                                 </TableCell>
                                                 <TableCell className="text-right font-medium">
-                                                    ${doc.total.toLocaleString('es-AR')}
+                                                    {moneda(doc.total)}
                                                 </TableCell>
                                                 <TableCell className={`text-right font-bold ${doc.es_credito ? 'text-green-600' : ''}`}>
-                                                    {doc.es_credito ? '-' : ''}${Math.abs(doc.saldo).toLocaleString('es-AR')}
+                                                    {doc.es_credito ? '-' : ''}{moneda(Math.abs(doc.saldo))}
                                                     {(enCallePorComprobante.get(doc.id) ?? 0) > 0.005 && (
                                                         <span className="ml-2 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 align-middle" title="Cobrado por el vendedor/chofer, pendiente de verificación en oficina">
-                                                            en calle ${enCallePorComprobante.get(doc.id)!.toLocaleString('es-AR')}
+                                                            en calle {moneda(enCallePorComprobante.get(doc.id)!)}
                                                         </span>
                                                     )}
                                                 </TableCell>
@@ -785,7 +787,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         {selectedDocumentos.length > 0 && (
                             <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                                 <p className="font-medium">
-                                    {selectedDocumentos.length} documento(s) seleccionado(s) - Total: ${totalSeleccionado.toLocaleString('es-AR')}
+                                    {selectedDocumentos.length} documento(s) seleccionado(s) - Total: {moneda(totalSeleccionado)}
                                 </p>
                             </div>
                         )}
@@ -813,7 +815,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                 <SelectContent>
                                     {data.comprobantes.map((comp) => (
                                         <SelectItem key={comp.id} value={comp.id}>
-                                            {comp.tipo_comprobante} {comp.numero_comprobante} - Saldo: ${comp.saldo_pendiente.toLocaleString('es-AR')}
+                                            {comp.tipo_comprobante} {comp.numero_comprobante} - Saldo: {moneda(comp.saldo_pendiente)}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -821,11 +823,10 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                         </div>
                         <div>
                             <Label>Monto de Ajuste</Label>
-                            <Input
-                                type="number"
+                            <InputMonto
                                 placeholder="Positivo suma, negativo resta"
                                 value={adjustmentMonto}
-                                onChange={(e) => setAdjustmentMonto(e.target.value)}
+                                onChange={setAdjustmentMonto}
                             />
                         </div>
                         <div>

@@ -15,6 +15,8 @@ import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { createClient } from "@/lib/supabase/client"
 import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION, condRowsToProveedor, condRowsToMarca } from "@/components/pedidos/SegmentacionCondiciones"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { fechaCorta, fechaHora, hora } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // ─── Types ──────────────────────────────────────────────
 interface ReviewItem {
@@ -166,9 +168,8 @@ export default function ImportReviewPage() {
   }
 
   // ── Item: update quantity ──
-  const handleQuantityChange = (idx: number, val: string) => {
-    const n = parseFloat(val)
-    if (isNaN(n) || n < 0) return
+  const handleQuantityChange = (idx: number, n: number | null) => {
+    if (n == null || n < 0) return
     setItems(prev => {
       const next = [...prev]
       next[idx] = { ...next[idx], quantity: n }
@@ -364,10 +365,7 @@ export default function ImportReviewPage() {
                             {imp.meta?.source?.toUpperCase() || "EMAIL"}
                           </Badge>
                           <span className="text-xs text-muted-foreground">
-                            {new Date(imp.created_at).toLocaleString("es-AR", {
-                              timeZone: "America/Argentina/Buenos_Aires",
-                              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
-                            })}
+                            {fechaCorta(imp.created_at)} {hora(imp.created_at)}
                           </span>
                         </div>
                         <div className="font-medium text-sm truncate">
@@ -411,10 +409,7 @@ export default function ImportReviewPage() {
                   <div className="min-w-0">
                     <div className="text-xs text-muted-foreground mb-0.5">
                       {selectedImport.meta?.source?.toUpperCase() || "EMAIL"} ·{" "}
-                      {new Date(selectedImport.created_at).toLocaleString("es-AR", {
-                        timeZone: "America/Argentina/Buenos_Aires",
-                        weekday: "long", day: "2-digit", month: "long", hour: "2-digit", minute: "2-digit"
-                      })}
+                      {fechaHora(selectedImport.created_at)}
                     </div>
                     <div className="font-semibold truncate">
                       De: {selectedImport.meta?.sender || "Desconocido"}
@@ -616,12 +611,10 @@ export default function ImportReviewPage() {
 
                                 {/* Quantity */}
                                 <td className="px-3 py-2 align-top">
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    step="0.5"
+                                  <InputMonto
+                                    decimales={3} soloPositivos
                                     value={item.quantity}
-                                    onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                                    onChange={(n) => handleQuantityChange(idx, n)}
                                     className="h-7 text-sm text-center w-20"
                                   />
                                 </td>

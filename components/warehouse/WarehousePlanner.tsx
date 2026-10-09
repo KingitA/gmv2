@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { InputMonto } from "@/components/ui/input-monto"
 
 const PX_M = 20       // pixels per meter at scale=1
 const W_M = 30        // warehouse width (meters)
@@ -270,9 +271,9 @@ export default function WarehousePlanner() {
                   ].map(f => (
                     <div key={f.key}>
                       <FieldLabel>{f.label}</FieldLabel>
-                      <input type="number" min={0.5} max={f.key === 'w' || f.key === 'x' ? W_M : H_M} step={0.5}
+                      <InputMonto decimales={1} soloPositivos
                         value={f.val}
-                        onChange={e => updateElem(selectedEl.id, { [f.key]: parseFloat(e.target.value) || 0.5 })}
+                        onChange={n => updateElem(selectedEl.id, { [f.key]: n || 0.5 })}
                         style={S.input} />
                     </div>
                   ))}

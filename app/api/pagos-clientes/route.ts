@@ -13,6 +13,7 @@ import { MARCA_CONTADO } from "@/lib/constants"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
+import { normalizarCuit } from "@/lib/formato"
 
 // ─── GET: listar pagos con filtros ───────────────────────────
 export async function GET(request: NextRequest) {
@@ -198,7 +199,7 @@ export async function POST(request: NextRequest) {
         numero_cheque: metodo.numero_cheque || null,
         fecha_cheque: metodo.fecha_cheque || null,
         localidad: metodo.localidad || null,
-        cuit_emisor: metodo.cuit_emisor || null,
+        cuit_emisor: normalizarCuit(metodo.cuit_emisor),
         color_cheque: colorMetodo,
         fecha_deposito: metodo.fecha_deposito || null,
         cheque: metodo.tipo === "cheque"

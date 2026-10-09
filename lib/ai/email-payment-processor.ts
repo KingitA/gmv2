@@ -5,6 +5,7 @@
 
 import { type ParsedEmail } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
+import { hoyISO, parseFecha, parseMonto } from '@/lib/formato'
 
 export interface PaymentProcessingResult {
     processed: boolean
@@ -37,11 +38,16 @@ export async function processEmailAsPayment(
     savedEmailId: string
 ): Promise<PaymentProcessingResult> {
     const db = getSupabaseAdmin()
-    const fechaHoy = new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0]
+    const fechaHoy = hoyISO()
 
     console.log(`[PaymentProcessor] Processing payment email: "${emailData.subject}" from ${emailData.from}`)
 
-    const amount = extractedData.amount
+    // Lo que devuelve la IA puede venir como texto ("1.234,56", "05/03/2026"):
+    // se normaliza antes de guardar. Una fecha ilegible se descarta (queda hoy).
+    const fechaIA = parseFecha(extractedData.date as any)
+    if (extractedData.date && !fechaIA) console.warn(`[PaymentProcessor] ⚠️ Fecha ilegible: ${JSON.stringify(extractedData.date)} — se usa hoy`)
+    extractedData = { ...extractedData, date: fechaIA ?? undefined }
+    const amount = parseMonto(extractedData.amount as any) ?? undefined
     if (!amount || amount <= 0) {
         return {
             processed: true,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import { useOnline, useParamEstado, useRuntime } from "@gm/core"
+import { fecha } from "@gm/formato"
 import { DS } from "../datasets"
 import { useFilaBilletera, useRefrescarAlEntrar } from "../datos/hooks"
 import { fechaCorta, formatCurrency, NecesitaConexion, Pantalla, SinDescargar } from "../ui"
@@ -95,12 +96,8 @@ const TIPO_LABEL: Record<string, { label: string; icon: string; color: string }>
   credito: { label: "Crédito", icon: "➕", color: "text-green-600" },
 }
 
-/** = formatDateAR de la web: fecha (DATE o timestamp) en el día calendario de Argentina. */
-function formatDateAR(f: string | null | undefined): string {
-  if (!f) return ""
-  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(f) ? `${f}T12:00:00Z` : f)
-  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
-}
+/** "09/10/2026": fecha (DATE o timestamp) en el día calendario de Argentina. */
+const formatDateAR = (f: string | null | undefined): string => fecha(f)
 
 export function Billetera() {
   const navigate = useNavigate()

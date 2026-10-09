@@ -17,6 +17,9 @@ import { localMatch } from "@/lib/search/local-match"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { formatCuit, moneda } from "@/lib/formato"
 
 const TIPO_INVERSO_LABEL: Record<string, string> = {
   FA: 'Nota de Crédito A', FB: 'Nota de Crédito B',
@@ -116,7 +119,7 @@ export default function ComprobantesVentaPage() {
   const [ndFacturaId, setNdFacturaId] = useState("")
   const [ndClienteId, setNdClienteId] = useState("")
   const [ndConcepto, setNdConcepto] = useState("")
-  const [ndMonto, setNdMonto] = useState("")
+  const [ndMonto, setNdMonto] = useState<number | null>(null)
   const [ndDesde, setNdDesde] = useState("")
   const [ndHasta, setNdHasta] = useState("")
   const [ndClientes, setNdClientes] = useState<{ id: string; nombre: string }[]>([])
@@ -138,7 +141,7 @@ export default function ComprobantesVentaPage() {
   }
 
   const emitirND = async () => {
-    const monto = parseFloat(ndMonto.replace(",", "."))
+    const monto = ndMonto ?? NaN
     if (!ndConcepto.trim() || isNaN(monto) || monto <= 0) {
       alert("Completá el concepto y un monto neto válido")
       return
@@ -175,9 +178,9 @@ export default function ComprobantesVentaPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      alert(`${data.comprobante.tipo} ${data.comprobante.numero} emitida por $${Number(data.comprobante.total).toFixed(2)} — CAE ${data.comprobante.cae}`)
+      alert(`${data.comprobante.tipo} ${data.comprobante.numero} emitida por ${moneda(Number(data.comprobante.total))} — CAE ${data.comprobante.cae}`)
       setModalNDAbierto(false)
-      setNdConcepto(""); setNdMonto(""); setNdFacturaId(""); setNdDesde(""); setNdHasta("")
+      setNdConcepto(""); setNdMonto(null); setNdFacturaId(""); setNdDesde(""); setNdHasta("")
       cargarComprobantes()
     } catch (e: any) {
       alert(e.message || "Error emitiendo la Nota de Débito")
@@ -393,7 +396,7 @@ export default function ComprobantesVentaPage() {
                   <SelectContent>
                     {facturasParaND.map(f => (
                       <SelectItem key={f.id} value={f.id}>
-                        {f.tipo_comprobante} {f.numero_comprobante} — {f.clientes?.nombre_razon_social} — ${Number(f.total_factura).toFixed(2)}
+                        {f.tipo_comprobante} {f.numero_comprobante} — {f.clientes?.nombre_razon_social} — {moneda(Number(f.total_factura))}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -413,11 +416,11 @@ export default function ComprobantesVentaPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm font-medium mb-1 block">Período desde</label>
-                    <Input type="date" value={ndDesde} onChange={e => setNdDesde(e.target.value)} />
+                    <DateInputAR value={ndDesde} onChange={setNdDesde} />
                   </div>
                   <div>
                     <label className="text-sm font-medium mb-1 block">Período hasta</label>
-                    <Input type="date" value={ndHasta} onChange={e => setNdHasta(e.target.value)} />
+                    <DateInputAR value={ndHasta} onChange={setNdHasta} />
                   </div>
                 </div>
               </>
@@ -429,7 +432,7 @@ export default function ComprobantesVentaPage() {
             </div>
             <div>
               <label className="text-sm font-medium mb-1 block">Monto NETO (sin IVA — se agrega 21%)</label>
-              <Input type="number" min="0" step="0.01" placeholder="0.00" value={ndMonto} onChange={e => setNdMonto(e.target.value)} />
+              <InputMonto pesos soloPositivos placeholder="0,00" value={ndMonto} onChange={setNdMonto} />
             </div>
           </div>
           <DialogFooter>
@@ -526,12 +529,12 @@ export default function ComprobantesVentaPage() {
                     <TableCell>
                       <div>
                         <div className="font-medium">{comp.clientes?.nombre_razon_social}</div>
-                        <div className="text-sm text-muted-foreground">{comp.clientes?.cuit}</div>
+                        <div className="text-sm text-muted-foreground">{formatCuit(comp.clientes?.cuit)}</div>
                       </div>
                     </TableCell>
                     <TableCell>{comp.pedidos?.numero_pedido || "-"}</TableCell>
-                    <TableCell className="text-right font-medium">${comp.total_factura?.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">${comp.saldo_pendiente?.toFixed(2)}</TableCell>
+                    <TableCell className="text-right font-medium">{moneda(comp.total_factura)}</TableCell>
+                    <TableCell className="text-right">{moneda(comp.saldo_pendiente)}</TableCell>
                     <TableCell>
                       <Badge className={`${ESTADOS_PAGO[comp.estado_pago]?.color} text-white`}>
                         {ESTADOS_PAGO[comp.estado_pago]?.label}
@@ -616,11 +619,11 @@ export default function ComprobantesVentaPage() {
                     <TableCell>
                       <div>
                         <div className="font-medium">{pedido.clientes?.nombre_razon_social}</div>
-                        <div className="text-sm text-muted-foreground">{pedido.clientes?.cuit}</div>
+                        <div className="text-sm text-muted-foreground">{formatCuit(pedido.clientes?.cuit)}</div>
                       </div>
                     </TableCell>
                     <TableCell>{pedido.clientes?.condicion_iva}</TableCell>
-                    <TableCell className="text-right font-medium">${pedido.total?.toFixed(2)}</TableCell>
+                    <TableCell className="text-right font-medium">{moneda(pedido.total)}</TableCell>
                     <TableCell className="text-right">
                       <Button
                         size="sm"
@@ -661,7 +664,7 @@ export default function ComprobantesVentaPage() {
                 <p>
                   Se va a generar un <strong>{TIPO_INVERSO_LABEL[confirmAnular.tipo_comprobante]}</strong> que
                   anula el comprobante <strong>{confirmAnular.numero_comprobante}</strong> por{' '}
-                  <strong>${Math.abs(confirmAnular.total_factura).toFixed(2)}</strong>.
+                  <strong>{moneda(Math.abs(confirmAnular.total_factura))}</strong>.
                 </p>
                 <p>
                   El comprobante original permanece registrado. El movimiento inverso

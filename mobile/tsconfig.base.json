@@ -23,7 +23,8 @@
       "@gm/cheques": ["../lib/cheques/isomorfico.ts"],
       "@gm/cobro": ["../lib/cobranzas/reglas-cobro.ts"],
       "@gm/cobro/conjunto": ["../lib/cobranzas/cobro-conjunto.ts"],
-      "@gm/cheques/foto": ["../lib/cheques/foto.ts"]
+      "@gm/cheques/foto": ["../lib/cheques/foto.ts"],
+      "@gm/formato": ["../lib/formato/index.ts"]
     }
   }
 }

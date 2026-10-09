@@ -15,6 +15,8 @@ import { anticiposDeSeleccion, ofreceAjuste, pedidosContadoAEnviar, topeAjuste }
 import { cuitValido, editarCampo, faltantes, filaVacia, urlsDeFotos, type FilaCheque } from "@/lib/cheques/isomorfico"
 import { EstadoFoto, clsOcr, useLectorFotos } from "@/components/pagos/foto-cheque"
 import { ConsultandoBcra, VeredictoBcraCard, useConsultaBcraFila, useConsultasBcra } from "@/components/pagos/BcraDeudorChip"
+import { InputMonto } from "@/components/ui/input-monto"
+import { redondear } from "@/lib/formato"
 
 // ─── Tipos ────────────────────────────────────────────────────
 
@@ -295,7 +297,7 @@ export default function ClienteEntregaPage() {
       // REGLA 07/10 (dueño): el 10% es del TOTAL del comprobante, una sola vez
       b += Math.min(Number(imp), Math.abs(Number(cp.total_factura) || 0) * 0.1)
     }
-    return Math.round(b * 100) / 100
+    return redondear(b)
   }
   const totalImputado = () => Object.values(comprobantesSeleccionados).reduce((s, v) => s + v, 0)
   /** Lo del cliente de la parada: seleccionado − devoluciones − 10 %.
@@ -617,11 +619,11 @@ export default function ClienteEntregaPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-gray-500 mb-1 block">Cantidad</label>
-                      <input type="number" min="1" value={item.cantidad} onChange={(e) => setDevItems((p) => p.map((x, i) => i === idx ? { ...x, cantidad: Number(e.target.value) } : x))} className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg font-bold text-center" />
+                      <InputMonto decimales={0} soloPositivos value={item.cantidad} onChange={(n) => setDevItems((p) => p.map((x, i) => i === idx ? { ...x, cantidad: Math.trunc(n ?? 0) } : x))} className="h-auto w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg font-bold text-center" />
                     </div>
                     <div>
                       <label className="text-xs text-gray-500 mb-1 block">Precio unit.</label>
-                      <input type="number" value={item.precio_venta_original} onChange={(e) => setDevItems((p) => p.map((x, i) => i === idx ? { ...x, precio_venta_original: Number(e.target.value) } : x))} className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg font-bold text-center" />
+                      <InputMonto soloPositivos value={item.precio_venta_original} onChange={(n) => setDevItems((p) => p.map((x, i) => i === idx ? { ...x, precio_venta_original: n ?? 0 } : x))} className="h-auto w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-lg font-bold text-center" />
                     </div>
                   </div>
                   <div>
@@ -1091,13 +1093,11 @@ function MetodoPagoCard({
       {/* Monto */}
       <div>
         <label className="text-xs text-gray-500 mb-1 block">Monto</label>
-        <input
-          type="number"
-          inputMode="decimal"
+        <InputMonto
+          soloPositivos
           value={metodo.monto || ""}
-          onChange={(e) => onChange({ monto: Number(e.target.value) })}
-          placeholder="0.00"
-          className={`w-full border-2 rounded-xl px-4 py-3 text-2xl font-bold text-center focus:border-blue-500 focus:outline-none ${fila ? clsOcr(fila, "monto", "border-gray-200") : "border-gray-200"}`}
+          onChange={(n) => onChange({ monto: n ?? 0 })}
+          className={`h-auto w-full border-2 rounded-xl px-4 py-3 text-2xl font-bold text-center focus:border-blue-500 focus:outline-none ${fila ? clsOcr(fila, "monto", "border-gray-200") : "border-gray-200"}`}
         />
       </div>
 

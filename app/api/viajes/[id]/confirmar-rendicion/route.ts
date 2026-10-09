@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { nowArgentina } from "@/lib/utils"
+import { moneda } from "@/lib/formato"
 import { colorOverride, resolverColorPendientes } from "@/lib/actions/color-cheque"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 
@@ -211,7 +212,7 @@ export async function POST(
       devoluciones_confirmadas: devolucionesConfirmadas,
       bonificacion_total: bonifTotal || undefined,
       bonificacion_errores: bonifErrores.length ? bonifErrores : undefined,
-      mensaje: `Rendición confirmada: ${confirmada.confirmados} pagos (${confirmada.a_conciliar} transferencias a conciliar), efectivo a caja $${Number(confirmada.efectivo_a_caja).toLocaleString("es-AR")}.`,
+      mensaje: `Rendición confirmada: ${confirmada.confirmados} pagos (${confirmada.a_conciliar} transferencias a conciliar), efectivo a caja ${moneda(Number(confirmada.efectivo_a_caja))}.`,
     })
   } catch (error: any) {
     console.error("[viajes] Error en confirmar-rendicion:", error)

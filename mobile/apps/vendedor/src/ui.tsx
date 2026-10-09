@@ -4,22 +4,30 @@ import { decidirAtras, indiceHistorial, useItemsOutbox, useOnline, useRuntime, t
 import { autoFormatoFechaAR, avisosBcraPendientes, fechaARAIso, fechaIsoAAR, resultadoSinCuit, type ConsultaBcraResultado } from "@gm/cheques"
 import { Encabezado, Frescura, Hoja } from "@gm/core/ui"
 import { CARTEL_PRECIOS_VENCIDOS } from "@gm/vendedor"
+import { errorCuit, fecha, fechaCorta as fechaCortaAR, fechaISO, moneda, numero, parseFecha, parseMonto, redondear } from "@gm/formato"
 
 // UI compartida de la app Vendedor. Mismos textos, colores y jerarquía que el módulo
 // web /vendedor (los viajantes ya lo conocen); lo único propio de la app es el
 // encabezado del core (atrás · En línea/Sin red · contador ⇪) y la frescura del dato.
 
-const ARS = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" })
-export const formatCurrency = (n: number | null | undefined) => ARS.format(Number(n) || 0)
-export const round2 = (n: number) => Math.round(n * 100) / 100
+// Formatos únicos del sistema (docs/FORMATOS.md): $1.000,32 · dd/mm/aaaa · xx-xxxxxxxx-x
+/** "$1.000,32" (= moneda de @gm/formato; el nombre queda por los llamadores). */
+export const formatCurrency = (n: number | null | undefined) => moneda(Number(n) || 0)
+export const round2 = (n: number) => redondear(n)
 
-/** "12 sept" — fecha YYYY-MM-DD sin corrimiento de huso (igual que fechaCorta de la web). */
-export function fechaCorta(f: string | null | undefined, opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" }): string {
-  if (!f) return "—"
-  const d = new Date(`${f.slice(0, 10)}T00:00:00`)
-  return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("es-AR", opts)
+/** "09/10" — lista compacta (fecha DATE o timestamp, día argentino). "—" si no hay. */
+export function fechaCorta(f: string | null | undefined): string {
+  return fechaCortaAR(f) || "—"
 }
-export const fechaAR = (f: string | null | undefined) => fechaCorta(f, { day: "2-digit", month: "2-digit", year: "numeric" })
+/** "09/10/2026". "—" si no hay. */
+export const fechaAR = (f: string | null | undefined) => fecha(f) || "—"
+const DIAS_SEMANA = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+/** "lunes 09/10" — día de la semana + dd/mm (zonas de visita). */
+export function fechaConDia(f: string | null | undefined): string {
+  const iso = fechaISO(f)
+  if (!iso) return "—"
+  return `${DIAS_SEMANA[new Date(`${iso}T12:00:00Z`).getUTCDay()]} ${fechaCortaAR(iso)}`
+}
 
 /** Marco de toda pantalla: encabezado del core + (opcional) frescura del dataset que se muestra. */
 export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = 60, pie, children, fondo = "bg-gray-50", preciosVencidos = false }: {
@@ -362,38 +370,89 @@ export function FechaInput({ valor, onCambio, className = "", placeholder = "DD/
   useEffect(() => {
     if (valor !== emitido.current) { emitido.current = valor; setTexto(fechaIsoAAR(valor)) }
   }, [valor])
+  const emitir = (iso: string) => { emitido.current = iso; onCambio(iso) }
   return (
     <input
       type="text" inputMode="numeric" placeholder={placeholder} maxLength={10} value={texto}
-      onChange={(e) => { const f = autoFormatoFechaAR(e.target.value); setTexto(f); const iso = fechaARAIso(f); emitido.current = iso; onCambio(iso) }}
+      onChange={(e) => { const f = autoFormatoFechaAR(e.target.value); setTexto(f); emitir(fechaARAIso(f)) }}
+      // Al salir: entiende también 9/10/26 o 091026 (parseFecha, siempre día/mes) y lo deja dd/mm/aaaa
+      onBlur={() => { const iso = parseFecha(texto); if (iso) { setTexto(fecha(iso)); if (iso !== emitido.current) emitir(iso) } }}
       className={className}
     />
   )
 }
 
 
-/** Monto en pesos: acepta coma o punto; confirma al salir o con Enter (= MontoInput de la web). */
-export function MontoInput({ valor, onCambio, className = "", placeholder = "0" }: { valor: number; onCambio: (n: number) => void; className?: string; placeholder?: string }) {
-  const [texto, setTexto] = useState(valor ? String(valor) : "")
+/**
+ * Monto en pesos (o cantidad decimal): acepta "1.500", "1500,50" o "1500.50" (parseMonto,
+ * formato argentino); confirma al salir o con Enter (= InputMonto de la web). Sin foco
+ * se ve "1.500,00".
+ */
+export function MontoInput({ valor, onCambio, className = "", placeholder = "0", decimales = 2 }: { valor: number; onCambio: (n: number) => void; className?: string; placeholder?: string; decimales?: number }) {
+  const mostrar = (v: number) => (v ? numero(v, decimales) : "")
+  const [texto, setTexto] = useState(() => mostrar(valor))
   const editando = useRef(false)
+  const mostrado = useRef(valor) // número que representa `texto`
+  // Sin foco, el texto sigue al valor de afuera (incluido el que el padre corrige: tope, mínimo)
   useEffect(() => {
-    if (!editando.current) setTexto(valor ? String(valor) : "")
-  }, [valor])
+    if (!editando.current && mostrado.current !== valor) { mostrado.current = valor; setTexto(mostrar(valor)) }
+  })
   const confirmar = () => {
     editando.current = false
-    onCambio(Math.max(0, parseFloat(texto.replace(",", ".")) || 0))
+    const n = Math.max(0, redondear(parseMonto(texto) ?? 0, decimales))
+    mostrado.current = n
+    setTexto(mostrar(n))
+    onCambio(n)
   }
   return (
     <input
       value={texto}
       inputMode="decimal"
       placeholder={placeholder}
-      onFocus={() => (editando.current = true)}
+      onFocus={(e) => { editando.current = true; e.target.select() }}
       onChange={(e) => setTexto(e.target.value.replace(/[^\d.,]/g, ""))}
       onBlur={confirmar}
       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur() } }}
       className={className}
     />
+  )
+}
+
+/** "20123456789" / "20-12345678-9" → "20-12345678-9" mientras se tipea (solo dígitos, máximo 11). */
+export function mascaraCuit(v: string | null | undefined): string {
+  const d = String(v ?? "").replace(/\D/g, "").slice(0, 11)
+  if (d.length <= 2) return d
+  if (d.length <= 10) return `${d.slice(0, 2)}-${d.slice(2)}`
+  return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`
+}
+
+/**
+ * CUIT / CUIL "xx-xxxxxxxx-x" (= InputCUIT de la web). `value` / `onChange` en texto con
+ * guiones; al guardar pasar por normalizarCuit y bloquear si errorCuit(). El error se
+ * muestra abajo al completar los 11 dígitos o al salir del campo (sinError: lo muestra
+ * quien lo usa, ej. los avisos del BCRA de un cheque).
+ */
+export function CuitInput({ value, onChange, className = "", placeholder = "XX-XXXXXXXX-X", sinError = false, autoFocus }: {
+  value: string; onChange: (v: string) => void; className?: string; placeholder?: string; sinError?: boolean; autoFocus?: boolean
+}) {
+  const [salio, setSalio] = useState(false)
+  const texto = mascaraCuit(value)
+  const digitos = texto.replace(/\D/g, "").length
+  const error = !sinError && (salio || digitos === 11) ? errorCuit(texto) : null
+  const input = (
+    <input
+      type="text" inputMode="numeric" autoComplete="off" placeholder={placeholder} maxLength={13} value={texto} autoFocus={autoFocus}
+      onChange={(e) => onChange(mascaraCuit(e.target.value))}
+      onBlur={() => setSalio(true)}
+      className={className}
+    />
+  )
+  if (sinError) return input
+  return (
+    <>
+      {input}
+      {error && <p className="mt-1 text-xs font-medium text-red-600">{error}</p>}
+    </>
   )
 }
 

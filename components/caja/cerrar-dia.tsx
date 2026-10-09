@@ -9,9 +9,10 @@
 import { useEffect, useState } from "react"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
+import { InputMonto } from "@/components/ui/input-monto"
+import { fecha as fmtFecha, moneda } from "@/lib/formato"
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
-const fmt = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 2 })
 
 export function CerrarDia({
   fecha,
@@ -57,7 +58,7 @@ export function CerrarDia({
       .catch(() => {})
   }, [fecha, cajaChicaId])
 
-  const contadoNum = Number(contado.replace(",", ".")) || 0
+  const contadoNum = Number(contado) || 0
   const diferencia = teorico != null && contado !== "" ? contadoNum - teorico : null
 
   const cerrar = async () => {
@@ -103,7 +104,7 @@ export function CerrarDia({
         title: "Día cerrado",
         description:
           diferencia && diferencia !== 0
-            ? `Caja chica cerrada con ajuste auditado de $ ${fmt(Math.abs(diferencia))}.`
+            ? `Caja chica cerrada con ajuste auditado de ${moneda(Math.abs(diferencia))}.`
             : "Caja chica cerrada sin diferencia.",
       })
       onListo()
@@ -121,19 +122,19 @@ export function CerrarDia({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-base font-bold tracking-tight text-azul-900">
-          Cerrar el día — {cajaChicaNombre} · {fecha.split("-").reverse().join("/")}
+          Cerrar el día — {cajaChicaNombre} · {fmtFecha(fecha)}
         </h3>
 
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
           <span>
-            Efectivo esperado: <b style={NUM}>{teorico != null ? `$ ${fmt(teorico)}` : "…"}</b>
+            Efectivo esperado: <b style={NUM}>{teorico != null ? moneda(teorico) : "…"}</b>
           </span>
           <span className="flex items-center gap-1.5">
             contado:
-            <input
+            <InputMonto
               value={contado}
-              onChange={(e) => setContado(e.target.value.replace(/[^\d.,]/g, ""))}
-              inputMode="decimal"
+              onChange={(n) => setContado(n == null ? "" : String(n))}
+              soloPositivos
               placeholder="0"
               className="w-32 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-right text-sm font-semibold outline-none focus:border-blue-500"
               style={NUM}
@@ -145,7 +146,7 @@ export function CerrarDia({
             </span>
           ) : (
             <span className="rounded-full bg-red-100 px-3 py-0.5 text-[11px] font-bold text-red-700" style={NUM}>
-              {diferencia > 0 ? "Sobra" : "Falta"} $ {fmt(Math.abs(diferencia))}
+              {diferencia > 0 ? "Sobra" : "Falta"} {moneda(Math.abs(diferencia))}
             </span>
           )}
         </div>
@@ -175,7 +176,7 @@ export function CerrarDia({
                   />
                   <span className="flex-1 truncate">{p.desc}</span>
                   <span className="font-semibold" style={NUM}>
-                    $ {fmt(p.monto)}
+                    {moneda(p.monto)}
                   </span>
                 </label>
               ))}
@@ -207,7 +208,7 @@ export function CerrarDia({
             {guardando
               ? "Cerrando…"
               : diferencia !== null && diferencia !== 0
-                ? `Cerrar igual — ajuste de $ ${fmt(Math.abs(diferencia ?? 0))}`
+                ? `Cerrar igual — ajuste de ${moneda(Math.abs(diferencia ?? 0))}`
                 : "✓ Cerrar el día"}
           </button>
           <button

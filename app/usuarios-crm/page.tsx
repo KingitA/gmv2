@@ -22,6 +22,8 @@ import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { localMatch } from "@/lib/search/local-match"
 import { createBrowserClient } from "@supabase/ssr"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
+import { InputCUIT } from "@/components/ui/input-cuit"
+import { errorCuit, fecha, fechaHora, formatCuit, normalizarCuit } from "@/lib/formato"
 
 type Usuario = {
   id: string
@@ -288,6 +290,11 @@ export default function UsuariosCRMPage() {
       alert("Nombre y email son obligatorios")
       return
     }
+    const errCuit = errorCuit(editForm.cuit)
+    if (errCuit) {
+      alert(errCuit)
+      return
+    }
 
     setLoading(true)
 
@@ -296,7 +303,7 @@ export default function UsuariosCRMPage() {
         nombre: editForm.nombre.trim(),
         email: editForm.email.trim(),
         telefono: editForm.telefono.trim() || null,
-        cuit: editForm.cuit.trim() || null,
+        cuit: normalizarCuit(editForm.cuit),
         direccion: editForm.direccion.trim() || null,
         rol: editForm.rol,
         estado: editForm.estado,
@@ -494,10 +501,10 @@ export default function UsuariosCRMPage() {
                     <TableRow key={usuario.id}>
                       <TableCell className="font-medium">{usuario.nombre}</TableCell>
                       <TableCell>{usuario.email}</TableCell>
-                      <TableCell>{usuario.cuit || "-"}</TableCell>
+                      <TableCell>{formatCuit(usuario.cuit) || "-"}</TableCell>
                       <TableCell>{getRolBadge(usuario.rol)}</TableCell>
                       <TableCell>{getEstadoBadge(usuario.estado)}</TableCell>
-                      <TableCell>{new Date(usuario.fecha_registro).toLocaleDateString("es-AR", { timeZone: 'America/Argentina/Buenos_Aires' })}</TableCell>
+                      <TableCell>{fecha(usuario.fecha_registro)}</TableCell>
                       <TableCell className="text-right space-x-2">
                         <Button variant="ghost" size="sm" onClick={() => handleVer(usuario)}>
                           <Eye className="w-4 h-4" />
@@ -591,9 +598,9 @@ export default function UsuariosCRMPage() {
 
                   <div className="space-y-2">
                     <Label className="normal-case">CUIT</Label>
-                    <Input
+                    <InputCUIT
                       value={editForm.cuit}
-                      onChange={(e) => setEditForm({ ...editForm, cuit: e.target.value })}
+                      onChange={(v) => setEditForm({ ...editForm, cuit: v })}
                       placeholder="20-12345678-9"
                       className="normal-case"
                     />
@@ -726,7 +733,7 @@ export default function UsuariosCRMPage() {
                 </div>
                 <div>
                   <Label className="text-xs text-gray-500 dark:text-gray-400 normal-case">CUIT</Label>
-                  <p className="font-medium mt-1 normal-case">{selectedUsuario?.cuit || "-"}</p>
+                  <p className="font-medium mt-1 normal-case">{formatCuit(selectedUsuario?.cuit) || "-"}</p>
                 </div>
                 <div className="col-span-2">
                   <Label className="text-xs text-gray-500 dark:text-gray-400 normal-case">Dirección</Label>
@@ -766,7 +773,7 @@ export default function UsuariosCRMPage() {
                   <div className="col-span-2">
                     <Label className="text-xs text-gray-500 dark:text-gray-400 normal-case">Fecha de Aprobación</Label>
                     <p className="mt-1 text-sm normal-case">
-                      {new Date(selectedUsuario.fecha_aprobacion).toLocaleString("es-AR", { timeZone: 'America/Argentina/Buenos_Aires' })}
+                      {fechaHora(selectedUsuario.fecha_aprobacion)}
                     </p>
                   </div>
                 )}

@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { parseMonto } from '@/lib/formato';
 
 export interface PriceListConfig {
     price_mode: 'UNITARIO' | 'BULTO';
@@ -122,18 +123,18 @@ export async function parsePriceList(file: File, config: PriceListConfig): Promi
         let rawAmount = 0;
         if (typeof valPrice === 'number') rawAmount = valPrice;
         else if (valPrice) {
-            // "1.200,50" -> 1200.50
-            const clean = String(valPrice).replace('$', '').replace(/\./g, '').replace(',', '.').trim();
-            if (clean && !clean.includes('fecha')) rawAmount = parseFloat(clean);
+            // "1.200,50" -> 1200.50 (formato argentino, lib/formato)
+            rawAmount = parseMonto(String(valPrice)) ?? 0;
         }
         if (!rawAmount || isNaN(rawAmount) || rawAmount <= 0) continue;
 
         // Clean Pack Qty
         let packQty: number | null = null;
         if (valPack) {
-            const cleanPack = String(valPack).replace(/[^0-9.]/g, '');
-            const p = parseFloat(cleanPack);
-            if (!isNaN(p) && p > 0) packQty = p;
+            const p = typeof valPack === 'number'
+                ? valPack
+                : parseMonto(String(valPack)) ?? parseMonto(String(valPack).replace(/[^0-9.,]/g, ''));
+            if (p != null && !isNaN(p) && p > 0) packQty = p;
         }
 
         // 3. APPLY PRICING LOGIC (Unit vs Case)

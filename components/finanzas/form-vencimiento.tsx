@@ -7,7 +7,7 @@
 // POST /api/vencimientos (alta, con la serie si se repite), PUT (edición),
 // DELETE (cancelar), POST /api/vencimientos/[id]/recalcular.
 
-import { useEffect, useMemo, useState, type ComponentType, type FormEvent, type ReactNode } from "react"
+import { useEffect, useState, type ComponentType, type FormEvent, type ReactNode } from "react"
 import { CalendarClock, Landmark, Loader2, Receipt, Repeat } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,8 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
+import { InputMonto } from "@/components/ui/input-monto"
+import { fecha as fmtFecha, redondear } from "@/lib/formato"
 import { Campo, Campos } from "@/components/ficha/ficha"
 import { CATEGORIAS_GASTO } from "@/lib/finanzas/categorias-gasto"
 import { tiposVisibles } from "@/lib/finanzas/tipos-reservados"
@@ -50,23 +52,6 @@ const RECURRENCIAS = [
   { v: "anual", l: "Una vez al año" },
 ]
 
-/**
- * Lee montos escritos de cualquier forma: "1.234,50" · "1234,5" · "1234.50" · "1234".
- * Con coma, la coma es el decimal y los puntos son miles. Sin coma, un punto
- * con 1 o 2 decimales es el decimal; con 3 cifras después es separador de miles.
- */
-export function leerMonto(texto: string): number | null {
-  const t = texto.trim().replace(/\s|\$/g, "")
-  if (!t) return null
-  let n: string
-  if (t.includes(",")) n = t.replace(/\./g, "").replace(",", ".")
-  else if (/^\d+\.\d{1,2}$/.test(t)) n = t
-  else n = t.replace(/\./g, "")
-  if (!/^\d+(\.\d+)?$/.test(n)) return null
-  const v = Number(n)
-  return Number.isFinite(v) ? Math.round(v * 100) / 100 : null
-}
-
 interface Props {
   open: boolean
   onOpenChange: (o: boolean) => void
@@ -89,7 +74,7 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
   const [tipo, setTipo] = useState(tipoInicial)
   const [proveedor, setProveedor] = useState<{ id: string; nombre: string } | null>(null)
   const [concepto, setConcepto] = useState("")
-  const [monto, setMonto] = useState("")
+  const [monto, setMonto] = useState<number | null>(null)
   const [estimado, setEstimado] = useState(false)
   const [fecha, setFecha] = useState(todayArgentina())
   const [validez, setValidez] = useState("")
@@ -109,7 +94,7 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
       setTipo(venc.tipo || "factura")
       setProveedor(venc.proveedor_id ? { id: venc.proveedor_id, nombre: venc.proveedores?.nombre || "Proveedor" } : null)
       setConcepto(venc.concepto || "")
-      setMonto(venc.monto != null ? String(Number(venc.monto)).replace(".", ",") : "")
+      setMonto(venc.monto != null ? Number(venc.monto) : null)
       setEstimado(!!venc.es_estimado)
       setFecha(venc.fecha_vencimiento || todayArgentina())
       setValidez(venc.fecha_validez || "")
@@ -124,7 +109,7 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
       setTipo(tipoInicial)
       setProveedor(null)
       setConcepto("")
-      setMonto("")
+      setMonto(null)
       setEstimado(false)
       setFecha(todayArgentina())
       setValidez("")
@@ -140,7 +125,7 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, venc?.id])
 
-  const montoNum = useMemo(() => leerMonto(monto), [monto])
+  const montoNum = monto == null ? null : redondear(monto)
   const titulo = editando ? (venc?.proveedores?.nombre || venc?.concepto || "Vencimiento") : "Nuevo pago o gasto"
 
   const guardar = async (e?: FormEvent) => {
@@ -212,8 +197,8 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
       const partes = [
         d.forma_pago ? `forma: ${d.forma_pago}` : null,
         d.modalidad ? `modalidad: ${d.modalidad}` : null,
-        d.fecha_vencimiento ? `vence: ${d.fecha_vencimiento.split("-").reverse().join("/")}` : null,
-        d.fecha_validez ? `validez cheques: ${d.fecha_validez.split("-").reverse().join("/")}` : null,
+        d.fecha_vencimiento ? `vence: ${fmtFecha(d.fecha_vencimiento)}` : null,
+        d.fecha_validez ? `validez cheques: ${fmtFecha(d.fecha_validez)}` : null,
       ].filter(Boolean)
       toast.success(`Recalculado desde la ficha del proveedor — ${partes.join(" · ")}`)
       onOpenChange(false)
@@ -289,10 +274,10 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
           <Bloque icono={CalendarClock} titulo="Cuánto y cuándo">
             <Campos cols={2}>
               <Campo label="Monto">
-                <Input inputMode="decimal" className="tabular-nums" value={monto} placeholder="0,00"
-                  onChange={e => { setMonto(e.target.value); if (editando && estimado && venc?.es_estimado) setEstimado(false) }} />
-                <p className={`mt-1 text-[12px] ${monto && montoNum === null ? "text-error-600" : "text-neutro-500"}`}>
-                  {monto ? (montoNum === null ? "No se entiende el monto" : `= ${formatCurrency(montoNum)}`) : "Podés escribir 1.234,50 o 1234.50"}
+                <InputMonto value={monto} placeholder="0,00"
+                  onChange={n => { setMonto(n); if (editando && estimado && venc?.es_estimado) setEstimado(false) }} />
+                <p className="mt-1 text-[12px] text-neutro-500">
+                  {montoNum !== null ? `= ${formatCurrency(montoNum)}` : "Formato: 1.500,50"}
                 </p>
               </Campo>
               <Campo label="Fecha de pago">
@@ -303,7 +288,7 @@ export function FormVencimientoDialog({ open, onOpenChange, venc, tipoInicial = 
               </Campo>
               <Campo label="Avisar">
                 <div className="flex items-center gap-2">
-                  <Input type="number" min="0" className="w-20 tabular-nums" value={diasAlerta} onChange={e => setDiasAlerta(e.target.value)} />
+                  <InputMonto decimales={0} soloPositivos className="w-20" value={diasAlerta} onChange={n => setDiasAlerta(n == null ? "" : String(n))} />
                   <span className="text-sm text-neutro-500">días antes</span>
                 </div>
               </Campo>

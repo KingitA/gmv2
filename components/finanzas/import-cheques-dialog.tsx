@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { formatCurrency } from "@/lib/utils"
+import { fecha as fmtFecha, parseFecha, parseMonto } from "@/lib/formato"
 import { FileSpreadsheet, Loader2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
@@ -83,33 +84,16 @@ function parseSheet(data: any[][], modo: ModoCartera): { filas: Fila[]; errores:
         }
     }
 
+    // Fecha: celda numérica de Excel (número de serie) o texto dd/mm/aaaa / ISO (parseFecha)
     const toISO = (v: any): string | null => {
-        if (v instanceof Date && !isNaN(v.getTime())) {
-            return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`
-        }
-        if (typeof v === "number") {
-            const d = XLSX.SSF.parse_date_code(v)
-            if (d) return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`
-            return null
-        }
-        const s = String(v ?? "").trim()
-        let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})$/)
-        if (m) {
-            let y = Number(m[3]); if (y < 100) y += 2000
-            return `${y}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[1])).padStart(2, "0")}`
-        }
-        m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
-        if (m) return `${m[1]}-${m[2]}-${m[3]}`
-        return null
+        if (v instanceof Date) return parseFecha(v)
+        return parseFecha(typeof v === "number" ? v : String(v ?? "").trim())
     }
 
+    // Monto en formato argentino ("1.234,56") o celda numérica (parseMonto)
     const toMonto = (v: any): number | null => {
-        if (typeof v === "number") return v > 0 ? v : null
-        let t = String(v ?? "").trim().replace(/\$/g, "").replace(/\s/g, "")
-        if (!t) return null
-        if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".")
-        const n = parseFloat(t)
-        return n > 0 ? n : null
+        const n = parseMonto(v)
+        return n != null && n > 0 ? n : null
     }
 
     const filas: Fila[] = []
@@ -173,7 +157,10 @@ export function ImportChequesDialog({
         if (!file) return
         try {
             const buffer = await file.arrayBuffer()
-            const wb = XLSX.read(buffer, { type: "array", cellDates: true })
+            // CSV: se lee como texto plano (raw) y fechas/montos se parsean en formato
+            // argentino; con cellDates SheetJS tomaba "05/03" como mm/dd.
+            const esCsv = /\.(csv|txt)$/i.test(file.name) || file.type === "text/csv"
+            const wb = XLSX.read(buffer, { type: "array", cellDates: false, raw: esCsv })
             const ws = wb.Sheets[wb.SheetNames[0]]
             const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" })
             setUltimaData(data)
@@ -305,7 +292,7 @@ export function ImportChequesDialog({
                                     <TableBody>
                                         {filas.map((f, i) => (
                                             <TableRow key={i}>
-                                                <TableCell className="py-1 font-mono text-xs">{f.fecha_vencimiento}</TableCell>
+                                                <TableCell className="py-1 font-mono text-xs">{fmtFecha(f.fecha_vencimiento)}</TableCell>
                                                 <TableCell className="py-1 font-mono text-xs">{f.numero}</TableCell>
                                                 <TableCell className="py-1 text-xs">
                                                     <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${CARTERA_LABEL[f.cartera].className}`}>

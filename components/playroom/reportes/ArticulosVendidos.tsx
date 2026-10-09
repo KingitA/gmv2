@@ -11,6 +11,7 @@ import MultiSelect from '@/components/playroom/MultiSelect'
 import { localMatch } from '@/lib/search/local-match'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
+import { moneda, numero, numeroPlano, porcentaje, fecha } from "@/lib/formato"
 
 interface ArticuloRow {
   articulo_id: string
@@ -81,10 +82,6 @@ const PROVINCIAS_AR = [
   'Santiago del Estero', 'Tierra del Fuego', 'Tucumán',
 ]
 
-function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
-
 const sel: React.CSSProperties = {
   background: '#1f2937',
   border: '1px solid rgba(255,255,255,0.08)',
@@ -150,32 +147,32 @@ const COLUMNS: Column<ArticuloRow>[] = [
   { key: 'proveedor', label: 'Proveedor', sortable: true },
   {
     key: 'unidades', label: 'Unidades', sortable: true, align: 'right',
-    render: v => <span className="font-mono">{Number(v).toLocaleString('es-AR')}</span>,
+    render: v => <span className="font-mono">{numero(Number(v), 0, 2)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'unidades_anterior', label: 'Ud. ant.', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? Number(v).toLocaleString('es-AR') : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? numero(Number(v), 0, 2) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'neto', label: 'Venta neta', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-semibold">{ars(v)}</span>,
+    render: v => <span className="font-mono font-semibold">{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'iva', label: 'Impuestos', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.45)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.45)' }}>{v > 0 ? moneda(v, 0) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'revenue', label: 'Total', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.7)' }}>{ars(v)}</span>,
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.7)' }}>{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'neto_anterior', label: 'Período ant.', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? moneda(v, 0) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
@@ -183,19 +180,19 @@ const COLUMNS: Column<ArticuloRow>[] = [
     render: (v, row) => row.neto_anterior > 0
       ? <ComparativoBadge pct={v} size="sm" />
       : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
-    exportValue: v => `${Number(v).toFixed(1)}%`,
+    exportValue: v => `${numeroPlano(Number(v), 1)}%`,
   },
   {
     key: 'margen_bruto_pct', label: 'Margen %', sortable: true, align: 'right',
     render: v => v !== null
-      ? <span className="font-mono" style={{ color: Number(v) >= 30 ? '#10b981' : Number(v) >= 15 ? '#f59e0b' : '#ef4444' }}>{Number(v).toFixed(1)}%</span>
+      ? <span className="font-mono" style={{ color: Number(v) >= 30 ? '#10b981' : Number(v) >= 15 ? '#f59e0b' : '#ef4444' }}>{porcentaje(Number(v), 1)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
-    exportValue: v => v !== null ? `${Number(v).toFixed(1)}%` : '',
+    exportValue: v => v !== null ? `${numeroPlano(Number(v), 1)}%` : '',
   },
   {
     key: 'bonificadas', label: 'Bonif.', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-amber-400">{Number(v).toLocaleString('es-AR')}</span>
+      ? <span className="font-mono text-amber-400">{numero(Number(v), 0, 2)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => String(v),
   },
@@ -576,33 +573,33 @@ export default function ArticulosVendidos() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <KPICard label="Venta neta total" value={loading ? '...' : ars(kpis.totalNeto)} subLabel={loading ? '' : `${filtered.length} SKUs vendidos`} loading={loading} />
-        <KPICard label="Total c/impuestos" value={loading ? '...' : ars(kpis.totalConIva)} subLabel={loading ? '' : `Impuestos ${ars(kpis.totalIva)}`} loading={loading} />
+        <KPICard label="Venta neta total" value={loading ? '...' : moneda(kpis.totalNeto, 0)} subLabel={loading ? '' : `${filtered.length} SKUs vendidos`} loading={loading} />
+        <KPICard label="Total c/impuestos" value={loading ? '...' : moneda(kpis.totalConIva, 0)} subLabel={loading ? '' : `Impuestos ${moneda(kpis.totalIva, 0)}`} loading={loading} />
         <KPICard label="SKUs con movimiento" value={loading ? '...' : kpis.skusActivos} loading={loading} />
         <KPICard
           label="Margen bruto promedio"
-          value={loading ? '...' : kpis.avgMargen !== null ? `${kpis.avgMargen.toFixed(1)}%` : '—'}
+          value={loading ? '...' : kpis.avgMargen !== null ? porcentaje(kpis.avgMargen, 1) : '—'}
           variant={kpis.avgMargen !== null && kpis.avgMargen < 15 ? 'danger' : kpis.avgMargen !== null && kpis.avgMargen < 25 ? 'warning' : 'default'}
           loading={loading}
         />
-        <KPICard label="Concentración top 10" value={loading ? '...' : `${kpis.concPct.toFixed(1)}%`} subLabel="del total vendido" loading={loading} />
+        <KPICard label="Concentración top 10" value={loading ? '...' : porcentaje(kpis.concPct, 1)} subLabel="del total vendido" loading={loading} />
       </div>
 
       {/* Chart top 15 */}
       {!loading && chartData.length > 0 && (
         <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
           <p className="text-[10px] font-semibold uppercase tracking-widest mb-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            Top {chartData.length} artículos — {sortBy === 'unidades' ? 'por Cantidad vendida' : `Venta neta · ${ars(kpis.totalNeto)} total`}
+            Top {chartData.length} artículos — {sortBy === 'unidades' ? 'por Cantidad vendida' : `Venta neta · ${moneda(kpis.totalNeto, 0)} total`}
           </p>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData} margin={{ left: 10, right: 10, top: 0, bottom: 60 }}>
               <XAxis dataKey="name" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9 }} axisLine={{ stroke: 'rgba(255,255,255,0.05)' }} tickLine={false} angle={-45} textAnchor="end" interval={0} />
               <YAxis
-                tickFormatter={sortBy === 'unidades' ? (v: number) => v.toLocaleString('es-AR') : (v: number) => `$${(v / 1000000).toFixed(1)}M`}
+                tickFormatter={sortBy === 'unidades' ? (v: number) => numero(v, 0, 2) : (v: number) => `${moneda(v / 1000000, 1)}M`}
                 tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} axisLine={false} tickLine={false}
               />
               <Tooltip
-                formatter={(v: number) => sortBy === 'unidades' ? [v.toLocaleString('es-AR'), 'Unidades'] : [ars(v), 'Venta neta']}
+                formatter={(v: number) => sortBy === 'unidades' ? [numero(v, 0, 2), 'Unidades'] : [moneda(v, 0), 'Venta neta']}
                 labelFormatter={(_l, p) => p?.[0]?.payload?.desc || _l}
                 contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
               />
@@ -660,7 +657,7 @@ export default function ArticulosVendidos() {
                 <p className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>Clientes que compraron</p>
                 <p className="text-sm font-semibold text-white">{selectedArticulo.descripcion}</p>
                 <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                  SKU {selectedArticulo.sku} · {filters.dateFrom} → {filters.dateTo}
+                  SKU {selectedArticulo.sku} · {fecha(filters.dateFrom)} → {fecha(filters.dateTo)}
                 </p>
               </div>
               <button onClick={() => setSelectedArticulo(null)} className="p-1.5 rounded-lg mt-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>
@@ -675,7 +672,7 @@ export default function ArticulosVendidos() {
                 { label: 'Marca', v: selectedArticulo.marca },
                 { label: 'Proveedor', v: selectedArticulo.proveedor },
                 { label: 'ABC', v: selectedArticulo.clasificacion },
-                { label: 'Margen', v: selectedArticulo.margen_bruto_pct !== null ? `${selectedArticulo.margen_bruto_pct.toFixed(1)}%` : '—' },
+                { label: 'Margen', v: selectedArticulo.margen_bruto_pct !== null ? porcentaje(selectedArticulo.margen_bruto_pct, 1) : '—' },
               ].map(({ label, v }) => (
                 <div key={label}>
                   <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>{label}</p>
@@ -689,15 +686,15 @@ export default function ArticulosVendidos() {
               <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <div>
                   <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Total unidades</p>
-                  <p className="text-base font-semibold text-white font-mono">{clienteDetalle.totales.unidades.toLocaleString('es-AR')}</p>
+                  <p className="text-base font-semibold text-white font-mono">{numero(clienteDetalle.totales.unidades, 0, 2)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Venta neta</p>
-                  <p className="text-base font-semibold text-white font-mono">{ars(clienteDetalle.totales.neto ?? clienteDetalle.totales.revenue)}</p>
+                  <p className="text-base font-semibold text-white font-mono">{moneda(clienteDetalle.totales.neto ?? clienteDetalle.totales.revenue, 0)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Total c/imp.</p>
-                  <p className="text-base font-semibold font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>{ars(clienteDetalle.totales.revenue)}</p>
+                  <p className="text-base font-semibold font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>{moneda(clienteDetalle.totales.revenue, 0)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Clientes</p>
@@ -740,13 +737,13 @@ export default function ArticulosVendidos() {
                         </td>
                         <td className="px-4 py-2.5" style={{ color: 'rgba(255,255,255,0.4)' }}>{c.localidad}</td>
                         <td className="px-4 py-2.5 text-right font-mono" style={{ color: 'rgba(255,255,255,0.75)' }}>
-                          {c.unidades.toLocaleString('es-AR')}
+                          {numero(c.unidades, 0, 2)}
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>
-                          {c.precio_unitario > 0 ? ars(c.precio_unitario) : '—'}
+                          {c.precio_unitario > 0 ? moneda(c.precio_unitario, 0) : '—'}
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: '#a78bfa' }}>
-                          {ars(c.neto ?? c.revenue)}
+                          {moneda(c.neto ?? c.revenue, 0)}
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <div className="flex items-center justify-end gap-1.5">
@@ -754,7 +751,7 @@ export default function ArticulosVendidos() {
                               <div className="h-full rounded-full" style={{ width: `${Math.min(100, c.porcentaje)}%`, background: i < 3 ? '#7c3aed' : 'rgba(124,58,237,0.4)' }} />
                             </div>
                             <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.5)', minWidth: 32, textAlign: 'right' }}>
-                              {c.porcentaje.toFixed(1)}%
+                              {porcentaje(c.porcentaje, 1)}
                             </span>
                           </div>
                         </td>

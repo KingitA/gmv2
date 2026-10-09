@@ -13,6 +13,9 @@ import { crearPagoProveedor, obtenerSugerenciaPagoProveedor, getChequesEnCartera
 import { ChequeSelectorModal } from "@/components/finanzas/ChequeSelectorModal"
 import { MoneyColorBadge } from "@/components/finanzas/MoneyColorBadge"
 import { useToast } from "@/hooks/use-toast"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { moneda } from "@/lib/formato"
 
 export default function PagosProveedoresPage() {
     const [proveedorId, setProveedorId] = useState("")
@@ -184,7 +187,7 @@ export default function PagosProveedoresPage() {
                                                     {item.detalle && <span className="text-sm text-muted-foreground ml-2">{item.detalle}</span>}
                                                 </div>
                                                 <div className="flex items-center gap-3">
-                                                    <span className="font-bold">${Number(item.monto).toFixed(2)}</span>
+                                                    <span className="font-bold">{moneda(Number(item.monto))}</span>
                                                     <Button size="icon" variant="ghost" onClick={() => eliminarItem(idx)}>
                                                         <X className="h-4 w-4" />
                                                     </Button>
@@ -199,7 +202,7 @@ export default function PagosProveedoresPage() {
                                 <span className="text-lg font-semibold">Total:</span>
                                 <div className="flex items-center gap-3">
                                     <MoneyColorBadge color={color} />
-                                    <span className="text-2xl font-bold">${totalPago.toFixed(2)}</span>
+                                    <span className="text-2xl font-bold">{moneda(totalPago)}</span>
                                 </div>
                             </div>
                         </div>
@@ -244,18 +247,17 @@ export default function PagosProveedoresPage() {
                             </div>
                             <div>
                                 <Label>Fecha Vencimiento</Label>
-                                <Input
-                                    type="date"
+                                <DateInputAR
                                     value={chequePropio.fecha_vencimiento}
-                                    onChange={e => setChequePropio({ ...chequePropio, fecha_vencimiento: e.target.value })}
+                                    onChange={v => setChequePropio({ ...chequePropio, fecha_vencimiento: v })}
                                 />
                             </div>
                             <div>
                                 <Label>Monto</Label>
-                                <Input
-                                    type="number"
-                                    value={chequePropio.monto || ""}
-                                    onChange={e => setChequePropio({ ...chequePropio, monto: parseFloat(e.target.value) || 0 })}
+                                <InputMonto
+                                    soloPositivos
+                                    value={chequePropio.monto || null}
+                                    onChange={n => setChequePropio({ ...chequePropio, monto: n ?? 0 })}
                                 />
                             </div>
                             <div className="flex gap-2 justify-end">
@@ -280,7 +282,7 @@ export default function PagosProveedoresPage() {
                                     {sugerencia.items_json?.map((item: any, idx: number) => (
                                         <div key={idx} className="p-2 bg-muted rounded flex justify-between">
                                             <span>{item.detalle || item.tipo}</span>
-                                            <span className="font-bold">${item.monto}</span>
+                                            <span className="font-bold">{moneda(item.monto)}</span>
                                         </div>
                                     ))}
                                 </div>

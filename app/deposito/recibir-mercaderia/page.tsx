@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { fecha } from "@/lib/formato"
 
 const C = { bg:"#f4f6f9",white:"#ffffff",border:"#e5e7eb",text:"#111827",textSub:"#6b7280",textLight:"#9ca3af",green:"#16a34a",greenLight:"#f0fdf4",greenBorder:"#bbf7d0",orange:"#ea580c",orangeLight:"#fff7ed",orangeBorder:"#fed7aa" }
 
@@ -70,7 +71,7 @@ export default function RecibirMercaderiaPage() {
               </div>
               <div style={{ display:"flex",gap:16,fontSize:13,color:C.textSub,marginBottom:enProgreso?10:14 }}>
                 <span>📦 {total} artículos</span>
-                <span>📅 {new Date(orden.fecha_orden).toLocaleDateString("es-AR")}</span>
+                <span>📅 {fecha(orden.fecha_orden)}</span>
               </div>
               {enProgreso && (
                 <div style={{ marginBottom:12 }}>

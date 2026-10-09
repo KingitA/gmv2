@@ -7,6 +7,7 @@ import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { colorOverride, derivarColorCheque, COLOR_PENDIENTE } from "@/lib/actions/color-cheque"
+import { normalizarCuit } from "@/lib/formato"
 
 // POST /api/cobranzas
 // Cobranza de UN cobro físico que abarca varios clientes/CUITs (caso "Tandil").
@@ -139,7 +140,7 @@ export async function POST(request: NextRequest) {
           numero_cheque: m.numero_cheque || null,
           fecha_cheque: m.fecha_cheque || null,
           localidad: m.localidad || null,
-          cuit_emisor: m.cuit_emisor || null,
+          cuit_emisor: normalizarCuit(m.cuit_emisor),
           color_cheque: m.tipo === "cheque" || m.tipo === "deposito" ? colorMetodo : null,
           fecha_deposito: m.fecha_deposito || null,
           cheque_id: m.tipo === "cheque" && m.usa_cheque_compartido && sharedChequeId ? sharedChequeId : null,

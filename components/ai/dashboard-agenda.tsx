@@ -19,6 +19,7 @@ import {
     Mail,
 } from 'lucide-react'
 import type { AiAgendaEvent } from '@/lib/ai/types'
+import { hoyISO, fechaCorta, hora } from "@/lib/formato"
 
 // ─── Email Types ───────────────────────────────────────
 
@@ -147,7 +148,7 @@ export function DashboardAgenda({ initialViajes, totalPedidosPendientes, saldosC
         }
     }
 
-    const today = new Date().toISOString().split('T')[0]
+    const today = hoyISO()
     const overdueEvents = events.filter(e => e.due_date && e.due_date < today)
     const todayEvents = events.filter(e => e.due_date === today)
     const upcomingEvents = events.filter(e => !e.due_date || e.due_date > today)
@@ -329,7 +330,7 @@ function DashboardEventCard({
                     </span>
                     {event.due_date && (
                         <span className={`text-[10px] ${isOverdue ? 'text-red-500 font-semibold' : 'text-neutral-400'}`}>
-                            {new Date(event.due_date + 'T12:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}
+                            {fechaCorta(event.due_date)}
                         </span>
                     )}
                 </div>
@@ -372,10 +373,10 @@ const CLASSIFICATION_BADGES: Record<string, { label: string; color: string }> = 
 function EmailRow({ email }: { email: InboxEmail }) {
     const badge = email.classification ? CLASSIFICATION_BADGES[email.classification] : null
     const dateStr = email.received_at
-        ? new Date(email.received_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })
+        ? fechaCorta(email.received_at)
         : '—'
     const timeStr = email.received_at
-        ? new Date(email.received_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+        ? hora(email.received_at)
         : ''
     const senderName = email.from_name || email.from_email?.split('@')[0] || 'Desconocido'
     const summary = email.ai_summary || '—'

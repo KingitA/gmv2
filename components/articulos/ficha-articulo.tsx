@@ -14,6 +14,8 @@ import { Boxes, IdCard, Layers, Truck, Upload, CircleDollarSign, X } from 'lucid
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { InputMonto } from '@/components/ui/input-monto'
+import { porcentaje } from '@/lib/formato'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Campo, Campos, ConUnidad, FichaCabecera, FichaCuerpo, FichaEstado, FichaMeta, FichaPie, FichaSeccion } from '@/components/ficha/ficha'
 import type { DescuentoTipado } from '@/lib/pricing/calculator'
@@ -184,7 +186,7 @@ export function FichaArticulo(p: Props) {
                   </Campo>
                   <Campo label="Precio de compra (lista)">
                     <ConUnidad unidad="$">
-                      <Input type="number" step="0.01" className="tabular-nums" value={ff.precio_compra || ''} onChange={e => set('precio_compra', parseFloat(e.target.value) || 0)} />
+                      <InputMonto className="tabular-nums" value={ff.precio_compra || null} onChange={v => set('precio_compra', v ?? 0)} />
                     </ConUnidad>
                   </Campo>
                 </Campos>
@@ -198,7 +200,7 @@ export function FichaArticulo(p: Props) {
                           ? <span className="text-[13px] text-neutro-400">Sin descuentos cargados</span>
                           : p.descuentos.map((d, i) => {
                             const t = TIPOS_DESC[d.tipo] ?? TIPOS_DESC.comercial
-                            return <span key={i} className={cn('rounded-md px-2 py-0.5 text-[13px] font-semibold tabular-nums', t.cls)}>{t.label} {d.porcentaje}%</span>
+                            return <span key={i} className={cn('rounded-md px-2 py-0.5 text-[13px] font-semibold tabular-nums', t.cls)}>{t.label} {porcentaje(d.porcentaje)}</span>
                           })}
                       </div>
                     </div>
@@ -262,13 +264,13 @@ export function FichaArticulo(p: Props) {
                 <Grupo titulo="Margen y oferta">
                   <Campos>
                     <Campo label="Margen">
-                      <ConUnidad unidad="%"><Input type="number" step="0.1" className="tabular-nums" value={ff.porcentaje_ganancia || ''} onChange={e => set('porcentaje_ganancia', parseFloat(e.target.value) || 0)} /></ConUnidad>
+                      <ConUnidad unidad="%"><InputMonto className="tabular-nums" value={ff.porcentaje_ganancia || null} onChange={v => set('porcentaje_ganancia', v ?? 0)} /></ConUnidad>
                     </Campo>
                     <Campo label="Bonificación / recargo" nota="B/R">
-                      <ConUnidad unidad="%"><Input type="number" step="0.1" className="tabular-nums" value={ff.bonif_recargo || ''} onChange={e => set('bonif_recargo', parseFloat(e.target.value) || 0)} /></ConUnidad>
+                      <ConUnidad unidad="%"><InputMonto className="tabular-nums" value={ff.bonif_recargo || null} onChange={v => set('bonif_recargo', v ?? 0)} /></ConUnidad>
                     </Campo>
                     <Campo label="Oferta">
-                      <ConUnidad unidad="%"><Input type="number" step="0.01" className="tabular-nums" placeholder="0" value={ff.descuento_propio || ''} onChange={e => set('descuento_propio', parseFloat(e.target.value) || 0)} /></ConUnidad>
+                      <ConUnidad unidad="%"><InputMonto className="tabular-nums" placeholder="0" value={ff.descuento_propio || null} onChange={v => set('descuento_propio', v ?? 0)} /></ConUnidad>
                     </Campo>
                     <Campo label="IVA de venta">
                       <Select value={ff.iva_ventas} onValueChange={v => set('iva_ventas', v)}>
@@ -285,10 +287,10 @@ export function FichaArticulo(p: Props) {
                 <Grupo titulo="Precio base">
                   <Campos>
                     <Campo label="Precio base">
-                      <ConUnidad unidad="$"><Input type="number" step="0.01" className="tabular-nums" placeholder="Calculado" value={ff.precio_base ?? ''} onChange={e => set('precio_base', e.target.value === '' ? null : parseFloat(e.target.value) || 0)} /></ConUnidad>
+                      <ConUnidad unidad="$"><InputMonto className="tabular-nums" placeholder="Calculado" value={ff.precio_base ?? null} onChange={v => set('precio_base', v)} /></ConUnidad>
                     </Campo>
                     <Campo label="Precio base contado">
-                      <ConUnidad unidad="$"><Input type="number" step="0.01" className="tabular-nums" placeholder="Calculado" value={ff.precio_base_contado ?? ''} onChange={e => set('precio_base_contado', e.target.value === '' ? null : parseFloat(e.target.value) || 0)} /></ConUnidad>
+                      <ConUnidad unidad="$"><InputMonto className="tabular-nums" placeholder="Calculado" value={ff.precio_base_contado ?? null} onChange={v => set('precio_base_contado', v)} /></ConUnidad>
                     </Campo>
                   </Campos>
                 </Grupo>
@@ -296,10 +298,10 @@ export function FichaArticulo(p: Props) {
                 <Grupo titulo="Lista especial" nota="opcional">
                   <Campos>
                     <Campo label="Precio lista especial" nota="neto">
-                      <ConUnidad unidad="$"><Input type="number" step="0.01" className="tabular-nums" placeholder="Sin precio especial" value={ff.precio_lista_especial ?? ''} onChange={e => set('precio_lista_especial', e.target.value === '' ? null : parseFloat(e.target.value) || 0)} /></ConUnidad>
+                      <ConUnidad unidad="$"><InputMonto className="tabular-nums" placeholder="Sin precio especial" value={ff.precio_lista_especial ?? null} onChange={v => set('precio_lista_especial', v)} /></ConUnidad>
                     </Campo>
                     <Campo label="Oferta especial">
-                      <ConUnidad unidad="%"><Input type="number" step="0.01" className="tabular-nums" placeholder="0" value={ff.oferta_lista_especial ?? ''} onChange={e => set('oferta_lista_especial', e.target.value === '' ? null : parseFloat(e.target.value) || 0)} /></ConUnidad>
+                      <ConUnidad unidad="%"><InputMonto className="tabular-nums" placeholder="0" value={ff.oferta_lista_especial ?? null} onChange={v => set('oferta_lista_especial', v)} /></ConUnidad>
                     </Campo>
                   </Campos>
                 </Grupo>
@@ -309,7 +311,7 @@ export function FichaArticulo(p: Props) {
                 ayuda="Cómo viene embalado y dónde se guarda. El orden de depósito es el recorrido del preparador.">
                 <Campos>
                   <Campo label="Unidades por bulto">
-                    <Input type="number" className="tabular-nums" value={ff.unidades_por_bulto || ''} onChange={e => set('unidades_por_bulto', parseInt(e.target.value) || 1)} />
+                    <InputMonto decimales={0} soloPositivos className="tabular-nums" value={ff.unidades_por_bulto || null} onChange={v => set('unidades_por_bulto', Math.trunc(v ?? 0) || 1)} />
                   </Campo>
                   <Campo label="Tipo de bulto">
                     <Select value={ff.unidad_de_medida || 'none'} onValueChange={v => set('unidad_de_medida', v === 'none' ? '' : v)}>
@@ -330,10 +332,10 @@ export function FichaArticulo(p: Props) {
                     </Select>
                   </Campo>
                   <Campo label="Unidades por fracción">
-                    <Input type="number" className="tabular-nums" placeholder="Ej: 12, 24, 6" value={ff.cantidad_fraccion ?? ''} onChange={e => set('cantidad_fraccion', e.target.value ? parseInt(e.target.value) : null)} />
+                    <InputMonto decimales={0} soloPositivos className="tabular-nums" placeholder="Ej: 12, 24, 6" value={ff.cantidad_fraccion ?? null} onChange={v => set('cantidad_fraccion', v != null ? Math.trunc(v) : null)} />
                   </Campo>
                   <Campo label="Orden en el depósito">
-                    <Input type="number" className="tabular-nums" value={ff.orden_deposito || ''} onChange={e => set('orden_deposito', parseInt(e.target.value) || 0)} />
+                    <InputMonto decimales={0} soloPositivos className="tabular-nums" value={ff.orden_deposito || null} onChange={v => set('orden_deposito', Math.trunc(v ?? 0))} />
                   </Campo>
                 </Campos>
               </FichaSeccion>

@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { MoneyColorBadge } from "./MoneyColorBadge"
+import { moneda } from "@/lib/formato"
 
 interface BalanceCardsProps {
     saldos: Array<{
@@ -32,11 +33,11 @@ export function BalanceCards({ saldos, cuentas }: BalanceCardsProps) {
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
                                 <MoneyColorBadge color="BLANCO" />
-                                <span className="font-bold">${getSaldoCuenta(cuenta.id, "BLANCO").toFixed(2)}</span>
+                                <span className="font-bold">{moneda(getSaldoCuenta(cuenta.id, "BLANCO"))}</span>
                             </div>
                             <div className="flex items-center justify-between">
                                 <MoneyColorBadge color="NEGRO" />
-                                <span className="font-bold">${getSaldoCuenta(cuenta.id, "NEGRO").toFixed(2)}</span>
+                                <span className="font-bold">{moneda(getSaldoCuenta(cuenta.id, "NEGRO"))}</span>
                             </div>
                         </div>
                     </CardContent>

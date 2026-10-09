@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft, GripVertical, Calendar, Package, AlertTriangle, Check, X, Loader2, ArrowUpDown } from "lucide-react"
 import Link from "next/link"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { fecha, moneda, numero, hoyISO } from "@/lib/formato"
 
 interface Importacion {
   id: string
@@ -239,17 +240,16 @@ export default function ActualizacionesPage() {
   // ─── Format helpers ────────────────────────────
   const fmtDate = (d: string | null) => {
     if (!d) return "—"
-    try { return new Date(d).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" }) }
-    catch { return d }
+    return fecha(d) || d
   }
   const fmtPrice = (n: number | null | undefined) => {
     if (n == null || n === 0) return "—"
-    return `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    return moneda(n)
   }
   const pctChange = (old: number, nuevo: number) => {
     if (!old || old === 0) return ""
     const pct = ((nuevo - old) / old) * 100
-    return pct > 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`
+    return pct > 0 ? `+${numero(pct, 1)}%` : `${numero(pct, 1)}%`
   }
 
   const getItemCount = (imp: Importacion) => {
@@ -520,7 +520,7 @@ export default function ActualizacionesPage() {
               <p className="text-xs text-muted-foreground">
                 {changeMap.size} artículo(s) con cambios detectados
               </p>
-              <Button onClick={() => { setShowApplyModal(true); setFechaEfectiva(selectedImport.fecha_vigencia || new Date().toISOString().split("T")[0]) }}>
+              <Button onClick={() => { setShowApplyModal(true); setFechaEfectiva(selectedImport.fecha_vigencia || hoyISO()) }}>
                 Importar Cambios
               </Button>
             </div>

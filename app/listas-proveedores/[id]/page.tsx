@@ -10,6 +10,7 @@ import { ArrowLeft, CheckCircle, Loader2, TrendingUp, TrendingDown, Minus } from
 import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
 import { formatCurrency } from "@/lib/utils"
+import { fecha, numero, porcentaje } from "@/lib/formato"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export default function DetalleListaPage() {
@@ -62,7 +63,7 @@ export default function DetalleListaPage() {
         if (!item.precio_anterior || !item.precio_compra || item.precio_anterior === 0) return null
         const pct = ((item.precio_compra - item.precio_anterior) / item.precio_anterior) * 100
         const color = pct > 0 ? 'text-red-600' : pct < 0 ? 'text-green-600' : 'text-muted-foreground'
-        return <span className={`text-xs font-medium ${color}`}>{pct > 0 ? '+' : ''}{pct.toFixed(1)}%</span>
+        return <span className={`text-xs font-medium ${color}`}>{pct > 0 ? '+' : ''}{numero(pct, 1)}%</span>
     }
 
     if (loading) return <div className="flex items-center justify-center h-64"><CargaProgreso mensajes={MENSAJES.articulos} titulo="Cargando lista del proveedor" /></div>
@@ -81,8 +82,8 @@ export default function DetalleListaPage() {
                 <div className="flex-1">
                     <h1 className="text-2xl font-bold">{lista.nombre || 'Lista de Precios'}</h1>
                     <p className="text-muted-foreground">
-                        {(lista.proveedor as any)?.nombre || 'Sin proveedor'} — Vigencia: {lista.fecha_vigencia}
-                        {lista.fecha_fin && ` hasta ${lista.fecha_fin}`}
+                        {(lista.proveedor as any)?.nombre || 'Sin proveedor'} — Vigencia: {fecha(lista.fecha_vigencia)}
+                        {lista.fecha_fin && ` hasta ${fecha(lista.fecha_fin)}`}
                     </p>
                 </div>
                 {lista.estado === 'pendiente' && (
@@ -153,7 +154,7 @@ export default function DetalleListaPage() {
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-center text-xs">
-                                            {item.descuento1 ? `${item.descuento1}%` : '—'} / {item.descuento2 ? `${item.descuento2}%` : '—'}
+                                            {item.descuento1 ? porcentaje(item.descuento1) : '—'} / {item.descuento2 ? porcentaje(item.descuento2) : '—'}
                                         </TableCell>
                                         <TableCell className="text-center">
                                             <Badge className={

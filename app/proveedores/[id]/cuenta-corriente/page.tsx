@@ -12,6 +12,9 @@ import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 import { toast } from "@/hooks/use-toast"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { fecha } from "@/lib/formato"
 
 export default function CuentaCorrienteProveedorPage() {
     const params = useParams()
@@ -25,19 +28,13 @@ export default function CuentaCorrienteProveedorPage() {
     const [showPagados, setShowPagados] = useState(false)
     const [provNombre, setProvNombre] = useState("")
     const [ncOpen, setNcOpen] = useState(false)
-    const [nc, setNc] = useState({ tipo: "NC", numero: "", fecha: "", total: "", total_neto: "" })
+    const [nc, setNc] = useState<{ tipo: string; numero: string; fecha: string; total: number | null; total_neto: number | null }>({ tipo: "NC", numero: "", fecha: "", total: null, total_neto: null })
     const [ncSaving, setNcSaving] = useState(false)
 
-    const parseMonto = (v: string) => {
-        const t = v.trim().replace(",", ".")
-        if (!t || !/^\d+(\.\d{0,2})?$/.test(t)) return null
-        return Number(t)
-    }
-
     async function guardarNC() {
-        const total = parseMonto(nc.total)
-        if (total === null || total <= 0) { toast({ variant: "destructive", title: "Total inválido (punto = centavos)" }); return }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(nc.fecha)) { toast({ variant: "destructive", title: "Fecha inválida (usar el selector)" }); return }
+        const total = nc.total
+        if (total === null || total <= 0) { toast({ variant: "destructive", title: "Total inválido" }); return }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(nc.fecha)) { toast({ variant: "destructive", title: "Fecha inválida (dd/mm/aaaa)" }); return }
         setNcSaving(true)
         try {
             const res = await fetch(`/api/proveedores/${id}/nc`, {
@@ -48,14 +45,14 @@ export default function CuentaCorrienteProveedorPage() {
                     numero: nc.numero || null,
                     fecha: nc.fecha,
                     total,
-                    total_neto: nc.total_neto ? parseMonto(nc.total_neto) : null,
+                    total_neto: nc.total_neto ? nc.total_neto : null,
                 }),
             })
             const d = await res.json()
             if (!res.ok) throw new Error(d.error)
             toast({ title: `${nc.tipo} registrada — ya figura como crédito y se puede descontar en la próxima OP` })
             setNcOpen(false)
-            setNc({ tipo: "NC", numero: "", fecha: "", total: "", total_neto: "" })
+            setNc({ tipo: "NC", numero: "", fecha: "", total: null, total_neto: null })
             loadCuentaCorriente()
         } catch (e: any) {
             toast({ variant: "destructive", title: "Error", description: e.message })
@@ -120,7 +117,7 @@ export default function CuentaCorrienteProveedorPage() {
                     </TableCell>
                 )}
                 <TableCell className="text-sm">
-                    {new Date(mov.fecha).toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}
+                    {fecha(mov.fecha)}
                 </TableCell>
                 <TableCell>
                     <Badge variant={isDebt ? "secondary" : "outline"} className={!isDebt ? "text-green-600 border-green-200 bg-green-50" : ""}>
@@ -130,7 +127,7 @@ export default function CuentaCorrienteProveedorPage() {
                 <TableCell className="max-w-[300px] truncate" title={mov.numero}>{mov.numero}</TableCell>
                 {mov.vencimiento && (
                     <TableCell className="text-sm text-muted-foreground">
-                        {new Date(mov.vencimiento + "T00:00:00").toLocaleDateString('es-AR')}
+                        {fecha(mov.vencimiento)}
                     </TableCell>
                 )}
                 {!mov.vencimiento && <TableCell></TableCell>}
@@ -193,19 +190,19 @@ export default function CuentaCorrienteProveedorPage() {
                             </div>
                             <div>
                                 <label className="text-xs font-medium">Fecha</label>
-                                <input type="date" className="w-full rounded-md border px-2 py-1.5 text-sm" value={nc.fecha}
-                                    onChange={e => setNc(p => ({ ...p, fecha: e.target.value }))} />
+                                <DateInputAR className="h-auto w-full rounded-md border px-2 py-1.5 text-sm" value={nc.fecha}
+                                    onChange={v => setNc(p => ({ ...p, fecha: v }))} />
                             </div>
                             <div>
                                 <label className="text-xs font-medium">Total</label>
-                                <input inputMode="decimal" className="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={nc.total}
-                                    onChange={e => setNc(p => ({ ...p, total: e.target.value }))} placeholder="punto = centavos" />
+                                <InputMonto pesos soloPositivos className="h-auto w-full rounded-md border pr-2 py-1.5 text-sm tabular-nums" value={nc.total}
+                                    onChange={n => setNc(p => ({ ...p, total: n }))} />
                             </div>
                             {nc.tipo !== "Reversa" && (
                                 <div className="col-span-2">
                                     <label className="text-xs font-medium">Neto gravado (opcional — si no, total ÷ 1,21)</label>
-                                    <input inputMode="decimal" className="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={nc.total_neto}
-                                        onChange={e => setNc(p => ({ ...p, total_neto: e.target.value }))} />
+                                    <InputMonto pesos soloPositivos className="h-auto w-full rounded-md border pr-2 py-1.5 text-sm tabular-nums" value={nc.total_neto}
+                                        onChange={n => setNc(p => ({ ...p, total_neto: n }))} />
                                 </div>
                             )}
                         </div>

@@ -2,9 +2,10 @@ import { useEffect, useState, type ChangeEvent, type ReactNode } from "react"
 import { useNavigate } from "react-router"
 import { ErrorHttp, useOnline, useOverlay, useRuntime } from "@gm/core"
 import { Hoja } from "@gm/core/ui"
+import { errorCuit, mismoCuit, normalizarCuit } from "@gm/formato"
 import { DS } from "../../datasets"
 import { useCatalogosFicha, useClientes, useEncolar, uuidv4 } from "../../datos/hooks"
-import { HojaConfirmar, Pantalla, useToast } from "../../ui"
+import { CuitInput, HojaConfirmar, Pantalla, useToast } from "../../ui"
 
 // Port de app/vendedor/clientes/nuevo/page.tsx + components/vendedor/NuevaLocalidadSheet.tsx.
 // Alta de cliente desde la calle: se ENCOLA (`cliente.crear`) con el id generado en el
@@ -254,9 +255,15 @@ export function ClienteNuevo() {
     }
     // Mismo control que el 409 del servidor, contra la cartera del equipo. El servidor
     // vuelve a controlar contra TODOS los clientes (los de otros viajantes) al sincronizar.
-    const cuitLimpio = f.cuit.trim()
-    if (cuitLimpio) {
-      const dup = clientes.find((c) => (c.cuit || "").trim() === cuitLimpio)
+    const errCuit = errorCuit(f.cuit)
+    if (errCuit) {
+      mostrar(errCuit, "err")
+      return
+    }
+    const cuit = normalizarCuit(f.cuit)
+    if (cuit) {
+      // Mismo CUIT sin importar cómo se escribió (con o sin guiones)
+      const dup = clientes.find((c) => mismoCuit(c.cuit, cuit))
       if (dup) {
         setDuplicado({ id: dup.id, nombre: dup.nombre })
         hojaDuplicado.abrir()
@@ -278,6 +285,7 @@ export function ClienteNuevo() {
           ...f,
           id,
           nombre,
+          cuit,
           localidad: localidades.find((l) => l.id === f.localidad_id)?.nombre || null,
           vendedor_id: viajante?.id ?? f.vendedor_id,
           lista_precio_id,
@@ -326,7 +334,7 @@ export function ClienteNuevo() {
           </Campo>
           <div className="grid grid-cols-2 gap-2">
             <Campo label="CUIT">
-              <input value={f.cuit} onChange={set("cuit")} inputMode="numeric" className={inputCls} placeholder="20-12345678-9" />
+              <CuitInput value={f.cuit} onChange={(v) => setF((p) => ({ ...p, cuit: v }))} className={inputCls} placeholder="20-12345678-9" />
             </Campo>
             <Campo label="Condición IVA">
               <select value={f.condicion_iva} onChange={set("condicion_iva")} className={inputCls}>

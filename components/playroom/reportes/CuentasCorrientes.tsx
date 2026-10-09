@@ -7,6 +7,7 @@ import DataTable from '@/components/playroom/DataTable'
 import { formatDateAR } from '@/lib/utils'
 import { localMatch } from '@/lib/search/local-match'
 import type { Column } from '@/components/playroom/DataTable'
+import { moneda, porcentaje } from "@/lib/formato"
 
 interface CCRow {
   cliente_id: string
@@ -54,12 +55,8 @@ const MORA_OPTIONS = [
   { label: 'Mora >90d', value: 90 },
 ]
 
-function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
-
 function pct(part: number, total: number) {
-  return total > 0 ? ((part / total) * 100).toFixed(1) + '%' : '0%'
+  return total > 0 ? porcentaje((part / total) * 100, 1) : '0%'
 }
 
 const inputStyle: React.CSSProperties = {
@@ -95,46 +92,46 @@ const COLUMNS: Column<CCRow>[] = [
   {
     key: 't0_30', label: '0–30 d', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-emerald-400">{ars(v)}</span>
+      ? <span className="font-mono text-emerald-400">{moneda(v, 0)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 't31_60', label: '31–60 d', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-amber-400">{ars(v)}</span>
+      ? <span className="font-mono text-amber-400">{moneda(v, 0)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 't61_90', label: '61–90 d', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono" style={{ color: '#f97316' }}>{ars(v)}</span>
+      ? <span className="font-mono" style={{ color: '#f97316' }}>{moneda(v, 0)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 't90_mas', label: '+90 d', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-red-400 font-semibold">{ars(v)}</span>
+      ? <span className="font-mono text-red-400 font-semibold">{moneda(v, 0)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 'total_deuda', label: 'Por comprobante', sortable: true, align: 'right',
-    render: v => <span className="font-mono text-white/70">{ars(v)}</span>,
+    render: v => <span className="font-mono text-white/70">{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'pagos_a_cuenta', label: 'A cuenta', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-emerald-400">−{ars(v)}</span>
+      ? <span className="font-mono text-emerald-400">−{moneda(v, 0)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => String(v ?? 0),
   },
   {
     key: 'saldo_libro', label: 'Debe (libro)', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-bold text-white">{ars(v)}</span>,
+    render: v => <span className="font-mono font-bold text-white">{moneda(v, 0)}</span>,
     exportValue: v => String(v ?? 0),
   },
   {
@@ -267,20 +264,20 @@ export default function CuentasCorrientes() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           label="Total cuentas por cobrar"
-          value={loading ? '...' : ars(summary.total)}
-          subLabel={loading ? '' : `${rows.length} clientes con saldo${(summary.pagos_a_cuenta ?? 0) > 0.01 ? ` · a cuenta ${ars(summary.pagos_a_cuenta!)}` : ''}`}
+          value={loading ? '...' : moneda(summary.total, 0)}
+          subLabel={loading ? '' : `${rows.length} clientes con saldo${(summary.pagos_a_cuenta ?? 0) > 0.01 ? ` · a cuenta ${moneda(summary.pagos_a_cuenta!, 0)}` : ''}`}
           loading={loading}
         />
         <KPICard
           label="% en mora (>30 días)"
           value={loading ? '...' : pct(summary.t31_60 + summary.t61_90 + summary.t90_mas, summary.total_por_comprobante ?? summary.total)}
-          subLabel={loading ? '' : ars(summary.t31_60 + summary.t61_90 + summary.t90_mas)}
+          subLabel={loading ? '' : moneda(summary.t31_60 + summary.t61_90 + summary.t90_mas, 0)}
           variant={kpis.moraPct > 50 ? 'danger' : kpis.moraPct > 20 ? 'warning' : 'default'}
           loading={loading}
         />
         <KPICard
           label="En riesgo (+90 días)"
-          value={loading ? '...' : ars(summary.t90_mas)}
+          value={loading ? '...' : moneda(summary.t90_mas, 0)}
           subLabel={loading ? '' : pct(summary.t90_mas, summary.total_por_comprobante ?? summary.total) + ' del total'}
           variant={summary.t90_mas > 0 ? 'danger' : 'default'}
           loading={loading}
@@ -310,7 +307,7 @@ export default function CuentasCorrientes() {
                 className="rounded-xl p-4"
                 style={{ background: `${color}0a`, border: `1px solid ${color}25` }}
               >
-                <div className="text-lg font-bold font-mono" style={{ color }}>{ars(val)}</div>
+                <div className="text-lg font-bold font-mono" style={{ color }}>{moneda(val, 0)}</div>
                 <div className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>{label}</div>
                 <div className="text-[10px] mt-0.5" style={{ color: `${color}99` }}>
                   {pct(val, summary.total_por_comprobante ?? summary.total)} del total
@@ -330,8 +327,8 @@ export default function CuentasCorrientes() {
           <ResponsiveContainer width="100%" height={Math.max(260, chartData.length * 28)}>
             <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 40, top: 0, bottom: 0 }}>
               <XAxis
-                type="number"
-                tickFormatter={v => `$${(v / 1000000).toFixed(1)}M`}
+                type="number" // formato-ok: tipo de eje de Recharts, no es un input
+                tickFormatter={v => `${moneda(v / 1000000, 1)}M`}
                 tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }}
                 axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
                 tickLine={false}
@@ -347,7 +344,7 @@ export default function CuentasCorrientes() {
               <Tooltip
                 formatter={(v: number, name: string) => {
                   const labels: Record<string, string> = { t0_30: '0–30 días', t31_60: '31–60 días', t61_90: '61–90 días', t90_mas: '+90 días' }
-                  return [ars(v), labels[name] ?? name]
+                  return [moneda(v, 0), labels[name] ?? name]
                 }}
                 contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
               />

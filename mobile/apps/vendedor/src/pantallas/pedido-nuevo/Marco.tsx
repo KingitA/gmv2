@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router"
 import { esQrOUrl, lecturaError, lecturaOk, useLector, useOnline, useRuntime } from "@gm/core"
 import { esPedidoEditable } from "@gm/vendedor"
+import { numero, parseMonto } from "@gm/formato"
 import { SEGS, SEG_LABEL, type Articulo, type BonifSeg, type CondPedido, COND_VACIA } from "../../datasets"
 import { nuevoBorrador, type Borrador } from "../../datos/borradores"
 import { buscarPorCodigo, eansDe, matchExacto } from "../../datos/busqueda"
@@ -212,8 +213,8 @@ function HojaArticulo({ a, onCerrar, onZoom, onAgregado }: { a: Articulo; onCerr
         <div className="flex items-center justify-center gap-3">
           <button onClick={() => setCantidad((c) => Math.max(0, (typeof c === "number" ? c : 0) - 1) || "")} className="h-14 w-14 rounded-xl bg-gray-100 text-2xl font-bold text-gray-700">−</button>
           <input
-            type="number" inputMode="numeric" min={0} value={cantidad} placeholder="0"
-            onChange={(e) => { const v = parseInt(e.target.value); setCantidad(Number.isFinite(v) && v > 0 ? v : "") }}
+            type="text" inputMode="numeric" value={cantidad} placeholder="0"
+            onChange={(e) => { const v = Math.trunc(parseMonto(e.target.value.replace(/\D/g, "")) ?? 0); setCantidad(v > 0 ? v : "") }}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregar() } }}
             className="h-14 w-24 rounded-xl border border-gray-300 text-center text-2xl font-bold placeholder:text-gray-300"
           />
@@ -273,7 +274,7 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
     for (const tipo of ["viajante", "mercaderia"] as const)
       for (const s of SEGS) {
         const v = cond.bonif?.[tipo]?.[s] ?? bonifCliente?.[tipo]?.[s] ?? 0
-        init[`${tipo}.${s}`] = v ? String(v) : ""
+        init[`${tipo}.${s}`] = v ? numero(v, 0, 2) : ""
       }
     return init
   })
@@ -287,7 +288,7 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
   const parsePct = (s: string | undefined) => {
     const t = (s ?? "").trim()
     if (t === "") return 0
-    const n = Number(t.replace(",", "."))
+    const n = parseMonto(t) ?? NaN
     return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : NaN
   }
   const bonifParsed: { viajante: BonifSeg; mercaderia: BonifSeg } = { viajante: {}, mercaderia: {} }

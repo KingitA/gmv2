@@ -18,7 +18,7 @@ const URL_WSFEV1: Record<AmbienteARCA, string> = {
 const NS = 'http://ar.gov.afip.dif.FEV1/'
 
 function n2(n: number): string {
-  return n.toFixed(2)
+  return n.toFixed(2) // formato-ok: WSFEv1 exige punto decimal
 }
 
 function extraerTag(xml: string, tag: string): string {
@@ -180,7 +180,7 @@ export async function consultarComprobante(
   if (errTags.length) return null
 
   const fecha    = extraerTag(xml, 'CbteFch')
-  const impTotal = parseFloat(extraerTag(xml, 'ImpTotal') || '0')
+  const impTotal = parseFloat(extraerTag(xml, 'ImpTotal') || '0') // formato-ok: XML de ARCA (punto decimal)
   const cae      = extraerTag(xml, 'CodAutorizacion')
   if (!fecha) return null
 

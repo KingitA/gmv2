@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchMovimientosMP } from "@/lib/finanzas/extracto-fuentes/mp"
 import { importarExtracto } from "@/lib/finanzas/extractos-import"
 import { todayArgentina } from "@/lib/utils"
+import { hoyISO, sumarDiasISO } from "@/lib/formato"
 
 export const maxDuration = 60
 
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     const hasta = body.hasta || todayArgentina()
     const desde =
       body.desde ||
-      new Date(Date.now() - 7 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+      sumarDiasISO(hoyISO(), -7)
 
     const { movimientos, fuente_detalle } = await fetchMovimientosMP(desde, hasta)
     if (!movimientos.length) {

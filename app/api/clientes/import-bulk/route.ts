@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuth } from "@/lib/auth"
 import { guardarHistorialImportacion } from "@/lib/import/guardar-historial"
+import { cuitDigitos, errorCuit, mismoCuit, normalizarCuit, parseMonto } from "@/lib/formato"
 
 // Campos que el importador puede actualizar (whitelist — nada fuera de acá se escribe)
 const ALLOWED_FIELDS = new Set<string>([
@@ -51,17 +52,22 @@ function coerce(field: string, raw: any): any {
   if (str === "") return null
 
   if (NUMERIC_FIELDS.has(field)) {
-    const n = parseFloat(str.replace(",", "."))
-    return isNaN(n) ? null : n
+    // Excel argentino: "1.500" = mil quinientos, "12,5" = doce y medio
+    return parseMonto(typeof raw === "number" ? raw : str)
   }
   if (BOOLEAN_FIELDS.has(field)) {
     return /^(si|sí|1|true|verdadero|x)$/i.test(str)
   }
+  if (field === "cuit") return normalizarCuit(str)
   return str
 }
 
 /** Compara dos valores ya normalizados para decidir si hay cambio real. */
 function sonIguales(field: string, a: any, b: any): boolean {
+  if (field === "cuit") {
+    if (!cuitDigitos(a) && !cuitDigitos(b)) return true
+    return mismoCuit(a, b)
+  }
   if (NUMERIC_FIELDS.has(field)) {
     if (a == null || b == null) return a === b
     return Math.round(Number(a) * 100) === Math.round(Number(b) * 100)
@@ -104,12 +110,20 @@ export async function POST(req: NextRequest) {
       if (v !== null && v !== undefined && String(v).trim() !== "") connValues.push(String(v).trim())
     }
 
-    // Valores a consultar: el valor tal cual y, para código, su versión sin ceros iniciales
+    // Valores a consultar: el valor tal cual y, para código, su versión sin ceros iniciales.
+    // CUIT: se busca normalizado (xx-xxxxxxxx-x) y en dígitos (dato viejo sin guiones),
+    // y se matchea por dígitos (sin importar cómo se escribió en el Excel).
     const queryValues = new Set<string>()
     for (const v of connValues) {
       queryValues.add(v)
       if (esCodigo) queryValues.add(stripLeadingZeros(v))
+      else {
+        const n = normalizarCuit(v)
+        if (n) queryValues.add(n)
+        if (cuitDigitos(v)) queryValues.add(cuitDigitos(v))
+      }
     }
+    const claveConector = (v: string) => (esCodigo ? v : cuitDigitos(v))
 
     // Columnas a traer: id + identificadores + los campos que vamos a comparar
     const usedFields = new Set<string>(["id", "codigo_cliente", "cuit", "nombre", "nombre_razon_social"])
@@ -127,7 +141,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Error consultando clientes: ${error.message}` }, { status: 500 })
       }
       for (const c of (data || []) as any[]) {
-        const key = String(c[connector] ?? "").trim()
+        const key = claveConector(String(c[connector] ?? "").trim())
         if (key) {
           existingMap.set(key, c)
           if (esCodigo) existingMap.set(stripLeadingZeros(key), c) // también por versión sin ceros
@@ -136,7 +150,8 @@ export async function POST(req: NextRequest) {
     }
 
     const lookup = (connVal: string) =>
-      existingMap.get(connVal) ?? (esCodigo ? existingMap.get(stripLeadingZeros(connVal)) : undefined) ?? null
+      (claveConector(connVal) ? existingMap.get(claveConector(connVal)) : undefined) ??
+      (esCodigo ? existingMap.get(stripLeadingZeros(connVal)) : undefined) ?? null
 
     // ── 2. Procesar cada fila: calcular cambios ──
     const filas: FilaReporte[] = []
@@ -158,6 +173,17 @@ export async function POST(req: NextRequest) {
 
       const cambios: FilaReporte["cambios"] = []
       const payload: Record<string, any> = {}
+
+      // CUIT nuevo inválido: la fila se informa como error (no se guarda basura)
+      const errCuit = connector !== "cuit" && "cuit" in row ? errorCuit(row.cuit) : null
+      if (errCuit) {
+        filas.push({
+          clave: existing.codigo_cliente ?? connVal,
+          nombre: existing.nombre || existing.nombre_razon_social || null,
+          status: "error", cambios: [], error: `CUIT "${row.cuit}": ${errCuit}`,
+        })
+        continue
+      }
 
       for (const field of Object.keys(row)) {
         if (!ALLOWED_FIELDS.has(field)) continue

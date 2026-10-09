@@ -3,14 +3,7 @@
 import { useState, useEffect } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
-
-function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
-
-function pct(n: number) {
-  return `${n.toFixed(2).replace('.', ',')}%`
-}
+import { moneda, porcentaje, fecha } from "@/lib/formato"
 
 function catLabel(cat: string) {
   if (cat === 'limpieza_bazar') return 'L/B'
@@ -192,8 +185,8 @@ function PedidosList({ pedidos, loading, tipo, onSelect }: {
     <div>
       <SummaryBar items={[
         { label: 'Pedidos', value: String(pedidos.length) },
-        { label: 'Monto total', value: ars(totalMonto) },
-        { label: 'Comisión total', value: ars(totalComision) },
+        { label: 'Monto total', value: moneda(totalMonto, 0) },
+        { label: 'Comisión total', value: moneda(totalComision, 0) },
       ]} />
 
       <table className="w-full text-sm">
@@ -225,10 +218,10 @@ function PedidosList({ pedidos, loading, tipo, onSelect }: {
                 </span>
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>{ars(p.total_monto)}</span>
+                <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>{moneda(p.total_monto, 0)}</span>
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="font-mono text-sm font-semibold text-emerald-400">{ars(p.total_comision)}</span>
+                <span className="font-mono text-sm font-semibold text-emerald-400">{moneda(p.total_comision, 0)}</span>
               </td>
               <td className="px-4 py-3 text-right">
                 <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>{p.cantidad_skus}</span>
@@ -263,8 +256,8 @@ function PedidoDetalle({ tipo, detalle, loading }: {
       <div>
         <SummaryBar items={[
           { label: 'Artículos', value: String(arts.length) },
-          { label: 'Monto neto', value: ars(totalMonto) },
-          { label: 'Comisión', value: ars(totalComision) },
+          { label: 'Monto neto', value: moneda(totalMonto, 0) },
+          { label: 'Comisión', value: moneda(totalComision, 0) },
         ]} />
 
         <table className="w-full text-sm">
@@ -293,16 +286,16 @@ function PedidoDetalle({ tipo, detalle, loading }: {
                   <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{a.cantidad}</span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>{ars(a.precio_unitario)}</span>
+                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>{moneda(a.precio_unitario, 0)}</span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{ars(a.subtotal)}</span>
+                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{moneda(a.subtotal, 0)}</span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-xs text-amber-400">{pct(a.comision_pct)}</span>
+                  <span className="font-mono text-xs text-amber-400">{porcentaje(a.comision_pct)}</span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-sm font-semibold text-emerald-400">{ars(a.comision_monto)}</span>
+                  <span className="font-mono text-sm font-semibold text-emerald-400">{moneda(a.comision_monto, 0)}</span>
                 </td>
               </tr>
             ))}
@@ -313,11 +306,11 @@ function PedidoDetalle({ tipo, detalle, loading }: {
                 <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.22)' }}>Total</span>
               </td>
               <td className="px-3 py-3 text-right">
-                <span className="font-mono text-sm font-bold" style={{ color: 'rgba(255,255,255,0.65)' }}>{ars(totalMonto)}</span>
+                <span className="font-mono text-sm font-bold" style={{ color: 'rgba(255,255,255,0.65)' }}>{moneda(totalMonto, 0)}</span>
               </td>
               <td />
               <td className="px-3 py-3 text-right">
-                <span className="font-mono text-sm font-bold text-emerald-400">{ars(totalComision)}</span>
+                <span className="font-mono text-sm font-bold text-emerald-400">{moneda(totalComision, 0)}</span>
               </td>
             </tr>
           </tfoot>
@@ -334,7 +327,7 @@ function PedidoDetalle({ tipo, detalle, loading }: {
     <div>
       <SummaryBar items={[
         { label: 'Comprobantes', value: String(comps.length) },
-        { label: 'Comisión total', value: ars(totalComision) },
+        { label: 'Comisión total', value: moneda(totalComision, 0) },
       ]} />
 
       {comps.map(comp => (
@@ -343,24 +336,24 @@ function PedidoDetalle({ tipo, detalle, loading }: {
           <div className="px-5 py-3 flex items-center gap-4 flex-wrap"
             style={{ background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
             <span className="font-mono text-xs font-bold text-blue-400">{comp.numero}</span>
-            <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.38)' }}>{comp.fecha_cobro}</span>
+            <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.38)' }}>{fecha(comp.fecha_cobro)}</span>
             <span className="flex-1" />
             {comp.total_neto > 0 && (
               <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.38)' }}>
-                Neto: <span className="font-mono">{ars(comp.total_neto)}</span>
+                Neto: <span className="font-mono">{moneda(comp.total_neto, 0)}</span>
               </span>
             )}
             {comp.total_iva > 0 && (
               <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.38)' }}>
-                IVA: <span className="font-mono">{ars(comp.total_iva)}</span>
+                IVA: <span className="font-mono">{moneda(comp.total_iva, 0)}</span>
               </span>
             )}
             {comp.total > 0 && (
               <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                Total: <span className="font-mono font-semibold">{ars(comp.total)}</span>
+                Total: <span className="font-mono font-semibold">{moneda(comp.total, 0)}</span>
               </span>
             )}
-            <span className="text-xs font-bold text-emerald-400 font-mono">Com: {ars(comp.total_comision)}</span>
+            <span className="text-xs font-bold text-emerald-400 font-mono">Com: {moneda(comp.total_comision, 0)}</span>
           </div>
 
           <table className="w-full text-sm">
@@ -389,16 +382,16 @@ function PedidoDetalle({ tipo, detalle, loading }: {
                     <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{a.cantidad}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{ars(a.precio_unitario)}</span>
+                    <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{moneda(a.precio_unitario, 0)}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{ars(a.subtotal)}</span>
+                    <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{moneda(a.subtotal, 0)}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-xs text-amber-400">{pct(a.comision_pct)}</span>
+                    <span className="font-mono text-xs text-amber-400">{porcentaje(a.comision_pct)}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-sm font-semibold text-emerald-400">{ars(a.comision_monto)}</span>
+                    <span className="font-mono text-sm font-semibold text-emerald-400">{moneda(a.comision_monto, 0)}</span>
                   </td>
                 </tr>
               ))}

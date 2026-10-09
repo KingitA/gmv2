@@ -20,6 +20,8 @@ import { ArrowLeft, CreditCard, Landmark, CheckCircle2, XCircle, RefreshCw } fro
 import Link from "next/link"
 import { MoneyColorBadge } from "@/components/finanzas/MoneyColorBadge"
 import { useToast } from "@/hooks/use-toast"
+import { InputMonto } from "@/components/ui/input-monto"
+import { fecha, moneda } from "@/lib/formato"
 
 interface Cheque {
   id: string
@@ -34,11 +36,7 @@ interface Cheque {
   cuenta_deposito_nombre?: string | null
 }
 
-const fmt = (n: number) =>
-  Number(n).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
-
-const fecha = (d: string) =>
-  new Date(d).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+const fmt = (n: number) => moneda(n)
 
 type Accion = { tipo: "depositar" | "acreditar" | "rechazar"; cheque: Cheque } | null
 
@@ -96,10 +94,10 @@ export default function ChequesPage() {
     try {
       const body =
         tipo === "depositar"
-          ? { cuenta_banco_id: cuentaBanco, gastos: parseFloat(gastos) || 0 }
+          ? { cuenta_banco_id: cuentaBanco, gastos: Number(gastos) || 0 }
           : tipo === "acreditar"
-            ? { gastos: parseFloat(gastos) || 0 }
-            : { motivo_rechazo: motivo || "Cheque rechazado", gastos: parseFloat(gastos) || 0 }
+            ? { gastos: Number(gastos) || 0 }
+            : { motivo_rechazo: motivo || "Cheque rechazado", gastos: Number(gastos) || 0 }
       const res = await fetch(`/api/cheques/${cheque.id}/${tipo}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -311,10 +309,10 @@ export default function ChequesPage() {
                 )}
                 <div>
                   <Label>Gastos bancarios</Label>
-                  <Input type="number" min="0" value={gastos} onChange={(e) => setGastos(e.target.value)} placeholder="0" />
+                  <InputMonto soloPositivos value={gastos} onChange={(n) => setGastos(n == null ? "" : String(n))} placeholder="0" />
                   {accion.tipo === "acreditar" && gastos && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      Se acreditan {fmt(Math.max(0, Number(accion.cheque.monto) - (parseFloat(gastos) || 0)))} netos.
+                      Se acreditan {fmt(Math.max(0, Number(accion.cheque.monto) - (Number(gastos) || 0)))} netos.
                     </p>
                   )}
                   {accion.tipo === "rechazar" && (

@@ -8,6 +8,8 @@ import KPICard from '@/components/playroom/KPICard'
 import DataTable from '@/components/playroom/DataTable'
 import { formatDateAR } from '@/lib/utils'
 import type { Column } from '@/components/playroom/DataTable'
+import { moneda, numero } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 type Sugerencia = 'OK' | 'Devolver' | 'Liquidar'
 
@@ -43,10 +45,6 @@ const DIAS_OPTIONS = [
   { label: '+365 días', value: 365 },
 ]
 
-function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
-
 function fmtDias(n: number | null) {
   if (n === null) return '—'
   if (n >= 9999) return '∞'
@@ -73,17 +71,17 @@ const COLUMNS: Column<RotacionRow>[] = [
   { key: 'rubro', label: 'Rubro', sortable: true },
   {
     key: 'stock_actual', label: 'Stock', sortable: true, align: 'right',
-    render: v => <span className="font-mono">{Number(v).toLocaleString('es-AR')}</span>,
+    render: v => <span className="font-mono">{numero(Number(v), 0, 2)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'ultimo_costo', label: 'Costo unit.', sortable: true, align: 'right',
-    render: v => <span className="font-mono">{ars(v)}</span>,
+    render: v => <span className="font-mono">{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'capital_inmovilizado', label: 'Capital $', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-semibold text-amber-400">{ars(v)}</span>,
+    render: v => <span className="font-mono font-semibold text-amber-400">{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
@@ -98,7 +96,7 @@ const COLUMNS: Column<RotacionRow>[] = [
   },
   {
     key: 'velocidad_90d', label: 'Vel. 90d u/día', sortable: true, align: 'right',
-    render: v => <span className="font-mono">{Number(v).toFixed(2)}</span>,
+    render: v => <span className="font-mono">{numero(Number(v), 2)}</span>,
     exportValue: v => String(v),
   },
   {
@@ -209,10 +207,10 @@ export default function RotacionStockMuerto() {
 
         <div className="flex items-center gap-2">
           <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Capital mín. $</label>
-          <input
-            type="number"
+          <InputMonto
+            soloPositivos
             value={capitalMin || ''}
-            onChange={e => setCapitalMin(Number(e.target.value))}
+            onChange={n => setCapitalMin(n ?? 0)}
             placeholder="0"
             style={{ ...inputStyle, width: 100 }}
           />
@@ -269,9 +267,9 @@ export default function RotacionStockMuerto() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard label="Capital inmovilizado" value={loading ? '...' : ars(kpis.capitalTotal)} variant="warning" loading={loading} />
+        <KPICard label="Capital inmovilizado" value={loading ? '...' : moneda(kpis.capitalTotal, 0)} variant="warning" loading={loading} />
         <KPICard label="SKUs sin movimiento >90d" value={loading ? '...' : kpis.sin90} variant="danger" loading={loading} />
-        <KPICard label="Capital recuperable" value={loading ? '...' : ars(kpis.capitalRecuperable)} subLabel="Sugerencia Liquidar" variant="danger" loading={loading} />
+        <KPICard label="Capital recuperable" value={loading ? '...' : moneda(kpis.capitalRecuperable, 0)} subLabel="Sugerencia Liquidar" variant="danger" loading={loading} />
         <KPICard label="Top rubro stock muerto" value={loading ? '...' : kpis.topRubro} loading={loading} />
       </div>
 
@@ -284,8 +282,8 @@ export default function RotacionStockMuerto() {
           <ResponsiveContainer width="100%" height={Math.max(220, chartData.length * 26)}>
             <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 40, top: 0, bottom: 0 }}>
               <XAxis
-                type="number"
-                tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
+                type="number" // formato-ok: tipo de eje de Recharts, no es un input
+                tickFormatter={v => `${moneda(v / 1000, 0)}k`}
                 tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 11 }}
                 axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
                 tickLine={false}
@@ -299,7 +297,7 @@ export default function RotacionStockMuerto() {
                 tickLine={false}
               />
               <Tooltip
-                formatter={(v: number) => [ars(v), 'Capital']}
+                formatter={(v: number) => [moneda(v, 0), 'Capital']}
                 labelFormatter={(_l, p) => p?.[0]?.payload?.desc || _l}
                 contentStyle={{
                   background: '#1f2937',

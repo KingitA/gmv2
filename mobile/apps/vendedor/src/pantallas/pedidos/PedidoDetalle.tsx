@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { useNoEnviados, useOnline, useOverlay, useRuntime, useSesion } from "@gm/core"
 import { esPedidoEditable, ESTADO_LABEL } from "@gm/vendedor"
+import { fechaHora, numero, parseMonto } from "@gm/formato"
 import { DS, SEG_LABEL, type DetallePedido, type ItemOpPedido, type OpPedido } from "../../datasets"
 import { almacenBorradores, nuevoBorrador } from "../../datos/borradores"
 import { rechazosDe, useEncolar, usePedido } from "../../datos/hooks"
 import { preciosAl } from "../../datos/precios"
 import { useVer } from "../pedido-nuevo/contexto"
-import { BadgeEstado, fechaCorta, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinDescargar, SinEnviar, useFotoZoom, useToast, useVolver, Vacio, ZoomFoto } from "../../ui"
+import { BadgeEstado, fechaAR, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinDescargar, SinEnviar, useFotoZoom, useToast, useVolver, Vacio, ZoomFoto } from "../../ui"
 
 // Detalle de un pedido (port de app/vendedor/pedidos/[id]/page.tsx).
 //  - Pedido del servidor: cantidades editables con guardado automático. En la web cada
@@ -78,7 +79,7 @@ function PedidoLocal({ vista }: { vista: Vista }) {
               ? local.error
               : "Está guardado en este equipo y se envía solo apenas haya señal. Todavía no tiene número: se lo da la oficina al recibirlo."}
           </p>
-          <p className="mt-1 text-xs text-gray-500">Tomado el {new Date(local.capturadoAt).toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</p>
+          <p className="mt-1 text-xs text-gray-500">Tomado el {fechaHora(local.capturadoAt)}</p>
         </div>
 
         <div className="divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white">
@@ -239,7 +240,7 @@ function PedidoServidor({ vista }: { vista: Vista }) {
             <button onClick={() => cliente && navigate(`/clientes/${cliente.id}`)} className="min-h-11 flex-1 text-left font-bold text-gray-900">{cliente?.nombre || "Sin cliente"} ›</button>
             {vista.cambios && vista.cambios.estado !== "rechazado" && <SinEnviar texto={vista.cambios.estado === "enviando" ? "enviando…" : "cambios sin enviar"} />}
           </div>
-          <p className="text-sm text-gray-500">{fechaCorta(pedido.fecha, { day: "numeric", month: "short", year: "numeric" })}</p>
+          <p className="text-sm text-gray-500">{fechaAR(pedido.fecha)}</p>
           {pedido.observaciones && <p className="mt-2 text-sm text-gray-600">📝 {pedido.observaciones}</p>}
           {cliente && (
             <div className="mt-3 grid grid-cols-2 gap-2">
@@ -337,12 +338,12 @@ function PedidoServidor({ vista }: { vista: Vista }) {
 
 function FilaRenglon({ r, editable, onCantidad, onQuitar, onZoom }: { r: Renglon; editable: boolean; onCantidad: (n: number) => void; onQuitar: () => void; onZoom: () => void }) {
   const a = r.d.articulos
-  const [cant, setCant] = useState(String(r.cantidad))
+  const [cant, setCant] = useState(() => numero(r.cantidad, 0, 3))
   const [bultos, setBultos] = useState(false)
   const [editando, setEditando] = useState(false)
-  useEffect(() => { if (!editando) { setCant(String(r.cantidad)); setBultos(false) } }, [r.cantidad, editando])
+  useEffect(() => { if (!editando) { setCant(numero(r.cantidad, 0, 3)); setBultos(false) } }, [r.cantidad, editando])
   const ub = a?.unidades_por_bulto || 1
-  const n = parseFloat(cant.replace(",", "."))
+  const n = parseMonto(cant) ?? NaN
   const unidades = Number.isFinite(n) && n > 0 ? (bultos ? n * ub : n) : 0
   const cambiado = unidades !== r.cantidad
   const confirmar = () => {

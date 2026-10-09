@@ -5,6 +5,7 @@ import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { sanitizarOr } from "@/lib/search/hybrid"
 import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar"
+import { cuitDigitos, errorCuit, normalizarCuit } from "@/lib/formato"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -127,14 +128,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Tu usuario no tiene viajante asignado." }, { status: 400 })
     }
 
-    const cuitLimpio = cuit ? String(cuit).trim() : null
+    const errCuit = errorCuit(cuit)
+    if (errCuit) {
+      return NextResponse.json({ error: errCuit }, { status: 400 })
+    }
+    // Se guarda "xx-xxxxxxxx-x" sin importar cómo se tipeó; el duplicado se busca
+    // igual (con y sin guiones, por si quedó algún dato viejo sin normalizar).
+    const cuitLimpio = normalizarCuit(cuit)
     if (cuitLimpio) {
-      const { data: dup } = await supabase
+      const { data: dups } = await supabase
         .from("clientes")
         .select("id, nombre")
-        .eq("cuit", cuitLimpio)
+        .in("cuit", [cuitLimpio, cuitDigitos(cuitLimpio)])
         .eq("activo", true)
-        .maybeSingle()
+        .limit(1)
+      const dup = dups?.[0]
       if (dup) {
         return NextResponse.json(
           { error: `Ya existe un cliente con ese CUIT: ${dup.nombre}`, cliente_existente_id: dup.id },

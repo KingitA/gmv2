@@ -11,6 +11,7 @@
 // vendedor lo ve). Cualquier otra cosa (5xx, red, base) ⇒ transitorio, se reintenta.
 
 import { POST as clientesPOST } from "@/app/api/vendedor/clientes/route"
+import { errorCuit } from "@/lib/formato"
 import { PATCH as clientePATCH } from "@/app/api/vendedor/cliente/[id]/route"
 import { PUT as bonificacionesPUT } from "@/app/api/vendedor/cliente/[id]/bonificaciones/route"
 import { POST as viajesPOST } from "@/app/api/vendedor/viajes/route"
@@ -39,6 +40,7 @@ import { conCaptura, type CapturaPedido } from "../contexto-captura"
 import { insumosAFecha, verificarPreciosCapturados } from "../precios-integridad"
 import { cargarClientesVendedor, cargarCuentaCliente, cargarPedidosVendedor, cargarViajeVendedor, vendedorIdsDe } from "../sync/vendedor"
 import { esUuid } from "../uuid"
+import { fechaISO } from "@/lib/formato"
 import { subirFotosPendientes } from "@/lib/cobranzas/fotos"
 import { llamarRuta } from "./rutas"
 import { RechazoNegocio, type CtxOutbox, type HandlerDef } from "./tipos"
@@ -161,7 +163,7 @@ function validarPedido(p: PayloadPedido): string | null {
   return null
 }
 
-const fechaArgentina = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+const fechaArgentina = (iso: string) => fechaISO(iso) // día argentino del instante
 
 const overridesDe = (c?: CondPedido | null) => ({
   ...(c?.metodo_facturacion_pedido ? { metodo_facturacion_pedido: c.metodo_facturacion_pedido } : {}),
@@ -385,10 +387,14 @@ const clienteCrear: HandlerDef<Record<string, any>> = {
   async aplicar(ctx, m) {
     const { data: previo } = await ctx.admin.from("clientes").select("id").eq("id", m.payload.id).maybeSingle()
     if (!previo) {
+      // La ruta rechaza un CUIT inválido. Un alta offline de una APK vieja (sin validar el
+      // CUIT) no debe perder el cliente ni trabar sus pedidos: se crea sin CUIT y oficina
+      // lo completa en la ficha.
+      const body = errorCuit(m.payload.cuit) ? { ...m.payload, cuit: null } : m.payload
       await llamarRuta(clientesPOST, ctx, {
         ruta: "/api/vendedor/clientes",
         method: "POST",
-        body: m.payload,
+        body,
         rechazo: (status, body) => (status === 409 ? `${body?.error || "Ya existe un cliente con ese CUIT"}. Buscalo en tu cartera o pedile a oficina que te lo asigne.` : null),
       })
     }
@@ -414,10 +420,16 @@ const clienteEditar: HandlerDef<{ cliente_id: string; cambios: Record<string, { 
       if (igual(actual[c], cambios[c]!.antes)) aplicables[c] = cambios[c]!.despues
       else pisados.push(c)
     }
+    // CUIT inválido (APK vieja sin validación): se aplica el resto y el CUIT no
+    const cuitInvalido = "cuit" in aplicables && !!errorCuit(aplicables.cuit as string)
+    if (cuitInvalido) delete aplicables.cuit
     if (Object.keys(aplicables).length) {
       await llamarRuta(clientePATCH, ctx, { ruta: `/api/vendedor/cliente/${cliente_id}`, method: "PATCH", params: { id: cliente_id }, body: aplicables })
     }
     const replica = await parches(() => parcheCliente(ctx, cliente_id))
+    if (cuitInvalido) {
+      throw new RechazoNegocio(`El CUIT ${String(cambios.cuit?.despues ?? "")} no es válido: no se guardó (el resto de los cambios sí). Corregilo en la ficha.`, "cas_parcial")
+    }
     if (pisados.length) {
       // Lo aplicable quedó aplicado; el rechazo informa qué NO se tocó
       throw new RechazoNegocio(`Otra persona cambió ${pisados.join(", ")} mientras estabas sin señal: esos campos no se modificaron. Revisá la ficha.`, "cas_parcial")

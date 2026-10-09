@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar, Truck, MapPin, DollarSign, Package } from 'lucide-react';
 import Link from "next/link";
 import type { Viaje } from "@/lib/types";
+import { moneda, fecha } from "@/lib/formato"
 
 const estadoConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive'; color: string }> = {
   pendiente: { label: 'Pendiente', variant: 'secondary' as const, color: 'text-gray-600' },
@@ -39,11 +40,7 @@ export function ViajeCard({ viaje }: ViajeCardProps) {
               </CardTitle>
               <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
                 <Calendar className="h-4 w-4" />
-                {new Date(viaje.fecha).toLocaleDateString('es-AR', {
-                  day: '2-digit',
-                  month: 'short',
-                  year: 'numeric'
-                })}
+                {fecha(viaje.fecha)}
               </div>
             </div>
             <Badge variant={config.variant} className="shrink-0">
@@ -85,7 +82,7 @@ export function ViajeCard({ viaje }: ViajeCardProps) {
             <div className="flex items-center justify-between pt-2 border-t">
               <span className="text-sm text-muted-foreground">Total Facturado</span>
               <span className="text-lg font-bold text-primary">
-                ${viaje.total_facturado.toLocaleString('es-AR')}
+                {moneda(viaje.total_facturado)}
               </span>
             </div>
           )}

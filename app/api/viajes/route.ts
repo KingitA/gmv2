@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireOficina, errorJson, guardarChoferes, guardarZonas, nombrePorDefecto } from '@/lib/viajes/servidor'
+import { sumarDiasISO } from '@/lib/formato'
 
 export async function GET(request: NextRequest) {
   try {
@@ -121,9 +122,7 @@ async function listarCalendario(supabase: SupabaseClient, searchParams: URLSearc
     .neq("estado", "cancelado") // cancelado = fuera del calendario (queda el registro y su historial)
     .order("fecha", { ascending: true })
   if (desde) {
-    const d = new Date(desde + "T00:00:00Z")
-    d.setUTCDate(d.getUTCDate() - 14)
-    q = q.gte("fecha", d.toISOString().slice(0, 10))
+    q = q.gte("fecha", sumarDiasISO(desde, -14))
   }
   if (hasta) q = q.lte("fecha", hasta)
 
@@ -132,9 +131,8 @@ async function listarCalendario(supabase: SupabaseClient, searchParams: URLSearc
   // Solo los que tocan el rango (fecha + dias − 1 >= desde)
   const viajes = (viajesRaw || []).filter((v: any) => {
     if (!desde) return true
-    const fin = new Date(String(v.fecha).slice(0, 10) + "T00:00:00Z")
-    fin.setUTCDate(fin.getUTCDate() + Math.max(1, Number(v.dias) || 1) - 1)
-    return fin.toISOString().slice(0, 10) >= desde
+    const fin = sumarDiasISO(String(v.fecha).slice(0, 10), Math.max(1, Number(v.dias) || 1) - 1)
+    return fin >= desde
   })
 
   const ids = (viajes || []).map((v: any) => v.id)

@@ -5,14 +5,14 @@ import {
   agruparCuenta, alternarAnticipo, alternarComprobante, alternarContadoPedido, alternarContadoTodo, alternarGrupo, alternarTodo, clavesDeLaCuenta,
   fijarMonto, montoAnticipo, resumenCuenta, saldoCobrable, type DatosCuenta, type EstadoCuenta,
 } from "../datos/cuenta-cobro"
-import { formatCurrency, formatDateAR } from "../ui"
+import { moneda } from "@gm/formato"
+import { formatCurrency, formatDateAR, MontoInput } from "../ui"
 
 // La cuenta de UN cliente dentro del cobro: pedidos y comprobantes seleccionables, "Incluir
 // devoluciones como crédito" y "10% contado a todo". Es la MISMA pantalla para el cliente de la
 // parada y para cada cliente agregado al cobro conjunto (regla del dueño, 01/10/2026: al agregar
 // un cliente se ve su cuenta completa, igual que la del principal).
 
-const fmt = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })
 
 export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir }: {
   datos: DatosCuenta
@@ -41,15 +41,15 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
         <button onClick={() => onChange(alternarComprobante(estado, cp))} className="flex min-h-11 min-w-0 flex-1 flex-wrap items-center gap-x-2 text-left">
           <span className="rounded border px-1 text-xs">{cp.tipo_comprobante}</span>
           <span className="font-mono text-xs">{cp.numero_comprobante}</span>
-          <span className="text-[10px] text-gray-400">{cp.fecha ? cp.fecha.slice(0, 10).split("-").reverse().join("/") : ""}</span>
+          <span className="text-[10px] text-gray-400">{formatDateAR(cp.fecha)}</span>
           {dtosHechos.has(cp.id) && <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">Dto. ctdo</span>}
-          {(cp.en_cobro || 0) > 0.005 && <span className="text-[10px] font-bold text-sky-600">🔒 {fmt(cp.en_cobro!)} en un cobro sin enviar</span>}
-          <span className="ml-auto font-mono text-orange-600">saldo ${fmt(saldoCobrable(cp))}</span>
+          {(cp.en_cobro || 0) > 0.005 && <span className="text-[10px] font-bold text-sky-600">🔒 {moneda(cp.en_cobro!)} en un cobro sin enviar</span>}
+          <span className="ml-auto font-mono text-orange-600">saldo {moneda(saldoCobrable(cp))}</span>
         </button>
         {checked ? (
-          <input
-            type="number" inputMode="decimal" min={0} max={saldoCobrable(cp)} step="0.01" value={sel[cp.id]}
-            onChange={(e) => onChange(fijarMonto(estado, cp, parseFloat(e.target.value) || 0))}
+          <MontoInput
+            valor={sel[cp.id] ?? 0}
+            onCambio={(n) => onChange(fijarMonto(estado, cp, n))}
             className="min-h-10 w-28 rounded-lg border border-gray-300 px-2 text-right text-sm"
           />
         ) : (
@@ -85,7 +85,7 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
                   <span className="text-sm font-semibold">Pedido #{ped.numero_pedido}</span>
                   <span className="text-xs">{formatDateAR(ped.fecha)}</span>
                   <span className="rounded border border-green-200 bg-green-50 px-1.5 text-[10px] text-green-700">Saldado</span>
-                  <span className="ml-auto font-mono text-sm">${fmt(ped.total)}</span>
+                  <span className="ml-auto font-mono text-sm">{moneda(ped.total)}</span>
                 </div>
               )
             const conContado = estado.contadoPedidos.includes(ped.id)
@@ -107,7 +107,7 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
                   {!facturado && (
                     <label className="mr-1 flex min-h-11 items-center gap-1 text-[11px] text-amber-700"><input type="checkbox" checked={conContado} onChange={() => onChange(alternarContadoPedido(estado, ped))} className="h-5 w-5" /> 10%</label>
                   )}
-                  <span className="font-mono text-sm">${fmt(facturado ? comps.reduce((s, c) => s + saldoCobrable(c), 0) : montoAnticipo(ped, conContado))}</span>
+                  <span className="font-mono text-sm">{moneda(facturado ? comps.reduce((s, c) => s + saldoCobrable(c), 0) : montoAnticipo(ped, conContado))}</span>
                 </div>
                 {facturado && abierto && <div className="border-t bg-white">{comps.map((c) => filaComprobante(c, true))}</div>}
               </div>
@@ -118,13 +118,13 @@ export function SelectorCuenta({ datos, estado, onChange, expandido, onExpandir 
               <div className="flex items-center gap-2 border-b px-3 py-2 text-xs font-semibold text-gray-500">
                 <input type="checkbox" checked={sinPedido.every((c) => sel[c.id] !== undefined)} onChange={() => onChange(alternarGrupo(estado, sinPedido))} className="h-5 w-5" title="Seleccionar todos" />
                 <span>Otros comprobantes</span>
-                <span className="ml-auto font-mono text-orange-600">saldo ${fmt(sinPedido.reduce((s, c) => s + saldoCobrable(c), 0))}</span>
+                <span className="ml-auto font-mono text-orange-600">saldo {moneda(sinPedido.reduce((s, c) => s + saldoCobrable(c), 0))}</span>
               </div>
               {sinPedido.map((c) => filaComprobante(c, false))}
             </div>
           )}
           {r.haySeleccion && (
-            <div className="flex justify-end pt-1 text-sm font-semibold">Total a pagar: <span className="ml-2 text-blue-700">${fmt(r.totalImputado)}</span></div>
+            <div className="flex justify-end pt-1 text-sm font-semibold">Total a pagar: <span className="ml-2 text-blue-700">{moneda(r.totalImputado)}</span></div>
           )}
         </div>
       )}

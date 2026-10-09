@@ -33,6 +33,7 @@ import { GET as rendicionesGET } from "@/app/api/viajante/rendiciones/route"
 import { GET as viajesGET } from "@/app/api/vendedor/viajes/route"
 import { GET as viajeGET } from "@/app/api/vendedor/viajes/[id]/route"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
+import { hoyISO, sumarDiasISO } from "@/lib/formato"
 import { ARTICULO_SELECT, mapArticuloVendedor } from "@/lib/vendedor/articulos-select"
 import { bonificacionesDesdeFilas } from "@/lib/vendedor/bonificaciones"
 import { cargarComprados } from "@/lib/vendedor/comprados"
@@ -237,7 +238,7 @@ export async function cargarPedidosVendedor(supabase: any, vendedorIds: string[]
   if (!vendedorIds.length) return []
   let pedidoIds = ids
   if (!pedidoIds) {
-    const corte = new Date(Date.now() - DIAS_PEDIDOS * 86_400_000).toISOString().slice(0, 10)
+    const corte = sumarDiasISO(hoyISO(), -DIAS_PEDIDOS)
     const { data, error } = await supabase
       .from("pedidos")
       .select("id")

@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { Loader2, RefreshCw } from "lucide-react"
+import { moneda } from "@/lib/formato"
 
 type Descuadre = {
   cliente_id: string
@@ -17,9 +18,6 @@ type Descuadre = {
   pagos_a_cuenta: number
   diferencia: number
 }
-
-const fmt = (n: number) =>
-  Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function ReconciliacionPage() {
   const [descuadres, setDescuadres] = useState<Descuadre[] | null>(null)
@@ -83,14 +81,14 @@ export default function ReconciliacionPage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="font-bold text-slate-900">{d.cliente_nombre}</p>
               <span className="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-700">
-                Diferencia $ {fmt(Math.abs(d.diferencia))}
+                Diferencia {moneda(Math.abs(d.diferencia))}
               </span>
             </div>
             <p className="mt-2 text-sm text-slate-600">
-              El libro dice que debe <b>$ {fmt(d.saldo_libro)}</b> · Los comprobantes dicen{" "}
-              <b>$ {fmt(d.saldo_documentos)}</b>
+              El libro dice que debe <b>{moneda(d.saldo_libro)}</b> · Los comprobantes dicen{" "}
+              <b>{moneda(d.saldo_documentos)}</b>
               {d.pagos_a_cuenta > 0.01 ? (
-                <> (con $ {fmt(d.pagos_a_cuenta)} a cuenta sin imputar)</>
+                <> (con {moneda(d.pagos_a_cuenta)} a cuenta sin imputar)</>
               ) : null}
               .
             </p>

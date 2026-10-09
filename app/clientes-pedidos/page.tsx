@@ -67,6 +67,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { moneda, fecha, hora, fechaCorta } from "@/lib/formato"
 
 type Pedido = {
   id: string
@@ -530,8 +531,7 @@ export default function ClientesPedidosPage() {
     setRepreciando(pedido.id)
     try {
       const r = await repreciarPedidoPreciosActuales(pedido.id)
-      const fmt = (n: number) => `$${(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      alert(`Pedido ${pedido.numero_pedido} repreciado: ${fmt(r.total_anterior)} → ${fmt(r.total)}`)
+      alert(`Pedido ${pedido.numero_pedido} repreciado: ${moneda(r.total_anterior || 0)} → ${moneda(r.total || 0)}`)
       await cargarPedidos()
       await cargarDetallesPedido(pedido.id)
       setPedidoSeleccionado((prev: any) => (prev && prev.id === pedido.id ? { ...prev, total: r.total } : prev))
@@ -907,7 +907,7 @@ export default function ClientesPedidosPage() {
           : ""
         }
               <div class="total-row">
-                <span>TOTAL: $${pedido.total?.toFixed(2)}</span>
+                <span>TOTAL: ${moneda(pedido.total)}</span>
               </div>
             </div>
 
@@ -1207,7 +1207,7 @@ export default function ClientesPedidosPage() {
   const soltarEnDia = (dia: string) => {
     const ids = arrastreRef.current
     if (!ids.length) return
-    const fechaTxt = `${Number(dia.slice(8))}/${Number(dia.slice(5, 7))}`
+    const fechaTxt = fechaCorta(dia)
     const zonas = zonasDeIds(ids)
     const distintas = new Set(zonas.map(z => z?.id ?? "?"))
     // Zonas distintas (o sin zona): nunca se juntan solos en un viaje → quedan para ese día
@@ -1682,7 +1682,7 @@ export default function ClientesPedidosPage() {
               <div className="flex gap-2 mt-5">
                 <div className="bg-white/10 rounded-xl px-3 py-2.5 backdrop-blur-sm flex-1 min-w-0">
                   <p className="text-white/50 text-[10px] uppercase tracking-wide font-semibold">Total</p>
-                  <p className="text-lg font-bold text-white mt-0.5 truncate">${pedidoSeleccionado.total?.toLocaleString("es-AR", { maximumFractionDigits: 0 })}</p>
+                  <p className="text-lg font-bold text-white mt-0.5 truncate">{moneda(pedidoSeleccionado.total, 0)}</p>
                 </div>
                 <div className="bg-white/10 rounded-xl px-3 py-2.5 backdrop-blur-sm min-w-[70px] text-center">
                   <p className="text-white/50 text-[10px] uppercase tracking-wide font-semibold">Arts.</p>
@@ -1843,7 +1843,7 @@ export default function ClientesPedidosPage() {
                           <SelectContent>
                             {viajes.map((viaje) => (
                               <SelectItem key={viaje.id} value={viaje.id}>
-                                {viaje.nombre} ({new Date(viaje.fecha).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })})
+                                {viaje.nombre} ({fecha(viaje.fecha)})
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1863,7 +1863,6 @@ export default function ClientesPedidosPage() {
                   <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mb-1.5">Preparó</p>
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
                     {preparadoresPedido.map((pr, i) => {
-                      const hora = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" }) : ""
                       const fecha = pr.desde ? formatDateAR(pr.desde) : ""
                       return (
                         <p key={i} className="text-sm text-indigo-900">
@@ -1947,7 +1946,7 @@ export default function ClientesPedidosPage() {
                           </div>
                           <div className="text-right shrink-0">
                             <span className="text-sm font-bold text-slate-700">{d.cantidad} u.</span>
-                            <span className="text-[10px] text-slate-400 block">${d.precio_final?.toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>
+                            <span className="text-[10px] text-slate-400 block">{moneda(d.precio_final, 0)}</span>
                           </div>
                         </div>
                       ))}
@@ -1966,35 +1965,35 @@ export default function ClientesPedidosPage() {
                 <div className="space-y-1.5 text-sm">
                   <div className="flex justify-between text-white/70">
                     <span>Subtotal</span>
-                    <span>${pedidoSeleccionado.subtotal?.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                    <span>{moneda(pedidoSeleccionado.subtotal)}</span>
                   </div>
                   {(pedidoSeleccionado.descuento_general || 0) > 0 && (
                     <div className="flex justify-between text-red-300">
                       <span>Descuento</span>
-                      <span>−${pedidoSeleccionado.descuento_general?.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      <span>−{moneda(pedidoSeleccionado.descuento_general)}</span>
                     </div>
                   )}
                   {(pedidoSeleccionado.total_flete || 0) > 0 && (
                     <div className="flex justify-between text-white/60">
                       <span>Flete</span>
-                      <span>${pedidoSeleccionado.total_flete?.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      <span>{moneda(pedidoSeleccionado.total_flete)}</span>
                     </div>
                   )}
                   {(pedidoSeleccionado.total_comision || 0) > 0 && (
                     <div className="flex justify-between text-white/60">
                       <span>Comisión</span>
-                      <span>${pedidoSeleccionado.total_comision?.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      <span>{moneda(pedidoSeleccionado.total_comision)}</span>
                     </div>
                   )}
                   {(pedidoSeleccionado.total_impuestos || 0) > 0 && (
                     <div className="flex justify-between text-white/60">
                       <span>Impuestos</span>
-                      <span>${pedidoSeleccionado.total_impuestos?.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      <span>{moneda(pedidoSeleccionado.total_impuestos)}</span>
                     </div>
                   )}
                   <div className="flex justify-between font-bold text-lg pt-2 border-t border-white/20">
                     <span>TOTAL</span>
-                    <span>${pedidoSeleccionado.total?.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                    <span>{moneda(pedidoSeleccionado.total)}</span>
                   </div>
                 </div>
               </div>
@@ -2037,7 +2036,7 @@ export default function ClientesPedidosPage() {
             <AlertDialogTitle>¿Eliminar pedido {pedidoAEliminar?.numero_pedido}?</AlertDialogTitle>
             <AlertDialogDescription>
               El pedido de <strong>{pedidoAEliminar?.clientes?.nombre_razon_social}</strong> por{" "}
-              <strong>${pedidoAEliminar?.total?.toFixed(2)}</strong> será marcado como eliminado.
+              <strong>{moneda(pedidoAEliminar?.total)}</strong> será marcado como eliminado.
               Permanecerá eliminado por 45 días, después de los cuales se borrará permanentemente del sistema.
             </AlertDialogDescription>
           </AlertDialogHeader>

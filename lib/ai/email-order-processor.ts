@@ -9,6 +9,7 @@ import { processOrder, processOrderText, processOrderTextMulti, type ParseResult
 import { GEMINI_MODEL } from './gemini-model'
 import Anthropic from '@anthropic-ai/sdk'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
+import { hoyISO } from '@/lib/formato'
 
 // Lazy singleton for Claude
 let _anthropic: Anthropic | null = null
@@ -49,7 +50,7 @@ export async function processEmailAsOrder(
     const db = getSupabaseAdmin()
 
     // Use Argentina timezone for dates
-    const fechaHoy = new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0]
+    const fechaHoy = hoyISO()
 
     console.log(`[EmailOrderProcessor] Processing email as order: "${emailData.subject}" from ${emailData.from} (fecha: ${fechaHoy})`)
 
@@ -298,7 +299,7 @@ export async function processEmailAsOrder(
                             event_type: 'pedido_preparar',
                             priority: 'alta',
                             status: 'pendiente',
-                            due_date: new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0],
+                            due_date: hoyISO(),
                             source: 'gmail',
                             source_ref_id: emailData.gmailId,
                             metadata: { drive_file_id: fileId, from: emailData.from, subject: emailData.subject }

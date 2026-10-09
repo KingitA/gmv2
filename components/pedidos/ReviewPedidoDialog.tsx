@@ -11,6 +11,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, CheckCircle, AlertTriangle, Search, AlertCircle, X } from "lucide-react"
 import type { ParseResult, ParsedItem } from "@/lib/actions/ai-order-import"
 import { toast } from "sonner"
+import { InputMonto } from "@/components/ui/input-monto"
+import { moneda } from "@/lib/formato"
 
 interface ReviewPedidoDialogProps {
   open: boolean
@@ -174,7 +176,7 @@ export function ReviewPedidoDialog({
                                   onMouseDown={() => linkProduct(idx, p)}
                                 >
                                   <ArticuloResultRow articulo={p} size="sm" />
-                                  <div className="text-[10px] text-muted-foreground mt-0.5">${p.precio_venta || p.precio_base}</div>
+                                  <div className="text-[10px] text-muted-foreground mt-0.5">{moneda(p.precio_venta || p.precio_base)}</div>
                                 </div>
                               ))}
                             </div>
@@ -208,12 +210,12 @@ export function ReviewPedidoDialog({
                       )}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Input
-                        type="number"
+                      <InputMonto
+                        decimales={0} soloPositivos
                         className="h-8 w-20 mx-auto text-center"
                         value={item.quantity}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) || 0
+                        onChange={(n) => {
+                          const val = Math.trunc(n ?? 0)
                           setItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: val } : it))
                         }}
                       />

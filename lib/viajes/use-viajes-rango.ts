@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRealtime } from '@/lib/hooks/use-realtime'
+import { sumarDiasISO } from '@/lib/formato'
 
 export type ViajeCal = {
   id: string
@@ -24,11 +25,7 @@ export type ViajeCal = {
   total: number
 }
 
-export const sumarDias = (f: string, n: number) => {
-  const d = new Date(f + 'T00:00:00Z')
-  d.setUTCDate(d.getUTCDate() + n)
-  return d.toISOString().slice(0, 10)
-}
+export const sumarDias = (f: string, n: number) => sumarDiasISO(f, n)
 
 export const quienLleva = (v: ViajeCal) =>
   v.tipo_transporte === 'transporte'

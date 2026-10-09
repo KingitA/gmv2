@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { moneda } from "../formato"
 
 /**
  * Aplicación de CRÉDITOS EXISTENTES dentro de un cobro (igual que el sistema
@@ -111,7 +112,7 @@ export async function validarCreditos(
         throw new Error(`${nc.numero_comprobante} no es un comprobante de crédito`)
       const disponible = Math.max(0, -Number(nc.saldo_pendiente))
       if (Number(cr.monto) > disponible + 0.01)
-        throw new Error(`El crédito ${nc.numero_comprobante} tiene $${disponible.toFixed(2)} disponibles (pediste $${Number(cr.monto).toFixed(2)})`)
+        throw new Error(`El crédito ${nc.numero_comprobante} tiene ${moneda(disponible)} disponibles (pediste ${moneda(Number(cr.monto))})`)
     } else {
       const { data: pg } = await supabase
         .from("pagos_clientes")
@@ -134,7 +135,7 @@ export async function validarCreditos(
       const usado = (imps || []).reduce((s: number, i: any) => s + Number(i.monto_imputado), 0)
       const disponible = r2(Number(pg.monto) - usado)
       if (Number(cr.monto) > disponible + 0.01)
-        throw new Error(`La plata a cuenta tiene $${disponible.toFixed(2)} disponibles (pediste $${Number(cr.monto).toFixed(2)})`)
+        throw new Error(`La plata a cuenta tiene ${moneda(disponible)} disponibles (pediste ${moneda(Number(cr.monto))})`)
     }
   }
 }
@@ -237,7 +238,7 @@ export async function ejecutarCreditosDePago(
                 p_cliente_id: nc.cliente_id,
                 p_tipo: "debito",
                 p_monto: debito10,
-                p_concepto: `Ajuste 10% contado sobre crédito ${nc.tipo_comprobante} ${nc.numero_comprobante} (usado $${p.monto.toFixed(2)}) [pago:${pagoId}]`,
+                p_concepto: `Ajuste 10% contado sobre crédito ${nc.tipo_comprobante} ${nc.numero_comprobante} (usado ${moneda(p.monto)}) [pago:${pagoId}]`,
                 p_usuario_id: null,
               })
               if (ajErr) throw new Error(`ajuste 10% s/crédito: ${ajErr.message}`)
@@ -282,7 +283,7 @@ export async function ejecutarCreditosDePago(
         }
       }
     } catch (e: any) {
-      avisos.push(`Crédito ${p.credito_id.slice(0, 8)} → ${p.debito_id.slice(0, 8)} por $${p.monto}: ${e.message}`)
+      avisos.push(`Crédito ${p.credito_id.slice(0, 8)} → ${p.debito_id.slice(0, 8)} por ${moneda(p.monto)}: ${e.message}`)
     }
   }
   return avisos

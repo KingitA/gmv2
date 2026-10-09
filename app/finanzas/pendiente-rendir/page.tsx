@@ -10,9 +10,9 @@ import Link from "next/link"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { fecha, fechaHora, moneda } from "@/lib/formato"
 
-const fmt = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 })
+const fmt = (n: number) => moneda(n)
 
 export default function PendienteRendirPage() {
   const { toast } = useToast()
@@ -136,7 +136,7 @@ export default function PendienteRendirPage() {
       if (!res.ok) throw new Error(d.error)
       toast({
         title: `Rendición confirmada: ${d.confirmados} pagos`,
-        description: `Efectivo a caja $${Number(d.efectivo_a_caja).toLocaleString("es-AR")}${d.a_conciliar ? ` · ${d.a_conciliar} transferencias a conciliar` : ""}`,
+        description: `Efectivo a caja ${moneda(Number(d.efectivo_a_caja))}${d.a_conciliar ? ` · ${d.a_conciliar} transferencias a conciliar` : ""}`,
       })
       load()
     } catch (e: any) {
@@ -176,7 +176,7 @@ export default function PendienteRendirPage() {
             <div>
               <h1 className="text-2xl font-bold">Pendiente de rendir</h1>
               <p className="text-sm text-muted-foreground">
-                Plata en la calle: {loading ? "…" : fmt(data?.total_en_calle ?? 0)}
+                Plata en la calle: {loading ? "…" : moneda(data?.total_en_calle ?? 0, 0)}
               </p>
             </div>
           </div>
@@ -214,7 +214,7 @@ export default function PendienteRendirPage() {
                       {r.cobrador_nombre}
                       <Badge variant="outline" className="ml-2 capitalize">{r.cobrador_tipo}</Badge>
                       <span className="text-sm text-muted-foreground ml-2">
-                        {new Date(r.fecha).toLocaleString("es-AR")} · {r.cantidad_pagos} pagos
+                        {fechaHora(r.fecha)} · {r.cantidad_pagos} pagos
                       </span>
                       <button
                         onClick={() => setAbierta((p) => ({ ...p, [r.id]: !p[r.id] }))}
@@ -291,7 +291,7 @@ export default function PendienteRendirPage() {
                           <div className="text-xs text-muted-foreground">
                             {p.medios.map((m: any, i: number) => (
                               <p key={i}>
-                                {m.tipo === "cheque" && `${m.banco || "—"} N° ${m.numero_cheque || "—"} · venc ${m.fecha_cheque ? m.fecha_cheque.split("-").reverse().join("/") : "—"}${m.color ? ` · ${m.color}` : ""}`}
+                                {m.tipo === "cheque" && `${m.banco || "—"} N° ${m.numero_cheque || "—"} · venc ${m.fecha_cheque ? fecha(m.fecha_cheque) : "—"}${m.color ? ` · ${m.color}` : ""}`}
                                 {m.tipo === "transferencia" && `ref ${m.referencia || "—"}`}
                                 {m.tipo === "efectivo" && "—"}
                               </p>
@@ -364,7 +364,7 @@ export default function PendienteRendirPage() {
                         <div className="min-w-0">
                           <p className="font-medium truncate">{p.cliente}</p>
                           <p className="text-xs text-muted-foreground">
-                            {new Date(p.fecha).toLocaleDateString("es-AR")}
+                            {fecha(p.fecha)}
                             {p.viaje && ` · ${p.viaje}`}
                           </p>
                         </div>
@@ -402,7 +402,7 @@ export default function PendienteRendirPage() {
                   <div>
                     <p className="font-medium text-sm">{p.cliente}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(p.fecha).toLocaleDateString("es-AR")} · {p.metodos.join(", ")} · {p.cobrador_tipo}
+                      {fecha(p.fecha)} · {p.metodos.join(", ")} · {p.cobrador_tipo}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">

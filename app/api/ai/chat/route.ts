@@ -5,6 +5,7 @@ import { chat } from '@/lib/ai/claude'
 import { getSupabaseAdmin } from '@/lib/ai/supabase-admin'
 import type { ChatMessage } from '@/lib/ai/types'
 import { requireAuth } from '@/lib/auth'
+import { moneda } from '@/lib/formato'
 
 export async function POST(request: NextRequest) {
     const auth = await requireAuth()
@@ -229,7 +230,7 @@ async function buildERPContext(db: ReturnType<typeof getSupabaseAdmin>, userMess
             contextParts.push('')
             contextParts.push(`📦 PEDIDOS RECIENTES:`)
             for (const o of orders) {
-                contextParts.push(`- Pedido #${o.id} | Cliente: ${o.cliente_id} | Estado: ${o.estado} | Total: $${o.total}`)
+                contextParts.push(`- Pedido #${o.id} | Cliente: ${o.cliente_id} | Estado: ${o.estado} | Total: ${moneda(o.total)}`)
             }
         }
     }
@@ -245,7 +246,7 @@ async function buildERPContext(db: ReturnType<typeof getSupabaseAdmin>, userMess
             contextParts.push('')
             contextParts.push(`📋 ARTÍCULOS (muestra):`)
             for (const a of articles) {
-                contextParts.push(`- ${a.descripcion} | Stock: ${a.stock} | Precio: $${a.precio_venta}`)
+                contextParts.push(`- ${a.descripcion} | Stock: ${a.stock} | Precio: ${moneda(a.precio_venta)}`)
             }
         }
     }

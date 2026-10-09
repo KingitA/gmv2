@@ -16,6 +16,7 @@ import { VencimientoEditDialog, type VencimientoEditable } from "@/components/fi
 import { NuevoGastoDialog } from "@/components/finanzas/nuevo-gasto-dialog"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { todayArgentina } from "@/lib/utils"
+import { fecha, fechaCorta, fechaHora, fechaISO, hora, moneda, numero, sumarDiasISO } from "@/lib/formato"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // ─── Estructura de cajas ─────────────────────────────────────────────────────
@@ -74,28 +75,23 @@ const CARTERA_DEF: Record<Cartera, { label: string; dot: string }> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const fmt = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 0, maximumFractionDigits: 2 })
+const fmt = (n: number) => moneda(n)
+// Abreviado para ejes y KPIs: "$1,5 M" · "$12 K" · "$500"
 const fmtShort = (n: number) => {
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
-  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`
-  return `$${n.toFixed(0)}`
+  const signo = n < 0 ? "-" : ""
+  const a = Math.abs(n)
+  if (a >= 1_000_000) return `${signo}$${numero(a / 1_000_000, 1)} M`
+  if (a >= 1_000) return `${signo}$${numero(a / 1_000, 0)} K`
+  return moneda(n, 0)
 }
 const today = () => todayArgentina()
-const addDias = (iso: string, dias: number) => {
-  const d = new Date(iso + "T00:00:00")
-  d.setDate(d.getDate() + dias)
-  return d.toISOString().slice(0, 10)
-}
+const addDias = sumarDiasISO
+const DIAS_SEMANA = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"]
 const fmtDiaCorto = (iso: string) => {
-  const d = new Date(iso + "T12:00:00Z")
-  const dia = d.toLocaleDateString("es-AR", { weekday: "short", timeZone: "UTC" }).replace(".", "").toUpperCase()
-  return `${dia} ${String(d.getUTCDate()).padStart(2, "0")}`
+  const d = new Date(iso.slice(0, 10) + "T12:00:00Z")
+  return `${DIAS_SEMANA[d.getUTCDay()]} ${iso.slice(8, 10)}`
 }
-const fmtFechaAR = (iso: string) => {
-  const [y, m, d] = iso.split("-")
-  return `${d}-${m}-${y}`
-}
+const fmtFechaAR = (iso: string) => fecha(iso)
 const NUM: React.CSSProperties = { fontFamily: "Bahnschrift, 'Segoe UI Variable Display', 'Segoe UI', sans-serif", fontVariantNumeric: "tabular-nums" }
 
 const MEDIO_BADGE: Record<string, { label: string; cls: string }> = {
@@ -255,8 +251,8 @@ export default function FinanzasPage() {
   // ── Lista de pagos ─────────────────────────────────────────────────────────
   const hoy = today()
   const finSemana = useMemo(() => {
-    const d = new Date(hoy + "T00:00:00")
-    const dow = d.getDay() === 0 ? 7 : d.getDay()
+    const d = new Date(hoy + "T12:00:00Z")
+    const dow = d.getUTCDay() === 0 ? 7 : d.getUTCDay()
     return addDias(hoy, 7 - dow)
   }, [hoy])
   const finProxSemana = addDias(finSemana, 7)
@@ -292,7 +288,7 @@ export default function FinanzasPage() {
   const nombreMes = (ym: string) => {
     const [y, m] = ym.split("-")
     const nombres = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    return `${nombres[parseInt(m) - 1]} ${y}`
+    return `${nombres[Number(m) - 1]} ${y}`
   }
   const montoDe = (i: ItemPago) => Number(i.tipo === "venc" ? i.venc.monto : i.emitido!.monto)
 
@@ -305,10 +301,8 @@ export default function FinanzasPage() {
   const ultimaAct = useMemo(() => {
     const fechas = cuentas.map(c => c.updated_at).filter(Boolean).sort() as string[]
     if (!fechas.length) return null
-    const d = new Date(fechas[fechas.length - 1])
-    const dia = d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
-    const hora = d.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" })
-    return dia === hoy ? `hoy ${hora}` : `${fmtFechaAR(dia)} ${hora}`
+    const ult = fechas[fechas.length - 1]
+    return fechaISO(ult) === hoy ? `hoy ${hora(ult)}` : fechaHora(ult)
   }, [cuentas, hoy])
 
   // ── Sub-componentes ────────────────────────────────────────────────────────
@@ -446,22 +440,22 @@ export default function FinanzasPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="rounded-2xl bg-slate-800 p-4 shadow">
             <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Disponible ya · efectivo y bancos</div>
-            <div className="text-[26px] font-semibold text-white leading-tight mt-0.5" style={NUM}>{loading ? "—" : fmt(efectivoSel + bancosSel)}</div>
+            <div className="text-[26px] font-semibold text-white leading-tight mt-0.5" style={NUM}>{loading ? "—" : moneda(efectivoSel + bancosSel, 0)}</div>
             <div className="text-xs text-slate-400 mt-0.5" style={NUM}>Efectivo {fmt(efectivoSel)} · Bancos {fmt(bancosSel)}</div>
           </div>
           <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
             <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Cheques en cartera · por cobrar</div>
-            <div className="text-[26px] font-semibold text-slate-800 leading-tight mt-0.5" style={NUM}>{loading ? "—" : fmt(chequesSelTotal)}</div>
+            <div className="text-[26px] font-semibold text-slate-800 leading-tight mt-0.5" style={NUM}>{loading ? "—" : moneda(chequesSelTotal, 0)}</div>
             <div className="text-xs text-slate-400 mt-0.5" style={NUM}>{chequesSel.length} cheques · {fmt(cobrablesHoy)} ya cobrables</div>
           </div>
           <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
             <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Sale en los próximos 30 días</div>
-            <div className="text-[26px] font-semibold text-red-700 leading-tight mt-0.5" style={NUM}>{loading ? "—" : fmt(sale30)}</div>
+            <div className="text-[26px] font-semibold text-red-700 leading-tight mt-0.5" style={NUM}>{loading ? "—" : moneda(sale30, 0)}</div>
             <div className="text-xs text-slate-400 mt-0.5">{vencs.filter(v => v.fecha_vencimiento <= addDias(hoy, 30)).length} pagos pendientes</div>
           </div>
           <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
             <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">En la bolsa · rescate en 24-48 h</div>
-            <div className="text-[26px] font-semibold text-slate-800 leading-tight mt-0.5" style={NUM}>{loading ? "—" : fmt(bolsaTotal)}</div>
+            <div className="text-[26px] font-semibold text-slate-800 leading-tight mt-0.5" style={NUM}>{loading ? "—" : moneda(bolsaTotal, 0)}</div>
             <div className="text-xs text-slate-400 mt-0.5" style={NUM}>FCI {fmtShort(latestOf("fondos_comunes"))} · Cauciones {fmtShort(latestOf("cauciones"))}</div>
           </div>
         </div>
@@ -707,7 +701,7 @@ export default function FinanzasPage() {
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={evolucion.serie} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-                    <XAxis dataKey="fecha" tick={{ fontSize: 11 }} tickFormatter={d => fmtFechaAR(d).slice(0, 5)} />
+                    <XAxis dataKey="fecha" tick={{ fontSize: 11 }} tickFormatter={d => fechaCorta(d)} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={fmtShort} width={60} />
                     <Tooltip formatter={(val: number, name: string) => [fmt(val), name]} labelFormatter={d => fmtFechaAR(String(d))} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { NuevaLocalidadSheet } from "@/components/vendedor/NuevaLocalidadSheet"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { errorCuit, normalizarCuit } from "@/lib/formato"
+import { InputCUIT } from "@/components/ui/input-cuit"
 
 // Alta de cliente desde la calle. Al guardar, va directo a levantarle un
 // pedido (o a la ficha). Nace asignado a un viajante del usuario.
@@ -95,6 +97,11 @@ export default function VendedorClienteNuevoPage() {
       alert("Ingresá la razón social o el nombre de fantasía.")
       return
     }
+    const errCuit = errorCuit(f.cuit)
+    if (errCuit) {
+      alert(errCuit)
+      return
+    }
     setGuardando(true)
     try {
       const res = await fetch("/api/vendedor/clientes", {
@@ -102,6 +109,7 @@ export default function VendedorClienteNuevoPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...f,
+          cuit: normalizarCuit(f.cuit),
           nombre: f.nombre.trim() || f.razon_social.trim(),
           localidad: cat.localidades.find((l) => l.id === f.localidad_id)?.nombre || null,
         }),
@@ -144,7 +152,7 @@ export default function VendedorClienteNuevoPage() {
           </Campo>
           <div className="grid grid-cols-2 gap-2">
             <Campo label="CUIT">
-              <input value={f.cuit} onChange={set("cuit")} inputMode="numeric" className={inputCls} placeholder="20-12345678-9" />
+              <InputCUIT value={f.cuit} onChange={(v) => setF((p) => ({ ...p, cuit: v }))} className={`${inputCls} h-auto text-base`} />
             </Campo>
             <Campo label="Condición IVA">
               <select value={f.condicion_iva} onChange={set("condicion_iva")} className={inputCls}>

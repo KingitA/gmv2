@@ -3,7 +3,7 @@ import { useContadoresOutbox, useNoEnviados, useOverlay, useRuntime } from "@gm/
 import { fechaHoraCorta } from "@gm/core/ui"
 import { DS, type ViajeResumen } from "../datasets"
 import { rechazosDe, useDescargaViaje, useMe, useRefrescarAlEntrar, useViaje, useYo } from "../datos/hooks"
-import { AvisosBcra, fechaViaje, HojaConfirmar, Pantalla, Rechazos, useAvisoEntrante, useEnterCierraTeclado, useToast } from "../ui"
+import { AvisosBcra, fechaViaje, formatDateAR, HojaConfirmar, Pantalla, Rechazos, useAvisoEntrante, useEnterCierraTeclado, useToast } from "../ui"
 
 // Inicio del chofer (port de app/chofer/page.tsx). Atrás acá MINIMIZA la app (lo
 // resuelve el core): no existe ninguna ruta del ERP a la que se pueda llegar.
@@ -113,7 +113,7 @@ export function Inicio() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate font-bold text-gray-800">{v.nombre || "Viaje"}</p>
-                      <p className="mt-0.5 text-sm text-gray-400">{fechaViaje(v.fecha, { day: "numeric", month: "long", year: "numeric" })}</p>
+                      <p className="mt-0.5 text-sm text-gray-400">{formatDateAR(v.fecha)}</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <span className={`rounded-full px-3 py-1 text-xs font-bold ${v.estado === "completado" ? "bg-gray-100 text-gray-500" : "bg-amber-100 text-amber-700"}`}>

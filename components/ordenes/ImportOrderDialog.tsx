@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AlertCircle, CheckCircle2, FileText, Loader2, Upload, AlertTriangle } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { moneda, porcentaje } from "@/lib/formato"
 
 interface ImportOrderDialogProps {
     proveedores: any[]
@@ -214,10 +215,10 @@ export function ImportOrderDialog({ proveedores, onImportSuccess }: ImportOrderD
                                                 ) : <span className="text-muted-foreground italic">Sin coincidencia</span>}
                                             </TableCell>
                                             <TableCell>{item.cantidad_pedida}</TableCell>
-                                            <TableCell>${item.precio_unitario}</TableCell>
+                                            <TableCell>{moneda(item.precio_unitario)}</TableCell>
                                             <TableCell>
                                                 {item.status === 'found' && <span className="text-green-600 text-xs font-bold">Encontrado</span>}
-                                                {item.status === 'suggested' && <span className="text-yellow-600 text-xs font-bold">Sug. {(item.match_confidence * 100).toFixed(0)}%</span>}
+                                                {item.status === 'suggested' && <span className="text-yellow-600 text-xs font-bold">Sug. {porcentaje(item.match_confidence * 100, 0)}</span>}
                                                 {item.status === 'not_found' && <span className="text-red-400 text-xs">Nuevo</span>}
                                             </TableCell>
                                         </TableRow>

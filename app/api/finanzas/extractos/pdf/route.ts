@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai"
+import { parseFecha, parseMonto } from "@/lib/formato"
 
 export const maxDuration = 120
 
@@ -44,6 +45,8 @@ const SCHEMA: any = {
 const PROMPT = `Sos un experto en extractos bancarios argentinos (Credicoop, Nación, Provincia, MercadoPago).
 
 Extraé TODOS los movimientos de este extracto de cuenta, de TODAS las páginas.
+
+Los documentos son de Argentina: las fechas vienen dd/mm/aaaa (día primero, NUNCA mes/día) y los montos 1.234,56 (punto = miles, coma = decimales). Devolvé las fechas como AAAA-MM-DD y los montos como número JSON con punto decimal y sin separador de miles (ej: 1234.56).
 
 Para cada movimiento:
 - fecha: en formato YYYY-MM-DD. Los años de 2 dígitos son 20XX (ej: 01/06/26 → 2026-06-01).
@@ -92,12 +95,14 @@ export async function POST(request: NextRequest) {
       parsed = JSON.parse(m[0])
     }
 
+    // La IA a veces devuelve texto ("05/03/26", "-3.241,30"): parseFecha / parseMonto
     const movimientos = (parsed.movimientos || [])
-      .filter((m: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(m.fecha ?? "")) && Number(m.monto))
+      .map((m: any) => ({ ...m, fecha: parseFecha(m.fecha ?? null), monto: parseMonto(m.monto ?? null) })) // número JSON pasa tal cual; texto se interpreta
+      .filter((m: any) => m.fecha && m.monto)
       .map((m: any) => ({
         fecha: m.fecha,
         descripcion: String(m.descripcion ?? "").trim(),
-        monto: Number(m.monto),
+        monto: m.monto,
         referencia_externa: m.referencia ? String(m.referencia).trim() : undefined,
       }))
 
@@ -108,10 +113,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       movimientos,
-      saldo_inicial: parsed.saldo_inicial ?? null,
-      saldo_final: parsed.saldo_final ?? null,
-      periodo_desde: parsed.periodo_desde ?? null,
-      periodo_hasta: parsed.periodo_hasta ?? null,
+      saldo_inicial: parseMonto(parsed.saldo_inicial ?? null),
+      saldo_final: parseMonto(parsed.saldo_final ?? null),
+      periodo_desde: parseFecha(parsed.periodo_desde ?? null),
+      periodo_hasta: parseFecha(parsed.periodo_hasta ?? null),
     })
   } catch (error: any) {
     console.error("[finanzas/extractos/pdf] error:", error)

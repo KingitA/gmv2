@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Plus, DollarSign, CheckCircle2, XCircle, Eye, FileText, Receipt, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
+import { fecha, hoyISO, moneda, sumarDiasISO } from "@/lib/formato"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
@@ -16,13 +17,23 @@ export default function OrdenesPagoPage() {
     const [ordenes, setOrdenes] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [filtroEstado, setFiltroEstado] = useState("todos")
-    const [mesExport, setMesExport] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 7))
+    const [mesExport, setMesExport] = useState(hoyISO().slice(0, 7))
     const [eligeCuenta, setEligeCuenta] = useState<{ opId: string; bancos: any[] } | null>(null)
 
     const finDeMes = (ym: string) => {
         const [y, m] = ym.split("-").map(Number)
-        return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`
+        const primeroSiguiente = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`
+        return sumarDiasISO(primeroSiguiente, -1)
     }
+    // Últimos 24 meses para el selector (se muestran mm/aaaa; el valor es "AAAA-MM")
+    const mesesExport = (() => {
+        const [y0, m0] = hoyISO().slice(0, 7).split("-").map(Number)
+        return Array.from({ length: 24 }, (_, i) => {
+            const t = y0 * 12 + (m0 - 1) - i
+            const y = Math.floor(t / 12), m = (t % 12) + 1
+            return { v: `${y}-${String(m).padStart(2, "0")}`, l: `${String(m).padStart(2, "0")}/${y}` }
+        })
+    })()
 
     useEffect(() => { loadOrdenes() }, [filtroEstado])
     // En vivo: OPs creadas/confirmadas desde otra PC
@@ -190,12 +201,13 @@ export default function OrdenesPagoPage() {
                         {/* Paquete mensual del contador: planilla PDF + TXT SICORE */}
                         <div className="flex items-center gap-2 mt-3 flex-wrap text-sm">
                             <span className="text-muted-foreground">Retenciones para el contador:</span>
-                            <input
-                                type="month"
+                            <select
                                 className="rounded-md border px-2 py-1 text-sm"
                                 value={mesExport}
                                 onChange={e => setMesExport(e.target.value)}
-                            />
+                            >
+                                {mesesExport.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+                            </select>
                             <a href={`/api/retenciones/export?formato=planilla&desde=${mesExport}-01&hasta=${finDeMes(mesExport)}`} target="_blank" rel="noreferrer">
                                 <Button variant="outline" size="sm">Planilla PDF</Button>
                             </a>
@@ -237,7 +249,7 @@ export default function OrdenesPagoPage() {
                                         <TableRow key={op.id} className="hover:bg-muted/50">
                                             <TableCell className="font-mono font-medium">{op.numero_op}</TableCell>
                                             <TableCell>
-                                                {new Date(op.fecha + "T00:00:00").toLocaleDateString("es-AR")}
+                                                {fecha(op.fecha)}
                                             </TableCell>
                                             <TableCell className="font-medium">
                                                 {op.proveedores?.sigla || op.proveedores?.nombre || "—"}
@@ -312,7 +324,7 @@ export default function OrdenesPagoPage() {
                                     onClick={() => { const opId = eligeCuenta.opId; setEligeCuenta(null); confirmarOP(opId, b.cuenta_id) }}>
                                     <span className="font-medium">{b.nombre}</span>
                                     <span className="text-xs text-muted-foreground ml-2">
-                                        saldo {Number(b.saldos?.BLANCO ?? 0).toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 })}
+                                        saldo {moneda(Number(b.saldos?.BLANCO ?? 0), 0)}
                                     </span>
                                 </button>
                             ))}

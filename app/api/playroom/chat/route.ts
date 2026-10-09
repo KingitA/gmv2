@@ -4,10 +4,10 @@ import Anthropic from '@anthropic-ai/sdk'
 import { requireAuth } from '@/lib/auth'
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
 import { fetchAllRows } from '@/lib/playroom/queries'
+import { hoyISO, sumarDiasISO } from '@/lib/formato'
 
 function diasAtrasArgentina(dias: number): string {
-  return new Date(Date.now() - dias * 86400000)
-    .toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' })
+  return sumarDiasISO(hoyISO(), -dias)
 }
 
 const anthropic = new Anthropic()

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react"
+import { cuitDigitos, formatCuit } from "@gm/formato"
 import { useDataset, useFila, useMetaDataset, useNoEnviados, useOnline, useRuntime, useSesion, uuidv4, type ItemOutbox } from "@gm/core"
 import { DS, idClienteViaje, type Articulo, type BilleteraData, type ChoferMe, type ClienteBusqueda, type ClienteViajeRow, type CuentaBancaria, type ViajeDetalle } from "../datasets"
 import { billeteraVisible, clienteDesdeParada, clienteVisible, estadoDescarga, viajeVisible, type ClienteVista, type ViajeVista } from "./overlay"
@@ -127,14 +128,16 @@ const VACIO: never[] = []
 const sinAcentos = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
 const palabras = (q: string) => sinAcentos(q).split(/\s+/).filter(Boolean)
 
-/** Búsqueda local: todas las palabras, sin acentos, en cualquier orden. */
+/** Búsqueda local: todas las palabras, sin acentos, en cualquier orden. El CUIT matchea con o sin guiones. */
 export function buscarClientes(clientes: ClienteBusqueda[], q: string, tope = 8): ClienteBusqueda[] {
   const ps = palabras(q)
   if (!ps.length) return []
   const out: ClienteBusqueda[] = []
   for (const c of clientes) {
-    const texto = sinAcentos([c.nombre, c.razon_social, c.nombre_razon_social, c.cuit, c.codigo_cliente, c.localidad].filter(Boolean).join(" "))
-    if (ps.every((p) => texto.includes(p))) {
+    const cuit = c.cuit ? `${formatCuit(c.cuit)} ${cuitDigitos(c.cuit)}` : ""
+    const texto = sinAcentos([c.nombre, c.razon_social, c.nombre_razon_social, cuit, c.codigo_cliente, c.localidad].filter(Boolean).join(" "))
+    // "20-1234…" o "201234…": un número con guiones/puntos se compara también por sus dígitos
+    if (ps.every((p) => texto.includes(p) || (/^[\d.\-]+$/.test(p) && cuitDigitos(p).length >= 3 && texto.includes(cuitDigitos(p))))) {
       out.push(c)
       if (out.length >= tope) break
     }
