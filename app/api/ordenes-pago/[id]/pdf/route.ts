@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth'
 import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { OrdenPagoPDF, type OrdenPagoPDFData } from '@/lib/pdf/orden-pago-template'
+import { fecha } from '@/lib/formato'
 
 // Nombre completo del tipo de comprobante para el PDF (nada de siglas crudas)
 function etiquetaTipoComp(tc?: string | null): string | null {
@@ -62,7 +63,7 @@ export async function GET(
     const detalleMedio = (m: any): string => {
       if (m.medio === 'cheque' || m.medio === 'cheque_propio') {
         return [m.cheque_banco, m.cheque_numero ? `N° ${m.cheque_numero}` : null,
-                m.cheque_fecha_vencimiento ? `vto ${m.cheque_fecha_vencimiento.split('-').reverse().join('/')}` : null]
+                m.cheque_fecha_vencimiento ? `vto ${fecha(m.cheque_fecha_vencimiento)}` : null]
           .filter(Boolean).join(' · ') || 'Cheque'
       }
       if (m.medio === 'transferencia') {

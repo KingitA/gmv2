@@ -6,6 +6,7 @@ import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/Artic
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
+import { numero, parseMonto } from "@/lib/formato"
 
 interface DetallePedido {
   id: string; articulo_id: string; cantidad: number
@@ -209,7 +210,7 @@ export default function PickingPage() {
     const otro = tomadoPorOtro(item)
     if (otro) { showToast(`🔒 Ya lo preparó ${otro}`, "err"); return }
     setArticuloSel(art); setItemActivo(item)
-    setCantidadInput(String(item.cantidad))
+    setCantidadInput(numero(item.cantidad, 0, 3))
     setBusqueda(""); setResultados([]); setScannerOpen(false)
   }
 
@@ -226,7 +227,7 @@ export default function PickingPage() {
       const otro = tomadoPorOtro(item)
       if (otro) { scanError(); showToast(`🔒 Ya lo preparó ${otro}`, "err"); return }
       scanOk()
-      setArticuloSel(art); setItemActivo(item); setCantidadInput(String(item.cantidad))
+      setArticuloSel(art); setItemActivo(item); setCantidadInput(numero(item.cantidad, 0, 3))
       setBusqueda(""); setResultados([]); setScannerOpen(false)
     } catch { scanError(); showToast("Error de conexión", "err") }
   }, [items, preparadores, miUsuario])
@@ -238,7 +239,7 @@ export default function PickingPage() {
     if (!itemActivo) return
     setSaving(true)
     try {
-      const cantidad = esFaltante ? 0 : parseFloat(cantidadInput) || 0
+      const cantidad = esFaltante ? 0 : parseMonto(cantidadInput) || 0
       const r = await fetch("/api/deposito/picking/item", {
         method:"PATCH", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ pedido_detalle_id: itemActivo.id, cantidad_preparada: cantidad, es_faltante: esFaltante, cantidad_pedida: itemActivo.cantidad }),
@@ -343,7 +344,7 @@ export default function PickingPage() {
       </div>
       <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:20, padding:18 }}>
         <div style={{ color:C.sub, fontSize:14, marginBottom:10 }}>Cantidad que separaste físicamente:</div>
-        <input type="number" inputMode="decimal" value={cantidadInput} onChange={e => setCantidadInput(e.target.value)} autoFocus
+        <input type="text" inputMode="decimal" autoComplete="off" value={cantidadInput} onChange={e => setCantidadInput(e.target.value.replace(/[^\d.,]/g, ""))} autoFocus
           style={{ width:"100%", background:C.bg, color:C.text, fontSize:48, fontWeight:800, textAlign:"center", borderRadius:16, padding:"16px", border:`2px solid ${C.border}`, outline:"none", boxSizing:"border-box" }} />
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>

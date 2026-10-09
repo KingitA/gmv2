@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Download, Calendar, TrendingUp, TrendingDown } from "lucide-react"
+import { moneda, numeroPlano, fecha, hoyISO, formatCuit } from "@/lib/formato"
 
 interface Movement {
   id: string
@@ -34,20 +35,21 @@ export function AccountStatement({ cliente, movimientos, saldoActual, limiteCred
     // Generate CSV export
     const headers = ["Fecha", "Tipo", "Concepto", "Debe", "Haber", "Saldo"]
     const rows = movimientos.map((m) => [
-      formatDateAR(m.fecha),
+      fecha(m.fecha),
       m.tipo.toUpperCase(),
-      m.concepto,
-      m.tipo === "debe" ? m.importe.toFixed(2) : "",
-      m.tipo === "haber" ? m.importe.toFixed(2) : "",
-      m.saldo_resultante.toFixed(2),
+      `"${String(m.concepto ?? "").replace(/"/g, '""')}"`,
+      m.tipo === "debe" ? numeroPlano(m.importe) : "",
+      m.tipo === "haber" ? numeroPlano(m.importe) : "",
+      numeroPlano(m.saldo_resultante),
     ])
 
-    const csv = [headers, ...rows].map((row) => row.join(",")).join("\n")
+    // CSV para Excel en castellano: ";" como separador y coma decimal sin miles
+    const csv = [headers, ...rows].map((row) => row.join(";")).join("\n")
     const blob = new Blob([csv], { type: "text/csv" })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `estado-cuenta-${cliente.razon_social.replace(/\s+/g, "-")}-${new Date().toISOString().split("T")[0]}.csv`
+    a.download = `estado-cuenta-${cliente.razon_social.replace(/\s+/g, "-")}-${hoyISO()}.csv`
     a.click()
   }
 
@@ -67,7 +69,7 @@ export function AccountStatement({ cliente, movimientos, saldoActual, limiteCred
         <div className="space-y-2">
           <h3 className="font-semibold">{cliente.razon_social}</h3>
           <div className="grid gap-2 text-sm text-muted-foreground">
-            <p>CUIT: {cliente.cuit}</p>
+            <p>CUIT: {formatCuit(cliente.cuit)}</p>
             <p>Dirección: {cliente.direccion}</p>
             <p>Zona: {cliente.zona}</p>
           </div>
@@ -80,14 +82,14 @@ export function AccountStatement({ cliente, movimientos, saldoActual, limiteCred
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground">Saldo Actual</p>
             <p className={`text-2xl font-bold ${saldoActual > 0 ? "text-destructive" : "text-green-600"}`}>
-              ${Math.abs(saldoActual).toFixed(2)}
+              {moneda(Math.abs(saldoActual))}
             </p>
             <p className="text-xs text-muted-foreground">{saldoActual > 0 ? "Debe" : "A favor"}</p>
           </div>
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground">Crédito Disponible</p>
-            <p className="text-2xl font-bold text-green-600">${Math.max(0, limiteCredito - saldoActual).toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground">Límite: ${limiteCredito.toFixed(2)}</p>
+            <p className="text-2xl font-bold text-green-600">{moneda(Math.max(0, limiteCredito - saldoActual))}</p>
+            <p className="text-xs text-muted-foreground">Límite: {moneda(limiteCredito)}</p>
           </div>
         </div>
 
@@ -116,9 +118,9 @@ export function AccountStatement({ cliente, movimientos, saldoActual, limiteCred
               </div>
               <div className="text-right">
                 <p className={`text-lg font-bold ${mov.tipo === "debe" ? "text-destructive" : "text-green-600"}`}>
-                  {mov.tipo === "debe" ? "+" : "-"}${mov.importe.toFixed(2)}
+                  {mov.tipo === "debe" ? "+" : "-"}{moneda(mov.importe)}
                 </p>
-                <p className="text-xs text-muted-foreground">Saldo: ${mov.saldo_resultante.toFixed(2)}</p>
+                <p className="text-xs text-muted-foreground">Saldo: {moneda(mov.saldo_resultante)}</p>
               </div>
             </div>
           ))}

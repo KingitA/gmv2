@@ -10,6 +10,7 @@ import { analyzeXlsxPriceList } from './claude-xlsx-analyzer'
 import { searchProductsByVector } from '@/lib/actions/embeddings'
 import type { AttachmentContent } from './attachment-content-extractor'
 import type { XlsxPriceListItem } from './types'
+import { hoyISO, parseFecha, parseMonto } from '@/lib/formato'
 
 export interface PriceChangeProcessingResult {
     processed: boolean
@@ -59,7 +60,7 @@ export async function processEmailAsPriceChange(
     preDownloadedAttachments?: AttachmentContent[]
 ): Promise<PriceChangeProcessingResult> {
     const db = getSupabaseAdmin()
-    const fechaHoy = new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0]
+    const fechaHoy = hoyISO()
 
     console.log(`[PriceListProcessor] Processing price change email: "${emailData.subject}" from ${emailData.from}`)
 
@@ -88,7 +89,7 @@ export async function processEmailAsPriceChange(
     // ── 2. Get fecha vigencia ──────────────────────────
     let fechaVigencia: string | null = null
     if (preExtractedData?.fecha_vigencia) {
-        fechaVigencia = preExtractedData.fecha_vigencia
+        fechaVigencia = parseFecha(preExtractedData.fecha_vigencia) // la IA puede devolver dd/mm/aaaa
         console.log(`[PriceListProcessor] ✅ Using Claude pre-extracted fecha_vigencia: ${fechaVigencia}`)
     }
 
@@ -116,7 +117,7 @@ export async function processEmailAsPriceChange(
                 const analysis = await analyzeXlsxPriceList(att.rawBuffer, att.filename)
 
                 if (!fechaVigencia && analysis.fecha_vigencia) {
-                    fechaVigencia = analysis.fecha_vigencia
+                    fechaVigencia = parseFecha(analysis.fecha_vigencia)
                 }
                 if (!proveedorName && analysis.proveedor_nombre) {
                     proveedorName = analysis.proveedor_nombre
@@ -147,11 +148,11 @@ export async function processEmailAsPriceChange(
                             originalDescription: item.description,
                             originalCode: item.code,
                             originalBrand: item.brand,
-                            originalPrice: item.price,
-                            previousPrice: item.previous_price,
+                            originalPrice: parseMonto(item.price as any), // la IA puede devolver "1.234,56"
+                            previousPrice: parseMonto(item.previous_price as any),
                             unit: item.unit,
                             isOffer: item.is_offer,
-                            offerValidUntil: item.offer_valid_until,
+                            offerValidUntil: parseFecha(item.offer_valid_until),
                             matchConfidence: 'NONE',
                         }
 
@@ -233,7 +234,7 @@ export async function processEmailAsPriceChange(
                     const analysis = await analyzeXlsxPriceList(buffer, att.filename)
 
                     if (!fechaVigencia && analysis.fecha_vigencia) {
-                        fechaVigencia = analysis.fecha_vigencia
+                        fechaVigencia = parseFecha(analysis.fecha_vigencia)
                     }
                     if (!proveedorName && analysis.proveedor_nombre) {
                         proveedorName = analysis.proveedor_nombre
@@ -246,9 +247,9 @@ export async function processEmailAsPriceChange(
                         const linked: LinkedPriceItem = {
                             originalDescription: item.description,
                             originalCode: item.code,
-                            originalPrice: item.price,
+                            originalPrice: parseMonto(item.price as any), // la IA puede devolver "1.234,56"
                             isOffer: item.is_offer,
-                            offerValidUntil: item.offer_valid_until,
+                            offerValidUntil: parseFecha(item.offer_valid_until),
                             matchConfidence: 'NONE',
                         }
                         try {

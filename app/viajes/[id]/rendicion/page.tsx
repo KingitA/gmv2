@@ -4,6 +4,8 @@ import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { fecha } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 interface RendicionData {
   viaje: {
@@ -93,7 +95,7 @@ export default function RendicionPage() {
         body: JSON.stringify({
           caja_destino_tipo: "CAJA",
           caja_destino_id: cajaDestino,
-          efectivo_declarado: parseFloat(efectivoContado) || 0,
+          efectivo_declarado: Number(efectivoContado) || 0,
           pagos_verificados: [...seleccionados],
           forzar_diferencia: forzarDiferencia,
           ...(colorCheques && pagosSinColor.length
@@ -155,12 +157,7 @@ export default function RendicionPage() {
             Rendición: {viaje.nombre}
           </h1>
           <p className="text-gray-500">
-            {new Date(String(viaje.fecha).slice(0, 10) + "T12:00:00").toLocaleDateString("es-AR", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            })}
+            {fecha(viaje.fecha)}
             {viaje.usuarios && ` — ${viaje.usuarios.nombre}`}
           </p>
         </div>
@@ -364,12 +361,12 @@ export default function RendicionPage() {
               <label className="text-xs font-medium text-gray-500 block mb-1">
                 Efectivo contado (real) *
               </label>
-              <input
-                type="number"
-                min="0"
+              {/* El estado guarda el número en formato máquina ("1500.5"): lo escribe InputMonto */}
+              <InputMonto
+                soloPositivos
                 value={efectivoContado}
-                onChange={(e) => { setEfectivoContado(e.target.value); setForzarDiferencia(false) }}
-                className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-lg font-bold focus:border-green-500 outline-none"
+                onChange={(n) => { setEfectivoContado(n == null ? "" : String(n)); setForzarDiferencia(false) }}
+                className="h-auto text-left w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-lg font-bold focus:border-green-500 outline-none"
               />
             </div>
             <div>
@@ -389,9 +386,9 @@ export default function RendicionPage() {
             </div>
           </div>
           {efectivoContado !== "" &&
-            Math.abs((parseFloat(efectivoContado) || 0) - (resumen.efectivo_pendiente_rendir ?? 0)) > 0.01 && (
+            Math.abs((Number(efectivoContado) || 0) - (resumen.efectivo_pendiente_rendir ?? 0)) > 0.01 && (
             <p className="text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              ⚠ Diferencia de {formatCurrency((parseFloat(efectivoContado) || 0) - (resumen.efectivo_pendiente_rendir ?? 0))} entre lo contado y lo registrado. Si es real, quedará documentada en el kardex.
+              ⚠ Diferencia de {formatCurrency((Number(efectivoContado) || 0) - (resumen.efectivo_pendiente_rendir ?? 0))} entre lo contado y lo registrado. Si es real, quedará documentada en el kardex.
             </p>
           )}
           <div className="flex items-center justify-between pt-2">
@@ -430,7 +427,7 @@ export default function RendicionPage() {
               </div>
               <div className="border-t pt-2 flex justify-between font-bold">
                 <span>Efectivo contado a caja</span>
-                <span className="text-green-700">{formatCurrency(parseFloat(efectivoContado) || 0)}</span>
+                <span className="text-green-700">{formatCurrency(Number(efectivoContado) || 0)}</span>
               </div>
               {forzarDiferencia && (
                 <p className="text-xs text-amber-700 font-medium pt-1">

@@ -6,6 +6,7 @@ import { formatCurrency } from "@/lib/utils"
 import { actualizarCantidadItem, eliminarItemPedido, softDeletePedido } from "@/lib/actions/pedidos"
 import { esPedidoEditable, puedeEliminarPedido } from "@/lib/pedidos/estados"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { parseMonto, porcentaje, fecha } from "@/lib/formato"
 
 interface DetalleItem {
   id: string
@@ -57,7 +58,7 @@ function FilaItemPedido({
   }, [item.cantidad, editando])
 
   const ub = a?.unidades_por_bulto || 1
-  const n = parseFloat(cant.replace(",", "."))
+  const n = parseMonto(cant) ?? NaN
   const unidades = Number.isFinite(n) && n > 0 ? (bultos ? n * ub : n) : 0
   const cambiado = unidades !== item.cantidad
   const confirmar = () => {
@@ -85,12 +86,12 @@ function FilaItemPedido({
           {a?.descripcion || "Artículo"}
           {Number(item.descuento_propio_pct) > 0 && (
             <span className="ml-1.5 inline-block bg-red-100 text-red-700 px-1.5 rounded text-[10px] font-bold align-middle">
-              -{Number(item.descuento_propio_pct)}%
+              -{porcentaje(Number(item.descuento_propio_pct))}
             </span>
           )}
           {Number(item.bonif_viajante_pct) > 0 && (
             <span className="ml-1.5 inline-block bg-orange-100 text-orange-700 px-1.5 rounded text-[10px] font-bold align-middle">
-              viaj. −{Number(item.bonif_viajante_pct)}%
+              viaj. −{porcentaje(Number(item.bonif_viajante_pct))}
             </span>
           )}
         </p>
@@ -361,11 +362,7 @@ function PedidoDetalleInner() {
             <h1 className="text-lg font-bold truncate">{cliente?.nombre || "Pedido"}</h1>
             <p className="text-emerald-200 text-xs truncate">
               {pedido.numero_pedido ? `Pedido Nº ${pedido.numero_pedido} · ` : ""}
-              {new Date(pedido.fecha + "T00:00:00").toLocaleDateString("es-AR", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })}
+              {fecha(pedido.fecha)}
             </p>
           </div>
           {sync !== "idle" ? (

@@ -6,6 +6,8 @@ import { formatCurrency } from "@/lib/utils"
 import { previewPrecioArticulo } from "@/lib/actions/pedidos"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { localMatch } from "@/lib/search/local-match"
+import { fecha } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // Devolución en la calle — la devolución NO es sobre un pedido: se busca en
 // las COMPRAS FACTURADAS del cliente y se devuelve al último precio al que se
@@ -245,7 +247,7 @@ export default function VendedorDevolucionPage() {
                   {i.nunca_facturado ? (
                     <span className="text-amber-600 font-bold">NUNCA FACTURADO · precio actual</span>
                   ) : (
-                    `último facturado ${i.fecha_venta_original ? new Date(i.fecha_venta_original + "T00:00:00").toLocaleDateString("es-AR") : ""}`
+                    `último facturado ${i.fecha_venta_original ? fecha(i.fecha_venta_original) : ""}`
                   )}
                 </p>
               </div>
@@ -257,23 +259,21 @@ export default function VendedorDevolucionPage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-[11px] text-gray-400 block mb-0.5">Cantidad</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
+                <InputMonto
+                  decimales={0}
+                  soloPositivos
                   value={i.cantidad || ""}
-                  onChange={(e) => updateItem(idx, { cantidad: Math.max(0, parseInt(e.target.value) || 0) })}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-center font-bold"
+                  onChange={(n) => updateItem(idx, { cantidad: Math.max(0, Math.trunc(n ?? 0)) })}
+                  className="h-auto w-full rounded-lg border border-gray-300 px-3 py-2 text-center font-bold"
                 />
               </div>
               <div>
                 <label className="text-[11px] text-gray-400 block mb-0.5">Precio unitario</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
+                <InputMonto
+                  soloPositivos
                   value={i.precio_venta_original || ""}
-                  onChange={(e) => updateItem(idx, { precio_venta_original: Math.max(0, parseFloat(e.target.value) || 0) })}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
+                  onChange={(n) => updateItem(idx, { precio_venta_original: Math.max(0, n ?? 0) })}
+                  className="h-auto w-full rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
                 />
               </div>
             </div>
@@ -362,7 +362,7 @@ export default function VendedorDevolucionPage() {
                         <p className="font-bold text-gray-900 text-sm leading-snug">{c.descripcion}</p>
                         <p className="text-gray-400 text-xs">
                           {c.tipo_comprobante} {c.numero_comprobante} ·{" "}
-                          {c.ultima_fecha ? new Date(c.ultima_fecha.slice(0, 10) + "T00:00:00").toLocaleDateString("es-AR") : ""}
+                          {c.ultima_fecha ? fecha(c.ultima_fecha) : ""}
                           {` · llevó ${c.cantidad_total}`}
                         </p>
                       </div>

@@ -9,6 +9,7 @@ import ComparativoBadge from '@/components/playroom/ComparativoBadge'
 import { formatDateAR } from '@/lib/utils'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
+import { moneda, numeroPlano, porcentaje } from "@/lib/formato"
 
 interface ClienteRow {
   cliente_id: string
@@ -38,10 +39,6 @@ const ESTADO_COLOR: Record<string, string> = {
   Nuevo: '#3b82f6',
 }
 const ABC_COLOR: Record<string, string> = { A: '#7c3aed', B: '#06b6d4', C: '#6b7280' }
-
-function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
 
 const inputStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
@@ -82,12 +79,12 @@ const COLUMNS: Column<ClienteRow>[] = [
   { key: 'tipo_canal', label: 'Canal', sortable: true },
   {
     key: 'facturacion', label: 'Facturación', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-semibold">{ars(v)}</span>,
+    render: v => <span className="font-mono font-semibold">{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'facturacion_anterior', label: 'Período ant.', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.45)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.45)' }}>{v > 0 ? moneda(v, 0) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
@@ -95,7 +92,7 @@ const COLUMNS: Column<ClienteRow>[] = [
     render: (v, row) => row.facturacion_anterior > 0
       ? <ComparativoBadge pct={v} size="sm" />
       : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
-    exportValue: v => `${Number(v).toFixed(1)}%`,
+    exportValue: v => `${numeroPlano(Number(v), 1)}%`,
   },
   {
     key: 'cantidad_comprobantes', label: '# Comp.', sortable: true, align: 'right',
@@ -104,7 +101,7 @@ const COLUMNS: Column<ClienteRow>[] = [
   {
     key: 'saldo_pendiente', label: 'Saldo pend.', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-amber-400">{ars(v)}</span>
+      ? <span className="font-mono text-amber-400">{moneda(v, 0)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => String(v),
   },
@@ -249,7 +246,7 @@ export default function RankingClientesABC() {
         />
         <KPICard
           label="Concentración top 10"
-          value={loading ? '...' : `${kpis.concPct.toFixed(1)}%`}
+          value={loading ? '...' : porcentaje(kpis.concPct, 1)}
           subLabel="del total facturado"
           loading={loading}
         />
@@ -260,7 +257,7 @@ export default function RankingClientesABC() {
         <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
           <div className="flex items-center justify-between mb-4">
             <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
-              Curva Pareto — top {paretoData.length} clientes · {ars(kpis.total)} total
+              Curva Pareto — top {paretoData.length} clientes · {moneda(kpis.total, 0)} total
             </p>
             {apiData?.meta && (
               <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
@@ -280,13 +277,13 @@ export default function RankingClientesABC() {
                 interval={0}
               />
               <YAxis
-                tickFormatter={v => `$${(v / 1000000).toFixed(1)}M`}
+                tickFormatter={v => `${moneda(v / 1000000, 1)}M`}
                 tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}
               />
               <Tooltip
-                formatter={(v: number) => [ars(v), 'Facturación']}
+                formatter={(v: number) => [moneda(v, 0), 'Facturación']}
                 contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
               />
               <Bar dataKey="facturacion" radius={[4, 4, 0, 0]} maxBarSize={36}>

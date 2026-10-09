@@ -13,6 +13,8 @@ import { ArrowLeft, FileMinus, Loader2, CheckCircle2 } from "lucide-react"
 import Link from "next/link"
 import { todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 
 const ORIGEN_LABELS: Record<string, string> = {
     descuento_fuera_factura: "Descuento fuera de factura",
@@ -274,12 +276,12 @@ export default function NCPendientesPage() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <Label>Fecha</Label>
-                                    <Input type="date" value={fechaNC} onChange={(e) => setFechaNC(e.target.value)} />
+                                    <DateInputAR value={fechaNC} onChange={setFechaNC} />
                                 </div>
                                 <div>
                                     <Label>Total real *</Label>
-                                    <Input type="number" step="0.01" value={totalNC || ""}
-                                        onChange={(e) => setTotalNC(Number.parseFloat(e.target.value) || 0)} />
+                                    <InputMonto pesos soloPositivos value={totalNC || null}
+                                        onChange={(n) => setTotalNC(n ?? 0)} />
                                 </div>
                             </div>
                             {registrando.comprobante_asociado_id && (

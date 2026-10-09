@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { toast } from "sonner"
 import { formatCurrency } from "@/lib/utils"
 import type { HojaRuta } from "@/lib/viajes/hoja-ruta"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // "Entregar dinero a chofer": monto a mano, de qué caja/banco sale y quién lo
 // retira. Sale en una transacción a la billetera del titular y en /caja queda
@@ -20,14 +21,14 @@ export function EntregarDinero({ hoja, abierto, onClose, onHecho }: { hoja: Hoja
   const { viaje, totales, dinero } = hoja
   const [cuentas, setCuentas] = useState<Cuenta[]>([])
   const [origen, setOrigen] = useState("")
-  const [monto, setMonto] = useState("")
+  const [monto, setMonto] = useState<number | null>(null)
   const [retira, setRetira] = useState(viaje.titular_id || "")
   const [ocupado, setOcupado] = useState(false)
 
   useEffect(() => {
     if (!abierto) return
     setRetira(viaje.titular_id || "")
-    setMonto("")
+    setMonto(null)
     fetch("/api/finanzas/cajas")
       .then((r) => r.json())
       .then((d) => {
@@ -40,7 +41,7 @@ export function EntregarDinero({ hoja, abierto, onClose, onHecho }: { hoja: Hoja
   }, [abierto, viaje.titular_id])
 
   const entregar = async () => {
-    const montoNum = Number(String(monto).replace(",", "."))
+    const montoNum = monto ?? 0
     if (!origen || !montoNum || montoNum <= 0) { toast.error("Elegí de dónde sale la plata y un monto mayor a 0"); return }
     const [origen_tipo, origen_id] = origen.split(":")
     setOcupado(true)
@@ -85,7 +86,7 @@ export function EntregarDinero({ hoja, abierto, onClose, onHecho }: { hoja: Hoja
           <div className="space-y-3">
             <div>
               <Label>Monto</Label>
-              <Input type="number" min="0" autoFocus value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="Ej: 300000" className="text-lg" />
+              <InputMonto soloPositivos autoFocus value={monto} onChange={setMonto} placeholder="Ej: 300.000" className="text-lg" />
             </div>
             <div>
               <Label>Sale de</Label>

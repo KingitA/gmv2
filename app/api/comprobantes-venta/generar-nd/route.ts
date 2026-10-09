@@ -12,6 +12,7 @@ import { resolverAlicuotaIIBB } from "@/lib/comprobantes/percepcion-iibb"
 import { generarYSubirPDF, buildPDFData, generarQRBase64, buildQRUrl, buildSnapshot } from "@/lib/pdf/generar"
 import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeHuerfano } from "@/lib/arca/registro-cae"
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
+import { cuitDigitos, cuitValido } from "@/lib/formato"
 
 /**
  * Genera Notas de Débito (NDA/NDB) para ventas.
@@ -93,6 +94,15 @@ export async function POST(request: Request) {
       return NextResponse.json({
         error: `El cliente "${cliente.nombre_razon_social ?? cliente.nombre ?? ''}" no tiene CUIT configurado. Sin CUIT no se puede emitir un comprobante fiscal.`,
         error_code: 'CLIENTE_SIN_CUIT',
+        cliente_id,
+        cliente_nombre: cliente.nombre_razon_social ?? cliente.nombre,
+      }, { status: 422 })
+    }
+    // La ND siempre es fiscal: validar el CUIT antes de hablar con ARCA.
+    if (!cuitValido(cliente.cuit)) {
+      return NextResponse.json({
+        error: `El CUIT del cliente "${cliente.nombre_razon_social ?? cliente.nombre ?? ''}" no es válido (${cliente.cuit}): corregilo en la ficha del cliente.`,
+        error_code: 'CLIENTE_CUIT_INVALIDO',
         cliente_id,
         cliente_nombre: cliente.nombre_razon_social ?? cliente.nombre,
       }, { status: 422 })
@@ -179,7 +189,7 @@ export async function POST(request: Request) {
     // ─── Obtener TA y sincronizar numeración ───
     const ambiente    = (empresaConfig?.arca_ambiente ?? 'produccion') as AmbienteARCA
     const ta          = await obtenerTAConCache(supabase, ambiente)
-    const cuitEmpresa = (empresaConfig?.cuit ?? '').replace(/-/g, '')
+    const cuitEmpresa = cuitDigitos(empresaConfig?.cuit)
     const cbteTipo    = TIPO_CBTE_ARCA[tipoFinal]
 
     let nuevoNumero = numeracion.ultimo_numero + 1
@@ -199,7 +209,7 @@ export async function POST(request: Request) {
     const numeroComprobante = `${puntoVenta}-${nuevoNumero.toString().padStart(8, '0')}`
 
     // ─── Solicitar CAE ───
-    const clienteCuit = cliente.cuit.replace(/-/g, '')
+    const clienteCuit = cuitDigitos(cliente.cuit)
     const fecha       = todayArgentina().replace(/-/g, '')
 
     // RG 5616/2024: condición IVA del receptor obligatoria

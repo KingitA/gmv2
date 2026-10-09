@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { fechaISO, hoyISO, sumarDiasISO } from "@/lib/formato"
 
 // GET /api/vendedor/estadisticas
 // KPIs del vendedor autenticado: ventas por mes (últimos 6), top clientes
@@ -13,10 +14,14 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    const desde = new Date()
-    desde.setMonth(desde.getMonth() - 5)
-    desde.setDate(1)
-    const desdeStr = desde.toISOString().slice(0, 10)
+    // Meses calendario en hora argentina (no UTC): el actual y los 5 anteriores
+    const hoy = hoyISO()
+    const [anioHoy, mesHoy] = hoy.split("-").map(Number)
+    const mesesLista: string[] = []
+    for (let i = 5; i >= 0; i--) {
+      mesesLista.push(new Date(Date.UTC(anioHoy, mesHoy - 1 - i, 1, 12)).toISOString().slice(0, 7))
+    }
+    const desdeStr = `${mesesLista[0]}-01`
 
     const pedidos = await fetchAllRows(() =>
       supabase
@@ -31,13 +36,9 @@ export async function GET() {
 
     // Ventas por mes
     const meses = new Map<string, { total: number; pedidos: number }>()
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(desde)
-      d.setMonth(desde.getMonth() + i)
-      meses.set(d.toISOString().slice(0, 7), { total: 0, pedidos: 0 })
-    }
+    for (const mes of mesesLista) meses.set(mes, { total: 0, pedidos: 0 })
     for (const p of pedidos || []) {
-      const mes = String(p.fecha).slice(0, 7)
+      const mes = fechaISO(p.fecha).slice(0, 7)
       const m = meses.get(mes)
       if (m) {
         m.total += Number(p.total) || 0
@@ -47,12 +48,10 @@ export async function GET() {
     const ventasPorMes = [...meses.entries()].map(([mes, v]) => ({ mes, ...v }))
 
     // Top clientes últimos 90 días
-    const hace90 = new Date()
-    hace90.setDate(hace90.getDate() - 90)
-    const corte90 = hace90.toISOString().slice(0, 10)
+    const corte90 = sumarDiasISO(hoy, -90)
     const porCliente = new Map<string, { nombre: string; total: number; pedidos: number }>()
     for (const p of pedidos || []) {
-      if (String(p.fecha) < corte90 || !p.cliente_id) continue
+      if (fechaISO(p.fecha) < corte90 || !p.cliente_id) continue
       const actual = porCliente.get(p.cliente_id) || {
         nombre: (p.clientes as any)?.nombre || "—",
         total: 0,
@@ -78,9 +77,9 @@ export async function GET() {
     const comisionesPendientes = (comisiones || [])
       .filter((c) => !c.pagado)
       .reduce((s, c) => s + Number(c.monto), 0)
-    const inicioMes = new Date().toISOString().slice(0, 7)
+    const inicioMes = hoy.slice(0, 7)
     const comisionesMes = (comisiones || [])
-      .filter((c) => String(c.created_at).slice(0, 7) === inicioMes)
+      .filter((c) => fechaISO(c.created_at).slice(0, 7) === inicioMes)
       .reduce((s, c) => s + Number(c.monto), 0)
 
     // Deuda de cartera

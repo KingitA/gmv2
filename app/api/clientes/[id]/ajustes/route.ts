@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
+import { moneda } from "@/lib/formato"
 
 /**
  * Ajuste manual de cuenta corriente del cliente.
@@ -50,7 +51,7 @@ export async function POST(
       const tope = topeAjuste(totalImputado)
       if (Math.abs(Number(monto)) > tope + 0.005) {
         return NextResponse.json(
-          { error: `El ajuste por redondeo ($${Math.abs(Number(monto)).toFixed(2)}) supera el tope del 1% de lo imputado por el pago ($${tope.toFixed(2)}).` },
+          { error: `El ajuste por redondeo (${moneda(Math.abs(Number(monto)))}) supera el tope del 1% de lo imputado por el pago (${moneda(tope)}).` },
           { status: 400 },
         )
       }
@@ -251,7 +252,7 @@ export async function DELETE(
 
     return NextResponse.json({
       success: true,
-      mensaje: `Ajuste revertido con contra-asiento ($ ${Math.abs(monto)})`,
+      mensaje: `Ajuste revertido con contra-asiento (${moneda(Math.abs(monto))})`,
     })
   } catch (error: any) {
     console.error("[clientes/ajustes] DELETE error:", error)

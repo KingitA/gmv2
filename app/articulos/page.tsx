@@ -20,6 +20,8 @@ import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FiltroColumnaMenu, ChipsFiltros, textoChip } from "@/components/search/filtro-columna"
 import { filtroActivo, type Filtros, type FiltroColumna, type OpcionFiltro } from "@/lib/search/facetas"
 import * as XLSX from "xlsx"
+import { InputMonto } from "@/components/ui/input-monto"
+import { entero, moneda, porcentaje, redondear } from "@/lib/formato"
 import { calcularPrecioBase, calcularPrecioFinal, articuloToDatosArticulo, resumirDescuentos, determinarGrupoPrecio, type DatosLista, type MetodoFacturacion, type DescuentoTipado } from "@/lib/pricing/calculator"
 import { calcularPreciosConFormulas, SUBLISTA_CODIGOS, SUBLISTA_META, type SublistaCodigo } from "@/lib/pricing/formula-evaluator"
 import { cargarTiposArticulo, opcionesCon, TIPOS_BULTO_DEFAULT, TIPOS_FRACCION_DEFAULT } from "@/lib/catalogos/tipos-articulo"
@@ -416,7 +418,7 @@ export default function ArticulosPage() {
   }
 
   // Helpers
-  const fmt=(n:number)=>n>0?`$${n.toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"
+  const fmt=(n:number)=>n>0?moneda(n):"—"
   const icC=(v:string)=>v==="factura"?"+":v==="mixto"?"½":"0"
   // Selección masiva — helpers
   const pageIds = arts.map(a=>a.id)
@@ -526,7 +528,7 @@ export default function ArticulosPage() {
       <div className="bg-white border-b px-5 py-3 flex items-center justify-between gap-3 flex-shrink-0 shadow-sm">
         <div>
           <h1 className="text-lg font-bold text-slate-800 leading-tight">Artículos</h1>
-          <p className="text-[11px] text-slate-400">{tc.toLocaleString()} artículos · Pág {pg+1}/{tp||1}</p>
+          <p className="text-[11px] text-slate-400">{entero(tc)} artículos · Pág {pg+1}/{tp||1}</p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -829,7 +831,7 @@ export default function ArticulosPage() {
                     {isVis("marca")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.marca,maxWidth:cw.marca}}><span className="text-[10px] text-slate-500 truncate block">{a.marca?.descripcion||"—"}</span></td>}
                     {isVis("cat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.cat,maxWidth:cw.cat}}><span className="text-[10px] text-slate-500 truncate block">{a.categoria||"—"}</span></td>}
                     {isVis("subcat")&&<td className="px-2 py-0 border-r border-slate-100 overflow-hidden" style={{width:cw.subcat,maxWidth:cw.subcat}}><span className="text-[10px] text-slate-500 truncate block">{a.subcategoria||"—"}</span></td>}
-                    {isVis("oferta")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.oferta,maxWidth:cw.oferta}}>{a.descuento_propio>0?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700">{a.descuento_propio}%</span>:<span className="text-[10px] text-slate-300">—</span>}</td>}
+                    {isVis("oferta")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.oferta,maxWidth:cw.oferta}}>{a.descuento_propio>0?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700">{porcentaje(a.descuento_propio)}</span>:<span className="text-[10px] text-slate-300">—</span>}</td>}
                     {isVis("segprecio")&&<td className="px-2 py-0 border-r border-slate-100 text-center overflow-hidden" style={{width:cw.segprecio,maxWidth:cw.segprecio}}>
                       {a.segmento_precio==="limpieza_bazar"
                         ?<span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">L/B</span>
@@ -841,22 +843,22 @@ export default function ArticulosPage() {
                     {/* ── Compras cells ── */}
                     {mode==="compras"&&<>
                       {isVis("plista")&&<td className="px-1 py-0 border-r border-amber-100 bg-amber-50/30" style={{width:cw.plista,maxWidth:cw.plista}}>
-                        <input type="number" step="0.01" className="w-full text-right text-[11px] font-mono text-amber-900 bg-transparent border-b border-transparent hover:border-amber-300 focus:border-amber-500 focus:outline-none py-0.5" value={a.precio_compra||""} onChange={e=>edt(a.id,"precio_compra",parseFloat(e.target.value)||0)}/>
+                        <InputMonto className="h-auto min-w-0 px-0 rounded-none border-0 shadow-none focus-visible:ring-0 md:text-[11px] w-full text-right text-[11px] font-mono text-amber-900 bg-transparent border-b border-transparent hover:border-amber-300 focus:border-amber-500 focus:outline-none py-0.5" value={a.precio_compra||null} onChange={v=>edt(a.id,"precio_compra",v??0)}/>
                       </td>}
                       {isVis("desctos")&&<td className="px-1 py-0 text-center border-r border-amber-100 bg-amber-50/30" style={{width:cw.desctos,maxWidth:cw.desctos}}>
                         <button onClick={()=>odm(a)} className="inline-flex flex-wrap gap-px px-1 py-0.5 rounded hover:bg-amber-100 transition-colors min-w-full justify-center">
                           {ds.length===0?<span className="text-[10px] text-slate-300">+</span>:<>
-                            {rs.totalComercial>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-blue-100 text-blue-700">{rs.totalComercial}%</span>}
-                            {rs.totalFinanciero>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-emerald-100 text-emerald-700">{rs.totalFinanciero}%</span>}
-                            {rs.totalPromocional>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-purple-100 text-purple-700">{rs.totalPromocional}%</span>}
+                            {rs.totalComercial>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-blue-100 text-blue-700">{porcentaje(rs.totalComercial)}</span>}
+                            {rs.totalFinanciero>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-emerald-100 text-emerald-700">{porcentaje(rs.totalFinanciero)}</span>}
+                            {rs.totalPromocional>0&&<span className="inline-flex items-center px-1 h-[16px] rounded text-[8px] font-bold bg-purple-100 text-purple-700">{porcentaje(rs.totalPromocional)}</span>}
                           </>}
                         </button>
                       </td>}
                       {isVis("marg")&&<td className="px-1 py-0 border-r border-amber-100 bg-amber-50/30" style={{width:cw.marg,maxWidth:cw.marg}}>
-                        <input type="number" step="0.1" className="w-full text-center text-[11px] font-bold text-emerald-700 bg-transparent border-b border-transparent hover:border-emerald-300 focus:border-emerald-500 focus:outline-none py-0.5" value={a.porcentaje_ganancia||""} placeholder="—" onChange={e=>edt(a.id,"porcentaje_ganancia",parseFloat(e.target.value)||0)}/>
+                        <InputMonto className="h-auto min-w-0 px-0 rounded-none border-0 shadow-none focus-visible:ring-0 md:text-[11px] w-full text-center text-[11px] font-bold text-emerald-700 bg-transparent border-b border-transparent hover:border-emerald-300 focus:border-emerald-500 focus:outline-none py-0.5" value={a.porcentaje_ganancia||null} placeholder="—" onChange={v=>edt(a.id,"porcentaje_ganancia",v??0)}/>
                       </td>}
                       {isVis("br")&&<td className="px-1 py-0 border-r border-amber-100 bg-amber-50/30" style={{width:cw.br,maxWidth:cw.br}}>
-                        <input type="number" step="0.1" className={`w-full text-center text-[11px] font-bold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 ${(a.bonif_recargo||0)<0?"text-red-600":(a.bonif_recargo||0)>0?"text-amber-600":"text-slate-300"}`} value={a.bonif_recargo||""} placeholder="—" onChange={e=>edt(a.id,"bonif_recargo",parseFloat(e.target.value)||0)}/>
+                        <InputMonto className={`h-auto min-w-0 px-0 rounded-none border-0 shadow-none focus-visible:ring-0 md:text-[11px] w-full text-center text-[11px] font-bold bg-transparent border-b border-transparent hover:border-neutral-300 focus:border-blue-500 focus:outline-none py-0.5 ${(a.bonif_recargo||0)<0?"text-red-600":(a.bonif_recargo||0)>0?"text-amber-600":"text-slate-300"}`} value={a.bonif_recargo||null} placeholder="—" onChange={v=>edt(a.id,"bonif_recargo",v??0)}/>
                       </td>}
                       {isVis("ucosto")&&<td className="px-2 py-0 text-right border-r border-amber-100 bg-amber-50/30" style={{width:cw.ucosto,maxWidth:cw.ucosto}}>
                         <span className="text-[11px] font-bold font-mono text-amber-800">{fmt(bs.costoNeto)}</span>
@@ -873,13 +875,13 @@ export default function ArticulosPage() {
                     {mode==="ventas"&&<>
                       {isVis("pbase")&&<td className="px-1 py-0 border-r border-indigo-100 bg-indigo-50/20" style={{width:cw.pbase,maxWidth:cw.pbase}}>
                         <div className="flex items-center gap-0.5">
-                          <input type="number" step="0.01" className={`flex-1 text-right text-[11px] font-mono font-bold bg-transparent border-b border-transparent hover:border-indigo-300 focus:border-indigo-500 focus:outline-none py-0.5 ${a.precio_base!=null?"text-indigo-700":"text-slate-400"}`} value={a.precio_base!=null?a.precio_base:""} placeholder={fmt(bs.precioBase)} onChange={e=>{const v=e.target.value;edt(a.id,"precio_base",v===""?null:parseFloat(v)||0);edt(a.id,"precio_base_contado",v===""?null:Math.round((parseFloat(v)||0)*0.9*100)/100)}}/>
+                          <InputMonto className={`h-auto min-w-0 px-0 rounded-none border-0 shadow-none focus-visible:ring-0 md:text-[11px] flex-1 text-right text-[11px] font-mono font-bold bg-transparent border-b border-transparent hover:border-indigo-300 focus:border-indigo-500 focus:outline-none py-0.5 ${a.precio_base!=null?"text-indigo-700":"text-slate-400"}`} value={a.precio_base!=null?a.precio_base:null} placeholder={fmt(bs.precioBase)} onChange={v=>{edt(a.id,"precio_base",v);edt(a.id,"precio_base_contado",v==null?null:redondear(v*0.9))}}/>
                           {a.precio_base!=null&&<button className="text-[9px] text-slate-300 hover:text-red-500 flex-shrink-0 leading-none" onClick={()=>{edt(a.id,"precio_base",null);edt(a.id,"precio_base_contado",null)}}>×</button>}
                         </div>
                         {a.precio_base==null&&<div className="text-[8px] text-slate-300 text-right leading-none">calc.</div>}
                       </td>}
                       {isVis("pbcont")&&<td className="px-1 py-0 border-r-2 border-indigo-200 bg-indigo-50/20" style={{width:cw.pbcont,maxWidth:cw.pbcont}}>
-                        <input type="number" step="0.01" className="w-full text-right text-[11px] font-mono font-bold text-amber-600 bg-transparent border-b border-transparent hover:border-amber-300 focus:border-amber-500 focus:outline-none py-0.5" value={a.precio_base_contado!=null?a.precio_base_contado:""} placeholder={a.precio_base!=null?fmt(Math.round(a.precio_base*0.9*100)/100):"—"} onChange={e=>edt(a.id,"precio_base_contado",parseFloat(e.target.value)||0)}/>
+                        <InputMonto className="h-auto min-w-0 px-0 rounded-none border-0 shadow-none focus-visible:ring-0 md:text-[11px] w-full text-right text-[11px] font-mono font-bold text-amber-600 bg-transparent border-b border-transparent hover:border-amber-300 focus:border-amber-500 focus:outline-none py-0.5" value={a.precio_base_contado!=null?a.precio_base_contado:null} placeholder={a.precio_base!=null?fmt(redondear(a.precio_base*0.9)):"—"} onChange={v=>edt(a.id,"precio_base_contado",v??0)}/>
                       </td>}
                       {isVis("ivac_v")&&<td className="px-1 py-0 text-center border-r border-indigo-100 bg-indigo-50/20" style={{width:cw.ivac_v,maxWidth:cw.ivac_v}}>
                         <span className={`inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-bold ${ccC(a.iva_compras||"factura")}`}>{icC(a.iva_compras||"factura")}</span>
@@ -948,7 +950,7 @@ export default function ArticulosPage() {
       {/* ═══ PAGINATION ════════════════════════════════════════════════════════ */}
       {tp>1&&(
         <div className="flex items-center justify-between px-5 py-2 border-t bg-white flex-shrink-0 shadow-[0_-1px_3px_rgba(0,0,0,0.04)]">
-          <span className="text-[11px] text-slate-400">{pg*PS+1}–{Math.min((pg+1)*PS,tc)} de {tc.toLocaleString()} artículos</span>
+          <span className="text-[11px] text-slate-400">{pg*PS+1}–{Math.min((pg+1)*PS,tc)} de {entero(tc)} artículos</span>
           <div className="flex gap-1">
             <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={pg===0} onClick={()=>setPg(p=>p-1)}><ChevronLeft className="h-3 w-3"/></Button>
             {Array.from({length:Math.min(tp,7)},(_,i)=>{ let pn=tp<=7?i:pg<3?i:pg>tp-4?tp-7+i:pg-3+i; return <Button key={pn} variant={pn===pg?"default":"outline"} size="sm" className={`h-7 w-7 p-0 text-[10px] ${pn===pg?"bg-indigo-600 hover:bg-indigo-700 border-indigo-600 text-white":""}`} onClick={()=>setPg(pn)}>{pn+1}</Button> })}
@@ -968,7 +970,7 @@ export default function ArticulosPage() {
             {dmi.map((d,i)=>(
               <div key={i} className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase ${TC[d.tipo]?.bg} ${TC[d.tipo]?.text}`}>{d.tipo.slice(0,3)}</span>
-                <Input type="number" step="0.1" className="w-[80px] h-7 text-xs text-center" value={d.porcentaje||""} onChange={e=>setDmi(p=>p.map((x,j)=>j===i?{...x,porcentaje:parseFloat(e.target.value)||0}:x))}/>
+                <InputMonto porciento className="w-[80px] h-7 text-xs text-center" value={d.porcentaje||null} onChange={v=>setDmi(p=>p.map((x,j)=>j===i?{...x,porcentaje:v??0}:x))}/>
                 <span className="text-[10px] text-slate-400">%</span>
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-red-400 hover:text-red-600" onClick={()=>setDmi(p=>p.filter((_,j)=>j!==i))}><Trash2 className="h-3 w-3"/></Button>
               </div>
@@ -1089,11 +1091,11 @@ export default function ArticulosPage() {
                       {bulkFields.has(f)&&<Check className="h-3 w-3 text-white"/>}
                     </button>
                     <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has(f)?"text-slate-800 font-semibold":"text-slate-400"}`}>{label}</Label>
-                    <Input type="number" step="0.01" disabled={!bulkFields.has(f)}
-                      value={bulkFields.has(f)?(bulkVals[f]??def):""}
+                    <InputMonto disabled={!bulkFields.has(f)}
+                      value={bulkFields.has(f)?(bulkVals[f]??def):null}
                       placeholder={bulkFields.has(f)?"Valor nuevo":"—"}
                       className={`h-7 text-xs flex-1 ${!bulkFields.has(f)?"opacity-30":""}`}
-                      onChange={e=>setBulkVals(v=>({...v,[f]:parseFloat(e.target.value)||0}))}/>
+                      onChange={n=>setBulkVals(v=>({...v,[f]:n??0}))}/>
                   </div>
                 ))}
               </div>
@@ -1231,11 +1233,11 @@ export default function ArticulosPage() {
                     {bulkFields.has("unidades_por_bulto")&&<Check className="h-3 w-3 text-white"/>}
                   </button>
                   <Label className={`text-xs w-36 flex-shrink-0 ${bulkFields.has("unidades_por_bulto")?"text-slate-800 font-semibold":"text-slate-400"}`}>Unid/Bulto</Label>
-                  <Input type="number" min={1} disabled={!bulkFields.has("unidades_por_bulto")}
-                    value={bulkFields.has("unidades_por_bulto")?(bulkVals["unidades_por_bulto"]??1):""}
+                  <InputMonto decimales={0} soloPositivos disabled={!bulkFields.has("unidades_por_bulto")}
+                    value={bulkFields.has("unidades_por_bulto")?(bulkVals["unidades_por_bulto"]??1):null}
                     placeholder={bulkFields.has("unidades_por_bulto")?"Valor nuevo":"—"}
                     className={`h-7 text-xs flex-1 ${!bulkFields.has("unidades_por_bulto")?"opacity-30":""}`}
-                    onChange={e=>setBulkVals(v=>({...v,unidades_por_bulto:parseInt(e.target.value)||1}))}/>
+                    onChange={n=>setBulkVals(v=>({...v,unidades_por_bulto:Math.trunc(n??0)||1}))}/>
                 </div>
               </div>
             </div>

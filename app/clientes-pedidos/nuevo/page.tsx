@@ -15,6 +15,8 @@ import {
   ChevronDown, ChevronRight, User, Save, X,
 } from "lucide-react"
 import Link from "next/link"
+import { moneda, formatCuit } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 type CartItem = {
   articuloId: string
@@ -216,7 +218,6 @@ export default function NuevoPedidoPage() {
   }
 
   const subtotal = cart.reduce((s, i) => s + i.precio * i.cantidad, 0)
-  const fmt = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const nombreCliente = cliente?.nombre_razon_social || cliente?.razon_social || ""
   const conContado = !!cond.form && Object.values(cond.form.contado).some(Boolean)
 
@@ -234,7 +235,7 @@ export default function NuevoPedidoPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {cart.length > 0 && <span className="text-2xl font-bold text-slate-800">${fmt(subtotal)}</span>}
+            {cart.length > 0 && <span className="text-2xl font-bold text-slate-800">{moneda(subtotal)}</span>}
             <Button onClick={crearPedido} disabled={!cliente || cart.length === 0 || creating || !!cond.bloqueo} className="gap-2 bg-indigo-600 hover:bg-indigo-700">
               {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Crear pedido
@@ -255,7 +256,7 @@ export default function NuevoPedidoPage() {
             <div className="flex items-start gap-3">
               <div className="flex-1 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
                 <p className="font-semibold text-slate-800">{nombreCliente}</p>
-                <p className="text-sm text-slate-500 mt-0.5">{[cliente.cuit, cliente.direccion, cliente.localidad].filter(Boolean).join(" · ")}</p>
+                <p className="text-sm text-slate-500 mt-0.5">{[cliente.cuit && formatCuit(cliente.cuit), cliente.direccion, cliente.localidad].filter(Boolean).join(" · ")}</p>
                 {cliente.condicion_iva && (
                   <span className="mt-2 inline-block px-2 py-0.5 bg-white border border-slate-200 rounded-full text-xs text-slate-600">{cliente.condicion_iva}</span>
                 )}
@@ -280,7 +281,7 @@ export default function NuevoPedidoPage() {
                   {clienteResults.map((c: any) => (
                     <div key={c.id} className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 last:border-0" onMouseDown={() => selectCliente(c)}>
                       <div className="font-medium text-slate-800">{c.nombre_razon_social || c.razon_social}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">{[c.cuit, c.direccion, c.localidad].filter(Boolean).join(" · ")}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">{[c.cuit && formatCuit(c.cuit), c.direccion, c.localidad].filter(Boolean).join(" · ")}</div>
                     </div>
                   ))}
                 </div>
@@ -354,15 +355,15 @@ export default function NuevoPedidoPage() {
                       ) : selectedPreview ? (
                         <div>
                           <p className="text-[11px] text-slate-400 leading-none mb-0.5">Precio unitario</p>
-                          <p className="text-xl font-bold text-indigo-700 leading-none">${fmt(selectedPreview.precio)}</p>
-                          {qty > 1 && <p className="text-xs text-slate-500 mt-0.5">= ${fmt(selectedPreview.precio * qty)} × {qty} u.</p>}
+                          <p className="text-xl font-bold text-indigo-700 leading-none">{moneda(selectedPreview.precio)}</p>
+                          {qty > 1 && <p className="text-xs text-slate-500 mt-0.5">= {moneda(selectedPreview.precio * qty)} × {qty} u.</p>}
                         </div>
                       ) : <p className="text-xs text-red-600">Sin precio</p>}
                     </div>
                   </div>
                   <button className="text-xs text-slate-400 hover:text-slate-600 shrink-0 underline" onClick={() => { setSelectedArt(null); setSelectedPreview(null); setArtQ(""); setQty(1) }}>Cambiar</button>
-                  <Input type="number" min={1} className="h-10 w-24 text-center font-bold text-lg shrink-0" value={qty}
-                    onChange={e => setQty(parseInt(e.target.value) || 1)} onKeyDown={e => { if (e.key === "Enter") agregarAlCarrito() }} autoFocus />
+                  <InputMonto decimales={0} soloPositivos className="h-10 w-24 text-center font-bold text-lg shrink-0" value={qty}
+                    onChange={n => setQty(Math.trunc(n ?? 0) || 1)} onKeyDown={e => { if (e.key === "Enter") agregarAlCarrito() }} autoFocus />
                   <span className="text-sm text-slate-500 shrink-0">uds.</span>
                   <Button size="sm" className="shrink-0 gap-1.5 bg-indigo-600 hover:bg-indigo-700" disabled={loadingPrice} onClick={agregarAlCarrito}>
                     <Plus className="h-4 w-4" />Agregar
@@ -387,13 +388,13 @@ export default function NuevoPedidoPage() {
                         <p className="font-medium text-sm text-slate-800 leading-tight truncate">{item.descripcion}</p>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">{item.sku}</p>
                       </div>
-                      <div className="col-span-2 text-right"><span className="text-sm font-semibold text-slate-700">${fmt(item.precio)}</span></div>
+                      <div className="col-span-2 text-right"><span className="text-sm font-semibold text-slate-700">{moneda(item.precio)}</span></div>
                       <div className="col-span-2 flex justify-center">
-                        <Input type="number" min={1} className="h-8 w-20 text-center font-semibold text-sm" value={item.cantidad}
-                          onChange={e => cambiarCantidad(item.articuloId, parseInt(e.target.value) || 1)}
+                        <InputMonto decimales={0} soloPositivos className="h-8 w-20 text-center font-semibold text-sm" value={item.cantidad}
+                          onChange={n => cambiarCantidad(item.articuloId, Math.trunc(n ?? 0) || 1)}
                           onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur() }} />
                       </div>
-                      <div className="col-span-2 text-right"><span className="text-sm font-bold text-slate-800">${fmt(item.precio * item.cantidad)}</span></div>
+                      <div className="col-span-2 text-right"><span className="text-sm font-bold text-slate-800">{moneda(item.precio * item.cantidad)}</span></div>
                       <div className="col-span-1 flex justify-end">
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-red-500 hover:bg-red-50" onClick={() => quitarDelCarrito(item.articuloId)}>
                           <Trash2 className="h-3.5 w-3.5" />
@@ -407,7 +408,7 @@ export default function NuevoPedidoPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center text-white/60 text-sm">
                       <span>{cart.length} artículo{cart.length !== 1 ? "s" : ""} · {cart.reduce((s, i) => s + i.cantidad, 0)} unidades</span>
-                      <span>${fmt(subtotal)}</span>
+                      <span>{moneda(subtotal)}</span>
                     </div>
                     {conContado && (
                       <p className="text-xs text-emerald-300">
@@ -416,7 +417,7 @@ export default function NuevoPedidoPage() {
                     )}
                     <div className="flex justify-between items-center pt-2 border-t border-white/10">
                       <span className="text-white/80 text-sm font-medium">Total</span>
-                      <span className="text-2xl font-bold">${fmt(subtotal)}</span>
+                      <span className="text-2xl font-bold">{moneda(subtotal)}</span>
                     </div>
                   </div>
                   {cond.bloqueo && <p className="text-xs text-amber-300 mt-3">{cond.bloqueo}</p>}

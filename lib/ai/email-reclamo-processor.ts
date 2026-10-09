@@ -6,6 +6,7 @@
 import { type ParsedEmail } from './gmail'
 import { getSupabaseAdmin } from './supabase-admin'
 import type { ExtractedReclamoData } from './types'
+import { hoyISO } from '@/lib/formato'
 
 export interface ReclamoProcessingResult {
     processed: boolean
@@ -30,7 +31,7 @@ export async function processEmailAsReclamo(
     savedEmailId: string
 ): Promise<ReclamoProcessingResult> {
     const db = getSupabaseAdmin()
-    const fechaHoy = new Date().toLocaleString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).split(',')[0]
+    const fechaHoy = hoyISO()
 
     console.log(`[ReclamoProcessor] Processing reclamo email: "${emailData.subject}" from ${emailData.from}`)
 

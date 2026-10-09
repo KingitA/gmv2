@@ -117,6 +117,12 @@ if (movil.code !== 0 || errMovil.length) {
   console.error(errMovil.length ? errMovil.map((l) => "   " + l).join("\n") : movil.out.slice(-2000))
 }
 
+// ─── 5. Formatos (fecha, moneda, CUIT — docs/FORMATOS.md) ──────────────────
+console.log("› control de formatos…")
+const formatos = correr(process.execPath, [join(RAIZ, "scripts/check-formatos.mjs"), ...(actualizarBase ? ["--actualizar-base"] : [])], RAIZ)
+console.log(formatos.out.trim())
+if (formatos.code !== 0) falla = true
+
 if (actualizarBase) {
   if (falla) {
     console.error("\n✗ No se actualiza la base con errores nuevos o en el alcance.")

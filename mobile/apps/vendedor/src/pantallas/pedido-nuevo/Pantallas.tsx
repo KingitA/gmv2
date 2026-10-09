@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router"
 import { useContadoresOutbox, useOverlay, useParamEstado, useRuntime } from "@gm/core"
 import { ListaVirtual } from "@gm/core/ui"
 import { localMatch } from "@gm/vendedor"
+import { redondear } from "@gm/formato"
 import { DS, type Articulo, type CatalogoRubro, type OpPedido } from "../../datasets"
 import { buscarCatalogo, filtrarLocal, vistaHabituales, vistaNovedades, vistaOfertas } from "../../datos/busqueda"
 import { useCatalogosFicha, useClientes, useCuenta, useEncolar, useProveedores, useTaxonomia } from "../../datos/hooks"
@@ -436,7 +437,7 @@ export function Carrito() {
         observaciones: b.obs.trim() || null,
         // Vigencia de los precios que el vendedor tuvo a la vista (MOBILE.md → Vendedor → precios)
         precios_al: preciosAl(rt),
-        vista: { cliente_nombre: p.cliente.nombre, total: Math.round(p.total * 100) / 100, numero_pedido: b.numeroPedido, estado: b.estadoPedido },
+        vista: { cliente_nombre: p.cliente.nombre, total: redondear(p.total), numero_pedido: b.numeroPedido, estado: b.estadoPedido },
       }
       // Durable ANTES de soltar el borrador: si la app muere acá, el pedido ya está en el outbox
       await encolar(b.pedidoId ? "pedido.editar" : "pedido.crear", payload, `${b.pedidoId ? "Cambios al pedido" : "Pedido"} · ${p.cliente.nombre} · ${formatCurrency(p.total)}`)

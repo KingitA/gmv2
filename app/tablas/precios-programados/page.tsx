@@ -19,6 +19,9 @@ import { formatDateTimeAR } from "@/lib/utils"
 import { toast } from "sonner"
 import { CalendarClock, Loader2, X } from "lucide-react"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { numero } from "@/lib/formato"
 
 type Tabla = "articulos" | "listas_precio"
 
@@ -52,9 +55,11 @@ interface Programado {
 
 interface Opcion { id: string; nombre: string }
 
-/** "2026-09-20T08:00" (hora Argentina) → ISO UTC */
-function localArAIso(v: string): string {
-  return new Date(`${v}:00-03:00`).toISOString()
+/** Día "2026-09-20" + hora "8:00" (hora Argentina) → ISO UTC; null si la hora no es válida */
+function localArAIso(dia: string, horaMin: string): string | null {
+  const m = horaMin.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || !m) return null
+  return new Date(`${dia}T${m[1].padStart(2, "0")}:${m[2]}:00-03:00`).toISOString()
 }
 
 export default function PreciosProgramadosPage() {
@@ -67,8 +72,9 @@ export default function PreciosProgramadosPage() {
   const [opciones, setOpciones] = useState<Opcion[]>([])
   const [registro, setRegistro] = useState<Opcion | null>(null)
   const [campo, setCampo] = useState(CAMPOS.articulos[0].key)
-  const [valor, setValor] = useState("")
-  const [vigencia, setVigencia] = useState("")
+  const [valor, setValor] = useState<number | null>(null)
+  const [vigenciaDia, setVigenciaDia] = useState("")
+  const [vigenciaHora, setVigenciaHora] = useState("")
   const [nota, setNota] = useState("")
   const [guardando, setGuardando] = useState(false)
 
@@ -107,9 +113,11 @@ export default function PreciosProgramadosPage() {
   }, [q, tabla])
 
   const guardar = async () => {
-    if (!registro || !valor || !vigencia) { toast.error("Completá registro, valor y vigencia"); return }
-    const num = Number(valor.replace(",", "."))
+    if (!registro || valor == null || !vigenciaDia || !vigenciaHora) { toast.error("Completá registro, valor y vigencia"); return }
+    const num = valor
     if (!Number.isFinite(num)) { toast.error("Valor numérico inválido"); return }
+    const vigenciaIso = localArAIso(vigenciaDia, vigenciaHora)
+    if (!vigenciaIso) { toast.error("Hora inválida (usar HH:mm, ej. 08:00)"); return }
     setGuardando(true)
     try {
       const r = await fetch("/api/precios-programados", {
@@ -119,14 +127,14 @@ export default function PreciosProgramadosPage() {
           tabla,
           registro_id: registro.id,
           cambios: { [campo]: num },
-          vigencia_desde: localArAIso(vigencia),
+          vigencia_desde: vigenciaIso,
           nota: nota || null,
         }),
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error)
       toast.success("Cambio programado")
-      setRegistro(null); setQ(""); setValor(""); setNota("")
+      setRegistro(null); setQ(""); setValor(null); setNota("")
       cargar()
     } catch (e: any) {
       toast.error(e.message || "No se pudo programar")
@@ -204,12 +212,16 @@ export default function PreciosProgramadosPage() {
 
           <div className="space-y-1">
             <Label>Nuevo valor</Label>
-            <Input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} />
+            <InputMonto value={valor} onChange={setValor} />
           </div>
 
           <div className="space-y-1">
             <Label>Rige desde (hora Argentina)</Label>
-            <Input type="datetime-local" value={vigencia} onChange={(e) => setVigencia(e.target.value)} />
+            <div className="flex gap-2">
+              <div className="flex-1"><DateInputAR value={vigenciaDia} onChange={setVigenciaDia} /></div>
+              <Input inputMode="numeric" placeholder="HH:mm" maxLength={5} className="w-24 tabular-nums" value={vigenciaHora}
+                onChange={(e) => setVigenciaHora(e.target.value.replace(/[^\d:]/g, ""))} />
+            </div>
           </div>
 
           <div className="space-y-1 md:col-span-2">
@@ -239,7 +251,7 @@ export default function PreciosProgramadosPage() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{p.registro_nombre}</div>
                   <div className="text-muted-foreground">
-                    {Object.entries(p.cambios).map(([k, v]) => `${k} → ${v}`).join(" · ")}
+                    {Object.entries(p.cambios).map(([k, v]) => `${k} → ${typeof v === "number" ? numero(v, 2, 4) : v}`).join(" · ")}
                     {p.nota ? ` — ${p.nota}` : ""}
                   </div>
                   {p.error && <div className="text-red-600">{p.error}</div>}

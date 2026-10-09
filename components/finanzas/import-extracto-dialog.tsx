@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Loader2, Upload, FileSpreadsheet } from "lucide-react"
 import { toast } from "sonner"
+import { fecha as fmtFecha, moneda, parseFecha, parseMonto } from "@/lib/formato"
 
 interface Mov {
   fecha: string
@@ -18,8 +19,8 @@ interface Mov {
 /**
  * Import de extracto bancario (Excel/CSV del homebanking).
  * Detecta columnas por header: fecha, concepto/descripción, y débito/crédito
- * en columnas separadas o un único importe con signo. Los montos usan
- * PUNTO para centavos (1000.5 = $1.000,50) — igual que todo el sistema.
+ * en columnas separadas o un único importe con signo. Montos y fechas se leen
+ * en formato argentino (parseMonto / parseFecha: "1.234,56", dd/mm/aaaa).
  */
 export function ImportExtractoDialog({
   open,
@@ -45,38 +46,16 @@ export function ImportExtractoDialog({
   const norm = (s: any) =>
     String(s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
 
+  // Fechas: celda numérica de Excel (número de serie) o texto dd/mm/aaaa / ISO.
   const toISO = (v: any): string | null => {
-    if (v instanceof Date && !isNaN(v.getTime())) {
-      return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`
-    }
-    if (typeof v === "number" && v > 20000) {
-      const d = XLSX.SSF.parse_date_code(v)
-      if (d) return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`
-    }
-    const t = String(v ?? "").trim()
-    let m = t.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/)
-    if (m) {
-      const anio = m[3].length === 2 ? `20${m[3]}` : m[3]
-      return `${anio}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`
-    }
-    m = t.match(/^(\d{4})-(\d{2})-(\d{2})/)
-    if (m) return `${m[1]}-${m[2]}-${m[3]}`
-    return null
+    if (v instanceof Date) return parseFecha(v)
+    if (typeof v === "number") return v > 20000 ? parseFecha(v) : null
+    return parseFecha(String(v ?? "").trim())
   }
 
-  // Números de extracto: pueden venir "1.234.567,89" (formato banco) o
-  // "1234567.89". Si hay coma decimal, los puntos son miles; si no, el
-  // punto delimita centavos (regla del sistema).
-  const toNum = (v: any): number => {
-    if (typeof v === "number") return v
-    let t = String(v ?? "").trim().replace(/\$|\s/g, "")
-    if (!t) return 0
-    const neg = /^-|\(/.test(t)
-    t = t.replace(/[()\-]/g, "")
-    if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".")
-    const n = Number(t)
-    return isNaN(n) ? 0 : neg ? -n : n
-  }
+  // Números de extracto: "1.234.567,89" (formato banco), "-1.200", "(1.200,00)" o
+  // celda numérica. Ver parseMonto.
+  const toNum = (v: any): number => parseMonto(v) ?? 0
 
   const parsePdf = async (file: File) => {
     setLeyendoPdf(true)
@@ -121,7 +100,10 @@ export function ImportExtractoDialog({
     }
     try {
       const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { cellDates: true })
+      // CSV: se lee como texto plano (raw) y las fechas/montos se parsean en formato
+      // argentino; con cellDates SheetJS tomaba "05/03" como mm/dd.
+      const esCsv = /\.(csv|txt)$/i.test(file.name) || file.type === "text/csv"
+      const wb = XLSX.read(buf, { cellDates: false, raw: esCsv })
       const sheet = wb.Sheets[wb.SheetNames[0]]
       const data: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })
 
@@ -228,7 +210,7 @@ export function ImportExtractoDialog({
 
   const creditos = movs.filter((m) => m.monto > 0)
   const debitos = movs.filter((m) => m.monto < 0)
-  const fmt = (n: number) => n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2 })
+  const fmt = (n: number) => moneda(n)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -278,7 +260,7 @@ export function ImportExtractoDialog({
                 <TableBody>
                   {movs.slice(0, 50).map((m, i) => (
                     <TableRow key={i}>
-                      <TableCell className="whitespace-nowrap">{m.fecha}</TableCell>
+                      <TableCell className="whitespace-nowrap">{fmtFecha(m.fecha)}</TableCell>
                       <TableCell className="max-w-[320px] truncate">{m.descripcion}</TableCell>
                       <TableCell className={`text-right tabular-nums ${m.monto < 0 ? "text-red-600" : "text-green-700"}`}>
                         {fmt(m.monto)}

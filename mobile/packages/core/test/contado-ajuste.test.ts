@@ -75,7 +75,7 @@ describe("ajuste por redondeo · tope solo en contra, el sobrante nunca rebota",
     const r = resolverAjuste(10.5, 1000)
     expect(r.ajuste).toBe(0)
     expect(r.rechazo).toContain("supera el tope del 1%")
-    expect(r.rechazo).toContain("$ 10,00")
+    expect(r.rechazo).toContain("$10,00")
   })
 
   it("sobrante grande: NUNCA rechazo; no se ajusta, queda a cuenta del cliente con aviso", () => {

@@ -2,10 +2,10 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { getPreviousPeriod, getSameLastYear, fetchAllRows, fetchByIds } from '@/lib/playroom/queries'
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
+import { fechaISO, hoyISO } from '@/lib/formato'
 
 function firstDayOfMonthArgentina(): string {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }))
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  return `${hoyISO().slice(0, 7)}-01`
 }
 
 export async function GET(req: NextRequest) {
@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
         if (clienteId && cliente !== clienteId) continue
         const monto = Number(c.monto ?? 0)
         const vid = c.viajante_id ?? 'sin_vendedor'
-        const fechaFiltro = (c.fecha_comprobante_cobrado ?? c.created_at ?? '').slice(0, 10)
+        const fechaFiltro = fechaISO(c.fecha_comprobante_cobrado ?? c.created_at) // timestamptz → día argentino
         const inCurrent = fechaFiltro >= dateFrom && fechaFiltro <= dateTo
         const inPrev = fechaFiltro >= prev.from && fechaFiltro <= prev.to
         if (!inCurrent && !inPrev) continue
@@ -235,7 +235,7 @@ export async function GET(req: NextRequest) {
     for (const k of kardexRows) {
       const monto = Number(k.comision_viajante_monto ?? 0)
       const vid = k.vendedor_id ?? 'sin_vendedor'
-      const fechaFiltro = (tipoFiltro === 'cobrada' ? k.fecha_comprobante_cobrado : k.fecha)?.slice(0, 10) ?? ''
+      const fechaFiltro = fechaISO(tipoFiltro === 'cobrada' ? k.fecha_comprobante_cobrado : k.fecha) // timestamptz → día argentino
       const pagado = pagadoMap.get(k.id) ?? false
 
       const inCurrent = fechaFiltro >= dateFrom && fechaFiltro <= dateTo

@@ -11,6 +11,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/auth'
+import { hoyISO, parseFecha, parseMonto } from '@/lib/formato'
 
 export async function GET() {
   const auth = await requireAuth()
@@ -18,7 +19,7 @@ export async function GET() {
 
   try {
     const supabase = createAdminClient()
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = hoyISO()
 
     const { data: jurisdicciones, error } = await supabase
       .from('jurisdicciones')
@@ -96,9 +97,9 @@ export async function POST(request: NextRequest) {
       if (cols.length < 4) { errores.push(`Línea ${i + 1}: faltan columnas (esperado cuit;alicuota;desde;hasta)`); continue }
 
       const cuit  = cols[0].replace(/\D/g, '')
-      const alic  = parseFloat(cols[1].replace(',', '.'))
-      const desde = cols[2]
-      const hasta = cols[3]
+      const alic  = parseMonto(cols[1]) ?? NaN          // "3,5" o "3.5"
+      const desde = parseFecha(cols[2]) ?? cols[2]       // acepta AAAA-MM-DD, dd/mm/aaaa y ddmmaaaa
+      const hasta = parseFecha(cols[3]) ?? cols[3]
 
       // Encabezado: primera fila sin CUIT numérico válido se ignora en silencio
       if (i === 0 && (cuit.length !== 11 || isNaN(alic))) continue

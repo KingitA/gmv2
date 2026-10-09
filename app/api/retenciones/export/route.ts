@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth'
 import { renderToBuffer, type DocumentProps } from '@react-pdf/renderer'
 import React, { type JSXElementConstructor, type ReactElement } from 'react'
 import { PlanillaRetencionesPDF, type PlanillaRetencionesData } from '@/lib/pdf/planilla-retenciones-template'
+import { formatCuit } from '@/lib/formato'
 
 /**
  * GET /api/retenciones/export?desde=YYYY-MM-DD&hasta=YYYY-MM-DD&formato=txt|planilla
@@ -29,8 +30,8 @@ import { PlanillaRetencionesPDF, type PlanillaRetencionesData } from '@/lib/pdf/
  */
 
 const pad0 = (s: string, w: number) => s.padStart(w, '0')
-const fmtImporte = (n: number, w: number) => pad0(n.toFixed(2), w)
-const fmtFechaAR = (iso: string) => {
+const fmtImporte = (n: number, w: number) => pad0(n.toFixed(2), w) // formato-ok: SICORE (punto decimal, ancho fijo)
+const fmtFechaAR = (iso: string) => { // formato-ok: SICORE (DD/MM/YYYY de ancho fijo)
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`
 }
@@ -61,7 +62,7 @@ export async function GET(request: Request) {
     if (formato === 'txt') {
       const lineas = emitidas.map((c: any) => {
         const nroOpDigits = String(c.ordenes_pago?.numero_op ?? '').replace(/\D/g, '')
-        const cuit = String(c.proveedores?.cuit ?? '').trim()
+        const cuit = formatCuit(c.proveedores?.cuit) // formato-ok: SICORE (CUIT con guiones, 13 chars)
         const base = Number(c.base_calculo ?? 0)
         const monto = Number(c.monto ?? 0)
         return (
@@ -76,7 +77,7 @@ export async function GET(request: Request) {
           fmtImporte(monto, 17) +
           '  0.00' + ' '.repeat(10) +
           '80' +
-          cuit.padEnd(20, ' ') +
+          cuit.padEnd(20, ' ') + // formato-ok: SICORE
           (String(c.numero_certificado ?? '').padEnd(13, ' ')) + ' '
         )
       })

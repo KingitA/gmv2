@@ -19,6 +19,9 @@ import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import type { Proveedor, OrdenCompra } from "@/lib/types"
 import { ImportOrderDialog } from "@/components/ordenes/ImportOrderDialog"
 import { nowArgentina, todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { entero, fecha, fechaISO, hoyISO } from "@/lib/formato"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -119,31 +122,27 @@ function CargarComprobanteForm({
 
       <div>
         <Label>Fecha del Comprobante *</Label>
-        <Input type="date" value={fechaComprobante} onChange={(e) => setFechaComprobante(e.target.value)} />
+        <DateInputAR value={fechaComprobante} onChange={setFechaComprobante} />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Total de la Factura (según papel) *</Label>
-          <Input
-            type="number"
-                                        onWheel={(e) => (e.target as HTMLElement).blur()}
-            step="0.01"
-            placeholder="0.00"
-            value={totalFacturaDeclarado || ""}
-            onChange={(e) => setTotalFacturaDeclarado(Number.parseFloat(e.target.value))}
+          <InputMonto
+            pesos
+            placeholder="0,00"
+            value={totalFacturaDeclarado || null}
+            onChange={(n) => setTotalFacturaDeclarado(n ?? 0)}
           />
         </div>
 
         <div>
           <Label>Descuento Fuera de Factura (%)</Label>
-          <Input
-            type="number"
-                                        onWheel={(e) => (e.target as HTMLElement).blur()}
-            step="0.01"
-            placeholder="0.00"
-            value={descuentoFueraFactura || ""}
-            onChange={(e) => setDescuentoFueraFactura(Number.parseFloat(e.target.value))}
+          <InputMonto
+            porciento
+            placeholder="0,00"
+            value={descuentoFueraFactura || null}
+            onChange={(n) => setDescuentoFueraFactura(n ?? 0)}
           />
         </div>
       </div>
@@ -350,8 +349,8 @@ export default function OrdenesCompraPage() {
   // Sugerencia
   const [sugerenciaData, setSugerenciaData] = useState<any[]>([])
   const [loadingSugerencia, setLoadingSugerencia] = useState(false)
-  const [fechaDesde, setFechaDesde] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 3); return d.toISOString().split('T')[0] })
-  const [fechaHasta, setFechaHasta] = useState(() => new Date().toISOString().split('T')[0])
+  const [fechaDesde, setFechaDesde] = useState(() => { const d = new Date(`${hoyISO()}T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() - 3); return fechaISO(d) })
+  const [fechaHasta, setFechaHasta] = useState(() => hoyISO())
   const [tipoVenta, setTipoVenta] = useState<'vendida' | 'facturada'>('vendida')
 
   // External article search
@@ -526,7 +525,7 @@ export default function OrdenesCompraPage() {
     const data = await res.json()
     if (!res.ok) { alert(`Error al crear la orden: ${data.error}`); return }
 
-    alert(`Orden ${data.numeroOrden} creada. Recepción estimada: ${data.fechaEstimada}`)
+    alert(`Orden ${data.numeroOrden} creada. Recepción estimada: ${fecha(data.fechaEstimada)}`)
     setIsCreating(false)
     setSelectedProveedor("")
     setArticulosTabla([])
@@ -802,11 +801,11 @@ export default function OrdenesCompraPage() {
                     <div className="bg-blue-50 border border-blue-200 p-3 rounded-md flex flex-wrap gap-3 items-end">
                       <div>
                         <Label className="text-xs">Desde</Label>
-                        <Input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className="w-36 h-8 text-sm" />
+                        <DateInputAR value={fechaDesde} onChange={setFechaDesde} className="w-36 h-8 text-sm" />
                       </div>
                       <div>
                         <Label className="text-xs">Hasta</Label>
-                        <Input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className="w-36 h-8 text-sm" />
+                        <DateInputAR value={fechaHasta} onChange={setFechaHasta} className="w-36 h-8 text-sm" />
                       </div>
                       <div>
                         <Label className="text-xs">Vendida / Facturada</Label>
@@ -922,96 +921,75 @@ export default function OrdenesCompraPage() {
                                       </TableCell>
                                     )}
                                     <TableCell className="w-36">
-                                      <Input
-                                        type="number"
-                                        onWheel={(e) => (e.target as HTMLElement).blur()}
-                                        min="0"
-                                        step="1"
-                                        value={item.cantidad_pedida || ""}
-                                        onChange={(e) =>
+                                      <InputMonto
+                                        decimales={0}
+                                        soloPositivos
+                                        value={item.cantidad_pedida || null}
+                                        onChange={(v) =>
                                           actualizarArticulo(
                                             indexReal,
                                             "cantidad_pedida",
-                                            Number.parseFloat(e.target.value) || 0,
+                                            v ?? 0,
                                           )
                                         }
                                         className={`w-full ${item.cantidad_pedida > 0 ? "border-primary" : ""}`}
                                       />
                                       {item.tipo_cantidad === "bulto" && item.cantidad_pedida > 0 && (
                                         <div className="text-xs text-muted-foreground mt-1">
-                                          = {item.cantidad_pedida * item.articulo.unidades_por_bulto} unidades
+                                          = {entero(item.cantidad_pedida * item.articulo.unidades_por_bulto)} unidades
                                         </div>
                                       )}
                                     </TableCell>
                                     <TableCell className="w-28">
-                                      <Input
-                                        type="number"
-                                        onWheel={(e) => (e.target as HTMLElement).blur()}
-                                        step="0.01"
-                                        min="0"
-                                        value={item.precio_unitario || ""}
-                                        onChange={(e) =>
+                                      <InputMonto
+                                        soloPositivos
+                                        value={item.precio_unitario || null}
+                                        onChange={(v) =>
                                           actualizarArticulo(
                                             indexReal,
                                             "precio_unitario",
-                                            Number.parseFloat(e.target.value) || 0,
+                                            v ?? 0,
                                           )
                                         }
                                         className="w-full"
                                       />
                                     </TableCell>
                                     <TableCell className="w-24">
-                                      <Input
-                                        type="number"
-                                        onWheel={(e) => (e.target as HTMLElement).blur()}
-                                        step="0.01"
-                                        min="0"
-                                        max="100"
-                                        value={item.descuento1 || ""}
-                                        onChange={(e) =>
-                                          actualizarArticulo(indexReal, "descuento1", Number.parseFloat(e.target.value) || 0)
+                                      <InputMonto
+                                        soloPositivos
+                                        value={item.descuento1 || null}
+                                        onChange={(v) =>
+                                          actualizarArticulo(indexReal, "descuento1", v ?? 0)
                                         }
                                         className="w-full"
                                       />
                                     </TableCell>
                                     <TableCell className="w-24">
-                                      <Input
-                                        type="number"
-                                        onWheel={(e) => (e.target as HTMLElement).blur()}
-                                        step="0.01"
-                                        min="0"
-                                        max="100"
-                                        value={item.descuento2 || ""}
-                                        onChange={(e) =>
-                                          actualizarArticulo(indexReal, "descuento2", Number.parseFloat(e.target.value) || 0)
+                                      <InputMonto
+                                        soloPositivos
+                                        value={item.descuento2 || null}
+                                        onChange={(v) =>
+                                          actualizarArticulo(indexReal, "descuento2", v ?? 0)
                                         }
                                         className="w-full"
                                       />
                                     </TableCell>
                                     <TableCell className="w-24">
-                                      <Input
-                                        type="number"
-                                        onWheel={(e) => (e.target as HTMLElement).blur()}
-                                        step="0.01"
-                                        min="0"
-                                        max="100"
-                                        value={item.descuento3 || ""}
-                                        onChange={(e) =>
-                                          actualizarArticulo(indexReal, "descuento3", Number.parseFloat(e.target.value) || 0)
+                                      <InputMonto
+                                        soloPositivos
+                                        value={item.descuento3 || null}
+                                        onChange={(v) =>
+                                          actualizarArticulo(indexReal, "descuento3", v ?? 0)
                                         }
                                         className="w-full"
                                       />
                                     </TableCell>
                                     <TableCell className="w-24">
-                                      <Input
-                                        type="number"
-                                        onWheel={(e) => (e.target as HTMLElement).blur()}
-                                        step="0.01"
-                                        min="0"
-                                        max="100"
-                                        value={item.descuento4 || ""}
-                                        onChange={(e) =>
-                                          actualizarArticulo(indexReal, "descuento4", Number.parseFloat(e.target.value) || 0)
+                                      <InputMonto
+                                        soloPositivos
+                                        value={item.descuento4 || null}
+                                        onChange={(v) =>
+                                          actualizarArticulo(indexReal, "descuento4", v ?? 0)
                                         }
                                         className="w-full"
                                       />

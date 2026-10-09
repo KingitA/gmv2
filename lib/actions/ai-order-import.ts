@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import { searchProductsByVector } from "./embeddings"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { sanitizarOr } from "@/lib/search/hybrid"
+import { parseMonto } from "@/lib/formato"
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" })
 
@@ -772,7 +773,7 @@ Devolvé UNICAMENTE las palabras fundamentales sueltas en minúsculas en un JSON
 
             return {
                 originalText: originalTextForFrontend,
-                quantity: parseFloat(item.quantity) || 0,
+                quantity: parseMonto(item.quantity) || 0, // la IA puede devolver "1.500" / "2,5"
                 matchedProduct: match,
                 confidence: confidence
             }

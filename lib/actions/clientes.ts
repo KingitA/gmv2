@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
 import { hybridSearchIds } from "@/lib/search/hybrid"
 import { buscarConFiltros } from "@/lib/search/buscar-con-filtros"
+import { errorCuit, normalizarCuit } from "@/lib/formato"
 
 export async function getViajanteClientes() {
   const supabase = await createClient()
@@ -119,10 +120,14 @@ export async function createCliente(formData: {
     throw new Error("No autorizado")
   }
 
+  const errCuit = errorCuit(formData.cuit)
+  if (errCuit) throw new Error(errCuit)
+
   const { data, error } = await supabase
     .from("clientes")
     .insert({
       ...formData,
+      cuit: normalizarCuit(formData.cuit),
       nombre: formData.razon_social,
       nombre_razon_social: formData.razon_social,
       vendedor_id: (roles.includes("viajante") || roles.includes("vendedor")) ? user.id : null,
@@ -166,6 +171,12 @@ export async function updateCliente(
   const { data: cliente } = await supabase.from("clientes").select("*").eq("id", clienteId).single()
 
   if (!cliente) throw new Error("Cliente no encontrado")
+
+  if (updates.cuit !== undefined) {
+    const errCuit = errorCuit(updates.cuit)
+    if (errCuit) throw new Error(errCuit)
+    updates = { ...updates, cuit: normalizarCuit(updates.cuit) ?? "" }
+  }
 
   const { error } = await supabase.from("cambios_pendientes").insert({
     viajante_id: user.id,

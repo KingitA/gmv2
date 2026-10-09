@@ -12,6 +12,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { cuitDigitos, hoyISO } from '@/lib/formato'
 
 // Nombre canónico de provincia (post-migración 20260611) → código CM
 export const JURISDICCION_POR_PROVINCIA: Record<string, string> = {
@@ -71,9 +72,9 @@ export async function resolverAlicuotaIIBB(
   if (!juris?.percibe_iibb) return 0
 
   // 2. Padrón oficial vigente por CUIT + jurisdicción
-  const cuit = (cliente.cuit ?? '').replace(/\D/g, '')
+  const cuit = cuitDigitos(cliente.cuit) // padron_iibb guarda el CUIT en dígitos (formato del padrón)
   if (cuit) {
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = hoyISO()
     const { data: padron } = await supabase
       .from('padron_iibb')
       .select('alicuota_percepcion')

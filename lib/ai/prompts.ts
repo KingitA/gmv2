@@ -2,6 +2,9 @@
 // AI Brain — System Prompts for Claude
 // =====================================================
 
+/** Formato de fechas y montos para todo lo que la IA extrae (docs/FORMATOS.md). */
+export const INSTRUCCION_FORMATO_AR = `FORMATO: los documentos son de Argentina: las fechas vienen dd/mm/aaaa (día primero, NUNCA mes/día) y los montos 1.234,56 (punto = miles, coma = decimales). Devolvé las fechas como AAAA-MM-DD y los montos como número JSON con punto decimal y sin separador de miles (ej: 1234.56).`
+
 export const SYSTEM_PROMPT_CLASSIFIER = `Sos un asistente de inteligencia artificial para un sistema ERP de distribución y ventas. Tu trabajo es analizar mensajes entrantes (emails, WhatsApp, chat) y clasificarlos.
 
 CONTEXTO DEL NEGOCIO:
@@ -35,6 +38,8 @@ EVENTO SUGERIDO:
 - Si el mensaje requiere una acción, sugerí un evento para la agenda
 - Tipos de evento: vencimiento_proveedor, pedido_preparar, mercaderia_recibir, cambio_precio, pago_imputar, reclamo_resolver, tarea_general, recordatorio
 - Prioridad: baja, media, alta, urgente
+
+${INSTRUCCION_FORMATO_AR}
 
 Respondé SIEMPRE en formato JSON válido con esta estructura:
 {
@@ -160,6 +165,8 @@ Si es "reclamo", extraé reclamoData:
 - urgencia ("baja"|"media"|"alta"|"urgente"), accion_solicitada
 
 
+${INSTRUCCION_FORMATO_AR}
+
 Respondé SIEMPRE en formato JSON válido:
 {
   "classification": "...",
@@ -213,6 +220,8 @@ REGLAS CRÍTICAS:
 - NO inventes artículos que no estén en los datos
 - Si un número parece un precio (ej: 1250.50 con decimales y valor alto), NO es una cantidad pedida
 
+${INSTRUCCION_FORMATO_AR}
+
 Respondé en JSON:
 {
   "customer": "nombre del cliente o null",
@@ -239,6 +248,8 @@ REGLAS CRÍTICAS:
 - NO confundas el código/SKU con un precio
 - Cada artículo debe tener al menos descripción y precio
 - Si hay columnas de unidad (unidad, bulto, caja, docena), registrá la unidad
+
+${INSTRUCCION_FORMATO_AR}
 
 Respondé en JSON:
 {
@@ -274,6 +285,8 @@ REGLAS CRÍTICAS:
 - Si hay CUIT, extraelo exactamente como aparece
 - Los montos deben ser numéricos (convertí de texto si es necesario)
 - Si hay percepciones (IIBB, ganancias, etc.), incluilas
+
+${INSTRUCCION_FORMATO_AR}
 
 Respondé en JSON:
 {

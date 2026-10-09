@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { fechaCorta } from "@/lib/formato"
 
 interface ClienteViaje {
   id: string
@@ -22,9 +23,6 @@ interface ViajeDetalle {
   fecha_fin_estimada: string | null
   zonas: { id: string; nombre: string }[]
 }
-
-const fechaCorta = (f: string | null) =>
-  f ? new Date(f + "T00:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" }) : "—"
 
 export default function ViajeDetallePage() {
   const router = useRouter()
@@ -131,7 +129,7 @@ export default function ViajeDetallePage() {
           <div className="min-w-0 flex-1">
             <h1 className="text-lg font-bold truncate">{viaje.nombre}</h1>
             <p className="text-emerald-200 text-xs truncate">
-              {fechaCorta(viaje.fecha_inicio)} → {fechaCorta(viaje.fecha_fin_estimada)} ·{" "}
+              {(fechaCorta(viaje.fecha_inicio) || "—")} → {(fechaCorta(viaje.fecha_fin_estimada) || "—")} ·{" "}
               {viaje.zonas.map((z) => z.nombre).join(" + ")}
             </p>
           </div>

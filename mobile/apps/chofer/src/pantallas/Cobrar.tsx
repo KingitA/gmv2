@@ -12,7 +12,8 @@ import { DS, ESTADOS_COBRABLES, idClienteViaje, nombreCliente, type ClienteBusqu
 import { estadoCuentaVacio, resumenCuenta, type EstadoCuenta, type ResumenCuenta } from "../datos/cuenta-cobro"
 import { buscarClientes, useClienteViaje, useClientesTodos, useCuentasBancarias, useEncolar, useRefrescarFilas, useViaje, uuidv4 } from "../datos/hooks"
 import { SelectorCuenta } from "./SelectorCuenta"
-import { AvisosBcra, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
+import { normalizarCuit } from "@gm/formato"
+import { AvisosBcra, CuitInput, dejarAviso, dejarAvisoSinCuit, FechaInput, formatCurrency, formatDateAR, MontoInput, Pantalla, round2, SinDescargar, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 
 // Cobro en el reparto (= el sheet "Registrar Cobro" de la ficha web, ahora ruta propia).
 //  · Pedidos / comprobantes a cobrar (incluye anticipos a pedidos sin facturar): lo que
@@ -38,7 +39,7 @@ const esFila = (m: MetodoPago): m is FilaCheque => m.tipo !== "efectivo"
 const metodoPayload = (m: MetodoPago): MetodoPayload =>
   esFila(m)
     ? m.tipo === "cheque"
-      ? { tipo: "cheque", monto: m.monto, banco_emisor: m.banco, numero_cheque: m.numero_cheque, fecha_cheque: m.fecha_cheque, fecha_emision: m.fecha_emision || undefined, cuit_emisor: m.cuit_emisor || undefined, color_cheque: m.es_echeq ? "ECHEQ" : undefined }
+      ? { tipo: "cheque", monto: m.monto, banco_emisor: m.banco, numero_cheque: m.numero_cheque, fecha_cheque: m.fecha_cheque, fecha_emision: m.fecha_emision || undefined, cuit_emisor: normalizarCuit(m.cuit_emisor) ?? undefined, color_cheque: m.es_echeq ? "ECHEQ" : undefined }
       : { tipo: "transferencia", monto: m.monto, numero_comprobante: m.referencia_transferencia || undefined, cuenta_bancaria_id: m.cuenta_bancaria_id || undefined }
     : { tipo: "efectivo", monto: m.monto }
 
@@ -486,9 +487,9 @@ function CuentaAgregada({ viajeId, agregado, online, onEstado, onResumen, onQuit
       </div>
       <div className="mt-3 flex items-center gap-2">
         <span className="text-xs text-gray-500">A cuenta (sin imputar):</span>
-        <input
-          type="number" inputMode="decimal" min={0} step="0.01" value={agregado.estado.aCuenta || ""} placeholder="0"
-          onChange={(e) => onEstado(id, { ...agregado.estado, aCuenta: Math.max(0, parseFloat(e.target.value) || 0) })}
+        <MontoInput
+          valor={agregado.estado.aCuenta || 0}
+          onCambio={(n) => onEstado(id, { ...agregado.estado, aCuenta: n })}
           className="min-h-10 flex-1 rounded-lg border-2 border-gray-200 px-2 py-1 text-right font-bold"
         />
       </div>
@@ -525,8 +526,8 @@ function MetodoPagoCard({ metodo, cuentas, onChange, onRemove, onFoto }: {
       </div>
       <div>
         <label className="mb-1 block text-xs text-gray-500">Monto</label>
-        <input
-          type="number" inputMode="decimal" value={metodo.monto || ""} onChange={(e) => onChange({ monto: Number(e.target.value) })} placeholder="0.00"
+        <MontoInput
+          valor={metodo.monto || 0} onCambio={(n) => onChange({ monto: n })} placeholder="0,00"
           className={`min-h-12 w-full rounded-xl border-2 px-4 py-3 text-center text-2xl font-bold focus:border-blue-500 focus:outline-none ${fila ? clsOcr(fila, "monto", "border-gray-200") : "border-gray-200"}`}
         />
       </div>
@@ -553,7 +554,7 @@ function MetodoPagoCard({ metodo, cuentas, onChange, onRemove, onFoto }: {
               </div>
               <div>
                 <label className="mb-1 block text-xs text-gray-400">CUIT emisor</label>
-                <input type="text" inputMode="numeric" placeholder="XX-XXXXXXXX-X" value={fila.cuit_emisor} onChange={(e) => onChange({ cuit_emisor: e.target.value })} className={`min-h-11 w-full rounded-xl border-2 px-4 py-3 font-mono text-base ${clsOcr(fila, "cuit_emisor", "border-gray-200")}`} />
+                <CuitInput sinError value={fila.cuit_emisor} onChange={(v) => onChange({ cuit_emisor: v })} className={`min-h-11 w-full rounded-xl border-2 px-4 py-3 font-mono text-base ${clsOcr(fila, "cuit_emisor", "border-gray-200")}`} />
               </div>
               {!cuitValido(fila.cuit_emisor) ? (
                 <p className="text-xs font-medium text-amber-700">

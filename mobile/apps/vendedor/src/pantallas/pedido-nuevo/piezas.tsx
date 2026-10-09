@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { ORDENES, type OrdenArticulos } from "@gm/vendedor"
+import { numero, parseMonto } from "@gm/formato"
 import type { Articulo } from "../../datasets"
 import type { Precio } from "../../datos/precios"
 import { formatCurrency } from "../../ui"
@@ -32,14 +33,14 @@ export function FilaArticulo({ a, precio, enCarrito, onAbrir, onZoom, onAgregar,
   // Mientras el vendedor edita, manda lo que tipea.
   useEffect(() => {
     if (!editando) {
-      setCant(enCarrito ? String(enCarrito) : "")
+      setCant(enCarrito ? numero(enCarrito, 0, 3) : "")
       if (enCarrito) setBultos(false) // lo agregado se muestra SIEMPRE en unidades
     }
   }, [enCarrito, editando])
 
   if (precio && precio.precio <= 0) return null
   const ub = a.unidades_por_bulto || 1
-  const n = parseFloat(cant.replace(",", "."))
+  const n = parseMonto(cant) ?? NaN
   const unidades = Number.isFinite(n) && n > 0 ? (bultos ? n * ub : n) : 0
   const cambiado = !!enCarrito && unidades !== enCarrito
 

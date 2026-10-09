@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { fecha, fechaHora, redondear } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // Rendiciones del viajante — vos declarás (POST /api/viajante/rendir) y la
 // plata pasa a "en viaje a oficina" (billetera en 0); oficina confirma cuando
@@ -88,7 +90,7 @@ export default function VendedorRendicionesPage() {
   const rendir = async () => {
     if (!seleccionados.size || enviando) return
     const efectivoSel = pagos.filter((p) => seleccionados.has(p.id)).reduce((s, p) => s + (p.monto_efectivo ?? 0), 0)
-    const difDeclarado = Math.round((efectivoDeclarado - efectivoSel) * 100) / 100
+    const difDeclarado = redondear(efectivoDeclarado - efectivoSel)
     if (
       !confirm(
         `¿Rendir ${seleccionados.size} cobro${seleccionados.size === 1 ? "" : "s"} por ${formatCurrency(totalSeleccionado)}?\n\n` +
@@ -166,7 +168,7 @@ export default function VendedorRendicionesPage() {
                       {seleccionados.has(p.id) ? "☑" : "☐"} {p.cliente_nombre}
                     </p>
                     <p className="text-gray-500 text-sm">
-                      {new Date(p.fecha_pago + "T00:00:00").toLocaleDateString("es-AR")} · {p.metodo_resumen}
+                      {fecha(p.fecha_pago)} · {p.metodo_resumen}
                     </p>
                   </div>
                   <p className="font-bold text-gray-900 shrink-0 ml-2">{formatCurrency(p.monto)}</p>
@@ -180,12 +182,11 @@ export default function VendedorRendicionesPage() {
                 </div>
                 <div>
                   <label className="text-gray-700 font-bold block mb-1">💵 Efectivo contado (declarado)</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
+                  <InputMonto
+                    soloPositivos
                     value={efectivoDeclarado || ""}
-                    onChange={(e) => setEfectivoDeclarado(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-3 text-right font-bold text-lg"
+                    onChange={(n) => setEfectivoDeclarado(Math.max(0, n ?? 0))}
+                    className="h-auto w-full rounded-lg border border-gray-300 px-3 py-3 text-right font-bold text-lg"
                   />
                 </div>
                 <div>
@@ -237,7 +238,7 @@ export default function VendedorRendicionesPage() {
                     >
                       <div className="min-w-0">
                         <p className="font-bold text-gray-900">
-                          {new Date(r.fecha).toLocaleDateString("es-AR")} · {r.cantidad_pagos}{" "}
+                          {fecha(r.fecha)} · {r.cantidad_pagos}{" "}
                           {r.cantidad_pagos === 1 ? "pago" : "pagos"} · {formatCurrency(r.total)}
                         </p>
                         <p className="text-gray-500 text-sm">
@@ -272,7 +273,7 @@ export default function VendedorRendicionesPage() {
                             <div className="min-w-0">
                               <p className="font-medium text-gray-800 truncate">{p.cliente_nombre}</p>
                               <p className="text-gray-400 text-xs">
-                                {new Date(p.fecha_pago + "T00:00:00").toLocaleDateString("es-AR")} ·{" "}
+                                {fecha(p.fecha_pago)} ·{" "}
                                 {p.metodo_resumen}
                               </p>
                             </div>
@@ -288,12 +289,7 @@ export default function VendedorRendicionesPage() {
                           {r.confirmado_at && (
                             <p>
                               Confirmada por oficina el{" "}
-                              {new Date(r.confirmado_at).toLocaleString("es-AR", {
-                                day: "numeric",
-                                month: "short",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
+                              {fechaHora(r.confirmado_at)}
                             </p>
                           )}
                         </div>

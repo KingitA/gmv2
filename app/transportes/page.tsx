@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Truck, Loader2 } from "lucide-react"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { formatCuit } from "@/lib/formato"
 
 const TIPO_LABELS: Record<string, string> = {
     faltante_mercaderia: "Faltante de mercadería",
@@ -132,7 +134,7 @@ export default function TransportesPage() {
                                 {transportes.map((t) => (
                                     <TableRow key={t.id} className={!t.activo ? "opacity-50" : ""}>
                                         <TableCell className="font-medium">{t.nombre}</TableCell>
-                                        <TableCell className="font-mono text-sm">{t.cuit || "—"}</TableCell>
+                                        <TableCell className="font-mono text-sm">{formatCuit(t.cuit) || "—"}</TableCell>
                                         <TableCell>{t.telefono || "—"}</TableCell>
                                         <TableCell className={`text-right font-semibold ${Number(t.saldo) > 0 ? "text-red-600" : ""}`}>
                                             {formatCurrency(Number(t.saldo || 0))}
@@ -179,8 +181,8 @@ export default function TransportesPage() {
                                     </div>
                                     <div>
                                         <Label className="text-xs">Monto</Label>
-                                        <Input type="number" step="0.01" value={nuevoMonto || ""}
-                                            onChange={(e) => setNuevoMonto(Number.parseFloat(e.target.value) || 0)} />
+                                        <InputMonto pesos soloPositivos value={nuevoMonto || null}
+                                            onChange={(n) => setNuevoMonto(n ?? 0)} />
                                     </div>
                                 </div>
                                 <Textarea rows={2} placeholder="Descripción (opcional)" value={nuevaDesc}

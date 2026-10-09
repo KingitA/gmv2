@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Upload, Plus, X, Search, Check, FileText, MapPin } from "lucide-react"
 import type { PedidoOverrides } from "@/hooks/use-order-queue"
 import { CondicionesPedidoPanel, useCondicionesPedido } from "@/components/pedidos/CondicionesPedidoPanel"
+import { entero } from "@/lib/formato"
 
 type Cliente = {
   id: string
@@ -145,7 +146,7 @@ export function NuevoPedidoDialog({ open, onOpenChange, onAddToQueue }: Props) {
                   <div key={i} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-sm">
                     <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                     <span className="flex-1 truncate text-slate-700" title={f.name}>{f.name}</span>
-                    <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap">{(f.size / 1024).toFixed(0)} KB</span>
+                    <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap">{entero(f.size / 1024)} KB</span>
                     <button onClick={() => setFiles(p => p.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 shrink-0 ml-1">
                       <X className="h-3.5 w-3.5" />
                     </button>

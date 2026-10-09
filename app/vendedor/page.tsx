@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
+import { fecha, fechaCorta } from "@/lib/formato"
 
 interface PedidoResumen {
   id: string
@@ -230,10 +231,7 @@ export default function VendedorHomePage() {
                     </p>
                     <p className="text-gray-500 text-sm">
                       {p.numero_pedido ? `#${p.numero_pedido} · ` : ""}
-                      {new Date(p.fecha).toLocaleDateString("es-AR", {
-                        day: "numeric",
-                        month: "short",
-                      })}
+                      {fechaCorta(p.fecha)}
                     </p>
                   </div>
                   <div className="text-right shrink-0 ml-3">
@@ -270,11 +268,7 @@ export default function VendedorHomePage() {
                         📍 {z.zonas?.nombre || z.nombre}
                       </p>
                       <p className="text-gray-500 text-sm">
-                        {new Date(z.fecha).toLocaleDateString("es-AR", {
-                          weekday: "long",
-                          day: "numeric",
-                          month: "long",
-                        })}
+                        {fecha(z.fecha)}
                         {z.zonas?.descripcion ? ` · ${z.zonas.descripcion}` : ""}
                       </p>
                     </div>

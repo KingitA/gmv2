@@ -16,6 +16,7 @@ import { ArrowDownAZ, ArrowUpAZ, ArrowDown01, ArrowUp10, ListFilter, X } from "l
 import { localMatch } from "@/lib/search/local-match"
 import { filtroActivo, type FiltroColumna, type OpcionFiltro } from "@/lib/search/facetas"
 import { cn } from "@/lib/utils"
+import { numero, parseMonto } from "@/lib/formato"
 
 interface Props {
   titulo: string
@@ -56,8 +57,8 @@ export function FiltroColumnaMenu({
     setBusqueda("")
     setAgregar(false)
     setSel(filtro?.valores ? new Set(filtro.valores) : null)
-    setMin(filtro?.min != null ? String(filtro.min) : "")
-    setMax(filtro?.max != null ? String(filtro.max) : "")
+    setMin(filtro?.min != null ? numero(filtro.min, 0, 4) : "")
+    setMax(filtro?.max != null ? numero(filtro.max, 0, 4) : "")
     setTimeout(() => inputRef.current?.focus(), 30)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto])
@@ -98,8 +99,8 @@ export function FiltroColumnaMenu({
 
   const aceptar = () => {
     if (tipo === "numero") {
-      const nMin = min.trim() === "" ? null : Number(min.replace(",", "."))
-      const nMax = max.trim() === "" ? null : Number(max.replace(",", "."))
+      const nMin = min.trim() === "" ? null : parseMonto(min) ?? NaN
+      const nMax = max.trim() === "" ? null : parseMonto(max) ?? NaN
       const f: FiltroColumna = {
         min: nMin != null && !Number.isNaN(nMin) ? nMin : null,
         max: nMax != null && !Number.isNaN(nMax) ? nMax : null,
@@ -285,8 +286,7 @@ export function textoChip(titulo: string, f: FiltroColumna, opciones?: OpcionFil
     if (et.length === 0) return `${titulo}: ninguno`
     return `${titulo}: ${et.slice(0, 2).join(", ")}${et.length > 2 ? ` (+${et.length - 2})` : ""}`
   }
-  const fmt = (n: number) => n.toLocaleString("es-AR")
-  if (f.min != null && f.max != null) return `${titulo}: ${fmt(f.min)} a ${fmt(f.max)}`
-  if (f.min != null) return `${titulo}: desde ${fmt(f.min)}`
-  return `${titulo}: hasta ${fmt(f.max!)}`
+  if (f.min != null && f.max != null) return `${titulo}: ${numero(f.min, 0, 2)} a ${numero(f.max, 0, 2)}`
+  if (f.min != null) return `${titulo}: desde ${numero(f.min, 0, 2)}`
+  return `${titulo}: hasta ${numero(f.max!, 0, 2)}`
 }

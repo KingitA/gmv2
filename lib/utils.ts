@@ -1,31 +1,32 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { moneda, fecha, fechaHora, ahoraISO, hoyISO, inicioDiaAR, finDiaAR } from '@/lib/formato'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatCurrency(value: number) {
-  return new Intl.NumberFormat('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-  }).format(value)
-}
+// Las funciones de formato de abajo son nombres viejos que se mantienen porque
+// los usan cientos de pantallas: todas delegan en lib/formato (formato único
+// del sistema, ver docs/FORMATOS.md). Para código nuevo, importar de @/lib/formato.
 
-const ARGENTINA_TZ = 'America/Argentina/Buenos_Aires'
+/** "$1.000,32" (sin espacio después del $, siempre 2 decimales). */
+export function formatCurrency(value: number | string | null | undefined) {
+  return moneda(Number(value) || 0)
+}
 
 /**
  * Returns current UTC timestamp for TIMESTAMPTZ DB columns.
  */
 export function nowArgentina(): string {
-  return new Date().toISOString()
+  return ahoraISO()
 }
 
 /**
  * Returns today's date in YYYY-MM-DD format in Argentina timezone.
  */
 export function todayArgentina(): string {
-  return new Date().toLocaleDateString('en-CA', { timeZone: ARGENTINA_TZ })
+  return hoyISO()
 }
 
 /**
@@ -35,7 +36,7 @@ export function todayArgentina(): string {
  * e.g. '2026-05-15' → '2026-05-15T03:00:00.000Z'
  */
 export function startOfDayArgentina(dateStr: string): string {
-  return `${dateStr}T03:00:00.000Z`
+  return inicioDiaAR(dateStr)
 }
 
 /**
@@ -45,29 +46,15 @@ export function startOfDayArgentina(dateStr: string): string {
  * e.g. '2026-05-15' → '2026-05-16T02:59:59.999Z'
  */
 export function endOfDayArgentina(dateStr: string): string {
-  const d = new Date(dateStr + 'T03:00:00.000Z')
-  d.setUTCDate(d.getUTCDate() + 1)
-  d.setUTCMilliseconds(d.getUTCMilliseconds() - 1)
-  return d.toISOString()
+  return finDiaAR(dateStr)
 }
 
-/**
- * Formats a date string for display in Argentina locale and timezone.
- */
-export function formatDateAR(date: string | Date): string {
-  if (!date) return ''
-  const str = typeof date === 'string' ? date : date.toISOString()
-  // DATE-only strings (YYYY-MM-DD) parsed by JS as UTC midnight → shows previous day in Argentina.
-  // Using noon UTC avoids the shift entirely (12:00Z = 09:00 ART, same calendar day).
-  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(str) ? str + 'T12:00:00Z' : str)
-  return d.toLocaleDateString('es-AR', { timeZone: ARGENTINA_TZ })
+/** "09/10/2026" en hora argentina (una columna date no se corre de día). */
+export function formatDateAR(date: string | Date | null | undefined): string {
+  return fecha(date)
 }
 
-/**
- * Formats a date string with time for display in Argentina locale and timezone.
- */
-export function formatDateTimeAR(date: string | Date): string {
-  if (!date) return ''
-  return new Date(date).toLocaleString('es-AR', { timeZone: ARGENTINA_TZ })
+/** "09/10/2026 14:05" en hora argentina. */
+export function formatDateTimeAR(date: string | Date | null | undefined): string {
+  return fechaHora(date)
 }
-

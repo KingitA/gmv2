@@ -36,7 +36,7 @@ export function extractFeatures(text: string | number | null | undefined): Extra
     const measureMatch = norm.match(measureRegex);
 
     if (measureMatch) {
-        features.measure_val = parseFloat(measureMatch[1].replace(',', '.'));
+        features.measure_val = parseFloat(measureMatch[1].replace(',', '.')); // formato-ok: medida técnica de la descripción (1,5L)
         let unit = measureMatch[2];
 
         // Normalize units

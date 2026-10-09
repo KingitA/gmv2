@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { InputMonto } from "@/components/ui/input-monto"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatCurrency } from "@/lib/utils"
@@ -32,34 +33,26 @@ export function AjustarSaldoDialog({
     onOpenChange: (o: boolean) => void
     onSaved?: () => void
 }) {
-    const [blanco, setBlanco] = useState("")
-    const [negro, setNegro] = useState("")
+    const [blanco, setBlanco] = useState<number | null>(null)
+    const [negro, setNegro] = useState<number | null>(null)
     const [motivo, setMotivo] = useState("")
     const [saving, setSaving] = useState(false)
 
     useEffect(() => {
         if (cuenta && open) {
-            setBlanco(String(cuenta.saldos.BLANCO ?? 0))
-            setNegro(String(cuenta.saldos.NEGRO ?? 0))
+            setBlanco(Number(cuenta.saldos.BLANCO ?? 0))
+            setNegro(Number(cuenta.saldos.NEGRO ?? 0))
             setMotivo("")
         }
     }, [cuenta, open])
 
     if (!cuenta) return null
 
-    // Regla del sistema: el punto delimita centavos → "1000.5" = $1.000,50
-    const parse = (s: string) => {
-        const t = s.trim().replace(",", ".")
-        if (!t || !/^-?\d+(\.\d{0,2})?$/.test(t)) return null
-        const n = Number(t)
-        return isNaN(n) ? null : n
-    }
-
     async function guardar(e: React.FormEvent) {
         e.preventDefault()
         if (!cuenta) return
-        const nuevoBlanco = parse(blanco)
-        const nuevoNegro = parse(negro)
+        const nuevoBlanco = blanco
+        const nuevoNegro = negro
         if (nuevoBlanco === null || nuevoNegro === null) {
             toast.error("Saldo inválido")
             return
@@ -109,15 +102,15 @@ export function AjustarSaldoDialog({
                 <form onSubmit={guardar} className="space-y-4">
                     <div>
                         <Label>Saldo</Label>
-                        <Input inputMode="decimal" value={blanco} onChange={(e) => setBlanco(e.target.value)} />
+                        <InputMonto value={blanco} onChange={setBlanco} />
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                            Actual: {formatCurrency(Number(cuenta.saldos.BLANCO ?? 0))} · el punto son centavos (1000.5 = $1.000,50)
+                            Actual: {formatCurrency(Number(cuenta.saldos.BLANCO ?? 0))} · formato: 1.500,50
                         </p>
                     </div>
                     {Number(cuenta.saldos.NEGRO ?? 0) !== 0 && (
                         <div>
                             <Label>Saldo negro (legacy)</Label>
-                            <Input inputMode="decimal" value={negro} onChange={(e) => setNegro(e.target.value)} />
+                            <InputMonto value={negro} onChange={setNegro} />
                             <p className="mt-1 text-[11px] text-muted-foreground">
                                 Actual: {formatCurrency(Number(cuenta.saldos.NEGRO ?? 0))}
                             </p>

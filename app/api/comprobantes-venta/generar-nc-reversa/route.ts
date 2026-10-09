@@ -16,6 +16,7 @@ import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeH
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { valorDevolucion } from "@/lib/cobranzas/valor-devolucion"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
+import { cuitDigitos, cuitValido, ahoraISO } from "@/lib/formato"
 
 export async function POST(request: Request) {
   try {
@@ -172,7 +173,7 @@ export async function POST(request: Request) {
       if (cbteTipo) {
         const ultimoEnArca = await ultimoAutorizado(
           ambiente, arcaTa.token, arcaTa.sign,
-          (empresaConfig.cuit ?? '').replace(/-/g, ''),
+          cuitDigitos(empresaConfig.cuit),
           parseInt(puntoVenta, 10), cbteTipo,
         )
         if (ultimoEnArca !== numeracion.ultimo_numero) {
@@ -241,7 +242,15 @@ export async function POST(request: Request) {
           cliente_nombre: devolucion.cliente?.nombre_razon_social,
         }, { status: 422 })
       }
-      const clienteCuit = devolucion.cliente.cuit.replace(/-/g, '')
+      if (!cuitValido(devolucion.cliente.cuit)) {
+        return NextResponse.json({
+          error: `El CUIT del cliente "${devolucion.cliente?.nombre_razon_social ?? ''}" no es válido (${devolucion.cliente.cuit}): corregilo en la ficha del cliente.`,
+          error_code: 'CLIENTE_CUIT_INVALIDO',
+          cliente_id: devolucion.cliente_id,
+          cliente_nombre: devolucion.cliente?.nombre_razon_social,
+        }, { status: 422 })
+      }
+      const clienteCuit = cuitDigitos(devolucion.cliente.cuit)
       const fecha = todayArgentina().replace(/-/g, '')
 
       // RG 5616/2024: condición IVA del receptor obligatoria
@@ -309,7 +318,7 @@ export async function POST(request: Request) {
         ambiente,
         token:    ta.token,
         sign:     ta.sign,
-        cuit:     (empresaConfig.cuit ?? '').replace(/-/g, ''),
+        cuit:     cuitDigitos(empresaConfig.cuit),
         ptoVta:   parseInt(puntoVenta, 10),
         cbteTipo: TIPO_CBTE_ARCA[tipoFinal],
         cbteDesde: nuevoNumero,
@@ -432,7 +441,7 @@ export async function POST(request: Request) {
         supabase,
         {
           tipo_movimiento: 'nota_credito_venta',
-          fecha: todayArgentina(),
+          fecha: ahoraISO(), // kardex.fecha es timestamptz: "AAAA-MM-DD" a secas quedaba el día anterior
           articulo_id: item.articulo_id,
           cantidad: cantidadAbs,
           precio_lista: precioUnitNeto,

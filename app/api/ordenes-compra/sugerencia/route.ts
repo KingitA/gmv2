@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { fetchAllRows, fetchByIds } from '@/lib/supabase/fetch-all';
+import { diasEntre, finDiaAR, inicioDiaAR } from '@/lib/formato';
 
 // Trae TODAS las filas de kardex para una lista grande de articulo_ids:
 // parte los ids en tandas (URLs cortas) y pagina cada tanda (sin corte en 1000).
@@ -52,8 +53,9 @@ export async function GET(request: NextRequest) {
             .eq('tipo_movimiento', 'venta')
             .eq('signo', -1)
             .in('articulo_id', chunk)
-            .gte('fecha', fecha_desde)
-            .lte('fecha', fecha_hasta);
+            // kardex.fecha es timestamptz: días argentinos completos
+            .gte('fecha', inicioDiaAR(fecha_desde))
+            .lte('fecha', finDiaAR(fecha_hasta));
 
         if (tipo_venta === 'facturada') {
             kardexQuery = kardexQuery.not('comprobante_venta_id', 'is', null);
@@ -88,9 +90,7 @@ export async function GET(request: NextRequest) {
         .eq('activo', true), articuloIds);
 
     // 5. Calculate suggestions
-    const fechaDesdeDate = new Date(fecha_desde);
-    const fechaHastaDate = new Date(fecha_hasta);
-    const diasPeriodo = Math.max(1, Math.round((fechaHastaDate.getTime() - fechaDesdeDate.getTime()) / (1000 * 60 * 60 * 24)));
+    const diasPeriodo = Math.max(1, diasEntre(fecha_desde, fecha_hasta) || 0);
 
     const items = articulos.map((articulo: any) => {
         const totalVendido = ventasPorArticulo[articulo.id] || 0;

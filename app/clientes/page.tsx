@@ -21,6 +21,7 @@ import { HistorialImportacionesDialog } from "@/components/import/HistorialImpor
 import { History } from "lucide-react"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { moneda, entero, formatCuit } from "@/lib/formato"
 
 interface Cliente {
   id: string
@@ -455,7 +456,7 @@ export default function ClientesPage() {
                         <TableCell className="max-w-[110px] truncate text-muted-foreground 2xl:max-w-[130px]">{cliente.localidades?.zonas?.nombre || "-"}</TableCell>
                         <TableCell className="max-w-[130px] truncate text-muted-foreground 2xl:max-w-[160px]" title={(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || undefined}>{(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || "-"}</TableCell>
                         <TableCell className="hidden whitespace-nowrap 2xl:table-cell">
-                          <span className="font-semibold">{cliente.puntaje.toFixed(0)}</span>
+                          <span className="font-semibold">{entero(cliente.puntaje)}</span>
                           <span className="text-muted-foreground text-sm">/100</span>
                         </TableCell>
                         <TableCell>
@@ -514,7 +515,7 @@ export default function ClientesPage() {
             </div>
             <SheetTitle className="text-white text-xl font-bold leading-tight">{selectedCliente?.nombre_razon_social}</SheetTitle>
             <SheetDescription className="text-white/60 text-xs mt-0.5">
-              CUIT: {selectedCliente?.cuit || "—"} · Cód: {selectedCliente?.codigo_cliente || "—"}
+              CUIT: {selectedCliente?.cuit ? formatCuit(selectedCliente.cuit) : "—"} · Cód: {selectedCliente?.codigo_cliente || "—"}
             </SheetDescription>
             {(selectedCliente?.direccion || selectedCliente?.localidades?.nombre) && (
               <p className="text-white/50 text-xs mt-1">
@@ -536,7 +537,7 @@ export default function ClientesPage() {
                   sheetCC > 0 ? "text-red-200" :
                   sheetCC < 0 ? "text-green-200" : "text-white/40"
                 }`}>
-                  {sheetCC === null ? "—" : `$${Math.abs(sheetCC).toLocaleString("es-AR", { maximumFractionDigits: 0 })}`}
+                  {sheetCC === null ? "—" : moneda(Math.abs(sheetCC), 0)}
                 </p>
                 <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
                   sheetCC === null ? "text-white/40 bg-white/10" :
@@ -644,7 +645,7 @@ export default function ClientesPage() {
                           <span className="text-xs text-slate-400 ml-2">{formatDateAR(p.fecha)}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-slate-700">${(p.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span>
+                          <span className="text-sm font-bold text-slate-700">{moneda(p.total || 0, 0)}</span>
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${colorClass}`}>{p.estado}</span>
                         </div>
                       </div>

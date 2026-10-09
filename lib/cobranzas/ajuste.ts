@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { moneda } from "../formato"
 
 /**
  * AJUSTE POR REDONDEO dentro de un cobro — reglas de negocio (26/08):
@@ -31,7 +32,7 @@ const MARCA = "[AJUSTE:"
 // Con signo: positivo = faltó plata (crédito al cliente), negativo = SOBRÓ
 // (débito: el sobrante no queda a favor). Mismo tope 1% en ambos sentidos.
 export function marcaAjuste(monto: number): string {
-  return Math.abs(monto) > 0.005 ? `${MARCA}${r2(monto).toFixed(2)}]` : ""
+  return Math.abs(monto) > 0.005 ? `${MARCA}${r2(monto).toFixed(2)}]` : "" // formato-ok: marca de máquina (se parsea)
 }
 
 export function parsearMarcaAjuste(obs: string | null | undefined): number {
@@ -90,7 +91,7 @@ export async function ejecutarAjusteDePago(
     p_concepto: concepto,
     p_usuario_id: usuarioId,
   })
-  if (error) return `Ajuste por redondeo de $${r2(monto)} no se pudo asentar: ${error.message}`
+  if (error) return `Ajuste por redondeo de ${moneda(r2(monto))} no se pudo asentar: ${error.message}`
 
   if (target) {
     const nuevoSaldo = Math.max(0, r2(Number(target.saldo_pendiente) - r2(monto)))
@@ -145,7 +146,7 @@ async function ejecutarAjusteSobrante(
     p_concepto: concepto,
     p_usuario_id: usuarioId,
   })
-  if (error) return `Ajuste por sobrante de $${r2(monto)} no se pudo asentar: ${error.message}`
+  if (error) return `Ajuste por sobrante de ${moneda(r2(monto))} no se pudo asentar: ${error.message}`
 
   if (target) {
     // saldo negativo = a favor; el débito lo acerca a 0 (nunca lo pasa)

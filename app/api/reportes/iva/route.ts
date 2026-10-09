@@ -14,6 +14,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { finDiaAR, inicioDiaAR } from "@/lib/formato"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -30,8 +31,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Los parámetros 'desde' y 'hasta' son requeridos (YYYY-MM-DD)" }, { status: 400 })
     }
 
-    const desdeTs = `${desde}T00:00:00`
-    const hastaTs = `${hasta}T23:59:59`
+    // kardex.fecha es timestamptz: días argentinos completos (no UTC)
+    const desdeTs = inicioDiaAR(desde)
+    const hastaTs = finDiaAR(hasta)
 
     // ── 1. IVA Ventas (Débito Fiscal) — desde kardex, ventas con IVA discriminado ──
     const kardexVentas = await fetchAllRows(() => supabase

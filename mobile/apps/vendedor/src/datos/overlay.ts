@@ -4,12 +4,13 @@
 // devuelve las filas actualizadas (parche de réplica) y el overlay deja de hacer falta.
 
 import type { ItemOutbox } from "@gm/core"
+import { redondear } from "@gm/formato"
 import type {
   Cliente, ClienteViaje, CuentaCliente, OpBonificaciones, OpClienteEditar, OpCobroAnular, OpPedido, OpViajeEstado, OpViajeNoVa,
   PedidoVendedor, ViajeVendedor,
 } from "../datasets"
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+const r2 = (n: number) => redondear(n)
 const de = <P,>(ops: ItemOutbox[], tipo: string) => ops.filter((o) => o.tipo === tipo).map((o) => ({ op: o, p: o.payload as P }))
 /** Una operación RECHAZADA no se aplicó ni se va a aplicar: no forma parte de lo que "va a pasar". */
 const vivas = (ops: ItemOutbox[]) => ops.filter((o) => o.estado !== "rechazado")

@@ -28,6 +28,7 @@ import { todayArgentina } from "@/lib/utils"
 import { localMatch } from "@/lib/search/local-match"
 import { useUrlParams } from "@/lib/hooks/use-url-state"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { hora, moneda, sumarDiasISO } from "@/lib/formato"
 
 type Estado = { tipo: "ok" | "info" | "accion" | "esperando" | "error"; texto: string }
 
@@ -81,38 +82,21 @@ const TABS = [
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
 
-const fmt = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 2 })
-
 function horaAR(iso: string | null) {
   if (!iso) return "—"
-  try {
-    return new Date(iso).toLocaleTimeString("es-AR", {
-      timeZone: "America/Argentina/Buenos_Aires",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
-  } catch {
-    return "—"
-  }
+  return hora(iso) || "—"
 }
 
+const DIAS_LARGOS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"]
+const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+// "Jueves 9 de octubre" (iso = día de calendario "AAAA-MM-DD")
 function fechaLarga(iso: string) {
-  const d = new Date(`${iso}T12:00:00Z`)
-  const s = d.toLocaleDateString("es-AR", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  })
-  return s.charAt(0).toUpperCase() + s.slice(1)
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00Z`)
+  return `${DIAS_LARGOS[d.getUTCDay()]} ${Number(iso.slice(8, 10))} de ${MESES_LARGOS[Number(iso.slice(5, 7)) - 1]}`
 }
 
-function sumarDias(iso: string, dias: number) {
-  const d = new Date(`${iso}T12:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + dias)
-  return d.toISOString().slice(0, 10)
-}
+const sumarDias = sumarDiasISO
 
 function EstadoChip({ estado, fila, onAccion }: { estado: Estado; fila: FilaCaja; onAccion?: (f: FilaCaja) => void }) {
   const estilos: Record<Estado["tipo"], string> = {
@@ -188,11 +172,11 @@ function Fila({
           : "bg-white border-slate-200"
   const monto =
     f.entrada != null ? (
-      <span className="text-green-700" style={NUM}>+ {fmt(f.entrada)}</span>
+      <span className="text-green-700" style={NUM}>+ {moneda(f.entrada)}</span>
     ) : f.salida != null ? (
-      <span className="text-red-700" style={NUM}>− {fmt(f.salida)}</span>
+      <span className="text-red-700" style={NUM}>− {moneda(f.salida)}</span>
     ) : f.neutro != null ? (
-      <span className="text-slate-600" style={NUM}>{fmt(f.neutro)}</span>
+      <span className="text-slate-600" style={NUM}>{moneda(f.neutro)}</span>
     ) : (
       <span className="text-slate-400">—</span>
     )
@@ -595,7 +579,7 @@ export default function CajaDelDiaPage() {
               <div className="mt-2 flex items-center justify-between text-sm">
                 <span className="text-slate-500">Efectivo esperado</span>
                 <span className="font-bold" style={NUM}>
-                  $ {fmt(feed?.arqueo.efectivo_esperado ?? 0)}
+                  {moneda(feed?.arqueo.efectivo_esperado ?? 0)}
                 </span>
               </div>
               {sinImputar > 0 && (
@@ -657,19 +641,19 @@ export default function CajaDelDiaPage() {
               <div className="mt-2 flex items-center justify-between text-sm">
                 <span className="text-slate-500">Entradas</span>
                 <span className="font-bold text-green-700" style={NUM}>
-                  + {fmt(feed?.totales.entrada ?? 0)}
+                  + {moneda(feed?.totales.entrada ?? 0)}
                 </span>
               </div>
               <div className="mt-1 flex items-center justify-between text-sm">
                 <span className="text-slate-500">Salidas</span>
                 <span className="font-bold text-red-700" style={NUM}>
-                  − {fmt(feed?.totales.salida ?? 0)}
+                  − {moneda(feed?.totales.salida ?? 0)}
                 </span>
               </div>
               <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2 text-sm">
                 <span className="font-semibold text-slate-700">Neto</span>
                 <span className="font-bold" style={NUM}>
-                  {fmt((feed?.totales.entrada ?? 0) - (feed?.totales.salida ?? 0))}
+                  {moneda((feed?.totales.entrada ?? 0) - (feed?.totales.salida ?? 0))}
                 </span>
               </div>
             </div>

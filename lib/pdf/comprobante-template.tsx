@@ -8,10 +8,10 @@
 import {
   Document, Page, Text, View, StyleSheet, Font, Image,
 } from '@react-pdf/renderer'
+import { fecha as fechaAR, numero, porcentaje, formatCuit } from '@/lib/formato'
 
 // ─── Helpers ────────────────────────────────────────────
-const fmtARS = (n: number) =>
-  Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtARS = (n: number) => numero(Math.abs(n))
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
@@ -216,12 +216,8 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
 
   const nro   = comp.numero_comprobante
   const pto   = nro.includes('-') ? nro.split('-')[0] : '0001'
-  // Las fechas vienen como 'YYYY-MM-DD' (hora Argentina). Formatear por string:
-  // new Date('YYYY-MM-DD') las interpreta como UTC y retrocede un día al mostrarlas.
-  const fmtFechaISO = (s?: string | null) => {
-    const m = String(s ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-    return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
-  }
+  // 'AAAA-MM-DD' o instante → dd/mm/aaaa en hora argentina (lib/formato)
+  const fmtFechaISO = (s?: string | null) => fechaAR(s) || '—'
   const fecha  = fmtFechaISO(comp.fecha)
   const caeVto = comp.vencimiento_cae ? fmtFechaISO(comp.vencimiento_cae) : ''
 
@@ -281,7 +277,7 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
                   ? <Image style={s.emLogo} src={empresa.logo_url} />
                   : <><Text style={s.emNombre}>{empresa.razon_social}</Text><Text style={s.emRubro}>LIMPIEZA · BAZAR · PERFUMERÍA</Text></>
                 }
-                <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{empresa.cuit}</Text></View>
+                <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{formatCuit(empresa.cuit)}</Text></View>
                 <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{empresa.condicion_iva ?? 'Responsable Inscripto'}</Text></View>
                 <View style={s.emRow}><Text style={s.emLbl}>Ing. Brutos:</Text><Text style={s.emVal}>{empresa.iibb ?? 'Convenio Multilateral — SIFERE'}</Text></View>
                 {empresa.inicio_actividades && (
@@ -341,7 +337,7 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
             <View style={s.cliCol}>
               <Text style={s.cliTit}>DATOS DEL CLIENTE</Text>
               <Text style={s.cliRazon}>{cliente.nombre_razon_social}</Text>
-              <View style={s.cliRow}><Text style={s.cliLbl}>CUIT / DNI:</Text><Text style={s.cliVal}>{cliente.cuit}</Text></View>
+              <View style={s.cliRow}><Text style={s.cliLbl}>CUIT / DNI:</Text><Text style={s.cliVal}>{formatCuit(cliente.cuit)}</Text></View>
               <View style={s.cliRow}><Text style={s.cliLbl}>Cond. IVA:</Text><Text style={s.cliVal}>{cliente.condicion_iva ?? '—'}</Text></View>
               <View style={s.cliRow}><Text style={s.cliLbl}>Domicilio:</Text><Text style={s.cliVal}>{[cliente.direccion, cliente.localidad].filter(Boolean).join(', ') || '—'}</Text></View>
               <View style={s.cliRow}><Text style={s.cliLbl}>Teléfono:</Text><Text style={s.cliVal}>{cliente.telefono ?? '—'}</Text></View>
@@ -361,8 +357,8 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
           <View style={s.encCond}>
             <View style={s.condItem}><Text style={s.condLbl}>MONEDA</Text><Text style={s.condVal}>Pesos ARS</Text></View>
             {!esPresRev && <View style={s.condItem}><Text style={s.condLbl}>OPERACIÓN</Text><Text style={s.condVal}>Venta de bienes</Text></View>}
-            {d1pct > 0 && <View style={s.condItem}><Text style={s.condLbl}>BONIF. GENERAL</Text><Text style={s.condVal}>{d1pct}%</Text></View>}
-            {d2pct > 0 && <View style={s.condItem}><Text style={s.condLbl}>BONIF. VIAJANTE</Text><Text style={s.condVal}>{d2pct}%</Text></View>}
+            {d1pct > 0 && <View style={s.condItem}><Text style={s.condLbl}>BONIF. GENERAL</Text><Text style={s.condVal}>{porcentaje(d1pct)}</Text></View>}
+            {d2pct > 0 && <View style={s.condItem}><Text style={s.condLbl}>BONIF. VIAJANTE</Text><Text style={s.condVal}>{porcentaje(d2pct)}</Text></View>}
           </View>
 
           {/* ── Tabla de artículos ── */}
@@ -408,11 +404,11 @@ function ComprobantePagina({ data, preview = false }: { data: ComprobantePDFData
                 <Text style={[s.tdText, s.cCod, { fontSize: 7.5, color: '#888' }]}>{item.sku ?? ''}</Text>
                 <Text style={[s.tdBold, s.cDesc, { fontSize: 8 }]}>{item.descripcion}</Text>
                 <Text style={[s.tdText, s.cMarca, { fontSize: 7.5, color: '#666' }]}>{item.marca ?? ''}</Text>
-                <Text style={[s.tdBold, s.cCant]}>{String(Math.abs(item.cantidad))}</Text>
+                <Text style={[s.tdBold, s.cCant]}>{numero(Math.abs(item.cantidad), 0, 3)}</Text>
                 <Text style={[s.tdText, s.cLst, { color: '#777', fontSize: 8 }]}>{`$${fmtARS(lista)}`}</Text>
-                <Text style={[s.tdText, s.cOf,  { color: esBonifMerc ? '#b45309' : ofPct > 0 ? '#b45309' : '#ccc', fontSize: 8 }]}>{esBonifMerc ? '100%' : ofPct > 0 ? `${ofPct}%` : '—'}</Text>
-                <Text style={[s.tdText, s.cB1,  { color: b1pct > 0 ? '#555' : '#ccc', fontSize: 8 }]}>{b1pct > 0 && !esBonifMerc ? `${b1pct}%` : '—'}</Text>
-                <Text style={[s.tdText, s.cB2,  { color: b2pct > 0 ? '#555' : '#ccc', fontSize: 8 }]}>{b2pct > 0 && !esBonifMerc ? `${b2pct}%` : '—'}</Text>
+                <Text style={[s.tdText, s.cOf,  { color: esBonifMerc ? '#b45309' : ofPct > 0 ? '#b45309' : '#ccc', fontSize: 8 }]}>{esBonifMerc ? '100%' : ofPct > 0 ? porcentaje(ofPct) : '—'}</Text>
+                <Text style={[s.tdText, s.cB1,  { color: b1pct > 0 ? '#555' : '#ccc', fontSize: 8 }]}>{b1pct > 0 && !esBonifMerc ? porcentaje(b1pct) : '—'}</Text>
+                <Text style={[s.tdText, s.cB2,  { color: b2pct > 0 ? '#555' : '#ccc', fontSize: 8 }]}>{b2pct > 0 && !esBonifMerc ? porcentaje(b2pct) : '—'}</Text>
                 <Text style={[s.tdText, s.cNet, { fontFamily: 'Helvetica-Bold', fontSize: 8.5 }]}>{`$${fmtARS(neto)}`}</Text>
                 <Text style={[s.tdBold, s.cSub, { fontSize: 9 }]}>{`$${fmtARS(sub)}`}</Text>
               </View>

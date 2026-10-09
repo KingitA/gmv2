@@ -12,6 +12,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { createClient } from "@/lib/supabase/client"
 import { parsePriceList } from "@/lib/parsing/price_list_parser"
 import { localMatch } from "@/lib/search/local-match"
+import { InputMonto } from "@/components/ui/input-monto"
+import { moneda, numero } from "@/lib/formato"
 
 interface ImportPriceListDialogProps {
     proveedores: any[]
@@ -295,11 +297,11 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
                             </div>
                             <div className="flex items-center gap-2">
                                 <Label className="whitespace-nowrap">Descuento Global (%):</Label>
-                                <Input
-                                    type="number"
+                                <InputMonto
+                                    porciento
                                     className="w-20"
                                     value={globalDiscount}
-                                    onChange={e => setGlobalDiscount(Number(e.target.value))}
+                                    onChange={n => setGlobalDiscount(n ?? 0)}
                                 />
                             </div>
                         </div>
@@ -343,14 +345,14 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
                                                         <div className="text-blue-600 font-medium">{item.articulo_desc}</div>
                                                         <div className="text-xs">{item.articulo_sku}</div>
                                                     </TableCell>
-                                                    <TableCell className="text-right">${item.old_precio?.toFixed(2)}</TableCell>
+                                                    <TableCell className="text-right">{moneda(item.old_precio)}</TableCell>
                                                     <TableCell><ArrowRight className="h-4 w-4 text-muted-foreground" /></TableCell>
                                                     <TableCell className="text-right font-bold">
-                                                        ${getCalculatedPrice(item).toFixed(2)}
+                                                        {moneda(getCalculatedPrice(item))}
                                                     </TableCell>
                                                     <TableCell className="text-right">
                                                         <span className={getVariation(item) > 0 ? "text-red-600" : "text-green-600"}>
-                                                            {getVariation(item).toFixed(1)}%
+                                                            {numero(getVariation(item), 1)}%
                                                         </span>
                                                     </TableCell>
                                                 </TableRow>
@@ -383,7 +385,7 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
                                                         <div className="font-medium text-blue-700">{dbItem.descripcion}</div>
                                                         <div className="text-xs text-muted-foreground">SKU: {dbItem.sku}</div>
                                                         <div className="text-xs font-mono mt-1">
-                                                            Último Precio: ${dbItem.precio_compra}
+                                                            Último Precio: {moneda(dbItem.precio_compra)}
                                                         </div>
                                                     </TableCell>
                                                     <TableCell className="align-top">
@@ -417,7 +419,7 @@ export function ImportPriceListDialog({ proveedores, onImportSuccess }: ImportPr
                                                                                 <div className="font-medium truncate">{fi.original_desc}</div>
                                                                                 <div className="flex justify-between text-xs text-muted-foreground">
                                                                                     <span>{fi.original_code}</span>
-                                                                                    <span className="text-green-600 font-bold">${fi.new_precio?.toFixed(2)}</span>
+                                                                                    <span className="text-green-600 font-bold">{moneda(fi.new_precio)}</span>
                                                                                 </div>
                                                                             </div>
                                                                         ))}

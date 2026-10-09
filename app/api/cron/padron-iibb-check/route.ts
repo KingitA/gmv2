@@ -12,6 +12,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { hoyISO } from '@/lib/formato'
 
 export async function GET(request: Request) {
   try {
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
     }
 
     const supabase = createAdminClient()
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = hoyISO()
 
     const { data: jurisdicciones, error } = await supabase
       .from('jurisdicciones')

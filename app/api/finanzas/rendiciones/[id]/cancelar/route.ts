@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+import { fecha } from "@/lib/formato"
 
 /**
  * POST /api/finanzas/rendiciones/[id]/cancelar — cancela una rendición ABIERTA
@@ -58,7 +59,7 @@ export async function POST(
       .from("rendiciones")
       .update({
         estado: "cancelada",
-        observaciones: `Cancelada por oficina: sin pagos vigentes (${new Date().toISOString().slice(0, 10)})`,
+        observaciones: `Cancelada por oficina: sin pagos vigentes (${fecha(new Date())})`,
       })
       .eq("id", rendicionId)
       .eq("estado", "abierta")

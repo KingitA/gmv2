@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Plus, Pencil, Trash2, ArrowLeft, UserCheck } from "lucide-react"
 import Link from "next/link"
+import { InputMonto } from "@/components/ui/input-monto"
+import { porcentaje } from "@/lib/formato"
 
 type Vendedor = {
   id: string
@@ -101,9 +103,9 @@ export default function ViajantesPage() {
       email: null as string | null,
       emails_alternativos: null as string | null,
       telefono: formData.telefono || null,
-      comision_limpieza_bazar: Number.parseFloat(formData.comision_limpieza_bazar) || 0,
-      comision_perfumeria_0: Number.parseFloat(formData.comision_perfumeria_0) || 0,
-      comision_perfumeria_plus: Number.parseFloat(formData.comision_perfumeria_plus) || 0,
+      comision_limpieza_bazar: Number(formData.comision_limpieza_bazar) || 0, // string de máquina ("6.00"): lo arma InputMonto
+      comision_perfumeria_0: Number(formData.comision_perfumeria_0) || 0, // string de máquina ("6.00"): lo arma InputMonto
+      comision_perfumeria_plus: Number(formData.comision_perfumeria_plus) || 0, // string de máquina ("6.00"): lo arma InputMonto
       usuario_id: formData.usuario_id || null,
       activo: true,
     }
@@ -182,7 +184,7 @@ export default function ViajantesPage() {
 
   const usuarioDe = (usuarioId: string | null) => usuarios.find((u) => u.id === usuarioId) || null
 
-  const fmtPct = (n: number | null) => `${Number(n ?? 0)}%`
+  const fmtPct = (n: number | null) => porcentaje(Number(n ?? 0))
 
   return (
     <div className="min-h-screen bg-background">
@@ -246,34 +248,31 @@ export default function ViajantesPage() {
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <Label htmlFor="comision_lb">Com. Limpieza/Bazar (%)</Label>
-                      <Input
+                      <InputMonto
                         id="comision_lb"
-                        type="number"
-                        step="0.01"
+                        porciento
                         value={formData.comision_limpieza_bazar}
-                        onChange={(e) => setFormData({ ...formData, comision_limpieza_bazar: e.target.value })}
+                        onChange={(v) => setFormData({ ...formData, comision_limpieza_bazar: v == null ? "" : String(v) })}
                         required
                       />
                     </div>
                     <div>
                       <Label htmlFor="comision_p0">Com. Perfumería negro (%)</Label>
-                      <Input
+                      <InputMonto
                         id="comision_p0"
-                        type="number"
-                        step="0.01"
+                        porciento
                         value={formData.comision_perfumeria_0}
-                        onChange={(e) => setFormData({ ...formData, comision_perfumeria_0: e.target.value })}
+                        onChange={(v) => setFormData({ ...formData, comision_perfumeria_0: v == null ? "" : String(v) })}
                         required
                       />
                     </div>
                     <div>
                       <Label htmlFor="comision_pp">Com. Perfumería c/factura (%)</Label>
-                      <Input
+                      <InputMonto
                         id="comision_pp"
-                        type="number"
-                        step="0.01"
+                        porciento
                         value={formData.comision_perfumeria_plus}
-                        onChange={(e) => setFormData({ ...formData, comision_perfumeria_plus: e.target.value })}
+                        onChange={(v) => setFormData({ ...formData, comision_perfumeria_plus: v == null ? "" : String(v) })}
                         required
                       />
                     </div>

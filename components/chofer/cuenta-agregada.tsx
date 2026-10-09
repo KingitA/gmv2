@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
 import { anticiposDeSeleccion, pedidosContadoAEnviar } from "@/lib/cobranzas/reglas-cobro"
 import { formatCurrency } from "@/lib/utils"
+import { InputMonto } from "@/components/ui/input-monto"
+import { redondear } from "@/lib/formato"
 
 // Cliente AGREGADO a un cobro conjunto del chofer (web): su cuenta completa, igual que la del
 // cliente de la parada — pedidos y comprobantes seleccionables, "Incluir devoluciones como
@@ -11,7 +13,7 @@ import { formatCurrency } from "@/lib/utils"
 // servidor los reparte entre todos (lib/cobranzas/cobro-conjunto.ts). Misma pantalla en la app
 // (mobile/apps/chofer/src/pantallas/Cobrar.tsx → CuentaAgregada).
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+const r2 = (n: number) => redondear(n)
 const TIPOS_BONIFICABLES = ["FA", "FB", "FC", "PRES"]
 
 /** Lo que viaja en `clientes_extra[i]` de POST /api/chofer/viaje/[id]/cobro. */
@@ -138,7 +140,7 @@ export function CuentaAgregada({ viajeId, cliente, onResumen, onQuitar }: {
 
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">A cuenta (sin imputar):</span>
-          <input type="number" inputMode="decimal" min={0} step="0.01" value={aCuenta || ""} placeholder="0" onChange={(e) => setACuenta(Math.max(0, Number(e.target.value) || 0))} className="flex-1 border-2 border-gray-200 rounded-lg px-2 py-1 text-right font-bold" />
+          <InputMonto soloPositivos value={aCuenta || ""} placeholder="0" onChange={(n) => setACuenta(Math.max(0, n ?? 0))} className="h-auto flex-1 border-2 border-gray-200 rounded-lg px-2 py-1 text-right font-bold" />
         </div>
         <p className="text-right text-sm font-semibold">Se le cobra: <span className="text-blue-700">{formatCurrency(total)}</span></p>
       </div>

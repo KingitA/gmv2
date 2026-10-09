@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Trash2, Link as LinkIcon, AlertTriangle } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
+import { InputMonto } from "@/components/ui/input-monto"
+import { numero } from "@/lib/formato"
 import { toast } from "sonner" // Assuming you use sonner or similar for toasts
 
 interface ArticuloProveedoresDialogProps {
@@ -188,19 +190,19 @@ export function ArticuloProveedoresDialog({ articulo, trigger }: ArticuloProveed
                                             )}
                                         </TableCell>
                                         <TableCell>
-                                            <Input
-                                                type="number"
+                                            <InputMonto
+                                                decimales={3}
+                                                soloPositivos
                                                 className="w-[80px]"
                                                 placeholder={mapping.unidad_factura === "UNIDAD" ? "-" : (articulo.unidades_por_bulto?.toString() || "1")}
-                                                value={mapping.factor_conversion || ""}
-                                                onChange={(e) => {
-                                                    const val = e.target.value ? parseFloat(e.target.value) : null
+                                                value={mapping.factor_conversion || null}
+                                                onChange={(val) => {
                                                     updateMapping(mapping.proveedor_id, { factor_conversion: val })
                                                 }}
                                             />
                                             <span className="text-[10px] text-muted-foreground block mt-1">
                                                 {mapping.factor_conversion
-                                                    ? `x${mapping.factor_conversion} = UNIDAD`
+                                                    ? `x${numero(mapping.factor_conversion, 0, 3)} = UNIDAD`
                                                     : mapping.unidad_factura === "UNIDAD"
                                                         ? ""
                                                         : articulo.unidades_por_bulto

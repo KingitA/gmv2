@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { insertarKardex } from '@/lib/kardex/insertar-kardex';
 import { nowArgentina } from '@/lib/utils';
+import { hoyISO } from '@/lib/formato';
 
 // POST /api/recepciones/[id]/cerrar
 // Body: {
@@ -49,7 +50,7 @@ async function crearNCEsperada(supabase: any, params: {
         proveedor_id: params.proveedor_id,
         tipo_comprobante: 'NC',
         numero_comprobante: `ESPERADA-${Date.now()}`,
-        fecha_comprobante: nowArgentina().slice(0, 10),
+        fecha_comprobante: hoyISO(),
         total_factura_declarado: Math.round(params.monto * 100) / 100,
         total_neto: Math.round(params.monto * 100) / 100,
         total_iva: 0,

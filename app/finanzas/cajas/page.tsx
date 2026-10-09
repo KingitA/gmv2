@@ -19,6 +19,8 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { fechaHora, moneda } from "@/lib/formato"
 
 interface Cuenta {
   cuenta_tipo: string
@@ -43,8 +45,7 @@ interface Movimiento {
   saldo_despues: number | null
 }
 
-const fmt = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
+const fmt = (n: number) => moneda(n)
 
 const GRUPOS: { key: Cuenta["grupo"]; label: string; icon: any }[] = [
   { key: "EFECTIVO", label: "Efectivo", icon: Banknote },
@@ -136,8 +137,8 @@ export default function CajasPage() {
           origen_id: origen.cuenta_id,
           destino_tipo: destino.cuenta_tipo,
           destino_id: destino.cuenta_id,
-          monto: parseFloat(tMonto),
-          gastos: parseFloat(tGastos) || 0,
+          monto: Number(tMonto),
+          gastos: Number(tGastos) || 0,
           color: tColor,
           concepto: tConcepto || `${origen.nombre} → ${destino.nombre}`,
         }),
@@ -173,7 +174,7 @@ export default function CajasPage() {
           origen_tipo: origen.cuenta_tipo,
           origen_id: origen.cuenta_id,
           categoria: eCategoria,
-          monto: parseFloat(eMonto),
+          monto: Number(eMonto),
           color: eColor,
           concepto: eConcepto,
         }),
@@ -309,11 +310,11 @@ export default function CajasPage() {
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label>Monto</Label>
-                <Input type="number" min="0" value={tMonto} onChange={(e) => setTMonto(e.target.value)} />
+                <InputMonto soloPositivos value={tMonto} onChange={(n) => setTMonto(n == null ? "" : String(n))} />
               </div>
               <div>
                 <Label>Gastos bancarios</Label>
-                <Input type="number" min="0" value={tGastos} onChange={(e) => setTGastos(e.target.value)} placeholder="0" />
+                <InputMonto soloPositivos value={tGastos} onChange={(n) => setTGastos(n == null ? "" : String(n))} placeholder="0" />
               </div>
               <div>
                 <Label>Color</Label>
@@ -332,7 +333,7 @@ export default function CajasPage() {
             </div>
             {tMonto && tGastos && (
               <p className="text-sm text-muted-foreground">
-                El destino recibe {fmt(Math.max(0, parseFloat(tMonto) - (parseFloat(tGastos) || 0)))} (neto de gastos).
+                El destino recibe {fmt(Math.max(0, Number(tMonto) - (Number(tGastos) || 0)))} (neto de gastos).
               </p>
             )}
           </div>
@@ -379,7 +380,7 @@ export default function CajasPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Monto</Label>
-                <Input type="number" min="0" value={eMonto} onChange={(e) => setEMonto(e.target.value)} />
+                <InputMonto soloPositivos value={eMonto} onChange={(n) => setEMonto(n == null ? "" : String(n))} />
               </div>
               <div>
                 <Label>Color</Label>
@@ -423,7 +424,7 @@ export default function CajasPage() {
                   <div className="min-w-0">
                     <p className="font-medium truncate">{m.concepto}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(m.created_at).toLocaleString("es-AR")} · {m.tipo_movimiento}
+                      {fechaHora(m.created_at)} · {m.tipo_movimiento}
                       {Number(m.gastos) > 0 && ` · gastos ${fmt(Number(m.gastos))}`}
                       {!m.verificado && " · sin verificar"}
                     </p>

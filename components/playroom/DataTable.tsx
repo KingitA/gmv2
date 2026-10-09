@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { ChevronUp, ChevronDown, ChevronsUpDown, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 import { exportToCSV } from '@/lib/playroom/exporters'
+import { entero } from "@/lib/formato"
 
 export interface Column<T> {
   key: string
@@ -81,7 +82,7 @@ export default function DataTable<T extends Record<string, any>>({
         style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
       >
         <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          {loading ? '...' : `${sorted.length.toLocaleString('es-AR')} registros`}
+          {loading ? '...' : `${entero(sorted.length)} registros`}
         </p>
         <button
           onClick={handleExport}
@@ -199,7 +200,7 @@ export default function DataTable<T extends Record<string, any>>({
           style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
         >
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>
-            Pág. {page} de {totalPages} · {sorted.length.toLocaleString('es-AR')} registros
+            Pág. {page} de {totalPages} · {entero(sorted.length)} registros
           </p>
           <div className="flex items-center gap-1">
             <button

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { accesoViajeChofer } from "@/lib/viajes/chofer"
 import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
+import { moneda } from "@/lib/formato"
 
 const ESTADOS = ["pendiente", "entregado", "entregado_parcial", "no_entregado", "solo_cobro"]
 
@@ -63,7 +64,7 @@ export async function PATCH(
     if (!parada.cobro_cumplido && !motivoCobro) {
       return NextResponse.json(
         {
-          error: `Oficina pidió cobrar sí o sí $${parada.minimo_exigido.toLocaleString("es-AR")} y hay cobrado $${parada.cobrado.toLocaleString("es-AR")}: contá por qué no se cobró`,
+          error: `Oficina pidió cobrar sí o sí ${moneda(parada.minimo_exigido)} y hay cobrado ${moneda(parada.cobrado)}: contá por qué no se cobró`,
           falta: "motivo_no_cobro",
         },
         { status: 400 },

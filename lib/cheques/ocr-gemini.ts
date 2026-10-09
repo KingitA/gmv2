@@ -85,6 +85,8 @@ TRANSFERENCIA (tipo: "transferencia"):
 DEPÓSITO (tipo: "deposito", puede tener varios ítems):
 - fecha_deposito (YYYY-MM-DD) e items: { tipo_item: "efectivo", monto, fecha_deposito_efectivo, nro_comprobante_deposito_ef } o { tipo_item: "cheque", monto, banco_emisor, numero_cheque, fecha_pago_cheque, numero_comprobante_deposito }.
 
+FORMATO: los documentos son de Argentina: las fechas vienen dd/mm/aaaa (día primero, NUNCA mes/día) y los montos 1.234,56 (punto = miles, coma = decimales). Devolvé las fechas como AAAA-MM-DD y los montos como número JSON con punto decimal y sin separador de miles (ej: 1234.56).
+
 Los montos SIEMPRE numéricos. Devolvé solo el JSON { "resultados": [ ... ] }.`
 
 /** Segunda pasada, solo texto: CUIT y fechas del cheque, con foco. */

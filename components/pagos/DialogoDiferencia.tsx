@@ -8,9 +8,9 @@
 //  · FALTA plata: pasar como ajuste (crédito, comprobante saldado) o dejar saldo.
 
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
+import { moneda } from "@/lib/formato"
 
 const NUM: React.CSSProperties = { fontVariantNumeric: "tabular-nums" }
-const fmt = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 function Overlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   return (
@@ -42,7 +42,7 @@ export function DialogoSobra({
   return (
     <Overlay onClose={onCancelar}>
       <h3 className="text-base font-bold text-slate-900">
-        Sobran <span style={NUM}>$ {fmt(monto)}</span>
+        Sobran <span style={NUM}>{moneda(monto)}</span>
       </h3>
       <p className="mt-1 text-xs text-slate-500">
         Lo entregado{conContado ? " (más la NC del 10%)" : ""} supera lo seleccionado. ¿Qué hacemos con el resto?
@@ -55,12 +55,12 @@ export function DialogoSobra({
           >
             Ajustar por redondeo — no queda a favor
             <span className="block text-[11px] font-normal opacity-80">
-              La cuenta queda en cero; los $ {fmt(monto)} se asientan como ajuste (débito)
+              La cuenta queda en cero; los {moneda(monto)} se asientan como ajuste (débito)
             </span>
           </button>
         ) : (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Supera el tope de ajuste por redondeo (1% de lo seleccionado = $ {fmt(tope)}).
+            Supera el tope de ajuste por redondeo (1% de lo seleccionado = {moneda(tope)}).
             Un sobrante así de grande queda a cuenta del cliente (o revisá los montos).
           </p>
         )}
@@ -70,7 +70,7 @@ export function DialogoSobra({
         >
           Dejar a cuenta
           <span className="block text-[11px] font-normal text-slate-400">
-            Los $ {fmt(monto)} quedan a favor del cliente para su próxima compra
+            Los {moneda(monto)} quedan a favor del cliente para su próxima compra
           </span>
         </button>
         <button onClick={onCancelar} className="w-full rounded-lg px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50">
@@ -100,7 +100,7 @@ export function DialogoFalta({
   return (
     <Overlay onClose={onCancelar}>
       <h3 className="text-base font-bold text-slate-900">
-        Falta pagar <span style={NUM}>$ {fmt(monto)}</span>
+        Falta pagar <span style={NUM}>{moneda(monto)}</span>
       </h3>
       <p className="mt-1 text-xs text-slate-500">
         Lo entregado{conContado ? " (más la NC del 10%)" : ""} no llega a cubrir lo seleccionado. ¿Qué hacemos con la diferencia?
@@ -113,12 +113,12 @@ export function DialogoFalta({
           >
             Pasar como ajuste por redondeo
             <span className="block text-[11px] font-normal opacity-80">
-              El comprobante queda saldado; los $ {fmt(monto)} se acreditan como ajuste en la cuenta
+              El comprobante queda saldado; los {moneda(monto)} se acreditan como ajuste en la cuenta
             </span>
           </button>
         ) : (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Supera el tope de ajuste por redondeo (1% de lo seleccionado = $ {fmt(tope)}).
+            Supera el tope de ajuste por redondeo (1% de lo seleccionado = {moneda(tope)}).
             Perdonar más que eso es una decisión de cuentas corrientes: dejá el saldo pendiente y resolvelo desde la cuenta del cliente.
           </p>
         )}
@@ -128,7 +128,7 @@ export function DialogoFalta({
         >
           Dejar saldo pendiente
           <span className="block text-[11px] font-normal text-slate-400">
-            El comprobante queda parcial, con $ {fmt(monto)} por cobrar
+            El comprobante queda parcial, con {moneda(monto)} por cobrar
           </span>
         </button>
         <button onClick={onCancelar} className="w-full rounded-lg px-4 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-50">

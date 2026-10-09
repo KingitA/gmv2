@@ -9,6 +9,7 @@ import { Check, Loader2, Link2 } from "lucide-react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { formatCurrency } from "@/lib/utils"
+import { porcentaje } from "@/lib/formato"
 
 // Líneas de comprobantes cuyo OCR no matcheó (o matcheó con dudas) contra el
 // catálogo. Confirmar una línea enseña la equivalencia al sistema
@@ -115,7 +116,7 @@ export function RevisarMatches({
                                 </div>
                                 {row.match_estado === "sugerido" && row.match_score != null && (
                                     <Badge variant="outline" className="shrink-0">
-                                        Sugerencia {(Number(row.match_score) * 100).toFixed(0)}%
+                                        Sugerencia {porcentaje(Number(row.match_score) * 100, 0)}
                                     </Badge>
                                 )}
                             </div>

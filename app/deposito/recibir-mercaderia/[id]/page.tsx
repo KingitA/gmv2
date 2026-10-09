@@ -6,6 +6,7 @@ import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
 import { useParams, useRouter } from "next/navigation"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
+import { numero, parseMonto, moneda } from "@/lib/formato"
 
 interface RecepcionItem {
   id: string; articulo_id: string; cantidad_oc: number; cantidad_fisica: number
@@ -145,7 +146,7 @@ export default function RecibirMercaderiaDetallePage() {
   const seleccionarDeBusqueda = (art:ArticuloFound) => {
     const item = items.find(i=>i.articulo_id===art.id)
     setArticuloSel(art); setItemActivo(item||null)
-    setCantidadInput(item?String(item.cantidad_oc):"")
+    setCantidadInput(item?numero(item.cantidad_oc, 0, 3):"")
     setBusqueda(""); setResultados([]); setScannerOpen(false)
   }
 
@@ -158,7 +159,7 @@ export default function RecibirMercaderiaDetallePage() {
       const item = items.find(i=>i.articulo_id===art.id)
       scanOk()
       setArticuloSel(art); setItemActivo(item||null)
-      setCantidadInput(item?String(item.cantidad_oc):"")
+      setCantidadInput(item?numero(item.cantidad_oc, 0, 3):"")
       setBusqueda(""); setResultados([]); setScannerOpen(false)
     } catch { scanError(); showToast("Error de conexión", "err") }
   }, [items])
@@ -169,7 +170,7 @@ export default function RecibirMercaderiaDetallePage() {
     if (!articuloSel||!recepcion) return
     setSaving(true)
     try {
-      const cantidad = esFaltante ? 0 : parseFloat(cantidadInput)||0
+      const cantidad = esFaltante ? 0 : parseMonto(cantidadInput)||0
       await patchItem(articuloSel.id, esFaltante ? 0 : cantidad)
       setItems(prev => {
         const existe = prev.some(i=>i.articulo_id===articuloSel.id)
@@ -241,8 +242,8 @@ export default function RecibirMercaderiaDetallePage() {
 
   const guardarConformidad = async (estado: "conforme"|"no_conforme"|"omitida") => {
     if (!recepcion) return
-    const decl = parseInt(bultosDeclarados)||0
-    const recib = parseInt(bultosRecibidos)||0
+    const decl = Number(bultosDeclarados)||0
+    const recib = Number(bultosRecibidos)||0
     if (estado !== "omitida") {
       if (decl <= 0 || recib < 0) { showToast("Cargá los bultos del remito y los contados","err"); return }
       if (estado === "no_conforme" && !bultosObs.trim()) { showToast("Si faltan bultos, la observación es obligatoria","err"); return }
@@ -328,8 +329,8 @@ export default function RecibirMercaderiaDetallePage() {
 
   // ── CONTROL DE BULTOS (paso previo al escaneo, opcional con aviso) ──
   if (necesitaControlBultos) {
-    const decl = parseInt(bultosDeclarados)||0
-    const recib = parseInt(bultosRecibidos)||0
+    const decl = Number(bultosDeclarados)||0
+    const recib = Number(bultosRecibidos)||0
     const difieren = decl > 0 && bultosRecibidos !== "" && decl !== recib
     return (
       <div style={{ background:C.bg, minHeight:"calc(100dvh - 64px)", padding:20, display:"flex", flexDirection:"column", gap:14 }}>
@@ -354,12 +355,12 @@ export default function RecibirMercaderiaDetallePage() {
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
             <div>
               <div style={{ color:C.sub, fontSize:14, marginBottom:6 }}>Bultos según remito</div>
-              <input type="number" inputMode="numeric" value={bultosDeclarados} onChange={e=>setBultosDeclarados(e.target.value)}
+              <input type="text" inputMode="numeric" autoComplete="off" value={bultosDeclarados} onChange={e=>setBultosDeclarados(e.target.value.replace(/\D/g, ""))}
                 style={{ width:"100%", background:C.bg, color:C.text, fontSize:32, fontWeight:800, textAlign:"center", borderRadius:12, padding:"12px", border:`2px solid ${C.border}`, outline:"none", boxSizing:"border-box" }} />
             </div>
             <div>
               <div style={{ color:C.sub, fontSize:14, marginBottom:6 }}>Bultos contados</div>
-              <input type="number" inputMode="numeric" value={bultosRecibidos} onChange={e=>setBultosRecibidos(e.target.value)}
+              <input type="text" inputMode="numeric" autoComplete="off" value={bultosRecibidos} onChange={e=>setBultosRecibidos(e.target.value.replace(/\D/g, ""))}
                 style={{ width:"100%", background:difieren?C.redL:C.bg, color:difieren?C.red:C.text, fontSize:32, fontWeight:800, textAlign:"center", borderRadius:12, padding:"12px", border:`2px solid ${difieren?C.redB:C.border}`, outline:"none", boxSizing:"border-box" }} />
             </div>
           </div>
@@ -414,7 +415,7 @@ export default function RecibirMercaderiaDetallePage() {
       )}
       <div style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:20, padding:18 }}>
         <div style={{ color:C.sub, fontSize:14, marginBottom:10 }}>Cantidad recibida físicamente:</div>
-        <input type="number" inputMode="decimal" value={cantidadInput} onChange={e=>setCantidadInput(e.target.value)} autoFocus
+        <input type="text" inputMode="decimal" autoComplete="off" value={cantidadInput} onChange={e=>setCantidadInput(e.target.value.replace(/[^\d.,]/g, ""))} autoFocus
           style={{ width:"100%", background:C.bg, color:C.text, fontSize:48, fontWeight:800, textAlign:"center", borderRadius:16, padding:"16px", border:`2px solid ${C.border}`, outline:"none", boxSizing:"border-box" }} />
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
@@ -477,7 +478,7 @@ export default function RecibirMercaderiaDetallePage() {
                     {doc.tipo_documento}
                   </span>
                   {nro&&<span style={{ fontSize:11, color:C.sub }}>{nro}</span>}
-                  {total&&<span style={{ fontSize:11, color:C.sub }}>${Number(total).toFixed(2)}</span>}
+                  {total&&<span style={{ fontSize:11, color:C.sub }}>{moneda(parseMonto(total))}</span>}
                   {doc.procesado&&<span style={{ fontSize:11, background:"#dcfce7", color:"#15803d", padding:"2px 8px", borderRadius:999, fontWeight:600 }}>OCR ✓</span>}
                 </div>
               </div>

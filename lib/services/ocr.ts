@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { parseFecha, parseMonto } from "@/lib/formato";
 
 // Native fetch to Gemini REST API — no SDK dependency, immune to SDK deprecations
 const GEMINI_MODEL = "gemini-2.5-flash";
@@ -102,6 +103,7 @@ TAREA:
 Extraé TODA la información del documento: encabezado del comprobante Y los ítems de detalle.
 Priorizá exactitud en códigos, descripciones y valores monetarios.
 Si hay precios por bulto/pack y precios unitarios, extraé ambos.
+Los documentos son de Argentina: las fechas vienen dd/mm/aaaa (día primero, NUNCA mes/día) y los montos 1.234,56 (punto = miles, coma = decimales). Devolvé las fechas como AAAA-MM-DD y los montos como número JSON con punto decimal y sin separador de miles (ej: 1234.56).
 
 FORMATO JSON:
 {
@@ -163,9 +165,10 @@ FORMATO JSON:
         const jsonStr = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
         const parsedData = JSON.parse(jsonStr || '{}');
 
+        const saneado = sanearOcr(parsedData);
         return {
-            items: parsedData.items || [],
-            comprobante: parsedData.comprobante || null,
+            items: saneado.items,
+            comprobante: saneado.comprobante,
             raw_text: text,
             metadata: { model: GEMINI_MODEL }
         };
@@ -256,7 +259,34 @@ export async function parseExcel(file: File): Promise<ParseResult> {
 function parseNumber(val: any): number {
     if (typeof val === 'number') return val;
     if (!val) return 0;
-    const str = String(val).replace(/[^0-9.,]/g, '').replace(/,/g, '.');
-    const num = parseFloat(str);
-    return isNaN(num) ? 0 : num;
+    // Formato argentino ("1.500" = mil quinientos, "12,5" = doce y medio); si la celda
+    // trae texto alrededor ("12 un"), se reintenta solo con los números.
+    return parseMonto(String(val)) ?? parseMonto(String(val).replace(/[^0-9.,-]/g, '')) ?? 0;
+}
+
+/** La IA a veces devuelve montos/fechas como texto: todo pasa por parseMonto / parseFecha. */
+function sanearOcr(parsed: any): any {
+    const num = (v: any) => (v == null || v === '' ? null : parseMonto(v));
+    const items = Array.isArray(parsed?.items) ? parsed.items.map((it: any) => ({
+        ...it,
+        cantidad: num(it?.cantidad),
+        precio_unitario: num(it?.precio_unitario),
+        precio_bulto: num(it?.precio_bulto),
+        unidades_por_bulto: num(it?.unidades_por_bulto),
+        descuento: num(it?.descuento),
+        total_linea: num(it?.total_linea),
+    })) : [];
+    const c = parsed?.comprobante;
+    const comprobante = c ? {
+        ...c,
+        fecha: parseFecha(c.fecha),
+        total_factura: num(c.total_factura),
+        subtotal_neto: num(c.subtotal_neto),
+        total_iva: num(c.total_iva),
+        percepcion_iva: num(c.percepcion_iva),
+        percepcion_iibb: num(c.percepcion_iibb),
+        retencion_ganancias: num(c.retencion_ganancias),
+        descuento_global: num(c.descuento_global),
+    } : null;
+    return { items, comprobante };
 }

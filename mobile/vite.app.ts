@@ -30,6 +30,8 @@ export function configApp(appDir: string, puerto: number): UserConfigFnObject {
           // Reglas puras del cobro en la calle (10% solo a lo seleccionado, tope de ajuste): mismas que el servidor
           "@gm/cobro/conjunto": resolve(RAIZ_REPO, "lib/cobranzas/cobro-conjunto.ts"),
           "@gm/cobro": resolve(RAIZ_REPO, "lib/cobranzas/reglas-cobro.ts"),
+          // Formatos únicos (fecha dd/mm/aaaa GMT-3, $1.000,32, CUIT xx-xxxxxxxx-x): los mismos que el ERP
+          "@gm/formato": resolve(RAIZ_REPO, "lib/formato/index.ts"),
         },
       },
       define: {

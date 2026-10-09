@@ -23,6 +23,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { entero } from "@/lib/formato"
 
 export default function CargarArticulosPage() {
   const supabase = createClient()
@@ -506,95 +508,90 @@ export default function CargarArticulosPage() {
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Input
-                      type="number"
-                      min="0"
+                    <InputMonto
+                      decimales={0}
+                      soloPositivos
                       value={item.cantidad}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         actualizarArticulo(
                           articulosIngresados.indexOf(item),
                           "cantidad",
-                          Number.parseFloat(e.target.value) || 0,
+                          v ?? 0,
                         )
                       }
                       className="w-full"
                     />
                     {item.tipo_cantidad === "bulto" && item.cantidad > 0 && (
                       <div className="text-xs text-muted-foreground mt-1">
-                        = {item.cantidad * item.articulo.unidades_por_bulto} unidades
+                        = {entero(item.cantidad * item.articulo.unidades_por_bulto)} unidades
                       </div>
                     )}
                   </TableCell>
                   <TableCell>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <InputMonto
+                      soloPositivos
                       value={item.precio_unitario}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         actualizarArticulo(
                           articulosIngresados.indexOf(item),
                           "precio_unitario",
-                          Number.parseFloat(e.target.value) || 0,
+                          v ?? 0,
                         )
                       }
                       className="w-full"
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <InputMonto
+                      soloPositivos
                       value={item.descuento1}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         actualizarArticulo(
                           articulosIngresados.indexOf(item),
                           "descuento1",
-                          Number.parseFloat(e.target.value) || 0,
+                          v ?? 0,
                         )
                       }
                       className="w-full"
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <InputMonto
+                      soloPositivos
                       value={item.descuento2}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         actualizarArticulo(
                           articulosIngresados.indexOf(item),
                           "descuento2",
-                          Number.parseFloat(e.target.value) || 0,
+                          v ?? 0,
                         )
                       }
                       className="w-full"
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <InputMonto
+                      soloPositivos
                       value={item.descuento3}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         actualizarArticulo(
                           articulosIngresados.indexOf(item),
                           "descuento3",
-                          Number.parseFloat(e.target.value) || 0,
+                          v ?? 0,
                         )
                       }
                       className="w-full"
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
-                      type="number"
-                      step="0.01"
+                    <InputMonto
+                      soloPositivos
                       value={item.descuento4}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         actualizarArticulo(
                           articulosIngresados.indexOf(item),
                           "descuento4",
-                          Number.parseFloat(e.target.value) || 0,
+                          v ?? 0,
                         )
                       }
                       className="w-full"
@@ -679,17 +676,17 @@ export default function CargarArticulosPage() {
               </div>
               <div>
                 <Label>Cantidad</Label>
-                <Input
-                  type="number"
-                  min="1"
+                <InputMonto
+                  decimales={0}
+                  soloPositivos
                   value={cantidadModal}
-                  onChange={(e) => setCantidadModal(Number.parseInt(e.target.value) || 1)}
+                  onChange={(v) => setCantidadModal((Math.trunc(v ?? 0) || 1))}
                   autoFocus
                   onKeyDown={(e) => e.key === "Enter" && confirmarAgregarArticulo()}
                 />
                 {tipoModal === "bulto" && (
                   <div className="text-xs text-muted-foreground mt-1">
-                    = {cantidadModal * articuloSeleccionado.unidades_por_bulto} unidades
+                    = {entero(cantidadModal * articuloSeleccionado.unidades_por_bulto)} unidades
                   </div>
                 )}
               </div>
@@ -735,67 +732,53 @@ export default function CargarArticulosPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Unidades por Bulto</Label>
-                <Input
-                  type="number"
-                  min="1"
+                <InputMonto
+                  decimales={0}
+                  soloPositivos
                   value={nuevoUnidadesPorBulto}
-                  onChange={(e) => setNuevoUnidadesPorBulto(Number.parseInt(e.target.value) || 1)}
+                  onChange={(v) => setNuevoUnidadesPorBulto((Math.trunc(v ?? 0) || 1))}
                 />
               </div>
               <div>
                 <Label>Precio de Compra</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <InputMonto
+                  soloPositivos
                   value={nuevoPrecio}
-                  onChange={(e) => setNuevoPrecio(Number.parseFloat(e.target.value) || 0)}
+                  onChange={(v) => setNuevoPrecio(v ?? 0)}
                 />
               </div>
             </div>
             <div className="grid grid-cols-4 gap-4">
               <div>
                 <Label>Descuento 1 (%)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
+                <InputMonto
+                  soloPositivos
                   value={nuevoDescuento1}
-                  onChange={(e) => setNuevoDescuento1(Number.parseFloat(e.target.value) || 0)}
+                  onChange={(v) => setNuevoDescuento1(v ?? 0)}
                 />
               </div>
               <div>
                 <Label>Descuento 2 (%)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
+                <InputMonto
+                  soloPositivos
                   value={nuevoDescuento2}
-                  onChange={(e) => setNuevoDescuento2(Number.parseFloat(e.target.value) || 0)}
+                  onChange={(v) => setNuevoDescuento2(v ?? 0)}
                 />
               </div>
               <div>
                 <Label>Descuento 3 (%)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
+                <InputMonto
+                  soloPositivos
                   value={nuevoDescuento3}
-                  onChange={(e) => setNuevoDescuento3(Number.parseFloat(e.target.value) || 0)}
+                  onChange={(v) => setNuevoDescuento3(v ?? 0)}
                 />
               </div>
               <div>
                 <Label>Descuento 4 (%)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
+                <InputMonto
+                  soloPositivos
                   value={nuevoDescuento4}
-                  onChange={(e) => setNuevoDescuento4(Number.parseFloat(e.target.value) || 0)}
+                  onChange={(v) => setNuevoDescuento4(v ?? 0)}
                 />
               </div>
             </div>

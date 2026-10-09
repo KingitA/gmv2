@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { normalizeText, extractFeatures } from './normalizer';
+import { porcentaje } from '../formato';
 import { MatchCandidate, MatchResult, ImportItemRaw, MatchSignal } from './types';
 
 const getSupabase = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
@@ -225,7 +226,7 @@ export class MatchingEngine {
                     sku_name: art.descripcion,
                     score: r.score,
                     method,
-                    signals: [{ type: 'embedding_score' as const, score_impact: 0, description: `${signalLabel}: ${(r.score * 100).toFixed(1)}%` }],
+                    signals: [{ type: 'embedding_score' as const, score_impact: 0, description: `${signalLabel}: ${porcentaje(r.score * 100, 1)}` }],
                     confidence_level: 'low' as const,
                 };
             });

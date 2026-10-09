@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { nowArgentina } from '@/lib/utils';
+import { fechaISO, mediodiaAR, sumarDiasISO } from '@/lib/formato';
 
 export async function POST(
     request: NextRequest,
@@ -53,7 +54,8 @@ export async function POST(
                     .update({
                         estado: 'confirmado',
                         comprobante_compra_id: comprobante_id,
-                        fecha: comprobante.fecha_comprobante || nowArgentina(),
+                        // kardex.fecha es timestamptz: del comprobante solo se sabe el día
+                        fecha: comprobante.fecha_comprobante ? mediodiaAR(comprobante.fecha_comprobante) : nowArgentina(),
                         color_dinero: esAdquisicion ? 'NEGRO' : 'BLANCO',
                     })
                     .in('id', idsAConfirmar);
@@ -129,7 +131,7 @@ export async function POST(
                 referencia_tipo: 'comprobante_compra',
                 numero_comprobante: comprobante.numero_comprobante,
                 tipo_comprobante: comprobante.tipo_comprobante,
-                fecha: comprobante.fecha_comprobante || nowArgentina(),
+                fecha: comprobante.fecha_comprobante ? mediodiaAR(comprobante.fecha_comprobante) : nowArgentina(),
             }).select('id').single();
             ccMovId = ccMov?.id || null;
         }
@@ -182,14 +184,12 @@ export async function POST(
                             .limit(1)
                             .maybeSingle();
                         const f = (rec as any)?.fecha_fin || (rec as any)?.fecha_inicio || (rec as any)?.created_at;
-                        if (f) fechaBase = String(f).slice(0, 10);
+                        if (f) fechaBase = fechaISO(f) || null; // timestamptz → día argentino
                     }
                     const dias = Number(cfg.dias ?? p.dias_vencimiento ?? 0);
                     // cfg.dias explícito admite 0 (contado); sin config, exige > 0
                     if (fechaBase && (cfg.dias != null || dias > 0)) {
-                        const base = new Date(fechaBase + 'T00:00:00');
-                        base.setDate(base.getDate() + dias);
-                        fechaVencimiento = base.toISOString().slice(0, 10);
+                        fechaVencimiento = sumarDiasISO(fechaBase, dias);
                         await supabase.from('comprobantes_compra')
                             .update({ fecha_vencimiento: fechaVencimiento })
                             .eq('id', comprobante_id);
@@ -197,9 +197,7 @@ export async function POST(
                 }
                 // Cheques con plazo: validez = vencimiento + plazo del cheque
                 if (fechaVencimiento && formaPago === 'cheque' && Number(cfg.plazoCheque ?? 0) > 0) {
-                    const v = new Date(fechaVencimiento + 'T00:00:00');
-                    v.setDate(v.getDate() + Number(cfg.plazoCheque));
-                    fechaValidez = v.toISOString().slice(0, 10);
+                    fechaValidez = sumarDiasISO(String(fechaVencimiento).slice(0, 10), Number(cfg.plazoCheque));
                 }
             }
 

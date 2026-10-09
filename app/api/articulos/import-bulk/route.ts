@@ -17,6 +17,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { guardarHistorialImportacion } from "@/lib/import/guardar-historial"
+import { parseMonto } from "@/lib/formato"
 
 export interface ArticleUpdateRow {
   sku: string
@@ -73,7 +74,7 @@ function parseDescuentos(str: string | undefined): number[] {
   if (!str) return []
   return str
     .split("+")
-    .map(s => parseFloat(s.trim()))
+    .map(s => parseMonto(s.trim()) ?? NaN) // "2,5+10" → [2.5, 10]
     .filter(n => !isNaN(n) && n > 0)
 }
 
@@ -189,8 +190,8 @@ export async function POST(request: NextRequest) {
         // Comparar: solo agregar al diff si cambió. Los numéricos se comparan
         // como número con tolerancia — el Excel arrastra ruido de decimales
         // (1309.4467 vs 1309.446690552) que NO es un cambio real.
-        const na = valorActual === null || valorActual === undefined ? NaN : parseFloat(String(valorActual))
-        const nb = valorNuevo === null || valorNuevo === undefined ? NaN : parseFloat(String(valorNuevo))
+        const na = valorActual === null || valorActual === undefined ? NaN : parseFloat(String(valorActual)) // formato-ok: comparación de valores de máquina
+        const nb = valorNuevo === null || valorNuevo === undefined ? NaN : parseFloat(String(valorNuevo)) // formato-ok: comparación de valores de máquina
         const ambosNumericos = !isNaN(na) && !isNaN(nb)
           && /^-?\d+(\.\d+)?$/.test(String(valorActual).trim())
           && /^-?\d+(\.\d+)?$/.test(String(valorNuevo).trim())

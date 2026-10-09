@@ -16,6 +16,8 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { RevisarMatches } from "./revisar-matches"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 
 const TIPO_DOC_LABELS: Record<string, string> = {
   factura: 'Factura', remito: 'Remito', adquisicion: 'Adquisición',
@@ -240,11 +242,11 @@ export default function CargarComprobantesPage() {
 
   const iniciarEdicion = (comp: any) => {
     setEditandoId(comp.id)
-    setEditNeto(comp.total_neto || 0)
-    setEditIVA(comp.total_iva || 0)
-    setEditPercepIVA(comp.percepcion_iva_monto || 0)
-    setEditPercepIIBB(comp.percepcion_iibb_monto || 0)
-    setEditRetGanancias(comp.retencion_ganancias_monto || 0)
+    setEditNeto(Number(comp.total_neto) || 0)
+    setEditIVA(Number(comp.total_iva) || 0)
+    setEditPercepIVA(Number(comp.percepcion_iva_monto) || 0)
+    setEditPercepIIBB(Number(comp.percepcion_iibb_monto) || 0)
+    setEditRetGanancias(Number(comp.retencion_ganancias_monto) || 0)
   }
 
   const guardarEdicion = async (comprobanteId: string) => {
@@ -521,17 +523,15 @@ export default function CargarComprobantesPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>Fecha del Comprobante *</Label>
-                    <Input type="date" value={fechaComprobante} onChange={(e) => setFechaComprobante(e.target.value)} />
+                    <DateInputAR value={fechaComprobante} onChange={setFechaComprobante} />
                   </div>
 
                   <div>
                     <Label>Total de la Factura *</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
+                    <InputMonto
+                      placeholder="0,00"
                       value={totalFacturaDeclarado || ""}
-                      onChange={(e) => setTotalFacturaDeclarado(Number.parseFloat(e.target.value))}
+                      onChange={(v) => setTotalFacturaDeclarado(v ?? 0)}
                     />
                   </div>
                 </div>
@@ -542,47 +542,37 @@ export default function CargarComprobantesPage() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label>Total Neto</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
+                        <InputMonto
                           value={totalNeto}
-                          onChange={(e) => setTotalNeto(Number.parseFloat(e.target.value) || 0)}
+                          onChange={(v) => setTotalNeto(v ?? 0)}
                         />
                       </div>
                       <div>
                         <Label>IVA 21%</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
+                        <InputMonto
                           value={totalIVA}
-                          onChange={(e) => setTotalIVA(Number.parseFloat(e.target.value) || 0)}
+                          onChange={(v) => setTotalIVA(v ?? 0)}
                         />
                       </div>
                       <div>
                         <Label>Percepción IVA</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
+                        <InputMonto
                           value={percepcionIVA}
-                          onChange={(e) => setPercepcionIVA(Number.parseFloat(e.target.value) || 0)}
+                          onChange={(v) => setPercepcionIVA(v ?? 0)}
                         />
                       </div>
                       <div>
                         <Label>Percepción IIBB</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
+                        <InputMonto
                           value={percepcionIIBB}
-                          onChange={(e) => setPercepcionIIBB(Number.parseFloat(e.target.value) || 0)}
+                          onChange={(v) => setPercepcionIIBB(v ?? 0)}
                         />
                       </div>
                       <div>
                         <Label>Retención Ganancias</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
+                        <InputMonto
                           value={retencionGanancias}
-                          onChange={(e) => setRetencionGanancias(Number.parseFloat(e.target.value) || 0)}
+                          onChange={(v) => setRetencionGanancias(v ?? 0)}
                         />
                       </div>
                     </div>
@@ -648,12 +638,10 @@ export default function CargarComprobantesPage() {
 
                       <TableCell>
                         {estaEditando ? (
-                          <Input
-                            type="number"
-                            step="0.01"
+                          <InputMonto
                             className="w-full"
                             value={editNeto}
-                            onChange={(e) => setEditNeto(Number.parseFloat(e.target.value) || 0)}
+                            onChange={(v) => setEditNeto(v ?? 0)}
                           />
                         ) : (
                           `${formatCurrency((comp.total_neto || 0))}`
@@ -662,12 +650,10 @@ export default function CargarComprobantesPage() {
 
                       <TableCell>
                         {estaEditando ? (
-                          <Input
-                            type="number"
-                            step="0.01"
+                          <InputMonto
                             className="w-full"
                             value={editIVA}
-                            onChange={(e) => setEditIVA(Number.parseFloat(e.target.value) || 0)}
+                            onChange={(v) => setEditIVA(v ?? 0)}
                           />
                         ) : comp.total_iva > 0 ? (
                           `${formatCurrency(comp.total_iva)}`
@@ -678,12 +664,10 @@ export default function CargarComprobantesPage() {
 
                       <TableCell>
                         {estaEditando ? (
-                          <Input
-                            type="number"
-                            step="0.01"
+                          <InputMonto
                             className="w-full"
                             value={editPercepIVA}
-                            onChange={(e) => setEditPercepIVA(Number.parseFloat(e.target.value) || 0)}
+                            onChange={(v) => setEditPercepIVA(v ?? 0)}
                           />
                         ) : comp.percepcion_iva_monto > 0 ? (
                           `${formatCurrency(comp.percepcion_iva_monto)}`
@@ -694,12 +678,10 @@ export default function CargarComprobantesPage() {
 
                       <TableCell>
                         {estaEditando ? (
-                          <Input
-                            type="number"
-                            step="0.01"
+                          <InputMonto
                             className="w-full"
                             value={editPercepIIBB}
-                            onChange={(e) => setEditPercepIIBB(Number.parseFloat(e.target.value) || 0)}
+                            onChange={(v) => setEditPercepIIBB(v ?? 0)}
                           />
                         ) : comp.percepcion_iibb_monto > 0 ? (
                           `${formatCurrency(comp.percepcion_iibb_monto)}`
@@ -710,12 +692,10 @@ export default function CargarComprobantesPage() {
 
                       <TableCell>
                         {estaEditando ? (
-                          <Input
-                            type="number"
-                            step="0.01"
+                          <InputMonto
                             className="w-full"
                             value={editRetGanancias}
-                            onChange={(e) => setEditRetGanancias(Number.parseFloat(e.target.value) || 0)}
+                            onChange={(v) => setEditRetGanancias(v ?? 0)}
                           />
                         ) : comp.retencion_ganancias_monto > 0 ? (
                           `${formatCurrency(comp.retencion_ganancias_monto)}`

@@ -2,19 +2,19 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { InputMonto } from "@/components/ui/input-monto"
+import { fechaHora, fechaISO, hora, hoyISO, moneda } from "@/lib/formato"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import type { CuentaAjustable } from "@/components/finanzas/ajustar-saldo-dialog"
 
-const fmt = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmt = (n: number) => moneda(n)
 
 /**
  * Rutina diaria de saldos a mano: todas las cuentas en una sola pantalla.
  * Cada saldo que cambies se registra vía caja_ajustar (AJUSTE_CAJA en el
- * kardex, con tu firma). El punto delimita centavos (1000.5 = $1.000,50).
+ * kardex, con tu firma). Montos en formato argentino: 1.500,50.
  * Cuando entren las APIs bancarias esta rutina desaparece.
  */
 export function ActualizarSaldosDialog({
@@ -28,31 +28,21 @@ export function ActualizarSaldosDialog({
   onOpenChange: (o: boolean) => void
   onSaved?: () => void
 }) {
-  const [valores, setValores] = useState<Record<string, string>>({})
+  const [valores, setValores] = useState<Record<string, number | null>>({})
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open) {
-      const v: Record<string, string> = {}
-      for (const c of cuentas) v[c.cuenta_id] = String(Number(c.saldos.BLANCO ?? 0))
+      const v: Record<string, number | null> = {}
+      for (const c of cuentas) v[c.cuenta_id] = Number(c.saldos.BLANCO ?? 0)
       setValores(v)
     }
   }, [open, cuentas])
 
-  const parse = (s: string) => {
-    const t = s.trim().replace(",", ".")
-    if (!t || !/^-?\d+(\.\d{0,2})?$/.test(t)) return null
-    return Number(t)
-  }
-
   const ultimaAct = (iso?: string | null) => {
     if (!iso) return "sin datos"
-    const d = new Date(iso)
-    const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
-    const dia = d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
-    const hora = d.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" })
-    if (dia === hoy) return `hoy ${hora}`
-    return `${d.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })} ${hora}`
+    if (fechaISO(iso) === hoyISO()) return `hoy ${hora(iso)}`
+    return fechaHora(iso)
   }
 
   const guardar = async () => {
@@ -60,9 +50,9 @@ export function ActualizarSaldosDialog({
     for (const c of cuentas) {
       const raw = valores[c.cuenta_id]
       if (raw === undefined) continue
-      const n = parse(raw)
+      const n = raw
       if (n === null) {
-        toast.error(`Saldo inválido en ${c.nombre} — el punto son centavos (1000.5 = $1.000,50)`)
+        toast.error(`Saldo inválido en ${c.nombre} — formato: 1.500,50`)
         return
       }
       if (n !== Number(c.saldos.BLANCO ?? 0)) cambios.push({ cuenta: c, nuevo: n })
@@ -108,7 +98,7 @@ export function ActualizarSaldosDialog({
           <DialogTitle>Actualizar saldos de hoy</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground -mt-2">
-          Cargá lo que ves en cada homebanking. Solo se registran los que cambies (quedan en el kardex como ajuste con tu firma). El punto son centavos.
+          Cargá lo que ves en cada homebanking. Solo se registran los que cambies (quedan en el kardex como ajuste con tu firma). Formato: 1.500,50.
         </p>
         <div className="space-y-2">
           {cuentas.map((c) => (
@@ -117,11 +107,9 @@ export function ActualizarSaldosDialog({
                 <p className="text-sm font-medium leading-tight">{c.nombre}</p>
                 <p className="text-[11px] text-muted-foreground">últ. act.: {ultimaAct(c.updated_at)}</p>
               </div>
-              <Input
-                inputMode="decimal"
-                className="tabular-nums"
-                value={valores[c.cuenta_id] ?? ""}
-                onChange={(e) => setValores((p) => ({ ...p, [c.cuenta_id]: e.target.value }))}
+              <InputMonto
+                value={valores[c.cuenta_id] ?? null}
+                onChange={(n) => setValores((p) => ({ ...p, [c.cuenta_id]: n }))}
               />
               <span className="text-[11px] text-muted-foreground w-28 text-right shrink-0">{fmt(Number(c.saldos.BLANCO ?? 0))}</span>
             </div>

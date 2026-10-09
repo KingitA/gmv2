@@ -3,6 +3,7 @@ import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai"
 import { requireAuth } from "@/lib/auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { GEMINI_MODEL } from "@/lib/ai/gemini-model"
+import { parseFecha, parseMonto, redondear } from "@/lib/formato"
 
 // POST /api/chofer/billetera/gasto/ocr — foto de un ticket (nafta, hotel,
 // peaje, comida…): Gemini detecta el tipo de gasto y el importe. La foto
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
 Devolvé:
 - categoria: una de nafta (combustible, GNC, gasoil, estación de servicio), hotel (alojamiento), peaje, comida (restaurante, kiosco, panadería), cubierta (gomería, neumáticos, auxilio), peon (mano de obra, changarín), otro.
 - monto: el TOTAL pagado, número. Los importes argentinos usan punto de miles y coma decimal ("12.500,00" = 12500). Si hay varios totales, el final/pagado.
-- fecha: AAAA-MM-DD si se lee, si no null.
+- fecha: AAAA-MM-DD si se lee (en el ticket viene dd/mm/aaaa: día primero, NUNCA mes/día), si no null.
 - comercio: nombre del comercio si se lee.
 - detalle: una línea corta (ej: "Nafta súper 32 L", "Peaje Azul").
 - confianza: 0 a 1, qué tan seguro estás del monto y la categoría.
@@ -72,14 +73,15 @@ Si la imagen no es un ticket, devolvé monto 0 y confianza 0.`
       const m = result.response.text().match(/\{[\s\S]*\}/)
       if (m) parsed = JSON.parse(m[0])
     }
-    const monto = Math.round((Number(parsed.monto) || 0) * 100) / 100
+    // La IA a veces devuelve el monto como texto ("12.500,00"): parseMonto
+    const monto = redondear(parseMonto(parsed.monto ?? null) || 0)
     const categoria = CATEGORIAS.includes(parsed.categoria) ? parsed.categoria : "otro"
 
     return NextResponse.json({
       success: monto > 0,
       categoria,
       monto,
-      fecha: /^\d{4}-\d{2}-\d{2}$/.test(parsed.fecha || "") ? parsed.fecha : null,
+      fecha: parseFecha(parsed.fecha ?? null),
       comercio: parsed.comercio || null,
       detalle: [parsed.comercio, parsed.detalle].filter(Boolean).join(" · ") || null,
       confianza: Number(parsed.confianza) || 0,

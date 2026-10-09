@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { fecha } from "@/lib/formato"
 
 interface ViajeResumen {
   id: string
@@ -91,11 +92,7 @@ export default function ChoferHomePage() {
                 <div>
                   <p className="text-xl font-bold text-gray-900">{data.viaje_activo.nombre}</p>
                   <p className="text-gray-500 mt-1">
-                    {new Date(data.viaje_activo.fecha).toLocaleDateString("es-AR", {
-                      weekday: "long",
-                      day: "numeric",
-                      month: "long",
-                    })}
+                    {fecha(data.viaje_activo.fecha)}
                   </p>
                   {(data.viaje_activo as any).zonas?.nombre && (
                     <p className="text-blue-600 font-medium mt-1">
@@ -141,11 +138,7 @@ export default function ChoferHomePage() {
                     <div>
                       <p className="font-bold text-gray-800">{viaje.nombre}</p>
                       <p className="text-gray-400 text-sm mt-0.5">
-                        {new Date(viaje.fecha).toLocaleDateString("es-AR", {
-                          day: "numeric",
-                          month: "long",
-                          year: "numeric",
-                        })}
+                        {fecha(viaje.fecha)}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Search, X } from "lucide-react"
 import { useDentroDeModal } from "@/lib/hooks/use-dentro-de-modal"
+import { formatCuit } from "@/lib/formato"
 
 interface Cliente {
   id: string
@@ -65,7 +66,7 @@ export function ClienteSearchCombobox({ onSelect, value }: Props) {
         <div className="flex-1">
           <p className="font-semibold text-sm">{value.razon_social || value.nombre}</p>
           {ubicacion(value) && <p className="text-xs text-foreground/80">{ubicacion(value)}</p>}
-          <p className="text-xs text-muted-foreground">CUIT: {value.cuit || "—"} {value.codigo_cliente ? `· Cód: ${value.codigo_cliente}` : ""}</p>
+          <p className="text-xs text-muted-foreground">CUIT: {formatCuit(value.cuit) || "—"} {value.codigo_cliente ? `· Cód: ${value.codigo_cliente}` : ""}</p>
         </div>
         <button onClick={() => onSelect(null)} className="text-muted-foreground hover:text-foreground">
           <X className="h-4 w-4" />
@@ -105,7 +106,7 @@ export function ClienteSearchCombobox({ onSelect, value }: Props) {
             >
               <p className="font-medium text-sm">{c.razon_social || c.nombre}</p>
               {ubicacion(c) && <p className="text-xs text-foreground/80">{ubicacion(c)}</p>}
-              <p className="text-xs text-muted-foreground">CUIT: {c.cuit || "—"} {c.codigo_cliente ? `· Cód: ${c.codigo_cliente}` : ""}</p>
+              <p className="text-xs text-muted-foreground">CUIT: {formatCuit(c.cuit) || "—"} {c.codigo_cliente ? `· Cód: ${c.codigo_cliente}` : ""}</p>
             </button>
           ))}
         </div>

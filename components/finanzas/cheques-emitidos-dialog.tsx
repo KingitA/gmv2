@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { FechaInput } from "@/components/finanzas/fecha-input"
+import { InputMonto } from "@/components/ui/input-monto"
 import { formatCurrency, todayArgentina } from "@/lib/utils"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -72,15 +73,13 @@ export function ChequesEmitidosDialog({
     const setFila = (i: number, patch: Partial<FilaCheque>) =>
         setFilas((prev) => prev.map((f, j) => (j === i ? { ...f, ...patch } : f)))
 
-    const parseMonto = (s: string) => {
-        const n = parseFloat(s.replace(/\./g, "").replace(",", "."))
-        return isNaN(n) ? 0 : n
-    }
-    const total = filas.reduce((a, f) => a + parseMonto(f.monto), 0)
+    // f.monto guarda el número que entrega InputMonto (formato de máquina: "1234.5")
+    const montoDe = (s: string) => Number(s) || 0
+    const total = filas.reduce((a, f) => a + montoDe(f.monto), 0)
 
     async function guardar(e: React.FormEvent) {
         e.preventDefault()
-        const validas = filas.filter((f) => f.numero.trim() && parseMonto(f.monto) > 0 && f.fecha_vencimiento)
+        const validas = filas.filter((f) => f.numero.trim() && montoDe(f.monto) > 0 && f.fecha_vencimiento)
         if (!validas.length) {
             toast.error("Cargá al menos un cheque con número, monto y fecha de pago")
             return
@@ -96,7 +95,7 @@ export function ChequesEmitidosDialog({
                     cheques: validas.map((f) => ({
                         banco: f.banco,
                         numero: f.numero,
-                        monto: parseMonto(f.monto),
+                        monto: montoDe(f.monto),
                         fecha_vencimiento: f.fecha_vencimiento,
                         color: f.color,
                         es_echeq: f.es_echeq,
@@ -147,8 +146,8 @@ export function ChequesEmitidosDialog({
                                 </div>
                                 <div>
                                     <Label className="text-[10px]">Monto *</Label>
-                                    <Input className="h-8 font-mono text-xs" inputMode="decimal" value={f.monto} placeholder="0"
-                                        onChange={(e) => setFila(i, { monto: e.target.value })} />
+                                    <InputMonto className="h-8 font-mono text-xs" soloPositivos value={f.monto} placeholder="0"
+                                        onChange={(n) => setFila(i, { monto: n == null ? "" : String(n) })} />
                                 </div>
                                 <div>
                                     <Label className="text-[10px]">Fecha de pago *</Label>

@@ -25,6 +25,9 @@ import {
 import { BcraDeudorMulti } from "@/components/pagos/BcraDeudorChip"
 import { useToast } from "@/hooks/use-toast"
 import { todayArgentina } from "@/lib/utils"
+import { fecha as fmtFecha, formatCuit, moneda, normalizarCuit, parseFecha, parseMonto, redondear } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
+import { InputCUIT } from "@/components/ui/input-cuit"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { DialogoFalta, DialogoSobra } from "@/components/pagos/DialogoDiferencia"
 import { Camera, ClipboardPaste, Loader2, Paperclip, Plus, X } from "lucide-react"
@@ -46,8 +49,7 @@ const METODOS: { key: Metodo; label: string }[] = [
 ]
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
-const fmt = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 2 })
-const round2 = (n: number) => Math.round(n * 100) / 100
+const round2 = (n: number) => redondear(n)
 
 const inputCls =
   "rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-blue-500"
@@ -62,7 +64,7 @@ export function RegistrarCobro({
   const { toast } = useToast()
   const [cliente, setCliente] = useState<any>(null)
   const [metodo, setMetodo] = useState<Metodo>("efectivo")
-  const [monto, setMonto] = useState("")
+  const [monto, setMonto] = useState<number | null>(null)
   const [guardando, setGuardando] = useState(false)
   // Campos por método
   const [cajaId, setCajaId] = useState("")
@@ -171,34 +173,33 @@ export function RegistrarCobro({
           return
         }
         const r = resultados[0]
-        const fmtFecha = (f?: string) => (f ? f.split("-").reverse().join("/") : "")
         if (r.tipo === "cheque") {
           const esEcheq = r.color_cheque === "ECHEQ"
           setMetodo(esEcheq ? "echeq" : "cheque")
           if (r.banco_emisor) setBanco(r.banco_emisor)
           if (r.numero_cheque) setNumeroCheque(String(r.numero_cheque))
-          if (r.fecha_cheque) setFechaCheque(r.fecha_cheque)
-          if (r.monto) { setMonto(String(r.monto)); setMontoConfirmado(Number(r.monto) || 0) }
-          if (r.cuit_emisor) setCuitEmisor(String(r.cuit_emisor))
+          if (r.fecha_cheque) setFechaCheque(parseFecha(r.fecha_cheque) ?? "")
+          if (r.monto) { setMonto(parseMonto(r.monto)); setMontoConfirmado(parseMonto(r.monto) ?? 0) }
+          if (r.cuit_emisor) setCuitEmisor(formatCuit(r.cuit_emisor))
           const titulares: string[] = Array.isArray(r.cuits_titulares) ? r.cuits_titulares : []
           setCuitsTitulares(titulares)
           setOcrExtra({
-            fecha_emision: r.fecha_emision || undefined,
+            fecha_emision: parseFecha(r.fecha_emision) || undefined,
             localidad: r.localidad || undefined,
           })
           toast({
             title: esEcheq ? "⚡ Echeq detectado" : "📄 Cheque detectado",
-            description: `${r.banco_emisor ?? ""} ${r.numero_cheque ?? ""}${r.fecha_cheque ? ` · vence ${fmtFecha(r.fecha_cheque)}` : ""}${r.monto ? ` · $ ${Number(r.monto).toLocaleString("es-AR")}` : ""}${titulares.length > 1 ? ` · cuenta conjunta (${titulares.length} titulares, se consultan todos en BCRA)` : ""} — revisá y Registrar.`,
+            description: `${r.banco_emisor ?? ""} ${r.numero_cheque ?? ""}${r.fecha_cheque ? ` · vence ${fmtFecha(parseFecha(r.fecha_cheque))}` : ""}${r.monto ? ` · ${moneda(parseMonto(r.monto))}` : ""}${titulares.length > 1 ? ` · cuenta conjunta (${titulares.length} titulares, se consultan todos en BCRA)` : ""} — revisá y Registrar.`,
           })
         } else if (r.tipo === "transferencia") {
           setMetodo("transferencia")
           if (r.cuenta_bancaria_id) setCuentaBancariaId(r.cuenta_bancaria_id)
           if (r.numero_comprobante) setNumeroOperacion(String(r.numero_comprobante))
-          if (r.monto) { setMonto(String(r.monto)); setMontoConfirmado(Number(r.monto) || 0) }
-          setOcrExtra({ fecha_transferencia: r.fecha_transferencia || undefined })
+          if (r.monto) { setMonto(parseMonto(r.monto)); setMontoConfirmado(parseMonto(r.monto) ?? 0) }
+          setOcrExtra({ fecha_transferencia: parseFecha(r.fecha_transferencia) || undefined })
           toast({
             title: "🏦 Transferencia detectada",
-            description: `${r.banco_nombre ? `→ ${r.banco_nombre}` : "Elegí el banco destino"}${r.numero_comprobante ? ` · op. ${r.numero_comprobante}` : ""}${r.monto ? ` · $ ${Number(r.monto).toLocaleString("es-AR")}` : ""} — revisá y Registrar.`,
+            description: `${r.banco_nombre ? `→ ${r.banco_nombre}` : "Elegí el banco destino"}${r.numero_comprobante ? ` · op. ${r.numero_comprobante}` : ""}${r.monto ? ` · ${moneda(parseMonto(r.monto))}` : ""} — revisá y Registrar.`,
           })
         } else {
           toast({
@@ -239,7 +240,7 @@ export function RegistrarCobro({
   )
 
   const limpiarMetodoActual = () => {
-    setMonto("")
+    setMonto(null)
     setMontoConfirmado(0)
     setNumeroOperacion("")
     setBanco("")
@@ -263,7 +264,7 @@ export function RegistrarCobro({
 
   // Arma el payload del método que se está editando en la barra (null si incompleto)
   const construirMetodoActual = (): { payload: any; label: string; monto: number } | null => {
-    const montoNum = Number(monto.replace(",", "."))
+    const montoNum = monto ?? 0
     if (!montoNum || montoNum <= 0) return null
     if ((metodo === "cheque" || metodo === "echeq") && !numeroCheque) return null
     const payload: any = { tipo: metodo === "echeq" ? "cheque" : metodo, monto: montoNum }
@@ -285,7 +286,7 @@ export function RegistrarCobro({
       payload.banco_emisor = banco || undefined
       payload.numero_cheque = numeroCheque
       payload.fecha_cheque = fechaCheque || todayArgentina()
-      if (cuitEmisor) payload.cuit_emisor = cuitEmisor
+      if (normalizarCuit(cuitEmisor)) payload.cuit_emisor = normalizarCuit(cuitEmisor)
       if (ocrExtra.fecha_emision) payload.fecha_emision = ocrExtra.fecha_emision
       if (ocrExtra.localidad) payload.localidad = ocrExtra.localidad
       if (metodo === "echeq") payload.color_cheque = "ECHEQ"
@@ -310,7 +311,7 @@ export function RegistrarCobro({
   }
 
   const totalCobro =
-    metodosAgregados.reduce((s, m) => s + m.monto, 0) + (Number(monto.replace(",", ".")) || 0)
+    metodosAgregados.reduce((s, m) => s + m.monto, 0) + (monto ?? 0)
 
   // ── Resumen del cobro (se actualiza al confirmar el monto, no por tecla) ──
   // Neto a cobrar = lo seleccionado − la NC del 10% (si está tildado).
@@ -331,7 +332,7 @@ export function RegistrarCobro({
     const metodosCobro = [...metodosAgregados, ...(actual ? [actual] : [])]
     // PRIMERO el método incompleto (banco/número faltante) y recién después el
     // "sin monto": antes una transferencia sin banco caía en "Monto inválido".
-    if (!actual && Number(monto.replace(",", ".")) > 0) {
+    if (!actual && (monto ?? 0) > 0) {
       toast({
         variant: "destructive",
         title: metodo === "transferencia" ? "Falta el banco" : "Falta el número",
@@ -367,7 +368,7 @@ export function RegistrarCobro({
         toast({
           variant: "destructive",
           title: "Falta plata para lo seleccionado",
-          description: `Entre métodos${aplicarContado ? " + NC 10%" : ""} cubrís $ ${fmt(cubierto)} y seleccionaste $ ${fmt(totalSeleccionado)}. Bajá la selección o agregá un método.`,
+          description: `Entre métodos${aplicarContado ? " + NC 10%" : ""} cubrís ${moneda(cubierto)} y seleccionaste ${moneda(totalSeleccionado)}. Bajá la selección o agregá un método.`,
         })
         return
       }
@@ -448,7 +449,7 @@ export function RegistrarCobro({
       // Bonificación 10% contado: la resolvió el servidor en la confirmación
       let bonifMsg = ""
       if (aplicarContado && esEfectivo) {
-        if (data.bonificacion?.total) bonifMsg = ` NC por bonificación contado: $ ${fmt(Number(data.bonificacion.total) || 0)}.`
+        if (data.bonificacion?.total) bonifMsg = ` NC por bonificación contado: ${moneda(Number(data.bonificacion.total) || 0)}.`
         else if (data.bonificacion_error) bonifMsg = ` ⚠ La bonificación falló: ${data.bonificacion_error}.`
       } else if (aplicarContado && !esEfectivo) {
         bonifMsg = " El 10% quedó agendado: la NC/REV sale sola al confirmar el valor."
@@ -458,14 +459,14 @@ export function RegistrarCobro({
       // al confirmar (en el acto si es efectivo; al aceptar el valor si no).
       const ajusteMsg =
         modoDiferencia === "ajuste" && falta > 0.01
-          ? ` Diferencia de $ ${fmt(falta)} como ajuste por redondeo${esEfectivo ? "." : " (se asienta al confirmar el valor)."}`
+          ? ` Diferencia de ${moneda(falta)} como ajuste por redondeo${esEfectivo ? "." : " (se asienta al confirmar el valor)."}`
           : modoDiferencia === "sobra_ajuste" && sobra > 0.01
-            ? ` Sobrante de $ ${fmt(sobra)} ajustado — no queda a favor${esEfectivo ? "." : " (se asienta al confirmar el valor)."}`
+            ? ` Sobrante de ${moneda(sobra)} ajustado — no queda a favor${esEfectivo ? "." : " (se asienta al confirmar el valor)."}`
             : modoDiferencia === "sobra_cuenta" && sobra > 0.01
-              ? ` Sobrante de $ ${fmt(sobra)} a cuenta del cliente.`
+              ? ` Sobrante de ${moneda(sobra)} a cuenta del cliente.`
               : ""
 
-      const recorteMsg = recorte > 0.01 ? ` Pago parcial: quedan $ ${fmt(recorte)} de saldo en el comprobante.` : ""
+      const recorteMsg = recorte > 0.01 ? ` Pago parcial: quedan ${moneda(recorte)} de saldo en el comprobante.` : ""
       toast({
         title: esEfectivo ? "Cobro en caja" : "Cobro registrado",
         description: esEfectivo
@@ -553,29 +554,28 @@ export function RegistrarCobro({
               className={`${inputCls} w-28`}
             />
             <FechaInput value={fechaCheque} onChange={setFechaCheque} placeholder="Vencimiento" containerClassName="w-[120px]" />
-            <input
+            <InputCUIT
               value={cuitEmisor}
-              onChange={(e) => setCuitEmisor(e.target.value.replace(/[^\d-]/g, ""))}
+              onChange={setCuitEmisor}
               placeholder="CUIT emisor"
-              inputMode="numeric"
               className={`${inputCls} w-32`}
               title="Se consulta en la Central de Deudores del BCRA"
             />
           </>
         )}
 
-        <input
+        <InputMonto
           value={monto}
-          onChange={(e) => setMonto(e.target.value.replace(/[^\d.,]/g, ""))}
-          onBlur={() => setMontoConfirmado(Number(monto.replace(",", ".")) || 0)}
+          onChange={setMonto}
+          soloPositivos
+          onBlur={() => setMontoConfirmado(monto ?? 0)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
-              setMontoConfirmado(Number(monto.replace(",", ".")) || 0)
+              setMontoConfirmado(monto ?? 0)
               registrar()
             }
           }}
           placeholder="$ monto"
-          inputMode="decimal"
           className={`${inputCls} w-32 text-right font-semibold`}
           style={NUM}
         />
@@ -606,7 +606,7 @@ export function RegistrarCobro({
               key={i}
               className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700"
             >
-              {m.label} · <span style={NUM}>$ {fmt(m.monto)}</span>
+              {m.label} · <span style={NUM}>{moneda(m.monto)}</span>
               <button
                 onClick={() => setMetodosAgregados((prev) => prev.filter((_, j) => j !== i))}
                 className="text-slate-400 hover:text-red-600"
@@ -713,7 +713,7 @@ export function RegistrarCobro({
               </div>
               {resumen && (
                 <span className="text-xs text-slate-500">
-                  Saldo a cobrar <b className="text-slate-800" style={NUM}>$ {fmt(resumen.saldoACobrar)}</b>
+                  Saldo a cobrar <b className="text-slate-800" style={NUM}>{moneda(resumen.saldoACobrar)}</b>
                   <span className="text-slate-300"> · </span>
                   {resumen.pedidosFacturados} facturado{resumen.pedidosFacturados === 1 ? "" : "s"}
                   {resumen.otrosComprobantes > 0 && ` + ${resumen.otrosComprobantes} sin pedido`}
@@ -762,17 +762,17 @@ export function RegistrarCobro({
           {totalSeleccionado > 0 ? (
             <>
               <span className="text-slate-500">
-                Seleccionado <b className="text-slate-800" style={NUM}>$ {fmt(totalSeleccionado)}</b>
+                Seleccionado <b className="text-slate-800" style={NUM}>{moneda(totalSeleccionado)}</b>
               </span>
               {aplicarContado && bonificacionEstimada > 0 && (
                 <>
                   <span className="text-slate-400">−</span>
                   <span className="text-amber-700">
-                    NC 10% <b style={NUM}>$ {fmt(bonificacionEstimada)}</b>
+                    NC 10% <b style={NUM}>{moneda(bonificacionEstimada)}</b>
                   </span>
                   <span className="text-slate-400">=</span>
                   <span className="text-slate-500">
-                    a cobrar <b className="text-slate-800" style={NUM}>$ {fmt(netoACobrar)}</b>
+                    a cobrar <b className="text-slate-800" style={NUM}>{moneda(netoACobrar)}</b>
                   </span>
                 </>
               )}
@@ -780,18 +780,18 @@ export function RegistrarCobro({
             </>
           ) : null}
           <span className="text-slate-500">
-            Entregado <b className="text-slate-800" style={NUM}>$ {fmt(totalCobroConfirmado)}</b>
+            Entregado <b className="text-slate-800" style={NUM}>{moneda(totalCobroConfirmado)}</b>
           </span>
           {mostrarResumen &&
             (Math.abs(restaSaldar) < 0.01 ? (
               <span className="rounded-full bg-green-100 px-3 py-0.5 text-xs font-bold text-green-700">✓ Cuadra</span>
             ) : restaSaldar > 0 ? (
               <span className="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-800" style={NUM}>
-                Resta saldar: $ {fmt(restaSaldar)}
+                Resta saldar: {moneda(restaSaldar)}
               </span>
             ) : (
               <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-bold text-blue-700" style={NUM}>
-                Sobran $ {fmt(-restaSaldar)} → al registrar elegís: ajustar o a cuenta
+                Sobran {moneda(-restaSaldar)} → al registrar elegís: ajustar o a cuenta
               </span>
             ))}
         </div>

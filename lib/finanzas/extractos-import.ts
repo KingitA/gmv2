@@ -36,7 +36,7 @@ export async function importarExtracto(
   const vistos = new Map<string, number>()
   for (const m of limpias) {
     if (!m.referencia_externa) {
-      const base = `${m.fecha}|${m.monto.toFixed(2)}|${m.descripcion.toLowerCase()}`
+      const base = `${m.fecha}|${m.monto.toFixed(2)}|${m.descripcion.toLowerCase()}` // formato-ok: clave de dedup (máquina)
       const n = (vistos.get(base) ?? 0) + 1
       vistos.set(base, n)
       m.referencia_externa = "h:" + createHash("md5").update(`${base}|${n}`).digest("hex").slice(0, 20)

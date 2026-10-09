@@ -16,6 +16,7 @@ import { Trash2, Plus, Pencil, Eye, EyeOff } from "lucide-react"
 import { toast } from "sonner"
 import type { TipoCatalogo } from "@/lib/catalogos/tipos-articulo"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
 
 interface Props {
   tabla: "tipos_bulto" | "tipos_fraccion"
@@ -180,7 +181,7 @@ export function CatalogoArticuloABM({ tabla, columnaArticulo, titulo, subtitulo,
             </div>
             <div>
               <Label>Orden</Label>
-              <Input type="number" value={orden} onChange={e => setOrden(e.target.value)} className="w-32" />
+              <InputMonto decimales={0} value={orden} onChange={n => setOrden(n == null ? "" : String(Math.trunc(n)))} className="w-32" />
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>

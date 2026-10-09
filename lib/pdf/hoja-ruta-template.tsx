@@ -8,13 +8,12 @@
  */
 
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
+import { fecha as fechaAR, moneda, numero } from '@/lib/formato'
 import type { HojaRuta } from '@/lib/viajes/hoja-ruta'
 
-const fmt = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtFecha = (v?: string | null) => {
-  const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
-}
+const fmt = (n: number) => numero(n)
+// "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
+const fmtFecha = (v?: string | null) => fechaAR(v) || '—'
 
 const s = StyleSheet.create({
   page:    { fontFamily: 'Helvetica', fontSize: 8, padding: '20 22 28 22' },
@@ -88,10 +87,10 @@ export function HojaRutaPDF({ data }: { data: HojaRuta }) {
 
         <View style={s.resumen}>
           <View style={s.caja}><Text style={s.cajaLbl}>Bultos a bajar</Text><Text style={s.cajaVal}>{t.bultos}</Text></View>
-          <View style={s.caja}><Text style={s.cajaLbl}>Importe de este viaje</Text><Text style={s.cajaVal}>$ {fmt(t.total_viaje)}</Text></View>
-          {!porTransporte && <View style={s.caja}><Text style={s.cajaLbl}>Saldos anteriores</Text><Text style={s.cajaVal}>$ {fmt(t.saldo_anterior)}</Text></View>}
-          {!porTransporte && <View style={s.caja}><Text style={s.cajaLbl}>Cobrar sí o sí</Text><Text style={s.cajaVal}>$ {fmt(t.minimo_exigido)}</Text></View>}
-          {!porTransporte && <View style={[s.caja, { marginRight: 0 }]}><Text style={s.cajaLbl}>Plata a cuenta del viaje</Text><Text style={s.cajaVal}>$ {fmt(dinero.fondo_entregado)}</Text></View>}
+          <View style={s.caja}><Text style={s.cajaLbl}>Importe de este viaje</Text><Text style={s.cajaVal}>{moneda(t.total_viaje)}</Text></View>
+          {!porTransporte && <View style={s.caja}><Text style={s.cajaLbl}>Saldos anteriores</Text><Text style={s.cajaVal}>{moneda(t.saldo_anterior)}</Text></View>}
+          {!porTransporte && <View style={s.caja}><Text style={s.cajaLbl}>Cobrar sí o sí</Text><Text style={s.cajaVal}>{moneda(t.minimo_exigido)}</Text></View>}
+          {!porTransporte && <View style={[s.caja, { marginRight: 0 }]}><Text style={s.cajaLbl}>Plata a cuenta del viaje</Text><Text style={s.cajaVal}>{moneda(dinero.fondo_entregado)}</Text></View>}
         </View>
 
         <View style={s.th} fixed>
@@ -138,7 +137,7 @@ export function HojaRutaPDF({ data }: { data: HojaRuta }) {
               {p.bloquear_entrega && p.motivo_bloqueo && <Text style={s.nota}>{p.motivo_bloqueo}</Text>}
               {p.minimo_exigido > 0 && (
                 <Text style={s.exigir}>
-                  COBRAR SÍ O SÍ $ {fmt(p.minimo_exigido)}
+                  COBRAR SÍ O SÍ {moneda(p.minimo_exigido)}
                   {p.exigir_cobro_anterior && p.exigir_cobro_actual ? ' (anterior + este viaje)' : p.exigir_cobro_anterior ? ' (lo anterior)' : ' (este viaje)'}
                 </Text>
               )}
@@ -169,10 +168,10 @@ export function HojaRutaPDF({ data }: { data: HojaRuta }) {
               {dinero.fondos.map((f) => (
                 <View key={f.id} style={s.pieLin}>
                   <Text>A cuenta — {f.origen} — retiró {f.retirado_por}</Text>
-                  <Text>$ {fmt(f.monto)}</Text>
+                  <Text>{moneda(f.monto)}</Text>
                 </View>
               ))}
-              {dinero.fondos.length === 0 && <View style={s.pieLin}><Text>Sin plata a cuenta entregada</Text><Text>$ 0,00</Text></View>}
+              {dinero.fondos.length === 0 && <View style={s.pieLin}><Text>Sin plata a cuenta entregada</Text><Text>{moneda(0)}</Text></View>}
             </View>
             <View style={s.pieCol}>
               <Text style={s.pieTit}>Gastos (anotar y cargar en la app)</Text>

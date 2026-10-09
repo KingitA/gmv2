@@ -9,6 +9,8 @@ import { formatDateAR } from '@/lib/utils'
 import { localMatch } from '@/lib/search/local-match'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
+import { moneda, numeroPlano, porcentaje } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 interface NCRow {
   cliente_id: string
@@ -41,10 +43,6 @@ const TIPO_COLORS: Record<string, string> = {
   NCA: '#ef4444', NCB: '#f97316', NCC: '#f59e0b',
 }
 
-function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
-
 const inputStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
   border: '1px solid rgba(255,255,255,0.08)',
@@ -63,12 +61,12 @@ const COLUMNS: Column<NCRow>[] = [
   },
   {
     key: 'nc_monto', label: 'Monto NC', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-semibold text-red-400">{ars(v)}</span>,
+    render: v => <span className="font-mono font-semibold text-red-400">{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'nc_monto_anterior', label: 'NC anterior', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? moneda(v, 0) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
@@ -76,11 +74,11 @@ const COLUMNS: Column<NCRow>[] = [
     render: (v, row) => row.nc_monto_anterior > 0
       ? <ComparativoBadge pct={v} size="sm" invertColor />
       : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
-    exportValue: v => `${Number(v).toFixed(1)}%`,
+    exportValue: v => `${numeroPlano(Number(v), 1)}%`,
   },
   {
     key: 'fact_monto', label: 'Facturado', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>{v > 0 ? moneda(v, 0) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
@@ -88,11 +86,11 @@ const COLUMNS: Column<NCRow>[] = [
     render: v => v !== null
       ? (
         <span className="font-mono font-semibold" style={{ color: Number(v) > 15 ? '#ef4444' : Number(v) > 5 ? '#f59e0b' : '#10b981' }}>
-          {Number(v).toFixed(1)}%
+          {porcentaje(Number(v), 1)}
         </span>
       )
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
-    exportValue: v => v !== null ? `${Number(v).toFixed(1)}%` : '',
+    exportValue: v => v !== null ? `${numeroPlano(Number(v), 1)}%` : '',
   },
   {
     key: 'tipo_mas_frecuente', label: 'Tipo NC', sortable: true,
@@ -167,10 +165,10 @@ export default function ComprobantesOperativo() {
       />
       <div className="flex items-center gap-2">
         <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>% NC mín.</label>
-        <input
-          type="number"
+        <InputMonto
+          soloPositivos
           value={ratioMin || ''}
-          onChange={e => setRatioMin(Number(e.target.value))}
+          onChange={n => setRatioMin(n ?? 0)}
           placeholder="0"
           style={{ ...inputStyle, width: 70 }}
         />
@@ -192,27 +190,27 @@ export default function ComprobantesOperativo() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           label="Total NCs emitidas"
-          value={loading ? '...' : ars(summary.total_nc)}
+          value={loading ? '...' : moneda(summary.total_nc, 0)}
           subLabel={loading ? '' : `${rows.length} clientes con NC`}
           variant={summary.total_nc > 0 ? 'danger' : 'default'}
           loading={loading}
         />
         <KPICard
           label="Var. NCs vs período ant."
-          value={loading ? '...' : `${summary.variacion_nc_pct >= 0 ? '+' : ''}${summary.variacion_nc_pct.toFixed(1)}%`}
+          value={loading ? '...' : `${summary.variacion_nc_pct >= 0 ? '+' : ''}${porcentaje(summary.variacion_nc_pct, 1)}`}
           variant={summary.variacion_nc_pct > 20 ? 'danger' : summary.variacion_nc_pct > 0 ? 'warning' : 'success'}
           loading={loading}
         />
         <KPICard
           label="% NC sobre facturación"
-          value={loading ? '...' : `${summary.ratio_pct.toFixed(2)}%`}
-          subLabel={loading ? '' : `de ${ars(summary.total_facturado)} facturado`}
+          value={loading ? '...' : porcentaje(summary.ratio_pct, 2)}
+          subLabel={loading ? '' : `de ${moneda(summary.total_facturado, 0)} facturado`}
           variant={summary.ratio_pct > 10 ? 'danger' : summary.ratio_pct > 5 ? 'warning' : 'default'}
           loading={loading}
         />
         <KPICard
           label="NCs anterior"
-          value={loading ? '...' : ars(summary.total_nc_prev)}
+          value={loading ? '...' : moneda(summary.total_nc_prev, 0)}
           loading={loading}
         />
       </div>

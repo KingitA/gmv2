@@ -13,14 +13,12 @@
 import {
   Document, Page, Text, View, StyleSheet, Image,
 } from '@react-pdf/renderer'
+import { fecha as fechaAR, numero, entero, formatCuit } from '@/lib/formato'
 
-const fmtARS = (n: number) =>
-  Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtARS = (n: number) => numero(Math.abs(n))
 
-const fmtFechaISO = (v?: string | null) => {
-  const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
-}
+// "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
+const fmtFechaISO = (v?: string | null) => fechaAR(v) || '—'
 
 const REMITO_CONFIG: Record<string, { letra: string; nombre: string; color: string }> = {
   REM:  { letra: 'R', nombre: 'REMITO', color: '#004060' },
@@ -180,7 +178,7 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
               {empresa!.logo_url
                 ? <Image style={s.emLogo} src={empresa!.logo_url} />
                 : <Text style={s.emNombre}>{empresa!.razon_social}</Text>}
-              <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{empresa!.cuit}</Text></View>
+              <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{formatCuit(empresa!.cuit)}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Cond. IVA:</Text><Text style={s.emVal}>{empresa!.condicion_iva ?? 'Responsable Inscripto'}</Text></View>
               <View style={s.emRow}><Text style={s.emLbl}>Ing. Brutos:</Text><Text style={s.emVal}>{empresa!.numero_iibb ?? empresa!.iibb ?? '—'}</Text></View>
               {empresa!.inicio_actividades && (
@@ -239,7 +237,7 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
             <View style={s.cliCol}>
               <Text style={s.cliTit}>DESTINATARIO</Text>
               <Text style={s.cliRazon}>{cliente.nombre_razon_social}</Text>
-              <View style={s.cliRow}><Text style={s.cliLbl}>CUIT:</Text><Text style={s.cliVal}>{cliente.cuit ?? '—'}</Text></View>
+              <View style={s.cliRow}><Text style={s.cliLbl}>CUIT:</Text><Text style={s.cliVal}>{formatCuit(cliente.cuit) || '—'}</Text></View>
               <View style={s.cliRow}><Text style={s.cliLbl}>Cond. IVA:</Text><Text style={s.cliVal}>{cliente.condicion_iva ?? '—'}</Text></View>
             </View>
             <View style={s.cliCol2}>
@@ -265,7 +263,7 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
           <View key={i} wrap={false} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}]}>
             <Text style={[s.tdText, s.cCod, { fontSize: 7.5, color: '#888' }]}>{item.sku ?? ''}</Text>
             <Text style={[s.tdBold, s.cDesc, { fontSize: 8 }]}>{item.descripcion}</Text>
-            <Text style={[s.tdBold, s.cCant]}>{String(Math.abs(Number(item.cantidad) || 0))}</Text>
+            <Text style={[s.tdBold, s.cCant]}>{numero(Math.abs(Number(item.cantidad) || 0), 0, 3)}</Text>
           </View>
         ))}
       </View>
@@ -283,7 +281,7 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
             </View>
             <View style={s.transpRow}>
               <Text style={s.transpLbl}>CUIT transp.:</Text>
-              {transporte?.cuit ? <Text style={s.transpVal}>{transporte.cuit}</Text> : <View style={s.blank} />}
+              {transporte?.cuit ? <Text style={s.transpVal}>{formatCuit(transporte.cuit)}</Text> : <View style={s.blank} />}
             </View>
             <View style={s.transpRow}>
               <Text style={s.transpLbl}>Chofer / Pat.:</Text>
@@ -299,11 +297,11 @@ function RemitoPagina({ data, copia }: { data: RemitoPDFData; copia: string }) {
           <View style={s.totNums}>
             <View style={s.totRow}>
               <Text style={s.totLbl}>Total unidades</Text>
-              <Text style={s.totVal}>{String(cantTotal)}</Text>
+              <Text style={s.totVal}>{numero(cantTotal, 0, 3)}</Text>
             </View>
             <View style={s.totRow}>
               <Text style={s.totLbl}>Bultos</Text>
-              <Text style={s.totVal}>{remito.bultos && remito.bultos > 0 ? String(remito.bultos) : '________'}</Text>
+              <Text style={s.totVal}>{remito.bultos && remito.bultos > 0 ? entero(remito.bultos) : '________'}</Text>
             </View>
             {esR ? (
               <View style={s.subGrand}>

@@ -13,6 +13,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Plus, Pencil, Trash2, X, Search, Wallet } from "lucide-react"
 import Link from "next/link"
+import { InputMonto } from "@/components/ui/input-monto"
+import { InputCUIT } from "@/components/ui/input-cuit"
+import { errorCuit, formatCuit, moneda, normalizarCuit, porcentaje } from "@/lib/formato"
 
 type Transporte = {
   id: string
@@ -152,15 +155,18 @@ export default function TransportesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const errCuit = errorCuit(formData.cuit)
+    if (errCuit) { alert(errCuit); return }
     const payload = {
       nombre: formData.nombre,
-      cuit: formData.cuit || null,
+      cuit: normalizarCuit(formData.cuit),
       telefono: formData.telefono || null,
       email: formData.email || null,
-      porcentaje_flete: parseFloat(formData.porcentaje_flete) || 0,
-      precio_bulto: formData.precio_bulto ? parseFloat(formData.precio_bulto) : null,
-      precio_pallet: formData.precio_pallet ? parseFloat(formData.precio_pallet) : null,
-      porcentaje_seguro: formData.porcentaje_seguro ? parseFloat(formData.porcentaje_seguro) : null,
+      // los campos guardan el número en formato de máquina ("12.5"): lo arma InputMonto
+      porcentaje_flete: Number(formData.porcentaje_flete) || 0,
+      precio_bulto: formData.precio_bulto ? Number(formData.precio_bulto) : null,
+      precio_pallet: formData.precio_pallet ? Number(formData.precio_pallet) : null,
+      porcentaje_seguro: formData.porcentaje_seguro ? Number(formData.porcentaje_seguro) : null,
       notas: formData.notas || null,
       activo: true,
     }
@@ -225,7 +231,7 @@ export default function TransportesPage() {
     setLocResults([])
   }
 
-  const fmt = (v: number | null, suffix = "") => v !== null && v !== undefined ? `${v}${suffix}` : "—"
+  const fmtPct = (v: number | null) => v !== null && v !== undefined ? porcentaje(v) : "—"
 
   return (
     <div className="p-6 lg:p-8">
@@ -258,12 +264,12 @@ export default function TransportesPage() {
             ) : transportes.map(t => (
               <TableRow key={t.id}>
                 <TableCell className="font-medium">{t.nombre}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{t.cuit || "—"}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{formatCuit(t.cuit) || "—"}</TableCell>
                 <TableCell className="text-sm">{t.telefono || "—"}</TableCell>
-                <TableCell>{fmt(t.porcentaje_flete, "%")}</TableCell>
-                <TableCell>{t.precio_bulto ? `$${t.precio_bulto}` : "—"}</TableCell>
-                <TableCell>{t.precio_pallet ? `$${t.precio_pallet}` : "—"}</TableCell>
-                <TableCell>{fmt(t.porcentaje_seguro, "%")}</TableCell>
+                <TableCell>{fmtPct(t.porcentaje_flete)}</TableCell>
+                <TableCell>{t.precio_bulto ? moneda(t.precio_bulto) : "—"}</TableCell>
+                <TableCell>{t.precio_pallet ? moneda(t.precio_pallet) : "—"}</TableCell>
+                <TableCell>{fmtPct(t.porcentaje_seguro)}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex gap-1 justify-end">
                     <Button variant="ghost" size="icon" asChild title="Cuenta corriente">
@@ -294,7 +300,7 @@ export default function TransportesPage() {
               </div>
               <div>
                 <Label>CUIT</Label>
-                <Input value={formData.cuit} onChange={e => setFormData({...formData, cuit: e.target.value})} />
+                <InputCUIT value={formData.cuit} onChange={v => setFormData({...formData, cuit: v})} />
               </div>
               <div>
                 <Label>Teléfono</Label>
@@ -312,19 +318,19 @@ export default function TransportesPage() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <Label>% Flete (valor declarado)</Label>
-                  <Input type="number" step="0.01" value={formData.porcentaje_flete} onChange={e => setFormData({...formData, porcentaje_flete: e.target.value})} placeholder="0" />
+                  <InputMonto porciento value={formData.porcentaje_flete} onChange={n => setFormData({...formData, porcentaje_flete: n == null ? "" : String(n)})} placeholder="0" />
                 </div>
                 <div>
                   <Label>$ por Bulto</Label>
-                  <Input type="number" step="0.01" value={formData.precio_bulto} onChange={e => setFormData({...formData, precio_bulto: e.target.value})} placeholder="—" />
+                  <InputMonto pesos value={formData.precio_bulto} onChange={n => setFormData({...formData, precio_bulto: n == null ? "" : String(n)})} placeholder="—" />
                 </div>
                 <div>
                   <Label>$ por Pallet</Label>
-                  <Input type="number" step="0.01" value={formData.precio_pallet} onChange={e => setFormData({...formData, precio_pallet: e.target.value})} placeholder="—" />
+                  <InputMonto pesos value={formData.precio_pallet} onChange={n => setFormData({...formData, precio_pallet: n == null ? "" : String(n)})} placeholder="—" />
                 </div>
                 <div>
                   <Label>% Seguro</Label>
-                  <Input type="number" step="0.01" value={formData.porcentaje_seguro} onChange={e => setFormData({...formData, porcentaje_seguro: e.target.value})} placeholder="—" />
+                  <InputMonto porciento value={formData.porcentaje_seguro} onChange={n => setFormData({...formData, porcentaje_seguro: n == null ? "" : String(n)})} placeholder="—" />
                 </div>
               </div>
             </div>

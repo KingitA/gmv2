@@ -3,6 +3,7 @@
 // Vendedor (que arma el detalle de todos los pedidos recientes de una sola lectura).
 
 import { getPrecioNeto } from "@/lib/comisiones/calcular"
+import { fechaISO } from "@/lib/formato"
 
 export const KARDEX_COMISION_COLS =
   "id, pedido_id, articulo_id, articulo_sku, articulo_descripcion, articulo_categoria, cantidad, subtotal_neto, metodo_facturacion, articulo_iva_ventas, comision_viajante_pct, comision_viajante_monto, descuento_financiero_pct, comprobante_venta_id, fecha_comprobante_cobrado, comprobante_cobrado"
@@ -50,7 +51,7 @@ export function agruparPorComprobante(rows: any[], compMap: Map<string, any>) {
       grupos.set(cid, {
         comprobante_id: cid,
         numero: comp ? `${comp.tipo_comprobante} ${comp.numero_comprobante}` : "—",
-        fecha_cobro: r.fecha_comprobante_cobrado?.slice(0, 10) ?? "",
+        fecha_cobro: fechaISO(r.fecha_comprobante_cobrado), // timestamptz → día argentino
         total_neto: Number(comp?.total_neto ?? 0),
         total_iva: Number(comp?.total_iva ?? 0),
         total: Number(comp?.total_factura ?? 0),

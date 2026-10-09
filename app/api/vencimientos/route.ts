@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { requireAuth, getUserRoles } from '@/lib/auth'
 import { nowArgentina, todayArgentina } from '@/lib/utils'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
+import { hoyISO, sumarDiasISO } from '@/lib/formato'
 import { esAdmin, esTipoReservado, TIPOS_SOLO_ADMIN } from '@/lib/finanzas/tipos-reservados'
 
 // Sueldos y Socios: SOLO admin los ve / carga / edita. Para el resto no existen.
@@ -66,11 +67,10 @@ export async function GET(request: Request) {
             }
             if (proximosNDias) {
                 const hoy = todayArgentina()
-                const limite = new Date(hoy)
-                limite.setDate(limite.getDate() + parseInt(proximosNDias))
+                const limite = sumarDiasISO(hoy, parseInt(proximosNDias))
                 query = query
                     .gte('fecha_vencimiento', hoy)
-                    .lte('fecha_vencimiento', limite.toISOString().split('T')[0])
+                    .lte('fecha_vencimiento', limite)
                     .in('estado', ['pendiente', 'vencido'])
             }
 
@@ -223,18 +223,18 @@ async function generarRecurrencias(
     if (!incremento) return
 
     const maxOcurrencias = 12
-    const limiteDate = hasta ? new Date(hasta) : null
+    // Fechas de calendario "AAAA-MM-DD" (comparables como texto), sin depender del huso del servidor
+    const limite = hasta ? String(hasta).slice(0, 10) : null
+    const hoy = hoyISO()
+    const dosAnios = `${Number(hoy.slice(0, 4)) + 2}${hoy.slice(4)}` // No generar más allá de 2 años
+    const [anioBase, mesBase, diaBase] = String(base.fecha_vencimiento).slice(0, 10).split('-').map(Number)
     const inserts = []
 
     for (let i = 1; i <= maxOcurrencias; i++) {
-        const fecha = new Date(base.fecha_vencimiento)
-        fecha.setMonth(fecha.getMonth() + (incremento * i))
+        // Mismo día, `incremento * i` meses después (31/01 + 1 mes desborda a marzo, como antes)
+        const fecha = new Date(Date.UTC(anioBase, mesBase - 1 + (incremento * i), diaBase, 12)).toISOString().slice(0, 10) // formato-ok: aritmética de calendario en UTC a mediodía
 
-        if (limiteDate && fecha > limiteDate) break
-
-        // No generar más allá de 2 años
-        const dosAnios = new Date()
-        dosAnios.setFullYear(dosAnios.getFullYear() + 2)
+        if (limite && fecha > limite) break
         if (fecha > dosAnios) break
 
         inserts.push({
@@ -243,7 +243,7 @@ async function generarRecurrencias(
             concepto: base.concepto,
             monto: base.monto,
             moneda: base.moneda,
-            fecha_vencimiento: fecha.toISOString().split('T')[0],
+            fecha_vencimiento: fecha,
             recurrencia: base.recurrencia,
             recurrencia_hasta: base.recurrencia_hasta,
             observaciones: base.observaciones,

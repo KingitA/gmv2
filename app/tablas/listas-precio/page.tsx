@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog"
 import { Loader2, RotateCcw } from "lucide-react"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { numero } from "@/lib/formato"
 
 // ─── Tipos ────────────────────────────────────────────
 
@@ -340,7 +341,7 @@ function CeldaFormula({ reglId, codigo, initialValue, onSave, saving, disabled }
       {/* Preview con Base=1000 */}
       {preview !== null && (
         <div className="text-[9px] text-slate-400 font-mono text-right mt-0.5 leading-none px-0.5">
-          ={preview.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          ={numero(preview, 2)}
         </div>
       )}
 
@@ -574,7 +575,7 @@ export default function ListasPrecioPage() {
         </div>
         <div className="flex items-center gap-1.5">
           <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">½</span>
-          <span>Mixto (IVA 10.5%)</span>
+          <span>Mixto (IVA 10,5%)</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-neutral-100 text-neutral-500">0</span>

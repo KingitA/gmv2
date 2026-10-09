@@ -13,6 +13,8 @@ import { Separator } from "@/components/ui/separator"
 import { ArrowLeft, TrendingUp, TrendingDown, Minus, Plus, Truck } from "lucide-react"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { formatCuit } from "@/lib/formato"
 
 const TIPO_LABELS: Record<string, { label: string; color: string; sign: number }> = {
     faltante_mercaderia: { label: 'Faltante de mercadería', color: 'bg-orange-100 text-orange-800', sign: 1 },
@@ -32,7 +34,7 @@ export default function TransporteCCPage() {
     // New movement form
     const [mostrando, setMostrando] = useState(false)
     const [tipo, setTipo] = useState('pago')
-    const [monto, setMonto] = useState('')
+    const [monto, setMonto] = useState<number | null>(null)
     const [descripcion, setDescripcion] = useState('')
     const [nroComp, setNroComp] = useState('')
     const [guardando, setGuardando] = useState(false)
@@ -56,18 +58,18 @@ export default function TransporteCCPage() {
     }
 
     async function guardarMovimiento() {
-        if (!monto || Number(monto) <= 0) { setError('Ingresá un monto válido'); return }
+        if (!monto || monto <= 0) { setError('Ingresá un monto válido'); return }
         setGuardando(true); setError(null)
         try {
             const res = await fetch(`/api/transportes/${transporteId}/cuenta-corriente`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tipo_movimiento: tipo, monto: Number(monto), descripcion, numero_comprobante: nroComp }),
+                body: JSON.stringify({ tipo_movimiento: tipo, monto, descripcion, numero_comprobante: nroComp }),
             })
             const data = await res.json()
             if (!res.ok) { setError(data.error || 'Error al guardar'); return }
             setMostrando(false)
-            setMonto(''); setDescripcion(''); setNroComp(''); setTipo('pago')
+            setMonto(null); setDescripcion(''); setNroComp(''); setTipo('pago')
             loadData()
         } finally {
             setGuardando(false)
@@ -87,7 +89,7 @@ export default function TransporteCCPage() {
                     <Truck className="h-6 w-6 text-muted-foreground" />
                     <div>
                         <h1 className="text-2xl font-bold">{transporte.nombre}</h1>
-                        <p className="text-muted-foreground text-sm">Cuenta Corriente{transporte.cuit && ` · CUIT: ${transporte.cuit}`}</p>
+                        <p className="text-muted-foreground text-sm">Cuenta Corriente{transporte.cuit && ` · CUIT: ${formatCuit(transporte.cuit)}`}</p>
                     </div>
                 </div>
                 <Button onClick={() => setMostrando(!mostrando)} className="gap-2">
@@ -147,7 +149,7 @@ export default function TransporteCCPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label>Monto</Label>
-                                <Input type="number" step="0.01" placeholder="0.00" value={monto} onChange={e => setMonto(e.target.value)} />
+                                <InputMonto pesos soloPositivos placeholder="0,00" value={monto} onChange={setMonto} />
                             </div>
                         </div>
                         <div className="space-y-2">

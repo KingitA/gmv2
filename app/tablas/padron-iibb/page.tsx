@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { AlertTriangle, Upload, Loader2, CheckCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { fecha, porcentaje } from "@/lib/formato"
 
 interface JurisdiccionEstado {
   codigo: string
@@ -97,7 +98,7 @@ export default function PadronIIBBPage() {
               <p key={j.codigo}>
                 {j.nombre}: {j.registros_total === 0
                   ? "sin padrón cargado — se usa la alícuota general"
-                  : `padrón VENCIDO (última vigencia ${j.vigencia_hasta}) — se usa la alícuota general`}
+                  : `padrón VENCIDO (última vigencia ${fecha(j.vigencia_hasta)}) — se usa la alícuota general`}
               </p>
             ))}
           </AlertDescription>
@@ -116,8 +117,8 @@ export default function PadronIIBBPage() {
               </div>
               <CardDescription>
                 {j.registros_vigentes} CUITs vigentes de {j.registros_total} cargados
-                {j.vigencia_hasta ? ` · vigencia hasta ${j.vigencia_hasta}` : ""}
-                {` · alícuota general (fallback): ${j.alicuota_general}%`}
+                {j.vigencia_hasta ? ` · vigencia hasta ${fecha(j.vigencia_hasta)}` : ""}
+                {` · alícuota general (fallback): ${porcentaje(j.alicuota_general)}`}
               </CardDescription>
             </CardHeader>
           </Card>

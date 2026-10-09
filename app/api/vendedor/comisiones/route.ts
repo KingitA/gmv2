@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { getPrecioNeto } from "@/lib/comisiones/calcular"
+import { fechaISO } from "@/lib/formato"
 
 // GET /api/vendedor/comisiones?tipo=cobrada|vendida
 // Comisiones del vendedor. REGLA DE ORO: el vendedor solo ve plata que
@@ -92,8 +93,8 @@ export async function GET(req: NextRequest) {
           pedido_id: pid,
           numero_pedido: k.numero_pedido ?? "—",
           cliente_id: k.cliente_id,
-          fecha: k.fecha?.slice(0, 10) ?? "",
-          fecha_cobro: k.fecha_comprobante_cobrado?.slice(0, 10) ?? null,
+          fecha: fechaISO(k.fecha), // timestamptz → día argentino
+          fecha_cobro: fechaISO(k.fecha_comprobante_cobrado) || null,
           total_monto: 0,
           total_comision: 0,
           total_debito_contado: 0,

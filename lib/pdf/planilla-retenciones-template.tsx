@@ -6,13 +6,11 @@
  */
 
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
+import { fecha as fechaAR, hoyISO, numero, formatCuit } from '@/lib/formato'
 
-const fmt = (n: number) =>
-  n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtFecha = (v?: string | null) => {
-  const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
-}
+const fmt = (n: number) => numero(n)
+// "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
+const fmtFecha = (v?: string | null) => fechaAR(v) || '—'
 
 export interface PlanillaRetencionesData {
   empresa: { razon_social: string; cuit: string; direccion?: string | null }
@@ -54,8 +52,8 @@ export function PlanillaRetencionesPDF({ data }: { data: PlanillaRetencionesData
     <Document>
       <Page size="A4" style={s.page}>
         <Text style={s.emNombre}>{data.empresa.razon_social}</Text>
-        <Text style={s.emSub}>CUIT {data.empresa.cuit}{data.empresa.direccion ? ` · ${data.empresa.direccion}` : ''}</Text>
-        <Text style={s.fecha}>Emitida: {fmtFecha(new Date().toISOString().slice(0, 10))}</Text>
+        <Text style={s.emSub}>CUIT {formatCuit(data.empresa.cuit)}{data.empresa.direccion ? ` · ${data.empresa.direccion}` : ''}</Text>
+        <Text style={s.fecha}>Emitida: {fmtFecha(hoyISO())}</Text>
 
         <Text style={s.titulo}>
           Planilla de Retenciones a las Ganancias (del {fmtFecha(data.desde)} al {fmtFecha(data.hasta)})
@@ -77,9 +75,9 @@ export function PlanillaRetencionesPDF({ data }: { data: PlanillaRetencionesData
             <Text style={[s.td, s.cOp, ...(f.anulada ? [s.anulada] : [])]}>{f.numero_op}</Text>
             <Text style={[s.td, s.cCert, ...(f.anulada ? [s.anulada] : [])]}>{f.numero_certificado}{f.anulada ? ' (anulada)' : ''}</Text>
             <Text style={[s.td, s.cProv, ...(f.anulada ? [s.anulada] : [])]}>{f.proveedor}</Text>
-            <Text style={[s.td, s.cCuit, ...(f.anulada ? [s.anulada] : [])]}>{f.cuit}</Text>
+            <Text style={[s.td, s.cCuit, ...(f.anulada ? [s.anulada] : [])]}>{formatCuit(f.cuit)}</Text>
             <Text style={[s.td, s.cBase, ...(f.anulada ? [s.anulada] : [])]}>{fmt(f.base)}</Text>
-            <Text style={[s.td, s.cAlic, ...(f.anulada ? [s.anulada] : [])]}>{Number(f.alicuota).toFixed(2)}</Text>
+            <Text style={[s.td, s.cAlic, ...(f.anulada ? [s.anulada] : [])]}>{numero(f.alicuota)}</Text>
             <Text style={[s.td, s.cImp, ...(f.anulada ? [s.anulada] : [])]}>{fmt(f.importe)}</Text>
           </View>
         ))}

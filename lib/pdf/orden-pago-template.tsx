@@ -6,13 +6,11 @@
  */
 
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
+import { fecha as fechaAR, moneda, numero, formatCuit } from '@/lib/formato'
 
-const fmt = (n: number) =>
-  n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtFecha = (v?: string | null) => {
-  const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
-}
+const fmt = (n: number) => numero(n)
+// "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
+const fmtFecha = (v?: string | null) => fechaAR(v) || '—'
 
 export interface OrdenPagoPDFData {
   empresa: { razon_social: string; cuit: string; direccion?: string | null; logo_url?: string | null; condicion_iva?: string | null }
@@ -86,7 +84,7 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
           <View style={s.emBlock}>
             {empresa.logo_url ? <Image src={empresa.logo_url} style={s.emLogo} /> : null}
             <Text style={s.emNombre}>{empresa.razon_social}</Text>
-            <Text style={s.emSub}>CUIT {empresa.cuit} · {empresa.condicion_iva ?? 'Responsable Inscripto'}</Text>
+            <Text style={s.emSub}>CUIT {formatCuit(empresa.cuit)} · {empresa.condicion_iva ?? 'Responsable Inscripto'}</Text>
             {empresa.direccion ? <Text style={s.emSub}>{empresa.direccion}</Text> : null}
           </View>
           <View style={s.docBlock}>
@@ -103,7 +101,7 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
           <View style={{ flex: 1 }}>
             <Text style={s.lbl}>PROVEEDOR</Text>
             <Text style={s.provNom}>{proveedor.nombre}</Text>
-            <Text style={s.provDato}>CUIT {proveedor.cuit ?? '—'}{proveedor.direccion ? ` · ${proveedor.direccion}` : ''}{proveedor.localidad ? ` · ${proveedor.localidad}` : ''}</Text>
+            <Text style={s.provDato}>CUIT {formatCuit(proveedor.cuit) || '—'}{proveedor.direccion ? ` · ${proveedor.direccion}` : ''}{proveedor.localidad ? ` · ${proveedor.localidad}` : ''}</Text>
           </View>
         </View>
 
@@ -115,13 +113,13 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
           <Text style={[s.thT, s.cMonto]}>IMPORTE</Text>
         </View>
         {imputaciones.length === 0 ? (
-          <View style={s.tr}><Text style={[s.td, s.cDesc]}>Pago a cuenta</Text><Text style={[s.td, s.cMonto]}>$ {fmt(op.neto_a_pagar + op.total_retenciones)}</Text></View>
+          <View style={s.tr}><Text style={[s.td, s.cDesc]}>Pago a cuenta</Text><Text style={[s.td, s.cMonto]}>{moneda(op.neto_a_pagar + op.total_retenciones)}</Text></View>
         ) : imputaciones.map((i, x) => (
           <View key={x} style={s.tr}>
             <Text style={[s.td, s.cFecha]}>{fmtFecha(i.fecha)}</Text>
             <Text style={[s.td, s.cTipo, { fontFamily: 'Helvetica-Bold' }]}>{i.tipo ?? '—'}</Text>
             <Text style={[s.td, s.cDesc]}>{i.etiqueta}</Text>
-            <Text style={[s.td, s.cMonto]}>$ {fmt(i.monto)}</Text>
+            <Text style={[s.td, s.cMonto]}>{moneda(i.monto)}</Text>
           </View>
         ))}
 
@@ -133,7 +131,7 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
                 <Text style={[s.td, s.cFecha]}>{fmtFecha(c.fecha)}</Text>
                 <Text style={[s.td, s.cTipo, { fontFamily: 'Helvetica-Bold' }]}>{c.tipo ?? '—'}</Text>
                 <Text style={[s.td, s.cDesc]}>{c.etiqueta}</Text>
-                <Text style={[s.td, s.cMonto]}>− $ {fmt(Math.abs(c.monto))}</Text>
+                <Text style={[s.td, s.cMonto]}>− {moneda(Math.abs(c.monto))}</Text>
               </View>
             ))}
           </>
@@ -149,7 +147,7 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
           <View key={x} style={s.tr}>
             <Text style={[s.td, { width: 90, fontFamily: 'Helvetica-Bold' }]}>{MEDIO_LABEL[m.medio] ?? m.medio}</Text>
             <Text style={[s.td, s.cDesc]}>{m.detalle}</Text>
-            <Text style={[s.td, s.cMonto]}>$ {fmt(m.monto)}</Text>
+            <Text style={[s.td, s.cMonto]}>{moneda(m.monto)}</Text>
           </View>
         ))}
 
@@ -157,22 +155,22 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
           <View style={s.obs}>
             {op.retencion_ganancias > 0 && (
               <Text style={s.obsTxt}>
-                Se practicó retención del Impuesto a las Ganancias (RG 830) por $ {fmt(op.retencion_ganancias)}
+                Se practicó retención del Impuesto a las Ganancias (RG 830) por {moneda(op.retencion_ganancias)}
                 {op.numero_certificado ? ` — Certificado N° ${op.numero_certificado} (se adjunta)` : ''}.
               </Text>
             )}
             {op.observaciones ? <Text style={[s.obsTxt, { marginTop: 4 }]}>{op.observaciones}</Text> : null}
           </View>
           <View style={s.tots}>
-            <View style={s.totRow}><Text style={s.totLbl}>Total bruto</Text><Text style={s.totVal}>$ {fmt(op.monto_total + op.total_creditos)}</Text></View>
+            <View style={s.totRow}><Text style={s.totLbl}>Total bruto</Text><Text style={s.totVal}>{moneda(op.monto_total + op.total_creditos)}</Text></View>
             {op.total_creditos > 0.009 && (
-              <View style={s.totRow}><Text style={s.totLbl}>Notas de crédito / Reversas</Text><Text style={s.totVal}>− $ {fmt(op.total_creditos)}</Text></View>
+              <View style={s.totRow}><Text style={s.totLbl}>Notas de crédito / Reversas</Text><Text style={s.totVal}>− {moneda(op.total_creditos)}</Text></View>
             )}
-            <View style={s.totRow}><Text style={s.totLbl}>Retención Ganancias</Text><Text style={s.totVal}>− $ {fmt(op.retencion_ganancias)}</Text></View>
+            <View style={s.totRow}><Text style={s.totLbl}>Retención Ganancias</Text><Text style={s.totVal}>− {moneda(op.retencion_ganancias)}</Text></View>
             {op.total_retenciones - op.retencion_ganancias > 0.009 && (
-              <View style={s.totRow}><Text style={s.totLbl}>Otras retenciones</Text><Text style={s.totVal}>− $ {fmt(op.total_retenciones - op.retencion_ganancias)}</Text></View>
+              <View style={s.totRow}><Text style={s.totLbl}>Otras retenciones</Text><Text style={s.totVal}>− {moneda(op.total_retenciones - op.retencion_ganancias)}</Text></View>
             )}
-            <View style={s.grand}><Text style={s.grandLbl}>NETO PAGADO</Text><Text style={s.grandVal}>$ {fmt(op.neto_a_pagar)}</Text></View>
+            <View style={s.grand}><Text style={s.grandLbl}>NETO PAGADO</Text><Text style={s.grandVal}>{moneda(op.neto_a_pagar)}</Text></View>
           </View>
         </View>
 
@@ -182,7 +180,7 @@ export function OrdenPagoPDF({ data }: { data: OrdenPagoPDFData }) {
           <View style={s.firma}><Text style={s.firmaTxt}>Recibí conforme (proveedor) — aclaración y DNI</Text></View>
         </View>
 
-        <Text style={s.pie}>{empresa.razon_social} · CUIT {empresa.cuit} · Orden de pago {op.numero_op} — documento no válido como factura</Text>
+        <Text style={s.pie}>{empresa.razon_social} · CUIT {formatCuit(empresa.cuit)} · Orden de pago {op.numero_op} — documento no válido como factura</Text>
       </Page>
     </Document>
   )

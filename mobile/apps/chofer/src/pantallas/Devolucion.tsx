@@ -4,7 +4,8 @@ import { indiceHistorial, useOnline, useRuntime } from "@gm/core"
 import { DS, esEnCurso, MOTIVOS_DEVOLUCION, type Articulo, type DetallePedido, type ItemDevolucion, type OpDevolucion } from "../datasets"
 import { guardarBorrador, useBorradorDevolucion } from "../datos/borrador-devolucion"
 import { buscarArticulos, useArticulos, useClienteViaje, useEncolar, useViaje, uuidv4 } from "../datos/hooks"
-import { dejarAviso, formatCurrency, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
+import { parseMonto } from "@gm/formato"
+import { dejarAviso, formatCurrency, MontoInput, Pantalla, useBloqueoSalida, useBusqueda, useToast } from "../ui"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
 
 // Devolución en el reparto (= el sheet "Registrar Devolución" de la ficha web, ahora ruta
@@ -209,11 +210,11 @@ export function Devolucion() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs text-gray-500">Cantidad</label>
-                <input type="number" inputMode="numeric" min="1" value={item.cantidad || ""} onChange={(e) => updateItem(idx, { cantidad: Math.max(0, parseInt(e.target.value) || 0) })} className="min-h-11 w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-center text-lg font-bold" />
+                <input type="text" inputMode="numeric" value={item.cantidad || ""} onChange={(e) => updateItem(idx, { cantidad: Math.max(0, Math.trunc(parseMonto(e.target.value.replace(/\D/g, "")) ?? 0)) })} className="min-h-11 w-full rounded-xl border-2 border-gray-200 px-3 py-2 text-center text-lg font-bold" />
               </div>
               <div>
                 <label className="mb-1 block text-xs text-gray-500">Precio unit.{item.precio_venta_original <= 0 ? <span className="font-bold text-amber-700"> · cargalo</span> : null}</label>
-                <input type="number" inputMode="decimal" value={item.precio_venta_original || ""} onChange={(e) => updateItem(idx, { precio_venta_original: Math.max(0, parseFloat(e.target.value) || 0) })} className={`min-h-11 w-full rounded-xl border-2 px-3 py-2 text-center text-lg font-bold ${item.precio_venta_original <= 0 ? "border-amber-400 bg-amber-50" : "border-gray-200"}`} />
+                <MontoInput valor={item.precio_venta_original || 0} onCambio={(n) => updateItem(idx, { precio_venta_original: n })} className={`min-h-11 w-full rounded-xl border-2 px-3 py-2 text-center text-lg font-bold ${item.precio_venta_original <= 0 ? "border-amber-400 bg-amber-50" : "border-gray-200"}`} />
               </div>
             </div>
             <div>

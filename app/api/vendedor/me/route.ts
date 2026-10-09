@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
+import { hoyISO } from "@/lib/formato"
 
 // GET /api/vendedor/me
 // Identidad del vendedor autenticado: usuario, registros de vendedor
@@ -90,7 +91,7 @@ export async function GET() {
 
     // Próximas zonas: viajes vigentes (hoy en adelante o en curso) con la
     // cantidad de clientes del vendedor en cada zona (vía localidades)
-    const hoy = new Date().toISOString().slice(0, 10)
+    const hoy = hoyISO()
     const { data: viajes } = await supabase
       .from("viajes")
       .select("id, nombre, fecha, estado, zona_id, zonas!zona_id(id, nombre, descripcion), viaje_zonas(zona_id)")

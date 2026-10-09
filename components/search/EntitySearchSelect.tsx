@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Search, X, Loader2 } from "lucide-react"
 import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { useDentroDeModal } from "@/lib/hooks/use-dentro-de-modal"
+import { formatCuit } from "@/lib/formato"
 
 export type SearchEntity = "articulos" | "clientes" | "proveedores"
 
@@ -42,7 +43,7 @@ function defaultRenderItem(entity: SearchEntity, item: any): ReactNode {
         return (
             <>
                 <p className="font-medium text-sm">{item.nombre}</p>
-                <p className="text-xs text-muted-foreground">CUIT: {item.cuit || "—"}</p>
+                <p className="text-xs text-muted-foreground">CUIT: {item.cuit ? formatCuit(item.cuit) : "—"}</p>
             </>
         )
     }
@@ -53,7 +54,7 @@ function defaultRenderItem(entity: SearchEntity, item: any): ReactNode {
             <p className="font-medium text-sm">{item.razon_social || item.nombre}</p>
             {ubicacion && <p className="text-xs text-foreground/80">{ubicacion}</p>}
             <p className="text-xs text-muted-foreground">
-                CUIT: {item.cuit || "—"}{item.codigo_cliente ? ` · Cód: ${item.codigo_cliente}` : ""}
+                CUIT: {item.cuit ? formatCuit(item.cuit) : "—"}{item.codigo_cliente ? ` · Cód: ${item.codigo_cliente}` : ""}
             </p>
         </>
     )

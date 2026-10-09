@@ -15,6 +15,7 @@ import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeH
 import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
 import { postearLibroConAviso } from '@/lib/cuenta-corriente/postear-libro'
+import { cuitDigitos, cuitValido } from '@/lib/formato'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -142,10 +143,18 @@ export async function POST(
       )
     }
 
+    // Inverso fiscal: validar el CUIT del cliente antes de hablar con ARCA.
+    if (esFiscal && !cuitValido(original.cliente.cuit)) {
+      return NextResponse.json({
+        error: `El CUIT del cliente "${original.cliente.nombre_razon_social ?? ''}" no es válido (${original.cliente.cuit}): corregilo en la ficha del cliente.`,
+        error_code: 'CLIENTE_CUIT_INVALIDO',
+      }, { status: 422 })
+    }
+
     if (esFiscal && certDisponible && empresaConfig) {
       const ambiente = (empresaConfig.arca_ambiente ?? 'produccion') as AmbienteARCA
       const ta = await obtenerTAConCache(supabase, ambiente)
-      const cuitEmpresa = (empresaConfig.cuit ?? '').replace(/-/g, '')
+      const cuitEmpresa = cuitDigitos(empresaConfig.cuit)
       const cbteTipo = TIPO_CBTE_ARCA[tipoInverso]
 
       // Sincronizar con ARCA
@@ -163,7 +172,7 @@ export async function POST(
       }
 
       // Solicitar CAE con referencia al comprobante original
-      const clienteCuit = original.cliente.cuit.replace(/-/g, '')
+      const clienteCuit = cuitDigitos(original.cliente.cuit)
       const fecha = todayArgentina().replace(/-/g, '')
 
       // RG 5616/2024: condición IVA del receptor obligatoria

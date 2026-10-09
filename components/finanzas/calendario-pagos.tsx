@@ -22,6 +22,7 @@ import { celdasSemana } from "@/components/viajes/calendario-viajes"
 import { sumarDias } from "@/lib/viajes/use-viajes-rango"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { fechaCorta } from "@/lib/formato"
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -68,10 +69,7 @@ const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
 const formaDe = (v: Vencimiento) => v.forma_pago || "sin_forma"
 const hoyISO = () => todayArgentina()
-const fmtCorta = (iso: string) => {
-    const [, m, d] = iso.split("-")
-    return `${d}/${m}`
-}
+const fmtCorta = (iso: string) => fechaCorta(iso)
 
 // ─── Componente ──────────────────────────────────────────────────────────────
 
@@ -393,7 +391,7 @@ export function CalendarioPagos({
 
     async function guardarVencimiento(e: React.FormEvent) {
         e.preventDefault()
-        const monto = parseFloat(form.monto.replace(/\./g, "").replace(",", "."))
+        const monto = Number(form.monto) // formato-ok: form.monto se arma con String(Number(v.monto)) (formato de máquina)
         if (!monto || monto <= 0) { toast.error("Monto inválido"); return }
         const concepto = form.concepto.trim() || form.proveedor?.nombre || ""
         if (!concepto) { toast.error("Ingresá un concepto o elegí un proveedor"); return }
@@ -729,9 +727,9 @@ export function CalendarioPagos({
                                     .filter((c) => c.fecha_vencimiento.startsWith(`${y}-${String(m + 1).padStart(2, "0")}`))
                                     .reduce((a, c) => a + Number(c.monto), 0)
                                 : 0
-                            const first = new Date(y, m, 1)
-                            const startIdx = (first.getDay() + 6) % 7
-                            const daysInMonth = new Date(y, m + 1, 0).getDate()
+                            const first = new Date(Date.UTC(y, m, 1))
+                            const startIdx = (first.getUTCDay() + 6) % 7
+                            const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate()
 
                             const mesKey = `${y}-${String(m + 1).padStart(2, "0")}`
                             const plegado = mesesPlegados.has(mesKey)

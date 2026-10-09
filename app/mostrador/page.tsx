@@ -16,9 +16,8 @@ import { searchProductos } from "@/lib/actions/productos"
 import { previewPrecioArticulo, previewPreciosArticulos } from "@/lib/actions/pedidos"
 import { createClient as createSupabase } from "@/lib/supabase/client"
 import { CondicionesPedidoPanel, useCondicionesPedido } from "@/components/pedidos/CondicionesPedidoPanel"
-
-const fmt = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 })
+import { moneda, formatCuit } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 interface ItemVenta {
   producto_id: string
@@ -303,7 +302,7 @@ export default function MostradorPage() {
                         className="w-full text-left px-3 py-2 hover:bg-muted text-sm"
                         onClick={() => { setCliente({ id: c.id, nombre: c.nombre }); setClienteQuery(""); setClientes([]) }}
                       >
-                        {c.nombre} {c.cuit ? <span className="text-muted-foreground">· {c.cuit}</span> : null}
+                        {c.nombre} {c.cuit ? <span className="text-muted-foreground">· {formatCuit(c.cuit)}</span> : null}
                       </button>
                     ))}
                   </div>
@@ -376,15 +375,15 @@ export default function MostradorPage() {
                     <div key={i.producto_id} className="flex items-center gap-3 border-b pb-2">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm truncate">{i.descripcion}</p>
-                        <p className="text-xs text-muted-foreground">{i.sku} · {fmt(i.precio_unitario)} c/u</p>
+                        <p className="text-xs text-muted-foreground">{i.sku} · {moneda(i.precio_unitario)} c/u</p>
                       </div>
-                      <Input
-                        type="number" min="1" className="w-20"
+                      <InputMonto
+                        decimales={0} soloPositivos className="w-20"
                         value={i.cantidad}
-                        onChange={(e) => setItems((prev) => prev.map((x) =>
-                          x.producto_id === i.producto_id ? { ...x, cantidad: Math.max(1, Number(e.target.value)) } : x))}
+                        onChange={(n) => setItems((prev) => prev.map((x) =>
+                          x.producto_id === i.producto_id ? { ...x, cantidad: Math.max(1, Math.trunc(n ?? 1)) } : x))}
                       />
-                      <span className="font-semibold w-28 text-right">{fmt(i.precio_unitario * i.cantidad)}</span>
+                      <span className="font-semibold w-28 text-right">{moneda(i.precio_unitario * i.cantidad)}</span>
                       <Button variant="ghost" size="icon" onClick={() => setItems((prev) => prev.filter((x) => x.producto_id !== i.producto_id))}>
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
@@ -405,7 +404,7 @@ export default function MostradorPage() {
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <p className="text-xs text-muted-foreground">Total sin percepciones — se cobra lo facturado{cond.form && Object.values(cond.form.contado).some(Boolean) ? " (menos la NC del 10% contado)" : ""}</p>
-                        <p className="text-2xl font-bold">{fmt(total)}</p>
+                        <p className="text-2xl font-bold">{moneda(total)}</p>
                       </div>
                       <Button size="lg" onClick={facturarYCobrar} disabled={vendiendo}>
                         {vendiendo ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
@@ -425,9 +424,9 @@ export default function MostradorPage() {
                       ✓ {ultimaVenta.mensaje} {ultimaVenta.numero_recibo && `· Recibo ${ultimaVenta.numero_recibo}`}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {ultimaVenta.comprobantes?.map((c: any) => `${c.tipo} ${c.numero}`).join(", ")} — facturado {fmt(ultimaVenta.total_facturado)}
-                      {ultimaVenta.nc_contado > 0 && ` · NC contado ${fmt(ultimaVenta.nc_contado)}`}
-                      {` · cobrado ${fmt(ultimaVenta.total_cobrado ?? 0)}`}
+                      {ultimaVenta.comprobantes?.map((c: any) => `${c.tipo} ${c.numero}`).join(", ")} — facturado {moneda(ultimaVenta.total_facturado)}
+                      {ultimaVenta.nc_contado > 0 && ` · NC contado ${moneda(ultimaVenta.nc_contado)}`}
+                      {` · cobrado ${moneda(ultimaVenta.total_cobrado ?? 0)}`}
                     </p>
                   </div>
                   {ultimaVenta.comprobantes?.[0]?.pdf_url && (
@@ -457,11 +456,11 @@ export default function MostradorPage() {
                         {p.estado === "facturado" && <Badge variant="outline" className="ml-2">Facturado</Badge>}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {p.comprobantes.map((c: any) => `${c.tipo} ${c.numero} (saldo ${fmt(c.saldo)})`).join(" · ") || "Sin comprobantes"}
+                        {p.comprobantes.map((c: any) => `${c.tipo} ${c.numero} (saldo ${moneda(c.saldo)})`).join(" · ") || "Sin comprobantes"}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="font-bold">{fmt(p.saldo_total)}</span>
+                      <span className="font-bold">{moneda(p.saldo_total)}</span>
                       <Button
                         size="sm"
                         disabled={cobrando === p.id || p.saldo_total <= 0}
@@ -518,17 +517,17 @@ export default function MostradorPage() {
                         <p className="font-medium text-sm truncate">{i.descripcion}</p>
                         <p className="text-xs text-muted-foreground">{i.sku}</p>
                       </div>
-                      <Input
-                        type="number" min="1" className="w-20"
+                      <InputMonto
+                        decimales={0} soloPositivos className="w-20"
                         value={i.cantidad}
-                        onChange={(e) => setDevItems((prev) => prev.map((x) =>
-                          x.producto_id === i.producto_id ? { ...x, cantidad: Math.max(1, Number(e.target.value)) } : x))}
+                        onChange={(n) => setDevItems((prev) => prev.map((x) =>
+                          x.producto_id === i.producto_id ? { ...x, cantidad: Math.max(1, Math.trunc(n ?? 1)) } : x))}
                       />
-                      <Input
-                        type="number" min="0" className="w-28" title="Precio venta original"
+                      <InputMonto
+                        soloPositivos className="w-28" title="Precio venta original"
                         value={i.precio_unitario}
-                        onChange={(e) => setDevItems((prev) => prev.map((x) =>
-                          x.producto_id === i.producto_id ? { ...x, precio_unitario: Number(e.target.value) } : x))}
+                        onChange={(n) => setDevItems((prev) => prev.map((x) =>
+                          x.producto_id === i.producto_id ? { ...x, precio_unitario: n ?? 0 } : x))}
                       />
                       <Select
                         value={i.condicion}

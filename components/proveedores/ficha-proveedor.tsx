@@ -11,6 +11,9 @@ import { Building2, Landmark, Receipt, ShieldCheck, ShoppingCart } from 'lucide-
 import { DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { InputMonto } from '@/components/ui/input-monto'
+import { InputCUIT } from '@/components/ui/input-cuit'
+import { formatCuit } from '@/lib/formato'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Campo, Campos, ConUnidad, FichaCabecera, FichaCuerpo, FichaMeta, FichaPie, FichaSeccion } from '@/components/ficha/ficha'
 import { PROVINCIAS_ARGENTINA, TIPOS_IVA_DJ, CONDICIONES_PAGO } from '@/lib/constants'
@@ -42,7 +45,7 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
         meta={
           <>
             {formData.codigo_proveedor && <FichaMeta label="Código">{formData.codigo_proveedor}</FichaMeta>}
-            {formData.cuit && <FichaMeta label="CUIT">{formData.cuit}</FichaMeta>}
+            {formData.cuit && <FichaMeta label="CUIT">{formatCuit(formData.cuit)}</FichaMeta>}
             {!editando && <span>Completá al menos el nombre y el CUIT</span>}
           </>
         }
@@ -66,7 +69,7 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
               <Input id="codigo_proveedor" className="tabular-nums" value={formData.codigo_proveedor} onChange={e => set('codigo_proveedor', e.target.value)} />
             </Campo>
             <Campo label="CUIT" nota="obligatorio">
-              <Input id="cuit" className="tabular-nums" value={formData.cuit} onChange={e => set('cuit', e.target.value)} placeholder="20-12345678-9" required />
+              <InputCUIT id="cuit" className="tabular-nums" value={formData.cuit} onChange={v => set('cuit', v)} placeholder="20-12345678-9" required />
             </Campo>
             <Campo label="Tipo de proveedor">
               <Select value={formData.tipo_proveedor} onValueChange={v => set('tipo_proveedor', v)}>
@@ -137,8 +140,8 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
               <>
                 <Campo label="Plazo">
                   <ConUnidad unidad="días">
-                    <Input id="plazo_dias" type="number" className="tabular-nums" value={formData.plazo_dias}
-                      onChange={e => set('plazo_dias', Number.parseInt(e.target.value))} placeholder="30" required />
+                    <InputMonto id="plazo_dias" decimales={0} soloPositivos className="tabular-nums" value={formData.plazo_dias}
+                      onChange={v => set('plazo_dias', v != null ? Math.trunc(v) : null)} placeholder="30" required />
                   </ConUnidad>
                 </Campo>
                 <Campo label="Plazo desde">
@@ -182,14 +185,14 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
             </Campo>
             <Campo label="Percepción IVA">
               <ConUnidad unidad="%">
-                <Input id="percepcion_iva" type="number" step="0.01" className="tabular-nums" value={formData.percepcion_iva}
-                  onChange={e => set('percepcion_iva', Number.parseFloat(e.target.value) || 0)} placeholder="0.00" />
+                <InputMonto id="percepcion_iva" className="tabular-nums" value={formData.percepcion_iva}
+                  onChange={v => set('percepcion_iva', v ?? 0)} placeholder="0,00" />
               </ConUnidad>
             </Campo>
             <Campo label="Percepción IIBB">
               <ConUnidad unidad="%">
-                <Input id="percepcion_iibb" type="number" step="0.01" className="tabular-nums" value={formData.percepcion_iibb}
-                  onChange={e => set('percepcion_iibb', Number.parseFloat(e.target.value) || 0)} placeholder="0.00" />
+                <InputMonto id="percepcion_iibb" className="tabular-nums" value={formData.percepcion_iibb}
+                  onChange={v => set('percepcion_iibb', v ?? 0)} placeholder="0,00" />
               </ConUnidad>
             </Campo>
           </Campos>

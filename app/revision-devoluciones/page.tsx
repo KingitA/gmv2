@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast"
 import { formatCurrency } from "@/lib/utils"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { fecha, numero, parseMonto } from "@/lib/formato"
 
 const ESTADO_UI: Record<string, { label: string; cls: string }> = {
   pendiente: { label: "Pendiente depósito", cls: "bg-amber-100 text-amber-800 border-amber-300" },
@@ -49,9 +50,6 @@ export default function RevisionDevolucionesPage() {
       setLoading(false)
     }
   }
-
-  const fecha = (iso: string) =>
-    new Date(iso).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "2-digit" })
 
   // ── Acciones ────────────────────────────────────────────────────────────────
 
@@ -137,7 +135,7 @@ export default function RevisionDevolucionesPage() {
     setEditando(dev.id)
     setQuitar(new Set())
     const init: Record<string, string> = {}
-    for (const it of dev.items || []) init[it.id] = String(it.cantidad)
+    for (const it of dev.items || []) init[it.id] = numero(Number(it.cantidad), 0, 3)
     setCantEdits(init)
   }
 
@@ -146,7 +144,7 @@ export default function RevisionDevolucionesPage() {
     try {
       const items = (dev.items || [])
         .filter((it: any) => !quitar.has(it.id))
-        .map((it: any) => ({ id: it.id, cantidad: parseFloat((cantEdits[it.id] ?? "").replace(",", ".")) }))
+        .map((it: any) => ({ id: it.id, cantidad: parseMonto(cantEdits[it.id] ?? "") ?? NaN }))
         .filter((it: any) => Number.isFinite(it.cantidad) && it.cantidad > 0)
       const res = await fetch(`/api/devoluciones/${dev.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -263,7 +261,7 @@ export default function RevisionDevolucionesPage() {
                             <tbody>
                               {(dev.items || []).map((it: any) => {
                                 const quitado = quitar.has(it.id)
-                                const cant = enEdicion ? parseFloat((cantEdits[it.id] ?? "").replace(",", ".")) || 0 : Number(it.cantidad)
+                                const cant = enEdicion ? parseMonto(cantEdits[it.id] ?? "") || 0 : Number(it.cantidad)
                                 return (
                                   <tr key={it.id} className={`border-t ${quitado ? "opacity-40 line-through" : ""}`}>
                                     <td className="px-2 py-1.5 font-medium">{it.articulos?.descripcion || it.articulos?.nombre || "—"}</td>
@@ -276,7 +274,7 @@ export default function RevisionDevolucionesPage() {
                                           className="w-16 border rounded px-1 py-0.5 text-right font-semibold"
                                           inputMode="decimal"
                                         />
-                                      ) : Number(it.cantidad)}
+                                      ) : numero(Number(it.cantidad), 0, 3)}
                                     </td>
                                     <td className="px-2 py-1.5 text-right">{formatCurrency(Number(it.precio_venta_original || 0))}</td>
                                     <td className="px-2 py-1.5 text-right font-semibold">{formatCurrency(cant * Number(it.precio_venta_original || 0))}</td>

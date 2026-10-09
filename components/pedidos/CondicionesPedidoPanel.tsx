@@ -25,6 +25,7 @@ import {
   type CondicionesForm, type FichaComercial, type ArticuloElegido,
 } from "@/lib/pedidos/condiciones-form"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
 
 type LP = { id: string; nombre: string; codigo?: string }
 export type AlcanceCondiciones = "pedido" | "ficha" | null
@@ -126,8 +127,8 @@ function SegToggle({ on, set }: { on: boolean; set: (b: boolean) => void }) {
 function Pct({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   return (
     <div className="flex items-center gap-1">
-      <Input type="number" step="0.01" min="0" max="100" className="h-6 w-14 text-center text-xs font-bold px-1"
-        value={value || 0} onChange={(e) => onChange(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))} />
+      <InputMonto soloPositivos className="h-6 w-14 text-center text-xs font-bold px-1"
+        value={value || 0} onChange={(n) => onChange(Math.max(0, Math.min(100, n ?? 0)))} />
       <span className="text-[10px] text-slate-400">%</span>
     </div>
   )

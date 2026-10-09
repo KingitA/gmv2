@@ -18,10 +18,10 @@ import {
 } from "@/components/pagos/ComprobantesSelector"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
+import { moneda, redondear } from "@/lib/formato"
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
-const fmt = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 2 })
-const round2 = (n: number) => Math.round(n * 100) / 100
+const round2 = (n: number) => redondear(n)
 
 export interface PagoAImputar {
   pago_id: string
@@ -117,7 +117,7 @@ export function ImputarPago({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               monto: -falta,
-              motivo: `Ajuste por redondeo — imputación de cobro (disponible $ ${fmt(pago.disponible)})`,
+              motivo: `Ajuste por redondeo — imputación de cobro (disponible ${moneda(pago.disponible)})`,
               // La falta cae en el último comprobante imputado: se salda también ahí
               comprobante_id: imputaciones[imputaciones.length - 1]?.comprobante_id,
               aplicar_saldo: true,
@@ -129,9 +129,9 @@ export function ImputarPago({
           })
           const ajData = await ajRes.json()
           if (!ajRes.ok) throw new Error(ajData.error)
-          ajusteMsg = ` Diferencia de $ ${fmt(falta)} pasada como ajuste por redondeo.`
+          ajusteMsg = ` Diferencia de ${moneda(falta)} pasada como ajuste por redondeo.`
         } catch {
-          ajusteMsg = ` ⚠ El ajuste por redondeo de $ ${fmt(falta)} falló — hacelo a mano desde la cuenta corriente.`
+          ajusteMsg = ` ⚠ El ajuste por redondeo de ${moneda(falta)} falló — hacelo a mano desde la cuenta corriente.`
         }
       }
 
@@ -141,8 +141,8 @@ export function ImputarPago({
         title: "Pago imputado",
         description:
           (restante > 0.01
-            ? `Aplicado $ ${fmt(totalImputado)}; quedan $ ${fmt(restante)} a cuenta del cliente.`
-            : `Aplicado $ ${fmt(totalImputado)} a los comprobantes elegidos.`) + ajusteMsg + bonifMsg,
+            ? `Aplicado ${moneda(totalImputado)}; quedan ${moneda(restante)} a cuenta del cliente.`
+            : `Aplicado ${moneda(totalImputado)} a los comprobantes elegidos.`) + ajusteMsg + bonifMsg,
       })
       onListo()
     } catch (e: any) {
@@ -160,12 +160,12 @@ export function ImputarPago({
       >
         <h3 className="text-base font-bold tracking-tight text-azul-900">Imputar cobro — {pago.quien}</h3>
         <p className="mt-0.5 text-xs text-slate-500">
-          Disponible de este cobro: <b style={NUM}>$ {fmt(pago.disponible)}</b>
+          Disponible de este cobro: <b style={NUM}>{moneda(pago.disponible)}</b>
           {saldoCliente != null && (
             <>
               {" · "}Saldo del cliente:{" "}
               <b className={saldoCliente > 0 ? "text-red-600" : "text-green-600"} style={NUM}>
-                $ {fmt(saldoCliente)}
+                {moneda(saldoCliente)}
               </b>
             </>
           )}
@@ -195,17 +195,17 @@ export function ImputarPago({
               de bonificación. */}
           <span className="text-xs text-slate-400">La plata a cuenta no genera 10% contado</span>
           <span>
-            Imputado: <b style={NUM}>$ {fmt(totalImputado)}</b>
+            Imputado: <b style={NUM}>{moneda(totalImputado)}</b>
           </span>
         </div>
         {restante > 0.01 && totalImputado > 0 && (
           <p className="mt-1 text-xs text-slate-400">
-            Los $ {fmt(restante)} sin imputar quedan a cuenta del cliente (podés volver a imputar después).
+            Los {moneda(restante)} sin imputar quedan a cuenta del cliente (podés volver a imputar después).
           </p>
         )}
         {restante < -0.01 && (
           <p className="mt-1 text-xs font-semibold text-red-600">
-            Estás imputando $ {fmt(-restante)} más que lo disponible del cobro — bajá algún monto.
+            Estás imputando {moneda(-restante)} más que lo disponible del cobro — bajá algún monto.
           </p>
         )}
 
@@ -230,7 +230,7 @@ export function ImputarPago({
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setDialogoFalta(null)}>
             <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <h3 className="text-base font-bold tracking-tight text-azul-900">
-                Falta pagar <span style={NUM}>$ {fmt(dialogoFalta)}</span>
+                Falta pagar <span style={NUM}>{moneda(dialogoFalta)}</span>
               </h3>
               <p className="mt-1 text-xs text-slate-500">
                 Lo disponible del cobro no cubre lo
@@ -243,7 +243,7 @@ export function ImputarPago({
                 >
                   Pasar como ajuste por redondeo
                   <span className="block text-[11px] font-normal opacity-80">
-                    El comprobante queda saldado; los $ {fmt(dialogoFalta)} se acreditan como ajuste en la cuenta
+                    El comprobante queda saldado; los {moneda(dialogoFalta)} se acreditan como ajuste en la cuenta
                   </span>
                 </button>
                 <button
@@ -252,7 +252,7 @@ export function ImputarPago({
                 >
                   Dejar saldo pendiente
                   <span className="block text-[11px] font-normal text-slate-400">
-                    El comprobante queda parcial, con $ {fmt(dialogoFalta)} por cobrar
+                    El comprobante queda parcial, con {moneda(dialogoFalta)} por cobrar
                   </span>
                 </button>
                 <button

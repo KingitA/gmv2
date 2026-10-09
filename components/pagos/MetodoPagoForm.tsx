@@ -9,6 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Trash2, Plus } from "lucide-react"
 import { DepositoItemsForm } from "./DepositoItemsForm"
 import { DateInputAR } from "@/components/ui/date-input-ar"
+import { InputMonto } from "@/components/ui/input-monto"
+import { InputCUIT } from "@/components/ui/input-cuit"
+import { moneda } from "@/lib/formato"
 import { BcraDeudorMulti } from "./BcraDeudorChip"
 
 export type TipoPago = "efectivo" | "transferencia" | "cheque" | "deposito"
@@ -117,19 +120,17 @@ export function MetodoPagoForm({ metodos, onChange }: Props) {
             </Select>
             {m.tipo !== "deposito" && (
               <div className="flex-1 max-w-xs">
-                <Input
-                  type="number"
+                <InputMonto
                   placeholder="Monto"
-                  min={0}
-                  step="0.01"
-                  value={m.monto || ""}
-                  onChange={(e) => updateMetodo(m.id, { monto: parseFloat(e.target.value) || 0 })}
+                  soloPositivos
+                  value={m.monto || null}
+                  onChange={(n) => updateMetodo(m.id, { monto: n ?? 0 })}
                 />
               </div>
             )}
             {m.tipo === "deposito" && (
               <span className="text-sm text-muted-foreground ml-2">
-                Total: ${montoDeposito(m).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                Total: {moneda(montoDeposito(m))}
               </span>
             )}
             <button
@@ -214,7 +215,7 @@ export function MetodoPagoForm({ metodos, onChange }: Props) {
               </div>
               <div>
                 <Label className="text-xs">CUIT emisor</Label>
-                <Input placeholder="20-12345678-9" value={m.cuit_emisor || ""} onChange={(e) => updateMetodo(m.id, { cuit_emisor: e.target.value })} />
+                <InputCUIT value={m.cuit_emisor || ""} onChange={(v) => updateMetodo(m.id, { cuit_emisor: v })} />
               </div>
               <div>
                 <Label className="text-xs">Color</Label>

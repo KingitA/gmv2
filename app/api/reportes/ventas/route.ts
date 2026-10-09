@@ -24,6 +24,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse, type NextRequest } from "next/server"
 import { requireAuth } from "@/lib/auth"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { fechaISO, finDiaAR, inicioDiaAR } from "@/lib/formato"
 
 const TIPOS_VENTA = ["venta", "nota_credito_venta", "nota_debito_venta"]
 
@@ -73,8 +74,9 @@ export async function GET(request: NextRequest) {
       `, { count: "exact" })
       .in("tipo_movimiento", TIPOS_VENTA)
 
-    if (desde) query = query.gte("fecha", `${desde}T00:00:00`)
-    if (hasta) query = query.lte("fecha", `${hasta}T23:59:59`)
+    // kardex.fecha es timestamptz: días argentinos completos
+    if (desde) query = query.gte("fecha", inicioDiaAR(desde))
+    if (hasta) query = query.lte("fecha", finDiaAR(hasta))
     if (clienteId) query = query.eq("cliente_id", clienteId)
     if (proveedorId) query = query.eq("articulo_proveedor_id", proveedorId)
     if (vendedorId) query = query.eq("vendedor_id", vendedorId)
@@ -101,8 +103,8 @@ export async function GET(request: NextRequest) {
         .select("subtotal_neto, subtotal_iva, subtotal_total, cantidad, precio_costo, margen_unitario, signo, articulo_categoria, fecha")
         .in("tipo_movimiento", TIPOS_VENTA)
 
-      if (desde) totalesQuery = totalesQuery.gte("fecha", `${desde}T00:00:00`)
-      if (hasta) totalesQuery = totalesQuery.lte("fecha", `${hasta}T23:59:59`)
+      if (desde) totalesQuery = totalesQuery.gte("fecha", inicioDiaAR(desde))
+      if (hasta) totalesQuery = totalesQuery.lte("fecha", finDiaAR(hasta))
       if (clienteId) totalesQuery = totalesQuery.eq("cliente_id", clienteId)
       if (proveedorId) totalesQuery = totalesQuery.eq("articulo_proveedor_id", proveedorId)
       if (vendedorId) totalesQuery = totalesQuery.eq("vendedor_id", vendedorId)
@@ -140,8 +142,8 @@ export async function GET(request: NextRequest) {
         let key: string
         switch (agruparPor) {
           case "categoria": key = (f as any).articulo_categoria || "Sin categoría"; break
-          case "dia":       key = (f as any).fecha?.slice(0, 10) || ""; break
-          case "mes":       key = (f as any).fecha?.slice(0, 7) || ""; break
+          case "dia":       key = fechaISO((f as any).fecha); break // día argentino
+          case "mes":       key = fechaISO((f as any).fecha).slice(0, 7); break
           default:          key = ""; break
         }
         if (!grupos[key]) grupos[key] = { key, neto: 0, iva: 0, total: 0, unidades: 0, margen: 0 }

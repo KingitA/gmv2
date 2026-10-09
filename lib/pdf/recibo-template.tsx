@@ -6,13 +6,11 @@
  */
 
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
+import { fecha as fechaAR, moneda, numero, formatCuit } from '@/lib/formato'
 
-const fmt = (n: number) =>
-  n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtFecha = (v?: string | null) => {
-  const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
-}
+const fmt = (n: number) => numero(n)
+// "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
+const fmtFecha = (v?: string | null) => fechaAR(v) || '—'
 
 export interface ReciboPDFData {
   empresa: { razon_social: string; cuit: string; direccion?: string | null; logo_url?: string | null }
@@ -73,7 +71,7 @@ export function ReciboPDF({ data }: { data: ReciboPDFData }) {
           <View style={{ flex: 1 }}>
             {empresa.logo_url ? <Image src={empresa.logo_url} style={s.emLogo} /> : null}
             <Text style={s.emNombre}>{empresa.razon_social}</Text>
-            <Text style={s.emSub}>CUIT {empresa.cuit}{empresa.direccion ? ` · ${empresa.direccion}` : ''}</Text>
+            <Text style={s.emSub}>CUIT {formatCuit(empresa.cuit)}{empresa.direccion ? ` · ${empresa.direccion}` : ''}</Text>
           </View>
           <View style={s.docBlock}>
             <Text style={s.docTit}>RECIBO DE PAGO</Text>
@@ -84,7 +82,7 @@ export function ReciboPDF({ data }: { data: ReciboPDFData }) {
 
         <Text style={s.secTit}>Cliente</Text>
         <Text style={s.cliNom}>{cliente.nombre}</Text>
-        <Text style={s.cliDato}>CUIT {cliente.cuit ?? '—'}{cliente.direccion ? ` · ${cliente.direccion}` : ''}</Text>
+        <Text style={s.cliDato}>CUIT {formatCuit(cliente.cuit) || '—'}{cliente.direccion ? ` · ${cliente.direccion}` : ''}</Text>
 
         <Text style={s.secTit}>{imputaciones.length ? 'Comprobantes cancelados / afectados' : 'Aplicación del pago'}</Text>
         {imputaciones.length === 0 ? (
@@ -101,8 +99,8 @@ export function ReciboPDF({ data }: { data: ReciboPDFData }) {
               <View key={x} style={s.tr}>
                 <Text style={[s.td, s.cComp]}>{[i.tipo, i.numero].filter(Boolean).join(' ')}</Text>
                 <Text style={[s.td, s.cFecha]}>{fmtFecha(i.fecha)}</Text>
-                <Text style={[s.td, s.cTotal]}>$ {fmt(i.total)}</Text>
-                <Text style={[s.td, s.cCanc, { fontFamily: 'Helvetica-Bold' }]}>$ {fmt(i.cancelado)}</Text>
+                <Text style={[s.td, s.cTotal]}>{moneda(i.total)}</Text>
+                <Text style={[s.td, s.cCanc, { fontFamily: 'Helvetica-Bold' }]}>{moneda(i.cancelado)}</Text>
               </View>
             ))}
           </>
@@ -117,7 +115,7 @@ export function ReciboPDF({ data }: { data: ReciboPDFData }) {
           <View key={x}>
             <View style={s.tr}>
               <Text style={[s.td, { flex: 1 }]}>{m.label}</Text>
-              <Text style={[s.td, { width: 90, textAlign: 'right' }]}>$ {fmt(m.monto)}</Text>
+              <Text style={[s.td, { width: 90, textAlign: 'right' }]}>{moneda(m.monto)}</Text>
             </View>
             {(m.subItems ?? []).map((si, y) => (
               <View key={y} style={s.sub}><Text style={[s.td, { color: '#555' }]}>{si}</Text></View>
@@ -140,18 +138,18 @@ export function ReciboPDF({ data }: { data: ReciboPDFData }) {
                 <Text style={[s.td, { width: 100 }]}>{r.tipo}</Text>
                 <Text style={[s.td, s.cFecha]}>{fmtFecha(r.fecha)}</Text>
                 <Text style={[s.td, { flex: 1 }]}>{r.numero ?? '—'}</Text>
-                <Text style={[s.td, { width: 90, textAlign: 'right' }]}>$ {fmt(r.monto)}</Text>
+                <Text style={[s.td, { width: 90, textAlign: 'right' }]}>{moneda(r.monto)}</Text>
               </View>
             ))}
           </>
         )}
 
         <View style={s.tots}>
-          <View style={s.totRow}><Text style={s.totLbl}>Total recibido</Text><Text style={s.totVal}>$ {fmt(totales.recibido)}</Text></View>
+          <View style={s.totRow}><Text style={s.totLbl}>Total recibido</Text><Text style={s.totVal}>{moneda(totales.recibido)}</Text></View>
           {totales.retenciones > 0 && (
-            <View style={s.totRow}><Text style={s.totLbl}>Retenciones</Text><Text style={s.totVal}>− $ {fmt(totales.retenciones)}</Text></View>
+            <View style={s.totRow}><Text style={s.totLbl}>Retenciones</Text><Text style={s.totVal}>− {moneda(totales.retenciones)}</Text></View>
           )}
-          <View style={s.grand}><Text style={s.grandLbl}>NETO COBRADO</Text><Text style={s.grandVal}>$ {fmt(totales.neto)}</Text></View>
+          <View style={s.grand}><Text style={s.grandLbl}>NETO COBRADO</Text><Text style={s.grandVal}>{moneda(totales.neto)}</Text></View>
         </View>
 
         <View style={s.firmas}>

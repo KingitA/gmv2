@@ -1,17 +1,24 @@
 import { todayArgentina } from '@/lib/utils'
+import { cuitDigitos, fecha as fechaAR, formatCuit, numeroPlano } from '@/lib/formato'
 
 export function exportToCSV<T extends Record<string, any>>(
   data: T[],
   columns: { key: string; label: string; exportValue?: (value: any, row: T) => string }[],
   filename: string
 ) {
-  const headers = columns.map(c => `"${c.label}"`).join(',')
+  // CSV para Excel en castellano: separador ";" y números con coma decimal sin
+  // miles (numeroPlano), así Excel los toma como número (docs/FORMATOS.md)
+  const headers = columns.map(c => `"${c.label}"`).join(';')
   const rows = data.map(row =>
     columns.map(col => {
       const raw = row[col.key]
-      const val = col.exportValue ? col.exportValue(raw, row) : raw ?? ''
+      const val = col.exportValue
+        ? col.exportValue(raw, row)
+        : typeof raw === 'number'
+          ? (Number.isInteger(raw) ? String(raw) : numeroPlano(raw))
+          : raw ?? ''
       return `"${String(val).replace(/"/g, '""')}"`
-    }).join(',')
+    }).join(';')
   )
   const csv = [headers, ...rows].join('\n')
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
@@ -41,16 +48,15 @@ export interface FiscalARCARow {
 }
 
 function fDate(iso: string): string {
-  const [y, m, d] = iso.slice(0, 10).split('-')
-  return `${d}/${m}/${y}`
+  return fechaAR(iso) // dd/mm/aaaa (día argentino)
 }
 
 function fMonto(n: number, width = 12): string {
-  return n.toFixed(2).padStart(width)
+  return n.toFixed(2).padStart(width) // formato-ok: libro IVA de ancho fijo (sistema anterior)
 }
 
 function fMontoPerc(n: number, width = 10): string {
-  return n.toFixed(2).padStart(width)
+  return n.toFixed(2).padStart(width) // formato-ok: libro IVA de ancho fijo (sistema anterior)
 }
 
 function fNombre(s: string, width = 31): string {
@@ -58,12 +64,7 @@ function fNombre(s: string, width = 31): string {
 }
 
 function fCuit(cuit: string): string {
-  // Ensure XX-XXXXXXXX-X format
-  const digits = cuit.replace(/\D/g, '')
-  if (digits.length === 11) {
-    return `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}`
-  }
-  return cuit
+  return formatCuit(cuit) // XX-XXXXXXXX-X
 }
 
 /**
@@ -148,7 +149,7 @@ export function exportLibroIVATXTFormatted(rows: FiscalARCARow[], filename: stri
   const sumDeb = (fn: (r: FiscalARCARow) => number) => debitos.reduce((s, r) => s + fn(r), 0)
   const sumCred = (fn: (r: FiscalARCARow) => number) => creditos.reduce((s, r) => s + Math.abs(fn(r)), 0)
 
-  const fTot = (n: number) => n.toFixed(2).padStart(12)
+  const fTot = (n: number) => n.toFixed(2).padStart(12) // formato-ok: libro IVA de ancho fijo
 
   const totalesLine = `TOTALES......................................................................${fTot(totalExento)}${fTot(totalPerciva)}${fTot(totalPercba)}${fTot(totalPercrn)}${fTot(totalPerclp)}${fTot(0)}${fTot(0)}${fTot(totalNeto1)}${fTot(totalNeto2)}${fTot(totalIva1)}${fTot(totalIva2)}${fTot(totalTotal)}`
   const debitosLine = `TOTAL DE DEBITOS.............................................................${fTot(sumDeb(r => r.exento))}${fTot(sumDeb(r => r.perciva))}${fTot(sumDeb(r => r.percba))}${fTot(sumDeb(r => r.percrn))}${fTot(sumDeb(r => r.perclp))}${fTot(0)}${fTot(0)}${fTot(sumDeb(r => r.neto1))}${fTot(sumDeb(r => r.neto2))}${fTot(sumDeb(r => r.iva1))}${fTot(sumDeb(r => r.iva2))}${fTot(sumDeb(r => r.total))}`
@@ -186,11 +187,11 @@ export function exportLibroIVATXT(
   filename: string
 ) {
   const lines = rows.map(r => {
-    const fecha = String(r.fecha ?? '').replace(/-/g, '')
+    const fecha = String(r.fecha ?? '').replace(/-/g, '') // formato-ok: AAAAMMDD (TXT fiscal)
     const tipo = String(r.tipo_comprobante ?? '').padEnd(3)
     const puntoVenta = String(r.punto_venta ?? '').padStart(5, '0')
     const numero = String(r.numero_comprobante ?? '').padStart(8, '0')
-    const cuit = String(r.cuit ?? '').padStart(11, '0')
+    const cuit = cuitDigitos(r.cuit).padStart(11, '0') // formato-ok: TXT fiscal (11 dígitos; la base guarda con guiones)
     const neto21 = formatMontoTXT(r.neto_21 ?? 0)
     const neto105 = formatMontoTXT(r.neto_105 ?? 0)
     const exento = formatMontoTXT(r.exento ?? 0)

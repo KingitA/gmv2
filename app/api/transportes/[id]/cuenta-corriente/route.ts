@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { nowArgentina } from '@/lib/utils';
 import { fetchAllRows } from '@/lib/supabase/fetch-all';
+import { finDiaAR, inicioDiaAR } from '@/lib/formato';
 
 // GET /api/transportes/[id]/cuenta-corriente
 // Returns CC movements + balance for a transporte
@@ -37,8 +38,9 @@ export async function GET(
                 .eq('transporte_id', transporteId)
                 .order('fecha', { ascending: false });
 
-            if (desde) query = query.gte('fecha', desde);
-            if (hasta) query = query.lte('fecha', hasta + 'T23:59:59');
+            // fecha es timestamptz: días argentinos completos
+            if (desde) query = query.gte('fecha', inicioDiaAR(desde));
+            if (hasta) query = query.lte('fecha', finDiaAR(hasta));
             return query;
         });
     } catch (error: any) {

@@ -13,6 +13,7 @@ export default defineConfig({
       "@gm/cheques": r("../../../lib/cheques/isomorfico.ts"),
       "@gm/cobro/conjunto": r("../../../lib/cobranzas/cobro-conjunto.ts"),
       "@gm/cobro": r("../../../lib/cobranzas/reglas-cobro.ts"),
+      "@gm/formato": r("../../../lib/formato/index.ts"),
       "@gm/core": r("./src/index.ts"),
     },
   },

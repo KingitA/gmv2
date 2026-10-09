@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { ChequesEmitidosDialog } from "./cheques-emitidos-dialog"
 import { FechaInput } from "./fecha-input"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { fecha, sumarDiasISO } from "@/lib/formato"
 
 export interface ChequeEmitido {
     id: string
@@ -22,16 +23,9 @@ export interface ChequeEmitido {
 
 const hoyISO = () => todayArgentina()
 
-const mas30 = (iso: string) => {
-    const d = new Date(iso + "T00:00:00")
-    d.setDate(d.getDate() + 30)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
+const mas30 = (iso: string) => sumarDiasISO(iso.slice(0, 10), 30)
 
-const fmtAR = (iso: string) => {
-    const [y, m, d] = iso.split("-")
-    return `${d}/${m}/${y.slice(2)}`
-}
+const fmtAR = (iso: string) => fecha(iso)
 
 /**
  * Cheques propios entregados y todavía no debitados. Cada uno puede

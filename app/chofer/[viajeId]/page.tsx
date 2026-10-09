@@ -7,6 +7,8 @@ import { useAvisoInline } from "@/components/pagos/aviso-inline"
 import { formatCurrency } from "@/lib/utils"
 import type { ParadaHoja, HojaRuta } from "@/lib/viajes/hoja-ruta"
 import { GastoSheet } from "@/components/chofer/gasto-sheet"
+import { fecha } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // Hoja de ruta del chofer (titular o acompañante): paradas en el orden que
 // armó oficina, con su instrucción (cobrar sí o sí / NO ENTREGAR SIN COBRAR /
@@ -116,7 +118,7 @@ export default function ViajeDashboardPage() {
 
   const rendir = async () => {
     const d = await post(`/api/chofer/viaje/${viajeId}/finalizar`, {
-      efectivo_declarado: Number(efectivoEntrega.replace(",", ".")) || 0,
+      efectivo_declarado: Number(efectivoEntrega) || 0, // estado en formato máquina (lo escribe InputMonto)
     })
     if (d) router.push("/chofer")
   }
@@ -283,7 +285,7 @@ export default function ViajeDashboardPage() {
           <div>
             <h1 className="text-xl font-bold">{viaje.nombre}</h1>
             <p className="text-sm text-blue-200">
-              {new Date(viaje.fecha).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}
+              {fecha(viaje.fecha)}
               {!viaje.es_titular && " · acompañante"}
             </p>
           </div>
@@ -400,10 +402,10 @@ export default function ViajeDashboardPage() {
                   ))}
                 </div>
                 {estadoSel === "entregado_parcial" && (
-                  <input
-                    type="number" inputMode="numeric" value={bultosEntregados} onChange={(e) => setBultosEntregados(e.target.value)}
+                  <InputMonto
+                    decimales={0} soloPositivos value={bultosEntregados} onChange={(n) => setBultosEntregados(n == null ? "" : String(Math.trunc(n)))}
                     placeholder={`Bultos que bajaste (de ${paradaSel.bultos})`}
-                    className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
+                    className="h-auto w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-left text-lg"
                   />
                 )}
                 {["entregado_parcial", "no_entregado"].includes(estadoSel) && (
@@ -443,9 +445,9 @@ export default function ViajeDashboardPage() {
                 </div>
                 <div>
                   <p className="mb-1 text-sm font-bold text-gray-700">Efectivo que entregás en oficina</p>
-                  <input
-                    type="number" inputMode="decimal" value={efectivoEntrega} onChange={(e) => setEfectivoEntrega(e.target.value)}
-                    className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-xl font-bold"
+                  <InputMonto
+                    soloPositivos value={efectivoEntrega} onChange={(n) => setEfectivoEntrega(n == null ? "" : String(n))}
+                    className="h-auto w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-left text-xl font-bold"
                   />
                   {dinero.efectivo_en_mano < -0.01 ? (
                     <p className="mt-1 text-xs font-medium text-amber-700">Gastaste más que el fondo + lo cobrado: pusiste {formatCurrency(-dinero.efectivo_en_mano)} de tu bolsillo. Queda a tu favor y oficina te lo reintegra.</p>

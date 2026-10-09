@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
+import { fechaCorta } from "@/lib/formato"
 
 interface Movimiento {
   id: string
@@ -85,9 +86,6 @@ const TIPO_LABEL: Record<string, { label: string; icon: string; color: string }>
   debito: { label: "Débito", icon: "➖", color: "text-red-600" },
   credito: { label: "Crédito", icon: "➕", color: "text-green-600" },
 }
-
-const fechaCorta = (f: string | null) =>
-  f ? new Date(f + "T00:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" }) : "—"
 
 function VendedorBilleteraInner() {
   const router = useRouter()
@@ -230,7 +228,7 @@ function VendedorBilleteraInner() {
                   <div>
                     <p className="font-bold text-emerald-900 text-sm">{c.numero}</p>
                     <p className="text-emerald-700 text-xs">
-                      Cobrado {fechaCorta(c.fecha_cobro)} · Neto {formatCurrency(c.total_neto)} + IVA{" "}
+                      Cobrado {(fechaCorta(c.fecha_cobro) || "—")} · Neto {formatCurrency(c.total_neto)} + IVA{" "}
                       {formatCurrency(c.total_iva)}
                     </p>
                     {(c.debito_contado || 0) > 0 && (
@@ -440,7 +438,7 @@ function VendedorBilleteraInner() {
                         <p className="font-bold text-gray-900 text-sm truncate">{p.cliente_nombre}</p>
                         <p className="text-gray-400 text-xs mt-0.5">
                           {p.numero_pedido !== "—" ? `#${p.numero_pedido} · ` : ""}
-                          {comTipo === "cobrada" ? `cobrado ${fechaCorta(p.fecha_cobro)}` : fechaCorta(p.fecha)} ·{" "}
+                          {comTipo === "cobrada" ? `cobrado ${(fechaCorta(p.fecha_cobro) || "—")}` : (fechaCorta(p.fecha) || "—")} ·{" "}
                           {p.cantidad_skus} SKUs
                         </p>
                       </div>

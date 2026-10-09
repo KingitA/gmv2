@@ -15,6 +15,7 @@ import {
     Check,
 } from 'lucide-react'
 import type { AiAgendaEvent } from '@/lib/ai/types'
+import { hoyISO, fecha } from "@/lib/formato"
 
 // ─── Helpers ───────────────────────────────────────────
 
@@ -78,7 +79,7 @@ export function AgendaPanel() {
         }
     }
 
-    const today = new Date().toISOString().split('T')[0]
+    const today = hoyISO()
 
     const todayEvents = events.filter((e) => e.due_date === today)
     const upcomingEvents = events.filter((e) => !e.due_date || e.due_date > today)
@@ -192,7 +193,7 @@ function EventCard({
                     </span>
                     {event.due_date && (
                         <span className="text-[10px] text-neutral-400">
-                            {event.due_date}
+                            {fecha(event.due_date)}
                         </span>
                     )}
                 </div>

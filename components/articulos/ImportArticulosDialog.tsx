@@ -33,6 +33,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Upload, ArrowRight, CheckCircle2, AlertCircle, Loader2, FileSpreadsheet } from "lucide-react"
 import { ImportReportView } from "@/components/import/ImportReportView"
+import { numero, parseMonto, porcentaje } from "@/lib/formato"
 
 // ─── Campos mapeables de la DB ────────────────────────────────────────────────
 
@@ -81,9 +82,10 @@ const CAMPOS_PORCENTAJE = new Set(["descuento_propio", "oferta_lista_especial", 
 export const articulosValueFormat = (campo: string, valor: any): string => {
   if (valor === null || valor === undefined || valor === "") return "—"
   const s = String(valor).trim()
-  const n = parseFloat(s.replace(",", "."))
-  if (CAMPOS_PLATA.has(campo) && !isNaN(n)) return n.toFixed(2)          // 385.284 → "385.28"
-  if (CAMPOS_PORCENTAJE.has(campo) && !isNaN(n)) return `${n}%`          // 20 → "20%"
+  // number o string de máquina ("385.284") tal cual; si no, texto tipeado ("385,28")
+  const n = typeof valor === "number" ? valor : (s !== "" && Number.isFinite(Number(s)) ? Number(s) : parseMonto(s))
+  if (CAMPOS_PLATA.has(campo) && n != null) return numero(n, 2)          // 385.284 → "385,28"
+  if (CAMPOS_PORCENTAJE.has(campo) && n != null) return porcentaje(n)    // 20 → "20%"
   return s
 }
 
@@ -283,8 +285,8 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
 
           if (NUMERIC_GT0.includes(field)) {
             // Numérico estricto > 0
-            const n = parseFloat(str.replace(",", "."))
-            if (!isNaN(n) && n > 0) obj[field] = n
+            const n = parseMonto(typeof val === "number" ? val : str.replace("%", ""))
+            if (n != null && n > 0) obj[field] = n
             else warnings.push({ sku: skuRow, campo: fieldLabel(field), valor: str })
 
           } else if (field === "descripcion") {
@@ -295,17 +297,17 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
             const m = str.match(OFERTA_RE)
             const desc = m ? m[1].trim() : str
             if (desc && !esImportEspecial) obj["descripcion"] = desc
-            if (m && !esImportEspecial) obj["descuento_propio"] = parseFloat(m[2].replace(",", "."))
+            if (m && !esImportEspecial) obj["descuento_propio"] = parseMonto(m[2])
 
           } else if (field === "descuento_propio" || field === "oferta_lista_especial") {
             // Busca (15%) en CUALQUIER posición del texto (no solo al final)
             // Esto cubre "GRIS (15%)", "(15%)", "15%", "15", etc.
             const mAnywhere = str.match(/\(\s*(\d+(?:[.,]\d+)?)\s*%\s*\)/)
             if (mAnywhere) {
-              obj[field] = parseFloat(mAnywhere[1].replace(",", "."))
+              obj[field] = parseMonto(mAnywhere[1])
             } else {
-              const n = parseFloat(str.replace(",", "."))
-              if (!isNaN(n) && n >= 0 && n <= 100) obj[field] = n
+              const n = parseMonto(typeof val === "number" ? val : str.replace("%", ""))
+              if (n != null && n >= 0 && n <= 100) obj[field] = n
             }
 
           } else if (field === "iva_compras" || field === "iva_ventas") {
@@ -328,7 +330,7 @@ export function ImportArticulosDialog({ open, onOpenChange, onImportComplete }: 
           let pct: number | null = null
           for (const cell of row) {
             const mm = String(cell ?? "").match(/\(\s*(\d+(?:[.,]\d+)?)\s*%\s*\)/)
-            if (mm) { pct = parseFloat(mm[1].replace(",", ".")); break }
+            if (mm) { pct = parseMonto(mm[1]); break }
           }
           obj["oferta_lista_especial"] = pct
         }

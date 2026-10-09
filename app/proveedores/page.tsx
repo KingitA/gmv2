@@ -20,6 +20,7 @@ import * as XLSX from "xlsx"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PROVINCIAS_ARGENTINA, TIPOS_IVA_DJ, CONDICIONES_PAGO } from "@/lib/constants"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { errorCuit, formatCuit, normalizarCuit } from "@/lib/formato"
 
 export default function ProveedoresPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
@@ -103,10 +104,13 @@ export default function ProveedoresPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const errCuit = errorCuit(formData.cuit)
+    if (errCuit) { alert(errCuit); return }
+    const datos = { ...formData, cuit: normalizarCuit(formData.cuit) }
     const supabase = createClient()
 
     if (editingProveedor) {
-      const { error } = await supabase.from("proveedores").update(formData).eq("id", editingProveedor.id)
+      const { error } = await supabase.from("proveedores").update(datos).eq("id", editingProveedor.id)
 
       if (error) {
         console.error("[v0] Error updating proveedor:", error)
@@ -114,7 +118,7 @@ export default function ProveedoresPage() {
       }
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: editingProveedor.id }) }).catch(() => {})
     } else {
-      const { data: newProv, error } = await supabase.from("proveedores").insert(formData).select("id").single()
+      const { data: newProv, error } = await supabase.from("proveedores").insert(datos).select("id").single()
 
       if (error) {
         console.error("[v0] Error creating proveedor:", error)
@@ -386,7 +390,7 @@ export default function ProveedoresPage() {
                             <span className="ml-2 text-xs font-normal text-muted-foreground">parecido</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">{proveedor.cuit || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground">{formatCuit(proveedor.cuit) || "-"}</TableCell>
                         <TableCell className="text-muted-foreground">
                           {proveedor.mail_oficina || proveedor.email || "-"}
                         </TableCell>

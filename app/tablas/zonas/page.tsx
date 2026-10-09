@@ -15,6 +15,8 @@ import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { InputMonto } from "@/components/ui/input-monto"
+import { porcentaje } from "@/lib/formato"
 
 interface Zona {
   id: string
@@ -289,7 +291,7 @@ export default function ZonasPage() {
                           <SelectContent>
                             {transportes.map((transporte) => (
                               <SelectItem key={transporte.id} value={transporte.id}>
-                                {transporte.nombre} - {transporte.porcentaje_flete}%
+                                {transporte.nombre} - {porcentaje(transporte.porcentaje_flete)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -299,13 +301,12 @@ export default function ZonasPage() {
 
                     <div>
                       <Label htmlFor="porcentaje_flete">% Flete de Venta *</Label>
-                      <Input
+                      <InputMonto
                         id="porcentaje_flete"
-                        type="number"
-                        step="0.01"
+                        porciento
                         value={formData.porcentaje_flete}
-                        onChange={(e) =>
-                          setFormData({ ...formData, porcentaje_flete: Number.parseFloat(e.target.value) || 0 })
+                        onChange={(v) =>
+                          setFormData({ ...formData, porcentaje_flete: v ?? 0 })
                         }
                         disabled={formData.tipo_flete === "transporte"}
                         required
@@ -364,7 +365,7 @@ export default function ZonasPage() {
                       )}
                     </TableCell>
                     <TableCell>{zona.transportes?.nombre || "-"}</TableCell>
-                    <TableCell className="font-semibold">{zona.porcentaje_flete != null ? `${zona.porcentaje_flete}%` : "—"}</TableCell>
+                    <TableCell className="font-semibold">{zona.porcentaje_flete != null ? porcentaje(zona.porcentaje_flete) : "—"}</TableCell>
                     <TableCell>{zona.dias_visita || "-"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-2 justify-end">

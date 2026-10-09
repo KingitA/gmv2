@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { formatCurrency } from "@/lib/utils"
 import { GastoSheet } from "@/components/chofer/gasto-sheet"
+import { fechaHora } from "@/lib/formato"
 
 // Billetera del chofer: efectivo en mano (cobros sin rendir + plata a cuenta
 // del viaje − gastos) y cheques en mano. Cada cobro muestra cliente y método.
@@ -27,8 +28,6 @@ const ESTADO_COBRO: Record<string, { label: string; cls: string }> = {
   en_rendicion: { label: "RENDIDO · ESPERANDO OFICINA", cls: "bg-amber-100 text-amber-700" },
   rendido: { label: "CONFIRMADO", cls: "bg-gray-100 text-gray-500" },
 }
-
-const fecha = (v: string) => new Date(v).toLocaleDateString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
 
 export default function BilleteraPage() {
   const router = useRouter()
@@ -109,7 +108,7 @@ export default function BilleteraPage() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-gray-800">{c.cliente}</p>
                       <p className="text-xs text-gray-500">{c.metodos.join(" + ") || "Efectivo"}{c.viaje ? ` · ${c.viaje}` : ""}</p>
-                      <p className="text-xs text-gray-400">{fecha(c.fecha)}</p>
+                      <p className="text-xs text-gray-400">{fechaHora(c.fecha)}</p>
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="text-lg font-bold text-green-600">{formatCurrency(c.monto)}</p>
@@ -124,7 +123,7 @@ export default function BilleteraPage() {
           <div className="space-y-2">
             {data.fondos.map((f) => (
               <div key={f.id} className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
-                <div><p className="text-sm font-bold text-gray-800">A cuenta viaje {f.viaje}</p><p className="text-xs text-gray-400">{fecha(f.created_at)}</p></div>
+                <div><p className="text-sm font-bold text-gray-800">A cuenta viaje {f.viaje}</p><p className="text-xs text-gray-400">{fechaHora(f.created_at)}</p></div>
                 <p className="text-lg font-bold text-blue-600">+{formatCurrency(f.monto)}</p>
               </div>
             ))}
@@ -132,7 +131,7 @@ export default function BilleteraPage() {
               <div key={g.id} className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
                 <div className="min-w-0">
                   <p className="text-sm font-bold capitalize text-gray-800">{g.categoria}{g.observaciones ? <span className="font-normal text-gray-500"> · {g.observaciones}</span> : null}</p>
-                  <p className="text-xs text-gray-400">{g.viaje} · {fecha(g.created_at)} · {g.estado === "aprobado" ? "aprobado" : "a revisar en oficina"}</p>
+                  <p className="text-xs text-gray-400">{g.viaje} · {fechaHora(g.created_at)} · {g.estado === "aprobado" ? "aprobado" : "a revisar en oficina"}</p>
                 </div>
                 <p className="text-lg font-bold text-red-500">−{formatCurrency(g.monto)}</p>
               </div>

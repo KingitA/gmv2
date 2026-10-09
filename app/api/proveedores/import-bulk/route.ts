@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuth } from "@/lib/auth"
 import { guardarHistorialImportacion } from "@/lib/import/guardar-historial"
+import { cuitDigitos, errorCuit, mismoCuit, normalizarCuit, parseMonto } from "@/lib/formato"
 
 const ALLOWED_FIELDS = new Set<string>([
   "codigo_proveedor", "cuit", "nombre", "sigla", "email", "mail_oficina", "mail_vendedor",
@@ -46,13 +47,18 @@ function coerce(field: string, raw: any): any {
   const str = String(raw).trim()
   if (str === "") return null
   if (NUMERIC_FIELDS.has(field)) {
-    const n = parseFloat(str.replace(",", "."))
-    return isNaN(n) ? null : n
+    // Excel argentino: "1.500" = mil quinientos, "12,5" = doce y medio
+    return parseMonto(typeof raw === "number" ? raw : str)
   }
+  if (field === "cuit") return normalizarCuit(str)
   return str
 }
 
 function sonIguales(field: string, a: any, b: any): boolean {
+  if (field === "cuit") {
+    if (!cuitDigitos(a) && !cuitDigitos(b)) return true
+    return mismoCuit(a, b)
+  }
   if (NUMERIC_FIELDS.has(field)) {
     if (a == null || b == null) return a === b
     return Math.round(Number(a) * 100) === Math.round(Number(b) * 100)
@@ -91,11 +97,19 @@ export async function POST(req: NextRequest) {
       if (v !== null && v !== undefined && String(v).trim() !== "") connValues.push(String(v).trim())
     }
 
+    // CUIT: se busca normalizado (xx-xxxxxxxx-x) y en dígitos (dato viejo sin
+    // guiones), y se matchea por dígitos (sin importar cómo se escribió en el Excel).
     const queryValues = new Set<string>()
     for (const v of connValues) {
       queryValues.add(v)
       if (esCodigo) queryValues.add(stripLeadingZeros(v))
+      else {
+        const n = normalizarCuit(v)
+        if (n) queryValues.add(n)
+        if (cuitDigitos(v)) queryValues.add(cuitDigitos(v))
+      }
     }
+    const claveConector = (v: string) => (esCodigo ? v : cuitDigitos(v))
 
     const usedFields = new Set<string>(["id", "codigo_proveedor", "cuit", "nombre"])
     for (const row of rows) {
@@ -110,7 +124,7 @@ export async function POST(req: NextRequest) {
       const { data, error } = await supabase.from("proveedores").select(selectCols).in(connector, chunk)
       if (error) return NextResponse.json({ error: `Error consultando proveedores: ${error.message}` }, { status: 500 })
       for (const p of (data || []) as any[]) {
-        const key = String(p[connector] ?? "").trim()
+        const key = claveConector(String(p[connector] ?? "").trim())
         if (key) {
           existingMap.set(key, p)
           if (esCodigo) existingMap.set(stripLeadingZeros(key), p)
@@ -119,7 +133,8 @@ export async function POST(req: NextRequest) {
     }
 
     const lookup = (connVal: string) =>
-      existingMap.get(connVal) ?? (esCodigo ? existingMap.get(stripLeadingZeros(connVal)) : undefined) ?? null
+      (claveConector(connVal) ? existingMap.get(claveConector(connVal)) : undefined) ??
+      (esCodigo ? existingMap.get(stripLeadingZeros(connVal)) : undefined) ?? null
 
     const filas: FilaReporte[] = []
     const updates: { id: string; payload: Record<string, any>; idx: number }[] = []
@@ -138,6 +153,18 @@ export async function POST(req: NextRequest) {
 
       const cambios: FilaReporte["cambios"] = []
       const payload: Record<string, any> = {}
+
+      // CUIT nuevo inválido: la fila se informa como error (no se guarda basura)
+      const errCuit = connector !== "cuit" && "cuit" in row ? errorCuit(row.cuit) : null
+      if (errCuit) {
+        filas.push({
+          clave: existing.codigo_proveedor ?? connVal,
+          nombre: existing.nombre ?? null,
+          status: "error", cambios: [], error: `CUIT "${row.cuit}": ${errCuit}`,
+        })
+        continue
+      }
+
       for (const field of Object.keys(row)) {
         if (!ALLOWED_FIELDS.has(field)) continue
         if (field === connector) continue

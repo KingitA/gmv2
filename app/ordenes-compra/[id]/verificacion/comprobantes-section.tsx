@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Upload, Loader2, CheckCircle2, XCircle, Edit, Trash2, FileText, Plus } from "lucide-react"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { RevisarMatches } from "../comprobantes/revisar-matches"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 
 const TIPOS = ["FA", "FB", "FC", "Adquisicion", "Remito", "Reversa", "NC", "NCA", "NCB", "NCC"]
 
@@ -84,12 +86,12 @@ export function ComprobantesSection({
     const [lineaComp, setLineaComp] = useState<any>(null)
     const [ocArts, setOcArts] = useState<any[]>([])
     const [lineaArt, setLineaArt] = useState("")
-    const [lineaCant, setLineaCant] = useState("")
-    const [lineaPrecio, setLineaPrecio] = useState("")
+    const [lineaCant, setLineaCant] = useState<number | null>(null)
+    const [lineaPrecio, setLineaPrecio] = useState<number | null>(null)
     const [lineaGuardando, setLineaGuardando] = useState(false)
 
     const abrirAgregarLinea = async (comp: any) => {
-        setLineaComp(comp); setLineaArt(""); setLineaCant(""); setLineaPrecio("")
+        setLineaComp(comp); setLineaArt(""); setLineaCant(null); setLineaPrecio(null)
         const { data } = await supabase
             .from("ordenes_compra_detalle")
             .select("articulo_id, cantidad_pedida, precio_unitario, articulos:articulo_id(sku, descripcion)")
@@ -98,8 +100,8 @@ export function ComprobantesSection({
     }
 
     const guardarLinea = async () => {
-        const cant = Number(String(lineaCant).replace(",", "."))
-        const precio = Number(String(lineaPrecio).replace(",", "."))
+        const cant = lineaCant ?? 0
+        const precio = lineaPrecio ?? 0
         if (!lineaArt || !cant || cant <= 0) { alert("Elegí el artículo y la cantidad"); return }
         setLineaGuardando(true)
         try {
@@ -298,42 +300,42 @@ export function ComprobantesSection({
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <Label className="text-xs">Fecha</Label>
-                                    <Input type="date" value={editando.fecha_comprobante || ""}
-                                        onChange={e => setEditando((p: any) => ({ ...p, fecha_comprobante: e.target.value }))} />
+                                    <DateInputAR value={editando.fecha_comprobante || ""}
+                                        onChange={v => setEditando((p: any) => ({ ...p, fecha_comprobante: v }))} />
                                 </div>
                                 <div>
                                     <Label className="text-xs">Total final</Label>
-                                    <Input type="number" step="0.01" value={editando.total_factura_declarado ?? ""}
-                                        onChange={e => setEditando((p: any) => ({ ...p, total_factura_declarado: e.target.value }))} />
+                                    <InputMonto pesos value={editando.total_factura_declarado ?? null}
+                                        onChange={n => setEditando((p: any) => ({ ...p, total_factura_declarado: n }))} />
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <Label className="text-xs">Neto</Label>
-                                    <Input type="number" step="0.01" value={editando.total_neto ?? ""}
-                                        onChange={e => setEditando((p: any) => ({ ...p, total_neto: e.target.value }))} />
+                                    <InputMonto pesos value={editando.total_neto ?? null}
+                                        onChange={n => setEditando((p: any) => ({ ...p, total_neto: n }))} />
                                 </div>
                                 <div>
                                     <Label className="text-xs">IVA</Label>
-                                    <Input type="number" step="0.01" value={editando.total_iva ?? ""}
-                                        onChange={e => setEditando((p: any) => ({ ...p, total_iva: e.target.value }))} />
+                                    <InputMonto pesos value={editando.total_iva ?? null}
+                                        onChange={n => setEditando((p: any) => ({ ...p, total_iva: n }))} />
                                 </div>
                             </div>
                             <div className="grid grid-cols-3 gap-3">
                                 <div>
                                     <Label className="text-xs">Percep. IVA</Label>
-                                    <Input type="number" step="0.01" value={editando.percepcion_iva_monto ?? ""}
-                                        onChange={e => setEditando((p: any) => ({ ...p, percepcion_iva_monto: e.target.value }))} />
+                                    <InputMonto pesos value={editando.percepcion_iva_monto ?? null}
+                                        onChange={n => setEditando((p: any) => ({ ...p, percepcion_iva_monto: n }))} />
                                 </div>
                                 <div>
                                     <Label className="text-xs">Percep. IIBB</Label>
-                                    <Input type="number" step="0.01" value={editando.percepcion_iibb_monto ?? ""}
-                                        onChange={e => setEditando((p: any) => ({ ...p, percepcion_iibb_monto: e.target.value }))} />
+                                    <InputMonto pesos value={editando.percepcion_iibb_monto ?? null}
+                                        onChange={n => setEditando((p: any) => ({ ...p, percepcion_iibb_monto: n }))} />
                                 </div>
                                 <div>
                                     <Label className="text-xs">Ret. Ganancias</Label>
-                                    <Input type="number" step="0.01" value={editando.retencion_ganancias_monto ?? ""}
-                                        onChange={e => setEditando((p: any) => ({ ...p, retencion_ganancias_monto: e.target.value }))} />
+                                    <InputMonto pesos value={editando.retencion_ganancias_monto ?? null}
+                                        onChange={n => setEditando((p: any) => ({ ...p, retencion_ganancias_monto: n }))} />
                                 </div>
                             </div>
                         </div>
@@ -358,8 +360,8 @@ export function ComprobantesSection({
                                 onChange={e => {
                                     setLineaArt(e.target.value)
                                     const it = ocArts.find((a: any) => a.articulo_id === e.target.value)
-                                    if (it && !lineaPrecio) setLineaPrecio(String(it.precio_unitario ?? ""))
-                                    if (it && !lineaCant) setLineaCant(String(it.cantidad_pedida ?? ""))
+                                    if (it && !lineaPrecio) setLineaPrecio(it.precio_unitario != null ? Number(it.precio_unitario) : null)
+                                    if (it && !lineaCant) setLineaCant(it.cantidad_pedida != null ? Number(it.cantidad_pedida) : null)
                                 }}>
                                 <option value="">Elegir artículo…</option>
                                 {ocArts.map((a: any) => (
@@ -372,13 +374,13 @@ export function ComprobantesSection({
                         <div className="grid grid-cols-2 gap-2">
                             <div>
                                 <label className="text-xs font-medium">Cantidad</label>
-                                <input inputMode="decimal" className="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={lineaCant}
-                                    onChange={e => setLineaCant(e.target.value)} />
+                                <InputMonto decimales={3} soloPositivos className="h-auto w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={lineaCant}
+                                    onChange={setLineaCant} />
                             </div>
                             <div>
-                                <label className="text-xs font-medium">Precio unitario (punto = centavos)</label>
-                                <input inputMode="decimal" className="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={lineaPrecio}
-                                    onChange={e => setLineaPrecio(e.target.value)} />
+                                <label className="text-xs font-medium">Precio unitario</label>
+                                <InputMonto decimales={4} soloPositivos className="h-auto w-full rounded-md border px-2 py-1.5 text-sm tabular-nums" value={lineaPrecio}
+                                    onChange={setLineaPrecio} />
                             </div>
                         </div>
                         <div className="flex justify-end gap-2 pt-1">

@@ -2,8 +2,7 @@
 
 import type { MetodoPago } from "./MetodoPagoForm"
 import type { Retencion } from "./RetencionForm"
-
-const fmtARS = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2 })
+import { moneda } from "@/lib/formato"
 
 interface Props {
   totalComprobantes: number
@@ -40,38 +39,38 @@ export function ResumenPago({ totalComprobantes, metodos, retenciones, bonificac
       <h3 className="mb-3 text-base font-bold tracking-tight text-azul-900">Resumen del cobro</h3>
       <div className="flex justify-between">
         <span className="text-muted-foreground">Comprobantes seleccionados:</span>
-        <span className="font-mono">${fmtARS(totalComprobantes)}</span>
+        <span className="font-mono">{moneda(totalComprobantes)}</span>
       </div>
       {bonificacion > 0 && (
         <div className="flex justify-between text-green-700">
           <span>Dto. pago contado (10%):</span>
-          <span className="font-mono">− ${fmtARS(bonificacion)}</span>
+          <span className="font-mono">− {moneda(bonificacion)}</span>
         </div>
       )}
       {bonificacion > 0 && (
         <div className="flex justify-between font-medium border-t pt-1">
           <span className="text-muted-foreground">Neto a cobrar:</span>
-          <span className="font-mono">${fmtARS(totalReal)}</span>
+          <span className="font-mono">{moneda(totalReal)}</span>
         </div>
       )}
       <div className="flex justify-between">
         <span className="text-muted-foreground">Total métodos de pago:</span>
-        <span className="font-mono">${fmtARS(totalMetodos)}</span>
+        <span className="font-mono">{moneda(totalMetodos)}</span>
       </div>
       {totalRet > 0 && (
         <div className="flex justify-between">
           <span className="text-muted-foreground">Retenciones:</span>
-          <span className="font-mono text-amber-700">+ ${fmtARS(totalRet)}</span>
+          <span className="font-mono text-amber-700">+ {moneda(totalRet)}</span>
         </div>
       )}
       <div className="flex justify-between font-semibold border-t pt-2 mt-2">
         <span>Total a cobrar:</span>
-        <span className="font-mono">${fmtARS(totalEfectivo)}</span>
+        <span className="font-mono">{moneda(totalEfectivo)}</span>
       </div>
       <div className={`flex justify-between font-semibold border rounded-lg px-3 py-2 mt-1 ${colorDif}`}>
         <span>{diferencia === 0 ? "Cuadra perfectamente" : diferencia > 0 ? "Queda pendiente:" : "Excede en:"}</span>
         <span className="font-mono">
-          {diferencia === 0 ? "✓" : `$${fmtARS(Math.abs(diferencia))}`}
+          {diferencia === 0 ? "✓" : `${moneda(Math.abs(diferencia))}`}
         </span>
       </div>
     </div>

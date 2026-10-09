@@ -1,4 +1,4 @@
-// Reglas PURAS del cobro en la calle (sin imports: corre igual en el servidor, en la web y
+// Reglas PURAS del cobro en la calle (solo importa lib/formato, también puro: corre igual en el servidor, en la web y
 // en las apps como @gm/cobro). Dos reglas viven acá para que pantalla y servidor no puedan
 // divergir:
 //
@@ -13,6 +13,8 @@
 //       favor; si no, queda a cuenta del cliente.
 //     · La base del tope es TODO lo seleccionado: comprobantes imputados + anticipos a pedidos
 //       sin facturar (los anticipos no viajan como imputaciones: antes la base daba $0).
+
+import { moneda } from "../formato"
 
 export const PEDIDO_PREFIX = "pedido:"
 
@@ -116,7 +118,7 @@ export interface AjusteResuelto {
   aviso: string | null
 }
 
-const pesos = (n: number) => `$ ${r2(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const pesos = (n: number) => moneda(r2(n))
 
 export function resolverAjuste(ajustePedido: number, base: number): AjusteResuelto {
   const ajuste = r2(num(ajustePedido))

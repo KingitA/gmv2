@@ -9,6 +9,7 @@ import { Check, X } from "lucide-react"
 import { toast } from "sonner"
 import { formatCurrency, formatDateTimeAR } from "@/lib/utils"
 import type { HojaRuta } from "@/lib/viajes/hoja-ruta"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // Arqueo del viaje (al pie de la hoja de ruta): plata entregada, gastos
 // detallados con aprobar/rechazar, y el efectivo que debería traer el chofer.
@@ -21,10 +22,10 @@ export function ViajeArqueo({ hoja, onCambio }: { hoja: HojaRuta; onCambio: () =
   const aFavor = Math.max(0, -dinero.saldo_billetera_titular)
   const [cuentas, setCuentas] = useState<{ cuenta_tipo: string; cuenta_id: string; nombre: string }[]>([])
   const [origen, setOrigen] = useState("")
-  const [montoReint, setMontoReint] = useState("")
+  const [montoReint, setMontoReint] = useState<number | null>(null)
   useEffect(() => {
     if (aFavor < 0.01) return
-    setMontoReint(String(aFavor))
+    setMontoReint(aFavor)
     fetch("/api/finanzas/cajas").then((r) => r.json()).then((d) => {
       const m = (d.cuentas || []).filter((c: any) => c.cuenta_tipo === "CAJA" || c.cuenta_tipo === "BANCO")
       setCuentas(m)
@@ -33,7 +34,7 @@ export function ViajeArqueo({ hoja, onCambio }: { hoja: HojaRuta; onCambio: () =
     }).catch(() => {})
   }, [aFavor])
   const reintegrar = async () => {
-    const monto = Number(String(montoReint).replace(",", "."))
+    const monto = montoReint ?? 0
     if (!origen || !monto) { toast.error("Elegí la caja y el monto"); return }
     const [origen_tipo, origen_id] = origen.split(":")
     if (!confirm(`¿Reintegrar ${formatCurrency(monto)} al chofer desde ${cuentas.find((c) => `${c.cuenta_tipo}:${c.cuenta_id}` === origen)?.nombre}?`)) return
@@ -146,7 +147,7 @@ export function ViajeArqueo({ hoja, onCambio }: { hoja: HojaRuta; onCambio: () =
                   {cuentas.map((c) => <SelectItem key={c.cuenta_id} value={`${c.cuenta_tipo}:${c.cuenta_id}`}>{c.nombre}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Input className="h-8 w-28 bg-white text-xs" type="number" value={montoReint} onChange={(e) => setMontoReint(e.target.value)} />
+              <InputMonto className="h-8 w-28 bg-white text-xs" soloPositivos value={montoReint} onChange={setMontoReint} />
             </div>
             <Button size="sm" className="h-8 w-full" disabled={ocupado} onClick={reintegrar}>Reintegrar al chofer</Button>
           </div>

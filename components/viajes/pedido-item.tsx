@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Pedido } from "@/lib/types";
 import Link from "next/link";
+import { moneda } from "@/lib/formato"
 
 const MapPinIcon = () => (
   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -119,19 +120,19 @@ export function PedidoItem({ pedido, viajeId }: PedidoItemProps) {
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground font-medium">Saldo Anterior:</span>
             <span className="font-bold text-base">
-              ${pedido.saldo_anterior.toLocaleString('es-AR')}
+              {moneda(pedido.saldo_anterior)}
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground font-medium">Saldo Actual:</span>
             <span className="font-bold text-base">
-              ${pedido.saldo_actual.toLocaleString('es-AR')}
+              {moneda(pedido.saldo_actual)}
             </span>
           </div>
           <div className="flex items-center justify-between pt-2 border-t">
             <span className="font-bold text-base">Total a Cobrar:</span>
             <span className="font-bold text-2xl text-primary">
-              ${pedido.total.toLocaleString('es-AR')}
+              {moneda(pedido.total)}
             </span>
           </div>
         </div>

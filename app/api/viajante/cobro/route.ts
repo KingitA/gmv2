@@ -12,6 +12,7 @@ import { marcaAjuste } from "@/lib/cobranzas/ajuste"
 import { topeAjuste } from "@/lib/cobranzas/reglas-cobro"
 import { MARCA_CONTADO } from "@/lib/constants"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
+import { moneda, normalizarCuit } from "@/lib/formato"
 
 /**
  * POST /api/viajante/cobro — cobro en la calle del viajante (Fase E).
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
     }
     if (Math.abs(totalMetodos - totalClientes) > 0.01) {
       return NextResponse.json(
-        { error: `Los métodos de pago ($${totalMetodos}) no coinciden con lo imputado ($${totalClientes})` },
+        { error: `Los métodos de pago (${moneda(totalMetodos)}) no coinciden con lo imputado (${moneda(totalClientes)})` },
         { status: 400 }
       )
     }
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
         const restante = valorTotal - (usadoPorDev.get(d.devolucion_id) || 0)
         if (d.monto > restante + 0.01)
           return NextResponse.json(
-            { error: `La devolución tiene ${restante.toFixed(2)} disponibles (valor en cobro) y se intentó descontar ${d.monto.toFixed(2)}` },
+            { error: `La devolución tiene ${moneda(restante)} disponibles (valor en cobro) y se intentó descontar ${moneda(d.monto)}` },
             { status: 400 }
           )
       }
@@ -240,7 +241,7 @@ export async function POST(request: NextRequest) {
         const tope = topeAjuste(totalDebitosSel)
         if (montoAjuste > tope + 0.005) {
           return NextResponse.json(
-            { error: `El ajuste por redondeo ($${montoAjuste.toFixed(2)}) supera el tope del 1% de los comprobantes seleccionados ($${tope.toFixed(2)}). Dejá el saldo pendiente: lo resuelve la oficina.` },
+            { error: `El ajuste por redondeo (${moneda(montoAjuste)}) supera el tope del 1% de los comprobantes seleccionados (${moneda(tope)}). Dejá el saldo pendiente: lo resuelve la oficina.` },
             { status: 400 },
           )
         }
@@ -276,7 +277,7 @@ export async function POST(request: NextRequest) {
           banco: m.banco || null,
           numero_cheque: m.numero_cheque || null,
           fecha_cheque: m.fecha_cheque || null,
-          cuit_emisor: m.tipo === "cheque" ? m.cuit_emisor || null : null,
+          cuit_emisor: m.tipo === "cheque" ? normalizarCuit(m.cuit_emisor) : null,
           referencia: m.referencia_transferencia || null,
           cuenta_bancaria_id: m.cuenta_bancaria_id || null,
           color_cheque: m.tipo === "cheque" ? colorOverride(m.color) || colorCliente : null,

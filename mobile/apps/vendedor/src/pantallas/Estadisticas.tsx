@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router"
+import { porcentaje } from "@gm/formato"
 import { DS } from "../datasets"
 import { useFilaBilletera, useRefrescarAlEntrar } from "../datos/hooks"
 import { formatCurrency, Pantalla, SinDescargar } from "../ui"
@@ -49,7 +50,7 @@ export function Estadisticas() {
             <p className="mt-1 text-xl font-bold text-gray-900">{formatCurrency(mesActual?.total || 0)}</p>
             {variacion !== null && (
               <p className={`text-sm font-medium ${variacion >= 0 ? "text-green-600" : "text-red-600"}`}>
-                {variacion >= 0 ? "▲" : "▼"} {Math.abs(variacion).toFixed(0)}% vs mes anterior
+                {variacion >= 0 ? "▲" : "▼"} {porcentaje(Math.abs(variacion), 0)} vs mes anterior
               </p>
             )}
           </div>

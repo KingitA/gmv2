@@ -8,14 +8,10 @@
 import {
   Document, Page, Text, View, StyleSheet, Image,
 } from '@react-pdf/renderer'
+import { fecha as fechaAR, moneda, numero, entero, porcentaje, formatCuit } from '@/lib/formato'
 
-const fmtARS = (n: number) =>
-  n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-const fmtFechaISO = (v?: string | null) => {
-  const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—'
-}
+// "AAAA-MM-DD" o instante → dd/mm/aaaa en hora argentina (lib/formato)
+const fmtFechaISO = (v?: string | null) => fechaAR(v) || '—'
 
 const s = StyleSheet.create({
   page:      { fontFamily: 'Helvetica', fontSize: 9, padding: 0, backgroundColor: '#fff', flexDirection: 'column' },
@@ -130,7 +126,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
   const { orden, empresa, proveedor, detalle, totales } = data
   const fmtDesc = (ds: number[]) => {
     const activos = ds.filter(d => d > 0)
-    return activos.length > 0 ? activos.map(d => `${d}%`).join('+') : '—'
+    return activos.length > 0 ? activos.map(d => porcentaje(d)).join('+') : '—'
   }
 
   return (
@@ -144,7 +140,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
               {empresa?.logo_url
                 ? <Image style={s.emLogo} src={empresa.logo_url} />
                 : <Text style={s.emNombre}>{empresa?.razon_social ?? '—'}</Text>}
-              {empresa?.cuit && <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{empresa.cuit}</Text></View>}
+              {empresa?.cuit && <View style={s.emRow}><Text style={s.emLbl}>CUIT:</Text><Text style={s.emVal}>{formatCuit(empresa.cuit)}</Text></View>}
               {empresa?.direccion && <View style={s.emRow}><Text style={s.emLbl}>Domicilio:</Text><Text style={s.emVal}>{empresa.direccion}</Text></View>}
               {empresa?.telefono && <View style={s.emRow}><Text style={s.emLbl}>Teléfono:</Text><Text style={s.emVal}>{empresa.telefono}</Text></View>}
               {empresa?.email && <View style={s.emRow}><Text style={s.emLbl}>Email:</Text><Text style={s.emVal}>{empresa.email}</Text></View>}
@@ -169,7 +165,7 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
             <View style={s.provCol}>
               <Text style={s.provTit}>PROVEEDOR</Text>
               <Text style={s.provRazon}>{proveedor.nombre}</Text>
-              <View style={s.provRow}><Text style={s.provLbl}>CUIT:</Text><Text style={s.provVal}>{proveedor.cuit ?? '—'}</Text></View>
+              <View style={s.provRow}><Text style={s.provLbl}>CUIT:</Text><Text style={s.provVal}>{formatCuit(proveedor.cuit) || '—'}</Text></View>
               {proveedor.direccion && <View style={s.provRow}><Text style={s.provLbl}>Domicilio:</Text><Text style={s.provVal}>{proveedor.direccion}</Text></View>}
               {proveedor.telefono && <View style={s.provRow}><Text style={s.provLbl}>Teléfono:</Text><Text style={s.provVal}>{proveedor.telefono}</Text></View>}
             </View>
@@ -194,12 +190,12 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
               <Text style={[s.td, s.cEan, { fontSize: 7, color: '#888' }]}>{l.ean13 ?? ''}</Text>
               <Text style={[s.td, s.cSku, { fontSize: 7, color: '#888' }]}>{l.sku ?? ''}</Text>
               <Text style={[s.tdBold, s.cDesc]}>{l.descripcion}</Text>
-              <Text style={[s.tdBold, s.cCant]}>{String(l.cantidad)}{l.tipo_cantidad === 'bulto' ? ' BUL' : ''}</Text>
-              <Text style={[s.td, s.cUnid]}>{String(l.unidades_totales)}</Text>
-              <Text style={[s.td, s.cPrecio]}>${fmtARS(l.precio_unitario)}</Text>
+              <Text style={[s.tdBold, s.cCant]}>{numero(l.cantidad, 0, 3)}{l.tipo_cantidad === 'bulto' ? ' BUL' : ''}</Text>
+              <Text style={[s.td, s.cUnid]}>{entero(l.unidades_totales)}</Text>
+              <Text style={[s.td, s.cPrecio]}>{moneda(l.precio_unitario)}</Text>
               <Text style={[s.td, s.cDesc4]}>{fmtDesc(l.descuentos)}</Text>
-              <Text style={[s.td, s.cNeto]}>${fmtARS(l.precio_neto)}</Text>
-              <Text style={[s.tdBold, s.cTotal]}>${fmtARS(l.total_linea)}</Text>
+              <Text style={[s.td, s.cNeto]}>{moneda(l.precio_neto)}</Text>
+              <Text style={[s.tdBold, s.cTotal]}>{moneda(l.total_linea)}</Text>
             </View>
           ))}
         </View>
@@ -215,19 +211,19 @@ export function OrdenCompraPDF({ data }: { data: OrdenCompraPDFData }) {
             <View style={s.totNums}>
               <View style={s.totRow}>
                 <Text style={s.totLbl}>Total unidades</Text>
-                <Text style={s.totVal}>{String(totales.unidades)}</Text>
+                <Text style={s.totVal}>{entero(totales.unidades)}</Text>
               </View>
               <View style={s.totRow}>
                 <Text style={s.totLbl}>Subtotal neto</Text>
-                <Text style={s.totVal}>${fmtARS(totales.subtotal_neto)}</Text>
+                <Text style={s.totVal}>{moneda(totales.subtotal_neto)}</Text>
               </View>
               <View style={s.totRow}>
                 <Text style={s.totLbl}>IVA 21%</Text>
-                <Text style={s.totVal}>${fmtARS(totales.iva)}</Text>
+                <Text style={s.totVal}>{moneda(totales.iva)}</Text>
               </View>
               <View style={s.grand}>
                 <Text style={s.grandLbl}>TOTAL</Text>
-                <Text style={s.grandVal}>${fmtARS(totales.total)}</Text>
+                <Text style={s.grandVal}>{moneda(totales.total)}</Text>
               </View>
             </View>
           </View>

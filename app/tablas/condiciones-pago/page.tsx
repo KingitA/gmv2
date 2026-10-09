@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label"
 import { Trash2, Plus, Pencil } from "lucide-react"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
 
 export default function CondicionesPagoPage() {
   const [items, setItems] = useState<any[]>([])
@@ -127,7 +128,7 @@ export default function CondicionesPagoPage() {
             </div>
             <div>
               <Label>Días de Plazo</Label>
-              <Input type="number" value={diasPlazo} onChange={e => setDiasPlazo(e.target.value)} placeholder="0 = contado" />
+              <InputMonto decimales={0} soloPositivos value={diasPlazo} onChange={n => setDiasPlazo(n == null ? "" : String(Math.trunc(n)))} placeholder="0 = contado" />
             </div>
             <div>
               <Label>Descripción</Label>

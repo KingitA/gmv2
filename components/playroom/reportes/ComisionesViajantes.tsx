@@ -10,6 +10,7 @@ import ComisionesDrawer from '@/components/playroom/reportes/ComisionesDrawer'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
 import * as XLSX from 'xlsx'
+import { moneda, numeroPlano, porcentaje } from "@/lib/formato"
 
 interface ComisionRow {
   viajante_id: string
@@ -39,10 +40,6 @@ interface ApiResponse {
 }
 
 const COLORS = ['#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6']
-
-function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
 
 export default function ComisionesViajantes() {
   const [filters, setFilters] = useState<PlayroomFiltersState>(defaultFilters)
@@ -99,7 +96,7 @@ export default function ComisionesViajantes() {
       Viajante: r.nombre,
       [tipo === 'cobrada' ? 'Total Cobrada' : 'Total Devengada']: r.devengado,
       'Período anterior': r.devengado_anterior,
-      'Var. %': `${r.variacion_pct.toFixed(1)}%`,
+      'Var. %': `${numeroPlano(r.variacion_pct, 1)}%`,
       Cobrable: r.cobrable,
       Pagado: r.pagado,
       Pendiente: r.pendiente_cobro,
@@ -124,12 +121,12 @@ export default function ComisionesViajantes() {
       key: 'devengado',
       label: tipo === 'cobrada' ? 'Total Cobrada' : 'Total Devengada',
       sortable: true, align: 'right',
-      render: v => <span className="font-mono font-semibold">{ars(v)}</span>,
+      render: v => <span className="font-mono font-semibold">{moneda(v, 0)}</span>,
       exportValue: v => String(v),
     },
     {
       key: 'devengado_anterior', label: 'Período ant.', sortable: true, align: 'right',
-      render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? ars(v) : '—'}</span>,
+      render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? moneda(v, 0) : '—'}</span>,
       exportValue: v => String(v),
     },
     {
@@ -137,22 +134,22 @@ export default function ComisionesViajantes() {
       render: (v, row) => row.devengado_anterior > 0
         ? <ComparativoBadge pct={v} size="sm" />
         : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
-      exportValue: v => `${Number(v).toFixed(1)}%`,
+      exportValue: v => `${numeroPlano(Number(v), 1)}%`,
     },
     {
       key: 'cobrable', label: 'Cobrable', sortable: true, align: 'right',
-      render: v => <span className="font-mono text-emerald-400">{ars(v)}</span>,
+      render: v => <span className="font-mono text-emerald-400">{moneda(v, 0)}</span>,
       exportValue: v => String(v),
     },
     {
       key: 'pagado', label: 'Pagado', sortable: true, align: 'right',
-      render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>{ars(v)}</span>,
+      render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>{moneda(v, 0)}</span>,
       exportValue: v => String(v),
     },
     {
       key: 'pendiente_cobro', label: 'Pendiente', sortable: true, align: 'right',
       render: v => v > 0
-        ? <span className="font-mono text-amber-400 font-semibold">{ars(v)}</span>
+        ? <span className="font-mono text-amber-400 font-semibold">{moneda(v, 0)}</span>
         : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
       exportValue: v => String(v),
     },
@@ -223,26 +220,26 @@ export default function ComisionesViajantes() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           label={tipo === 'cobrada' ? 'Total cobrado' : 'Total devengado'}
-          value={loading ? '...' : ars(summary.total_devengado)}
+          value={loading ? '...' : moneda(summary.total_devengado, 0)}
           subLabel={loading ? '' : `${rows.length} viajantes`}
           loading={loading}
         />
         <KPICard
           label="Cobrable"
-          value={loading ? '...' : ars(summary.total_cobrable)}
-          subLabel={loading ? '' : `${kpis.cobrabilidad.toFixed(0)}% del total`}
+          value={loading ? '...' : moneda(summary.total_cobrable, 0)}
+          subLabel={loading ? '' : `${porcentaje(kpis.cobrabilidad, 0)} del total`}
           variant="success"
           loading={loading}
         />
         <KPICard
           label="Pendiente de pago"
-          value={loading ? '...' : ars(summary.total_pendiente)}
+          value={loading ? '...' : moneda(summary.total_pendiente, 0)}
           variant={summary.total_pendiente > 0 ? 'warning' : 'default'}
           loading={loading}
         />
         <KPICard
           label="Ya pagado"
-          value={loading ? '...' : ars(summary.total_pagado)}
+          value={loading ? '...' : moneda(summary.total_pagado, 0)}
           loading={loading}
         />
       </div>
@@ -262,13 +259,13 @@ export default function ComisionesViajantes() {
                 tickLine={false}
               />
               <YAxis
-                tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
+                tickFormatter={v => `${moneda(v / 1000, 0)}k`}
                 tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }}
                 axisLine={false}
                 tickLine={false}
               />
               <Tooltip
-                formatter={(v: number, name: string) => [ars(v), name === 'devengado' ? (tipo === 'cobrada' ? 'Cobrada' : 'Devengada') : 'Cobrable']}
+                formatter={(v: number, name: string) => [moneda(v, 0), name === 'devengado' ? (tipo === 'cobrada' ? 'Cobrada' : 'Devengada') : 'Cobrable']}
                 labelFormatter={(_l, p) => p?.[0]?.payload?.fullName || _l}
                 contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
               />

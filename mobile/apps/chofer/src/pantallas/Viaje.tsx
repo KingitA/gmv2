@@ -5,6 +5,7 @@ import { fechaHoraCorta, Hoja } from "@gm/core/ui"
 import { DS, esEnCurso, ESTADOS_COBRABLES, type OpFinalizar, type OpIniciar, type OpParada } from "../datasets"
 import { paradasSinResolver, type ParadaVista } from "../datos/overlay"
 import { rechazosDe, useDescargaViaje, useEncolar, useRefrescarFilas, useViaje } from "../datos/hooks"
+import { numero, parseMonto } from "@gm/formato"
 import { AvisosBcra, Botones, dejarAviso, ESTADO_PARADA, fechaViaje, formatCurrency, HojaConfirmar, Linea, Pantalla, Rechazos, SinDescargar, SinEnviar, useAbrirPdf, useAvisoEntrante, useOverlayDinamico, useToast } from "../ui"
 import { GastoHoja } from "./GastoHoja"
 import { CLAVE_VOLVER_A_PARADA } from "./Cobrar"
@@ -63,7 +64,7 @@ export function Viaje() {
   }, [claveHoja])
   useEffect(() => {
     if (rendir.abierto && v?.dinero) {
-      setEfectivoEntrega(String(Math.max(0, v.dinero.efectivo_en_mano || 0)))
+      setEfectivoEntrega(numero(Math.max(0, v.dinero.efectivo_en_mano || 0)))
       setAviso("")
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,7 +127,7 @@ export function Viaje() {
         parada_id: p.id,
         cliente_id: p.cliente_id,
         estado: estadoSel,
-        bultos_entregados: Number(bultosEntregados) || 0,
+        bultos_entregados: Math.trunc(parseMonto(bultosEntregados) ?? 0),
         motivo_no_entrega: mEntrega,
         motivo_no_cobro: p.cobro_cumplido ? "" : mCobro,
       }
@@ -157,7 +158,7 @@ export function Viaje() {
     if (!viaje.es_titular) return setAviso("El viaje lo rinde el chofer titular.")
     setOcupado(true)
     try {
-      const payload: OpFinalizar = { viaje_id: viajeId, efectivo_declarado: Number(String(efectivoEntrega).replace(",", ".")) || 0 }
+      const payload: OpFinalizar = { viaje_id: viajeId, efectivo_declarado: Math.max(0, parseMonto(efectivoEntrega) ?? 0) }
       await encolar("viaje.finalizar", payload, `Rendir viaje ${viaje.nombre || ""}`.trim())
       dejarAviso(online ? "Viaje enviado a rendición: oficina la ve en la Caja del Día y la confirma al recibir la plata." : "Cierre del viaje guardado en el equipo: se envía a oficina al volver la señal.")
       navigate("/", { replace: true })
@@ -405,7 +406,7 @@ export function Viaje() {
             </div>
             {estadoSel === "entregado_parcial" && (
               <input
-                type="number" inputMode="numeric" value={bultosEntregados} onChange={(e) => setBultosEntregados(e.target.value)}
+                type="text" inputMode="numeric" value={bultosEntregados} onChange={(e) => setBultosEntregados(e.target.value.replace(/\D/g, ""))}
                 placeholder={`Bultos que bajaste (de ${paradaSel.bultos})`}
                 className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-lg"
               />
@@ -455,7 +456,7 @@ export function Viaje() {
             <div>
               <p className="mb-1 text-sm font-bold text-gray-700">Efectivo que entregás en oficina</p>
               <input
-                type="number" inputMode="decimal" value={efectivoEntrega} onChange={(e) => setEfectivoEntrega(e.target.value)}
+                type="text" inputMode="decimal" value={efectivoEntrega} onChange={(e) => setEfectivoEntrega(e.target.value.replace(/[^\d.,]/g, ""))}
                 className="min-h-12 w-full rounded-xl border-2 border-gray-200 px-4 py-3 text-xl font-bold"
               />
               {dinero.efectivo_en_mano < -0.01 ? (

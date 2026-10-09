@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react'
 import { todayArgentina } from '@/lib/utils'
+import { moneda, numero, numeroPlano, fecha } from "@/lib/formato"
 
 interface ChatMessageProps {
   role: 'user' | 'assistant'
@@ -10,21 +11,16 @@ interface ChatMessageProps {
   loading?: boolean
 }
 
-function ars(n: number) {
-  if (typeof n !== 'number') return String(n)
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
-
 function formatCell(value: any): string {
   if (value === null || value === undefined) return '—'
   if (typeof value === 'number') {
     // Heuristic: large numbers are probably pesos
-    if (Math.abs(value) > 500) return ars(value)
-    return value.toLocaleString('es-AR')
+    if (Math.abs(value) > 500) return moneda(value, 0)
+    return numero(value, 0, 2)
   }
   if (typeof value === 'boolean') return value ? 'Sí' : 'No'
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return new Date(value + 'T00:00:00').toLocaleDateString('es-AR')
+    return fecha(value)
   }
   return String(value)
 }
@@ -39,6 +35,9 @@ function DataTableInline({ data }: { data: any[] }) {
     const header = columns.join(';')
     const rows = data.map(r => columns.map(c => {
       const v = r[c]
+      // CSV para Excel en castellano: ";" + coma decimal sin miles; fechas dd/mm/aaaa
+      if (typeof v === 'number') return Number.isInteger(v) ? String(v) : numeroPlano(v)
+      if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return fecha(v)
       return typeof v === 'string' && v.includes(';') ? `"${v}"` : String(v ?? '')
     }).join(';'))
     const csv = [header, ...rows].join('\r\n')

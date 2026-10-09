@@ -11,6 +11,8 @@ import { FechaInput } from "@/components/finanzas/fecha-input"
 import { Loader2, Upload, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
+import { fecha, formatCuit, porcentaje } from "@/lib/formato"
 
 /**
  * Ficha fiscal del proveedor (R6): régimen RG 830 y condición ante Ganancias,
@@ -35,7 +37,7 @@ export function FichaFiscalDialog({
   const [blanco, setBlanco] = useState({ ...vacio })
   const [negro, setNegro] = useState({ ...vacio })
   const [negroIgual, setNegroIgual] = useState(true)
-  const [nuevaExclusion, setNuevaExclusion] = useState<{ desde: string; hasta: string; pct: string; nro: string } | null>(null)
+  const [nuevaExclusion, setNuevaExclusion] = useState<{ desde: string; hasta: string; pct: number | null; nro: string } | null>(null)
   const [desactivar, setDesactivar] = useState<Set<string>>(new Set())
   const [propuesta, setPropuesta] = useState<any>(null)
   const [leyendo, setLeyendo] = useState(false)
@@ -95,12 +97,12 @@ export function FichaFiscalDialog({
         setNuevaExclusion({
           desde: ex.fecha_desde ?? "",
           hasta: ex.fecha_hasta ?? "",
-          pct: String(ex.porcentaje ?? 100),
+          pct: Number(ex.porcentaje ?? 100),
           nro: ex.numero_certificado ?? "",
         })
       }
       if (!d.propuesta.cuit_coincide) {
-        toast.error(`⚠ El CUIT del documento (${d.propuesta.cuit_documento}) NO coincide con el del proveedor — revisá antes de guardar`)
+        toast.error(`⚠ El CUIT del documento (${formatCuit(d.propuesta.cuit_documento)}) NO coincide con el del proveedor — revisá antes de guardar`)
       } else {
         toast.success("Documento leído — revisá la propuesta y guardá")
       }
@@ -130,12 +132,12 @@ export function FichaFiscalDialog({
         pago_negro_desde: negroIgual ? null : (negro.desde || "factura"),
         desactivar_exclusiones: [...desactivar],
       }
-      if (nuevaExclusion && nuevaExclusion.desde && Number(nuevaExclusion.pct) > 0) {
+      if (nuevaExclusion && nuevaExclusion.desde && (nuevaExclusion.pct ?? 0) > 0) {
         body.exclusiones_nuevas = [{
           tipo: "retencion_ganancias",
           fecha_desde: nuevaExclusion.desde,
           fecha_hasta: nuevaExclusion.hasta || null,
-          porcentaje: Number(nuevaExclusion.pct),
+          porcentaje: nuevaExclusion.pct,
           numero_certificado: nuevaExclusion.nro || null,
         }]
       }
@@ -178,7 +180,7 @@ export function FichaFiscalDialog({
                   <SelectContent>
                     {(data.regimenes ?? []).map((r: any) => (
                       <SelectItem key={r.clave} value={r.clave}>
-                        {r.descripcion} ({Number(r.alicuota_inscripto)}%)
+                        {r.descripcion} ({porcentaje(r.alicuota_inscripto)})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -283,9 +285,9 @@ export function FichaFiscalDialog({
                           return n
                         })} />
                       <span className="flex-1">
-                        {e.tipo.replace("_", " ")} · {Number(e.porcentaje_excencion)}%
+                        {e.tipo.replace("_", " ")} · {porcentaje(e.porcentaje_excencion)}
                         {e.numero_certificado ? ` · N° ${e.numero_certificado}` : ""}
-                        <span className="text-xs text-muted-foreground"> ({e.fecha_desde} → {e.fecha_hasta ?? "sin fin"})</span>
+                        <span className="text-xs text-muted-foreground"> ({fecha(e.fecha_desde)} → {e.fecha_hasta ? fecha(e.fecha_hasta) : "sin fin"})</span>
                       </span>
                       {desactivar.has(e.id) && <Badge className="bg-red-100 text-red-700">se desactiva</Badge>}
                     </label>
@@ -312,7 +314,7 @@ export function FichaFiscalDialog({
                   <p className="text-xs font-semibold text-indigo-800">
                     Documento leído: {String(propuesta.tipo_documento).replace(/_/g, " ")}
                     {propuesta.razon_social_documento ? ` · ${propuesta.razon_social_documento}` : ""}
-                    {propuesta.cuit_documento ? ` · CUIT ${propuesta.cuit_documento}` : ""}
+                    {propuesta.cuit_documento ? ` · CUIT ${formatCuit(propuesta.cuit_documento)}` : ""}
                   </p>
                   {!propuesta.cuit_coincide && (
                     <p className="text-xs font-bold text-red-700">⚠ El CUIT del documento no coincide con el del proveedor.</p>
@@ -336,7 +338,7 @@ export function FichaFiscalDialog({
               <div className="flex items-center justify-between">
                 <Label>Nueva exclusión</Label>
                 {!nuevaExclusion && (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setNuevaExclusion({ desde: "", hasta: "", pct: "100", nro: "" })}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setNuevaExclusion({ desde: "", hasta: "", pct: 100, nro: "" })}>
                     + Agregar a mano
                   </Button>
                 )}
@@ -345,7 +347,7 @@ export function FichaFiscalDialog({
                 <div className="grid grid-cols-2 gap-2 mt-1">
                   <div><Label className="text-xs">Desde</Label><FechaInput value={nuevaExclusion.desde} onChange={v => setNuevaExclusion(p => p && ({ ...p, desde: v }))} /></div>
                   <div><Label className="text-xs">Hasta</Label><FechaInput value={nuevaExclusion.hasta} onChange={v => setNuevaExclusion(p => p && ({ ...p, hasta: v }))} /></div>
-                  <div><Label className="text-xs">% exclusión</Label><Input inputMode="decimal" value={nuevaExclusion.pct} onChange={e => setNuevaExclusion(p => p && ({ ...p, pct: e.target.value }))} /></div>
+                  <div><Label className="text-xs">% exclusión</Label><InputMonto porciento soloPositivos value={nuevaExclusion.pct} onChange={n => setNuevaExclusion(p => p && ({ ...p, pct: n }))} /></div>
                   <div><Label className="text-xs">N° certificado</Label><Input value={nuevaExclusion.nro} onChange={e => setNuevaExclusion(p => p && ({ ...p, nro: e.target.value }))} /></div>
                 </div>
               )}

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { cargarFichaCliente } from "@/lib/vendedor/ficha-cliente"
+import { errorCuit, normalizarCuit } from "@/lib/formato"
 
 // GET /api/vendedor/cliente/[id]
 // Ficha del cliente + cuenta corriente: comprobantes con saldo pendiente
@@ -103,6 +104,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     if (patch.nombre === null) {
       return NextResponse.json({ error: "El nombre no puede quedar vacío." }, { status: 400 })
+    }
+    if (patch.cuit !== undefined) {
+      const errCuit = errorCuit(patch.cuit)
+      if (errCuit) return NextResponse.json({ error: errCuit }, { status: 400 })
+      patch.cuit = normalizarCuit(patch.cuit)
     }
 
     // Reasignación de vendedor (opcional) — SOLO entre los viajantes del

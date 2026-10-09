@@ -9,8 +9,11 @@ npm run dev       # Start dev server (uses webpack bundler)
 npm run build     # Production build
 npm run lint      # ESLint check
 npm run start     # Run production server
-npm run typecheck:movil  # MANDATORY before commit/merge (next build ignores type errors — see MOBILE.md §14)
+npm run typecheck:movil  # MANDATORY before commit/merge (next build ignores type errors — see MOBILE.md §14); also runs the format check
+npm run check:formatos   # format check alone (scripts/check-formatos.mjs)
 ```
+
+**Formats (dates, money, CUIT) — read `docs/FORMATOS.md` before touching any date, amount or CUIT.** Users see/type `dd/mm/aaaa` (Argentina time, GMT-3), `$1.000,32` and `xx-xxxxxxxx-x`; DB/JSON use ISO dates, `timestamptz`, numbers and `xx-xxxxxxxx-x`. Only use the helpers in `lib/formato` (`@gm/formato` in the apps) and the inputs `InputMonto`, `DateInputAR`, `InputCUIT`. Never `type="number"`/`type="date"`, `toLocaleString`, `toFixed` on screen, `parseFloat` on typed amounts, or `toISOString().slice(0,10)` as "today"; in SQL never `CURRENT_DATE` (use `public.hoy_ar()`) nor `timestamp` without time zone.
 
 There are no tests in the web ERP. The mobile apps (`mobile/`) have their own tests: `cd mobile && npm test`.
 

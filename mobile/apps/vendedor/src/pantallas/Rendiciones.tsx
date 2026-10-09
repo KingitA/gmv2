@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
 import { ErrorHttp, ErrorSesion, useContadoresOutbox, useOnline, useOverlay, useParamEstado, useRuntime } from "@gm/core"
+import { fecha, fechaHora, redondear } from "@gm/formato"
 import { DS } from "../datasets"
 import { useFilaBilletera, useRefrescarAlEntrar } from "../datos/hooks"
-import { fechaCorta, formatCurrency, HojaConfirmar, Pantalla, SinDescargar, useToast } from "../ui"
+import { fechaAR, formatCurrency, HojaConfirmar, MontoInput, Pantalla, SinDescargar, useToast } from "../ui"
 
 // Rendiciones del viajante (= app/vendedor/rendiciones/page.tsx) — vos declarás
 // (POST /api/viajante/rendir) y la plata pasa a "en viaje a oficina" (billetera en 0);
@@ -45,9 +46,8 @@ interface Rendicion {
 interface FilaPendientes { pagos?: PagoPendiente[]; total?: number; total_efectivo?: number; total_otros?: number }
 interface FilaRendiciones { rendiciones?: Rendicion[] }
 
-const TZ = "America/Argentina/Buenos_Aires"
 const SIN_PAGOS: PagoPendiente[] = []
-const fechaPago = (f: string) => fechaCorta(f, {})
+const fechaPago = (f: string) => fechaAR(f)
 
 export function Rendiciones() {
   const { api, sync } = useRuntime()
@@ -89,7 +89,7 @@ export function Rendiciones() {
   const elegidos = pagos.filter((p) => seleccionados.has(p.id))
   const totalSeleccionado = elegidos.reduce((s, p) => s + p.monto, 0)
   const efectivoSel = elegidos.reduce((s, p) => s + (p.monto_efectivo ?? 0), 0)
-  const difDeclarado = Math.round((efectivoDeclarado - efectivoSel) * 100) / 100
+  const difDeclarado = redondear(efectivoDeclarado - efectivoSel)
   const cuantos = `${elegidos.length} cobro${elegidos.length === 1 ? "" : "s"}`
 
   const rendir = async () => {
@@ -170,11 +170,9 @@ export function Rendiciones() {
                   </div>
                   <div>
                     <label className="mb-1 block font-bold text-gray-700">💵 Efectivo contado (declarado)</label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      value={efectivoDeclarado || ""}
-                      onChange={(e) => setEfectivoDeclarado(Math.max(0, parseFloat(e.target.value) || 0))}
+                    <MontoInput
+                      valor={efectivoDeclarado}
+                      onCambio={setEfectivoDeclarado}
                       className="w-full rounded-lg border border-gray-300 px-3 py-3 text-right text-lg font-bold"
                     />
                   </div>
@@ -212,7 +210,7 @@ export function Rendiciones() {
                       <button onClick={() => setAbierta(expandida ? "" : r.id)} className="flex min-h-11 w-full items-center justify-between p-3 text-left">
                         <div className="min-w-0">
                           <p className="font-bold text-gray-900">
-                            {new Date(r.fecha).toLocaleDateString("es-AR", { timeZone: TZ })} · {r.cantidad_pagos} {r.cantidad_pagos === 1 ? "pago" : "pagos"} ·{" "}
+                            {fecha(r.fecha)} · {r.cantidad_pagos} {r.cantidad_pagos === 1 ? "pago" : "pagos"} ·{" "}
                             {formatCurrency(r.total)}
                           </p>
                           <p className="text-sm text-gray-500">
@@ -253,7 +251,7 @@ export function Rendiciones() {
                             {r.confirmado_at && (
                               <p>
                                 Confirmada por oficina el{" "}
-                                {new Date(r.confirmado_at).toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: TZ })}
+                                {fechaHora(r.confirmado_at)}
                               </p>
                             )}
                           </div>

@@ -1,8 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
 import Link from "next/link"
+import { moneda } from "@/lib/formato"
 
 function ars(n: number) {
-  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n)
+  return moneda(n)
 }
 
 export default async function ViajantesPage() {

@@ -676,16 +676,16 @@ export async function renewWatchIfNeeded(email: string): Promise<boolean> {
 
     if (hoursRemaining < 48 || daysSinceUpdate > 5) {
         const reason = hoursRemaining < 0
-            ? `ya expiró hace ${Math.abs(hoursRemaining).toFixed(0)}h`
+            ? `ya expiró hace ${Math.abs(hoursRemaining).toFixed(0)}h` // formato-ok: log interno
             : hoursRemaining < 48
-            ? `expira en ${hoursRemaining.toFixed(1)}h`
-            : `sin actualizar hace ${daysSinceUpdate.toFixed(1)} días`
+            ? `expira en ${hoursRemaining.toFixed(1)}h` // formato-ok: log interno
+            : `sin actualizar hace ${daysSinceUpdate.toFixed(1)} días` // formato-ok: log interno
         console.log(`[Gmail Watch] Renovando watch para ${email} — ${reason}`)
         const result = await setupGmailWatch(email)
         return result !== null
     }
 
-    console.log(`[Gmail Watch] Watch OK para ${email} — ${hoursRemaining.toFixed(1)}h restantes`)
+    console.log(`[Gmail Watch] Watch OK para ${email} — ${hoursRemaining.toFixed(1)}h restantes`) // formato-ok: log interno
     return true // Watch is still valid
 }
 

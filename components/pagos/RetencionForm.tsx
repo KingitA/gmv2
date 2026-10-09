@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Trash2, Plus, Upload, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { DateInputAR } from "@/components/ui/date-input-ar"
+import { InputMonto } from "@/components/ui/input-monto"
+import { hoyISO } from "@/lib/formato"
 
 export interface Retencion {
   id: string
@@ -36,7 +38,7 @@ export function RetencionForm({ retenciones, onChange }: Props) {
     onChange([...retenciones, {
       id: genId(),
       tipo: "IIBB",
-      fecha: new Date().toISOString().slice(0, 10),
+      fecha: hoyISO(),
       numero_comprobante: "",
       monto: 0,
       origen: "manual",
@@ -61,7 +63,7 @@ export function RetencionForm({ retenciones, onChange }: Props) {
       onChange([...retenciones, {
         id: genId(),
         tipo: "IIBB",
-        fecha: new Date().toISOString().slice(0, 10),
+        fecha: hoyISO(),
         numero_comprobante: "",
         monto: 0,
         origen: "ocr",
@@ -97,13 +99,10 @@ export function RetencionForm({ retenciones, onChange }: Props) {
             </div>
             <div>
               <Label className="text-xs">Monto</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="0.00"
-                value={r.monto || ""}
-                onChange={(e) => update(r.id, { monto: parseFloat(e.target.value) || 0 })}
+              <InputMonto
+                soloPositivos
+                value={r.monto || null}
+                onChange={(n) => update(r.id, { monto: n ?? 0 })}
               />
             </div>
           </div>

@@ -16,6 +16,7 @@ import { controlarContadoDuplicado } from "@/lib/cobranzas/contado-duplicado"
 import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
 import { claveDelCliente, montoDelPrincipal, repartirMetodos, validarCobroConjunto } from "@/lib/cobranzas/cobro-conjunto"
 import { anularCobranza } from "@/lib/actions/cobranzas"
+import { normalizarCuit } from "@/lib/formato"
 import type { User } from "@supabase/supabase-js"
 
 // POST /api/chofer/viaje/[id]/cobro
@@ -211,7 +212,7 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
         banco: metodo.tipo === "cheque" ? metodo.banco_emisor || null : null,
         numero_cheque: metodo.tipo === "cheque" ? metodo.numero_cheque || null : null,
         fecha_cheque: metodo.tipo === "cheque" ? metodo.fecha_cheque || null : null,
-        cuit_emisor: metodo.tipo === "cheque" ? metodo.cuit_emisor || null : null,
+        cuit_emisor: metodo.tipo === "cheque" ? normalizarCuit(metodo.cuit_emisor) : null,
         color_cheque: metodo.tipo === "cheque" ? colorMetodo : null,
         cheque: metodo.tipo === "cheque"
           ? {
@@ -388,7 +389,7 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
             banco: m.banco_emisor || null,
             numero_cheque: m.numero_cheque || null,
             fecha_cheque: m.fecha_cheque || null,
-            cuit_emisor: m.cuit_emisor || null,
+            cuit_emisor: normalizarCuit(m.cuit_emisor),
             color_cheque: m.tipo === "cheque" ? colorMetodoEx : null,
             cheque: m.tipo === "cheque"
               ? {

@@ -14,6 +14,7 @@ import { ArrowLeft, AlertCircle, History } from "lucide-react"
 import { ImportReportView } from "@/components/import/ImportReportView"
 import type { ReportFila, ValueFormat } from "@/lib/import/export-excel"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { fechaHora } from "@/lib/formato"
 
 interface ResumenItem {
   id: string
@@ -40,8 +41,7 @@ interface Props {
 }
 
 function fmtFecha(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+  return fechaHora(iso)
 }
 
 export function HistorialImportacionesDialog({ open, onOpenChange, modulo, claveLabel, nombreLabel, statuses, fieldLabel, valueFormat }: Props) {

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import { useNoEnviados, useParamEstado } from "@gm/core"
+import { fecha, parseMonto } from "@gm/formato"
 import { COND_VACIA, DS, type Articulo, type Comprado } from "../../datasets"
 import { buscarCatalogo } from "../../datos/busqueda"
 import { rechazosDe, useCatalogo, useCliente, useCuenta, useEncolar, uuidv4 } from "../../datos/hooks"
 import { useMotorCliente } from "../../datos/precios"
-import { Pantalla, Rechazos, SinDescargar, formatCurrency, useToast, useVolver, useBusqueda } from "../../ui"
+import { MontoInput, Pantalla, Rechazos, SinDescargar, formatCurrency, useToast, useVolver, useBusqueda } from "../../ui"
 
 // Port de app/vendedor/clientes/[id]/devolucion/page.tsx.
 // Devolución en la calle — la devolución NO es sobre un pedido: se busca en las COMPRAS
@@ -81,7 +82,7 @@ function useBorrador(clienteId: string | undefined) {
   return [borrador, setBorrador] as const
 }
 
-const fechaLocal = (f: string | null | undefined) => (f ? new Date(`${f.slice(0, 10)}T00:00:00`).toLocaleDateString("es-AR") : "")
+const fechaLocal = (f: string | null | undefined) => fecha(f)
 
 const Foto = ({ url }: { url: string | null }) =>
   url ? <img src={url} alt="" loading="lazy" className="h-11 w-11 shrink-0 rounded-lg bg-gray-100 object-cover" /> : <div className="h-11 w-11 shrink-0 rounded-lg bg-gray-100" />
@@ -265,21 +266,18 @@ export function Devolucion() {
               <div>
                 <label className="mb-0.5 block text-[11px] text-gray-400">Cantidad</label>
                 <input
-                  type="number"
+                  type="text"
                   inputMode="numeric"
-                  min={1}
                   value={i.cantidad || ""}
-                  onChange={(e) => updateItem(idx, { cantidad: Math.max(0, parseInt(e.target.value) || 0) })}
+                  onChange={(e) => updateItem(idx, { cantidad: Math.max(0, Math.trunc(parseMonto(e.target.value.replace(/\D/g, "")) ?? 0)) })}
                   className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-center font-bold"
                 />
               </div>
               <div>
                 <label className="mb-0.5 block text-[11px] text-gray-400">Precio unitario</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={i.precio_venta_original || ""}
-                  onChange={(e) => updateItem(idx, { precio_venta_original: Math.max(0, parseFloat(e.target.value) || 0) })}
+                <MontoInput
+                  valor={i.precio_venta_original || 0}
+                  onCambio={(n) => updateItem(idx, { precio_venta_original: n })}
                   className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-right font-bold"
                 />
               </div>

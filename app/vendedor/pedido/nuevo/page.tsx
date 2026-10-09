@@ -29,6 +29,8 @@ import {
 } from "./catalogo-ui"
 import { ZoomImageOverlay } from "@/components/vendedor/zoom-image"
 import { BuscarPorFoto } from "@/components/vendedor/buscar-por-foto"
+import { parseMonto, porcentaje } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
 
 interface Articulo {
   id: string
@@ -132,7 +134,7 @@ function FilaArticulo({
 
   if (precio && precio.precio <= 0) return null
   const ub = a.unidades_por_bulto || 1
-  const n = parseFloat(cant.replace(",", "."))
+  const n = parseMonto(cant) ?? NaN
   const unidades = Number.isFinite(n) && n > 0 ? (bultos ? n * ub : n) : 0
   const cambiado = !!enCarrito && unidades !== enCarrito
 
@@ -242,8 +244,8 @@ function FilaArticulo({
 const fmtSeg = (s: BonifSeg | null | undefined) => {
   if (!s) return "—"
   const v = SEGS.map((k) => s[k] ?? 0)
-  if (v.every((x) => x === v[0])) return v[0] ? `${v[0]}%` : "0%"
-  return `L/B ${v[0]}% · P0 ${v[1]}% · P+ ${v[2]}%`
+  if (v.every((x) => x === v[0])) return porcentaje(v[0] || 0)
+  return `L/B ${porcentaje(v[0])} · P0 ${porcentaje(v[1])} · P+ ${porcentaje(v[2])}`
 }
 
 // Datos mínimos del artículo dentro del carrito (al retomar un pedido
@@ -2109,8 +2111,8 @@ function NuevoPedidoInner() {
               const parsePct = (s: string | undefined) => {
                 const t = (s ?? "").trim()
                 if (t === "") return 0
-                const n = Number(t.replace(",", "."))
-                return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : NaN
+                const n = parseMonto(t)
+                return n != null ? Math.max(0, Math.min(100, n)) : NaN
               }
               const bonifParsed: BonifPedidoUI = { viajante: {}, mercaderia: {} }
               let bonifValida = true
@@ -2421,15 +2423,15 @@ function NuevoPedidoInner() {
               >
                 −
               </button>
-              <input
-                type="number"
+              <InputMonto
+                decimales={0}
+                soloPositivos
                 inputMode="numeric"
-                min={0}
                 value={selCantidad}
                 placeholder="0"
-                onChange={(e) => {
-                  const v = parseInt(e.target.value)
-                  setSelCantidad(Number.isFinite(v) && v > 0 ? v : "")
+                onChange={(n) => {
+                  const v = Math.trunc(n ?? 0)
+                  setSelCantidad(v > 0 ? v : "")
                 }}
                 className="w-24 h-14 text-center text-2xl font-bold border border-gray-300 rounded-xl placeholder:text-gray-300"
               />

@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Search, Package, User } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
+import { moneda } from "@/lib/formato"
 
 type Articulo = {
   id: string
@@ -264,7 +265,7 @@ export default function ConsultaPreciosPage() {
         precio_venta_neto,
         impuestos_monto,
         precio_final,
-        precio_final_redondeado: `$${precio_final_redondeado}`,
+        precio_final_redondeado: moneda(precio_final_redondeado, 0),
       })
     } catch (error) {
       console.error("[v0] Error calculando precio:", error)
@@ -403,39 +404,39 @@ export default function ConsultaPreciosPage() {
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Precio Lista:</span>
-                <span className="font-medium">${desglose.precio_lista.toFixed(2)}</span>
+                <span className="font-medium">{moneda(desglose.precio_lista)}</span>
               </div>
               <div className="flex justify-between text-red-600">
                 <span>Descuento 1:</span>
-                <span>-${desglose.descuento1_monto.toFixed(2)}</span>
+                <span>-{moneda(desglose.descuento1_monto)}</span>
               </div>
               <div className="flex justify-between text-red-600">
                 <span>Descuento 2:</span>
-                <span>-${desglose.descuento2_monto.toFixed(2)}</span>
+                <span>-{moneda(desglose.descuento2_monto)}</span>
               </div>
               <div className="flex justify-between text-red-600">
                 <span>Descuento 3:</span>
-                <span>-${desglose.descuento3_monto.toFixed(2)}</span>
+                <span>-{moneda(desglose.descuento3_monto)}</span>
               </div>
               <div className="flex justify-between text-red-600">
                 <span>Descuento 4:</span>
-                <span>-${desglose.descuento4_monto.toFixed(2)}</span>
+                <span>-{moneda(desglose.descuento4_monto)}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-semibold">
                 <span>Costo Bruto:</span>
-                <span>${desglose.costo_bruto.toFixed(2)}</span>
+                <span>{moneda(desglose.costo_bruto)}</span>
               </div>
               <div className="flex justify-between text-blue-600">
                 <span>IVA Compras:</span>
-                <span>+${desglose.iva_compras_monto.toFixed(2)}</span>
+                <span>+{moneda(desglose.iva_compras_monto)}</span>
               </div>
               <div className="flex justify-between text-blue-600">
                 <span>Flete Compra:</span>
-                <span>+${desglose.flete_compra_monto.toFixed(2)}</span>
+                <span>+{moneda(desglose.flete_compra_monto)}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-bold text-lg">
                 <span>Costo Final:</span>
-                <span>${desglose.costo_final.toFixed(2)}</span>
+                <span>{moneda(desglose.costo_final)}</span>
               </div>
             </CardContent>
           </Card>
@@ -448,19 +449,19 @@ export default function ConsultaPreciosPage() {
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Costo Bruto:</span>
-                <span className="font-medium">${desglose.costo_bruto.toFixed(2)}</span>
+                <span className="font-medium">{moneda(desglose.costo_bruto)}</span>
               </div>
               <div className="flex justify-between text-green-600">
                 <span>Ganancia:</span>
-                <span>+${desglose.ganancia_monto.toFixed(2)}</span>
+                <span>+{moneda(desglose.ganancia_monto)}</span>
               </div>
               <div className="flex justify-between text-green-600">
                 <span>Gastos Operativos:</span>
-                <span>+${desglose.gastos_operativos_monto.toFixed(2)}</span>
+                <span>+{moneda(desglose.gastos_operativos_monto)}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-bold text-lg">
                 <span>Precio Base:</span>
-                <span>${desglose.precio_base.toFixed(2)}</span>
+                <span>{moneda(desglose.precio_base)}</span>
               </div>
             </CardContent>
           </Card>
@@ -473,27 +474,27 @@ export default function ConsultaPreciosPage() {
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Precio Base:</span>
-                <span className="font-medium">${desglose.precio_base.toFixed(2)}</span>
+                <span className="font-medium">{moneda(desglose.precio_base)}</span>
               </div>
               <div className="flex justify-between text-blue-600">
                 <span>Flete Venta:</span>
-                <span>+${desglose.flete_venta_monto.toFixed(2)}</span>
+                <span>+{moneda(desglose.flete_venta_monto)}</span>
               </div>
               <div className="flex justify-between text-orange-600">
                 <span>Recargo Puntaje:</span>
-                <span>+${desglose.recargo_puntaje_monto.toFixed(2)}</span>
+                <span>+{moneda(desglose.recargo_puntaje_monto)}</span>
               </div>
               <div className="flex justify-between text-purple-600">
                 <span>Comisión Vendedor:</span>
-                <span>+${desglose.comision_vendedor_monto.toFixed(2)}</span>
+                <span>+{moneda(desglose.comision_vendedor_monto)}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-semibold">
                 <span>Precio Venta Neto:</span>
-                <span>${desglose.precio_venta_neto.toFixed(2)}</span>
+                <span>{moneda(desglose.precio_venta_neto)}</span>
               </div>
               <div className="flex justify-between text-blue-600">
                 <span>Impuestos:</span>
-                <span>+${desglose.impuestos_monto.toFixed(2)}</span>
+                <span>+{moneda(desglose.impuestos_monto)}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-bold text-xl text-green-600">
                 <span>PRECIO FINAL (CTA CTE):</span>
@@ -501,7 +502,7 @@ export default function ConsultaPreciosPage() {
               </div>
               <div className="flex justify-between font-bold text-lg text-emerald-700">
                 <span>PRECIO CONTADO (-10%):</span>
-                <span>${Math.ceil(desglose.precio_final * 0.9)}</span>
+                <span>{moneda(Math.ceil(desglose.precio_final * 0.9), 0)}</span>
               </div>
             </CardContent>
           </Card>

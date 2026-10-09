@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth, getUserRoles } from '@/lib/auth'
 import { esAdmin, esTipoReservado } from '@/lib/finanzas/tipos-reservados'
+import { fechaISO, sumarDiasISO } from '@/lib/formato'
 
 /**
  * POST /api/vencimientos/[id]/recalcular — re-aplica el acuerdo de pago de la
@@ -104,21 +105,17 @@ export async function POST(
           .limit(1)
           .maybeSingle()
         const f = (rec as any)?.fecha_fin || (rec as any)?.fecha_inicio || (rec as any)?.created_at
-        if (f) fechaBase = String(f).slice(0, 10)
+        if (f) fechaBase = fechaISO(f) || null // timestamptz → día argentino
       }
       const dias = Number(cfg.dias ?? p.dias_vencimiento ?? 0)
       if (fechaBase) {
-        const base = new Date(fechaBase + 'T00:00:00')
-        base.setDate(base.getDate() + dias)
-        fechaVencimiento = base.toISOString().slice(0, 10)
+        fechaVencimiento = sumarDiasISO(fechaBase, dias)
       }
     }
 
     let fechaValidez: string | null = null
     if (formaPago === 'cheque' && Number(cfg.plazoCheque ?? 0) > 0) {
-      const v = new Date(fechaVencimiento + 'T00:00:00')
-      v.setDate(v.getDate() + Number(cfg.plazoCheque))
-      fechaValidez = v.toISOString().slice(0, 10)
+      fechaValidez = sumarDiasISO(String(fechaVencimiento).slice(0, 10), Number(cfg.plazoCheque))
     }
 
     const { error: updErr } = await supabase

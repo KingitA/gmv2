@@ -13,6 +13,7 @@ import { localMatch } from "@/lib/search/local-match"
 import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/ArticuloResultRow"
 import { esQrOUrl } from "@/lib/utils/scan-guard"
 import { scanError } from "@/lib/utils/scan-feedback"
+import { numero, parseMonto } from "@/lib/formato"
 
 interface Articulo {
   id: string
@@ -244,7 +245,7 @@ export default function ModificacionArticulosPage() {
     setUnidadesBulto(art.unidades_por_bulto ? String(art.unidades_por_bulto) : "")
     setUnidadMedida(art.unidad_de_medida || "")
     setTipoFraccion(""); setCantidadFraccion("")
-    setCantidad(tipo === "correccion" ? String(art.stock_actual ?? 0) : "")
+    setCantidad(tipo === "correccion" ? numero(art.stock_actual ?? 0, 0, 3) : "")
     setMotivo(""); setMsgDatos(null); setMsgStock(null)
     setBusqueda(""); setPanelFiltro(null)
     // snapshot base (se completa con los campos extra al resolver)
@@ -294,10 +295,10 @@ export default function ModificacionArticulosPage() {
       await actualizarDatosArticulo(articulo.id, {
         ean13: ean13.length > 0 ? ean13 : null,
         codigo_bulto: codigoBulto || null,
-        unidades_por_bulto: unidadesBulto ? parseInt(unidadesBulto) : undefined,
+        unidades_por_bulto: unidadesBulto ? Math.trunc(parseMonto(unidadesBulto) ?? 0) : undefined,
         unidad_de_medida: unidadMedida || null,
         tipo_fraccion: tipoFraccion || null,
-        cantidad_fraccion: cantidadFraccion ? parseInt(cantidadFraccion) : null,
+        cantidad_fraccion: cantidadFraccion ? Math.trunc(parseMonto(cantidadFraccion) ?? 0) : null,
       })
       originalRef.current = snapActual()
       setMsgDatos({ ok: true, txt: "✓ Datos guardados" })
@@ -391,18 +392,18 @@ export default function ModificacionArticulosPage() {
     if (!articulo || !cantidad) { setMsgStock({ ok: false, txt: "Ingresá una cantidad" }); return }
     setGuardandoStock(true); setMsgStock(null)
     try {
-      const res = await ajustarStock(articulo.id, parseFloat(cantidad), tipo, motivo)
+      const res = await ajustarStock(articulo.id, parseMonto(cantidad) ?? NaN, tipo, motivo)
       setArticulo(a => a ? { ...a, stock_actual: res.nuevoStock } : a)
-      setCantidad(tipo === "correccion" ? String(res.nuevoStock) : "")
+      setCantidad(tipo === "correccion" ? numero(res.nuevoStock, 0, 3) : "")
       setMotivo("")
-      setMsgStock({ ok: true, txt: `✓ Stock: ${res.nuevoStock} ${articulo.unidad_de_medida || "UN"}` })
+      setMsgStock({ ok: true, txt: `✓ Stock: ${numero(res.nuevoStock, 0, 3)} ${articulo.unidad_de_medida || "UN"}` })
     } catch (e: any) { setMsgStock({ ok: false, txt: e.message || "Error al guardar" }) }
     setGuardandoStock(false)
   }
 
   const stockResultante = () => {
     if (!articulo || !cantidad) return null
-    const c = parseFloat(cantidad) || 0, s = articulo.stock_actual ?? 0
+    const c = parseMonto(cantidad) || 0, s = articulo.stock_actual ?? 0
     if (tipo === "correccion") return c
     if (tipo === "entrada") return s + c
     return s - c
@@ -683,7 +684,7 @@ export default function ModificacionArticulosPage() {
                   <div style={C.artName}>{art.descripcion}{articuloMarcaSuffix(art)}</div>
                   <div style={C.artSub}>
                     <span style={{ fontFamily: "monospace" }}>{articuloInfoLine(art)}</span>
-                    <span>Stock: <span style={C.artStock}>{art.stock_actual ?? 0}</span></span>
+                    <span>Stock: <span style={C.artStock}>{numero(art.stock_actual ?? 0, 0, 3)}</span></span>
                     {art.orden_deposito != null && <span style={{ color: "#6366f1" }}>#{art.orden_deposito}</span>}
                   </div>
                 </button>
@@ -713,7 +714,7 @@ export default function ModificacionArticulosPage() {
               <div style={C.artSelectedName}>{articulo.descripcion}{articuloMarcaSuffix(articulo)}</div>
               <div style={C.artSelectedSub}>{articuloInfoLine(articulo)}</div>
             </div>
-            <div style={C.stockBadge}>Stock: {articulo.stock_actual ?? 0}</div>
+            <div style={C.stockBadge}>Stock: {numero(articulo.stock_actual ?? 0, 0, 3)}</div>
             <button style={C.changeBtn} onClick={volver}>
               {enNavegacion ? "Volver" : "Cambiar"}
             </button>
@@ -742,7 +743,7 @@ export default function ModificacionArticulosPage() {
                   <span style={C.label}>Tipo de movimiento</span>
                   <div style={C.typeGrid}>
                     {([["entrada","#16a34a","📥 Entrada"],["salida","#dc2626","📤 Salida"],["correccion","#d97706","✏️ Corrección"]] as const).map(([t,color,label])=>(
-                      <button key={t} style={C.typeBtn(tipo===t,color)} onClick={()=>{setTipo(t);setCantidad(t==="correccion"?String(articulo.stock_actual??0):"")}}>
+                      <button key={t} style={C.typeBtn(tipo===t,color)} onClick={()=>{setTipo(t);setCantidad(t==="correccion"?numero(articulo.stock_actual??0, 0, 3):"")}}>
                         {label}
                       </button>
                     ))}
@@ -750,9 +751,9 @@ export default function ModificacionArticulosPage() {
                 </div>
                 <div style={C.card}>
                   <span style={C.label}>{tipo==="correccion"?"Nuevo stock (valor final)":tipo==="entrada"?"Cantidad a ingresar":"Cantidad a retirar"}</span>
-                  <input style={C.bigInput} type="number" inputMode="decimal" value={cantidad} onChange={e=>setCantidad(e.target.value)} autoFocus/>
+                  <input style={C.bigInput} type="text" inputMode="decimal" autoComplete="off" value={cantidad} onChange={e=>setCantidad(e.target.value.replace(/[^\d.,-]/g, ""))} autoFocus/>
                   {stockResultante()!==null&&(
-                    <div style={C.resultante}>Stock resultante: <strong style={{color:(stockResultante()??0)<0?"#dc2626":"#16a34a",fontSize:20}}>{stockResultante()}</strong></div>
+                    <div style={C.resultante}>Stock resultante: <strong style={{color:(stockResultante()??0)<0?"#dc2626":"#16a34a",fontSize:20}}>{numero(stockResultante(), 0, 3)}</strong></div>
                   )}
                 </div>
                 <div style={C.card}>
@@ -799,7 +800,7 @@ export default function ModificacionArticulosPage() {
                   <div style={{color:"#9ca3af",fontSize:13,marginTop:6}}>Enter o coma para agregar · × para quitar</div>
                 </div>
                 <div style={{...C.card,...C.row2}}>
-                  <div><span style={C.label}>Unid. por bulto</span><input style={C.input} type="number" inputMode="numeric" placeholder="—" value={unidadesBulto} onChange={e=>setUnidadesBulto(e.target.value)}/></div>
+                  <div><span style={C.label}>Unid. por bulto</span><input style={C.input} type="text" inputMode="numeric" autoComplete="off" placeholder="—" value={unidadesBulto} onChange={e=>setUnidadesBulto(e.target.value.replace(/\D/g, ""))}/></div>
                   <div><span style={C.label}>Tipo de bulto</span>
                     <select style={C.input} value={unidadMedida} onChange={e=>setUnidadMedida(e.target.value)}>
                       <option value="">—</option>
@@ -814,7 +815,7 @@ export default function ModificacionArticulosPage() {
                       {opcionesCon(tiposFraccion, tipoFraccion).map(t=><option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
-                  <div><span style={C.label}>Unidades / fracción</span><input style={C.input} type="number" inputMode="numeric" placeholder="—" value={cantidadFraccion} onChange={e=>setCantidadFraccion(e.target.value)}/></div>
+                  <div><span style={C.label}>Unidades / fracción</span><input style={C.input} type="text" inputMode="numeric" autoComplete="off" placeholder="—" value={cantidadFraccion} onChange={e=>setCantidadFraccion(e.target.value.replace(/\D/g, ""))}/></div>
                 </div>
                 {msgDatos&&<div style={C.msg(msgDatos.ok)}>{msgDatos.txt}</div>}
                 <button style={C.saveBtn("#2563eb",guardandoDatos)} onClick={guardarDatos} disabled={guardandoDatos}>

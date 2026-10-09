@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from "react-router"
 import { esQrOUrl, lecturaError, lecturaOk, useNoEnviados, useOverlay, useParamEstado } from "@gm/core"
 import { Hoja, ListaVirtual } from "@gm/core/ui"
+import { numero, parseMonto } from "@gm/formato"
 import { DS, type OpDatos, type OpStock } from "../../datasets"
 import { buscarPorCodigo, coincide, eansDe, lineaInfo, padEan13, sufijoMarca } from "../../datos/busqueda"
 import { useArticulos, useCatalogos, useEncolar, useVistaArticulos } from "../../datos/hooks"
@@ -296,10 +297,10 @@ export function ArticuloEditor() {
     if ([...ean13].sort().join("|") !== [...eanAntes].sort().join("|")) c.ean13 = { antes: eanAntes.length ? eanAntes : null, despues: ean13.length ? ean13 : null }
     const cmp = (campo: string, antes: unknown, despues: unknown) => { if (String(antes ?? "") !== String(despues ?? "")) c[campo] = { antes: antes ?? null, despues: despues ?? null } }
     cmp("codigo_bulto", art.codigo_bulto || null, codigoBulto.trim() ? padEan13(codigoBulto.trim()) : null)
-    cmp("unidades_por_bulto", art.unidades_por_bulto ?? null, unidadesBulto ? parseInt(unidadesBulto) : art.unidades_por_bulto ?? null)
+    cmp("unidades_por_bulto", art.unidades_por_bulto ?? null, unidadesBulto ? Math.trunc(parseMonto(unidadesBulto) ?? 0) : art.unidades_por_bulto ?? null)
     cmp("unidad_de_medida", art.unidad_de_medida || null, unidadMedida || null)
     cmp("tipo_fraccion", art.tipo_fraccion || null, tipoFraccion || null)
-    cmp("cantidad_fraccion", art.cantidad_fraccion ?? null, cantidadFraccion ? parseInt(cantidadFraccion) : null)
+    cmp("cantidad_fraccion", art.cantidad_fraccion ?? null, cantidadFraccion ? Math.trunc(parseMonto(cantidadFraccion) ?? 0) : null)
     return c
   }
   const guardarDatos = async (silencioso = false) => {
@@ -322,16 +323,16 @@ export function ArticuloEditor() {
 
   const aplicarStock = async () => {
     if (!cantidad) { setMsgStock({ ok: false, txt: "Ingresá una cantidad" }); return }
-    const c = parseFloat(cantidad) || 0
+    const c = parseMonto(cantidad) ?? 0
     const visto = art.stock_actual ?? 0
     const nuevo = tipo === "correccion" ? c : tipo === "entrada" ? visto + c : visto - c
     await encolar<OpStock>("stock.ajustar", { articulo_id: art.id, tipo, cantidad: c, motivo: motivo || null, stock_visto: visto }, `Stock de ${art.descripcion}: ${tipo === "correccion" ? `= ${c}` : tipo === "entrada" ? `+${c}` : `−${c}`}`)
-    setCantidad(tipo === "correccion" ? String(nuevo) : ""); setMotivo("")
+    setCantidad(tipo === "correccion" ? numero(nuevo, 0, 3) : ""); setMotivo("")
     setMsgStock({ ok: true, txt: `✓ Stock: ${nuevo} ${art.unidad_de_medida || "UN"}` })
   }
   const stockResultante = () => {
     if (!cantidad) return null
-    const c = parseFloat(cantidad) || 0, s = art.stock_actual ?? 0
+    const c = parseMonto(cantidad) ?? 0, s = art.stock_actual ?? 0
     return tipo === "correccion" ? c : tipo === "entrada" ? s + c : s - c
   }
 
@@ -408,7 +409,7 @@ export function ArticuloEditor() {
             </div>
             <div style={S.card}>
               <span style={S.label}>{tipo === "correccion" ? "Nuevo stock (valor final)" : tipo === "entrada" ? "Cantidad a ingresar" : "Cantidad a retirar"}</span>
-              <input type="number" inputMode="decimal" value={cantidad} onChange={(e) => setCantidad(e.target.value)} onFocus={(e) => e.target.select()} style={{ ...S.input, border: "2px solid #d1d5db", borderRadius: 14, padding: 16, fontSize: 32, fontWeight: 700, textAlign: "center" }} />
+              <input type="text" inputMode="decimal" value={cantidad} onChange={(e) => setCantidad(e.target.value.replace(/[^\d.,]/g, ""))} onFocus={(e) => e.target.select()} style={{ ...S.input, border: "2px solid #d1d5db", borderRadius: 14, padding: 16, fontSize: 32, fontWeight: 700, textAlign: "center" }} />
               {stockResultante() !== null && (
                 <div style={{ textAlign: "center", marginTop: 8, fontSize: 15, color: C.sub }}>Stock resultante: <strong style={{ color: (stockResultante() ?? 0) < 0 ? C.red : C.green, fontSize: 20 }}>{stockResultante()}</strong></div>
               )}
@@ -455,7 +456,7 @@ export function ArticuloEditor() {
               <div style={{ color: C.light, fontSize: 13, marginTop: 6 }}>Enter o coma para agregar · × para quitar</div>
             </div>
             <div style={{ ...S.card, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div><span style={S.label}>Unid. por bulto</span><input style={S.input} type="number" inputMode="numeric" placeholder="—" value={unidadesBulto} onChange={(e) => setUnidadesBulto(e.target.value)} /></div>
+              <div><span style={S.label}>Unid. por bulto</span><input style={S.input} type="text" inputMode="numeric" placeholder="—" value={unidadesBulto} onChange={(e) => setUnidadesBulto(e.target.value.replace(/\D/g, ""))} /></div>
               <div>
                 <span style={S.label}>Tipo de bulto</span>
                 <select style={S.input} value={unidadMedida} onChange={(e) => setUnidadMedida(e.target.value)}>
@@ -472,7 +473,7 @@ export function ArticuloEditor() {
                   {opcionesCon(tiposFraccion, tipoFraccion).map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              <div><span style={S.label}>Unidades / fracción</span><input style={S.input} type="number" inputMode="numeric" placeholder="—" value={cantidadFraccion} onChange={(e) => setCantidadFraccion(e.target.value)} /></div>
+              <div><span style={S.label}>Unidades / fracción</span><input style={S.input} type="text" inputMode="numeric" placeholder="—" value={cantidadFraccion} onChange={(e) => setCantidadFraccion(e.target.value.replace(/\D/g, ""))} /></div>
             </div>
             {art.datosSinEnviar && <div style={{ textAlign: "center" }}><SinEnviar /></div>}
             {msgDatos && <div style={S.msg(msgDatos.ok)}>{msgDatos.txt}</div>}

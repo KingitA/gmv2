@@ -15,6 +15,7 @@ import { localMatch } from "@/lib/search/local-match"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Trash2 } from "lucide-react"
+import { InputMonto } from "@/components/ui/input-monto"
 
 export type CondRow = {
   ref_id: string                       // proveedor_id | marca_id
@@ -63,12 +64,6 @@ const METODOS = [
   { value: "Final",       label: "Final (Mixto)" },
   { value: "Presupuesto", label: "Presupuesto"   },
 ]
-
-function numOrNull(v: string): number | null {
-  if (v.trim() === "") return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
-}
 
 export function SegmentacionCondiciones({
   listas,
@@ -252,11 +247,11 @@ function DtoInput({ label, value, onChange }: { label: string; value: number | n
   return (
     <div>
       <label className="mb-1 block text-xs font-semibold text-neutro-600">{label}</label>
-      <Input
-        type="number" inputMode="decimal" min={0} max={100}
+      <InputMonto
+        soloPositivos
         className="h-8 text-xs"
         value={value ?? ""}
-        onChange={e => onChange(numOrNull(e.target.value))}
+        onChange={onChange}
         placeholder="0"
       />
     </div>

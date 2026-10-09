@@ -19,6 +19,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
+import { finDiaAR, inicioDiaAR, numeroPlano } from '@/lib/formato'
 
 const TIPOS_FISCALES = ['FA', 'FB', 'NCA', 'NCB', 'NDA', 'NDB']
 
@@ -43,8 +44,9 @@ export async function GET(request: NextRequest) {
       .from('kardex')
       .select('provincia_destino, tipo_comprobante, tipo_movimiento, signo, subtotal_neto, subtotal_iva, subtotal_total')
       .in('tipo_comprobante', TIPOS_FISCALES)
-      .gte('fecha', desde)
-      .lte('fecha', hasta))
+      // kardex.fecha es timestamptz: el período son días argentinos completos
+      .gte('fecha', inicioDiaAR(desde))
+      .lte('fecha', finDiaAR(hasta)))
 
     // Agrupar por provincia de destino — NC restan (signo +1 en kardex pero es crédito)
     const porJurisdiccion = new Map<string, { neto: number; iva: number; total: number; movimientos: number }>()
@@ -83,9 +85,9 @@ export async function GET(request: NextRequest) {
     const lineas = [
       'PROVINCIA;VENTAS_NETAS;IVA;TOTAL;MOVIMIENTOS;COEFICIENTE',
       ...resultado.map(r =>
-        `${r.provincia};${r.ventas_netas.toFixed(2)};${r.iva.toFixed(2)};${r.total.toFixed(2)};${r.movimientos};${totalNeto !== 0 ? (r.ventas_netas / totalNeto).toFixed(6) : '0'}`
+        `${r.provincia};${numeroPlano(r.ventas_netas)};${numeroPlano(r.iva)};${numeroPlano(r.total)};${r.movimientos};${totalNeto !== 0 ? numeroPlano(r.ventas_netas / totalNeto, 6) : '0'}`
       ),
-      `TOTAL;${totalNeto.toFixed(2)};;;;`,
+      `TOTAL;${numeroPlano(totalNeto)};;;;`,
     ]
     const buffer = Buffer.from(lineas.join('\r\n') + '\r\n', 'latin1')
 

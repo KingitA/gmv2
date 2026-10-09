@@ -12,9 +12,10 @@ import { useToast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
 import { CargaProgreso } from "@/components/ui/carga-progreso"
 import type { CuentaFondos } from "./registrar-cobro"
+import { InputMonto } from "@/components/ui/input-monto"
+import { fecha, moneda, redondear } from "@/lib/formato"
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
-const fmt = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 2 })
 
 interface ChequeFisico {
   key: string
@@ -96,8 +97,8 @@ export function ControlarRendicion({
           fondosViaje = (vf || []).reduce((s: number, f: any) => s + Number(f.monto), 0)
           gastosViaje = (vg || []).reduce((s: number, g: any) => s + Number(g.monto), 0)
         }
-        setFondos(Math.round(fondosViaje * 100) / 100)
-        setGastos(Math.round(gastosViaje * 100) / 100)
+        setFondos(redondear(fondosViaje))
+        setGastos(redondear(gastosViaje))
 
         fetch("/api/pagos-clientes/rendiciones-resumen")
           .then((r) => r.json())
@@ -115,7 +116,7 @@ export function ControlarRendicion({
             id: p.id,
             cliente,
             monto: Number(p.monto),
-            medios: ((p as any).pagos_detalle || []).map((d: any) => `${d.tipo_pago} $ ${fmt(Number(d.monto))}`).join(" + "),
+            medios: ((p as any).pagos_detalle || []).map((d: any) => `${d.tipo_pago} ${moneda(Number(d.monto))}`).join(" + "),
           })
           let soloDigital = true
           for (const d of (p as any).pagos_detalle || []) {
@@ -168,7 +169,7 @@ export function ControlarRendicion({
   // (pago → rechazado, imputaciones pendientes fuera, cheques ANULADO). Si la
   // rendición queda vacía, se cancela sola y desaparece de "Esperando la plata".
   const rechazarPago = async (p: { id: string; cliente: string; monto: number }) => {
-    const motivo = window.prompt(`Rechazar el cobro de ${p.cliente} por $ ${fmt(p.monto)}.\n¿Motivo? (no llegó la plata, mal cargado, prueba…)`)
+    const motivo = window.prompt(`Rechazar el cobro de ${p.cliente} por ${moneda(p.monto)}.\n¿Motivo? (no llegó la plata, mal cargado, prueba…)`)
     if (motivo === null) return
     if (!motivo.trim()) {
       toast({ variant: "destructive", title: "Indicá el motivo del rechazo" })
@@ -202,14 +203,14 @@ export function ControlarRendicion({
   // Es contra esto que se mide la diferencia: si el vendedor cobró 1.241.200 y
   // trae 1.241.000, faltan 200 aunque él haya "declarado" 1.241.000.
   const efectivoRegistrado = Number(rendicion?.efectivo_registrado ?? 0)
-  const contadoNum = Number(efectivoContado.replace(",", ".")) || 0
+  const contadoNum = Number(efectivoContado) || 0
   // Esperado en mano = cobrado + a cuenta viaje − gastos declarados.
   // Dos ejes (mismos que el SQL): retención = esperado − declarado (ya
   // asentada en la CC del cobrador al declarar) y diferencia de oficina =
   // contado − declarado (lo que decide "confirmar con diferencia").
-  const esperado = Math.round((efectivoRegistrado + fondos - gastos) * 100) / 100
-  const difEfectivo = Math.round((contadoNum - efectivoDeclarado) * 100) / 100
-  const retencion = Math.round((esperado - efectivoDeclarado) * 100) / 100
+  const esperado = redondear(efectivoRegistrado + fondos - gastos)
+  const difEfectivo = redondear(contadoNum - efectivoDeclarado)
+  const retencion = redondear(esperado - efectivoDeclarado)
 
   const confirmar = async (forzar: boolean) => {
     if (!cajaDestino) {
@@ -365,7 +366,7 @@ export function ControlarRendicion({
                       <span className="flex-1 min-w-0 truncate">
                         {p.cliente} <span className="text-xs text-slate-400">· {p.medios || "sin detalle"}</span>
                       </span>
-                      <span className="font-semibold" style={NUM}>$ {fmt(p.monto)}</span>
+                      <span className="font-semibold" style={NUM}>{moneda(p.monto)}</span>
                       <button
                         type="button"
                         onClick={() => rechazarPago(p)}
@@ -403,11 +404,11 @@ export function ControlarRendicion({
                       />
                       <span className="flex-1 min-w-0 truncate">
                         📄 {c.banco} {c.numero}
-                        {c.vencimiento ? ` · venc ${c.vencimiento.split("-").reverse().join("/")}` : ""} ·{" "}
+                        {c.vencimiento ? ` · venc ${fecha(c.vencimiento)}` : ""} ·{" "}
                         <span className="text-slate-500">{c.cliente}</span>
                       </span>
                       <span className="font-semibold" style={NUM}>
-                        $ {fmt(c.monto)}
+                        {moneda(c.monto)}
                       </span>
                     </label>
                   ))}
@@ -455,39 +456,39 @@ export function ControlarRendicion({
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <div className="grid max-w-xs grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-sm" style={NUM}>
                 <span className="text-slate-600">💵 Cobrado en efectivo</span>
-                <span className="text-right font-semibold">$ {fmt(efectivoRegistrado)}</span>
+                <span className="text-right font-semibold">{moneda(efectivoRegistrado)}</span>
                 {fondos > 0 && (
                   <>
                     <span className="text-slate-600">+ A cuenta del viaje</span>
-                    <span className="text-right font-semibold">$ {fmt(fondos)}</span>
+                    <span className="text-right font-semibold">{moneda(fondos)}</span>
                   </>
                 )}
                 {gastos > 0 && (
                   <>
                     <span className="text-slate-600">− Gastos declarados</span>
-                    <span className="text-right font-semibold">$ {fmt(gastos)}</span>
+                    <span className="text-right font-semibold">{moneda(gastos)}</span>
                   </>
                 )}
                 <span className="border-t border-slate-300 pt-0.5 font-bold text-slate-800">= Esperado en mano</span>
-                <span className="border-t border-slate-300 pt-0.5 text-right font-bold">$ {fmt(esperado)}</span>
+                <span className="border-t border-slate-300 pt-0.5 text-right font-bold">{moneda(esperado)}</span>
               </div>
               <p className="mt-2 text-sm">
-                Declaró enviar: <b style={NUM}>$ {fmt(efectivoDeclarado)}</b>
+                Declaró enviar: <b style={NUM}>{moneda(efectivoDeclarado)}</b>
                 {Math.abs(retencion) > 0.005 && (
                   <span className={`ml-1.5 text-xs font-semibold ${retencion > 0 ? "text-amber-700" : "text-sky-700"}`} style={NUM}>
                     {retencion > 0
-                      ? `(retiene $ ${fmt(retencion)} — ya debitado en su cuenta al declarar)`
-                      : `(entregó $ ${fmt(-retencion)} de más — ya a su favor)`}
+                      ? `(retiene ${moneda(retencion)} — ya debitado en su cuenta al declarar)`
+                      : `(entregó ${moneda(-retencion)} de más — ya a su favor)`}
                   </span>
                 )}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
                 <span className="flex items-center gap-1.5">
                   Contado por vos:
-                  <input
+                  <InputMonto
                     value={efectivoContado}
-                    onChange={(e) => setEfectivoContado(e.target.value.replace(/[^\d.,]/g, ""))}
-                    inputMode="decimal"
+                    onChange={(n) => setEfectivoContado(n == null ? "" : String(n))}
+                    soloPositivos
                     className="w-32 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-right text-sm font-semibold outline-none focus:border-blue-500"
                     style={NUM}
                   />
@@ -498,7 +499,7 @@ export function ControlarRendicion({
                   </span>
                 ) : (
                   <span className="rounded-full bg-red-100 px-3 py-0.5 text-[11px] font-bold text-red-700" style={NUM}>
-                    {difEfectivo > 0 ? "sobra" : "falta"} $ {fmt(Math.abs(difEfectivo))} vs lo declarado
+                    {difEfectivo > 0 ? "sobra" : "falta"} {moneda(Math.abs(difEfectivo))} vs lo declarado
                   </span>
                 )}
               </div>
@@ -515,7 +516,7 @@ export function ControlarRendicion({
             {digitales.length > 0 && (
               <div className="mt-3 text-xs text-slate-400">
                 Ya asentado aparte:{" "}
-                {digitales.map((d) => `${d.desc} $ ${fmt(d.monto)}`).join(" · ")}
+                {digitales.map((d) => `${d.desc} ${moneda(d.monto)}`).join(" · ")}
               </div>
             )}
 
@@ -534,7 +535,7 @@ export function ControlarRendicion({
                         {sec.items.map((m: any, i: number) => (
                           <div key={i} className="flex items-center justify-between text-[11px] text-slate-600">
                             <span className="truncate">{m.concepto || m.descripcion || "—"}</span>
-                            <span style={NUM}>$ {fmt(Math.abs(Number(m.monto)))}</span>
+                            <span style={NUM}>{moneda(Math.abs(Number(m.monto)))}</span>
                           </div>
                         ))}
                       </div>

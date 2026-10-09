@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { MoneyColorBadge } from "./MoneyColorBadge"
+import { fecha, moneda } from "@/lib/formato"
 
 interface Cheque {
     id: string
@@ -79,8 +80,8 @@ export function ChequeSelectorModal({ open, onClose, cheques, onSelect, multiSel
                                     </TableCell>
                                     <TableCell>{cheque.banco}</TableCell>
                                     <TableCell>{cheque.numero}</TableCell>
-                                    <TableCell>{new Date(cheque.fecha_vencimiento).toLocaleDateString()}</TableCell>
-                                    <TableCell className="font-semibold">${cheque.monto.toFixed(2)}</TableCell>
+                                    <TableCell>{fecha(cheque.fecha_vencimiento)}</TableCell>
+                                    <TableCell className="font-semibold">{moneda(cheque.monto)}</TableCell>
                                     <TableCell>
                                         <MoneyColorBadge color={cheque.color} />
                                     </TableCell>

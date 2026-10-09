@@ -11,11 +11,12 @@ import { formatDateAR } from "@/lib/utils"
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
 } from "recharts"
+import { moneda, numero } from "@/lib/formato"
 
-const fmt = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 })
-const fmtC = (n: number) =>
-  n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmt = (n: number) => moneda(n)
+const fmtC = (n: number) => moneda(n)
+// KPI grande, sin centavos
+const fmtK = (n: number) => moneda(n, 0)
 
 const GRUPO_ORDEN = ["EFECTIVO", "BANCOS", "BOLSA", "BILLETERAS"]
 const VENTANA_LABEL: Record<string, string> = {
@@ -152,7 +153,7 @@ export default function TableroTesoreriaPage() {
               <Card>
                 <CardContent className="pt-5">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Posición consolidada</p>
-                  <p className="text-2xl font-bold tabular-nums">{fmt(totalGeneral)}</p>
+                  <p className="text-2xl font-bold tabular-nums">{fmtK(totalGeneral)}</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {GRUPO_ORDEN.filter((g) => porGrupo[g]).map((g) => `${g.toLowerCase()} ${fmt(porGrupo[g].total)}`).join(" · ")}
                   </p>
@@ -171,7 +172,7 @@ export default function TableroTesoreriaPage() {
                 <CardContent className="pt-5">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Cheques ≤ 30 días</p>
                   <p className="text-2xl font-bold tabular-nums">
-                    {fmt((chequesPorVentana.D7?.total ?? 0) + (chequesPorVentana.D15?.total ?? 0) + (chequesPorVentana.D30?.total ?? 0))}
+                    {fmtK((chequesPorVentana.D7?.total ?? 0) + (chequesPorVentana.D15?.total ?? 0) + (chequesPorVentana.D30?.total ?? 0))}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {Object.entries(VENTANA_LABEL).filter(([k]) => chequesPorVentana[k])
@@ -182,7 +183,7 @@ export default function TableroTesoreriaPage() {
               <Card>
                 <CardContent className="pt-5">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Plata en la calle</p>
-                  <p className="text-2xl font-bold tabular-nums">{fmt(enCalle)}</p>
+                  <p className="text-2xl font-bold tabular-nums">{fmtK(enCalle)}</p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {(data?.dias_calle || []).length} billeteras con saldo
                   </p>
@@ -241,7 +242,7 @@ export default function TableroTesoreriaPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={proyeccion} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
                         <XAxis dataKey="semana" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                        <YAxis tickFormatter={(v) => `$${(v / 1_000_000).toFixed(1)}M`} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={52} />
+                        <YAxis tickFormatter={(v) => `$${numero(v / 1_000_000, 1)} M`} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={52} />
                         <Tooltip formatter={(v: any) => fmt(Number(v))} />
                         <Legend wrapperStyle={{ fontSize: 12 }} />
                         <Bar dataKey="A cobrar (cheques)" fill="#3b82f6" radius={[4, 4, 0, 0]} />

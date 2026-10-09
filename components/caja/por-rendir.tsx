@@ -12,17 +12,17 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { fecha, moneda } from "@/lib/formato"
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
-const fmt = (n: number) => Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fechaAR = (d?: string | null) => (d ? d.slice(0, 10).split("-").reverse().join("/") : "—")
+const fechaAR = (d?: string | null) => (d ? fecha(d) : "—")
 
 function Desglose({ d }: { d: any }) {
   if (!d) return null
   const partes: string[] = []
-  if (d.efectivo > 0) partes.push(`💵 $ ${fmt(d.efectivo)}`)
-  if (d.cheques > 0) partes.push(`📄 ${d.cheques_cantidad ?? ""} cheque${(d.cheques_cantidad ?? 0) === 1 ? "" : "s"} $ ${fmt(d.cheques)}`)
-  if (d.transferencias > 0) partes.push(`🏦 $ ${fmt(d.transferencias)}`)
+  if (d.efectivo > 0) partes.push(`💵 ${moneda(d.efectivo)}`)
+  if (d.cheques > 0) partes.push(`📄 ${d.cheques_cantidad ?? ""} cheque${(d.cheques_cantidad ?? 0) === 1 ? "" : "s"} ${moneda(d.cheques)}`)
+  if (d.transferencias > 0) partes.push(`🏦 ${moneda(d.transferencias)}`)
   return <span className="text-[11px] text-slate-500">{partes.join(" · ")}</span>
 }
 
@@ -34,7 +34,7 @@ function Movs({ titulo, items }: { titulo: string; items: any[] }) {
       {items.map((m: any, i: number) => (
         <div key={i} className="flex items-center justify-between text-[11px] text-slate-600">
           <span className="truncate">{m.concepto || m.descripcion || "—"}{m.fecha ? ` · ${fechaAR(m.fecha)}` : ""}</span>
-          <span style={NUM}>$ {fmt(Math.abs(Number(m.monto)))}</span>
+          <span style={NUM}>{moneda(Math.abs(Number(m.monto)))}</span>
         </div>
       ))}
     </div>
@@ -97,7 +97,7 @@ export function PorRendir({ recarga }: { recarga: number }) {
               <span className="block text-[11px] text-slate-500">{v.cantidad_pagos} cobro{v.cantidad_pagos === 1 ? "" : "s"} sin declarar</span>
             </span>
             <span className="flex-1 min-w-0 truncate"><Desglose d={v.desglose} /></span>
-            <span className="w-[130px] flex-none text-right text-[13.5px] font-bold text-slate-700" style={NUM}>$ {fmt(v.total)}</span>
+            <span className="w-[130px] flex-none text-right text-[13.5px] font-bold text-slate-700" style={NUM}>{moneda(v.total)}</span>
             <a
               href={`/viajes/${v.viaje_id}/rendicion`}
               target="_blank"
@@ -133,7 +133,7 @@ export function PorRendir({ recarga }: { recarga: number }) {
               <span className="block text-[11px] text-slate-500">{v.cantidad_pagos} cobro{v.cantidad_pagos === 1 ? "" : "s"} en la calle sin declarar</span>
             </span>
             <span className="flex-1 min-w-0 truncate"><Desglose d={v.desglose} /></span>
-            <span className="w-[130px] flex-none text-right text-[13.5px] font-bold text-slate-700" style={NUM}>$ {fmt(v.total)}</span>
+            <span className="w-[130px] flex-none text-right text-[13.5px] font-bold text-slate-700" style={NUM}>{moneda(v.total)}</span>
             <span className="w-[220px] flex-none text-right text-[11px] text-slate-400">Declara el vendedor desde su app</span>
           </div>
         ))}
@@ -151,7 +151,7 @@ export function PorRendir({ recarga }: { recarga: number }) {
                   </span>
                 </span>
                 <span className="flex-1 min-w-0 truncate"><Desglose d={r.desglose} /></span>
-                <span className="w-[130px] flex-none text-right text-[13.5px] font-bold text-slate-700" style={NUM}>$ {fmt(r.total)}</span>
+                <span className="w-[130px] flex-none text-right text-[13.5px] font-bold text-slate-700" style={NUM}>{moneda(r.total)}</span>
                 <span className="w-[220px] flex-none text-right text-[11px] text-blue-600">{abierta === r.id ? "Ocultar detalle" : "Ver detalle"}</span>
               </button>
               {abierta === r.id && (
@@ -161,12 +161,12 @@ export function PorRendir({ recarga }: { recarga: number }) {
                     {(r.pagos || []).map((p: any) => (
                       <div key={p.id} className="flex items-center justify-between text-[11px] text-slate-600">
                         <span className="truncate">{p.cliente_nombre} · {p.metodos}</span>
-                        <span style={NUM}>$ {fmt(p.monto)}</span>
+                        <span style={NUM}>{moneda(p.monto)}</span>
                       </div>
                     ))}
                     <div className="mt-1 text-[11px] text-slate-500">
-                      Efectivo declarado <b style={NUM}>$ {fmt(r.efectivo_declarado)}</b> · registrado <b style={NUM}>$ {fmt(r.efectivo_registrado)}</b>
-                      {Number(r.diferencia) !== 0 && <span className="font-bold text-red-600"> · dif. $ {fmt(r.diferencia)}</span>}
+                      Efectivo declarado <b style={NUM}>{moneda(r.efectivo_declarado)}</b> · registrado <b style={NUM}>{moneda(r.efectivo_registrado)}</b>
+                      {Number(r.diferencia) !== 0 && <span className="font-bold text-red-600"> · dif. {moneda(r.diferencia)}</span>}
                     </div>
                   </div>
                   <div>

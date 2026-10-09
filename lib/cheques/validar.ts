@@ -1,6 +1,11 @@
 // Validación de los datos que devuelve el OCR de un cheque / transferencia.
 // Todo lo que no cierra (CUIT sin dígito verificador, fecha fuera de rango,
 // monto absurdo) se descarta: mejor un campo vacío que uno inventado.
+//
+// Formatos: lib/formato es la fuente única (dd/mm/aaaa, día argentino, xx-xxxxxxxx-x).
+// Acá quedan solo las reglas propias del OCR de cheques (rangos, rescates, descartes).
+
+import { cuitDigitos, formatCuit, hoyISO, cuitValido as cuitValidoFormato } from "../formato"
 
 export interface DatosCheque {
   monto: number
@@ -38,22 +43,15 @@ export interface TransferenciaSaneada {
 
 // ─── CUIT ────────────────────────────────────────────────────────────────────
 
-/** CUIT/CUIL argentino: 11 dígitos y dígito verificador (módulo 11). */
+/** CUIT/CUIL argentino: 11 dígitos y dígito verificador (módulo 11). Misma regla que lib/formato. */
 export function cuitValido(v: string | number | null | undefined): boolean {
-  const d = String(v ?? "").replace(/\D/g, "")
-  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false
-  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
-  const suma = pesos.reduce((s, p, i) => s + p * Number(d[i]), 0)
-  const resto = suma % 11
-  const dv = resto === 0 ? 0 : resto === 1 ? 9 : 11 - resto
-  return dv === Number(d[10])
+  return cuitValidoFormato(v)
 }
 
 /** "20123456789" | "20-12345678-9" | " 20 12345678 9 " → "20-12345678-9"; inválido → null. */
 export function normalizarCuit(v: string | number | null | undefined): string | null {
   if (!cuitValido(v)) return null
-  const d = String(v).replace(/\D/g, "")
-  return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`
+  return formatCuit(v) // XX-XXXXXXXX-X (lib/formato)
 }
 
 /**
@@ -87,12 +85,6 @@ export const cuitConsultable = (v: string | null | undefined) => cuitValido(v)
 
 const DIA_MS = 86_400_000
 
-function fechaLocalISO(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const dd = String(d.getDate()).padStart(2, "0")
-  return `${y}-${m}-${dd}`
-}
 
 const MESES: Record<string, number> = { ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6, jul: 7, ago: 8, sep: 9, set: 9, oct: 10, nov: 11, dic: 12 }
 
@@ -122,9 +114,10 @@ export function parsearFecha(v: string | null | undefined): string | null {
     if (mt[3]!.length === 2) y += 2000
   }
   if (m < 1 || m > 12 || d < 1 || d > 31) return null
-  const f = new Date(y, m - 1, d)
-  if (f.getFullYear() !== y || f.getMonth() !== m - 1 || f.getDate() !== d) return null
-  return fechaLocalISO(f)
+  // Fecha de calendario: se valida en UTC (no depende del huso del equipo)
+  const f = new Date(Date.UTC(y, m - 1, d, 12))
+  if (f.getUTCFullYear() !== y || f.getUTCMonth() !== m - 1 || f.getUTCDate() !== d) return null
+  return f.toISOString().slice(0, 10) // formato-ok: fecha de calendario armada en UTC a mediodía (no es "hoy")
 }
 
 /**
@@ -135,7 +128,7 @@ export function parsearFecha(v: string | null | undefined): string | null {
 export function normalizarFecha(v: string | null | undefined, opts: { hoy?: string; atrasDias?: number; adelanteDias?: number } = {}): string | null {
   const iso = parsearFecha(v)
   if (!iso) return null
-  const hoy = opts.hoy ? parsearFecha(opts.hoy) : fechaLocalISO(new Date())
+  const hoy = opts.hoy ? parsearFecha(opts.hoy) : hoyISO() // día argentino (en el servidor UTC, después de las 21 h era mañana)
   if (!hoy) return iso
   const dif = (Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${hoy}T00:00:00Z`)) / DIA_MS
   if (dif < -(opts.atrasDias ?? 400) || dif > (opts.adelanteDias ?? 400)) return null
@@ -183,10 +176,10 @@ export function normalizarMonto(v: string | number | null | undefined): number |
     const punto = s.lastIndexOf(".")
     if (coma >= 0 && punto >= 0) {
       // El separador que aparece ÚLTIMO es el decimal
-      s = coma > punto ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "")
+      s = coma > punto ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "") // formato-ok: parser propio de montos de cheques (OCR)
     } else if (coma >= 0) {
       // Solo comas: una sola con 1-2 dígitos detrás = decimal; si no, miles
-      s = /,\d{1,2}$/.test(s) && s.split(",").length === 2 ? s.replace(",", ".") : s.replace(/,/g, "")
+      s = /,\d{1,2}$/.test(s) && s.split(",").length === 2 ? s.replace(",", ".") : s.replace(/,/g, "") // formato-ok: parser propio de montos de cheques (OCR)
     } else if (punto >= 0) {
       s = /\.\d{1,2}$/.test(s) && s.split(".").length === 2 ? s : s.replace(/\./g, "")
     }

@@ -4,14 +4,13 @@ import { requireAuth } from "@/lib/auth"
 import { renderToBuffer, type DocumentProps } from "@react-pdf/renderer"
 import React, { type JSXElementConstructor, type ReactElement } from "react"
 import { ReciboPDF, type ReciboPDFData } from "@/lib/pdf/recibo-template"
+import { fecha, formatCuit, numero } from "@/lib/formato"
 
-const fmtARS = (n: number | null | undefined) =>
-  Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// Se usa como `$${fmtARS(x)}` → "$1.234,56" (mismo formato que moneda())
+const fmtARS = (n: number | null | undefined) => numero(Number(n || 0))
 
-const fmtFecha = (d: string | null | undefined) => {
-  if (!d) return ""
-  return new Date(d).toLocaleDateString("es-AR")
-}
+// dd/mm/aaaa en hora argentina (sin depender del huso del servidor)
+const fmtFecha = (d: string | null | undefined) => fecha(d)
 
 function labelMetodo(det: any, cajaMap: Map<string, string>, bancoMap: Map<string, string>): string {
   switch (det.tipo_pago) {
@@ -306,7 +305,7 @@ export async function GET(
   <table style="border:none;">
     <tr>
       <td style="border:none; padding:2px 0; width:50%;"><strong>Cliente:</strong> ${cliente?.razon_social || cliente?.nombre_razon_social || cliente?.nombre || ""}</td>
-      <td style="border:none; padding:2px 0;"><strong>CUIT:</strong> ${cliente?.cuit || "—"}</td>
+      <td style="border:none; padding:2px 0;"><strong>CUIT:</strong> ${formatCuit(cliente?.cuit) || "—"}</td>
     </tr>
     ${cliente?.direccion ? `<tr><td colspan="2" style="border:none; padding:2px 0;"><strong>Dirección:</strong> ${cliente.direccion}</td></tr>` : ""}
   </table>

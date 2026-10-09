@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { useOnline, useOverlay } from "@gm/core"
+import { hoyISO } from "@gm/formato"
 import { DS, type ClienteViaje, type OpViajeEstado, type OpViajeNoVa, type ViajeVendedor } from "../../datasets"
 import { useEncolar, useRefrescarAlEntrar, useRefrescarFilas, useViajes, useZonas, uuidv4 } from "../../datos/hooks"
 import { esIdLocal } from "../../datos/overlay"
-import { fechaCorta, formatCurrency, HojaConfirmar, NecesitaConexion, Pantalla, SinDescargar, SinEnviar, useToast } from "../../ui"
+import { FechaInput, fechaCorta, formatCurrency, HojaConfirmar, NecesitaConexion, Pantalla, SinDescargar, SinEnviar, useToast } from "../../ui"
 
 // Viajes de levantamiento del viajante (= app/vendedor/viajes/**).
 //   /viajes          listado (en curso + anteriores)
@@ -13,7 +14,7 @@ import { fechaCorta, formatCurrency, HojaConfirmar, NecesitaConexion, Pantalla, 
 // Lo pendiente de enviar ya viene superpuesto por datos/overlay.ts (viajesVisibles): acá no hay estado optimista.
 
 /** Hoy en Argentina (no UTC: a las 21 hs toISOString() ya dice "mañana"). */
-const hoyAR = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+const hoyAR = () => hoyISO()
 
 // ─── Listado ─────────────────────────────────────────────────────────────────
 
@@ -122,6 +123,10 @@ export function ViajeNuevo() {
 
   const crear = async () => {
     if (!elegidas.length || !fechaInicio || creando) return
+    if (fechaFin && fechaFin < fechaInicio) {
+      mostrar("El fin estimado no puede ser anterior al inicio.", "err")
+      return
+    }
     setCreando(true)
     try {
       const id = uuidv4()
@@ -176,11 +181,11 @@ export function ViajeNuevo() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-sm text-gray-500">Inicio de pedidos</label>
-              <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-3" />
+              <FechaInput valor={fechaInicio} onCambio={setFechaInicio} className="w-full rounded-xl border border-gray-300 px-3 py-3" />
             </div>
             <div>
               <label className="mb-1 block text-sm text-gray-500">Fin estimado</label>
-              <input type="date" value={fechaFin} min={fechaInicio} onChange={(e) => setFechaFin(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-3" />
+              <FechaInput valor={fechaFin} onCambio={setFechaFin} className="w-full rounded-xl border border-gray-300 px-3 py-3" />
             </div>
           </div>
         </section>

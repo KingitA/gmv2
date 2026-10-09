@@ -6,6 +6,8 @@ import { formatCurrency } from "@/lib/utils"
 import { NuevaLocalidadSheet } from "@/components/vendedor/NuevaLocalidadSheet"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { useAvisoInline } from "@/components/pagos/aviso-inline"
+import { fecha, fechaHora, formatCuit, errorCuit, normalizarCuit, numero, parseMonto } from "@/lib/formato"
+import { InputCUIT } from "@/components/ui/input-cuit"
 
 interface Comprobante {
   id: string
@@ -148,7 +150,7 @@ export default function VendedorClienteFichaPage() {
       const body: { viajante: Record<string, number>; mercaderia: Record<string, number> } = { viajante: {}, mercaderia: {} }
       for (const [k, v] of Object.entries(bonifEdit)) {
         const [tipo, seg] = k.split(".") as ["viajante" | "mercaderia", string]
-        body[tipo][seg] = parseFloat(String(v).replace(",", ".")) || 0
+        body[tipo][seg] = parseMonto(String(v)) ?? 0
       }
       const res = await fetch(`/api/vendedor/cliente/${id}/bonificaciones`, {
         method: "PUT",
@@ -243,12 +245,17 @@ export default function VendedorClienteFichaPage() {
       alert("El nombre no puede quedar vacío.")
       return
     }
+    const errCuit = errorCuit(form.cuit)
+    if (errCuit) {
+      alert(errCuit)
+      return
+    }
     setGuardando(true)
     try {
       const res = await fetch(`/api/vendedor/cliente/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, cuit: normalizarCuit(form.cuit) }),
       })
       const d = await res.json()
       if (d.error) {
@@ -319,7 +326,7 @@ export default function VendedorClienteFichaPage() {
         <div className="min-w-0">
           <h1 className="text-lg font-bold truncate">{cliente.nombre}</h1>
           <p className="text-emerald-200 text-sm truncate">
-            {[cliente.localidad, cliente.cuit].filter(Boolean).join(" · ")}
+            {[cliente.localidad, cliente.cuit && formatCuit(cliente.cuit)].filter(Boolean).join(" · ")}
           </p>
         </div>
       </header>
@@ -388,7 +395,7 @@ export default function VendedorClienteFichaPage() {
                         {cp.tipo_comprobante} {cp.numero_comprobante}
                       </p>
                       <p className="text-gray-500 text-sm">
-                        {new Date(cp.fecha + "T00:00:00").toLocaleDateString("es-AR")} · Total{" "}
+                        {fecha(cp.fecha)} · Total{" "}
                         {formatCurrency(cp.total_factura)}
                       </p>
                     </div>
@@ -431,7 +438,7 @@ export default function VendedorClienteFichaPage() {
                     <div>
                       <p className="font-bold text-gray-900">{formatCurrency(p.monto)}</p>
                       <p className="text-gray-500 text-sm">
-                        {new Date(p.fecha_pago + "T00:00:00").toLocaleDateString("es-AR")}
+                        {fecha(p.fecha_pago)}
                         {p.forma_pago ? ` · ${p.forma_pago}` : ""}
                       </p>
                     </div>
@@ -475,12 +482,20 @@ export default function VendedorClienteFichaPage() {
               {CAMPOS_TEXTO.map((campo) => (
                 <div key={campo.key}>
                   <label className="text-gray-500 text-sm block mb-1">{campo.label}</label>
-                  <input
-                    type={campo.tipo || "text"}
-                    value={form[campo.key] || ""}
-                    onChange={(e) => setForm((prev) => ({ ...prev, [campo.key]: e.target.value }))}
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900"
-                  />
+                  {campo.key === "cuit" ? (
+                    <InputCUIT
+                      value={form.cuit || ""}
+                      onChange={(v) => setForm((prev) => ({ ...prev, cuit: v }))}
+                      className="h-auto w-full rounded-xl border border-gray-300 px-4 py-3 text-base text-gray-900"
+                    />
+                  ) : (
+                    <input
+                      type={campo.tipo || "text"}
+                      value={form[campo.key] || ""}
+                      onChange={(e) => setForm((prev) => ({ ...prev, [campo.key]: e.target.value }))}
+                      className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900"
+                    />
+                  )}
                 </div>
               ))}
 
@@ -613,7 +628,7 @@ export default function VendedorClienteFichaPage() {
           ) : (
             <>
               {cliente.razon_social && <Dato label="Razón social" valor={cliente.razon_social} />}
-              <Dato label="CUIT" valor={cliente.cuit} />
+              <Dato label="CUIT" valor={cliente.cuit && formatCuit(cliente.cuit)} />
               <Dato label="Condición IVA" valor={cliente.condicion_iva} />
               <Dato label="Método facturación" valor={cliente.metodo_facturacion} />
               <Dato
@@ -675,8 +690,8 @@ export default function VendedorClienteFichaPage() {
                   onClick={() => {
                     const init: Record<string, string> = {}
                     for (const s of catalogos.segmentos || []) {
-                      init[`viajante.${s.key}`] = bonif.viajante[s.key] ? String(bonif.viajante[s.key]) : ""
-                      init[`mercaderia.${s.key}`] = bonif.mercaderia[s.key] ? String(bonif.mercaderia[s.key]) : ""
+                      init[`viajante.${s.key}`] = bonif.viajante[s.key] ? numero(bonif.viajante[s.key], 0, 2) : ""
+                      init[`mercaderia.${s.key}`] = bonif.mercaderia[s.key] ? numero(bonif.mercaderia[s.key], 0, 2) : ""
                     }
                     setBonifEdit(init)
                   }}
@@ -752,13 +767,7 @@ export default function VendedorClienteFichaPage() {
           {cliente.actualizado_at && (
             <p className="text-gray-400 text-xs pt-2">
               Última modificación:{" "}
-              {new Date(cliente.actualizado_at).toLocaleString("es-AR", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {fechaHora(cliente.actualizado_at)}
               {cliente.actualizado_por_nombre ? ` · por ${cliente.actualizado_por_nombre}` : ""}
             </p>
           )}

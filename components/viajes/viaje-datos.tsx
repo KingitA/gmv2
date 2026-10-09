@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "sonner"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
+import { InputMonto } from "@/components/ui/input-monto"
 
 // Datos del viaje: se completan de a poco mientras está 'programado'
 // (primero fecha + zonas; más cerca de la fecha, quién lleva y en qué).
@@ -134,7 +135,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
         </div>
         <div>
           <Label>Duración (días)</Label>
-          <Input type="number" min="1" max="15" value={dias} onChange={(e) => setDias(e.target.value)} />
+          <InputMonto decimales={0} soloPositivos value={dias} onChange={(n) => setDias(n == null ? "" : String(Math.trunc(n)))} />
         </div>
       </div>
 

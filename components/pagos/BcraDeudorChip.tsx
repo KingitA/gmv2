@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { cuitDigitos } from "@/lib/formato"
 import {
   bcraError,
   cuitValido,
@@ -28,7 +29,7 @@ const BCRA_TIMEOUT_MS = 12_000
 
 /** Consulta un CUIT (ya validado). Nunca lanza. */
 export async function consultarBcra(cuit: string): Promise<BcraResultado> {
-  const limpio = cuit.replace(/\D/g, "")
+  const limpio = cuitDigitos(cuit)
   try {
     const res = await fetch(`/api/bcra/deudor/${limpio}`, { signal: AbortSignal.timeout(BCRA_TIMEOUT_MS) })
     const d = await res.json().catch(() => null)
@@ -47,7 +48,7 @@ export function useBcraDeudor(cuit: string | null | undefined) {
   const [consultando, setConsultando] = useState(false)
 
   useEffect(() => {
-    const limpio = (cuit || "").replace(/\D/g, "")
+    const limpio = cuitDigitos(cuit)
     if (!cuitValido(limpio)) {
       setResultado(null)
       return
@@ -133,7 +134,7 @@ class AlmacenConsultas {
     const c: ConsultaBcra = { id, ctx: { ...ctx, cuits }, consultando: true, veredicto: null, visto: false, iniciada_at: Date.now() }
     this.mapa.set(id, c)
     this.emitir()
-    void Promise.all(cuits.map(async (cuit) => cache.get(cuit.replace(/\D/g, "")) ?? consultarBcra(cuit))).then((res) => {
+    void Promise.all(cuits.map(async (cuit) => cache.get(cuitDigitos(cuit)) ?? consultarBcra(cuit))).then((res) => {
       for (const r of res) if (!r.error) cache.set(r.cuit, r)
       const actual = this.mapa.get(id)
       if (!actual || actual.ctx.cuits.join(",") !== clave) return // cambió el CUIT mientras tanto
@@ -187,7 +188,7 @@ export function useConsultasBcra() {
  * desde la card del cheque; `id` = id de la fila.
  */
 export function useConsultaBcraFila(id: string, ctx: ContextoCheque | null) {
-  const clave = ctx ? ctx.cuits.map((c) => c.replace(/\D/g, "")).filter(cuitValido).join(",") : ""
+  const clave = ctx ? ctx.cuits.map((c) => cuitDigitos(c)).filter(cuitValido).join(",") : ""
   const ctxRef = useRef(ctx)
   ctxRef.current = ctx
   useEffect(() => {
@@ -293,7 +294,7 @@ export function BcraDeudorChip({ cuit, bancoEmisor }: { cuit: string | null | un
 
 /** Cuentas conjuntas: consulta a todos los CUITs y responde UNA cosa. */
 export function BcraDeudorMulti({ cuits, bancoEmisor }: { cuits: (string | null | undefined)[]; bancoEmisor?: string | null }) {
-  const unicos = [...new Set(cuits.map((c) => (c || "").replace(/\D/g, "")).filter(cuitValido))]
+  const unicos = [...new Set(cuits.map((c) => cuitDigitos(c)).filter(cuitValido))]
   const clave = unicos.join(",")
   const [resultados, setResultados] = useState<BcraResultado[] | null>(null)
   const [consultando, setConsultando] = useState(false)

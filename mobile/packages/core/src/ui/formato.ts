@@ -1,17 +1,14 @@
-const AR = "America/Argentina/Buenos_Aires"
+import { fechaCorta, hora, moneda as monedaAR } from "@gm/formato"
 
-/** "18/09 14:30" en hora Argentina */
+/** "18/09 14:30" en hora Argentina (= fechaCorta + hora de @gm/formato). */
 export function fechaHoraCorta(iso: string | null | undefined): string {
-  if (!iso) return "—"
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return "—"
-  return new Intl.DateTimeFormat("es-AR", { timeZone: AR, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
-    .format(d)
-    .replace(",", "")
+  const f = fechaCorta(iso)
+  return f ? `${f} ${hora(iso)}` : "—"
 }
 
+/** "$1.000,32" (= moneda de @gm/formato). */
 export function moneda(n: number | null | undefined): string {
-  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2 }).format(Number(n) || 0)
+  return monedaAR(Number(n) || 0)
 }
 
 /** "hace 3 min" / "hace 2 h" / "hace 3 días" */

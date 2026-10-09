@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { startOfDayArgentina, endOfDayArgentina } from '@/lib/utils'
+import { fechaISO } from '@/lib/formato'
 
 export async function GET(req: NextRequest) {
   try {
@@ -68,8 +69,8 @@ export async function GET(req: NextRequest) {
           pedido_id: pid,
           numero_pedido: k.numero_pedido ?? '—',
           cliente_id: k.cliente_id,
-          fecha: k.fecha?.slice(0, 10) ?? '',
-          fecha_cobro: k.fecha_comprobante_cobrado?.slice(0, 10) ?? null,
+          fecha: fechaISO(k.fecha), // timestamptz → día argentino
+          fecha_cobro: fechaISO(k.fecha_comprobante_cobrado) || null,
           total_monto: 0,
           total_comision: 0,
           skus: new Set(),

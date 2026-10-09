@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Trash2, Plus } from "lucide-react"
 import type { DepositoItem } from "./MetodoPagoForm"
 import { DateInputAR } from "@/components/ui/date-input-ar"
+import { InputMonto } from "@/components/ui/input-monto"
 
 function genId() { return Math.random().toString(36).slice(2) }
 
@@ -46,13 +47,11 @@ export function DepositoItemsForm({ items, onChange }: Props) {
                 <SelectItem value="cheque">Cheque</SelectItem>
               </SelectContent>
             </Select>
-            <Input
-              type="number"
+            <InputMonto
               placeholder="Monto"
-              min={0}
-              step="0.01"
-              value={item.monto || ""}
-              onChange={(e) => updateItem(item.id, { monto: parseFloat(e.target.value) || 0 })}
+              soloPositivos
+              value={item.monto || null}
+              onChange={(n) => updateItem(item.id, { monto: n ?? 0 })}
               className="w-36"
             />
             <button

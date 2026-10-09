@@ -34,6 +34,9 @@ import { MetodoPagoForm, type MetodoPago } from "@/components/pagos/MetodoPagoFo
 import { DialogoFalta, DialogoSobra } from "@/components/pagos/DialogoDiferencia"
 import { RetencionForm, type Retencion } from "@/components/pagos/RetencionForm"
 import { ResumenPago } from "@/components/pagos/ResumenPago"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
+import { fechaHora, formatCuit, hoyISO, moneda, normalizarCuit, parseFecha, parseMonto, redondear } from "@/lib/formato"
 
 interface Cliente {
   id: string
@@ -56,7 +59,6 @@ interface PagoHistorial {
 }
 
 function genId() { return Math.random().toString(36).slice(2) }
-const fmtARS = (n: number) => n.toLocaleString("es-AR", { minimumFractionDigits: 2 })
 const fmtFecha = (d: string) => formatDateAR(d)
 
 function PagosClientesContent() {
@@ -213,14 +215,14 @@ function PagosClientesContent() {
       }
 
       const nuevosMetodos: MetodoPago[] = resultados.map((r: any) => {
-        const base = { id: genId(), tipo: r.tipo, monto: r.monto || 0 }
+        const base = { id: genId(), tipo: r.tipo, monto: parseMonto(r.monto) ?? 0 }
         if (r.tipo === "cheque") return {
           ...base,
           numero_cheque: r.numero_cheque || "",
           banco_emisor: r.banco_emisor || "",
-          fecha_emision: r.fecha_emision || "",
-          fecha_cheque: r.fecha_cheque || "",
-          cuit_emisor: r.cuit_emisor || "",
+          fecha_emision: parseFecha(r.fecha_emision) ?? "",
+          fecha_cheque: parseFecha(r.fecha_cheque) ?? "",
+          cuit_emisor: normalizarCuit(r.cuit_emisor) ?? "",
           cuits_titulares: Array.isArray(r.cuits_titulares) ? r.cuits_titulares : [],
           localidad: r.localidad || "",
           // El OCR solo detecta ECHEQ; el color BLANCO/NEGRO lo deriva el
@@ -288,7 +290,7 @@ function PagosClientesContent() {
     const totalSel = clientes.reduce((s, c) => s + c.portion, 0)
     const totalMet = metodos.reduce((s, m) => s + montoMetodo(m), 0)
     if (Math.abs(totalSel - totalMet) > 0.5) {
-      toast.error(`El total de métodos ($${totalMet.toLocaleString("es-AR")}) debe igualar lo seleccionado ($${totalSel.toLocaleString("es-AR")})`); return
+      toast.error(`El total de métodos (${moneda(totalMet)}) debe igualar lo seleccionado (${moneda(totalSel)})`); return
     }
 
     const chequeMetodo = metodos.find((m) => m.tipo === "cheque") as any
@@ -360,7 +362,7 @@ function PagosClientesContent() {
     // ── Diferencia entre lo entregado y lo seleccionado (misma regla y carteles
     // que la barra de Caja): falta → ajuste por redondeo (tope 1%) o saldo;
     // sobra → ajuste (débito) o a cuenta. El ajuste viaja como ajuste_redondeo.
-    const r2 = (n: number) => Math.round(n * 100) / 100
+    const r2 = (n: number) => redondear(n)
     const montoMetodo = (m: any) => m.tipo === "deposito"
       ? (m.items || []).reduce((a: number, it: any) => a + Number(it.monto || 0), 0)
       : Number(m.monto || 0)
@@ -373,7 +375,7 @@ function PagosClientesContent() {
 
     if (!pagoACuenta && falta > 0.01) {
       if (falta > totalImputable + 0.01) {
-        toast.error(`Entre métodos${aplicarContado ? " + NC 10%" : ""} cubrís $${fmtARS(cubierto)} y seleccionaste $${fmtARS(totalSeleccionado)}. Bajá la selección o agregá un método.`)
+        toast.error(`Entre métodos${aplicarContado ? " + NC 10%" : ""} cubrís ${moneda(cubierto)} y seleccionaste ${moneda(totalSeleccionado)}. Bajá la selección o agregá un método.`)
         return
       }
       if (!modoDiferencia) { setDialogoFalta(falta); return }
@@ -416,7 +418,7 @@ function PagosClientesContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cliente_id: cliente.id,
-          fecha_pago: new Date().toISOString().slice(0, 10),
+          fecha_pago: hoyISO(),
           metodos: metodos.map((m) => ({
             tipo: m.tipo,
             monto: m.monto,
@@ -429,7 +431,7 @@ function PagosClientesContent() {
             fecha_emision: m.fecha_emision,
             fecha_cheque: m.fecha_cheque,
             localidad: m.localidad,
-            cuit_emisor: m.cuit_emisor,
+            cuit_emisor: normalizarCuit(m.cuit_emisor),
             color_cheque: m.color_cheque,
             fecha_deposito: m.fecha_deposito,
             items: m.items,
@@ -589,7 +591,7 @@ function PagosClientesContent() {
             ))}
           </div>
         </td>
-        <td className={`p-3 text-right font-mono font-semibold ${esAnulado ? "line-through text-muted-foreground" : ""}`}>${fmtARS(Number(p.monto))}</td>
+        <td className={`p-3 text-right font-mono font-semibold ${esAnulado ? "line-through text-muted-foreground" : ""}`}>{moneda(Number(p.monto))}</td>
         <td className="p-3 text-center">
           <Badge
             className={
@@ -725,7 +727,7 @@ function PagosClientesContent() {
         }
         return sum
       }, 0)
-    return Math.round(total * 100) / 100
+    return redondear(total)
   }
 
 
@@ -771,7 +773,7 @@ function PagosClientesContent() {
                       <div key={ce.cliente.id} className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
                         <div>
                           <p className="font-semibold text-sm">{ce.cliente.razon_social || ce.cliente.nombre}</p>
-                          <p className="text-xs text-muted-foreground">CUIT: {ce.cliente.cuit || "—"}</p>
+                          <p className="text-xs text-muted-foreground">CUIT: {formatCuit(ce.cliente.cuit) || "—"}</p>
                         </div>
                         <button onClick={() => setClientesExtra((prev) => prev.filter((_, i) => i !== idx))} className="text-muted-foreground hover:text-foreground">
                           <X className="h-4 w-4" />
@@ -830,7 +832,7 @@ function PagosClientesContent() {
                     </div>
                     {resumenCuenta && (
                       <span className="text-xs text-muted-foreground">
-                        Saldo a cobrar <b className="text-foreground">$ {fmtARS(resumenCuenta.saldoACobrar)}</b>
+                        Saldo a cobrar <b className="text-foreground">{moneda(resumenCuenta.saldoACobrar)}</b>
                         {" · "}{resumenCuenta.pedidosFacturados} facturado{resumenCuenta.pedidosFacturados === 1 ? "" : "s"}
                         {resumenCuenta.otrosComprobantes > 0 && ` + ${resumenCuenta.otrosComprobantes} sin pedido`}
                         {" · "}{resumenCuenta.pedidosSinFacturar} sin facturar
@@ -1045,9 +1047,9 @@ function PagosClientesContent() {
                   placeholder="Filtrar por cliente…"
                   className="h-10 w-full rounded-lg border border-neutro-200 bg-white px-3 text-sm outline-none focus:border-azul-400 sm:w-64"
                 />
-                <input type="date" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} className="h-10 rounded-lg border border-neutro-200 bg-white px-2 text-sm" />
+                <DateInputAR value={filtroDesde} onChange={setFiltroDesde} className="h-10 w-32 rounded-lg border border-neutro-200 bg-white px-2 text-sm" />
                 <span className="text-xs text-muted-foreground">a</span>
-                <input type="date" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} className="h-10 rounded-lg border border-neutro-200 bg-white px-2 text-sm" />
+                <DateInputAR value={filtroHasta} onChange={setFiltroHasta} className="h-10 w-32 rounded-lg border border-neutro-200 bg-white px-2 text-sm" />
                 {(filtroCliente || filtroDesde || filtroHasta) && (
                   <button
                     onClick={() => { setFiltroCliente(""); setFiltroDesde(""); setFiltroHasta("") }}
@@ -1136,9 +1138,9 @@ function PagosClientesContent() {
                                   <span className="text-muted-foreground font-normal"> · {r.cantidad_pagos} pagos</span>
                                 </td>
                                 <td className="p-3 text-muted-foreground text-xs">
-                                  ef. {fmtARS(r.efectivo_declarado)}
+                                  ef. {moneda(r.efectivo_declarado)}
                                 </td>
-                                <td className="p-3 text-right font-mono font-semibold">${fmtARS(r.total)}</td>
+                                <td className="p-3 text-right font-mono font-semibold">{moneda(r.total)}</td>
                                 <td className="p-3 text-center">
                                   <Badge className={abierta ? "bg-amber-100 text-amber-700 border-0" : "bg-green-100 text-green-700 border-0"}>
                                     {abierta ? "🚚 En viaje" : "Confirmada"}
@@ -1167,10 +1169,10 @@ function PagosClientesContent() {
                                   <span className="text-muted-foreground font-normal"> · {v.cantidad_pagos} pagos</span>
                                 </td>
                                 <td className="p-3 text-muted-foreground text-xs">
-                                  💵 ${fmtARS(v.desglose?.efectivo || 0)}
+                                  💵 {moneda(v.desglose?.efectivo || 0)}
                                   {v.desglose?.cheques_cantidad ? ` · 🧾 ${v.desglose.cheques_cantidad}` : ""}
                                 </td>
-                                <td className="p-3 text-right font-mono font-semibold">${fmtARS(v.total)}</td>
+                                <td className="p-3 text-right font-mono font-semibold">{moneda(v.total)}</td>
                                 <td className="p-3 text-center">
                                   <Badge className="bg-purple-100 text-purple-700 border-0">Por rendir</Badge>
                                 </td>
@@ -1197,10 +1199,10 @@ function PagosClientesContent() {
                                   <span className="text-muted-foreground font-normal"> · {v.cantidad_pagos} cobros</span>
                                 </td>
                                 <td className="p-3 text-muted-foreground text-xs">
-                                  💵 ${fmtARS(v.desglose?.efectivo || 0)}
+                                  💵 {moneda(v.desglose?.efectivo || 0)}
                                   {v.desglose?.cheques_cantidad ? ` · 🧾 ${v.desglose.cheques_cantidad}` : ""}
                                 </td>
-                                <td className="p-3 text-right font-mono font-semibold">${fmtARS(v.total)}</td>
+                                <td className="p-3 text-right font-mono font-semibold">{moneda(v.total)}</td>
                                 <td className="p-3 text-center">
                                   <Badge className="bg-sky-100 text-sky-700 border-0">Sin declarar</Badge>
                                 </td>
@@ -1286,17 +1288,17 @@ function PagosClientesContent() {
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-2">
                       <p className="text-[10px] text-emerald-600 uppercase font-bold">💵 Efectivo a recibir</p>
-                      <p className="font-mono font-semibold">${fmtARS(rendicionSel.desglose.efectivo)}</p>
+                      <p className="font-mono font-semibold">{moneda(rendicionSel.desglose.efectivo)}</p>
                     </div>
                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-2">
                       <p className="text-[10px] text-slate-500 uppercase font-bold">🧾 Cheques</p>
                       <p className="font-mono font-semibold">
-                        {rendicionSel.desglose.cheques_cantidad} × ${fmtARS(rendicionSel.desglose.cheques_monto)}
+                        {rendicionSel.desglose.cheques_cantidad} × {moneda(rendicionSel.desglose.cheques_monto)}
                       </p>
                     </div>
                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-2">
                       <p className="text-[10px] text-slate-500 uppercase font-bold">🏦 Transferencias</p>
-                      <p className="font-mono font-semibold">${fmtARS(rendicionSel.desglose.transferencias)}</p>
+                      <p className="font-mono font-semibold">{moneda(rendicionSel.desglose.transferencias)}</p>
                     </div>
                   </div>
                 )}
@@ -1314,7 +1316,7 @@ function PagosClientesContent() {
                             {fmtFecha(p.fecha_pago)} · {p.metodos}
                           </p>
                         </div>
-                        <p className="font-mono font-semibold shrink-0 ml-2">${fmtARS(p.monto)}</p>
+                        <p className="font-mono font-semibold shrink-0 ml-2">{moneda(p.monto)}</p>
                       </div>
                     ))}
                   </div>
@@ -1325,16 +1327,16 @@ function PagosClientesContent() {
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="bg-muted/40 rounded-lg p-2">
                       <p className="text-[10px] text-muted-foreground uppercase">Efectivo declarado</p>
-                      <p className="font-mono font-semibold">${fmtARS(rendicionSel.efectivo_declarado)}</p>
+                      <p className="font-mono font-semibold">{moneda(rendicionSel.efectivo_declarado)}</p>
                     </div>
                     <div className="bg-muted/40 rounded-lg p-2">
                       <p className="text-[10px] text-muted-foreground uppercase">Efectivo registrado</p>
-                      <p className="font-mono font-semibold">${fmtARS(rendicionSel.efectivo_registrado)}</p>
+                      <p className="font-mono font-semibold">{moneda(rendicionSel.efectivo_registrado)}</p>
                     </div>
                     <div className={`rounded-lg p-2 ${Math.abs(rendicionSel.diferencia) > 0.01 ? "bg-red-50" : "bg-muted/40"}`}>
                       <p className="text-[10px] text-muted-foreground uppercase">Diferencia</p>
                       <p className={`font-mono font-semibold ${Math.abs(rendicionSel.diferencia) > 0.01 ? "text-red-600" : ""}`}>
-                        ${fmtARS(rendicionSel.diferencia)}
+                        {moneda(rendicionSel.diferencia)}
                       </p>
                     </div>
                   </div>
@@ -1357,7 +1359,7 @@ function PagosClientesContent() {
                           {rendicionSel.gastos.map((g: any, i: number) => (
                             <div key={i} className="flex justify-between px-3 py-1.5 text-xs">
                               <span className="truncate">{g.concepto || "Gasto"}</span>
-                              <span className="font-mono text-red-600 shrink-0 ml-2">${fmtARS(Math.abs(g.monto))}</span>
+                              <span className="font-mono text-red-600 shrink-0 ml-2">{moneda(Math.abs(g.monto))}</span>
                             </div>
                           ))}
                         </div>
@@ -1370,7 +1372,7 @@ function PagosClientesContent() {
                           {rendicionSel.fondos.map((g: any, i: number) => (
                             <div key={i} className="flex justify-between px-3 py-1.5 text-xs">
                               <span className="truncate">{g.concepto || "Fondo"}</span>
-                              <span className="font-mono shrink-0 ml-2">${fmtARS(g.monto)}</span>
+                              <span className="font-mono shrink-0 ml-2">{moneda(g.monto)}</span>
                             </div>
                           ))}
                         </div>
@@ -1387,7 +1389,7 @@ function PagosClientesContent() {
                       {rendicionSel.retiros.map((g: any, i: number) => (
                         <div key={i} className="flex justify-between px-3 py-1.5 text-xs">
                           <span className="truncate">{fmtFecha(g.fecha)} · {g.concepto || "Retiro"}</span>
-                          <span className="font-mono text-red-600 shrink-0 ml-2">${fmtARS(Math.abs(g.monto))}</span>
+                          <span className="font-mono text-red-600 shrink-0 ml-2">{moneda(Math.abs(g.monto))}</span>
                         </div>
                       ))}
                     </div>
@@ -1399,7 +1401,7 @@ function PagosClientesContent() {
                 )}
                 {rendicionSel.confirmado_at && (
                   <p className="text-xs text-muted-foreground">
-                    Confirmada el {new Date(rendicionSel.confirmado_at).toLocaleString("es-AR")}
+                    Confirmada el {fechaHora(rendicionSel.confirmado_at)}
                   </p>
                 )}
 
@@ -1554,14 +1556,12 @@ function ACuentaExtraInput({ valor, onChange }: { valor: number; onChange: (v: n
   return (
     <div className="mt-3 flex items-center gap-2">
       <label className="text-sm text-muted-foreground whitespace-nowrap">A cuenta (extra):</label>
-      <div className="relative w-40">
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-        <input
-          type="number"
-          min={0}
-          step="0.01"
-          value={valor || ""}
-          onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+      <div className="w-40">
+        <InputMonto
+          pesos
+          soloPositivos
+          value={valor || null}
+          onChange={(n) => onChange(Math.max(0, n ?? 0))}
           className="h-10 w-full rounded-lg border border-neutro-200 bg-white px-2 pl-5 text-sm"
           placeholder="0"
         />

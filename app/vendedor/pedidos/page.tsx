@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { fecha } from "@/lib/formato"
 
 interface PedidoItem {
   id: string
@@ -118,11 +119,7 @@ export default function VendedorPedidosPage() {
                 <p className="font-bold text-gray-900 truncate">{p.clientes?.nombre || "Sin cliente"}</p>
                 <p className="text-gray-500 text-sm">
                   {p.numero_pedido ? `#${p.numero_pedido} · ` : ""}
-                  {new Date(p.fecha + "T00:00:00").toLocaleDateString("es-AR", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                  })}
+                  {fecha(p.fecha)}
                   {p.estado === "en_venta" ? " · tocá para seguir cargando" : ""}
                 </p>
               </div>

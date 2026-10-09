@@ -18,6 +18,9 @@ import {
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
+import { fecha as fmtFecha, hoyISO, numero as numeroAR, parseMonto, porcentaje, redondear, sumarDiasISO } from "@/lib/formato"
+import { InputMonto } from "@/components/ui/input-monto"
+import { DateInputAR } from "@/components/ui/date-input-ar"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface MedioPago {
@@ -65,16 +68,8 @@ function claseTipo(tc?: string | null) {
     return "bg-muted text-muted-foreground"
 }
 
-const addDiasISO = (iso: string, dias: number) => {
-    const d = new Date(iso + "T00:00:00")
-    d.setDate(d.getDate() + dias)
-    return d.toISOString().slice(0, 10)
-}
-const fmtFechaCorta = (iso?: string | null) => {
-    if (!iso) return "—"
-    const [y, m, d] = String(iso).slice(0, 10).split("-")
-    return `${d}/${m}/${y.slice(2)}`
-}
+const addDiasISO = sumarDiasISO
+const fmtFechaCorta = (iso?: string | null) => (iso ? fmtFecha(String(iso).slice(0, 10)) : "—")
 const COLOR_CHEQUE: Record<string, { label: string; dot: string }> = {
     BLANCO: { label: "Blanco", dot: "#e2e8f0" },
     NEGRO: { label: "Negro", dot: "#1f2937" },
@@ -96,7 +91,7 @@ function NuevaOrdenPagoContent() {
 
     const [proveedores, setProveedores] = useState<any[]>([])
     const [proveedorId, setProveedorId] = useState(searchParams.get("proveedor_id") || "")
-    const [fecha, setFecha] = useState(new Date().toISOString().split("T")[0])
+    const [fecha, setFecha] = useState(hoyISO())
     const [observaciones, setObservaciones] = useState("")
 
     // Retención de Ganancias RG 830 — calculada por el sistema; el ajuste
@@ -196,7 +191,7 @@ function NuevaOrdenPagoContent() {
                 if (venc) {
                     setImputaciones(prev => [...prev, {
                         vencimiento_id: vencId,
-                        monto_imputado: parseFloat(monto),
+                        monto_imputado: Number(monto) || 0, // formato-ok: parámetro de URL en formato de máquina
                         descripcion: venc.concepto
                     }])
                 }
@@ -218,7 +213,7 @@ function NuevaOrdenPagoContent() {
                 if (!imputaciones.some(imp => imp.movimiento_cc_id === ccId)) {
                     newImps.push({
                         movimiento_cc_id: ccId,
-                        monto_imputado: parseFloat(montos[i]) || 0,
+                        monto_imputado: Number(montos[i]) || 0, // formato-ok: parámetro de URL en formato de máquina
                         descripcion: descs[i] || "Comprobante"
                     })
                 }
@@ -367,8 +362,8 @@ function NuevaOrdenPagoContent() {
         else { setDiasAntes("365"); setDiasDespues("0") }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fichaPago, plazoCheque])
-    const vAntes = Math.max(0, parseInt(diasAntes) || 0)
-    const vDespues = Math.max(0, parseInt(diasDespues) || 0)
+    const vAntes = Math.max(0, Math.trunc(Number(diasAntes)) || 0)
+    const vDespues = Math.max(0, Math.trunc(Number(diasDespues)) || 0)
     const enVentana = (ch: any) =>
         ch.fecha_vencimiento >= addDiasISO(fechaObjetivoCheque, -vAntes)
         && ch.fecha_vencimiento <= addDiasISO(fechaObjetivoCheque, vDespues)
@@ -446,16 +441,11 @@ function NuevaOrdenPagoContent() {
     const cajasFondos = cuentasFondos.filter((c: any) => c.grupo === "EFECTIVO")
     const saldoTotalDe = (c: any) => Number(c.saldos?.BLANCO ?? 0) + Number(c.saldos?.NEGRO ?? 0)
 
-    const parseMonto = (s: string) => {
-        const t = s.trim().replace(",", ".")
-        if (!t || !/^\d+(\.\d{0,2})?$/.test(t)) return null
-        return Number(t)
-    }
     const agregarTransferencia = () => {
         const cta = bancosFondos.find((b: any) => b.cuenta_id === bancoOrigenSel)
-        const m = parseMonto(montoTransfer !== "" ? montoTransfer : String(restante ?? ""))
+        const m = montoTransfer !== "" ? parseMonto(montoTransfer) : (restante != null ? redondear(restante) : null)
         if (!cta) { alert("Elegí desde qué banco sale la transferencia"); return }
-        if (m === null || m <= 0) { alert("Monto inválido — el punto son centavos: 1000.5 = $1.000,50"); return }
+        if (m === null || m <= 0) { alert("Monto inválido — formato: 1.500,50"); return }
         setMedios(prev => [...prev, {
             id: crypto.randomUUID(),
             medio: "transferencia",
@@ -469,9 +459,9 @@ function NuevaOrdenPagoContent() {
     }
     const agregarEfectivo = () => {
         const cta = cajasFondos.find((c: any) => c.cuenta_id === cajaOrigenSel)
-        const m = parseMonto(montoEfectivo !== "" ? montoEfectivo : String(restante ?? ""))
+        const m = montoEfectivo !== "" ? parseMonto(montoEfectivo) : (restante != null ? redondear(restante) : null)
         if (!cta) { alert("Elegí de qué caja sale el efectivo"); return }
-        if (m === null || m <= 0) { alert("Monto inválido — el punto son centavos: 1000.5 = $1.000,50"); return }
+        if (m === null || m <= 0) { alert("Monto inválido — formato: 1.500,50"); return }
         setMedios(prev => [...prev, {
             id: crypto.randomUUID(),
             medio: "efectivo",
@@ -581,7 +571,7 @@ function NuevaOrdenPagoContent() {
                             </div>
                             <div>
                                 <Label>Fecha</Label>
-                                <Input type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+                                <DateInputAR value={fecha} onChange={setFecha} />
                             </div>
                         </div>
                         <div>
@@ -618,7 +608,7 @@ function NuevaOrdenPagoContent() {
                                                     <span className="text-sm text-muted-foreground ml-2">{c.numero}</span>
                                                     {c.vencimiento && (
                                                         <span className="text-xs text-muted-foreground ml-2">
-                                                            Vence: {new Date(c.vencimiento + "T00:00:00").toLocaleDateString("es-AR")}
+                                                            Vence: {fmtFecha(c.vencimiento)}
                                                         </span>
                                                     )}
                                                 </div>
@@ -708,11 +698,11 @@ function NuevaOrdenPagoContent() {
                                     </div>
                                     <div className="flex items-center gap-2 flex-wrap mb-2 text-xs text-muted-foreground">
                                         <span>Ventana:</span>
-                                        <Input inputMode="numeric" className="h-7 w-14 text-center text-xs" value={diasAntes}
-                                            onChange={e => setDiasAntes(e.target.value.replace(/[^0-9]/g, ""))} />
+                                        <InputMonto decimales={0} soloPositivos className="h-7 w-14 text-center text-xs" value={diasAntes}
+                                            onChange={n => setDiasAntes(String(n ?? ""))} />
                                         <span>días antes ·</span>
-                                        <Input inputMode="numeric" className="h-7 w-14 text-center text-xs" value={diasDespues}
-                                            onChange={e => setDiasDespues(e.target.value.replace(/[^0-9]/g, ""))} />
+                                        <InputMonto decimales={0} soloPositivos className="h-7 w-14 text-center text-xs" value={diasDespues}
+                                            onChange={n => setDiasDespues(String(n ?? ""))} />
                                         <span>días después del objetivo</span>
                                         {(faltaNegro > 0.01 || netoNegro > 0.01) && (
                                             <span className="ml-auto font-semibold text-slate-600">
@@ -774,9 +764,9 @@ function NuevaOrdenPagoContent() {
                                         ))}
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <Input inputMode="decimal" className="w-40 tabular-nums" placeholder={restante !== null && restante > 0 ? String(restante) : "monto"}
-                                            value={montoTransfer} onChange={e => setMontoTransfer(e.target.value)} />
-                                        <span className="text-[11px] text-muted-foreground">punto = centavos</span>
+                                        <InputMonto className="w-40" placeholder={restante !== null && restante > 0 ? numeroAR(restante) : "monto"}
+                                            value={montoTransfer} onChange={n => setMontoTransfer(n == null ? "" : String(n))} />
+                                        <span className="text-[11px] text-muted-foreground">Formato: 1.500,50</span>
                                         <Button size="sm" variant="outline" className="ml-auto" disabled={!bancoOrigenSel} onClick={agregarTransferencia}>
                                             <Plus className="h-4 w-4 mr-1" /> Agregar transferencia
                                         </Button>
@@ -800,9 +790,9 @@ function NuevaOrdenPagoContent() {
                                         ))}
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <Input inputMode="decimal" className="w-40 tabular-nums" placeholder={restante !== null && restante > 0 ? String(restante) : "monto"}
-                                            value={montoEfectivo} onChange={e => setMontoEfectivo(e.target.value)} />
-                                        <span className="text-[11px] text-muted-foreground">punto = centavos</span>
+                                        <InputMonto className="w-40" placeholder={restante !== null && restante > 0 ? numeroAR(restante) : "monto"}
+                                            value={montoEfectivo} onChange={n => setMontoEfectivo(n == null ? "" : String(n))} />
+                                        <span className="text-[11px] text-muted-foreground">Formato: 1.500,50</span>
                                         <Button size="sm" variant="outline" className="ml-auto" disabled={!cajaOrigenSel} onClick={agregarEfectivo}>
                                             <Plus className="h-4 w-4 mr-1" /> Agregar efectivo
                                         </Button>
@@ -838,8 +828,8 @@ function NuevaOrdenPagoContent() {
                                                 <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">CH. PROPIO</Badge>
                                                 <Input className="h-7 w-28 text-xs" placeholder="Banco" value={m.cheque_banco || ""} onChange={e => actualizarMedio(m.id, "cheque_banco", e.target.value)} />
                                                 <Input className="h-7 w-24 text-xs" placeholder="Número" value={m.cheque_numero || ""} onChange={e => actualizarMedio(m.id, "cheque_numero", e.target.value)} />
-                                                <Input className="h-7 w-32 text-xs" type="date" value={m.cheque_fecha_vencimiento || ""} onChange={e => actualizarMedio(m.id, "cheque_fecha_vencimiento", e.target.value)} />
-                                                <Input className="h-7 w-28 text-right text-xs tabular-nums ml-auto" type="number" step="0.01" value={m.monto} onChange={e => actualizarMedio(m.id, "monto", parseFloat(e.target.value) || 0)} />
+                                                <DateInputAR className="h-7 w-32 text-xs" value={m.cheque_fecha_vencimiento || ""} onChange={v => actualizarMedio(m.id, "cheque_fecha_vencimiento", v)} />
+                                                <InputMonto className="h-7 w-28 text-xs ml-auto" value={m.monto} onChange={n => actualizarMedio(m.id, "monto", n ?? 0)} />
                                             </>
                                         ) : (
                                             <>
@@ -850,7 +840,7 @@ function NuevaOrdenPagoContent() {
                                                 {m.medio === "deposito" && (
                                                     <Input className="h-7 w-28 text-xs" placeholder="Banco destino" value={m.banco_destino || ""} onChange={e => actualizarMedio(m.id, "banco_destino", e.target.value)} />
                                                 )}
-                                                <Input className="h-7 w-28 text-right text-xs tabular-nums ml-auto" type="number" step="0.01" value={m.monto} onChange={e => actualizarMedio(m.id, "monto", parseFloat(e.target.value) || 0)} />
+                                                <InputMonto className="h-7 w-28 text-xs ml-auto" value={m.monto} onChange={n => actualizarMedio(m.id, "monto", n ?? 0)} />
                                             </>
                                         )}
                                         <Button variant="ghost" size="sm" onClick={() => eliminarMedio(m.id)} className="text-red-600 hover:bg-red-50 h-7 w-7 p-0 shrink-0">
@@ -896,7 +886,7 @@ function NuevaOrdenPagoContent() {
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                                     <div>
                                         <p className="text-xs text-muted-foreground">Régimen · condición</p>
-                                        <p className="font-medium capitalize">{calcGanancias.regimen} · {String(calcGanancias.condicion).replace("_", " ")} ({Number(calcGanancias.alicuota)}%)</p>
+                                        <p className="font-medium capitalize">{calcGanancias.regimen} · {String(calcGanancias.condicion).replace("_", " ")} ({porcentaje(calcGanancias.alicuota)})</p>
                                     </div>
                                     <div>
                                         <p className="text-xs text-muted-foreground">Base de este pago (neto)</p>
@@ -923,8 +913,8 @@ function NuevaOrdenPagoContent() {
                                     <div className="text-right">
                                         <p className="text-xs text-muted-foreground">Retención a practicar</p>
                                         {gananciasManual ? (
-                                            <Input type="number" step="0.01" className="w-36 text-right font-bold" value={retGanancias}
-                                                onChange={e => setRetGanancias(parseFloat(e.target.value) || 0)} />
+                                            <InputMonto className="w-36 font-bold" value={retGanancias}
+                                                onChange={n => setRetGanancias(n ?? 0)} />
                                         ) : (
                                             <p className="text-xl font-bold text-orange-600 tabular-nums">{formatCurrency(retGanancias)}</p>
                                         )}

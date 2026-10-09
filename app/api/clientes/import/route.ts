@@ -3,6 +3,7 @@ import * as XLSX from "xlsx"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuth } from '@/lib/auth'
 import { normalizarCondicionIva } from "@/lib/clientes/normalizar"
+import { cuitDigitos, errorCuit, normalizarCuit, parseMonto } from "@/lib/formato"
 
 export async function POST(req: NextRequest) {
     const auth = await requireAuth()
@@ -50,6 +51,8 @@ export async function POST(req: NextRequest) {
 
         const rows = rawData.slice(dataStartIndex)
         const procesadosBase = []
+        // Filas que no se importan (ej. CUIT inválido): se informan en vez de guardar basura
+        const errores: { fila: number; error: string }[] = []
 
         // Pre-cargar vendedores si la columna es por nombre (no UUID)
         let vendedorMap: Record<string, string> = {} // nombre normalizado → id
@@ -89,7 +92,9 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        for (const row of rows) {
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i]
+            const filaExcel = dataStartIndex + i + 1 // número de fila tal como se ve en Excel
             if (!row || row.length === 0) continue
 
             const val = (idx: number) => {
@@ -101,13 +106,20 @@ export async function POST(req: NextRequest) {
 
             // Debe tener al menos uno de los tres identificadores
             const codigo_cliente = getHeaderVal("codigo_cliente")
-            const cuit = getHeaderVal("cuit")
+            const cuitCrudo = getHeaderVal("cuit")
             // Aceptar "nombre_razon_social", "nombre" o "razon_social" como columna de nombre
             const nombre = getHeaderVal("nombre_razon_social") || getHeaderVal("nombre") || getHeaderVal("razon_social")
 
-            if (!codigo_cliente && !cuit && !nombre) {
+            if (!codigo_cliente && !cuitCrudo && !nombre) {
                 continue
             }
+
+            const errCuit = errorCuit(cuitCrudo)
+            if (errCuit) {
+                errores.push({ fila: filaExcel, error: `${nombre ?? codigo_cliente ?? ""} — CUIT "${cuitCrudo}": ${errCuit}` })
+                continue
+            }
+            const cuit = normalizarCuit(cuitCrudo)
 
             const parseBool = (valStr: string | null) => {
                 if (!valStr) return false
@@ -116,8 +128,7 @@ export async function POST(req: NextRequest) {
 
             const parseFloatSafe = (valStr: string | null) => {
                 if (!valStr) return 0
-                const parsed = parseFloat(valStr.replace(",", "."))
-                return isNaN(parsed) ? 0 : parsed
+                return parseMonto(valStr) ?? 0
             }
 
             const puntaje = parseFloatSafe(getHeaderVal("puntaje")) || 0
@@ -209,7 +220,12 @@ export async function POST(req: NextRequest) {
         }
 
         if (procesadosBase.length === 0) {
-            return NextResponse.json({ error: "No se encontraron clientes válidos para importar." }, { status: 400 })
+            return NextResponse.json({
+                error: errores.length
+                    ? `No se encontraron clientes válidos para importar. ${errores.map(e => `Fila ${e.fila}: ${e.error}`).join(" · ")}`
+                    : "No se encontraron clientes válidos para importar.",
+                errores,
+            }, { status: 400 })
         }
 
         const supabase = createAdminClient()
@@ -230,13 +246,14 @@ export async function POST(req: NextRequest) {
             if (data) existingClientes.push(...data)
         }
 
-        // Buscar por CUIT (seguro, formato XX-XXXXXXXX-X)
+        // Buscar por CUIT: el Excel ya viene normalizado (XX-XXXXXXXX-X); se busca
+        // también la versión en dígitos por si quedó algún dato viejo sin guiones.
         if (cuits.length > 0) {
             const existingIds = new Set(existingClientes.map(c => c.id))
             const { data } = await supabase
                 .from("clientes")
                 .select("*")
-                .in("cuit", cuits)
+                .in("cuit", [...cuits, ...cuits.map((c: string) => cuitDigitos(c))])
             if (data) {
                 for (const c of data) {
                     if (!existingIds.has(c.id)) existingClientes.push(c)
@@ -250,7 +267,7 @@ export async function POST(req: NextRequest) {
         if (existingClientes) {
             existingClientes.forEach(c => {
                 if (c.codigo_cliente) existingMap.set(`cod_${c.codigo_cliente}`, c)
-                if (c.cuit) existingMap.set(`cuit_${c.cuit}`, c)
+                if (cuitDigitos(c.cuit)) existingMap.set(`cuit_${cuitDigitos(c.cuit)}`, c)
                 if (c.nombre_razon_social) existingMap.set(`nombre_${c.nombre_razon_social}`, c)
             })
         }
@@ -262,8 +279,8 @@ export async function POST(req: NextRequest) {
             let existing = null
             if (cliente.codigo_cliente && existingMap.has(`cod_${cliente.codigo_cliente}`)) {
                 existing = existingMap.get(`cod_${cliente.codigo_cliente}`)
-            } else if (cliente.cuit && existingMap.has(`cuit_${cliente.cuit}`)) {
-                existing = existingMap.get(`cuit_${cliente.cuit}`)
+            } else if (cliente.cuit && existingMap.has(`cuit_${cuitDigitos(cliente.cuit)}`)) {
+                existing = existingMap.get(`cuit_${cuitDigitos(cliente.cuit)}`)
             } else if (cliente.nombre_razon_social && existingMap.has(`nombre_${cliente.nombre_razon_social}`)) {
                 existing = existingMap.get(`nombre_${cliente.nombre_razon_social}`)
             }
@@ -330,7 +347,7 @@ export async function POST(req: NextRequest) {
             totalProcesados += toUpdate.length
         }
 
-        return NextResponse.json({ success: true, count: totalProcesados, inserted: toInsert.length, updated: toUpdate.length })
+        return NextResponse.json({ success: true, count: totalProcesados, inserted: toInsert.length, updated: toUpdate.length, errores })
 
     } catch (error: any) {
         console.error("[Import Clientes Exception]", error)

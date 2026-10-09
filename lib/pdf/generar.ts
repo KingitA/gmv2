@@ -11,6 +11,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import QRCode from 'qrcode'
 import crypto from 'crypto'
 import { TIPO_CBTE_ARCA } from '@/lib/arca/tipos'
+import { cuitDigitos } from '@/lib/formato'
 
 /**
  * Genera el QR de verificación ARCA según RG 4892/2020 (modificatoria de la RG 4291).
@@ -47,7 +48,7 @@ export function buildQRUrl(params: {
   const payload = {
     ver:        1,
     fecha:      params.fecha,
-    cuit:       parseInt(params.cuit.replace(/-/g, ''), 10),
+    cuit:       parseInt(cuitDigitos(params.cuit), 10),
     ptoVta:     parseInt(params.ptoVta, 10),
     tipoCmp:    TIPO_CBTE_ARCA[params.tipoCmp] ?? 0,
     nroCmp:     nroComprobante,
@@ -55,7 +56,7 @@ export function buildQRUrl(params: {
     moneda:     'PES',
     ctz:        1,
     tipoDocRec: params.tipoDocRec,
-    nroDocRec:  parseInt(params.nroDocRec.replace(/-/g, ''), 10),
+    nroDocRec:  parseInt(cuitDigitos(params.nroDocRec), 10),
     tipoCodAut: 'E',
     codAut:     parseInt(params.cae, 10),
   }

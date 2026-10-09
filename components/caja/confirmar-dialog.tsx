@@ -8,6 +8,7 @@ import { useMemo, useState } from "react"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
 import { ComprobantesSelector } from "@/components/pagos/ComprobantesSelector"
+import { moneda } from "@/lib/formato"
 
 const ICONO: Record<string, string> = {
   efectivo: "💵",
@@ -71,7 +72,7 @@ export function ConfirmarDialog({
       toast({
         variant: "destructive",
         title: "Imputación mayor al pago",
-        description: `Tildaste $ ${totalImputado.toLocaleString("es-AR")} y el pago es de $ ${pago.monto.toLocaleString("es-AR")}. Bajá la selección.`,
+        description: `Tildaste ${moneda(totalImputado)} y el pago es de ${moneda(pago.monto)}. Bajá la selección.`,
       })
       return
     }
@@ -101,7 +102,7 @@ export function ConfirmarDialog({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Error procesando el pago")
       const bonifMsg = data.bonificacion?.total
-        ? ` NC/REV por 10% contado: $ ${Number(data.bonificacion.total).toLocaleString("es-AR")}.`
+        ? ` NC/REV por 10% contado: ${moneda(Number(data.bonificacion.total))}.`
         : data.bonificacion_error
           ? ` ⚠ El 10% contado falló: ${data.bonificacion_error}`
           : ""
@@ -132,7 +133,7 @@ export function ConfirmarDialog({
           {modo === "confirmar" ? pago.accion_texto : "Rechazar pago"} — {pago.quien}
         </h3>
         <p className="mt-0.5 text-xs text-slate-500">
-          Total $ {pago.monto.toLocaleString("es-AR")}
+          Total {moneda(pago.monto)}
         </p>
 
         <div className="mt-3 flex flex-col gap-1.5">
@@ -151,7 +152,7 @@ export function ConfirmarDialog({
                 )}
               </span>
               <span className="font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>
-                $ {d.monto.toLocaleString("es-AR")}
+                {moneda(d.monto)}
               </span>
             </div>
           ))}
@@ -182,7 +183,7 @@ export function ConfirmarDialog({
                   onChange={setSeleccionados}
                 />
                 <p className={`mt-2 text-xs ${excedeImputacion ? "font-bold text-red-600" : "text-slate-500"}`}>
-                  Imputado $ {totalImputado.toLocaleString("es-AR")} de $ {pago.monto.toLocaleString("es-AR")}
+                  Imputado {moneda(totalImputado)} de {moneda(pago.monto)}
                   {excedeImputacion ? " — supera el monto del pago" : ""}
                 </p>
               </div>

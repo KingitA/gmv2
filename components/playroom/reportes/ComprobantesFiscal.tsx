@@ -9,6 +9,7 @@ import { localMatch } from '@/lib/search/local-match'
 import type { FiscalARCARow } from '@/lib/playroom/exporters'
 import type { Column } from '@/components/playroom/DataTable'
 import type { PlayroomFiltersState } from '@/lib/playroom/types'
+import { moneda, fecha } from "@/lib/formato"
 
 interface FiscalRow {
   id: string
@@ -70,10 +71,6 @@ const PROVINCIAS = [
   { value: 'lp', label: 'La Pampa' },
 ]
 
-function ars(n: number) {
-  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
-}
-
 const inputStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
   border: '1px solid rgba(255,255,255,0.08)',
@@ -113,7 +110,7 @@ function FilterBtn({ label, active, color, onClick }: { label: string; active: b
 const COLUMNS: Column<FiscalRow>[] = [
   {
     key: 'fecha', label: 'Fecha', sortable: true,
-    render: v => new Date(v + 'T00:00:00').toLocaleDateString('es-AR'),
+    render: v => fecha(v),
     exportValue: v => v,
   },
   {
@@ -147,24 +144,24 @@ const COLUMNS: Column<FiscalRow>[] = [
   { key: 'ti', label: 'TI', sortable: true },
   {
     key: 'total_neto', label: 'Neto', sortable: true, align: 'right',
-    render: v => <span className="font-mono text-xs">{ars(v)}</span>,
+    render: v => <span className="font-mono text-xs">{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'total_iva', label: 'IVA', sortable: true, align: 'right',
-    render: v => <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{ars(v)}</span>,
+    render: v => <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'perciva', label: 'Perc.IVA', sortable: true, align: 'right',
     render: v => v !== 0
-      ? <span className="font-mono text-xs text-amber-400">{ars(v)}</span>
+      ? <span className="font-mono text-xs text-amber-400">{moneda(v, 0)}</span>
       : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 'total', label: 'Total', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-semibold">{ars(v)}</span>,
+    render: v => <span className="font-mono font-semibold">{moneda(v, 0)}</span>,
     exportValue: v => String(v),
   },
   {
@@ -380,10 +377,10 @@ export default function ComprobantesFiscal() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard label="Total facturado (FA/B/C)" value={loading ? '...' : ars(kpis.totalVentas)} loading={loading} />
-        <KPICard label="Total notas de crédito" value={loading ? '...' : ars(kpis.totalNC)} variant={kpis.totalNC > 0 ? 'warning' : 'default'} loading={loading} />
+        <KPICard label="Total facturado (FA/B/C)" value={loading ? '...' : moneda(kpis.totalVentas, 0)} loading={loading} />
+        <KPICard label="Total notas de crédito" value={loading ? '...' : moneda(kpis.totalNC, 0)} variant={kpis.totalNC > 0 ? 'warning' : 'default'} loading={loading} />
         <KPICard label="Comprobantes en período" value={loading ? '...' : kpis.countTotal} loading={loading} />
-        <KPICard label="Saldo pendiente" value={loading ? '...' : ars(kpis.pendiente)} variant={kpis.pendiente > 0 ? 'danger' : 'default'} loading={loading} />
+        <KPICard label="Saldo pendiente" value={loading ? '...' : moneda(kpis.pendiente, 0)} variant={kpis.pendiente > 0 ? 'danger' : 'default'} loading={loading} />
       </div>
 
       {/* Summary por tipo */}
@@ -398,7 +395,7 @@ export default function ComprobantesFiscal() {
               return (
                 <div key={s.tipo} className="rounded-lg p-3 min-w-[120px]" style={{ background: `${color}0f`, border: `1px solid ${color}25` }}>
                   <div className="text-xs font-bold font-mono mb-1" style={{ color }}>{s.label}</div>
-                  <div className="text-sm font-semibold font-mono text-white">{ars(s.total)}</div>
+                  <div className="text-sm font-semibold font-mono text-white">{moneda(s.total, 0)}</div>
                   <div className="text-[10px] mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>{s.count} comp.</div>
                 </div>
               )
@@ -442,8 +439,8 @@ export default function ComprobantesFiscal() {
                 style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
                 <p className="text-xs" style={{ color: '#fbbf24' }}>
                   ⚠️ Inconsistencia en {inc.tipo} número {inc.numero}
-                  {inc.fecha ? ` con fecha ${inc.fecha}` : ''}
-                  {inc.importe != null ? ` por ${ars(Math.abs(inc.importe))}` : ''}
+                  {inc.fecha ? ` con fecha ${fecha(inc.fecha)}` : ''}
+                  {inc.importe != null ? ` por ${moneda(Math.abs(inc.importe), 0)}` : ''}
                   {' — '}{MOTIVO_LABEL[inc.motivo]}. Verificar.
                 </p>
                 {inc.recuperable_log_id && (
