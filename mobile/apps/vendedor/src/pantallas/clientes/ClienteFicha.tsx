@@ -5,6 +5,8 @@ import { DS, SEGS, SEG_LABEL, type BonifSeg, type OpBonificaciones, type OpClien
 import { rechazosDe, useCatalogosFicha, useCliente, useCuenta, useEncolar } from "../../datos/hooks"
 import { AvisosBcra, HojaConfirmar, Pantalla, Rechazos, SinEnviar, formatCurrency, useAvisoEntrante, useToast } from "../../ui"
 import { HojaNuevaLocalidad, type LocalidadCreada } from "./ClienteNuevo"
+import { metodoLabel, useSegmentosCliente } from "../../datos/segmentos"
+import { CuadroSegmentos } from "../segmentos-ui"
 
 // Port de app/vendedor/clientes/[id]/page.tsx. Lee la cuenta del cliente de la réplica
 // (+ lo hecho acá sin enviar) y ENCOLA: cliente.editar (compare-and-set por campo),
@@ -83,6 +85,12 @@ export function ClienteFicha() {
     [cat?.localidades, localidadesNuevas],
   )
   const cliente = cuenta?.cliente ?? null
+  // Lista/método que de verdad se usan, por segmento (la ficha general sola engañaba: caso Freije 09/10)
+  // (ficha local SOLO para un cliente dado de alta acá que todavía no llegó a la réplica de precios;
+  // los demás esperan esa réplica: mostrar lo general mientras tanto era justamente el error)
+  const condSeg = useSegmentosCliente(id, {}, cliente && enCartera?.sinEnviar ? { lista_precio_id: cliente.lista_precio_id, metodo_facturacion: cliente.metodo_facturacion } : null)
+  // La ficha tiene lista/método PROPIOS por segmento: el general que se edita acá no los cambia
+  const segPropios = !!condSeg && !!cliente && condSeg.filas.some((f) => f.listaId !== (cliente.lista_precio_id || null) || metodoLabel(f.metodo) !== metodoLabel(cliente.metodo_facturacion || null))
   const bonif = { viajante: (enCartera?.bonificaciones?.viajante ?? {}) as BonifSeg, mercaderia: (enCartera?.bonificaciones?.mercaderia ?? {}) as BonifSeg }
   // ¿El viajante actual del cliente impone la lista? → no se elige a mano
   const listaImpuesta = vendedores.find((v) => v.id === cliente?.vendedor_id)?.lista_nombre || null
@@ -424,6 +432,13 @@ export function ClienteFicha() {
                   </select>
                 </div>
               </div>
+              {segPropios && condSeg && (
+                <CuadroSegmentos
+                  resumen={condSeg}
+                  titulo="Este cliente va por segmento"
+                  nota="El método y la lista generales de arriba solo se usan en los segmentos que no tienen valor propio. Por segmento lo cambia la oficina desde el ERP; para un pedido puntual, elegilo en el pedido (👤)."
+                />
+              )}
 
               {cat?.puede_cambiar_lista && !listaImpuesta && (
                 <div>
@@ -466,8 +481,12 @@ export function ClienteFicha() {
               {cliente.razon_social && <Dato label="Razón social" valor={cliente.razon_social} />}
               <Dato label="CUIT" valor={cliente.cuit} />
               <Dato label="Condición IVA" valor={cliente.condicion_iva} />
-              <Dato label="Método facturación" valor={cliente.metodo_facturacion} />
-              <Dato label="Lista de precios" valor={nombreLista + (listaImpuesta ? " (por viajante)" : "")} />
+              {condSeg ? (
+                <div className="py-1.5"><CuadroSegmentos resumen={condSeg} /></div>
+              ) : (
+                // Sin la réplica de precios todavía: NO mostrar solo lo general (engaña si va por segmento)
+                <Dato label="Lista y facturación" valor="se ven al descargar los precios" />
+              )}
               <Dato label="Condición de pago" valor={cliente.condicion_pago} />
               <Dato label="Condición de entrega" valor={nombreEntrega(cliente.condicion_entrega)} />
               <Dato label="Dirección" valor={[cliente.direccion, cliente.localidad, cliente.provincia].filter(Boolean).join(", ")} />

@@ -1,11 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useLocation, useNavigate, useSearchParams } from "react-router"
 import { ordenarArticulos, type OrdenArticulos } from "@gm/vendedor"
+import type { Segmento } from "@gm/pricing"
 import { COND_VACIA, type Articulo, type Cliente, type CondPedido } from "../../datasets"
 import { conArticulo, conCantidad, nuevoBorrador, sinArticulo, useBorrador, type Borrador, type ItemBorrador } from "../../datos/borradores"
 import type { IndiceCatalogo } from "../../datos/busqueda"
 import { useCatalogo, useCliente, useVentas } from "../../datos/hooks"
-import { useMotorCliente, type MotorLocal } from "../../datos/precios"
+import { faltaListaMetodo, type FaltaListaMetodo } from "@gm/pricing"
+import { overridesDe, useMotorCliente, type MotorLocal } from "../../datos/precios"
+import { useSegmentosCliente, type ResumenSegmentos } from "../../datos/segmentos"
 
 // Estado COMPARTIDO por todas las pantallas del pedido en curso (/pedido/nuevo/:clienteId/*).
 // En la web era un solo componente con ~40 useState; acá cada pantalla es una ruta, así
@@ -13,7 +16,7 @@ import { useMotorCliente, type MotorLocal } from "../../datos/precios"
 // (datos/borradores.ts) o en la URL, y esto solo lo junta.
 
 export interface LineaCarrito extends ItemBorrador {
-  precio: { precio: number; precioNeto: number } | null
+  precio: { precio: number; precioNeto: number; segmento?: Segmento; sinLista?: boolean; sinMetodo?: boolean } | null
   /** true = precio ya guardado del renglón (pedido confirmado, condiciones sin cambios) */
   fijo: boolean
 }
@@ -31,6 +34,10 @@ export interface PedidoEnCurso {
   orden: OrdenArticulos
   setOrden(o: OrdenArticulos): void
   ordenar<T extends Articulo>(arts: T[]): T[]
+  /** Lista y método por segmento con lo elegido para este pedido (null = sin datos del cliente) */
+  segmentos: ResumenSegmentos | null
+  /** Segmentos de los renglones SIN lista o SIN método: así el pedido no se puede cerrar (regla del dueño 09/10/2026) */
+  falta: FaltaListaMetodo | null
   lineas: LineaCarrito[]
   total: number
   totalItems: number
@@ -90,11 +97,17 @@ export function ProveedorPedido({ clienteId, children }: { clienteId: string; ch
   )
   const total = useMemo(() => lineas.reduce((s, l) => s + (l.precio?.precio || 0) * l.cantidad, 0), [lineas])
   const totalItems = useMemo(() => lineas.reduce((s, l) => s + l.cantidad, 0), [lineas])
+  const segmentos = useSegmentosCliente(clienteId, overridesDe(cond), fichaLocal)
+  // Solo los renglones que cotiza el motor ahora (los de precio fijo ya los cerró el servidor)
+  const falta = useMemo(
+    () => faltaListaMetodo(lineas.map((l) => (l.fijo || !l.precio?.segmento ? null : (l.precio as { segmento: Segmento; sinLista: boolean; sinMetodo: boolean })))),
+    [lineas],
+  )
   const cantidades = useMemo(() => new Map((borrador?.items || []).map((i) => [i.articuloId, i.cantidad])), [borrador?.items])
 
   const valor = useMemo<PedidoEnCurso>(
     () => ({
-      clienteId, cliente, cargandoCliente, borrador, cond, motor, indice, catalogoVacio, ventas, orden, setOrden, ordenar, lineas, total, totalItems,
+      clienteId, cliente, cargandoCliente, borrador, cond, motor, indice, catalogoVacio, ventas, orden, setOrden, ordenar, segmentos, falta, lineas, total, totalItems,
       enCarrito: (id) => cantidades.get(id),
       agregar(a, unidades) {
         const p = motor.precio(a.id)
@@ -110,7 +123,7 @@ export function ProveedorPedido({ clienteId, children }: { clienteId: string; ch
       descartar,
       cargarBorrador: (b) => cambiar(() => b, () => b),
     }),
-    [clienteId, cliente, cargandoCliente, borrador, cond, motor, indice, catalogoVacio, ventas, orden, setOrden, ordenar, lineas, total, totalItems, cantidades, cambiar, base, descartar],
+    [clienteId, cliente, cargandoCliente, borrador, cond, motor, indice, catalogoVacio, ventas, orden, setOrden, ordenar, segmentos, falta, lineas, total, totalItems, cantidades, cambiar, base, descartar],
   )
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>
 }

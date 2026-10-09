@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor } from "@/lib/vendedor/session"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import { resumenBilletera } from "@/lib/vendedor/billetera-saldo"
 
 // GET /api/vendedor/billetera?page=
 // Billetera del vendedor autenticado. "Plata en la calle" = suma de los pagos
@@ -18,66 +19,9 @@ export async function GET(request: Request) {
     const perPage = 50
     const offset = (page - 1) * perPage
 
-    // Plata en la calle: cobros sin rendir (fuente de verdad: pagos_clientes).
-    // Los que ya están declarados en una rendición abierta pasan a "en viaje
-    // a oficina" y dejan la billetera en 0.
-    const { data: pagosSinRendir } = await supabase
-      .from("pagos_clientes")
-      .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto, color_cheque)")
-      .in("vendedor_id", session.vendedorIds)
-      .eq("estado", "pendiente_rendicion")
-
-    const declarados = new Set<string>()
-    const { data: abiertas } = await supabase
-      .from("rendiciones")
-      .select("id")
-      .in("cobrador_id", session.vendedorIds)
-      .eq("estado", "abierta")
-    // (El saldo que retiene al declarar ya queda como movimiento
-    // 'rendicion_saldo_declarado' en su cuenta corriente — rendicion_crear v2)
-    if (abiertas?.length) {
-      const { data: items } = await supabase
-        .from("rendicion_items")
-        .select("pago_id")
-        .in("rendicion_id", abiertas.map((r) => r.id))
-      for (const it of items || []) declarados.add(it.pago_id)
-    }
-
-    const enCalle = (pagosSinRendir ?? []).filter((p: any) => !declarados.has(p.id))
-    const enViaje = (pagosSinRendir ?? []).filter((p: any) => declarados.has(p.id))
-
-    let efectivo = 0
-    let cheques = 0
-    let chequesCantidad = 0
-    let transferencias = 0
-    for (const p of enCalle) {
-      const detalles: any[] = (p as any).pagos_detalle || []
-      if (detalles.length) {
-        for (const d of detalles) {
-          const tipo = (d.tipo_pago || "").toLowerCase()
-          // Echeq = canal DIGITAL (como la transferencia): no es un papel en
-          // mano — lo acepta oficina directo en /caja, no viaja en el sobre.
-          if (tipo === "cheque" && d.color_cheque === "ECHEQ") { transferencias += Number(d.monto); continue }
-          if (tipo === "efectivo") efectivo += Number(d.monto)
-          else if (tipo === "cheque") { cheques += Number(d.monto); chequesCantidad += 1 }
-          else transferencias += Number(d.monto)
-        }
-      } else {
-        // pagos viejos sin detalle: clasificar por forma_pago
-        const forma = ((p as any).forma_pago || "").toLowerCase()
-        if (forma === "cheque") { cheques += Number(p.monto); chequesCantidad += 1 }
-        else if (forma === "transferencia") transferencias += Number(p.monto)
-        else efectivo += Number(p.monto)
-      }
-    }
-
-    // El SALDO de la billetera es SOLO el efectivo. Los cheques van aparte
-    // como cantidad de papeles en mano (su monto es informativo: no es plata
-    // hasta que se acreditan). Las transferencias van directas al banco.
-    const balance = Math.round(efectivo * 100) / 100
-    const desglose = { efectivo, cheques, transferencias }
-    const cantidadSinRendir = enCalle.length
-    const enViajeTotal = enViaje.reduce((s, p) => s + Number(p.monto), 0)
+    // Saldo, efectivo en la calle, cheques, en viaje y cuenta corriente: el MISMO
+    // cálculo que el inicio de la app (lib/vendedor/billetera-saldo.ts).
+    const resumen = await resumenBilletera(supabase, session.vendedorIds)
 
     const comisionesPendientes = await fetchAllRows(() =>
       supabase
@@ -90,20 +34,6 @@ export async function GET(request: Request) {
     )
 
     const totalPendiente = comisionesPendientes.reduce((s, c) => s + Number(c.monto), 0)
-
-    // Cuenta corriente de la billetera: saldos de rendiciones y ajustes
-    // (positivo = debe, negativo = a favor). La lista de tipos vive en
-    // lib/cobranzas/billetera-cc (única para vendedor y chofer): incluye las
-    // compensaciones 'rendicion_devuelta' y 'manual' — sin ellas, una
-    // rendición cancelada o un ajuste del admin dejaban a la app sumando
-    // distinto que /viajantes (caso FREIJE 05/10: −$674.500 vs $0).
-    const { deudaCuentaCorriente, TIPOS_CC_BILLETERA } = await import("@/lib/cobranzas/billetera-cc")
-    const { data: difs } = await supabase
-      .from("billetera_movimientos")
-      .select("monto, referencia_tipo")
-      .in("viajante_id", session.vendedorIds)
-      .in("referencia_tipo", [...TIPOS_CC_BILLETERA])
-    const deudaRendiciones = deudaCuentaCorriente(difs ?? [])
 
     const { data: historial, count } = await supabase
       .from("billetera_movimientos")
@@ -143,15 +73,7 @@ export async function GET(request: Request) {
     })
 
     return NextResponse.json({
-      balance,
-      // Saldo de la CUENTA CORRIENTE: efectivo en calle + saldos de rendiciones
-      // (retenciones declaradas, diferencias). Es EL número de la billetera.
-      saldo: Math.round((balance + deudaRendiciones) * 100) / 100,
-      desglose,
-      cheques_cantidad: chequesCantidad,
-      pagos_sin_rendir: cantidadSinRendir,
-      en_viaje: { total: enViajeTotal, cantidad: enViaje.length },
-      deuda_rendiciones: deudaRendiciones,
+      ...resumen,
       comisiones_pendientes: comisionesPendientes,
       total_pendiente_comisiones: totalPendiente,
       historial: historialEnriquecido,

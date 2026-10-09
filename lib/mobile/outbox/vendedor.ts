@@ -30,6 +30,7 @@ import {
 import { esPedidoEditable, motivoBloqueo } from "@/lib/pedidos/estados"
 import { esErrorReglaPedido, MSG_SIN_LISTA } from "@/lib/pedidos/errores"
 import { limpiarCentinela } from "@/lib/pricing/resolver"
+import { faltaListaMetodo, mensajeFaltaListaMetodo, prepararMotorCliente } from "@/lib/pricing/motor"
 import { esApkVendedorVieja, compatOverridesApkVieja, SEGS_COMPAT } from "@/lib/vendedor/compat-apk"
 import { listasPermitidasDe } from "@/lib/vendedor/session"
 import type { BonifPedido } from "@/lib/pricing/segmento"
@@ -260,6 +261,18 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   if (!pedidoId && !tieneLista) throw new RechazoNegocio(MSG_SIN_LISTA)
   const apkVieja = esApkVendedorVieja(m.app_version)
   const overrides = apkVieja ? compatOverridesApkVieja(overridesDe(p.cond), cli) : overridesDe(p.cond)
+  // Regla del dueño (09/10/2026): ni lista ni método en blanco, en NINGÚN segmento del pedido.
+  // Antes el método vacío se cotizaba "Final" sin avisar. Mismo cálculo que hace la app
+  // antes de dejar confirmar (motor compartido): acá es la red de seguridad.
+  if (!pedidoId) {
+    const motor = prepararMotorCliente(reconstruido.insumos, overrides)
+    const arts = new Map<string, any>(reconstruido.articulos.map((a: any) => [a.id, a]))
+    const falta = faltaListaMetodo(p.items.map((i) => {
+      const a = arts.get(i.articulo_id)
+      try { return a ? motor.precio(a) : null } catch { return null }
+    }))
+    if (falta) throw new RechazoNegocio(mensajeFaltaListaMetodo(falta))
+  }
   const verificacion = !garantizada ? null : await verificarPreciosCapturados(ctx.admin, {
     clienteId: p.cliente_id,
     capturadoAt: vigenciaAt,

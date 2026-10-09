@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router"
 import { esQrOUrl, lecturaError, lecturaOk, useLector, useOnline, useRuntime } from "@gm/core"
 import { esPedidoEditable } from "@gm/vendedor"
@@ -8,6 +8,8 @@ import { buscarPorCodigo, eansDe, matchExacto } from "../../datos/busqueda"
 import { useCatalogosFicha, useEncolar, usePedidos } from "../../datos/hooks"
 import { formatCurrency, useFotoZoom, useToast, ZoomFoto } from "../../ui"
 import { ProveedorPedido, usePedidoEnCurso, useVer } from "./contexto"
+import { metodoLabel, useSegmentosCliente } from "../../datos/segmentos"
+import { CuadroSegmentos } from "../segmentos-ui"
 
 // Marco de TODAS las pantallas del pedido en curso (/pedido/nuevo/:clienteId/*): el
 // borrador, el motor de precios y las hojas que en la web se abrían desde cualquier
@@ -266,8 +268,12 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
   const cond = p.cond
   const bonifCliente = cliente?.bonificaciones ?? null
 
-  const [metodoSel, setMetodoSel] = useState(cond.metodo || cliente?.metodo_facturacion || "")
-  const [listaSel, setListaSel] = useState(cond.lista || cliente?.lista_precio_id || "")
+  // "" = como la ficha (por segmento). Antes arrancaba en el método GENERAL de la ficha y,
+  // si el vendedor elegía ese mismo, no quedaba como "solo este pedido" aunque la ficha
+  // por segmento dijera otra cosa (caso Freije 09/10: eligió Factura y limpieza y
+  // perfumería 0 salieron en presupuesto).
+  const [metodoSel, setMetodoSel] = useState(cond.metodo || "")
+  const [listaSel, setListaSel] = useState(cond.lista || "")
   const [bonifSel, setBonifSel] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
     for (const tipo of ["viajante", "mercaderia"] as const)
@@ -277,13 +283,23 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
       }
     return init
   })
+  const fichaLocal = useMemo(
+    () => (cliente?.sinEnviar ? { lista_precio_id: cliente.lista_precio_id, metodo_facturacion: cliente.metodo_facturacion } : null),
+    [cliente?.sinEnviar, cliente?.lista_precio_id, cliente?.metodo_facturacion],
+  )
+  const puedeLista = !!catFicha?.puede_cambiar_lista
+  // Ficha POR SEGMENTO (lo que se usa si no se elige nada para el pedido)
+  const segFicha = useSegmentosCliente(cliente?.id, {}, fichaLocal)
+  const todosLosSegmentos = (pred: (f: NonNullable<typeof segFicha>["filas"][number]) => boolean) => !!segFicha && segFicha.filas.every(pred)
+  // Lo elegido queda "solo este pedido" salvo que los TRES segmentos ya vayan así por la ficha
+  const metodoOv = metodoSel && !todosLosSegmentos((f) => metodoLabel(f.metodo) === metodoLabel(metodoSel)) ? metodoSel : ""
+  const listaOv = puedeLista ? (listaSel && !todosLosSegmentos((f) => f.listaId === listaSel) ? listaSel : "") : cond.lista
+  // Vista previa: cómo se va a facturar cada segmento con lo elegido
+  const preview = useSegmentosCliente(cliente?.id, { metodo_facturacion_pedido: metodoOv || null, lista_precio_pedido_id: listaOv || null }, fichaLocal)
   if (!cliente) return null
 
   // Lista impuesta por el viajante del cliente: no se guarda en ficha; sí se puede pisar "solo este pedido" con permiso
   const listaImpuesta = catFicha?.vendedores.find((v) => v.id === cliente.vendedor_id)?.lista_nombre || null
-  const puedeLista = !!catFicha?.puede_cambiar_lista
-  const listaNombre = (id: string | null | undefined) => catFicha?.listas_precio.find((l) => l.id === id)?.nombre || null
-  const listaClienteNombre = cliente.lista?.nombre || listaNombre(cliente.lista_precio_id) || "Estándar"
   const parsePct = (s: string | undefined) => {
     const t = (s ?? "").trim()
     if (t === "") return 0
@@ -305,8 +321,8 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
   const fichaLista = cliente.lista_precio_id || ""
   const bonifIgualFicha = (["viajante", "mercaderia"] as const).every((t) => SEGS.every((s) => (bonifParsed[t][s] ?? 0) === (bonifCliente?.[t]?.[s] ?? 0)))
   const nuevaCond: CondPedido = {
-    metodo: metodoSel && metodoSel !== fichaMetodo ? metodoSel : "",
-    lista: puedeLista ? (listaSel && listaSel !== fichaLista ? listaSel : "") : cond.lista,
+    metodo: metodoOv,
+    lista: listaOv,
     bonif: bonifIgualFicha ? null : bonifParsed,
   }
   const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) ? null : cond.bonif })
@@ -321,7 +337,7 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
     if (!bonifValida) return
     const cambios: Record<string, { antes: unknown; despues: unknown }> = {}
     if (metodoSel && metodoSel !== fichaMetodo) cambios.metodo_facturacion = { antes: cliente.metodo_facturacion ?? null, despues: metodoSel }
-    if (puedeLista && !listaImpuesta && (listaSel || "") !== fichaLista) cambios.lista_precio_id = { antes: cliente.lista_precio_id ?? null, despues: listaSel || null }
+    if (puedeLista && !listaImpuesta && listaSel && listaSel !== fichaLista) cambios.lista_precio_id = { antes: cliente.lista_precio_id ?? null, despues: listaSel || null }
     if (Object.keys(cambios).length) await encolar("cliente.editar", { cliente_id: cliente.id, cambios }, `Ficha de ${cliente.nombre}`)
     if (!bonifIgualFicha) {
       const body: { viajante: BonifSeg; mercaderia: BonifSeg } = { viajante: {}, mercaderia: {} }
@@ -351,26 +367,26 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
           <div className="space-y-3 rounded-xl bg-gray-50 p-4">
             <div>
               <p className="text-sm font-bold text-gray-700">Método de facturación</p>
-              <p className="text-xs text-gray-400">Actual: {cond.metodo ? `${cond.metodo} (solo este pedido)` : cliente.metodo_facturacion || "—"}</p>
+              <p className="text-xs text-gray-400">Elegido acá vale para TODO el pedido (los tres segmentos).</p>
             </div>
             <select value={metodoSel} onChange={(e) => setMetodoSel(e.target.value)} className={selCls}>
-              <option value="">Elegir método...</option>
-              <option value="Factura">Factura{fichaMetodo === "Factura" ? " (ficha)" : ""}</option>
-              <option value="Final">Final (Mixto){fichaMetodo === "Final" ? " (ficha)" : ""}</option>
-              <option value="Presupuesto">Presupuesto{fichaMetodo === "Presupuesto" ? " (ficha)" : ""}</option>
+              <option value="">Como la ficha (por segmento)</option>
+              <option value="Factura">Factura</option>
+              <option value="Final">Final (Mixto)</option>
+              <option value="Presupuesto">Presupuesto</option>
             </select>
           </div>
 
           <div className="space-y-3 rounded-xl bg-gray-50 p-4">
             <div>
               <p className="text-sm font-bold text-gray-700">Lista de precios</p>
-              <p className="text-xs text-gray-400">Actual: {cond.lista ? `${listaNombre(cond.lista) || "—"} (solo este pedido)` : listaClienteNombre}{listaImpuesta && !cond.lista ? " (por viajante)" : ""}</p>
+              <p className="text-xs text-gray-400">Elegida acá vale para TODO el pedido (los tres segmentos).</p>
             </div>
             {puedeLista ? (
               <>
                 <select value={listaSel} onChange={(e) => setListaSel(e.target.value)} className={selCls}>
-                  <option value="">Estándar (sin lista)</option>
-                  {(catFicha?.listas_precio || []).map((l) => <option key={l.id} value={l.id}>{l.nombre}{l.id === fichaLista ? " (ficha)" : ""}</option>)}
+                  <option value="">Como la ficha (por segmento)</option>
+                  {(catFicha?.listas_precio || []).map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
                 </select>
                 {listaImpuesta && <p className="text-xs text-gray-400">La ficha lleva lista <b>{listaImpuesta}</b> por el viajante asignado; para cambiarla de forma permanente, reasigná el viajante desde la ficha.</p>}
               </>
@@ -378,6 +394,8 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
               <p className="text-xs text-gray-400">No tenés permiso para cambiar la lista de precios.</p>
             )}
           </div>
+
+          {preview && <CuadroSegmentos resumen={preview} titulo="Así se factura este pedido" />}
 
           <div className="space-y-3 rounded-xl bg-gray-50 p-4">
             <div>
@@ -423,6 +441,9 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
             {!bonifValida && <p className="text-xs font-medium text-red-600">Revisá los porcentajes: hay un valor inválido.</p>}
             <button onClick={() => { if (!bonifValida || !hayCambios) return; p.setCond(nuevaCond); onCerrar() }} disabled={!bonifValida || !hayCambios} className="w-full rounded-xl bg-emerald-600 py-3.5 text-base font-bold text-white disabled:opacity-40">✅ Aplicar a este pedido</button>
             <p className="text-center text-[11px] text-gray-400">Guarda método, lista y descuentos juntos y recalcula al instante todos los precios (de ahí sale la factura). Lo que coincide con la ficha no queda como "solo este pedido".</p>
+            {segFicha && !segFicha.uniforme && (
+              <p className="text-center text-[11px] text-gray-500">"Guardar en la ficha" cambia el método y la lista GENERALES; lo que la ficha tiene por segmento lo cambia la oficina desde el ERP.</p>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => void guardarEnFicha()} disabled={!bonifValida} className="rounded-xl bg-gray-900 py-3 text-sm font-bold text-white disabled:opacity-40">Guardar en la ficha del cliente</button>
               <button onClick={() => { p.setCond(COND_VACIA); onCerrar() }} disabled={!hayOverride} className="rounded-xl border border-gray-300 bg-white py-3 text-sm font-bold text-gray-700 disabled:opacity-40">↩ Volver a lo del cliente</button>

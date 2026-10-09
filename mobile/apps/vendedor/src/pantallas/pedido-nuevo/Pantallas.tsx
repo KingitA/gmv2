@@ -11,6 +11,8 @@ import { formatCurrency, HojaConfirmar, Pantalla, SinDescargar, useBusqueda, use
 import { IconoCategoria, TINTE_HABITUALES, TINTE_NOVEDADES, TINTE_OFERTAS, tinteRubro, type Tinte } from "./catalogo-ui"
 import { usePedidoEnCurso, useVer } from "./contexto"
 import { condParaServidor, fmtSeg } from "./Marco"
+import { mensajeFaltaListaMetodo } from "@gm/pricing"
+import { CuadroSegmentos, textoSegmentos } from "../segmentos-ui"
 import { agruparEnArbol, BuscadorLocal, CatalogoArbol, claveSubcategoria, FilaArticulo, OrdenSelector, posicionSubcategorias } from "./piezas"
 
 type Filtro = "novedades" | "ofertas" | "habituales"
@@ -63,16 +65,13 @@ export function ElegirCliente() {
 
 // ─── Marco visual de las pantallas del catálogo ──────────────────────────────
 
-const METODO_CORTO: Record<string, string> = { Factura: "C/IVA", Final: "FINAL", Presupuesto: "PRES" }
 
 function PantallaCatalogo({ titulo, subtitulo, children }: { titulo: string; subtitulo?: string; children: ReactNode }) {
   const p = usePedidoEnCurso()
   const { abrir } = useVer()
-  const catFicha = useCatalogosFicha()
-  const nombreLista = (id: string | null | undefined) => catFicha?.listas_precio.find((l) => l.id === id)?.nombre
-  const listaChip = (p.cond.lista ? nombreLista(p.cond.lista) : p.cliente?.lista?.nombre || nombreLista(p.cliente?.lista_precio_id)) || "STD"
-  const metodoRaw = p.cond.metodo || p.cliente?.metodo_facturacion || ""
-  const chip = `${listaChip.toUpperCase()} ${METODO_CORTO[metodoRaw] || metodoRaw.toUpperCase() || "—"}`
+  // Chip lista + método POR SEGMENTO, como cotiza el motor (antes: solo la ficha general → "STD C/IVA")
+  const seg = p.segmentos ? textoSegmentos(p.segmentos) : null
+  const chip = seg?.chip ?? "—"
   const vencidos = usePreciosVencidos()
   if (!p.cliente) {
     return (
@@ -91,12 +90,15 @@ function PantallaCatalogo({ titulo, subtitulo, children }: { titulo: string; sub
       derecha={
         <>
           {/* Chip lista + método vigentes (cortito: NECO FINAL). Ámbar = "solo este pedido" */}
-          <button onClick={() => abrir("cliente")} className={`mr-1 min-h-9 shrink-0 rounded-xl border px-2.5 text-[11px] font-bold ${p.cond.metodo || p.cond.lista ? "border-amber-300 bg-amber-400 text-amber-950" : "border-white/30 bg-white/10 text-white"}`}>{chip}</button>
+          <button onClick={() => abrir("cliente")} className={`mr-1 min-h-9 max-w-[38vw] shrink-0 truncate rounded-xl border px-2.5 text-[11px] font-bold ${p.segmentos?.incompleto ? "border-red-300 bg-red-600 text-white" : p.cond.metodo || p.cond.lista ? "border-amber-300 bg-amber-400 text-amber-950" : "border-white/30 bg-white/10 text-white"}`}>{chip}</button>
           <button onClick={() => abrir("cliente")} className="mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/30 bg-white/10 text-lg" aria-label="Cliente: ficha, cuenta corriente y método">👤</button>
         </>
       }
     >
       {subtitulo && <p className="truncate bg-slate-800 px-4 py-1 text-xs text-slate-200">{subtitulo}</p>}
+      {/* Por segmento siempre a la vista: qué lista y método lleva cada mercadería */}
+      {seg?.detalle && <p className="truncate bg-slate-800 px-4 pb-1 text-xs font-bold text-white">{seg.detalle}</p>}
+      {p.segmentos?.incompleto && <p className="bg-red-600 px-4 py-1.5 text-xs font-bold text-white">Falta lista o método en algún segmento: elegilo en 👤 antes de confirmar.</p>}
       {p.catalogoVacio ? <SinDescargar que="el catálogo" /> : <div className="mx-auto w-full max-w-2xl p-4 pb-28">{children}</div>}
     </Pantalla>
   )
@@ -160,7 +162,7 @@ export function CatalogoHome() {
     ? `Pedido Nº ${p.borrador.numeroPedido}${p.borrador.estadoPedido && p.borrador.estadoPedido !== "en_venta" ? " · editando" : " · se guarda en el equipo"}`
     : p.lineas.length
       ? "Pedido en curso · se guarda en el equipo"
-      : p.cliente?.metodo_facturacion ? `Facturación: ${p.cliente.metodo_facturacion}` : "Nuevo pedido"
+      : "Nuevo pedido"
 
   return (
     <PantallaCatalogo titulo={q ? "Buscar artículos" : p.cliente?.nombre || "Nuevo pedido"} subtitulo={q ? p.cliente?.nombre : subtitulo}>
@@ -417,11 +419,15 @@ export function Carrito() {
   const vencidos = usePreciosVencidos()
   const editandoExistente = !!p.borrador?.pedidoId && p.borrador.estadoPedido !== "en_venta"
   const sinPrecio = p.lineas.filter((l) => !l.precio || l.precio.precio <= 0)
+  // Regla del dueño (09/10/2026): un pedido NUEVO no se cierra con lista o método en blanco en
+  // ningún segmento (el servidor lo rechaza igual). Los cambios a un pedido que ya existe
+  // siguen con las condiciones con las que se tomó.
+  const faltaNuevo = p.borrador?.pedidoId ? null : p.falta
   const bonif = p.cond.bonif
 
   const confirmar = async () => {
     const b = p.borrador
-    if (!b || !p.cliente || !p.lineas.length || sinPrecio.length || confirmando) return
+    if (!b || !p.cliente || !p.lineas.length || sinPrecio.length || faltaNuevo || confirmando) return
     setConfirmando(true)
     try {
       const payload: OpPedido = {
@@ -464,7 +470,8 @@ export function Carrito() {
             </div>
             {vencidos && <p className="text-xs font-bold text-red-700">Precios sin actualizar hace más de 24 hs: el total es orientativo. El pedido se factura al precio del sistema cuando ingrese.</p>}
             {sinPrecio.length > 0 && <p className="text-sm font-medium text-red-600">Hay {sinPrecio.length} artículo(s) sin precio en este equipo: quitalos para poder confirmar.</p>}
-            <button onClick={() => void confirmar()} disabled={confirmando || !p.lineas.length || sinPrecio.length > 0} className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white disabled:bg-gray-300">
+            {faltaNuevo && <p className="text-sm font-medium text-red-600">{mensajeFaltaListaMetodo(faltaNuevo)}</p>}
+            <button onClick={() => void confirmar()} disabled={confirmando || !p.lineas.length || sinPrecio.length > 0 || !!faltaNuevo} className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white disabled:bg-gray-300">
               {confirmando ? "Guardando..." : editandoExistente ? "Guardar cambios" : "Confirmar pedido"}
             </button>
           </div>
@@ -503,12 +510,13 @@ export function Carrito() {
             <div>
               <label className="mb-1 block text-sm text-gray-500">Método de facturación</label>
               <select value={p.cond.metodo} onChange={(e) => p.setCond({ ...p.cond, metodo: e.target.value })} className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3">
-                <option value="">Del cliente{p.cliente.metodo_facturacion ? ` (${p.cliente.metodo_facturacion})` : ""}</option>
+                <option value="">Como la ficha (por segmento, ver abajo)</option>
                 <option value="Factura">Factura</option>
                 <option value="Final">Final (Mixto)</option>
                 <option value="Presupuesto">Presupuesto</option>
               </select>
-              <p className="mt-1 text-xs text-gray-400">Al cambiar el método, todos los precios del pedido se recalculan al instante.</p>
+              <p className="mt-1 text-xs text-gray-400">Elegir un método acá lo aplica a TODO el pedido (todos los segmentos) y recalcula los precios al instante.</p>
+              {p.segmentos && <div className="mt-2"><CuadroSegmentos resumen={p.segmentos} titulo="Cómo se factura este pedido" /></div>}
               {(p.cond.lista || (bonif && (Object.keys(bonif.viajante || {}).length || Object.keys(bonif.mercaderia || {}).length))) ? (
                 <p className="mt-2 text-xs font-medium text-amber-700">
                   Solo este pedido:

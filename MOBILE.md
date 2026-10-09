@@ -1299,6 +1299,40 @@ Pedido del dueño: aplicar la paleta del PDF "Megasur · Sistema de color v1" **
 - Fuera de alcance (no son colores): tipografías del PDF, barra de navegación inferior (la app
   no tiene), radios y alturas. La barra de estado nativa de Android no se tocó.
 
+### Reclamos de la semana de prueba de Freije (09/10/2026)
+
+- **Lista y método POR SEGMENTO a la vista** (`datos/segmentos.ts`, `pantallas/segmentos-ui.tsx`).
+  Caso: cliente LIN XUEJUAN (Cipolletti) con ficha general Factura sin lista y por segmento
+  L/B y P0 Presupuesto, P+ Factura (Neco). La app mostraba solo lo general ("Factura",
+  "Estándar" → chip "STD C/IVA") y el vendedor creía "todo factura". Ahora la ficha, el chip
+  del pedido ("NECO C/IVA" o "NECO MIXTO" + detalle "L/B PRES · P0 PRES · P+ C/IVA"), la
+  hoja 👤 y la pantalla de confirmar muestran lo que resuelve el motor por segmento
+  (`resolverListaSegmentoDefinido`). Sin la réplica de precios la ficha NO muestra lo general.
+- **Bug "solo este pedido" descartado** (hoja 👤, `Marco.tsx`): si el vendedor elegía el
+  mismo método que la ficha GENERAL, no quedaba como override aunque la ficha por segmento
+  dijera otra cosa (por eso el "todo factura" de Freije no se aplicó). Ahora la selección
+  arranca en "Como la ficha (por segmento)" y queda como override salvo que los TRES
+  segmentos ya vayan así. "Guardar en la ficha" con "Como la ficha" ya no borra la lista.
+  La web `/vendedor` tiene el mismo patrón (pendiente aparte).
+- **Ningún pedido nuevo con lista o método en blanco** (regla del dueño): el motor marca
+  cada renglón `sinLista`/`sinMetodo` (antes el método vacío se cotizaba "Final" en silencio);
+  la app no deja confirmar (`faltaListaMetodo` + `mensajeFaltaListaMetodo`, mismo texto que el
+  servidor) y el handler `pedido.crear` lo rechaza como regla de negocio. Solo pedidos NUEVOS
+  (las ediciones siguen con las condiciones con que se tomaron). Datos al 09/10: 1 cliente
+  activo sin método en algún segmento y 206 sin lista en algún segmento (casi todos de
+  vendedores que no usan la app; Freije: 1).
+- **Saldo de billetera único** (`lib/vendedor/billetera-saldo.ts`): `/api/vendedor/me` tenía
+  su propia copia del cálculo (sin las compensaciones del arreglo del 05/10) y el inicio
+  mostraba −$674.500 con la billetera en $0. Los dos endpoints llaman a `resumenBilletera`;
+  el inicio además lee la MISMA fila de la réplica que la pantalla Billetera. Es de servidor:
+  corrige también la APK instalada apenas se despliega.
+- **Precios: "+ Comparar" no agregaba columnas** (ni se podía volver a agregar una borrada):
+  el set del parámetro `c` se hacía sobre la entrada del overlay y `cerrar()` (atrás) lo
+  perdía. Nuevo `useOverlay().cerrarCon(params)` en el core: vuelve atrás y fija los
+  parámetros en la entrada de destino. Una combinación repetida avisa en vez de no hacer nada.
+- Compatibilidad: `esApkVendedorVieja` trata como regla vieja solo ≤ 0.2.3; cualquier APK
+  nueva usa la precedencia nueva del resolver (la que lleva el motor empaquetado).
+
 ### Resultados de las pruebas (21/09/2026)
 Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
 solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.

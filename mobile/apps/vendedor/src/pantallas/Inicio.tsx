@@ -2,7 +2,7 @@ import { useNavigate } from "react-router"
 import { useContadoresOutbox, useNoEnviados, useOverlay, useRuntime } from "@gm/core"
 import { DS } from "../datasets"
 import { useBorradores } from "../datos/borradores"
-import { rechazosDe, useClientes, useMe, usePedidos, useRefrescarAlEntrar, useYo } from "../datos/hooks"
+import { rechazosDe, useClientes, useFilaBilletera, useMe, usePedidos, useRefrescarAlEntrar, useYo } from "../datos/hooks"
 import { usePreciosVencidos } from "../datos/precios"
 import { AvisosBcra, BadgeEstado, fechaCorta, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinEnviar, useEnterCierraTeclado, useToast } from "../ui"
 
@@ -21,6 +21,11 @@ export function Inicio() {
   const rt = useRuntime()
   const yo = useYo()
   const { fila: me } = useMe<Me>()
+  // Saldo: la MISMA fila que muestra la pantalla Billetera (un solo número en toda la app).
+  // Si la billetera todavía no se descargó en este equipo, el resumen de "me" (mismo cálculo
+  // en el servidor: lib/vendedor/billetera-saldo.ts).
+  const { fila: billetera } = useFilaBilletera<{ saldo?: number; balance?: number }>("billetera")
+  const saldoBilletera = billetera?.saldo ?? billetera?.balance ?? me?.billetera?.saldo ?? 0
   const { clientes } = useClientes()
   const { pedidos } = usePedidos()
   const borradores = useBorradores().filter((b) => b.items.length > 0)
@@ -75,7 +80,7 @@ export function Inicio() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-emerald-200">💰 Saldo en billetera</p>
-              <p className="mt-1 text-3xl font-bold">{formatCurrency(me?.billetera?.saldo ?? 0)}</p>
+              <p className="mt-1 text-3xl font-bold">{formatCurrency(saldoBilletera)}</p>
               {(me?.billetera?.cheques_cantidad || 0) > 0 && (
                 <p className="mt-0.5 text-xs text-emerald-200">🧾 {me!.billetera.cheques_cantidad} {me!.billetera.cheques_cantidad === 1 ? "cheque" : "cheques"} en mano</p>
               )}

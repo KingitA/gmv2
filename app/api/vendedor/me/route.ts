@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { resumenBilletera } from "@/lib/vendedor/billetera-saldo"
 import { requireVendedor } from "@/lib/vendedor/session"
 
 // GET /api/vendedor/me
@@ -31,54 +32,10 @@ export async function GET() {
       .order("fecha", { ascending: false })
       .limit(5)
 
-    // Resumen de billetera: PLATA EN LA CALLE = efectivo + cheques que el
-    // vendedor tiene físicamente (pagos sin rendir, desde pagos_detalle).
-    // Las transferencias van directas al banco: no suman. Mismo criterio que
-    // /api/vendedor/billetera (excluye lo ya declarado en rendición abierta).
-    const { data: pagosSinRendir } = await supabase
-      .from("pagos_clientes")
-      .select("id, monto, forma_pago, pagos_detalle(tipo_pago, monto)")
-      .in("vendedor_id", session.vendedorIds)
-      .eq("estado", "pendiente_rendicion")
-    const declarados = new Set<string>()
-    const { data: rendAbiertas } = await supabase
-      .from("rendiciones")
-      .select("id")
-      .in("cobrador_id", session.vendedorIds)
-      .eq("estado", "abierta")
-    if (rendAbiertas?.length) {
-      const { data: items } = await supabase
-        .from("rendicion_items")
-        .select("pago_id")
-        .in("rendicion_id", rendAbiertas.map((r) => r.id))
-      for (const it of items || []) declarados.add(it.pago_id)
-    }
-    // Saldo = SOLO efectivo; los cheques van como cantidad de papeles en mano
-    let billeteraSaldo = 0
-    let chequesCantidad = 0
-    for (const p of pagosSinRendir || []) {
-      if (declarados.has(p.id)) continue
-      const detalles: any[] = (p as any).pagos_detalle || []
-      if (detalles.length) {
-        for (const d of detalles) {
-          const tipo = (d.tipo_pago || "").toLowerCase()
-          if (tipo === "efectivo") billeteraSaldo += Number(d.monto)
-          else if (tipo === "cheque") chequesCantidad += 1
-        }
-      } else {
-        const forma = ((p as any).forma_pago || "").toLowerCase()
-        if (forma === "cheque") chequesCantidad += 1
-        else if (forma !== "transferencia") billeteraSaldo += Number(p.monto)
-      }
-    }
-    // + cuenta corriente de rendiciones (retenciones declaradas y diferencias)
-    const { data: difsCC } = await supabase
-      .from("billetera_movimientos")
-      .select("monto")
-      .in("viajante_id", session.vendedorIds)
-      .in("referencia_tipo", ["rendicion_diferencia", "rendicion_saldo_declarado"])
-    billeteraSaldo += (difsCC ?? []).reduce((s: number, m: any) => s + Number(m.monto), 0)
-    billeteraSaldo = Math.round(billeteraSaldo * 100) / 100
+    // Saldo de la billetera: el MISMO cálculo que la pantalla Billetera
+    // (lib/vendedor/billetera-saldo.ts). Antes había una copia acá que quedó vieja
+    // y el inicio mostraba −$674.500 con la billetera en $0 (Freije, 09/10/2026).
+    const billetera = await resumenBilletera(supabase, session.vendedorIds)
 
     const { data: comisiones } = await supabase
       .from("comisiones")
@@ -128,7 +85,7 @@ export async function GET() {
       vendedores: session.vendedores,
       total_clientes: totalClientes ?? 0,
       ultimos_pedidos: ultimosPedidos || [],
-      billetera: { saldo: billeteraSaldo, cheques_cantidad: chequesCantidad, comisiones_pendientes: comisionesPendientes },
+      billetera: { saldo: billetera.saldo, cheques_cantidad: billetera.cheques_cantidad, comisiones_pendientes: comisionesPendientes },
       proximas_zonas: proximasZonas,
     })
   } catch (error: any) {
