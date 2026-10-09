@@ -914,7 +914,7 @@ function PagosClientesContent() {
 
               {/* 3. Métodos de pago */}
               <Paso
-                n="3"
+                n={cliente && !pagoACuenta ? "3" : "2"}
                 titulo="Cómo paga"
                 ayuda="Efectivo, transferencia, cheque o depósito. Con una foto o captura se completan solos."
                 accion={
@@ -964,7 +964,7 @@ function PagosClientesContent() {
               </Paso>
 
               {/* 4. Retenciones */}
-              <Paso n="4" titulo="Retenciones" ayuda="Solo si el cliente te entrega certificados de retención (opcional).">
+              <Paso n={cliente && !pagoACuenta ? "4" : "3"} titulo="Retenciones" ayuda="Solo si el cliente te entrega certificados de retención (opcional).">
                 <RetencionForm retenciones={retenciones} onChange={setRetenciones} />
               </Paso>
             </div>
@@ -999,14 +999,12 @@ function PagosClientesContent() {
                 disabled={guardando || !cliente || metodos.length === 0}
               >
                 {guardando ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
-                {guardando ? "Guardando..." : "Registrar cobro (queda pendiente de verificación)"}
+                {guardando ? "Guardando..." : "Registrar cobro"}
               </Button>
 
-              {metodos.length > 0 && (
-                <p className="text-xs text-muted-foreground text-center">
-                  Todo cobro ingresado acá queda pendiente: Finanzas lo cuenta y lo confirma en Caja, y ahí sale el recibo.
-                </p>
-              )}
+              <p className="text-xs text-neutro-500 text-center">
+                Queda pendiente de verificación: Finanzas lo cuenta y lo confirma en Caja, y ahí sale el recibo.
+              </p>
 
               {(Object.keys(seleccionados).length === 0 && !pagoACuenta && cliente) && (
                 <p className="text-xs text-muted-foreground text-center">
