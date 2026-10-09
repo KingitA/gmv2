@@ -11,6 +11,7 @@ import { ArrowLeft, Wallet, DollarSign, ListChecks, ChevronDown, ChevronRight, E
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 import { toast } from "@/hooks/use-toast"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export default function CuentaCorrienteProveedorPage() {
     const params = useParams()
@@ -283,7 +284,7 @@ export default function CuentaCorrienteProveedorPage() {
                         </TableHeader>
                         <TableBody>
                             {loading ? (
-                                <TableRow><TableCell colSpan={8} className="text-center h-20 text-muted-foreground">Cargando...</TableCell></TableRow>
+                                <TableRow><TableCell colSpan={8} className="text-center h-20 text-muted-foreground"><CargaProgreso compacto mensajes={MENSAJES.cuentaCorriente} className="mx-auto max-w-sm" /></TableCell></TableRow>
                             ) : pendientes.length === 0 ? (
                                 <TableRow><TableCell colSpan={8} className="text-center h-16 text-muted-foreground">Sin comprobantes pendientes</TableCell></TableRow>
                             ) : pendientes.map(mov => renderRow(mov, true))}

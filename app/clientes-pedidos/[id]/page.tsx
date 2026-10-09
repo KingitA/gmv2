@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Loader2, Plus, Trash2, Search, Package, Save, ChevronDown, ChevronRight, Undo2 } from "lucide-react"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 type ItemEdit = { precio_final: number; cantidad: number; estado_item: string }
 
@@ -354,7 +355,7 @@ export default function PedidoEditPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <CargaProgreso mensajes={MENSAJES.pedidos} titulo="Cargando pedido" />
       </div>
     )
   }

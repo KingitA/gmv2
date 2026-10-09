@@ -128,7 +128,7 @@ export function ConfirmarDialog({
         className={`w-full ${imputarAhora ? "max-w-2xl" : "max-w-md"} max-h-[90vh] overflow-y-auto rounded-xl bg-white p-5 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-base font-bold text-slate-900">
+        <h3 className="text-base font-bold tracking-tight text-azul-900">
           {modo === "confirmar" ? pago.accion_texto : "Rechazar pago"} — {pago.quien}
         </h3>
         <p className="mt-0.5 text-xs text-slate-500">

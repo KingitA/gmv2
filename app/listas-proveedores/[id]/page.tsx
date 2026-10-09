@@ -10,6 +10,7 @@ import { ArrowLeft, CheckCircle, Loader2, TrendingUp, TrendingDown, Minus } from
 import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
 import { formatCurrency } from "@/lib/utils"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export default function DetalleListaPage() {
     const params = useParams()
@@ -64,7 +65,7 @@ export default function DetalleListaPage() {
         return <span className={`text-xs font-medium ${color}`}>{pct > 0 ? '+' : ''}{pct.toFixed(1)}%</span>
     }
 
-    if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin" /></div>
+    if (loading) return <div className="flex items-center justify-center h-64"><CargaProgreso mensajes={MENSAJES.articulos} titulo="Cargando lista del proveedor" /></div>
     if (!lista) return <div className="p-6">Lista no encontrada</div>
 
     const itemsMatcheados = items.filter(i => i.articulo_id)

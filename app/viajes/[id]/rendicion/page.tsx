@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface RendicionData {
   viaje: {
@@ -125,7 +126,7 @@ export default function RendicionPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <CargaProgreso mensajes={MENSAJES.viajes} titulo="Cargando rendición del viaje" />
       </div>
     )
   }

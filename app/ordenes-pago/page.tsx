@@ -10,6 +10,7 @@ import { ArrowLeft, Plus, DollarSign, CheckCircle2, XCircle, Eye, FileText, Rece
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export default function OrdenesPagoPage() {
     const [ordenes, setOrdenes] = useState<any[]>([])
@@ -222,7 +223,7 @@ export default function OrdenesPagoPage() {
                                 {loading ? (
                                     <TableRow>
                                         <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                                            Cargando...
+                                            <CargaProgreso compacto mensajes={MENSAJES.pagos} className="mx-auto max-w-sm" />
                                         </TableCell>
                                     </TableRow>
                                 ) : ordenes.length === 0 ? (

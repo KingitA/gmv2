@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { ArrowLeft, TrendingUp, TrendingDown, Minus, Plus, Truck } from "lucide-react"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const TIPO_LABELS: Record<string, { label: string; color: string; sign: number }> = {
     faltante_mercaderia: { label: 'Faltante de mercadería', color: 'bg-orange-100 text-orange-800', sign: 1 },
@@ -73,7 +74,7 @@ export default function TransporteCCPage() {
         }
     }
 
-    if (loading) return <div className="p-6 text-muted-foreground">Cargando...</div>
+    if (loading) return <CargaProgreso mensajes={MENSAJES.tablas} titulo="Cargando transporte" />
     if (!transporte) return <div className="p-6 text-muted-foreground">Transporte no encontrado</div>
 
     return (

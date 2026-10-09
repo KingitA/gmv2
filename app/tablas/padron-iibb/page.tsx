@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { AlertTriangle, Upload, Loader2, CheckCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface JurisdiccionEstado {
   codigo: string
@@ -74,7 +75,7 @@ export default function PadronIIBBPage() {
   const alertas = estado.filter(j => j.vencido || j.registros_total === 0)
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-8 w-8 animate-spin" /></div>
+    return <div className="flex items-center justify-center h-screen"><CargaProgreso mensajes={MENSAJES.tablas} titulo="Cargando padrón de IIBB" /></div>
   }
 
   return (

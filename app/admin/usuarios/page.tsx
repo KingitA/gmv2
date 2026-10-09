@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Users, Loader2, AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, Pencil } from "lucide-react"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const TODOS_LOS_ROLES = [
   { value: "admin",          label: "Admin",          desc: "Acceso total" },
@@ -204,9 +205,7 @@ export default function UsuariosPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-slate-400">
-          <Loader2 className="h-6 w-6 animate-spin mr-2" />Cargando...
-        </div>
+        <CargaProgreso mensajes={MENSAJES.general} titulo="Cargando usuarios" />
       ) : (
         <div className="border rounded-xl overflow-hidden bg-white shadow-sm">
           <table className="w-full text-sm">

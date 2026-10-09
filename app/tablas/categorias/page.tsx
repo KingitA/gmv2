@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronRight, Plus, Trash2, Pencil, Check, X, GripVertical } from "lucide-react"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 type Rubro = { id: string; nombre: string; slug: string; orden: number; descripcion?: string | null; imagen_url?: string | null }
 type Categoria = { id: string; rubro_id: string; nombre: string; orden: number }
@@ -221,7 +222,7 @@ export default function CategoriasPage() {
   }
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64 text-slate-400 text-sm">Cargando...</div>
+    <div className="flex items-center justify-center h-64"><CargaProgreso mensajes={MENSAJES.tablas} titulo="Cargando categorías" /></div>
   )
 
   return (

@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { ChevronDown, ChevronRight } from "lucide-react"
+import { CargaProgreso } from "@/components/ui/carga-progreso"
 
 export interface Comprobante {
   id: string
@@ -257,7 +258,7 @@ export function ComprobantesSelector({ clienteId, seleccionados, onChange, onCom
 
   const totalSeleccionado = Object.values(seleccionados).reduce((s, v) => s + v, 0)
 
-  if (loading) return <div className="text-sm text-muted-foreground py-4">Cargando…</div>
+  if (loading) return <CargaProgreso compacto mensajes={["Buscando sus comprobantes…", "Sumando saldos…", "Ordenando pedidos…", "Ya casi está…"]} className="mx-auto max-w-sm py-6" />
 
   // Pedidos a mostrar según modo:
   //  - facturados: solo los que tienen comprobantes a cobrar.

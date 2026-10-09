@@ -1755,7 +1755,8 @@ export default function ClientesPedidosPage() {
           ) : (
             <div className="pt-12 pb-4 px-6 shrink-0">
               <SheetTitle>Detalle del Pedido</SheetTitle>
-              <SheetDescription>Cargando...</SheetDescription>
+              <SheetDescription className="sr-only">Cargando...</SheetDescription>
+              <CargaProgreso compacto mensajes={MENSAJES.pedidos} className="mt-4" />
             </div>
           )}
 

@@ -15,6 +15,7 @@ import { Loader2, ChevronDown, ChevronRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { formatCurrency } from "@/lib/utils"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const ESTADO_UI: Record<string, { label: string; cls: string }> = {
   pendiente: { label: "Pendiente depósito", cls: "bg-amber-100 text-amber-800 border-amber-300" },
@@ -166,7 +167,7 @@ export default function RevisionDevolucionesPage() {
   const btn = "h-7 px-2.5 rounded-md text-xs font-semibold border disabled:opacity-40"
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen"><Loader2 className="h-8 w-8 animate-spin" /></div>
+    return <div className="flex items-center justify-center h-screen"><CargaProgreso mensajes={MENSAJES.devoluciones} titulo="Cargando devoluciones" /></div>
   }
 
   return (

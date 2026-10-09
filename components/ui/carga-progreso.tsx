@@ -20,6 +20,14 @@ export const MENSAJES = {
   viajes: ['Buscando viajes…', 'Ubicando zonas y choferes…', 'Contando pedidos y bultos…', 'Armando el calendario…'],
   fichaCliente: ['Buscando el cliente…', 'Leyendo listas y descuentos…', 'Revisando su cuenta corriente…', 'Trayendo sus últimos pedidos…', 'Ya casi está…'],
   vencimientos: ['Buscando vencimientos…', 'Sumando lo que sale por día…', 'Revisando cheques y transferencias…', 'Armando el calendario…'],
+  ordenesCompra: ['Buscando la orden de compra…', 'Trayendo artículos y cantidades…', 'Revisando comprobantes del proveedor…', 'Ya casi está…'],
+  cuentaCorriente: ['Buscando movimientos…', 'Sumando debe y haber…', 'Calculando el saldo…', 'Ordenando por fecha…', 'Ya casi está…'],
+  tablas: ['Buscando los registros…', 'Ordenando la tabla…', 'Armando la lista…', 'Ya casi está…'],
+  articulos: ['Buscando artículos…', 'Leyendo precios y proveedores…', 'Ordenando el catálogo…', 'Ya casi está…'],
+  devoluciones: ['Buscando devoluciones…', 'Trayendo artículos y cantidades…', 'Cruzando con los pedidos…', 'Ya casi está…'],
+  pagos: ['Buscando órdenes de pago…', 'Sumando importes y retenciones…', 'Revisando comprobantes…', 'Ya casi está…'],
+  finanzas: ['Buscando cuentas y cajas…', 'Sumando saldos…', 'Revisando movimientos…', 'Ya casi está…'],
+  ocrComprobante: ['Subiendo el archivo…', 'Leyendo el comprobante…', 'Reconociendo importes e impuestos…', 'Ya casi está…'],
 } as const
 
 interface Props {

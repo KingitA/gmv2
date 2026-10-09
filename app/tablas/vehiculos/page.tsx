@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Pencil } from "lucide-react"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export default function VehiculosPage() {
   const [items, setItems] = useState<any[]>([])
@@ -81,7 +82,7 @@ export default function VehiculosPage() {
         </TableHeader>
         <TableBody>
           {loading ? (
-            <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Cargando…</TableCell></TableRow>
+            <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
           ) : items.length === 0 ? (
             <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Todavía no hay vehículos</TableCell></TableRow>
           ) : (

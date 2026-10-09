@@ -10,9 +10,10 @@ import { useEffect, useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { ArrowLeft, AlertCircle, Loader2, History } from "lucide-react"
+import { ArrowLeft, AlertCircle, History } from "lucide-react"
 import { ImportReportView } from "@/components/import/ImportReportView"
 import type { ReportFila, ValueFormat } from "@/lib/import/export-excel"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface ResumenItem {
   id: string
@@ -94,9 +95,7 @@ export function HistorialImportacionesDialog({ open, onOpenChange, modulo, clave
         )}
 
         {loading && (
-          <div className="flex items-center justify-center py-10 text-muted-foreground">
-            <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Cargando...
-          </div>
+          <CargaProgreso compacto mensajes={MENSAJES.general} className="mx-auto max-w-sm py-10" />
         )}
 
         {!loading && !detalle && (

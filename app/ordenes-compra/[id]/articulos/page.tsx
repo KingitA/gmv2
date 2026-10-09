@@ -22,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export default function CargarArticulosPage() {
   const supabase = createClient()
@@ -305,7 +306,7 @@ export default function CargarArticulosPage() {
     setNuevoDescuento4(0)
   }
 
-  if (!orden) return <div>Cargando...</div>
+  if (!orden) return <CargaProgreso mensajes={MENSAJES.ordenesCompra} titulo="Cargando orden de compra" />
 
   // Solo se pueden agregar artículos si la OC está pendiente o enviada (aún no recibida)
   const esEditable = ['pendiente', 'enviada', 'confirmada', 'borrador'].includes(orden.estado)

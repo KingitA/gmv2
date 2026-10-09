@@ -11,6 +11,7 @@ import { toast } from "sonner"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
 import { ESTADO_LABEL } from "@/lib/pedidos/estados"
 import { localMatch } from "@/lib/search/local-match"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // Pedidos del viaje + candidatos para subir en lote. Los candidatos son pedidos
 // sin viaje, en cualquier estado previo a salir, de clientes de las zonas del
@@ -77,7 +78,7 @@ export function ViajePedidos({ viajeId, onCambio }: { viajeId: string; onCambio:
   )
   const sel = candidatos.filter((p) => seleccion.includes(p.id))
 
-  if (cargando) return <p className="py-8 text-center text-sm text-muted-foreground">Cargando…</p>
+  if (cargando) return <CargaProgreso compacto mensajes={MENSAJES.pedidos} className="mx-auto max-w-sm py-8" />
 
   return (
     <div className="space-y-6">

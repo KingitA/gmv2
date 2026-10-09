@@ -33,6 +33,7 @@ import { ExternalLink } from "lucide-react";
 import { FechaInput } from "@/components/finanzas/fecha-input";
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible";
 import { useUrlState } from "@/lib/hooks/use-url-state";
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const ArrowLeftIcon = () => (
     <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -366,7 +367,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     if (isLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
-                <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+                <CargaProgreso mensajes={MENSAJES.cuentaCorriente} titulo="Cargando cuenta corriente" />
             </div>
         );
     }

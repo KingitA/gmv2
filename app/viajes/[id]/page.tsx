@@ -17,6 +17,7 @@ import { ViajeArqueo } from "@/components/viajes/viaje-arqueo"
 import { ViajeDatos } from "@/components/viajes/viaje-datos"
 import { EntregarDinero } from "@/components/viajes/entregar-dinero"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // Detalle del viaje = la hoja de ruta, en una sola pantalla: KPIs arriba,
 // paradas en vivo (qué se entregó, cuánto y cómo se cobró), pedidos y el
@@ -96,7 +97,7 @@ export default function ViajeDetallePage() {
   }
 
   if (error) return <div className="p-6"><p className="text-red-600">{error}</p></div>
-  if (!hoja) return <div className="p-6 text-muted-foreground">Cargando viaje…</div>
+  if (!hoja) return <CargaProgreso mensajes={MENSAJES.viajes} titulo="Cargando viaje" />
 
   const v = hoja.viaje
   const t = hoja.totales

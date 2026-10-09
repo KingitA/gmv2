@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Trash2, Plus, Pencil, Eye, EyeOff } from "lucide-react"
 import { toast } from "sonner"
 import type { TipoCatalogo } from "@/lib/catalogos/tipos-articulo"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface Props {
   tabla: "tipos_bulto" | "tipos_fraccion"
@@ -128,7 +129,7 @@ export function CatalogoArticuloABM({ tabla, columnaArticulo, titulo, subtitulo,
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={6} className="text-center py-8">Cargando...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="text-center py-8"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
             ) : items.length === 0 ? (
               <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No hay {singular}s cargados</TableCell></TableRow>
             ) : items.map(item => (

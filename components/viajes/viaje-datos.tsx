@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "sonner"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // Datos del viaje: se completan de a poco mientras está 'programado'
 // (primero fecha + zonas; más cerca de la fecha, quién lleva y en qué).
@@ -112,7 +113,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
     }
   }
 
-  if (cargando) return <p className="py-8 text-center text-sm text-muted-foreground">Cargando…</p>
+  if (cargando) return <CargaProgreso compacto mensajes={MENSAJES.viajes} className="mx-auto max-w-sm py-8" />
 
   return (
     <div className="space-y-6">

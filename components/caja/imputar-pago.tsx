@@ -158,7 +158,7 @@ export function ImputarPago({
         className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-base font-bold text-slate-900">Imputar cobro — {pago.quien}</h3>
+        <h3 className="text-base font-bold tracking-tight text-azul-900">Imputar cobro — {pago.quien}</h3>
         <p className="mt-0.5 text-xs text-slate-500">
           Disponible de este cobro: <b style={NUM}>$ {fmt(pago.disponible)}</b>
           {saldoCliente != null && (
@@ -229,7 +229,7 @@ export function ImputarPago({
         {dialogoFalta != null && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setDialogoFalta(null)}>
             <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-base font-bold text-slate-900">
+              <h3 className="text-base font-bold tracking-tight text-azul-900">
                 Falta pagar <span style={NUM}>$ {fmt(dialogoFalta)}</span>
               </h3>
               <p className="mt-1 text-xs text-slate-500">

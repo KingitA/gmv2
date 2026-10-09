@@ -7,6 +7,7 @@ import { CheckCircle2, Loader2, PenLine, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { ChequesEmitidosDialog } from "./cheques-emitidos-dialog"
 import { FechaInput } from "./fecha-input"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export interface ChequeEmitido {
     id: string
@@ -93,7 +94,7 @@ export function ChequesEmitidosPanel({
             </div>
 
             {loading ? (
-                <p className="py-3 text-center text-xs text-muted-foreground">Cargando...</p>
+                <CargaProgreso compacto mensajes={MENSAJES.vencimientos} className="mx-auto max-w-sm py-3" />
             ) : emitidos.length === 0 ? (
                 <p className="py-3 text-center text-xs text-muted-foreground">
                     No hay cheques emitidos sin debitar.

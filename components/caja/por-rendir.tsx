@@ -30,7 +30,7 @@ function Movs({ titulo, items }: { titulo: string; items: any[] }) {
   if (!items?.length) return null
   return (
     <div className="mt-1.5">
-      <p className="text-[10px] font-bold uppercase text-slate-400">{titulo}</p>
+      <p className="text-xs font-semibold text-neutro-500">{titulo}</p>
       {items.map((m: any, i: number) => (
         <div key={i} className="flex items-center justify-between text-[11px] text-slate-600">
           <span className="truncate">{m.concepto || m.descripcion || "—"}{m.fecha ? ` · ${fechaAR(m.fecha)}` : ""}</span>
@@ -82,7 +82,7 @@ export function PorRendir({ recarga }: { recarga: number }) {
   return (
     <div className="mb-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-violet-600">Por rendir</span>
+        <span className="text-sm font-bold text-violet-700">Por rendir</span>
         {confirmadas.length > 0 && (
           <button onClick={() => setVerConfirmadas((v) => !v)} className="text-[11px] font-semibold text-blue-600 hover:underline">
             {verConfirmadas ? "Ocultar confirmadas" : `Rendiciones confirmadas (${confirmadas.length})`}
@@ -157,7 +157,7 @@ export function PorRendir({ recarga }: { recarga: number }) {
               {abierta === r.id && (
                 <div className="mt-2 grid grid-cols-1 gap-3 border-t border-slate-100 pt-2 md:grid-cols-2">
                   <div>
-                    <p className="text-[10px] font-bold uppercase text-slate-400">Cobros</p>
+                    <p className="text-xs font-semibold text-neutro-500">Cobros</p>
                     {(r.pagos || []).map((p: any) => (
                       <div key={p.id} className="flex items-center justify-between text-[11px] text-slate-600">
                         <span className="truncate">{p.cliente_nombre} · {p.metodos}</span>

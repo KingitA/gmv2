@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Trash2, Plus, Pencil } from "lucide-react"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export default function CondicionesEntregaPage() {
   const [items, setItems] = useState<any[]>([])
@@ -94,7 +95,7 @@ export default function CondicionesEntregaPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={4} className="text-center py-8">Cargando...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={4} className="text-center py-8"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
             ) : items.length === 0 ? (
               <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No hay condiciones cargadas</TableCell></TableRow>
             ) : items.map(item => (

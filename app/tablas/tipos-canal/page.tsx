@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label"
 import { Trash2, Plus, Pencil } from "lucide-react"
 import { toast } from "sonner"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface TipoCanal {
   id: string
@@ -92,7 +93,7 @@ export default function TiposCanalPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={3} className="text-center py-8">Cargando...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={3} className="text-center py-8"><CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm" /></TableCell></TableRow>
             ) : items.length === 0 ? (
               <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No hay tipos de canal cargados</TableCell></TableRow>
             ) : items.map(item => (

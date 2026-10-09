@@ -23,6 +23,7 @@ import {
   condicionesParaPedido, listasParaFicha, descuentosParaFicha, segmentacionParaFicha,
   type CondicionesForm, type FichaComercial, type ArticuloElegido,
 } from "@/lib/pedidos/condiciones-form"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 type LP = { id: string; nombre: string; codigo?: string }
 export type AlcanceCondiciones = "pedido" | "ficha" | null
@@ -188,7 +189,7 @@ export function CondicionesPedidoPanel({ estado, exigirMercaderia = false }: { e
   const listasNormales = useMemo(() => listas.filter((l) => l.codigo !== "especial"), [listas])
   const nombreLista = (id: string) => listas.find((l) => l.id === id)?.nombre || ""
 
-  if (cargando || !form || !ficha) return <p className="text-xs text-slate-400">Cargando condiciones del cliente…</p>
+  if (cargando || !form || !ficha) return <CargaProgreso compacto mensajes={MENSAJES.fichaCliente} className="max-w-sm py-2" />
   const set = (patch: Partial<CondicionesForm>) => setForm({ ...form, ...patch })
   const cupos = cuposPosibles(form)
 

@@ -18,6 +18,7 @@ import {
   Landmark, LineChart, Wallet, RefreshCw,
 } from "lucide-react"
 import Link from "next/link"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface Cuenta {
   cuenta_tipo: string
@@ -412,7 +413,7 @@ export default function CajasPage() {
             <DialogTitle>Movimientos — {historialDe?.nombre}</DialogTitle>
           </DialogHeader>
           {loadingMov ? (
-            <p className="text-center py-8 text-muted-foreground">Cargando...</p>
+            <CargaProgreso compacto mensajes={MENSAJES.finanzas} className="mx-auto max-w-sm py-8" />
           ) : movimientos.length === 0 ? (
             <p className="text-center py-8 text-muted-foreground">Sin movimientos registrados</p>
           ) : (
