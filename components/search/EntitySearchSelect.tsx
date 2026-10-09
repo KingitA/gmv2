@@ -46,13 +46,14 @@ function defaultRenderItem(entity: SearchEntity, item: any): ReactNode {
             </>
         )
     }
-    // clientes
+    // clientes: dirección y localidad en su propia línea ("SARMIENTO 111 - CARMEN DE PATAGONES")
+    const ubicacion = [item.direccion, item.localidad].filter((x: string | null) => x && String(x).trim()).join(" - ")
     return (
         <>
             <p className="font-medium text-sm">{item.razon_social || item.nombre}</p>
+            {ubicacion && <p className="text-xs text-foreground/80">{ubicacion}</p>}
             <p className="text-xs text-muted-foreground">
                 CUIT: {item.cuit || "—"}{item.codigo_cliente ? ` · Cód: ${item.codigo_cliente}` : ""}
-                {item.localidad ? ` · ${item.localidad}` : ""}
             </p>
         </>
     )
