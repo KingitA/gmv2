@@ -137,3 +137,44 @@ describe("Billetera · un solo saldo para el inicio y la pantalla Billetera", ()
     expect(r.pagos_sin_rendir).toBe(3)
   })
 })
+
+// ─── Ficha por segmento desde la app + revisión de oficina (09/10/2026) ──────
+import { patchListasMetodos, validarListasMetodos } from "../../../../lib/vendedor/ficha-listas"
+import { esPedidoEditable, ESTADO_LABEL, puedeCambiarEstado } from "../../../../lib/pedidos/estados"
+import { readFileSync } from "node:fs"
+import { clienteListasDe, fichaListasDe } from "../../../apps/vendedor/src/datos/segmentos"
+
+describe("Ficha · lista y método por segmento desde la app (como el ERP)", () => {
+  const sesion = { puedeCambiarLista: true, listasPermitidas: ["L-neco", "L-viaj"] }
+
+  it("acepta lista y método por segmento dentro de lo permitido", () => {
+    expect(validarListasMetodos({ lista_perf0_id: "L-viaj", metodo_perf0: "Presupuesto", metodo_facturacion: "" }, sesion)).toBeNull()
+    expect(patchListasMetodos({ lista_perf0_id: "L-viaj", metodo_perf0: "Presupuesto", metodo_facturacion: "", nombre: "x" }))
+      .toEqual({ lista_perf0_id: "L-viaj", metodo_perf0: "Presupuesto", metodo_facturacion: null })
+  })
+
+  it("rechaza listas no habilitadas, sin permiso, y métodos inventados", () => {
+    expect(validarListasMetodos({ lista_limpieza_id: "L-bahia" }, sesion)).toMatch(/no está habilitada/)
+    expect(validarListasMetodos({ lista_limpieza_id: "L-neco" }, { ...sesion, puedeCambiarLista: false })).toMatch(/permiso/)
+    expect(validarListasMetodos({ metodo_perf_plus: "Negro" }, sesion)).toMatch(/inválido/)
+  })
+
+  it("la ficha local (alta sin señal) cotiza con sus segmentos, no solo con lo general", () => {
+    const f = fichaListasDe({ lista_precio_id: "L-neco", metodo_facturacion: "", metodo_perf0: "Presupuesto", metodo_limpieza: "Factura", metodo_perf_plus: "Factura", extra: 1 })
+    const r = resumirSegmentos(clienteListasDe(f), {}, nombres)
+    expect(r.filas.map((x) => x.metodo)).toEqual(["Factura", "Presupuesto", "Factura"])
+    expect(r.incompleto).toBe(false)
+  })
+})
+
+describe("Revisión de oficina: estado en_revision", () => {
+  it("es editable, depósito NO lo prepara y la oficina lo libera a pendiente", () => {
+    expect(ESTADO_LABEL.en_revision).toBe("En Revisión")
+    expect(esPedidoEditable("en_revision")).toBe(true)
+    // lib/deposito/picking.ts importa cosas del ERP que no corren en los tests: se lee la constante del fuente
+    const preparables = /ESTADOS_PREPARABLES = \[([^\]]*)\]/.exec(readFileSync(new URL("../../../../lib/deposito/picking.ts", import.meta.url), "utf8"))![1]!
+    expect(preparables).toContain('"pendiente"')
+    expect(preparables).not.toContain("en_revision")
+    expect(puedeCambiarEstado("en_revision", "pendiente")).toBe(true)
+  })
+})

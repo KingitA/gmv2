@@ -96,6 +96,7 @@ export function useNombreLista(): (id: string) => string | null {
 export function useSegmentosCliente(
   clienteId: string | undefined,
   overrides: OverridesListaPedido = {},
+  /** Cliente que todavía no está en la réplica de precios (alta en este equipo / venta a cliente nuevo) */
   fichaLocal?: ClienteListas | null,
 ): ResumenSegmentos | null {
   const { filas } = useDataset<FilaClientePrecio>(DS.preciosClientes)
@@ -109,4 +110,49 @@ export function useSegmentosCliente(
     return resumirSegmentos(cliente, overrides, nombreLista, extra)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fila, fichaLocal, nombreLista, clave])
+}
+
+// ─── Ficha: lista y método general o POR SEGMENTO (como el ERP) ──────────────
+
+/** Las 8 columnas de lista/método de la ficha ("" = vacío / hereda de lo general). */
+export const CAMPOS_FICHA_LISTAS = [
+  "lista_precio_id", "metodo_facturacion",
+  "lista_limpieza_id", "metodo_limpieza",
+  "lista_perf0_id", "metodo_perf0",
+  "lista_perf_plus_id", "metodo_perf_plus",
+] as const
+export type CampoFichaListas = (typeof CAMPOS_FICHA_LISTAS)[number]
+export type FichaListas = Record<CampoFichaListas, string>
+
+/** Columnas por segmento, en el orden de SEGMENTOS_PRECIO */
+export const COLS_SEGMENTO: Array<{ seg: Segmento; label: string; lista: CampoFichaListas; metodo: CampoFichaListas }> = [
+  { seg: "limpieza", label: "Limpieza / Bazar", lista: "lista_limpieza_id", metodo: "metodo_limpieza" },
+  { seg: "perf0", label: "Perfumería 0", lista: "lista_perf0_id", metodo: "metodo_perf0" },
+  { seg: "perf_plus", label: "Perfumería plus", lista: "lista_perf_plus_id", metodo: "metodo_perf_plus" },
+]
+
+/** Lee las 8 columnas de cualquier objeto (ficha de la réplica, payload, cliente local). */
+export function fichaListasDe(o: Partial<Record<string, unknown>> | null | undefined): FichaListas {
+  const out = {} as FichaListas
+  for (const k of CAMPOS_FICHA_LISTAS) {
+    const v = o?.[k]
+    out[k] = typeof v === "string" ? limpiarCentinela(v) || "" : ""
+  }
+  return out
+}
+
+/** Para el motor / el resolver ("" → null). */
+export function clienteListasDe(f: FichaListas): ClienteListas {
+  const out: Record<string, string | null> = {}
+  for (const k of CAMPOS_FICHA_LISTAS) out[k] = f[k] || null
+  return out as ClienteListas
+}
+
+/** Ficha de lista/método del cliente tal como está en la réplica de PRECIOS (null = todavía no llegó). */
+export function useFichaListas(clienteId: string | undefined): FichaListas | null {
+  const { filas } = useDataset<FilaClientePrecio>(DS.preciosClientes)
+  return useMemo(() => {
+    const fila = clienteId ? filas.find((c) => c.id === clienteId) : null
+    return fila ? fichaListasDe(fila.cliente as unknown as Record<string, unknown>) : null
+  }, [filas, clienteId])
 }

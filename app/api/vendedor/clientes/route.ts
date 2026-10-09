@@ -5,6 +5,7 @@ import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { sanitizarOr } from "@/lib/search/hybrid"
 import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar"
+import { patchListasMetodos, validarListasMetodos } from "@/lib/vendedor/ficha-listas"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -127,6 +128,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Tu usuario no tiene viajante asignado." }, { status: 400 })
     }
 
+    // Lista y método por segmento (como la ficha del ERP): mismas reglas que al editar.
+    // La lista GENERAL sigue la regla de siempre (la impone el viajante).
+    const segmentos = { ...body, lista_precio_id: undefined, metodo_facturacion: undefined }
+    const errListas = validarListasMetodos(segmentos, session)
+    if (errListas) return NextResponse.json({ error: errListas }, { status: 403 })
+    const metodoGeneral = metodo_facturacion ? String(metodo_facturacion) : null
+    if (metodoGeneral && !["Factura", "Final", "Presupuesto"].includes(metodoGeneral)) {
+      return NextResponse.json({ error: `Método de facturación inválido: ${metodoGeneral}` }, { status: 400 })
+    }
+
     const cuitLimpio = cuit ? String(cuit).trim() : null
     if (cuitLimpio) {
       const { data: dup } = await supabase
@@ -154,7 +165,8 @@ export async function POST(request: Request) {
         nombre_razon_social: razon_social?.trim() || nombreFinal,
         cuit: cuitLimpio,
         condicion_iva: normalizarCondicionIva(condicion_iva),
-        metodo_facturacion: metodo_facturacion || null,
+        metodo_facturacion: metodoGeneral,
+        ...patchListasMetodos(segmentos, ["lista_limpieza_id", "lista_perf0_id", "lista_perf_plus_id", "metodo_limpieza", "metodo_perf0", "metodo_perf_plus"]),
         condicion_pago: condicion_pago || null,
         condicion_entrega: condicion_entrega || null,
         direccion: direccion?.trim() || null,

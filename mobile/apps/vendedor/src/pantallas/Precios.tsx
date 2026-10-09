@@ -13,8 +13,8 @@ import { CatalogoArbol, OrdenSelector } from "./pedido-nuevo/piezas"
 // En la web los precios venían de previewPreciosListas (servidor); acá los da el MISMO
 // motor sobre la réplica, sin cliente (sin condiciones ni bonificaciones), al instante.
 
-interface Combo { lista_id: string; metodo: string }
-const comboKey = (c: Combo) => `${c.lista_id}|${c.metodo}`
+export interface Combo { lista_id: string; metodo: string }
+export const comboKey = (c: Combo) => `${c.lista_id}|${c.metodo}`
 const MAX_COMBOS = 4
 
 export function Precios() {
@@ -160,7 +160,7 @@ export function Precios() {
   )
 }
 
-function AgregarCombo({ listas, metodos, existentes, onCerrar, onAgregar }: { listas: ListaPrecio[]; metodos: Array<{ key: string; label: string }>; existentes: string[]; onCerrar: () => void; onAgregar: (c: Combo) => void }) {
+export function AgregarCombo({ listas, metodos, existentes, onCerrar, onAgregar }: { listas: ListaPrecio[]; metodos: Array<{ key: string; label: string }>; existentes: string[]; onCerrar: () => void; onAgregar: (c: Combo) => void }) {
   const [listaId, setListaId] = useState(listas[0]?.id || "")
   const [metodo, setMetodo] = useState("Factura")
   return (

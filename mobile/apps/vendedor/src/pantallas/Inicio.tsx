@@ -100,6 +100,8 @@ export function Inicio() {
           <button onClick={() => navigate("/precios")} className={acceso}><p className="mb-2 text-3xl">💲</p><p className="text-lg font-bold text-gray-900">Precios</p><p className="mt-1 text-sm text-gray-500">Consultá y compará listas</p></button>
           <button onClick={() => navigate("/viajes")} className={acceso}><p className="mb-2 text-3xl">🧭</p><p className="text-lg font-bold text-gray-900">Mis Viajes</p><p className="mt-1 text-sm text-gray-500">Levantar pedidos por zona</p></button>
           <button onClick={() => navigate("/estadisticas")} className={acceso}><p className="mb-2 text-3xl">📊</p><p className="text-lg font-bold text-gray-900">Estadísticas</p><p className="mt-1 text-sm text-gray-500">Ventas y comisiones</p></button>
+          {/* Venta a cliente nuevo: primero se vende, los datos se piden al cerrar */}
+          <button onClick={() => navigate("/venta-nueva")} className={acceso}><p className="mb-2 text-3xl">🆕</p><p className="text-lg font-bold text-gray-900">Cliente nuevo</p><p className="mt-1 text-sm text-gray-500">Vender primero, datos al final</p></button>
         </section>
 
         <section>

@@ -5,6 +5,8 @@ import { Hoja } from "@gm/core/ui"
 import { DS } from "../../datasets"
 import { useCatalogosFicha, useClientes, useEncolar, uuidv4 } from "../../datos/hooks"
 import { HojaConfirmar, Pantalla, useToast } from "../../ui"
+import { CAMPOS_FICHA_LISTAS, type FichaListas } from "../../datos/segmentos"
+import { EditorListaMetodo, fichaCompleta } from "./EditorListaMetodo"
 
 // Port de app/vendedor/clientes/nuevo/page.tsx + components/vendedor/NuevaLocalidadSheet.tsx.
 // Alta de cliente desde la calle: se ENCOLA (`cliente.crear`) con el id generado en el
@@ -199,7 +201,32 @@ function FormLocalidad({ zonas, onCreada, onCerrar }: { zonas: Array<{ id: strin
 
 // ─── /clientes/nuevo ─────────────────────────────────────────────────────────
 
-export function ClienteNuevo() {
+/**
+ * Modo "venta a cliente nuevo" (/pedido/nuevo/:id/cliente): el vendedor ya armó el pedido
+ * y ahora SÍ O SÍ carga los datos. El cliente nace con el id del borrador y la lista/método
+ * que se eligieron mientras se cotizaba; `alGuardar` encola el pedido detrás del alta.
+ */
+export interface ModoProspecto {
+  clienteId: string
+  ficha: FichaListas
+  alGuardar: (nombre: string) => Promise<void>
+  /** CUIT de un cliente que ya está en la cartera: el pedido armado pasa a ese cliente */
+  pasarA: (clienteId: string) => Promise<void>
+}
+
+/** Datos obligatorios del cliente nuevo de una venta (decisión del dueño, 09/10/2026). */
+function faltanDatos(f: Record<string, string>): string | null {
+  if (!f.razon_social.trim() && !f.nombre.trim()) return "la razón social"
+  if (!f.condicion_iva) return "la condición de IVA"
+  if (!/consumidor/i.test(f.condicion_iva) && !f.cuit.trim()) return "el CUIT"
+  if (!f.direccion.trim()) return "la dirección"
+  if (!f.localidad_id) return "la localidad"
+  if (!f.telefono.trim()) return "el teléfono"
+  if (!f.condicion_pago) return "la condición de pago"
+  return null
+}
+
+export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) {
   const navigate = useNavigate()
   const encolar = useEncolar()
   const cat = useCatalogosFicha()
@@ -212,15 +239,18 @@ export function ClienteNuevo() {
     nombre: "",
     cuit: "",
     condicion_iva: "",
-    metodo_facturacion: "Factura",
     condicion_pago: "",
     condicion_entrega: "",
     direccion: "",
     localidad_id: "",
     telefono: "",
     mail: "",
-    lista_precio_id: "",
     vendedor_id: "",
+  })
+  // Lista y método, general o por segmento (como la ficha del ERP)
+  const [ficha, setFicha] = useState<FichaListas>(() => prospecto?.ficha ?? {
+    lista_precio_id: "", metodo_facturacion: "Factura",
+    lista_limpieza_id: "", metodo_limpieza: "", lista_perf0_id: "", metodo_perf0: "", lista_perf_plus_id: "", metodo_perf_plus: "",
   })
   const [guardando, setGuardando] = useState(false)
   /** Localidades dadas de alta recién (por si el refresco del catálogo todavía no llegó) */
@@ -245,11 +275,25 @@ export function ClienteNuevo() {
   // Lista impuesta por el viajante elegido (o el único del usuario)
   const viajanteSel = vendedores.find((v) => v.id === f.vendedor_id) || (vendedores.length === 1 ? vendedores[0]! : null)
   const listaImpuesta = viajanteSel?.lista_nombre || null
+  // La lista GENERAL que impone el viajante va en la ficha (así el resumen por segmento la ve)
+  const listaGeneralImpuesta = viajanteSel?.lista_nombre ? viajanteSel.lista_precio_id || "" : null
+  useEffect(() => {
+    if (listaGeneralImpuesta !== null) setFicha((p) => (p.lista_precio_id === listaGeneralImpuesta ? p : { ...p, lista_precio_id: listaGeneralImpuesta }))
+  }, [listaGeneralImpuesta])
 
   const guardar = async (irAPedido: boolean) => {
     if (guardando) return
     if (!f.razon_social.trim() && !f.nombre.trim()) {
       mostrar("Ingresá la razón social o el nombre de fantasía.", "err")
+      return
+    }
+    const falta = prospecto ? faltanDatos(f) : null
+    if (falta) {
+      mostrar(`Para cerrar la venta falta ${falta} del cliente.`, "err")
+      return
+    }
+    if (!fichaCompleta(ficha)) {
+      mostrar("Completá lista y método de facturación de cada segmento.", "err")
       return
     }
     // Mismo control que el 409 del servidor, contra la cartera del equipo. El servidor
@@ -265,17 +309,20 @@ export function ClienteNuevo() {
     }
     setGuardando(true)
     try {
-      const id = uuidv4()
+      const id = prospecto?.clienteId ?? uuidv4()
       // Misma regla que el servidor (POST /api/vendedor/clientes): el cliente nace asignado al
       // viajante elegido (o al primero) y la lista la impone ese viajante; si no impone, la elige
       // quien tiene permiso. Va resuelta en el payload para que el precio sin señal sea el mismo.
       const viajante = vendedores.find((v) => v.id === f.vendedor_id) ?? vendedores[0] ?? null
-      const lista_precio_id = viajante?.lista_precio_id || (cat?.puede_cambiar_lista ? f.lista_precio_id || null : null)
+      const lista_precio_id = viajante?.lista_precio_id || (cat?.puede_cambiar_lista ? ficha.lista_precio_id || null : null)
+      const listasYMetodos: Record<string, string | null> = {}
+      for (const k of CAMPOS_FICHA_LISTAS) listasYMetodos[k] = ficha[k] || null
       const nombre = f.nombre.trim() || f.razon_social.trim()
       await encolar(
         "cliente.crear",
         {
           ...f,
+          ...listasYMetodos,
           id,
           nombre,
           localidad: localidades.find((l) => l.id === f.localidad_id)?.nombre || null,
@@ -284,6 +331,10 @@ export function ClienteNuevo() {
         },
         `Cliente nuevo: ${nombre}`,
       )
+      if (prospecto) {
+        await prospecto.alGuardar(nombre)
+        return
+      }
       navigate(irAPedido ? `/pedido/nuevo/${id}` : `/clientes/${id}`, { replace: true })
     } catch {
       mostrar("No se pudo guardar el cliente en el equipo.", "err")
@@ -293,9 +344,17 @@ export function ClienteNuevo() {
 
   return (
     <Pantalla
-      titulo="➕ Nuevo cliente"
+      titulo={prospecto ? "Datos del cliente nuevo" : "➕ Nuevo cliente"}
       pie={
         <div className="border-t border-gray-200 bg-white p-4">
+          {prospecto ? (
+            <div className="mx-auto max-w-2xl">
+              <button onClick={() => void guardar(true)} disabled={guardando} className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white disabled:bg-gray-300">
+                {guardando ? "Guardando..." : "Guardar cliente y confirmar pedido"}
+              </button>
+              <p className="mt-1 text-center text-xs text-gray-500">El pedido va a revisión de la oficina antes de prepararse.</p>
+            </div>
+          ) : (
           <div className="mx-auto grid max-w-2xl grid-cols-2 gap-2">
             <button onClick={() => void guardar(false)} disabled={guardando} className="rounded-xl border-2 border-emerald-600 bg-white py-4 font-bold text-emerald-700 disabled:opacity-50">
               Guardar
@@ -304,12 +363,13 @@ export function ClienteNuevo() {
               {guardando ? "Guardando..." : "Guardar y levantar pedido 🛒"}
             </button>
           </div>
+          )}
         </div>
       }
     >
       {toast}
       <div className="mx-auto w-full max-w-2xl space-y-3 p-4">
-        <p className="text-sm text-gray-500">Cargalo y arrancá el pedido al toque</p>
+        <p className="text-sm text-gray-500">{prospecto ? "Último paso: los datos del cliente (los marcados con * son obligatorios)." : "Cargalo y arrancá el pedido al toque"}</p>
         {!cat && (
           <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
             Todavía no se descargaron las listas de opciones (condiciones, localidades) en este equipo. Conectate una vez para tenerlas sin señal.
@@ -325,10 +385,10 @@ export function ClienteNuevo() {
             <input value={f.nombre} onChange={set("nombre")} className={inputCls} placeholder="Cómo lo conocés (opcional)" />
           </Campo>
           <div className="grid grid-cols-2 gap-2">
-            <Campo label="CUIT">
+            <Campo label={prospecto ? "CUIT *" : "CUIT"}>
               <input value={f.cuit} onChange={set("cuit")} inputMode="numeric" className={inputCls} placeholder="20-12345678-9" />
             </Campo>
-            <Campo label="Condición IVA">
+            <Campo label={prospecto ? "Condición IVA *" : "Condición IVA"}>
               <select value={f.condicion_iva} onChange={set("condicion_iva")} className={inputCls}>
                 <option value="">Elegir...</option>
                 {(cat?.condiciones_iva ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
@@ -339,29 +399,15 @@ export function ClienteNuevo() {
 
         <section className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Comercial</p>
+          <EditorListaMetodo
+            valor={ficha}
+            onCambiar={setFicha}
+            listas={cat?.listas_precio ?? []}
+            puedeLista={!!cat?.puede_cambiar_lista}
+            listaImpuesta={listaImpuesta}
+          />
           <div className="grid grid-cols-2 gap-2">
-            <Campo label="Método facturación">
-              <select value={f.metodo_facturacion} onChange={set("metodo_facturacion")} className={inputCls}>
-                {(cat?.metodos_facturacion ?? ["Factura"]).map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </Campo>
-            {listaImpuesta ? (
-              <Campo label="Lista de precios">
-                <div className={`${inputCls} bg-gray-50 text-gray-600`}>
-                  {listaImpuesta} <span className="text-xs text-gray-400">(por viajante)</span>
-                </div>
-              </Campo>
-            ) : cat?.puede_cambiar_lista ? (
-              <Campo label="Lista de precios">
-                <select value={f.lista_precio_id} onChange={set("lista_precio_id")} className={inputCls}>
-                  <option value="">Estándar</option>
-                  {cat.listas_precio.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-                </select>
-              </Campo>
-            ) : null}
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Campo label="Condición de pago">
+            <Campo label={prospecto ? "Condición de pago *" : "Condición de pago"}>
               <select value={f.condicion_pago} onChange={set("condicion_pago")} className={inputCls}>
                 <option value="">Elegir...</option>
                 {(cat?.condiciones_pago ?? []).map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
@@ -390,10 +436,10 @@ export function ClienteNuevo() {
 
         <section className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Ubicación y contacto</p>
-          <Campo label="Dirección">
+          <Campo label={prospecto ? "Dirección *" : "Dirección"}>
             <input value={f.direccion} onChange={set("direccion")} className={inputCls} placeholder="Calle y número" />
           </Campo>
-          <Campo label="Localidad">
+          <Campo label={prospecto ? "Localidad *" : "Localidad"}>
             <div className="flex gap-2">
               <select value={f.localidad_id} onChange={set("localidad_id")} className={inputCls}>
                 <option value="">Elegir localidad...</option>
@@ -409,7 +455,7 @@ export function ClienteNuevo() {
             </div>
           </Campo>
           <div className="grid grid-cols-2 gap-2">
-            <Campo label="Teléfono">
+            <Campo label={prospecto ? "Teléfono *" : "Teléfono"}>
               <input value={f.telefono} onChange={set("telefono")} type="tel" className={inputCls} />
             </Campo>
             <Campo label="Email">
@@ -434,10 +480,16 @@ export function ClienteNuevo() {
         abierta={hojaDuplicado.abierto && !!duplicado}
         onCerrar={hojaDuplicado.cerrar}
         titulo="Cliente existente"
-        confirmar="Abrir la ficha"
-        onConfirmar={() => duplicado && navigate(`/clientes/${duplicado.id}`, { replace: true })}
+        confirmar={prospecto ? "Pasar el pedido a ese cliente" : "Abrir la ficha"}
+        onConfirmar={() => {
+          if (!duplicado) return
+          if (prospecto) void prospecto.pasarA(duplicado.id)
+          else navigate(`/clientes/${duplicado.id}`, { replace: true })
+        }}
       >
-        Ya existe un cliente con ese CUIT: {duplicado?.nombre}. ¿Abrir la ficha de ese cliente?
+        {prospecto
+          ? <>Ya tenés un cliente con ese CUIT: {duplicado?.nombre}. Los artículos que cargaste pasan a un pedido de ese cliente (con su lista y su facturación).</>
+          : <>Ya existe un cliente con ese CUIT: {duplicado?.nombre}. ¿Abrir la ficha de ese cliente?</>}
       </HojaConfirmar>
     </Pantalla>
   )

@@ -412,6 +412,7 @@ export function useEnterCierraTeclado() {
 
 export const ESTADO_BADGE: Record<string, string> = {
   // Chips Megasur: fondo tono 50 + texto tono 700/800 + punto de color
+  en_revision: "bg-lavanda-100 text-lavanda-800",
   en_venta: "bg-neutro-100 text-neutro-700",
   pendiente: "bg-alerta-50 text-alerta-700",
   impreso: "bg-azul-50 text-azul-700",
@@ -422,7 +423,7 @@ export const ESTADO_BADGE: Record<string, string> = {
   entregado: "bg-exito-50 text-exito-700",
   cancelado: "bg-error-50 text-error-700",
 }
-const ESTADO_TEXTO: Record<string, string> = { en_venta: "EN VENTA", pendiente: "PENDIENTE", impreso: "IMPRESO", en_preparacion: "EN PREPARACIÓN", en_viaje: "EN VIAJE" }
+const ESTADO_TEXTO: Record<string, string> = { en_revision: "EN REVISIÓN", en_venta: "EN VENTA", pendiente: "PENDIENTE", impreso: "IMPRESO", en_preparacion: "EN PREPARACIÓN", en_viaje: "EN VIAJE" }
 export const estadoTexto = (e: string) => ESTADO_TEXTO[e] || e.toUpperCase()
 export function BadgeEstado({ estado }: { estado: string }) {
   return (

@@ -8,8 +8,9 @@ import { buscarPorCodigo, eansDe, matchExacto } from "../../datos/busqueda"
 import { useCatalogosFicha, useEncolar, usePedidos } from "../../datos/hooks"
 import { formatCurrency, useFotoZoom, useToast, ZoomFoto } from "../../ui"
 import { ProveedorPedido, usePedidoEnCurso, useVer } from "./contexto"
-import { metodoLabel, useSegmentosCliente } from "../../datos/segmentos"
+import { clienteListasDe, fichaListasDe, metodoLabel, useSegmentosCliente } from "../../datos/segmentos"
 import { CuadroSegmentos } from "../segmentos-ui"
+import { PanelProspecto } from "./VentaNueva"
 
 // Marco de TODAS las pantallas del pedido en curso (/pedido/nuevo/:clienteId/*): el
 // borrador, el motor de precios y las hojas que en la web se abrían desde cualquier
@@ -259,7 +260,13 @@ export const fmtSeg = (s: BonifSeg | null | undefined) => {
   return `L/B ${v[0]}% · P0 ${v[1]}% · P+ ${v[2]}%`
 }
 
+/** Hoja 👤: en la venta a cliente nuevo elige SU lista y facturación; si no, las condiciones del pedido. */
 function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
+  const p = usePedidoEnCurso()
+  return p.prospecto ? <PanelProspecto onCerrar={onCerrar} /> : <PanelClienteCartera onCerrar={onCerrar} />
+}
+
+function PanelClienteCartera({ onCerrar }: { onCerrar: () => void }) {
   const p = usePedidoEnCurso()
   const navigate = useNavigate()
   const encolar = useEncolar()
@@ -284,8 +291,8 @@ function PanelCliente({ onCerrar }: { onCerrar: () => void }) {
     return init
   })
   const fichaLocal = useMemo(
-    () => (cliente?.sinEnviar ? { lista_precio_id: cliente.lista_precio_id, metodo_facturacion: cliente.metodo_facturacion } : null),
-    [cliente?.sinEnviar, cliente?.lista_precio_id, cliente?.metodo_facturacion],
+    () => (cliente?.sinEnviar ? clienteListasDe(fichaListasDe(cliente as unknown as Record<string, unknown>)) : null),
+    [cliente],
   )
   const puedeLista = !!catFicha?.puede_cambiar_lista
   // Ficha POR SEGMENTO (lo que se usa si no se elige nada para el pedido)

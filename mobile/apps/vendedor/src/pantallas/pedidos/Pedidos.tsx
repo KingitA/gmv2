@@ -14,6 +14,7 @@ import { BadgeEstado, fechaCorta, formatCurrency, Pantalla, SinEnviar } from "..
 
 const ESTADOS = [
   { key: "", label: "Todos" },
+  { key: "en_revision", label: "En revisión" },
   { key: "en_venta", label: "En venta" },
   { key: "pendiente", label: "Pendientes" },
   { key: "impreso", label: "Impresos" },

@@ -1,3 +1,4 @@
+import { clienteListasDe, fichaListasDe } from "../../datos/segmentos"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"
 import { useNoEnviados, useParamEstado } from "@gm/core"
@@ -389,8 +390,8 @@ export function DevolucionCatalogo() {
   const [borrador, setBorrador] = useBorrador(id)
   // Cliente dado de alta acá (todavía sin insumos de precio replicados): nace con su lista y método
   const fichaLocal = useMemo(
-    () => (cliente?.sinEnviar ? { lista_precio_id: cliente.lista_precio_id, metodo_facturacion: cliente.metodo_facturacion } : null),
-    [cliente?.sinEnviar, cliente?.lista_precio_id, cliente?.metodo_facturacion],
+    () => (cliente?.sinEnviar ? clienteListasDe(fichaListasDe(cliente as unknown as Record<string, unknown>)) : null),
+    [cliente],
   )
   const motor = useMotorCliente(id, COND_VACIA, fichaLocal)
 

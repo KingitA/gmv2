@@ -706,7 +706,7 @@ export async function createPedido(data: {
   mercaderia_bonificada?: MercaderiaBonificadaInput
   // "en_venta": el vendedor está armando el pedido en vivo (autoguardado);
   // pasa a "pendiente" al confirmar (confirmarPedidoVendedor).
-  estado_inicial?: "en_venta" | "pendiente"
+  estado_inicial?: "en_venta" | "pendiente" | "en_revision"
 }) {
   const supabase = await createClient()
 
@@ -851,7 +851,7 @@ export async function createPedido(data: {
       vendedor_id: clienteInfo.vendedor_id,
       fecha: captura?.fecha || todayArgentina(),
       ...(captura?.localId ? { movil_local_id: captura.localId } : {}),
-      estado: data.estado_inicial === "en_venta" ? "en_venta" : "pendiente",
+      estado: data.estado_inicial === "en_venta" || data.estado_inicial === "en_revision" ? data.estado_inicial : "pendiente",
       subtotal: total,
       descuento_general: 0,
       ...(limpiarCentinela(data.metodo_facturacion_pedido) ? { metodo_facturacion_pedido: limpiarCentinela(data.metodo_facturacion_pedido) } : {}),

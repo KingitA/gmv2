@@ -5,7 +5,8 @@ import { DS, SEGS, SEG_LABEL, type BonifSeg, type OpBonificaciones, type OpClien
 import { rechazosDe, useCatalogosFicha, useCliente, useCuenta, useEncolar } from "../../datos/hooks"
 import { AvisosBcra, HojaConfirmar, Pantalla, Rechazos, SinEnviar, formatCurrency, useAvisoEntrante, useToast } from "../../ui"
 import { HojaNuevaLocalidad, type LocalidadCreada } from "./ClienteNuevo"
-import { metodoLabel, useSegmentosCliente } from "../../datos/segmentos"
+import { CAMPOS_FICHA_LISTAS, clienteListasDe, fichaListasDe, useFichaListas, useSegmentosCliente, type FichaListas } from "../../datos/segmentos"
+import { EditorListaMetodo, fichaCompleta } from "./EditorListaMetodo"
 import { CuadroSegmentos } from "../segmentos-ui"
 
 // Port de app/vendedor/clientes/[id]/page.tsx. Lee la cuenta del cliente de la réplica
@@ -70,6 +71,8 @@ export function ClienteFicha() {
   const confEliminar = useOverlay("eliminar", "conf")
 
   const [form, setForm] = useState<Record<string, string> | null>(null)
+  // Lista y método (general o por segmento) que se editan; null = sin editar
+  const [fichaEdit, setFichaEdit] = useState<FichaListas | null>(null)
   // edición: { "viajante.limpieza_bazar": "10", ... }
   const [bonifEdit, setBonifEdit] = useState<Record<string, string> | null>(null)
   const [guardando, setGuardando] = useState(false)
@@ -88,9 +91,12 @@ export function ClienteFicha() {
   // Lista/método que de verdad se usan, por segmento (la ficha general sola engañaba: caso Freije 09/10)
   // (ficha local SOLO para un cliente dado de alta acá que todavía no llegó a la réplica de precios;
   // los demás esperan esa réplica: mostrar lo general mientras tanto era justamente el error)
-  const condSeg = useSegmentosCliente(id, {}, cliente && enCartera?.sinEnviar ? { lista_precio_id: cliente.lista_precio_id, metodo_facturacion: cliente.metodo_facturacion } : null)
-  // La ficha tiene lista/método PROPIOS por segmento: el general que se edita acá no los cambia
-  const segPropios = !!condSeg && !!cliente && condSeg.filas.some((f) => f.listaId !== (cliente.lista_precio_id || null) || metodoLabel(f.metodo) !== metodoLabel(cliente.metodo_facturacion || null))
+  const condSeg = useSegmentosCliente(id, {}, enCartera?.sinEnviar ? clienteListasDe(fichaListasDe(enCartera as unknown as Record<string, unknown>)) : null)
+  // Lista/método de la ficha como están en el sistema (réplica de precios); un alta hecha acá, del payload
+  const fichaReplica = useFichaListas(id)
+  const listasSinEnviar = ops.some((o) => o.tipo === "cliente.editar" && o.estado !== "enviado" && o.estado !== "rechazado" && (o.payload as OpClienteEditar)?.cliente_id === id
+    && Object.keys((o.payload as OpClienteEditar)?.cambios || {}).some((k) => (CAMPOS_FICHA_LISTAS as readonly string[]).includes(k)))
+  const fichaActual: FichaListas | null = fichaReplica ?? (enCartera?.sinEnviar ? fichaListasDe(enCartera as unknown as Record<string, unknown>) : null)
   const bonif = { viajante: (enCartera?.bonificaciones?.viajante ?? {}) as BonifSeg, mercaderia: (enCartera?.bonificaciones?.mercaderia ?? {}) as BonifSeg }
   // ¿El viajante actual del cliente impone la lista? → no se elige a mano
   const listaImpuesta = vendedores.find((v) => v.id === cliente?.vendedor_id)?.lista_nombre || null
@@ -105,8 +111,6 @@ export function ClienteFicha() {
     inicial.condicion_pago = c.condicion_pago || ""
     inicial.condicion_entrega = c.condicion_entrega || ""
     inicial.condicion_iva = c.condicion_iva || ""
-    inicial.metodo_facturacion = c.metodo_facturacion || ""
-    if (cat?.puede_cambiar_lista) inicial.lista_precio_id = c.lista_precio_id || ""
     return inicial
   }
   const bonifInicial = (): Record<string, string> => {
@@ -120,7 +124,7 @@ export function ClienteFicha() {
 
   // Se entró directo con el overlay abierto (recarga): armar el formulario con lo que se ve
   useEffect(() => {
-    if (edicion.abierto && !form && cliente) setForm(formInicial())
+    if (edicion.abierto && !form && cliente) { setForm(formInicial()); setFichaEdit(fichaActual) }
     if (edicionBonif.abierto && !bonifEdit && enCartera) setBonifEdit(bonifInicial())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edicion.abierto, edicionBonif.abierto, !!cliente, !!enCartera])
@@ -162,6 +166,7 @@ export function ClienteFicha() {
 
   const empezarEdicion = () => {
     setForm(formInicial())
+    setFichaEdit(fichaActual)
     edicion.abrir()
   }
 
@@ -184,6 +189,18 @@ export function ClienteFicha() {
       const antes = normal(actual[campo])
       const despues = normal(valor)
       if (antes !== despues) cambios[campo] = { antes, despues }
+    }
+    // Lista y método, general o por segmento (mismo compare-and-set, contra lo que había en la ficha)
+    if (fichaEdit && fichaActual) {
+      if (!fichaCompleta(fichaEdit)) {
+        mostrar("Completá lista y método de facturación de cada segmento.", "err")
+        return
+      }
+      for (const campo of CAMPOS_FICHA_LISTAS) {
+        const antes = normal(fichaActual[campo])
+        const despues = normal(fichaEdit[campo])
+        if (antes !== despues) cambios[campo] = { antes, despues }
+      }
     }
     if (!Object.keys(cambios).length) {
       edicion.cerrar()
@@ -416,7 +433,7 @@ export function ClienteFicha() {
                 {form.provincia && <p className="mt-1 text-xs text-gray-400">Provincia: {form.provincia} (se completa sola)</p>}
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div>
                 <div>
                   <label className="mb-1 block text-sm text-gray-500">Condición IVA</label>
                   <select value={form.condicion_iva || ""} onChange={(e) => setForm((prev) => ({ ...(prev || {}), condicion_iva: e.target.value }))} className="w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-gray-900">
@@ -424,32 +441,23 @@ export function ClienteFicha() {
                     {(cat?.condiciones_iva ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm text-gray-500">Método facturación</label>
-                  <select value={form.metodo_facturacion || ""} onChange={(e) => setForm((prev) => ({ ...(prev || {}), metodo_facturacion: e.target.value }))} className="w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-gray-900">
-                    <option value="">Sin definir</option>
-                    {(cat?.metodos_facturacion ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
               </div>
-              {segPropios && condSeg && (
-                <CuadroSegmentos
-                  resumen={condSeg}
-                  titulo="Este cliente va por segmento"
-                  nota="El método y la lista generales de arriba solo se usan en los segmentos que no tienen valor propio. Por segmento lo cambia la oficina desde el ERP; para un pedido puntual, elegilo en el pedido (👤)."
-                />
-              )}
+              <div className="rounded-xl border border-gray-200 p-3">
+                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.12em] text-gray-500">Lista y facturación</p>
+                {fichaEdit ? (
+                  <EditorListaMetodo
+                    valor={fichaEdit}
+                    onCambiar={setFichaEdit}
+                    listas={cat?.listas_precio ?? []}
+                    puedeLista={!!cat?.puede_cambiar_lista}
+                    listaImpuesta={listaImpuesta}
+                  />
+                ) : (
+                  <p className="text-sm text-gray-500">Se pueden cambiar cuando se descarguen los precios en este equipo.</p>
+                )}
+                <p className="mt-2 text-xs text-gray-400">Rige para los pedidos que tomes después de que el cambio llegue al sistema (con señal, enseguida).</p>
+              </div>
 
-              {cat?.puede_cambiar_lista && !listaImpuesta && (
-                <div>
-                  <label className="mb-1 block text-sm text-gray-500">Lista de precios</label>
-                  <select value={form.lista_precio_id || ""} onChange={(e) => setForm((prev) => ({ ...(prev || {}), lista_precio_id: e.target.value }))} className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900">
-                    <option value="">Sin lista (cálculo estándar)</option>
-                    {cat.listas_precio.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-                  </select>
-                  <p className="mt-1 text-xs text-gray-400">Cambiar la lista recalcula los precios de los próximos pedidos.</p>
-                </div>
-              )}
 
               <div>
                 <label className="mb-1 block text-sm text-gray-500">Condición de pago</label>
@@ -482,7 +490,12 @@ export function ClienteFicha() {
               <Dato label="CUIT" valor={cliente.cuit} />
               <Dato label="Condición IVA" valor={cliente.condicion_iva} />
               {condSeg ? (
-                <div className="py-1.5"><CuadroSegmentos resumen={condSeg} /></div>
+                <div className="py-1.5">
+                  <CuadroSegmentos
+                    resumen={condSeg}
+                    nota={listasSinEnviar ? "Hay un cambio de lista/facturación guardado en el equipo que todavía no llegó al sistema: rige desde que llegue." : undefined}
+                  />
+                </div>
               ) : (
                 // Sin la réplica de precios todavía: NO mostrar solo lo general (engaña si va por segmento)
                 <Dato label="Lista y facturación" valor="se ven al descargar los precios" />

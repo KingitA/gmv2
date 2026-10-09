@@ -231,7 +231,7 @@ const cuentas: DatasetDef = {
 /** Alcance: lo que el vendedor abre en la calle. El historial viejo se ve en la web. */
 export const DIAS_PEDIDOS = 90
 export const TOPE_PEDIDOS = 250
-const ESTADOS_VIVOS = ["en_venta", "pendiente", "impreso", "en_preparacion"]
+const ESTADOS_VIVOS = ["en_revision", "en_venta", "pendiente", "impreso", "en_preparacion"]
 
 export async function cargarPedidosVendedor(supabase: any, vendedorIds: string[], ids?: string[]): Promise<FilaReplica[]> {
   if (!vendedorIds.length) return []

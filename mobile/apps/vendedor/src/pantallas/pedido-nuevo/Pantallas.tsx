@@ -13,6 +13,7 @@ import { usePedidoEnCurso, useVer } from "./contexto"
 import { condParaServidor, fmtSeg } from "./Marco"
 import { mensajeFaltaListaMetodo } from "@gm/pricing"
 import { CuadroSegmentos, textoSegmentos } from "../segmentos-ui"
+import { BarraComparar, CeldasComparar } from "./VentaNueva"
 import { agruparEnArbol, BuscadorLocal, CatalogoArbol, claveSubcategoria, FilaArticulo, OrdenSelector, posicionSubcategorias } from "./piezas"
 
 type Filtro = "novedades" | "ofertas" | "habituales"
@@ -39,6 +40,7 @@ export function ElegirCliente() {
     <Pantalla titulo="Nuevo pedido — Elegir cliente" dataset={DS.clientes}>
       <div className="bg-slate-900 px-4 pb-3">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar cliente..." className="w-full rounded-xl bg-white px-4 py-3 text-lg text-gray-900 outline-none" />
+        <button onClick={() => navigate("/venta-nueva", { replace: true })} className="mt-2 min-h-11 w-full rounded-xl border border-white/30 bg-white/10 text-sm font-bold text-white">🆕 Cliente nuevo: vender primero, datos al final</button>
       </div>
       {!cargando && clientes.length === 0 ? (
         <SinDescargar que="tu cartera de clientes" />
@@ -99,6 +101,8 @@ function PantallaCatalogo({ titulo, subtitulo, children }: { titulo: string; sub
       {/* Por segmento siempre a la vista: qué lista y método lleva cada mercadería */}
       {seg?.detalle && <p className="truncate bg-slate-800 px-4 pb-1 text-xs font-bold text-white">{seg.detalle}</p>}
       {p.segmentos?.incompleto && <p className="bg-red-600 px-4 py-1.5 text-xs font-bold text-white">Falta lista o método en algún segmento: elegilo en 👤 antes de confirmar.</p>}
+      {/* Venta a cliente nuevo: columnas para comparar listas × método mientras se carga */}
+      <BarraComparar />
       {p.catalogoVacio ? <SinDescargar que="el catálogo" /> : <div className="mx-auto w-full max-w-2xl p-4 pb-28">{children}</div>}
     </Pantalla>
   )
@@ -110,8 +114,8 @@ function useFilaDe() {
   const { abrir } = useVer()
   const foto = useFotoZoom()
   return (a: Articulo) => (
+    <div key={a.id}>
     <FilaArticulo
-      key={a.id}
       a={a}
       precio={p.motor.precio(a.id)}
       enCarrito={p.enCarrito(a.id)}
@@ -121,6 +125,8 @@ function useFilaDe() {
       onActualizar={(u) => p.setCantidad(a.id, u)}
       onQuitar={() => p.quitar(a.id)}
     />
+    {p.prospecto && <CeldasComparar a={a} />}
+    </div>
   )
 }
 
@@ -407,6 +413,31 @@ export function CategoriaArticulos() {
 
 // ─── Carrito / confirmación (/…/carrito) ─────────────────────────────────────
 
+/** Operación de outbox del pedido en curso (Confirmar del carrito y cierre de la venta a cliente nuevo). */
+export function armarPedido(p: ReturnType<typeof usePedidoEnCurso>, rt: ReturnType<typeof useRuntime>): { tipo: "pedido.crear" | "pedido.editar"; payload: OpPedido; etiqueta: string } {
+  const b = p.borrador!
+  const cliente = p.cliente!
+  const payload: OpPedido = {
+    local_id: b.localId,
+    pedido_id: b.pedidoId,
+    cliente_id: p.clienteId,
+    items: p.lineas.map((l) => ({
+      articulo_id: l.articuloId, cantidad: l.cantidad, precio: l.precio!.precio, detalle_id: l.detalleId ?? null, ...(l.fijo ? { precio_fijo: true } : {}),
+      precio_neto: l.precio!.precioNeto, descripcion: l.art.descripcion, sku: l.art.sku, unidades_por_bulto: l.art.unidades_por_bulto, imagen_url: l.art.imagen_url,
+    })),
+    cond: condParaServidor(p.cond),
+    observaciones: b.obs.trim() || null,
+    // Vigencia de los precios que el vendedor tuvo a la vista (MOBILE.md → Vendedor → precios)
+    precios_al: preciosAl(rt),
+    vista: { cliente_nombre: cliente.nombre, total: Math.round(p.total * 100) / 100, numero_pedido: b.numeroPedido, estado: b.estadoPedido },
+  }
+  return {
+    tipo: b.pedidoId ? "pedido.editar" : "pedido.crear",
+    payload,
+    etiqueta: `${b.pedidoId ? "Cambios al pedido" : "Pedido"} · ${cliente.nombre} · ${formatCurrency(p.total)}`,
+  }
+}
+
 export function Carrito() {
   const p = usePedidoEnCurso()
   const rt = useRuntime()
@@ -430,22 +461,9 @@ export function Carrito() {
     if (!b || !p.cliente || !p.lineas.length || sinPrecio.length || faltaNuevo || confirmando) return
     setConfirmando(true)
     try {
-      const payload: OpPedido = {
-        local_id: b.localId,
-        pedido_id: b.pedidoId,
-        cliente_id: p.clienteId,
-        items: p.lineas.map((l) => ({
-          articulo_id: l.articuloId, cantidad: l.cantidad, precio: l.precio!.precio, detalle_id: l.detalleId ?? null, ...(l.fijo ? { precio_fijo: true } : {}),
-          precio_neto: l.precio!.precioNeto, descripcion: l.art.descripcion, sku: l.art.sku, unidades_por_bulto: l.art.unidades_por_bulto, imagen_url: l.art.imagen_url,
-        })),
-        cond: condParaServidor(p.cond),
-        observaciones: b.obs.trim() || null,
-        // Vigencia de los precios que el vendedor tuvo a la vista (MOBILE.md → Vendedor → precios)
-        precios_al: preciosAl(rt),
-        vista: { cliente_nombre: p.cliente.nombre, total: Math.round(p.total * 100) / 100, numero_pedido: b.numeroPedido, estado: b.estadoPedido },
-      }
+      const { tipo, payload, etiqueta } = armarPedido(p, rt)
       // Durable ANTES de soltar el borrador: si la app muere acá, el pedido ya está en el outbox
-      await encolar(b.pedidoId ? "pedido.editar" : "pedido.crear", payload, `${b.pedidoId ? "Cambios al pedido" : "Pedido"} · ${p.cliente.nombre} · ${formatCurrency(p.total)}`)
+      await encolar(tipo, payload, etiqueta)
       await p.descartar()
       navigate(`/pedido/nuevo/${p.clienteId}/listo?${b.pedidoId ? "editado=1&" : ""}n=${encodeURIComponent(b.numeroPedido || "")}`, { replace: true })
     } finally {
@@ -471,8 +489,13 @@ export function Carrito() {
             {vencidos && <p className="text-xs font-bold text-red-700">Precios sin actualizar hace más de 24 hs: el total es orientativo. El pedido se factura al precio del sistema cuando ingrese.</p>}
             {sinPrecio.length > 0 && <p className="text-sm font-medium text-red-600">Hay {sinPrecio.length} artículo(s) sin precio en este equipo: quitalos para poder confirmar.</p>}
             {faltaNuevo && <p className="text-sm font-medium text-red-600">{mensajeFaltaListaMetodo(faltaNuevo)}</p>}
-            <button onClick={() => void confirmar()} disabled={confirmando || !p.lineas.length || sinPrecio.length > 0 || !!faltaNuevo} className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white disabled:bg-gray-300">
-              {confirmando ? "Guardando..." : editandoExistente ? "Guardar cambios" : "Confirmar pedido"}
+            <button
+              // Venta a cliente nuevo: antes de confirmar, SÍ O SÍ los datos del cliente
+              onClick={() => (p.prospecto ? navigate(`/pedido/nuevo/${p.clienteId}/cliente`) : void confirmar())}
+              disabled={confirmando || !p.lineas.length || sinPrecio.length > 0 || !!faltaNuevo}
+              className="w-full rounded-xl bg-emerald-600 py-4 text-lg font-bold text-white disabled:bg-gray-300"
+            >
+              {confirmando ? "Guardando..." : p.prospecto ? "Siguiente: datos del cliente →" : editandoExistente ? "Guardar cambios" : "Confirmar pedido"}
             </button>
           </div>
         </div>
@@ -508,14 +531,18 @@ export function Carrito() {
         {p.lineas.length > 0 && (
           <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
             <div>
-              <label className="mb-1 block text-sm text-gray-500">Método de facturación</label>
+{p.prospecto ? (
+                <p className="text-sm font-bold text-gray-700">Lista y facturación del cliente nuevo <span className="font-normal text-gray-400">(se cambian en 👤)</span></p>
+              ) : (<>
+                            <label className="mb-1 block text-sm text-gray-500">Método de facturación</label>
               <select value={p.cond.metodo} onChange={(e) => p.setCond({ ...p.cond, metodo: e.target.value })} className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3">
                 <option value="">Como la ficha (por segmento, ver abajo)</option>
                 <option value="Factura">Factura</option>
                 <option value="Final">Final (Mixto)</option>
                 <option value="Presupuesto">Presupuesto</option>
               </select>
-              <p className="mt-1 text-xs text-gray-400">Elegir un método acá lo aplica a TODO el pedido (todos los segmentos) y recalcula los precios al instante.</p>
+              </>)}
+              {!p.prospecto && <p className="mt-1 text-xs text-gray-400">Elegir un método acá lo aplica a TODO el pedido (todos los segmentos) y recalcula los precios al instante.</p>}
               {p.segmentos && <div className="mt-2"><CuadroSegmentos resumen={p.segmentos} titulo="Cómo se factura este pedido" /></div>}
               {(p.cond.lista || (bonif && (Object.keys(bonif.viajante || {}).length || Object.keys(bonif.mercaderia || {}).length))) ? (
                 <p className="mt-2 text-xs font-medium text-amber-700">
@@ -562,6 +589,7 @@ export function PedidoListo() {
   const { pendientes } = useContadoresOutbox()
   const [editado] = useParamEstado("editado")
   const [n] = useParamEstado("n")
+  const [revision] = useParamEstado("revision")
   return (
     <Pantalla titulo={editado ? "Cambios guardados" : "Pedido confirmado"} atras={false}>
       <div className="flex flex-1 items-center justify-center p-6">
@@ -569,6 +597,7 @@ export function PedidoListo() {
           <p className="text-6xl">✅</p>
           <h1 className="text-2xl font-bold text-gray-900">{editado ? "Cambios guardados" : "Pedido confirmado"}</h1>
           {n ? <p className="text-lg text-gray-500">N° {n}</p> : null}
+          {revision ? <p className="rounded-xl bg-lavanda-50 px-3 py-2 text-sm font-bold text-lavanda-700">Cliente nuevo: el pedido pasa por revisión de la oficina antes de prepararse.</p> : null}
           <p className="text-sm text-gray-500">
             {pendientes === 0
               ? "Ya está en la oficina."

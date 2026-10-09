@@ -212,7 +212,8 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   const sesion = await sesionVendedor(ctx)
 
   const { data: cliente } = await ctx.supabase.from("clientes").select("id, nombre, activo, vendedor_id").eq("id", p.cliente_id).maybeSingle()
-  if (!cliente) throw new RechazoNegocio("El cliente ya no existe.")
+  // (Cliente dado de alta en la calle cuya alta se rechazó, p. ej. CUIT repetido: el pedido no tiene a quién ir)
+  if (!cliente) throw new RechazoNegocio("El cliente de este pedido no existe en el sistema (si lo diste de alta acá, revisá si el alta fue rechazada). El pedido no se cargó.")
   if (cliente.activo === false) throw new RechazoNegocio(`${cliente.nombre} fue dado de baja: el pedido no se puede tomar.`)
   if (!ctx.sesion.roles.includes("admin") && !sesion.vendedorIds.includes(cliente.vendedor_id)) {
     throw new RechazoNegocio(`${cliente.nombre} ya no está asignado a vos: el pedido no se puede tomar.`)
@@ -292,6 +293,20 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   }
 
   const creado = !pedidoId
+  // Revisión de oficina (decisión del dueño, 09/10/2026): el PRIMER pedido de un cliente
+  // (en la práctica, el cliente que el vendedor dio de alta en la calle) nace "en_revision":
+  // depósito no lo ve hasta que la oficina revisa cliente y pedido y lo pasa a "pendiente".
+  let estadoInicial: "pendiente" | "en_revision" = "pendiente"
+  if (creado) {
+    const { count, error: eCount } = await ctx.admin
+      .from("pedidos")
+      .select("id", { count: "exact", head: true })
+      .eq("cliente_id", p.cliente_id)
+      .is("eliminado_at", null)
+      .neq("estado", "eliminado")
+    if (eCount) throw new Error(`pedidos previos del cliente: ${eCount.message}`)
+    if (!count) estadoInicial = "en_revision"
+  }
   const resultado = await conCaptura(captura, async () => {
    try {
     if (!pedidoId) {
@@ -299,7 +314,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
         cliente_id: p.cliente_id,
         items: p.items.map((i) => ({ producto_id: i.articulo_id, cantidad: Number(i.cantidad), precio_unitario: 0, descuento: 0 })),
         observaciones: p.observaciones || undefined,
-        estado_inicial: "pendiente",
+        estado_inicial: estadoInicial,
         ...overrides,
       })
       pedidoId = pedido.id as string
@@ -343,6 +358,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     numero_pedido: resultado.numero_pedido,
     total: resultado.total,
     creado,
+    ...(creado ? { estado: estadoInicial } : {}),
     precios_garantizados: garantizada,
     precios_verificados: verificacion ? verificacion.ok : null,
     replica: await parches(
