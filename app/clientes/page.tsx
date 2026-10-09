@@ -60,9 +60,9 @@ function leerGuardado(): { q?: string; filtros?: Filtros; orden?: { col: string;
   try { return JSON.parse(sessionStorage.getItem(CLAVE_GUARDADO) || "{}") || {} } catch { return {} }
 }
 const ENTREGA: Record<string, string> = { entregamos_nosotros: "Entregamos nosotros", retira_mostrador: "Retira en mostrador", transporte: "Transporte" }
-const FACETAS_CLIENTES = ["localidad", "zona", "viajante", "nivel", "iva", "pago", "facturacion", "lista", "canal", "entrega"]
+const FACETAS_CLIENTES = ["tiene_codigo", "localidad", "zona", "viajante", "nivel", "iva", "pago", "facturacion", "lista", "canal", "entrega"]
 const TITULOS: Record<string, string> = {
-  codigo: "Código", nombre: "Nombre", direccion: "Dirección", localidad: "Localidad", zona: "Zona", viajante: "Viajante",
+  codigo: "Código", tiene_codigo: "Código", nombre: "Nombre", direccion: "Dirección", localidad: "Localidad", zona: "Zona", viajante: "Viajante",
   puntaje: "Puntaje", nivel: "Nivel", iva: "Condición IVA", pago: "Condición de pago", facturacion: "Facturación",
   lista: "Lista de precios", canal: "Canal", entrega: "Entrega",
 }
@@ -237,6 +237,7 @@ export default function ClientesPage() {
   const nombreLista = useMemo(() => new Map(listasPrecio.map((l: any) => [l.id, l.nombre])), [listasPrecio])
   const defs = useMemo<DefColumna<Cliente>[]>(() => [
     { id: "codigo", valor: (c) => c.codigo_cliente, numero: (c) => (c.codigo_cliente && /^\d+$/.test(c.codigo_cliente) ? Number(c.codigo_cliente) : null) },
+    { id: "tiene_codigo", valor: (c) => (c.codigo_cliente?.trim() ? "Con código" : "Sin código") },
     { id: "nombre", valor: (c) => c.nombre || c.nombre_razon_social },
     { id: "direccion", valor: (c) => c.direccion },
     { id: "localidad", valor: (c) => c.localidades?.nombre || c.localidad },
@@ -384,6 +385,7 @@ export default function ClientesPage() {
                   </button>
                 ))}
               </div>
+              {menu("tiene_codigo", "Con / sin código", "valores", "Código")}
               {menu("iva", "Condición IVA", "valores", "Condición IVA")}
               {menu("pago", "Condición de pago", "valores", "Pago")}
               {menu("facturacion", "Facturación", "valores", "Facturación")}
@@ -458,11 +460,11 @@ export default function ClientesPage() {
                         </TableCell>
                         <TableCell>
                           <span
-                            className={`px-3 py-1 rounded-full text-xs font-semibold ${cliente.nivel_puntaje === "Premium"
+                            className={`px-3 py-1 rounded-full text-xs font-semibold ${cliente.nivel_puntaje?.toLowerCase() === "premium"
                               ? "bg-green-100 text-green-800"
-                              : cliente.nivel_puntaje === "Regular"
+                              : cliente.nivel_puntaje?.toLowerCase() === "regular"
                                 ? "bg-blue-100 text-blue-800"
-                                : cliente.nivel_puntaje === "Riesgo"
+                                : cliente.nivel_puntaje?.toLowerCase() === "riesgo"
                                   ? "bg-yellow-100 text-yellow-800"
                                   : "bg-red-100 text-red-800"
                               }`}

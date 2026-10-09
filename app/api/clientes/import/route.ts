@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import * as XLSX from "xlsx"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuth } from '@/lib/auth'
+import { normalizarCondicionIva } from "@/lib/clientes/normalizar"
 
 export async function POST(req: NextRequest) {
     const auth = await requireAuth()
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
             if (headers.includes("provincia")) clienteData.provincia = getHeaderVal("provincia")
             if (headers.includes("telefono")) clienteData.telefono = getHeaderVal("telefono")
             if (headers.includes("mail")) clienteData.mail = getHeaderVal("mail")
-            if (headers.includes("condicion_iva")) clienteData.condicion_iva = getHeaderVal("condicion_iva")
+            if (headers.includes("condicion_iva")) clienteData.condicion_iva = normalizarCondicionIva(getHeaderVal("condicion_iva"))
             if (headers.includes("metodo_facturacion")) clienteData.metodo_facturacion = getHeaderVal("metodo_facturacion")
             if (headers.includes("condicion_pago")) clienteData.condicion_pago = getHeaderVal("condicion_pago")
             if (headers.includes("tipo_canal")) clienteData.tipo_canal = getHeaderVal("tipo_canal")

@@ -53,7 +53,9 @@ export async function GET() {
         { key: "perf0", label: "Perfumería 0" },
         { key: "perf_plus", label: "Perfumería plus" },
       ],
-      condiciones_iva: ["Responsable Inscripto", "Monotributista", "Exento", "Consumidor Final"],
+      // Mismos valores que la ficha web (lib/clientes/normalizar.ts). "Monotributista"
+      // no lo reconocía determinarTipoFactura() y el cliente quedaba sin tipo de factura.
+      condiciones_iva: ["Responsable Inscripto", "Monotributo", "Sujeto Exento", "Consumidor Final"],
       metodos_facturacion: ["Factura", "Final", "Presupuesto"],
       puede_cambiar_lista: session.puedeCambiarLista,
     })

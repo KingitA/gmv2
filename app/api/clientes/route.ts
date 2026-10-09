@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
 import { requireAuth } from '@/lib/auth'
+import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -128,14 +129,14 @@ export async function POST(request: NextRequest) {
         localidad_id,
         telefono,
         mail,
-        condicion_iva,
+        condicion_iva: normalizarCondicionIva(condicion_iva),
         vendedor_id,
         metodo_facturacion,
         condicion_pago,
         tipo_canal,
         activo: true,
         puntaje: 50, // Puntaje inicial
-        nivel_puntaje: "REGULAR",
+        nivel_puntaje: NIVEL_INICIAL,
         retira_en_deposito: false,
       })
       .select()

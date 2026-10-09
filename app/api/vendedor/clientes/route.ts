@@ -4,6 +4,7 @@ import { esUuid } from "@/lib/mobile/uuid"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { sanitizarOr } from "@/lib/search/hybrid"
+import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -152,7 +153,7 @@ export async function POST(request: Request) {
         razon_social: razon_social?.trim() || null,
         nombre_razon_social: razon_social?.trim() || nombreFinal,
         cuit: cuitLimpio,
-        condicion_iva: condicion_iva || null,
+        condicion_iva: normalizarCondicionIva(condicion_iva),
         metodo_facturacion: metodo_facturacion || null,
         condicion_pago: condicion_pago || null,
         condicion_entrega: condicion_entrega || null,
@@ -167,7 +168,7 @@ export async function POST(request: Request) {
         vendedor_id: vendedorId,
         activo: true,
         puntaje: 50,
-        nivel_puntaje: "REGULAR",
+        nivel_puntaje: NIVEL_INICIAL,
         retira_en_deposito: false,
         actualizado_por: session.user.id,
         actualizado_at: new Date().toISOString(),
