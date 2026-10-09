@@ -18,6 +18,7 @@ export const MENSAJES = {
   ],
   comprobantes: ['Calculando importes…', 'Aplicando IVA y percepciones…', 'Numerando comprobantes…', 'Generando el PDF…', 'Ya casi está…'],
   viajes: ['Buscando viajes…', 'Ubicando zonas y choferes…', 'Contando pedidos y bultos…', 'Armando el calendario…'],
+  fichaCliente: ['Buscando el cliente…', 'Leyendo listas y descuentos…', 'Revisando su cuenta corriente…', 'Trayendo sus últimos pedidos…', 'Ya casi está…'],
   vencimientos: ['Buscando vencimientos…', 'Sumando lo que sale por día…', 'Revisando cheques y transferencias…', 'Armando el calendario…'],
 } as const
 

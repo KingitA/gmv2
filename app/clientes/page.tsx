@@ -7,15 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet"
-import { Label } from "@/components/ui/label"
 import { Plus, Pencil, Trash2, ArrowLeft, ShoppingBag, Truck, FileText, Search, X, ExternalLink } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { formatDateAR } from "@/lib/utils"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ImportClientesDialog, clientesFieldLabel } from "@/components/clientes/ImportClientesDialog"
 import { HistorialImportacionesDialog } from "@/components/import/HistorialImportacionesDialog"
 import { History } from "lucide-react"
@@ -71,44 +68,12 @@ export default function ClientesPage() {
   const [sheetBonifs, setSheetBonifs] = useState<any[]>([])
   const [sheetCC, setSheetCC] = useState<number | null>(null)
   const [sheetPedidos, setSheetPedidos] = useState<any[]>([])
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isHistorialOpen, setIsHistorialOpen] = useState(false)
-  const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   // Motor de búsqueda unificado: el endpoint decide qué matchea (ids), filtramos
   // el array ya cargado por esos ids (no cambia la forma de la tabla).
   const [searchIds, setSearchIds] = useState<Set<string> | null>(null)
-  const [bonificaciones, setBonificaciones] = useState<any[]>([])
-  const [formData, setFormData] = useState({
-    codigo_cliente: "",
-    nombre_razon_social: "",
-    direccion: "",
-    cuit: "",
-    condicion_iva: "Consumidor Final",
-    metodo_facturacion: "Factura",
-    localidad_id: "",
-    localidad: "",
-    provincia: "",
-    telefono: "",
-    mail: "",
-    condicion_pago: "Efectivo",
-    nro_iibb: "",
-    exento_iibb: false,
-    exento_iva: false,
-    percepcion_iibb: 0,
-    tipo_canal: "Minorista",
-    vendedor_id: "",
-    condicion_entrega: "entregamos_nosotros",
-    lista_precio_id: "",
-    lista_limpieza_id: "",
-    metodo_limpieza: "",
-    lista_perf0_id: "",
-    metodo_perf0: "",
-    lista_perf_plus_id: "",
-    metodo_perf_plus: "",
-  })
-
   // Hasta que llega la primera lectura se muestra "trabajando" (antes decía
   // "No hay clientes registrados" unos segundos y confundía).
   const [cargandoClientes, setCargandoClientes] = useState(true)
@@ -190,58 +155,6 @@ export default function ClientesPage() {
     setListasPrecio(data || [])
   }
 
-  async function loadBonificaciones(clienteId: string) {
-    const supabase = createClient()
-    const { data } = await supabase.from("bonificaciones").select("*, proveedores(nombre)").eq("cliente_id", clienteId).order("created_at")
-    setBonificaciones(data || [])
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const supabase = createClient()
-
-    const dataToSave = {
-      ...formData,
-      nombre: formData.nombre_razon_social,
-      razon_social: formData.nombre_razon_social,
-      vendedor_id: formData.vendedor_id && formData.vendedor_id !== "none" ? formData.vendedor_id : null,
-      localidad_id: formData.localidad_id || null,
-      lista_precio_id: formData.lista_precio_id && formData.lista_precio_id !== "none" ? formData.lista_precio_id : null,
-      lista_limpieza_id: formData.lista_limpieza_id || null,
-      metodo_limpieza: formData.metodo_limpieza || null,
-      lista_perf0_id: formData.lista_perf0_id || null,
-      metodo_perf0: formData.metodo_perf0 || null,
-      lista_perf_plus_id: formData.lista_perf_plus_id || null,
-      metodo_perf_plus: formData.metodo_perf_plus || null,
-    }
-
-    if (editingCliente) {
-      const { error } = await supabase.from("clientes").update(dataToSave).eq("id", editingCliente.id)
-
-      if (error) {
-        console.error("[v0] Error updating cliente:", error)
-        alert(`Error al actualizar: ${error.message}`)
-        return
-      }
-      fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id: editingCliente.id }) }).catch(() => {})
-      // Los pedidos ya tomados NO se re-precian: su precio se cerró al tomarlos.
-      // La ficha nueva rige desde el próximo pedido (Repreciar, en el pedido).
-    } else {
-      const { data: newCliente, error } = await supabase.from("clientes").insert(dataToSave).select("id").single()
-
-      if (error) {
-        console.error("[v0] Error creating cliente:", error)
-        alert(`Error al crear: ${error.message}`)
-        return
-      }
-      if (newCliente?.id) fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id: newCliente.id }) }).catch(() => {})
-    }
-
-    setIsDialogOpen(false)
-    resetForm()
-    loadClientes()
-  }
-
   async function handleDelete(id: string) {
     if (!confirm("¿Está seguro de eliminar este cliente?")) return
 
@@ -255,37 +168,6 @@ export default function ClientesPage() {
     }
 
     loadClientes()
-  }
-
-  function resetForm() {
-    setFormData({
-      codigo_cliente: "",
-      nombre_razon_social: "",
-      direccion: "",
-      cuit: "",
-      condicion_iva: "Consumidor Final",
-      metodo_facturacion: "Factura",
-      localidad_id: "",
-      provincia: "",
-      telefono: "",
-      mail: "",
-      condicion_pago: "Efectivo",
-      nro_iibb: "",
-      exento_iibb: false,
-      exento_iva: false,
-      percepcion_iibb: 0,
-      tipo_canal: "Minorista",
-      vendedor_id: "",
-      condicion_entrega: "entregamos_nosotros",
-      lista_precio_id: "",
-        lista_limpieza_id: "",
-      metodo_limpieza: "",
-      lista_perf0_id: "",
-      metodo_perf0: "",
-      lista_perf_plus_id: "",
-      metodo_perf_plus: "",
-    })
-    setEditingCliente(null)
   }
 
   async function openClienteSheet(cliente: Cliente) {
@@ -306,57 +188,10 @@ export default function ClientesPage() {
     setSheetPedidos(pedidosRes.data || [])
   }
 
-  function openEditDialog(cliente: Cliente) {
-    setEditingCliente(cliente)
-    setFormData({
-      codigo_cliente: cliente.codigo_cliente || "",
-      nombre_razon_social: cliente.nombre_razon_social,
-      direccion: cliente.direccion || "",
-      cuit: cliente.cuit || "",
-      condicion_iva: cliente.condicion_iva,
-      metodo_facturacion: cliente.metodo_facturacion,
-      localidad_id: cliente.localidad_id || "",
-      localidad: (cliente as any).localidad || cliente.localidades?.nombre || "",
-      provincia: cliente.provincia || "",
-      telefono: cliente.telefono || "",
-      mail: cliente.mail || "",
-      condicion_pago: cliente.condicion_pago,
-      nro_iibb: cliente.nro_iibb || "",
-      exento_iibb: cliente.exento_iibb,
-      exento_iva: cliente.exento_iva,
-      percepcion_iibb: cliente.percepcion_iibb,
-      tipo_canal: cliente.tipo_canal,
-      vendedor_id: cliente.vendedor_id || "",
-      condicion_entrega: cliente.condicion_entrega || "entregamos_nosotros",
-      lista_precio_id: (cliente as any).lista_precio_id || "",
-      lista_limpieza_id: (cliente as any).lista_limpieza_id || "",
-      metodo_limpieza: (cliente as any).metodo_limpieza || "",
-      lista_perf0_id: (cliente as any).lista_perf0_id || "",
-      metodo_perf0: (cliente as any).metodo_perf0 || "",
-      lista_perf_plus_id: (cliente as any).lista_perf_plus_id || "",
-      metodo_perf_plus: (cliente as any).metodo_perf_plus || "",
-    })
-    setBonificaciones([])
-    loadBonificaciones(cliente.id)
-    setIsDialogOpen(true)
-  }
-
-  function handleLocalidadChange(localidadId: string) {
-    const localidad = localidades.find((l) => l.id === localidadId)
-    setFormData({
-      ...formData,
-      localidad_id: localidadId,
-      localidad: localidad?.nombre || "",
-      provincia: localidad?.provincia || "",
-    })
-  }
-
   const filteredClientes = searchIds === null
     ? clientes
     : clientes.filter((cliente) => searchIds.has(cliente.id))
 
-  const selectedLocalidad = localidades.find((l) => l.id === formData.localidad_id)
-  const zonaAsignada = selectedLocalidad?.zonas?.nombre
 
   return (
     <div className="min-h-screen">
@@ -409,250 +244,12 @@ export default function ClientesPage() {
                   fieldLabel={clientesFieldLabel}
                 />
 
-                <Dialog
-                  open={isDialogOpen}
-                  onOpenChange={(open) => {
-                    setIsDialogOpen(open)
-                    if (!open) resetForm()
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button className="gap-2 bg-primary hover:bg-primary/90">
-                      <Plus className="h-4 w-4" />
-                      Nuevo Cliente
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-[95vw] w-full max-h-[95vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle>{editingCliente ? "Editar Cliente" : "Nuevo Cliente"}</DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleSubmit} className="space-y-5">
-                      {/* ── Fila 1: Identificación ── */}
-                      <div className="grid grid-cols-3 gap-3">
-                        <div>
-                          <Label className="text-xs text-slate-500">Código</Label>
-                          <Input value={formData.codigo_cliente} onChange={(e) => setFormData({ ...formData, codigo_cliente: e.target.value })} placeholder="CL-001" className="h-9" />
-                        </div>
-                        <div className="col-span-2">
-                          <Label className="text-xs text-slate-500">Nombre / Razón Social *</Label>
-                          <Input value={formData.nombre_razon_social} onChange={(e) => setFormData({ ...formData, nombre_razon_social: e.target.value })} required className="h-9" />
-                        </div>
-                      </div>
-
-                      {/* ── Fila 2: Fiscal + Contacto ── */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <Label className="text-xs text-slate-500">CUIT</Label>
-                          <Input value={formData.cuit} onChange={(e) => setFormData({ ...formData, cuit: e.target.value })} placeholder="20-12345678-9" className="h-9" />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">Condición IVA *</Label>
-                          <Select value={formData.condicion_iva} onValueChange={(v) => setFormData({ ...formData, condicion_iva: v })}>
-                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Responsable Inscripto">Responsable Inscripto</SelectItem>
-                              <SelectItem value="Monotributo">Monotributo</SelectItem>
-                              <SelectItem value="Consumidor Final">Consumidor Final</SelectItem>
-                              <SelectItem value="Sujeto Exento">Sujeto Exento</SelectItem>
-                              <SelectItem value="No Categorizado">No Categorizado</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">Teléfono</Label>
-                          <Input value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} className="h-9" />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">Email</Label>
-                          <Input type="email" value={formData.mail} onChange={(e) => setFormData({ ...formData, mail: e.target.value })} className="h-9" />
-                        </div>
-                      </div>
-
-                      {/* ── Fila 3: Dirección ── */}
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="col-span-2">
-                          <Label className="text-xs text-slate-500">Dirección</Label>
-                          <Input value={formData.direccion} onChange={(e) => setFormData({ ...formData, direccion: e.target.value })} className="h-9" />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">Localidad</Label>
-                          <Select value={formData.localidad_id} onValueChange={handleLocalidadChange}>
-                            <SelectTrigger className="h-9"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
-                            <SelectContent>
-                              {localidades.map((loc) => (
-                                <SelectItem key={loc.id} value={loc.id}>{loc.nombre} - {loc.provincia}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      {/* ── Fila 4: Comercial ── */}
-                      <div className="grid grid-cols-3 gap-3">
-                        <div>
-                          <Label className="text-xs text-slate-500">Facturación *</Label>
-                          <Select value={formData.metodo_facturacion} onValueChange={(v) => setFormData({ ...formData, metodo_facturacion: v })}>
-                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Factura">Factura (21% IVA)</SelectItem>
-                              <SelectItem value="Final">Final (Mixto)</SelectItem>
-                              <SelectItem value="Presupuesto">Presupuesto</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">Lista de Precio</Label>
-                          <Select value={formData.lista_precio_id || "__none__"} onValueChange={(v) => setFormData({ ...formData, lista_precio_id: v === "__none__" ? "" : v })}>
-                            <SelectTrigger className="h-9"><SelectValue placeholder="Sin lista" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">Sin lista</SelectItem>
-                              {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">Vendedor</Label>
-                          <Select value={formData.vendedor_id || "none"} onValueChange={(v) => setFormData({ ...formData, vendedor_id: v === "none" ? "" : v })}>
-                            <SelectTrigger className="h-9"><SelectValue placeholder="Sin vendedor" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">Sin vendedor</SelectItem>
-                              {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">Condición de Pago *</Label>
-                          <Select value={formData.condicion_pago} onValueChange={(v) => setFormData({ ...formData, condicion_pago: v })}>
-                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Efectivo">Efectivo</SelectItem>
-                              <SelectItem value="Transferencia">Transferencia</SelectItem>
-                              <SelectItem value="Cheque al día">Cheque al día</SelectItem>
-                              <SelectItem value="Cheque 30 días">Cheque 30 días</SelectItem>
-                              <SelectItem value="Cheque 30/60/90">Cheque 30/60/90</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">Condición de Entrega *</Label>
-                          <Select value={formData.condicion_entrega} onValueChange={(v) => setFormData({ ...formData, condicion_entrega: v })}>
-                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="retira_mostrador">Retira en Mostrador</SelectItem>
-                              <SelectItem value="transporte">Envío por Transporte</SelectItem>
-                              <SelectItem value="entregamos_nosotros">Entregamos Nosotros</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      {/* ── Fila 5: Fiscal extra ── */}
-                      <div className="grid grid-cols-4 gap-3 items-end">
-                        <div>
-                          <Label className="text-xs text-slate-500">Tipo de Canal</Label>
-                          <Select value={formData.tipo_canal} onValueChange={(v) => setFormData({ ...formData, tipo_canal: v })}>
-                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Mayorista">Mayorista</SelectItem>
-                              <SelectItem value="Minorista">Minorista</SelectItem>
-                              <SelectItem value="Consumidor Final">Consumidor Final</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">N° IIBB</Label>
-                          <Input value={formData.nro_iibb} onChange={(e) => setFormData({ ...formData, nro_iibb: e.target.value })} className="h-9" />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">% Percepción IIBB</Label>
-                          <Input type="number" step="0.01" value={formData.percepcion_iibb} onChange={(e) => setFormData({ ...formData, percepcion_iibb: parseFloat(e.target.value) || 0 })} className="h-9" />
-                        </div>
-                        <div className="flex gap-4 pb-1">
-                          <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-                            <input type="checkbox" checked={formData.exento_iibb} onChange={(e) => setFormData({ ...formData, exento_iibb: e.target.checked })} className="h-4 w-4 rounded" />
-                            Exento IIBB
-                          </label>
-                          <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-                            <input type="checkbox" checked={formData.exento_iva} onChange={(e) => setFormData({ ...formData, exento_iva: e.target.checked })} className="h-4 w-4 rounded" />
-                            Exento IVA
-                          </label>
-                        </div>
-                      </div>
-
-                      {/* ── Segmentos ── */}
-                      <div>
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Condiciones por Segmento</p>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { label: "Limpieza / Bazar", listaKey: "lista_limpieza_id", metodoKey: "metodo_limpieza" },
-                            { label: "Perfumería Perf0", listaKey: "lista_perf0_id",    metodoKey: "metodo_perf0"    },
-                            { label: "Perfumería Plus",  listaKey: "lista_perf_plus_id", metodoKey: "metodo_perf_plus" },
-                          ].map(({ label, listaKey, metodoKey }) => (
-                            <div key={listaKey} className="border rounded-md p-2.5 bg-slate-50 space-y-1.5">
-                              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>
-                              <Select value={(formData as any)[metodoKey] || "__none__"} onValueChange={(v) => setFormData({ ...formData, [metodoKey]: v === "__none__" ? "" : v })}>
-                                <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Heredar" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">Heredar general</SelectItem>
-                                  <SelectItem value="Factura (21% IVA)">Factura</SelectItem>
-                                  <SelectItem value="Final (Mixto)">Final</SelectItem>
-                                  <SelectItem value="Presupuesto">Presupuesto</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <Select value={(formData as any)[listaKey] || "__none__"} onValueChange={(v) => setFormData({ ...formData, [listaKey]: v === "__none__" ? "" : v })}>
-                                <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Heredar lista" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">Heredar lista</SelectItem>
-                                  {listasPrecio.map((lp) => <SelectItem key={lp.id} value={lp.id}>{lp.nombre}</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* ── Bonificaciones (solo en edición) ── */}
-                      {editingCliente && (
-                        <div>
-                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Bonificaciones</p>
-
-                          {/* Solo lectura: los descuentos y el contado se editan en la ficha del
-                              cliente (un solo camino de guardado: lib/actions/condiciones-cliente.ts). */}
-                          {bonificaciones.filter((b: any) => b.activo).length > 0 ? (
-                            <div className="flex flex-wrap gap-2 mb-3">
-                              {bonificaciones.filter((b: any) => b.activo).map((b: any) => (
-                                <div key={b.id} className={`flex items-center gap-1.5 border rounded-full px-3 py-1 text-sm font-medium ${!b.activo ? "opacity-40" : ""} ${
-                                  b.tipo === "mercaderia" ? "border-green-300 bg-green-50 text-green-800" :
-                                  b.tipo === "general"   ? "border-blue-300 bg-blue-50 text-blue-800" :
-                                                           "border-orange-300 bg-orange-50 text-orange-800"
-                                }`}>
-                                  <span className="capitalize">{b.tipo}</span>
-                                  <span className="font-bold">{b.porcentaje}%</span>
-                                  {b.segmento && <span className="text-xs opacity-70">· {b.segmento}</span>}
-                                  {b.proveedores?.nombre && <span className="text-xs opacity-70 truncate max-w-[80px]">· {b.proveedores.nombre}</span>}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-slate-400 mb-2">Sin descuentos cargados.</p>
-                          )}
-                          <Link href={`/clientes/${editingCliente.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:underline">
-                            <ExternalLink className="h-3 w-3" />
-                            Editar descuentos, contado y condiciones en la ficha del cliente
-                          </Link>
-
-                        </div>
-                      )}
-
-                      <div className="flex gap-2 justify-end pt-2 border-t">
-                        <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                          Cancelar
-                        </Button>
-                        <Button type="submit">{editingCliente ? "Actualizar" : "Crear"}</Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
+                <Button asChild className="gap-2">
+                  <Link href="/clientes/nuevo">
+                    <Plus className="h-4 w-4" />
+                    Nuevo Cliente
+                  </Link>
+                </Button>
               </div>
             </div>
           </CardHeader>

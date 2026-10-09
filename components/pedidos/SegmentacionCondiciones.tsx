@@ -158,9 +158,11 @@ function Seccion({
     .slice(0, 40)
 
   return (
-    <div className="rounded-lg border border-teal-200 bg-teal-50/40 px-3 py-3 space-y-2">
-      <p className="text-xs font-bold text-teal-700 uppercase tracking-wide">{titulo}</p>
-      {ayuda && <p className="text-[11px] text-slate-500">{ayuda}</p>}
+    <div className="rounded-xl border border-neutro-200 bg-neutro-50/60 p-3 space-y-2.5 sm:p-4">
+      <div>
+        <p className="text-sm font-bold text-azul-900">{titulo}</p>
+        {ayuda && <p className="text-xs text-neutro-500">{ayuda}</p>}
+      </div>
 
       {/* Seleccionados con su condición */}
       {rows.length > 0 && (
@@ -168,16 +170,16 @@ function Seccion({
           {rows.map(r => {
             const ofreceEspecial = conEspecial.has(r.ref_id) && !!especialLista
             return (
-              <div key={r.ref_id} className="rounded-md border border-teal-300 bg-white p-2 space-y-2">
+              <div key={r.ref_id} className="rounded-lg border border-neutro-200 bg-white p-3 space-y-2.5 shadow-xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-700">{r.nombre}</span>
-                  <button type="button" className="text-red-400 hover:text-red-600" onClick={() => remove(r.ref_id)}>
-                    <Trash2 className="h-3.5 w-3.5" />
+                  <span className="text-sm font-semibold text-azul-900">{r.nombre}</span>
+                  <button type="button" aria-label={`Quitar ${r.nombre}`} className="grid size-7 place-items-center rounded-md text-neutro-400 hover:bg-error-50 hover:text-error-600" onClick={() => remove(r.ref_id)}>
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="text-[10px] text-slate-500 uppercase">Lista</label>
+                    <label className="mb-1 block text-xs font-semibold text-neutro-600">Lista</label>
                     <Select value={r.lista_precio_id ?? "__none__"} onValueChange={v => update(r.ref_id, { lista_precio_id: v === "__none__" ? null : v })}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Lista" /></SelectTrigger>
                       <SelectContent>
@@ -188,7 +190,7 @@ function Seccion({
                     </Select>
                   </div>
                   <div>
-                    <label className="text-[10px] text-slate-500 uppercase">Facturación</label>
+                    <label className="mb-1 block text-xs font-semibold text-neutro-600">Facturación</label>
                     <Select value={r.metodo_facturacion || "__none__"} onValueChange={v => update(r.ref_id, { metodo_facturacion: v === "__none__" ? null : v })}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -198,12 +200,12 @@ function Seccion({
                     </Select>
                   </div>
                 </div>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <DtoInput label="General %"    value={r.dto_general_pct}    onChange={n => update(r.ref_id, { dto_general_pct: n })} />
                   <DtoInput label="Viajante %"   value={r.dto_viajante_pct}   onChange={n => update(r.ref_id, { dto_viajante_pct: n })} />
                   <DtoInput label="Mercadería %" value={r.dto_mercaderia_pct} onChange={n => update(r.ref_id, { dto_mercaderia_pct: n })} />
                   <div>
-                    <label className="text-[10px] text-slate-500 uppercase">Contado 10%</label>
+                    <label className="mb-1 block text-xs font-semibold text-neutro-600">Contado 10%</label>
                     <Select value={r.contado === true ? "si" : r.contado === false ? "no" : "__none__"} onValueChange={v => update(r.ref_id, { contado: v === "si" ? true : v === "no" ? false : null })}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -214,7 +216,7 @@ function Seccion({
                     </Select>
                   </div>
                 </div>
-                <p className="text-[10px] text-slate-400">Vacío = hereda lo del pedido / la ficha.</p>
+                <p className="text-xs text-neutro-400">Vacío = hereda lo del pedido / la ficha.</p>
               </div>
             )
           })}
@@ -223,20 +225,20 @@ function Seccion({
 
       {/* Buscador */}
       <Input
-        className="h-8 text-xs"
-        placeholder={`Buscar ${titulo.toLowerCase().replace("segmentar por ", "")}...`}
+        className="h-9 bg-white text-sm"
+        placeholder={`+ Agregar ${titulo.toLowerCase().replace("segmentar por ", "")}: escribí para buscar…`}
         value={search}
         onChange={e => setSearch(e.target.value)}
       />
       {search.trim() !== "" && (
-        <div className="max-h-40 overflow-auto space-y-1">
+        <div className="max-h-40 overflow-auto space-y-0.5 rounded-lg border border-neutro-200 bg-white p-1">
           {disponibles.length === 0
-            ? <p className="text-[11px] text-slate-400 px-1">Sin resultados</p>
+            ? <p className="text-xs text-neutro-400 px-1">Sin resultados</p>
             : disponibles.map(o => (
               <button key={o.id} type="button" onClick={() => add(o)}
-                className="w-full text-left px-3 py-1.5 rounded hover:bg-teal-50 text-xs font-medium text-slate-700 flex items-center justify-between">
+                className="w-full text-left px-3 py-2 rounded-md hover:bg-azul-50 text-sm font-medium text-neutro-700 flex items-center justify-between">
                 <span>{o.nombre}{conEspecial.has(o.id) && especialLista ? " · tiene especial" : ""}</span>
-                <Plus className="h-3.5 w-3.5 text-teal-600" />
+                <Plus className="h-4 w-4 text-azul-600" />
               </button>
             ))}
         </div>
@@ -248,7 +250,7 @@ function Seccion({
 function DtoInput({ label, value, onChange }: { label: string; value: number | null; onChange: (n: number | null) => void }) {
   return (
     <div>
-      <label className="text-[10px] text-slate-500 uppercase">{label}</label>
+      <label className="mb-1 block text-xs font-semibold text-neutro-600">{label}</label>
       <Input
         type="number" inputMode="decimal" min={0} max={100}
         className="h-8 text-xs"

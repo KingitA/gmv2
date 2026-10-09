@@ -1,6 +1,6 @@
 {
   "nota": "Errores de tipo preexistentes fuera del alcance móvil. Solo puede bajar. Ver MOBILE.md §14.",
-  "total": 71,
+  "total": 70,
   "archivos": {
     "app/admin/usuarios/page.tsx": 2,
     "app/api/articulos/[id]/packaging/route.ts": 1,
@@ -13,7 +13,6 @@
     "app/api/finanzas/cajas/route.ts": 1,
     "app/articulos/actualizaciones/page.tsx": 4,
     "app/clientes-pedidos/page.tsx": 3,
-    "app/clientes/page.tsx": 1,
     "app/deposito/ajustar-stock/page.tsx": 1,
     "app/deposito/devoluciones/page.tsx": 1,
     "app/deposito/layout.tsx": 1,
