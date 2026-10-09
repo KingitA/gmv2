@@ -120,7 +120,7 @@ export function CerrarDia({
         className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl bg-white p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-base font-bold text-slate-900">
+        <h3 className="text-base font-bold tracking-tight text-azul-900">
           Cerrar el día — {cajaChicaNombre} · {fecha.split("-").reverse().join("/")}
         </h3>
 
@@ -161,7 +161,7 @@ export function CerrarDia({
 
         {sinVerificar.length > 0 && (
           <div className="mt-4">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <div className="text-sm font-bold text-azul-900">
               Cobros del día a verificar (segunda firma)
             </div>
             <div className="mt-1.5 flex flex-col gap-1">

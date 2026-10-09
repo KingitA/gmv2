@@ -16,6 +16,7 @@ import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import { localMatch } from "@/lib/search/local-match"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useRealtime } from "@/lib/hooks/use-realtime"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const TIPO_INVERSO_LABEL: Record<string, string> = {
   FA: 'Nota de Crédito A', FB: 'Nota de Crédito B',
@@ -497,7 +498,7 @@ export default function ComprobantesVentaPage() {
               {cargando ? (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                    <CargaProgreso compacto mensajes={MENSAJES.comprobantes} className="mx-auto max-w-sm" />
                   </TableCell>
                 </TableRow>
               ) : comprobantesFiltrados.length === 0 ? (

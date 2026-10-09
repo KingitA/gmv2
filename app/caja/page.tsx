@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { Ban, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react"
+import { CargaProgreso } from "@/components/ui/carga-progreso"
 import { createBrowserClient } from "@supabase/ssr"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { RegistrarCobro, type CuentaFondos } from "@/components/caja/registrar-cobro"
@@ -230,6 +231,9 @@ function Fila({
   )
 }
 
+// Esperas de la caja: barra con mensajes en lugar de "Cargando…"
+const MENSAJES_CAJA = ["Abriendo la caja del día…", "Sumando cobros y pagos…", "Revisando echeqs y transferencias…", "Cruzando rendiciones…", "Ya casi está…"]
+
 export default function CajaDelDiaPage() {
   // Día y pestaña en la URL (?fecha=2026-10-07&tab=cobro): "atrás" vuelve al mismo día y filtro
   const url = useUrlParams()
@@ -425,7 +429,7 @@ export default function CajaDelDiaPage() {
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <h1 className="text-2xl font-extrabold text-slate-900">{fechaLarga(fecha)}</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">{fechaLarga(fecha)}</h1>
               <button
                 onClick={() => setFecha(sumarDias(fecha, 1))}
                 disabled={esHoy}
@@ -521,7 +525,7 @@ export default function CajaDelDiaPage() {
             {/* Rendiciones esperando la plata (siempre arriba: son lo próximo que llega) */}
             {filasRend.length > 0 && (
               <div className="mb-4">
-                <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-purple-600">
+                <div className="mb-2 text-sm font-bold text-purple-700">
                   Esperando la plata
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -538,7 +542,7 @@ export default function CajaDelDiaPage() {
             {/* Pendientes de días anteriores */}
             {filasAnteriores.length > 0 && (
               <div className="mb-4">
-                <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-amber-600">
+                <div className="mb-2 text-sm font-bold text-amber-700">
                   Pendientes de otras fechas
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -550,7 +554,7 @@ export default function CajaDelDiaPage() {
             )}
 
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <span className="text-sm font-bold text-azul-900">
                 {esHoy ? "Hoy" : "Movimientos del día"}
               </span>
               <span className="flex items-center gap-3">
@@ -569,8 +573,8 @@ export default function CajaDelDiaPage() {
               </span>
             </div>
             {cargando && !feed ? (
-              <div className="rounded-xl border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400">
-                Cargando…
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-8">
+                <CargaProgreso compacto mensajes={MENSAJES_CAJA} className="mx-auto max-w-sm" />
               </div>
             ) : filasDia.length === 0 ? (
               <div className="rounded-xl border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400">
@@ -713,7 +717,7 @@ export default function CajaDelDiaPage() {
       {pagoAAnular && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPagoAAnular(null)}>
           <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-bold text-slate-900">Anular recibo — {pagoAAnular.quien}</h3>
+            <h3 className="text-base font-bold tracking-tight text-azul-900">Anular recibo — {pagoAAnular.quien}</h3>
             <p className="mt-1 text-xs text-slate-500">
               Se revierten las imputaciones (los comprobantes vuelven a quedar con saldo), la plata
               sale de la caja/banco en el libro, y si había cheques quedan anulados. El recibo queda

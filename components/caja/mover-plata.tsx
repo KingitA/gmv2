@@ -187,7 +187,7 @@ export function MoverPlata({
           ))}
         </div>
 
-        <span className="text-[11px] font-bold uppercase text-slate-400">De</span>
+        <span className="text-xs font-semibold text-neutro-500">De</span>
         <select
           value={origen || (origenDefault ? clave(origenDefault) : "")}
           onChange={(e) => setOrigen(e.target.value)}
@@ -202,7 +202,7 @@ export function MoverPlata({
 
         {modo === "transferencia" ? (
           <>
-            <span className="text-[11px] font-bold uppercase text-slate-400">A</span>
+            <span className="text-xs font-semibold text-neutro-500">A</span>
             <select value={destino} onChange={(e) => setDestino(e.target.value)} className={inputCls}>
               <option value="">Cuenta destino…</option>
               {movibles.map((c) => (
@@ -221,7 +221,7 @@ export function MoverPlata({
           </>
         ) : modo === "billetera" ? (
           <>
-            <span className="text-[11px] font-bold uppercase text-slate-400">A</span>
+            <span className="text-xs font-semibold text-neutro-500">A</span>
             <select value={viajanteId} onChange={(e) => setViajanteId(e.target.value)} className={inputCls}>
               <option value="">Chofer / viajante…</option>
               {viajantes.map((v) => (

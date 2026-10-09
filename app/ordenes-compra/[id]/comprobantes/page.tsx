@@ -8,13 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Plus, Trash2, Edit, Save, X, Upload, FileText, FileImage, Loader2, Eye, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Edit, Save, X, Upload, FileText, FileImage, Eye, CheckCircle2 } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { nowArgentina, todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { RevisarMatches } from "./revisar-matches"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const TIPO_DOC_LABELS: Record<string, string> = {
   factura: 'Factura', remito: 'Remito', adquisicion: 'Adquisición',
@@ -305,7 +306,7 @@ export default function CargarComprobantesPage() {
     loadComprobantes()
   }
 
-  if (!orden) return <div>Cargando...</div>
+  if (!orden) return <CargaProgreso mensajes={MENSAJES.ordenesCompra} titulo="Cargando orden de compra" />
 
   const calcularDiferencia = () => {
     const suma = totalNeto + totalIVA + percepcionIVA + percepcionIIBB + retencionGanancias
@@ -376,8 +377,8 @@ export default function CargarComprobantesPage() {
             />
             {subiendoDocumento ? (
               <div className="flex flex-col items-center gap-2">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 <p className="text-sm font-medium">Procesando con OCR...</p>
+                <CargaProgreso compacto mensajes={MENSAJES.ocrComprobante} className="max-w-xs" />
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2 text-muted-foreground">

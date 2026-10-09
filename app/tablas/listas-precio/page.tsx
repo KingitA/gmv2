@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Loader2, RotateCcw } from "lucide-react"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // ─── Tipos ────────────────────────────────────────────
 
@@ -442,7 +443,7 @@ export default function ListasPrecioPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48">
-        <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+        <CargaProgreso mensajes={MENSAJES.tablas} titulo="Cargando listas de precio" />
       </div>
     )
   }

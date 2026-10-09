@@ -18,6 +18,7 @@ import {
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
 import Link from "next/link"
 import { formatCurrency } from "@/lib/utils"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface MedioPago {
     id: string
@@ -83,7 +84,7 @@ const colorDeCheque = (ch: any): string => ch.es_echeq ? "ECHEQ" : (ch.color ===
 
 export default function NuevaOrdenPagoPage() {
     return (
-        <Suspense fallback={<div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">Cargando...</div>}>
+        <Suspense fallback={<div className="min-h-screen bg-background flex items-center justify-center"><CargaProgreso mensajes={MENSAJES.pagos} titulo="Preparando la nueva orden de pago" /></div>}>
             <NuevaOrdenPagoContent />
         </Suspense>
     )

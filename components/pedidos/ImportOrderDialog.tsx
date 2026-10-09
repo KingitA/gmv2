@@ -28,6 +28,7 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover"
 import { searchClientes } from "@/lib/actions/clientes"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // Helper for confidence color
 const getConfidenceColor = (conf: string) => {
@@ -242,7 +243,7 @@ export function ImportOrderDialog({ onOrderCreated }: { onOrderCreated?: () => v
 
                     {analyzing && (
                         <div className="flex flex-col items-center justify-center py-10 space-y-4">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <CargaProgreso compacto mensajes={MENSAJES.importarPedido} className="max-w-sm" />
                             <div className="text-center space-y-1">
                                 <p className="font-medium">Analizando archivos con Gemini 2.0...</p>
                                 <p className="text-sm text-muted-foreground">Interpretando todos los artículos y consolidando el pedido.</p>

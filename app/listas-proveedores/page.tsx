@@ -14,6 +14,7 @@ import { Plus, Upload, Loader2, Eye, CheckCircle } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 export default function ListasProveedoresPage() {
     const supabase = createClient()
@@ -134,7 +135,7 @@ export default function ListasProveedoresPage() {
                         </TableHeader>
                         <TableBody>
                             {loading ? (
-                                <TableRow><TableCell colSpan={6} className="text-center h-20"><Loader2 className="h-5 w-5 animate-spin inline" /></TableCell></TableRow>
+                                <TableRow><TableCell colSpan={6} className="text-center h-20"><CargaProgreso compacto mensajes={MENSAJES.general} className="mx-auto max-w-sm" /></TableCell></TableRow>
                             ) : listas.length === 0 ? (
                                 <TableRow><TableCell colSpan={6} className="text-center h-20 text-muted-foreground">Sin listas importadas aún</TableCell></TableRow>
                             ) : listas.map((lista: any) => (

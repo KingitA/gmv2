@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
+import { CargaProgreso } from "@/components/ui/carga-progreso"
 import type { CuentaFondos } from "./registrar-cobro"
 
 const NUM = { fontVariantNumeric: "tabular-nums" } as const
@@ -275,10 +276,10 @@ export function ControlarRendicion({
         onClick={(e) => e.stopPropagation()}
       >
         {cargando ? (
-          <div className="py-10 text-center text-sm text-slate-400">Cargando rendición…</div>
+          <CargaProgreso compacto mensajes={["Buscando la rendición…", "Sumando efectivo y cheques…", "Revisando gastos y fondos…", "Ya casi está…"]} className="mx-auto max-w-sm py-10" />
         ) : (
           <>
-            <h3 className="text-base font-bold text-slate-900">
+            <h3 className="text-base font-bold tracking-tight text-azul-900">
               Controlar rendición — {rendicion?.cobrador_tipo}
             </h3>
             <p className="mt-0.5 text-xs text-slate-500">
@@ -355,7 +356,7 @@ export function ControlarRendicion({
             {/* Pagos declarados: qué cobros trae, con opción de rechazar uno */}
             {pagosDeclarados.length > 0 && (
               <div className="mt-4">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <div className="text-sm font-bold text-azul-900">
                   Cobros declarados ({pagosDeclarados.length})
                 </div>
                 <div className="mt-1.5 flex flex-col gap-1">
@@ -383,7 +384,7 @@ export function ControlarRendicion({
             {/* Cheques físicos */}
             {cheques.length > 0 && (
               <div className="mt-4">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <div className="text-sm font-bold text-azul-900">
                   Cheques en el sobre — tildá los que están
                 </div>
                 <div className="mt-1.5 flex flex-col gap-1.5">
@@ -529,7 +530,7 @@ export function ControlarRendicion({
                   (sec) =>
                     (sec.items?.length ?? 0) > 0 && (
                       <div key={sec.titulo}>
-                        <p className="text-[10px] font-bold uppercase text-slate-400">{sec.titulo}</p>
+                        <p className="text-xs font-semibold text-neutro-500">{sec.titulo}</p>
                         {sec.items.map((m: any, i: number) => (
                           <div key={i} className="flex items-center justify-between text-[11px] text-slate-600">
                             <span className="truncate">{m.concepto || m.descripcion || "—"}</span>

@@ -1,7 +1,7 @@
 "use client"
 import { formatDateAR } from "@/lib/utils"
 
-import { useRef, useState, useEffect, Suspense } from "react"
+import { useRef, useState, useEffect, Suspense, type ReactNode, type ComponentType } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useUrlParams } from "@/lib/hooks/use-url-state"
@@ -12,7 +12,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle, Ban, Plus, X, CheckCircle } from "lucide-react"
+import { Loader2, FileText, RotateCcw, Upload, ExternalLink, AlertCircle, Ban, Plus, X, CheckCircle, Banknote, Landmark, Building2, CreditCard, Paperclip, Camera } from "lucide-react"
+import { CargaProgreso } from "@/components/ui/carga-progreso"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -575,7 +576,15 @@ function PagosClientesContent() {
         <td className="p-3">
           <div className="flex gap-1 flex-wrap">
             {[...new Set((p.pagos_detalle || []).map((d: any) => d.tipo_pago))].map((tipo: any) => (
-              <span key={tipo} title={tipo} className="text-lg leading-none">{tiposBadge[tipo] || "💳"}</span>
+              (() => {
+                const m = ICONO_METODO[tipo]
+                const Icono = m?.Icono ?? CreditCard
+                return (
+                  <span key={tipo} title={m?.texto ?? tipo} className="grid size-7 place-items-center rounded-md bg-neutro-100 text-neutro-600">
+                    <Icono className="h-4 w-4" />
+                  </span>
+                )
+              })()
             ))}
           </div>
         </td>
@@ -605,7 +614,7 @@ function PagosClientesContent() {
               <ExternalLink className="h-3.5 w-3.5 mr-1" /> Recibo
             </Button>
             <Button variant="ghost" size="sm" className="h-7" onClick={() => verComprobantes(p.id)}>
-              📎 Comprobantes
+              <Paperclip className="h-3.5 w-3.5 mr-1" /> Fotos
             </Button>
             {(p.estado === "pendiente" || p.estado === "pendiente_rendicion") && (
               <Button
@@ -718,12 +727,6 @@ function PagosClientesContent() {
     return Math.round(total * 100) / 100
   }
 
-  const tiposBadge: Record<string, string> = {
-    efectivo: "💵",
-    transferencia: "🏦",
-    cheque: "📄",
-    deposito: "🏧",
-  }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto" onPaste={onPasteCaptura}>
@@ -735,7 +738,7 @@ function PagosClientesContent() {
         {pedidoOrigen && (
           <Link
             href={`/clientes-pedidos?pedido=${pedidoOrigen}`}
-            className="shrink-0 rounded-lg border px-3 py-2 text-sm text-blue-600 hover:bg-blue-50"
+            className="shrink-0 rounded-lg border border-neutro-200 bg-white px-3 py-2 text-sm font-semibold text-azul-600 hover:bg-azul-50"
           >
             ← Volver al pedido
           </Link>
@@ -757,8 +760,7 @@ function PagosClientesContent() {
             <div className="lg:col-span-2 space-y-6">
 
               {/* 1. Cliente */}
-              <section className="border rounded-xl p-4 bg-white">
-                <h2 className="font-semibold mb-3 text-sm uppercase tracking-wide text-muted-foreground">1. Cliente</h2>
+              <Paso n="1" titulo="Cliente" ayuda="Quién paga. Si pagan varios juntos, agregalos abajo.">
                 <ClienteSearchCombobox value={cliente} onSelect={setCliente} />
 
                 {/* Clientes adicionales (cobro conjunto — caso "Tandil") */}
@@ -787,26 +789,29 @@ function PagosClientesContent() {
                         }}
                       />
                     ) : (
-                      <button onClick={() => setMostrarBuscarExtra(true)} className="text-sm text-blue-600 hover:underline flex items-center gap-1">
+                      <button onClick={() => setMostrarBuscarExtra(true)} className="text-sm font-semibold text-azul-600 hover:underline flex items-center gap-1">
                         <Plus className="h-4 w-4" /> Agregar cliente (cobro conjunto)
                       </button>
                     )}
                   </div>
                 )}
-              </section>
+              </Paso>
 
               {/* 2. Comprobantes */}
               {cliente && !pagoACuenta && (
-                <section className="border rounded-xl p-4 bg-white">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">2. Comprobantes a afectar</h2>
+                <Paso
+                  n="2"
+                  titulo="Qué paga"
+                  ayuda="Tildá los pedidos o comprobantes que cancela con este cobro."
+                  accion={
                     <button
                       onClick={() => { setPagoACuenta(true); setSeleccionados({}) }}
-                      className="text-xs text-blue-600 hover:underline"
+                      className="text-xs font-semibold text-azul-600 hover:underline"
                     >
                       Pago a cuenta (sin imputar)
                     </button>
-                  </div>
+                  }
+                >
                   {/* Switch Facturados/Todos + línea de saldos (traído de la barra de Caja) */}
                   <div className="mb-2 flex flex-wrap items-center gap-2.5">
                     <div className="inline-flex rounded-lg bg-muted p-0.5" role="tablist" aria-label="Pedidos a mostrar">
@@ -851,17 +856,17 @@ function PagosClientesContent() {
                       onChange={(v) => setACuentaExtra((prev) => ({ ...prev, [cliente.id]: v }))}
                     />
                   )}
-                </section>
+                </Paso>
               )}
 
               {cliente && pagoACuenta && (
-                <section className="border rounded-xl p-4 bg-amber-50 border-amber-200">
+                <section className="rounded-xl border border-ambar-200 bg-ambar-50 p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-amber-700">
                       <AlertCircle className="h-4 w-4" />
                       <span className="text-sm font-medium">Pago a cuenta — no se imputará a ningún comprobante</span>
                     </div>
-                    <button onClick={() => setPagoACuenta(false)} className="text-xs text-blue-600 hover:underline">
+                    <button onClick={() => setPagoACuenta(false)} className="text-xs font-semibold text-azul-600 hover:underline">
                       Imputar a comprobantes
                     </button>
                   </div>
@@ -872,18 +877,20 @@ function PagosClientesContent() {
               {cliente && !pagoACuenta && (
                 <>
                   {clientesExtra.map((ce, idx) => (
-                    <section key={ce.cliente.id} className="border rounded-xl p-4 bg-white">
-                      <div className="flex items-center justify-between mb-3">
-                        <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">
-                          Cliente adicional — {ce.cliente.razon_social || ce.cliente.nombre}
-                        </h2>
+                    <Paso
+                      key={ce.cliente.id}
+                      n={`2.${idx + 2}`}
+                      titulo={<>Qué paga {ce.cliente.razon_social || ce.cliente.nombre}</>}
+                      ayuda="Cliente adicional del cobro conjunto."
+                      accion={
                         <button
                           onClick={() => setClientesExtra((prev) => prev.filter((_, i) => i !== idx))}
-                          className="text-xs text-red-600 hover:underline"
+                          className="text-xs font-semibold text-error-600 hover:underline"
                         >
                           Quitar
                         </button>
-                      </div>
+                      }
+                    >
                       <ComprobantesSelector
                         clienteId={ce.cliente.id}
                         seleccionados={ce.seleccionados}
@@ -893,7 +900,7 @@ function PagosClientesContent() {
                         valor={aCuentaExtra[ce.cliente.id] || 0}
                         onChange={(v) => setACuentaExtra((prev) => ({ ...prev, [ce.cliente.id]: v }))}
                       />
-                    </section>
+                    </Paso>
                   ))}
                   {esMulti && (
                     <p className="text-xs text-amber-700 px-1">
@@ -906,10 +913,12 @@ function PagosClientesContent() {
               )}
 
               {/* 3. Métodos de pago */}
-              <section className="border rounded-xl p-4 bg-white">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">3. Métodos de pago</h2>
-                  <div className="flex items-center gap-2">
+              <Paso
+                n="3"
+                titulo="Cómo paga"
+                ayuda="Efectivo, transferencia, cheque o depósito. Con una foto o captura se completan solos."
+                accion={
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       ref={ocrFileRef}
                       type="file"
@@ -945,19 +954,19 @@ function PagosClientesContent() {
                       onClick={() => ocrCamRef.current?.click()}
                       disabled={ocrProcesando}
                     >
-                      📷 Sacar foto
+                      <Camera className="h-4 w-4 mr-1" /> Sacar foto
                     </Button>
-                    <span className="text-[11px] text-muted-foreground hidden lg:inline">o pegá una captura (Ctrl+V)</span>
+                    <span className="text-[11px] text-neutro-500 hidden lg:inline">o pegá una captura (Ctrl+V)</span>
                   </div>
-                </div>
+                }
+              >
                 <MetodoPagoForm metodos={metodos} onChange={setMetodos} />
-              </section>
+              </Paso>
 
               {/* 4. Retenciones */}
-              <section className="border rounded-xl p-4 bg-white">
-                <h2 className="font-semibold mb-3 text-sm uppercase tracking-wide text-muted-foreground">4. Retenciones (opcional)</h2>
+              <Paso n="4" titulo="Retenciones" ayuda="Solo si el cliente te entrega certificados de retención (opcional).">
                 <RetencionForm retenciones={retenciones} onChange={setRetenciones} />
-              </section>
+              </Paso>
             </div>
 
             {/* Columna derecha: resumen */}
@@ -972,7 +981,7 @@ function PagosClientesContent() {
               {/* 10% bonificación pago contado (solo cliente único) */}
               {!esMulti && Object.keys(seleccionados).length > 0 && (
                 <div
-                  className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${aplicarContado ? "bg-amber-50 border-amber-300" : "bg-muted/30 border-border"}`}
+                  className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${aplicarContado ? "bg-ambar-50 border-ambar-300" : "bg-white border-neutro-200"}`}
                   onClick={() => setAplicarContado((v) => !v)}
                 >
                   <Checkbox checked={aplicarContado} onCheckedChange={(v) => setAplicarContado(!!v)} className="mt-0.5" />
@@ -1011,8 +1020,8 @@ function PagosClientesContent() {
         {/* ════ TAB HISTORIAL ════ */}
         <TabsContent value="historial">
           {cargandoHistorial ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="rounded-xl border border-neutro-200 bg-white py-8">
+              <CargaProgreso compacto mensajes={["Buscando cobros…", "Trayendo recibos…", "Sumando rendiciones…", "Ya casi está…"]} className="mx-auto max-w-sm" />
             </div>
           ) : (
             <div className="space-y-3">
@@ -1035,15 +1044,15 @@ function PagosClientesContent() {
                   value={filtroCliente}
                   onChange={(e) => setFiltroCliente(e.target.value)}
                   placeholder="Filtrar por cliente…"
-                  className="rounded-md border px-3 py-1.5 text-sm w-56"
+                  className="h-10 w-full rounded-lg border border-neutro-200 bg-white px-3 text-sm outline-none focus:border-azul-400 sm:w-64"
                 />
-                <input type="date" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} className="rounded-md border px-2 py-1.5 text-sm" />
+                <input type="date" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} className="h-10 rounded-lg border border-neutro-200 bg-white px-2 text-sm" />
                 <span className="text-xs text-muted-foreground">a</span>
-                <input type="date" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} className="rounded-md border px-2 py-1.5 text-sm" />
+                <input type="date" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} className="h-10 rounded-lg border border-neutro-200 bg-white px-2 text-sm" />
                 {(filtroCliente || filtroDesde || filtroHasta) && (
                   <button
                     onClick={() => { setFiltroCliente(""); setFiltroDesde(""); setFiltroHasta("") }}
-                    className="text-xs text-blue-600 hover:underline"
+                    className="text-xs font-semibold text-azul-600 hover:underline"
                   >
                     Limpiar filtros
                   </button>
@@ -1053,9 +1062,9 @@ function PagosClientesContent() {
               {historial.length === 0 && rendicionesU.length === 0 && viajesPendU.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">No hay pagos registrados</div>
               ) : (
-                <div className="border rounded-xl overflow-hidden">
+                <div className="overflow-x-auto rounded-xl border border-neutro-200 bg-white">
                   <table className="w-full text-sm">
-                    <thead className="bg-muted/50">
+                    <thead className="bg-neutro-50 text-xs font-semibold text-neutro-600">
                       <tr>
                         <th className="p-3 text-left">Fecha</th>
                         <th className="p-3 text-left">Recibo</th>
@@ -1228,11 +1237,11 @@ function PagosClientesContent() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setFotosPago(null)}>
           <div className="bg-white rounded-2xl p-5 max-w-2xl w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold">Comprobantes adjuntos</h3>
+              <h3 className="text-lg font-bold tracking-tight text-azul-900">Fotos del cobro</h3>
               <button onClick={() => setFotosPago(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
             </div>
             {cargandoFotos ? (
-              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              <CargaProgreso compacto mensajes={["Buscando las fotos…", "Descargando imágenes…", "Ya casi está…"]} className="mx-auto max-w-sm py-10" />
             ) : fotosPago.length === 0 ? (
               <p className="text-center text-muted-foreground py-10">Este pago no tiene comprobantes adjuntos.</p>
             ) : (
@@ -1481,7 +1490,9 @@ function PagosClientesContent() {
             <DialogTitle>Pago registrado</DialogTitle>
           </DialogHeader>
           <div className="text-center py-4 space-y-4">
-            <div className="text-5xl">✅</div>
+            <div className="mx-auto grid size-14 place-items-center rounded-full bg-exito-50 text-exito-600">
+              <CheckCircle className="h-8 w-8" />
+            </div>
             <div>
               <p className="font-semibold text-lg">{reciboGenerado?.numero}</p>
               <p className="text-sm text-muted-foreground">Recibo generado correctamente</p>
@@ -1509,7 +1520,7 @@ function PagosClientesContent() {
                 className="w-full text-sm"
                 onClick={() => { setShowSuccess(false); resetForm() }}
               >
-                Nuevo Pago
+                Nuevo cobro
               </Button>
             </div>
           </div>
@@ -1555,7 +1566,7 @@ function ACuentaExtraInput({ valor, onChange }: { valor: number; onChange: (v: n
           step="0.01"
           value={valor || ""}
           onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
-          className="w-full rounded-md border px-2 py-1.5 pl-5 text-sm"
+          className="h-10 w-full rounded-lg border border-neutro-200 bg-white px-2 pl-5 text-sm"
           placeholder="0"
         />
       </div>
@@ -1564,9 +1575,38 @@ function ACuentaExtraInput({ valor, onChange }: { valor: number; onChange: (v: n
   )
 }
 
+// Un paso del cobro: número, título y para qué sirve (mismo lenguaje visual que las fichas)
+function Paso({ n, titulo, ayuda, accion, children, className = "" }: {
+  n: string; titulo: ReactNode; ayuda?: ReactNode; accion?: ReactNode; children?: ReactNode; className?: string
+}) {
+  return (
+    <section className={`rounded-xl border border-neutro-200 bg-white p-4 sm:p-5 ${className}`}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-azul-50 text-sm font-bold text-azul-600">{n}</span>
+          <div className="min-w-0">
+            <h2 className="text-base font-bold tracking-tight text-azul-900">{titulo}</h2>
+            {ayuda && <p className="text-[13px] text-neutro-500">{ayuda}</p>}
+          </div>
+        </div>
+        {accion}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+// Ícono de cada forma de pago (en lugar de emojis)
+const ICONO_METODO: Record<string, { Icono: ComponentType<{ className?: string }>; texto: string }> = {
+  efectivo: { Icono: Banknote, texto: "Efectivo" },
+  transferencia: { Icono: Landmark, texto: "Transferencia" },
+  cheque: { Icono: FileText, texto: "Cheque" },
+  deposito: { Icono: Building2, texto: "Depósito" },
+}
+
 export default function PagosClientesPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-muted-foreground">Cargando...</div>}>
+    <Suspense fallback={<CargaProgreso titulo="Abriendo Cobros" />}>
       <PagosClientesContent />
     </Suspense>
   )

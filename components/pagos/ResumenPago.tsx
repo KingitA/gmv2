@@ -37,7 +37,7 @@ export function ResumenPago({ totalComprobantes, metodos, retenciones, bonificac
 
   return (
     <div className="border rounded-xl p-4 bg-gray-50 space-y-2 text-sm">
-      <h3 className="font-semibold text-sm mb-3">Resumen</h3>
+      <h3 className="mb-3 text-base font-bold tracking-tight text-azul-900">Resumen del cobro</h3>
       <div className="flex justify-between">
         <span className="text-muted-foreground">Comprobantes seleccionados:</span>
         <span className="font-mono">${fmtARS(totalComprobantes)}</span>

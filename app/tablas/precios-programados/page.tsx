@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { formatDateTimeAR } from "@/lib/utils"
 import { toast } from "sonner"
 import { CalendarClock, Loader2, X } from "lucide-react"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 type Tabla = "articulos" | "listas_precio"
 
@@ -228,7 +229,7 @@ export default function PreciosProgramadosPage() {
           <Button size="sm" variant={filtro === "todos" ? "default" : "outline"} onClick={() => setFiltro("todos")}>Todos</Button>
         </div>
         {cargando ? (
-          <div className="py-8 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div>
+          <CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm py-8" />
         ) : items.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No hay cambios programados.</p>
         ) : (

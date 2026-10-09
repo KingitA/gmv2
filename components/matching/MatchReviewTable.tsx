@@ -6,7 +6,8 @@ import { ImportItemRaw, MatchCandidate } from '@/lib/matching/types';
 import { Button } from '@/components/ui/button';
 import { ManualMatchDialog } from './ManualMatchDialog';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Filter } from 'lucide-react';
+import { Filter } from 'lucide-react';
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface ImportItem {
     id: string;
@@ -102,7 +103,7 @@ export function MatchReviewTable({ importId, providerId }: { importId: string, p
         });
     }
 
-    if (loading) return <div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>;
+    if (loading) return <div className="flex justify-center p-10"><CargaProgreso compacto mensajes={MENSAJES.articulos} className="max-w-sm" /></div>;
 
     return (
         <div className="space-y-4">

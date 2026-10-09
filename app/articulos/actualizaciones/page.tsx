@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft, GripVertical, Calendar, Package, AlertTriangle, Check, X, Loader2, ArrowUpDown } from "lucide-react"
 import Link from "next/link"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface Importacion {
   id: string
@@ -298,9 +299,7 @@ export default function ActualizacionesPage() {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-16">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
+          <CargaProgreso mensajes={MENSAJES.articulos} titulo="Cargando actualizaciones" />
         ) : (
           <>
             {/* ═══ PENDIENTES ═══ */}
@@ -414,7 +413,7 @@ export default function ActualizacionesPage() {
 
           <div className="flex-1 overflow-auto">
             {detailLoading ? (
-              <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+              <CargaProgreso compacto mensajes={MENSAJES.articulos} className="mx-auto max-w-sm py-16" />
             ) : linkedItems.length === 0 && articulosProveedor.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
                 <AlertTriangle className="h-10 w-10 mx-auto mb-3 opacity-30" />

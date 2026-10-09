@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { Loader2, Upload, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 /**
  * Ficha fiscal del proveedor (R6): régimen RG 830 y condición ante Ganancias,
@@ -166,7 +167,7 @@ export function FichaFiscalDialog({
         </DialogHeader>
 
         {!data ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">Cargando…</p>
+          <CargaProgreso compacto mensajes={MENSAJES.general} className="mx-auto max-w-sm py-6" />
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">

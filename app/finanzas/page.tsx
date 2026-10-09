@@ -16,6 +16,7 @@ import { VencimientoEditDialog, type VencimientoEditable } from "@/components/fi
 import { NuevoGastoDialog } from "@/components/finanzas/nuevo-gasto-dialog"
 import { FechaInput } from "@/components/finanzas/fecha-input"
 import { todayArgentina } from "@/lib/utils"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // ─── Estructura de cajas ─────────────────────────────────────────────────────
 
@@ -652,7 +653,7 @@ export default function FinanzasPage() {
               <CalendarioPagos key={calKey} showCheques onDataChanged={load} />
             </div>
           ) : loading ? (
-            <div className="py-10 text-center text-slate-400 text-sm">Cargando…</div>
+            <CargaProgreso compacto mensajes={MENSAJES.vencimientos} className="mx-auto max-w-sm py-10" />
           ) : !items.length ? (
             <div className="py-10 text-center text-slate-400 text-sm">No hay pagos pendientes en este horizonte. 🎉</div>
           ) : (

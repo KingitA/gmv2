@@ -4,6 +4,7 @@ import { formatDateAR } from '@/lib/utils'
 import { useState, useEffect, useCallback } from 'react'
 import { ArrowLeft, RefreshCw, Wallet, TrendingDown, Plus, Minus, CheckSquare, Square } from 'lucide-react'
 import Link from 'next/link'
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface Vendedor {
   id: string
@@ -257,7 +258,7 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
 
         <div className="divide-y divide-white/[0.04]">
           {loading ? (
-            <p className="text-white/30 text-sm p-5">Cargando...</p>
+            <CargaProgreso compacto mensajes={MENSAJES.cuentaCorriente} className="mx-auto max-w-sm p-5 [&>div:first-child]:bg-white/10 [&>div:last-child]:text-white/40" />
           ) : (data?.comisiones_pendientes.length ?? 0) === 0 ? (
             <p className="text-white/20 text-sm p-5">Sin comisiones pendientes</p>
           ) : (
@@ -292,7 +293,7 @@ export default function BilleteraViajante({ vendedor }: { vendedor: Vendedor }) 
         </div>
         <div className="divide-y divide-white/[0.04]">
           {loading ? (
-            <p className="text-white/30 text-sm p-5">Cargando...</p>
+            <CargaProgreso compacto mensajes={MENSAJES.cuentaCorriente} className="mx-auto max-w-sm p-5 [&>div:first-child]:bg-white/10 [&>div:last-child]:text-white/40" />
           ) : (data?.historial.length ?? 0) === 0 ? (
             <p className="text-white/20 text-sm p-5">Sin movimientos</p>
           ) : (

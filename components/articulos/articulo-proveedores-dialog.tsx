@@ -134,7 +134,7 @@ export function ArticuloProveedoresDialog({ articulo, trigger }: ArticuloProveed
                     </p>
 
                     {loading ? (
-                        <div className="text-center py-4">Cargando...</div>
+                        <CargaProgreso compacto mensajes={MENSAJES.articulos} className="mx-auto max-w-sm py-4" />
                     ) : mappings.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-md">
                             No hay vinculaciones registradas para este artículo.
@@ -223,3 +223,5 @@ export function ArticuloProveedoresDialog({ articulo, trigger }: ArticuloProveed
         </Dialog>
     )
 }
+
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"

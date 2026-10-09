@@ -600,7 +600,7 @@ export function RegistrarCobro({
       {/* ── Métodos ya agregados al cobro (cobro mixto) ── */}
       {metodosAgregados.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
-          <span className="text-[11px] font-bold uppercase text-slate-400">Métodos del cobro:</span>
+          <span className="text-xs font-semibold text-neutro-500">Métodos del cobro:</span>
           {metodosAgregados.map((m, i) => (
             <span
               key={i}
@@ -690,7 +690,7 @@ export function RegistrarCobro({
         <div className="mt-2 border-t border-slate-100 pt-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2.5">
-              <span className="text-[11px] font-bold uppercase text-slate-400">Resumen de cuenta</span>
+              <span className="text-xs font-semibold text-neutro-500">Resumen de cuenta</span>
               <div className="inline-flex rounded-lg bg-slate-200 p-0.5" role="tablist" aria-label="Pedidos a mostrar">
                 {(
                   [

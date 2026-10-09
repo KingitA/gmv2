@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { ArrowLeft, FileMinus, Loader2, CheckCircle2 } from "lucide-react"
 import Link from "next/link"
 import { todayArgentina, formatCurrency, formatDateAR } from "@/lib/utils"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const ORIGEN_LABELS: Record<string, string> = {
     descuento_fuera_factura: "Descuento fuera de factura",
@@ -164,7 +165,7 @@ export default function NCPendientesPage() {
                 </CardHeader>
                 <CardContent>
                     {loading ? (
-                        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                        <CargaProgreso compacto mensajes={MENSAJES.general} className="mx-auto max-w-sm py-8" />
                     ) : esperadas.length === 0 ? (
                         <p className="text-sm text-muted-foreground py-4">No hay notas de crédito esperadas.</p>
                     ) : (

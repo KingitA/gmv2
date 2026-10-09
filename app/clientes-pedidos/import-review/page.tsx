@@ -15,6 +15,7 @@ import { ArticuloResultRow } from "@/components/search/ArticuloResultRow"
 import { EmailPreviewModal } from "@/components/ai/EmailPreviewModal"
 import { createClient } from "@/lib/supabase/client"
 import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION, condRowsToProveedor, condRowsToMarca } from "@/components/pedidos/SegmentacionCondiciones"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 // ─── Types ──────────────────────────────────────────────
 interface ReviewItem {
@@ -291,7 +292,7 @@ export default function ImportReviewPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <CargaProgreso mensajes={MENSAJES.importarPedido} titulo="Cargando importación" />
       </div>
     )
   }

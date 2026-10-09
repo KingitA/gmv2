@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ComprobantesSection } from "./comprobantes-section"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 interface CompData {
     id: string
@@ -721,7 +722,7 @@ export default function VerificacionOCPage() {
                         </TableHeader>
                         <TableBody>
                             {loading ? (
-                                <TableRow><TableCell colSpan={20} className="text-center h-20">Cargando...</TableCell></TableRow>
+                                <TableRow><TableCell colSpan={20} className="text-center h-20"><CargaProgreso compacto mensajes={MENSAJES.ordenesCompra} className="mx-auto max-w-sm" /></TableCell></TableRow>
                             ) : rows.length === 0 ? (
                                 <TableRow><TableCell colSpan={20} className="text-center h-20 text-muted-foreground">Sin artículos</TableCell></TableRow>
                             ) : rows.map(row => {

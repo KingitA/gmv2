@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Truck, Loader2 } from "lucide-react"
 import { formatCurrency, formatDateAR } from "@/lib/utils"
+import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 
 const TIPO_LABELS: Record<string, string> = {
     faltante_mercaderia: "Faltante de mercadería",
@@ -115,7 +116,7 @@ export default function TransportesPage() {
             <Card>
                 <CardContent className="pt-6">
                     {loading ? (
-                        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                        <CargaProgreso compacto mensajes={MENSAJES.tablas} className="mx-auto max-w-sm py-8" />
                     ) : (
                         <Table>
                             <TableHeader>
@@ -159,7 +160,7 @@ export default function TransportesPage() {
                     </DialogHeader>
 
                     {cargandoCC ? (
-                        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                        <CargaProgreso compacto mensajes={MENSAJES.cuentaCorriente} className="mx-auto max-w-sm py-8" />
                     ) : (
                         <div className="space-y-4">
                             <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
