@@ -72,6 +72,8 @@ export default function ClienteDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const supabase = createClient()
+  // /clientes/nuevo: la misma ficha, vacía (un solo formulario para crear y editar)
+  const esNuevo = id === "nuevo"
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -123,6 +125,18 @@ export default function ClienteDetailPage() {
 
   async function loadAll() {
     setLoading(true)
+    if (esNuevo) {
+      const [vendRes, locRes, listasRes] = await Promise.all([
+        supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
+        supabase.from("localidades").select("*, zonas(nombre)").order("provincia, nombre"),
+        supabase.from("listas_precio").select("id, nombre, codigo").eq("activo", true).order("nombre"),
+      ])
+      setVendedores(vendRes.data || [])
+      setLocalidades(locRes.data || [])
+      setListasPrecio(listasRes.data || [])
+      setLoading(false)
+      return
+    }
     const [clienteRes, vendRes, locRes, listasRes, ccRes, pedRes] = await Promise.all([
       supabase.from("clientes").select("*, localidades(nombre, zonas(nombre))").eq("id", id).single(),
       supabase.from("vendedores").select("id, nombre").eq("activo", true).order("nombre"),
@@ -301,7 +315,16 @@ export default function ClienteDetailPage() {
     for (const k of ["metodo_facturacion", "lista_precio_id", "lista_limpieza_id", "metodo_limpieza", "lista_perf0_id", "metodo_perf0", "lista_perf_plus_id", "metodo_perf_plus"]) {
       delete (dataToSave as any)[k]
     }
-    const { error } = await supabase.from("clientes").update(dataToSave).eq("id", id)
+    // Alta: se crea el cliente y desde ahí sigue el mismo camino que la edición
+    let clienteId = id
+    let error: { message: string } | null = null
+    if (esNuevo) {
+      const res = await supabase.from("clientes").insert(dataToSave).select("id").single()
+      error = res.error
+      if (res.data?.id) clienteId = res.data.id
+    } else {
+      error = (await supabase.from("clientes").update(dataToSave).eq("id", id)).error
+    }
     if (error) {
       alert(`Error al guardar: ${error.message}`)
     } else {
@@ -313,13 +336,13 @@ export default function ClienteDetailPage() {
           await supabase
             .from("clientes")
             .update({ actualizado_por: user.id, actualizado_at: new Date().toISOString() })
-            .eq("id", id)
+            .eq("id", clienteId)
         }
       } catch {}
-      fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id }) }).catch(() => {})
+      fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "clientes", id: clienteId }) }).catch(() => {})
       // Lista, método, descuentos y contado (mismo guardado que el botón de la sección)
       try {
-        await guardarFichaComercial(id, {
+        await guardarFichaComercial(clienteId, {
           listas: listasDeFormulario(),
           descuentos: { porSegmento: segDescuentos, valores: bonifGrid },
         })
@@ -331,7 +354,7 @@ export default function ClienteDetailPage() {
       // Segmentación por proveedor/marca (mismo guardado que tenía su botón), solo si se tocó
       if (segTocada) {
         try {
-          await guardarSegmentacionCliente(id, { proveedor: mapSegmentacion(segmentacion.proveedor), marca: mapSegmentacion(segmentacion.marca) })
+          await guardarSegmentacionCliente(clienteId, { proveedor: mapSegmentacion(segmentacion.proveedor), marca: mapSegmentacion(segmentacion.marca) })
         } catch (e: any) {
           alert(`Cliente y condiciones guardados, pero no se pudo guardar la segmentación: ${e?.message || e}`)
           setSaving(false)
@@ -406,16 +429,17 @@ export default function ClienteDetailPage() {
             <div className="grid size-14 place-items-center rounded-xl bg-azul-600 text-lg font-bold text-white sm:size-16">{iniciales(formData.nombre_razon_social)}</div>
           </div>
         }
-        titulo={formData.nombre_razon_social || "Cliente sin nombre"}
+        titulo={formData.nombre_razon_social || (esNuevo ? "Nuevo cliente" : "Cliente sin nombre")}
         meta={
           <>
             {formData.codigo_cliente && <FichaMeta label="Código">{formData.codigo_cliente}</FichaMeta>}
             {formData.cuit && <FichaMeta label="CUIT">{formData.cuit}</FichaMeta>}
             {localidadSel && <FichaMeta>{localidadSel.nombre}{localidadSel.zonas?.nombre ? ` · ${localidadSel.zonas.nombre}` : ""}</FichaMeta>}
             {vendedorSel && <FichaMeta label="Vendedor">{vendedorSel.nombre}</FichaMeta>}
+            {esNuevo && !formData.nombre_razon_social && <span>Completá al menos el nombre</span>}
           </>
         }
-        acciones={
+        acciones={esNuevo ? undefined : (
           <>
             <Button type="button" variant="outline" asChild>
               <Link href={`/clientes/${id}/cuenta-corriente`} className="gap-2">
@@ -430,7 +454,7 @@ export default function ClienteDetailPage() {
               <Link href={`/pagos-clientes?cliente_id=${id}`} className="gap-2"><HandCoins className="size-4" />Cobrar</Link>
             </Button>
           </>
-        }
+        )}
       />
 
       <FichaCuerpo secciones={[
@@ -438,7 +462,7 @@ export default function ClienteDetailPage() {
         { id: "venta", titulo: "Venta y entrega" },
         { id: "precios", titulo: "Lista y descuentos", nota: cantSegmentacion ? `+${cantSegmentacion}` : algunoPorSegmento ? "por segmento" : undefined },
         { id: "fiscal", titulo: "Fiscal" },
-        { id: "cuenta", titulo: "Cuenta y pedidos" },
+        ...(esNuevo ? [] : [{ id: "cuenta", titulo: "Cuenta y pedidos" }]),
       ]}>
         <FichaSeccion id="datos" titulo="Datos y contacto" icono={Store} ayuda="Quién es el cliente y dónde lo encontramos.">
           <Campos>
@@ -674,6 +698,7 @@ export default function ClienteDetailPage() {
           </Campos>
         </FichaSeccion>
 
+        {!esNuevo && (
         <FichaSeccion id="cuenta" titulo="Cuenta y pedidos" icono={Wallet} ayuda="Lo que debe hoy y sus últimos pedidos.">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,280px)_1fr]">
             <Link href={`/clientes/${id}/cuenta-corriente`} className={cn(
@@ -716,13 +741,14 @@ export default function ClienteDetailPage() {
             </div>
           </div>
         </FichaSeccion>
+        )}
       </FichaCuerpo>
 
       <FichaPie className="sticky bottom-0 z-10 md:static" mensaje={<span className="hidden sm:inline">Un solo botón guarda todo: datos, condiciones y segmentación.</span>}>
         <Button type="button" variant="outline" asChild><Link href="/clientes">Cancelar</Link></Button>
         <Button type="submit" disabled={saving} className="gap-2">
           {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-          {saving ? "Guardando…" : "Guardar cambios"}
+          {saving ? "Guardando…" : esNuevo ? "Crear cliente" : "Guardar cambios"}
         </Button>
       </FichaPie>
     </form>
