@@ -286,8 +286,8 @@ export default function ClientesPage() {
     />
   )
   // Encabezado: click en el texto ordena (A→Z, Z→A, sin orden); el embudo abre el filtro
-  const encabezado = (id: string, titulo: string, tipo?: "valores" | "numero" | null) => (
-    <TableHead className="font-semibold">
+  const encabezado = (id: string, titulo: string, tipo?: "valores" | "numero" | null, clase = "") => (
+    <TableHead className={`whitespace-nowrap font-semibold ${clase}`}>
       <div className="flex items-center gap-1">
         <button type="button" onClick={() => alternarOrden(id)} className="inline-flex items-center gap-1 hover:text-foreground">
           {titulo}
@@ -306,7 +306,7 @@ export default function ClientesPage() {
 
   return (
     <div className="min-h-screen">
-      <main className="container mx-auto space-y-6 px-4 py-6 sm:px-6">
+      <main className="mx-auto w-full max-w-[1800px] space-y-6 px-4 py-6 sm:px-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-azul-900 sm:text-3xl">Fichas de clientes</h1>
           <p className="text-sm text-neutro-500">Datos, condiciones y cuenta corriente de cada cliente</p>
@@ -374,7 +374,7 @@ export default function ClientesPage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             {/* Estado + filtros que no son columnas + filtros activos */}
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-md border text-xs font-medium">
@@ -404,18 +404,18 @@ export default function ClientesPage() {
               </div>
             )}
             <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
+              <Table contenedorClassName="max-h-[calc(100dvh-19rem)] min-h-64 overflow-auto">
+                <TableHeader className="sticky top-0 z-10 bg-neutro-50 shadow-[0_1px_0_var(--color-neutro-200)]">
+                  <TableRow className="bg-neutro-50 hover:bg-neutro-50">
                     {encabezado("codigo", "Código", "numero")}
                     {encabezado("nombre", "Nombre")}
                     {encabezado("direccion", "Dirección")}
                     {encabezado("localidad", "Localidad", "valores")}
                     {encabezado("zona", "Zona", "valores")}
                     {encabezado("viajante", "Viajante", "valores")}
-                    {encabezado("puntaje", "Puntaje", "numero")}
+                    {encabezado("puntaje", "Puntaje", "numero", "hidden 2xl:table-cell")}
                     {encabezado("nivel", "Nivel", "valores")}
-                    <TableHead className="font-semibold">Acciones</TableHead>
+                    <TableHead className="w-px whitespace-nowrap font-semibold">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -439,7 +439,7 @@ export default function ClientesPage() {
                         onClick={() => openClienteSheet(cliente)}
                       >
                         <TableCell className="font-medium tabular-nums">{cliente.codigo_cliente || "-"}</TableCell>
-                        <TableCell>
+                        <TableCell className="min-w-[180px] max-w-[260px] 2xl:max-w-[320px]">
                           {/* Nombre = cómo lo conocemos; debajo la razón social si es otra */}
                           <div className="font-medium">
                             {cliente.nombre || cliente.nombre_razon_social}
@@ -447,20 +447,20 @@ export default function ClientesPage() {
                             {busqueda?.parecidos.has(cliente.id) && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800" title="No contiene lo escrito; se parece">parecido</span>}
                           </div>
                           {cliente.razon_social && cliente.nombre && normalizeLocal(cliente.razon_social) !== normalizeLocal(cliente.nombre) && (
-                            <div className="text-xs text-muted-foreground">{cliente.razon_social}</div>
+                            <div className="truncate text-xs text-muted-foreground" title={cliente.razon_social}>{cliente.razon_social}</div>
                           )}
                         </TableCell>
-                        <TableCell className="text-muted-foreground">{cliente.direccion || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground">{cliente.localidades?.nombre || cliente.localidad || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground">{cliente.localidades?.zonas?.nombre || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground">{(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || "-"}</TableCell>
-                        <TableCell>
+                        <TableCell className="max-w-[180px] truncate text-muted-foreground 2xl:max-w-[240px]" title={cliente.direccion || undefined}>{cliente.direccion || "-"}</TableCell>
+                        <TableCell className="max-w-[140px] truncate text-muted-foreground 2xl:max-w-[170px]" title={cliente.localidades?.nombre || cliente.localidad || undefined}>{cliente.localidades?.nombre || cliente.localidad || "-"}</TableCell>
+                        <TableCell className="max-w-[110px] truncate text-muted-foreground 2xl:max-w-[130px]">{cliente.localidades?.zonas?.nombre || "-"}</TableCell>
+                        <TableCell className="max-w-[130px] truncate text-muted-foreground 2xl:max-w-[160px]" title={(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || undefined}>{(cliente.vendedor_id && nombreVendedor.get(cliente.vendedor_id)) || "-"}</TableCell>
+                        <TableCell className="hidden whitespace-nowrap 2xl:table-cell">
                           <span className="font-semibold">{cliente.puntaje.toFixed(0)}</span>
                           <span className="text-muted-foreground text-sm">/100</span>
                         </TableCell>
                         <TableCell>
                           <span
-                            className={`px-3 py-1 rounded-full text-xs font-semibold ${cliente.nivel_puntaje?.toLowerCase() === "premium"
+                            className={`whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-semibold ${cliente.nivel_puntaje?.toLowerCase() === "premium"
                               ? "bg-green-100 text-green-800"
                               : cliente.nivel_puntaje?.toLowerCase() === "regular"
                                 ? "bg-blue-100 text-blue-800"
@@ -473,7 +473,7 @@ export default function ClientesPage() {
                           </span>
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <div className="flex gap-2">
+                          <div className="flex gap-1">
                             <Link href={`/clientes/${cliente.id}`}>
                               <Button variant="ghost" size="icon" className="hover:bg-blue-50 hover:text-blue-600">
                                 <Pencil className="h-4 w-4" />

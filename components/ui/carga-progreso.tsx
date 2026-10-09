@@ -65,7 +65,7 @@ export function CargaProgreso({ mensajes = MENSAJES.general, titulo, compacto, p
     <div
       role="status"
       aria-live="polite"
-      className={cn(compacto ? 'w-full space-y-1.5' : 'mx-auto w-full max-w-md space-y-3 px-6 py-10 text-center', className)}
+      className={cn('normal-case', compacto ? 'w-full space-y-1.5' : 'mx-auto w-full max-w-md space-y-3 px-6 py-10 text-center', className)}
     >
       {titulo && !compacto && <div className="text-sm font-semibold text-slate-700">{titulo}</div>}
       <div className={cn('relative overflow-hidden rounded-full bg-slate-200', compacto ? 'h-1.5' : 'h-2')}>
