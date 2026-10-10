@@ -102,6 +102,15 @@
     "components/finanzas/nuevo-gasto-dialog.tsx",
     "components/finanzas/vencimiento-edit-dialog.tsx",
     "components/deposito/urgent-notification.tsx",
-    "app/page.tsx"
+    "app/page.tsx",
+    "app/playroom/page.tsx",
+    "app/playroom/layout.tsx",
+    "app/playroom/loading.tsx",
+    "app/api/playroom/tablero/",
+    "components/playroom/tablero.tsx",
+    "components/playroom/megasur-panel.tsx",
+    "components/playroom/bloque-vista.tsx",
+    "lib/playroom/bloques.ts",
+    "lib/playroom/catalogo-tablero.ts"
   ]
 }

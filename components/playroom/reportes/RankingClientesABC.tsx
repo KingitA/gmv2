@@ -32,36 +32,36 @@ interface ApiResponse {
 }
 
 const ESTADO_COLOR: Record<string, string> = {
-  Activo: '#10b981',
-  'En riesgo': '#f59e0b',
-  Perdido: '#ef4444',
-  Nuevo: '#3b82f6',
+  Activo: '#15805A',
+  'En riesgo': '#CD9014',
+  Perdido: '#D2364B',
+  Nuevo: '#4549B5',
 }
-const ABC_COLOR: Record<string, string> = { A: '#7c3aed', B: '#06b6d4', C: '#6b7280' }
+const ABC_COLOR: Record<string, string> = { A: '#4549B5', B: '#22A9C9', C: '#6E7290' }
 
 function ars(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 }
 
 const inputStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: '#FFFFFF',
+  border: '1px solid #E3E5EF',
   borderRadius: 8,
   padding: '4px 10px',
-  color: '#fff',
+  color: '#20233A',
   fontSize: 12,
   outline: 'none',
 }
 
 function FilterBtn({ label, active, color, onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
-  const c = color ?? '#7c3aed'
+  const c = color ?? '#4549B5'
   return (
     <button
       onClick={onClick}
       className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
       style={active
         ? { background: `${c}25`, color: c, border: `1px solid ${c}45` }
-        : { color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)' }
+        : { color: '#545871', background: '#FFFFFF', border: '1px solid #E3E5EF' }
       }
     >
       {label}
@@ -87,14 +87,14 @@ const COLUMNS: Column<ClienteRow>[] = [
   },
   {
     key: 'facturacion_anterior', label: 'Período ant.', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.45)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: '#545871' }}>{v > 0 ? ars(v) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'variacion_pct', label: 'Var. %', sortable: true, align: 'right',
     render: (v, row) => row.facturacion_anterior > 0
       ? <ComparativoBadge pct={v} size="sm" />
-      : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      : <span className="text-xs" style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => `${Number(v).toFixed(1)}%`,
   },
   {
@@ -104,8 +104,8 @@ const COLUMNS: Column<ClienteRow>[] = [
   {
     key: 'saldo_pendiente', label: 'Saldo pend.', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-amber-400">{ars(v)}</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono text-ambar-700">{ars(v)}</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
   {
@@ -191,15 +191,15 @@ export default function RankingClientesABC() {
   }, [rows, apiData])
 
   if (error) return (
-    <div className="rounded-xl p-6" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-      <p className="text-red-400 text-sm">Error: {error}</p>
+    <div className="rounded-xl p-6" style={{ background: '#FBEBED', border: '1px solid #F6D0D5' }}>
+      <p className="text-error-600 text-sm">Error: {error}</p>
     </div>
   )
 
   const extraFilters = (
     <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-2">
-        <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Estado</label>
+        <label className="text-xs" style={{ color: '#6E7290' }}>Estado</label>
         <div className="flex gap-1">
           {['Todos', 'Activo', 'En riesgo', 'Perdido', 'Nuevo'].map(s => (
             <FilterBtn key={s} label={s} active={estadoFiltro === s} color={ESTADO_COLOR[s]} onClick={() => setEstadoFiltro(s)} />
@@ -207,7 +207,7 @@ export default function RankingClientesABC() {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Clase</label>
+        <label className="text-xs" style={{ color: '#6E7290' }}>Clase</label>
         <div className="flex gap-1">
           {['Todos', 'A', 'B', 'C'].map(s => (
             <FilterBtn key={s} label={s} active={abcFiltro === s} color={ABC_COLOR[s]} onClick={() => setAbcFiltro(s)} />
@@ -257,13 +257,13 @@ export default function RankingClientesABC() {
 
       {/* Pareto chart */}
       {!loading && paretoData.length > 0 && (
-        <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}>
           <div className="flex items-center justify-between mb-4">
-            <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            <p className="text-xs font-semibold" style={{ color: '#545871' }}>
               Curva Pareto — top {paretoData.length} clientes · {ars(kpis.total)} total
             </p>
             {apiData?.meta && (
-              <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
+              <p className="text-xs" style={{ color: '#9295AE' }}>
                 vs {apiData.meta.prevFrom} → {apiData.meta.prevTo}
               </p>
             )}
@@ -272,8 +272,8 @@ export default function RankingClientesABC() {
             <BarChart data={paretoData} margin={{ left: 10, right: 10, top: 0, bottom: 70 }}>
               <XAxis
                 dataKey="name"
-                tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9 }}
-                axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
+                tick={{ fill: '#6E7290', fontSize: 10 }}
+                axisLine={{ stroke: '#E3E5EF' }}
                 tickLine={false}
                 angle={-45}
                 textAnchor="end"
@@ -281,15 +281,15 @@ export default function RankingClientesABC() {
               />
               <YAxis
                 tickFormatter={v => `$${(v / 1000000).toFixed(1)}M`}
-                tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }}
+                tick={{ fill: '#6E7290', fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
               />
               <Tooltip
                 formatter={(v: number) => [ars(v), 'Facturación']}
-                contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
+                contentStyle={{ background: '#FFFFFF', border: '1px solid #E3E5EF', borderRadius: 8, color: '#1E2030', fontSize: 12 }}
               />
-              <Bar dataKey="facturacion" radius={[4, 4, 0, 0]} maxBarSize={36}>
+              <Bar dataKey="facturacion" radius={[4, 4, 0, 0]} maxBarSize={24}>
                 {paretoData.map((e, i) => (
                   <Cell key={i} fill={ABC_COLOR[e.clasificacion]} fillOpacity={0.85} />
                 ))}
@@ -300,7 +300,7 @@ export default function RankingClientesABC() {
             {(['A', 'B', 'C'] as const).map(k => (
               <div key={k} className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm" style={{ background: ABC_COLOR[k] }} />
-                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                <span className="text-xs" style={{ color: '#6E7290' }}>
                   Clase {k} · {rows.filter(r => r.clasificacion === k).length} clientes
                 </span>
               </div>

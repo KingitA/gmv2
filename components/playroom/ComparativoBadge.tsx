@@ -16,9 +16,9 @@ export default function ComparativoBadge({
   const isPositive = pct > 0.05
   const isNegative = pct < -0.05
 
-  const goodClass = 'text-emerald-400 bg-emerald-400/10'
-  const badClass = 'text-red-400 bg-red-400/10'
-  const neutralClass = 'text-white/40 bg-white/5'
+  const goodClass = 'text-exito-600 bg-exito-50'
+  const badClass = 'text-error-600 bg-error-50'
+  const neutralClass = 'text-neutro-500 bg-neutro-100'
 
   const colorClass = !isPositive && !isNegative
     ? neutralClass

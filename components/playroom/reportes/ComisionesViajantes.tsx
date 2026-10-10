@@ -38,7 +38,8 @@ interface ApiResponse {
   meta: { dateFrom: string; dateTo: string; prevFrom: string; prevTo: string; tipo: string }
 }
 
-const COLORS = ['#7c3aed', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6']
+// Una sola serie: todas las barras en azul-500 (los colores por viajante no codifican nada)
+const COLORS = ['#4549B5']
 
 function ars(n: number) {
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
@@ -129,31 +130,31 @@ export default function ComisionesViajantes() {
     },
     {
       key: 'devengado_anterior', label: 'Período ant.', sortable: true, align: 'right',
-      render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? ars(v) : '—'}</span>,
+      render: v => <span className="font-mono" style={{ color: '#6E7290' }}>{v > 0 ? ars(v) : '—'}</span>,
       exportValue: v => String(v),
     },
     {
       key: 'variacion_pct', label: 'Var. %', sortable: true, align: 'right',
       render: (v, row) => row.devengado_anterior > 0
         ? <ComparativoBadge pct={v} size="sm" />
-        : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+        : <span className="text-xs" style={{ color: '#9295AE' }}>—</span>,
       exportValue: v => `${Number(v).toFixed(1)}%`,
     },
     {
       key: 'cobrable', label: 'Cobrable', sortable: true, align: 'right',
-      render: v => <span className="font-mono text-emerald-400">{ars(v)}</span>,
+      render: v => <span className="font-mono text-exito-600">{ars(v)}</span>,
       exportValue: v => String(v),
     },
     {
       key: 'pagado', label: 'Pagado', sortable: true, align: 'right',
-      render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>{ars(v)}</span>,
+      render: v => <span className="font-mono" style={{ color: '#545871' }}>{ars(v)}</span>,
       exportValue: v => String(v),
     },
     {
       key: 'pendiente_cobro', label: 'Pendiente', sortable: true, align: 'right',
       render: v => v > 0
-        ? <span className="font-mono text-amber-400 font-semibold">{ars(v)}</span>
-        : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+        ? <span className="font-mono text-ambar-700 font-semibold">{ars(v)}</span>
+        : <span style={{ color: '#9295AE' }}>—</span>,
       exportValue: v => String(v),
     },
     {
@@ -167,8 +168,8 @@ export default function ComisionesViajantes() {
   ]
 
   if (error) return (
-    <div className="rounded-xl p-6" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-      <p className="text-red-400 text-sm">Error: {error}</p>
+    <div className="rounded-xl p-6" style={{ background: '#FBEBED', border: '1px solid #F6D0D5' }}>
+      <p className="text-error-600 text-sm">Error: {error}</p>
     </div>
   )
 
@@ -183,12 +184,12 @@ export default function ComisionesViajantes() {
 
       {/* Selector tipo + export */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-1 p-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="flex items-center gap-1 p-1 rounded-lg" style={{ background: '#F0F1F7', border: '1px solid #E3E5EF' }}>
           {(['cobrada', 'vendida'] as const).map(t => (
             <button
               key={t}
               onClick={() => handleTipoChange(t)}
-              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${tipo === t ? 'bg-blue-500 text-white' : 'text-white/50 hover:text-white/80'}`}
+              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${tipo === t ? 'bg-azul-600 text-white shadow-sm' : 'text-neutro-500 hover:text-neutro-800'}`}
             >
               {t === 'cobrada' ? 'Mercadería Cobrada' : 'Mercadería Vendida'}
             </button>
@@ -197,15 +198,15 @@ export default function ComisionesViajantes() {
         <div className="flex gap-2">
           <button
             onClick={handleExportExcel}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
-            style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-exito-600 hover:text-exito-700 transition-colors"
+            style={{ background: '#E6F4EE', border: '1px solid #C5E6D7' }}
           >
             Exportar Excel
           </button>
           <button
             onClick={handleExportPDF}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
-            style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-azul-600 hover:text-azul-800 transition-colors"
+            style={{ background: '#EEEEF6', border: '1px solid #CFD0E4' }}
           >
             Exportar PDF
           </button>
@@ -213,7 +214,7 @@ export default function ComisionesViajantes() {
       </div>
 
       {/* Label de qué tipo se está viendo */}
-      <div className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.25)' }}>
+      <div className="text-xs font-semibold" style={{ color: '#545871' }}>
         {tipo === 'cobrada'
           ? 'Comisiones reales — calculadas sobre comprobantes cobrados'
           : 'Comisiones estimadas — calculadas sobre pedidos (consulta)'}
@@ -249,32 +250,32 @@ export default function ComisionesViajantes() {
 
       {/* Chart */}
       {!loading && chartData.length > 0 && (
-        <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-widest mb-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}>
+          <p className="text-xs font-semibold mb-4" style={{ color: '#545871' }}>
             Comisiones por viajante — {tipo === 'cobrada' ? 'mercadería cobrada' : 'mercadería vendida'}
           </p>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData} margin={{ left: 10, right: 10, top: 0, bottom: 10 }}>
               <XAxis
                 dataKey="name"
-                tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-                axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
+                tick={{ fill: '#6E7290', fontSize: 11 }}
+                axisLine={{ stroke: '#E3E5EF' }}
                 tickLine={false}
               />
               <YAxis
                 tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
-                tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }}
+                tick={{ fill: '#6E7290', fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
               />
               <Tooltip
                 formatter={(v: number, name: string) => [ars(v), name === 'devengado' ? (tipo === 'cobrada' ? 'Cobrada' : 'Devengada') : 'Cobrable']}
                 labelFormatter={(_l, p) => p?.[0]?.payload?.fullName || _l}
-                contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
+                contentStyle={{ background: '#FFFFFF', border: '1px solid #E3E5EF', borderRadius: 8, color: '#1E2030', fontSize: 12 }}
               />
-              <Bar dataKey="devengado" radius={[4, 4, 0, 0]} maxBarSize={48}>
+              <Bar dataKey="devengado" radius={[4, 4, 0, 0]} maxBarSize={24}>
                 {chartData.map((e, i) => (
-                  <Cell key={i} fill={e.color} fillOpacity={0.85} />
+                  <Cell key={i} fill={e.color} />
                 ))}
               </Bar>
             </BarChart>

@@ -52,15 +52,15 @@ interface ApiResponse {
 }
 
 const TIPO_COLORS: Record<string, string> = {
-  FA: '#7c3aed', FB: '#06b6d4', FC: '#10b981',
-  NCA: '#ef4444', NCB: '#f97316', NCC: '#f59e0b',
-  PRES: '#6b7280', REV: '#374151',
+  FA: '#4549B5', FB: '#22A9C9', FC: '#15805A',
+  NCA: '#D2364B', NCB: '#B8560F', NCC: '#CD9014',
+  PRES: '#6E7290', REV: '#545871',
 }
 
 const ESTADO_COLOR: Record<string, string> = {
-  saldado: '#10b981',
-  parcial: '#f59e0b',
-  pendiente: '#ef4444',
+  saldado: '#15805A',
+  parcial: '#CD9014',
+  pendiente: '#D2364B',
 }
 
 const PROVINCIAS = [
@@ -75,11 +75,11 @@ function ars(n: number) {
 }
 
 const inputStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: '#FFFFFF',
+  border: '1px solid #E3E5EF',
   borderRadius: 8,
   padding: '4px 10px',
-  color: '#fff',
+  color: '#20233A',
   fontSize: 12,
   outline: 'none',
 }
@@ -87,7 +87,7 @@ const inputStyle: React.CSSProperties = {
 const btnBase: React.CSSProperties = {
   borderRadius: 8,
   padding: '5px 12px',
-  fontSize: 11,
+  fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
   border: 'none',
@@ -95,14 +95,14 @@ const btnBase: React.CSSProperties = {
 }
 
 function FilterBtn({ label, active, color, onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
-  const c = color ?? '#7c3aed'
+  const c = color ?? '#4549B5'
   return (
     <button
       onClick={onClick}
       className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
       style={active
         ? { background: `${c}25`, color: c, border: `1px solid ${c}45` }
-        : { color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)' }
+        : { color: '#545871', background: '#FFFFFF', border: '1px solid #E3E5EF' }
       }
     >
       {label}
@@ -119,7 +119,7 @@ const COLUMNS: Column<FiscalRow>[] = [
   {
     key: 'tipo_label', label: 'Tipo', sortable: true,
     render: (v, row) => {
-      const color = TIPO_COLORS[row.tipo_comprobante] ?? '#6b7280'
+      const color = TIPO_COLORS[row.tipo_comprobante] ?? '#6E7290'
       return (
         <span className="px-2 py-0.5 rounded text-xs font-bold font-mono"
           style={{ background: `${color}20`, color, border: `1px solid ${color}35` }}>
@@ -132,7 +132,7 @@ const COLUMNS: Column<FiscalRow>[] = [
   {
     key: 'numero_comprobante', label: 'Número', sortable: true,
     render: (v, row) => (
-      <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>
+      <span className="font-mono text-xs" style={{ color: '#31354A' }}>
         {row.punto_venta ? `${row.punto_venta}-` : ''}{v}
       </span>
     ),
@@ -141,7 +141,7 @@ const COLUMNS: Column<FiscalRow>[] = [
   { key: 'cliente_nombre', label: 'Cliente', sortable: true },
   {
     key: 'cuit', label: 'CUIT', sortable: true,
-    render: v => <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{v}</span>,
+    render: v => <span className="font-mono text-xs" style={{ color: '#545871' }}>{v}</span>,
     exportValue: v => v,
   },
   { key: 'ti', label: 'TI', sortable: true },
@@ -152,14 +152,14 @@ const COLUMNS: Column<FiscalRow>[] = [
   },
   {
     key: 'total_iva', label: 'IVA', sortable: true, align: 'right',
-    render: v => <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{ars(v)}</span>,
+    render: v => <span className="font-mono text-xs" style={{ color: '#545871' }}>{ars(v)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'perciva', label: 'Perc.IVA', sortable: true, align: 'right',
     render: v => v !== 0
-      ? <span className="font-mono text-xs text-amber-400">{ars(v)}</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono text-xs text-ambar-700">{ars(v)}</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
   {
@@ -170,7 +170,7 @@ const COLUMNS: Column<FiscalRow>[] = [
   {
     key: 'estado_pago', label: 'Estado', sortable: true,
     render: (v: string) => {
-      const color = ESTADO_COLOR[v] ?? '#6b7280'
+      const color = ESTADO_COLOR[v] ?? '#6E7290'
       return (
         <span className="px-2 py-0.5 rounded text-xs font-semibold capitalize"
           style={{ background: `${color}18`, color, border: `1px solid ${color}35` }}>
@@ -338,8 +338,8 @@ export default function ComprobantesFiscal() {
   }
 
   if (error) return (
-    <div className="rounded-xl p-6" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-      <p className="text-red-400 text-sm">Error: {error}</p>
+    <div className="rounded-xl p-6" style={{ background: '#FBEBED', border: '1px solid #F6D0D5' }}>
+      <p className="text-error-600 text-sm">Error: {error}</p>
     </div>
   )
 
@@ -353,11 +353,11 @@ export default function ComprobantesFiscal() {
         style={{ ...inputStyle, width: 220 }}
       />
       <div className="flex items-center gap-2">
-        <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Tipo</label>
+        <label className="text-xs" style={{ color: '#6E7290' }}>Tipo</label>
         <div className="flex gap-1">
           {tiposDisponibles.map(t => (
             <FilterBtn key={t} label={t} active={tipoFiltro === t}
-              color={TIPO_COLORS[t] ?? '#7c3aed'} onClick={() => setTipoFiltro(t)} />
+              color={TIPO_COLORS[t] ?? '#4549B5'} onClick={() => setTipoFiltro(t)} />
           ))}
         </div>
       </div>
@@ -365,8 +365,8 @@ export default function ComprobantesFiscal() {
         onClick={() => { setSoloARCA(v => !v); setTimeout(() => load(filters), 0) }}
         className="text-xs px-2.5 py-1 rounded-lg font-medium transition-colors"
         style={soloARCA
-          ? { background: 'rgba(124,58,237,0.2)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.4)' }
-          : { color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)' }
+          ? { background: '#EEEEF6', color: '#4549B5', border: '1px solid #CFD0E4' }
+          : { color: '#545871', background: '#FFFFFF', border: '1px solid #E3E5EF' }
         }
       >
         Solo ARCA
@@ -388,18 +388,18 @@ export default function ComprobantesFiscal() {
 
       {/* Summary por tipo */}
       {!loading && summary.length > 0 && (
-        <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-widest mb-3" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}>
+          <p className="text-xs font-semibold mb-3" style={{ color: '#545871' }}>
             Totales por tipo de comprobante
           </p>
           <div className="flex flex-wrap gap-3">
             {summary.map(s => {
-              const color = TIPO_COLORS[s.tipo] ?? '#6b7280'
+              const color = TIPO_COLORS[s.tipo] ?? '#6E7290'
               return (
                 <div key={s.tipo} className="rounded-lg p-3 min-w-[120px]" style={{ background: `${color}0f`, border: `1px solid ${color}25` }}>
                   <div className="text-xs font-bold font-mono mb-1" style={{ color }}>{s.label}</div>
-                  <div className="text-sm font-semibold font-mono text-white">{ars(s.total)}</div>
-                  <div className="text-[10px] mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>{s.count} comp.</div>
+                  <div className="text-sm font-semibold font-mono text-azul-900">{ars(s.total)}</div>
+                  <div className="text-xs mt-0.5" style={{ color: '#9295AE' }}>{s.count} comp.</div>
                 </div>
               )
             })}
@@ -409,27 +409,27 @@ export default function ComprobantesFiscal() {
 
       {/* Conciliación contra ARCA */}
       <div className="rounded-xl p-5" style={{
-        background: concError ? 'rgba(239,68,68,0.06)' : conc && !conc.ok ? 'rgba(245,158,11,0.06)' : 'rgba(16,185,129,0.05)',
-        border: `1px solid ${concError ? 'rgba(239,68,68,0.25)' : conc && !conc.ok ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.2)'}`,
+        background: concError ? '#FBEBED' : conc && !conc.ok ? '#FFF7E6' : '#E6F4EE',
+        border: `1px solid ${concError ? '#F6D0D5' : conc && !conc.ok ? '#FFE7B4' : '#C5E6D7'}`,
       }}>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.45)' }}>
+          <p className="text-xs font-semibold" style={{ color: '#545871' }}>
             Conciliación contra ARCA — numeración fiscal PV {conc?.punto_venta ?? '0007'}
           </p>
           <button
             onClick={conciliar}
             disabled={concLoading}
-            style={{ ...btnBase, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}
+            style={{ ...btnBase, background: '#F0F1F7', color: '#31354A', border: '1px solid #E3E5EF' }}
           >
             {concLoading ? 'Conciliando…' : 'Volver a conciliar'}
           </button>
         </div>
 
-        {concLoading && <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Consultando ARCA…</p>}
-        {concError && <p className="text-xs text-red-400">Error al conciliar: {concError}</p>}
+        {concLoading && <p className="text-xs" style={{ color: '#6E7290' }}>Consultando ARCA…</p>}
+        {concError && <p className="text-xs text-error-600">Error al conciliar: {concError}</p>}
 
         {conc && !concLoading && conc.ok && (
-          <p className="text-sm" style={{ color: '#34d399' }}>
+          <p className="text-sm" style={{ color: '#15805A' }}>
             ✓ Conciliación OK — todos los comprobantes autorizados por ARCA están registrados en el sistema
             ({Object.entries(conc.resumen).map(([t, r]) => `${t}: ${r.ultimo_arca}`).join(' · ')})
           </p>
@@ -439,8 +439,8 @@ export default function ComprobantesFiscal() {
           <div className="space-y-2">
             {conc.inconsistencias.map((inc, i) => (
               <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2"
-                style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                <p className="text-xs" style={{ color: '#fbbf24' }}>
+                style={{ background: '#FFF7E6', border: '1px solid #FFE7B4' }}>
+                <p className="text-xs" style={{ color: '#B47C0F' }}>
                   ⚠️ Inconsistencia en {inc.tipo} número {inc.numero}
                   {inc.fecha ? ` con fecha ${inc.fecha}` : ''}
                   {inc.importe != null ? ` por ${ars(Math.abs(inc.importe))}` : ''}
@@ -450,7 +450,7 @@ export default function ComprobantesFiscal() {
                   <button
                     onClick={() => reintentarRegistro(inc.recuperable_log_id!, inc.numero)}
                     disabled={reintentando === inc.recuperable_log_id}
-                    style={{ ...btnBase, background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }}
+                    style={{ ...btnBase, background: '#E6F4EE', color: '#15805A', border: '1px solid #C5E6D7' }}
                   >
                     {reintentando === inc.recuperable_log_id ? 'Registrando…' : 'Reintentar registro (sin tocar ARCA)'}
                   </button>
@@ -462,13 +462,13 @@ export default function ComprobantesFiscal() {
       </div>
 
       {/* Exportación ARCA */}
-      <div className="rounded-xl p-5" style={{ background: '#0f172a', border: '1px solid rgba(124,58,237,0.2)' }}>
-        <p className="text-[10px] font-semibold uppercase tracking-widest mb-3" style={{ color: 'rgba(124,58,237,0.6)' }}>
+      <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1px solid #CFD0E4' }}>
+        <p className="text-xs font-semibold mb-3" style={{ color: '#4549B5' }}>
           Exportar para ARCA / Contador
         </p>
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
-            <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Provincia IIBB</label>
+            <label className="text-xs" style={{ color: '#6E7290' }}>Provincia IIBB</label>
             <select
               value={provinciaExport}
               onChange={e => setProvinciaExport(e.target.value)}
@@ -480,19 +480,19 @@ export default function ComprobantesFiscal() {
           <button
             onClick={handleCSV}
             disabled={loading || arcaRows.length === 0}
-            style={{ ...btnBase, background: 'rgba(124,58,237,0.2)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.35)' }}
+            style={{ ...btnBase, background: '#EEEEF6', color: '#4549B5', border: '1px solid #CFD0E4' }}
           >
             CSV ARCA{provinciaExport ? ' · ' + provinciaExport.toUpperCase() : ''}
           </button>
           <button
             onClick={handleTXT}
             disabled={loading || arcaRows.length === 0}
-            style={{ ...btnBase, background: 'rgba(6,182,212,0.1)', color: '#67e8f9', border: '1px solid rgba(6,182,212,0.25)' }}
+            style={{ ...btnBase, background: '#E9F7FA', color: '#128BAE', border: '1px solid #BEE7F1' }}
           >
             TXT Provincia{provinciaExport ? ' · ' + provinciaExport.toUpperCase() : ''}
           </button>
           {arcaRows.length > 0 && !loading && (
-            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            <span className="text-xs" style={{ color: '#9295AE' }}>
               {arcaRows.length} comprobantes listos para exportar
             </span>
           )}
@@ -500,21 +500,21 @@ export default function ComprobantesFiscal() {
 
         {/* Formato oficial Libro IVA Digital (RG 4597) — segunda opción hasta
             que el contador defina cuál adopta */}
-        <div className="flex flex-wrap items-center gap-4 mt-4 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+        <div className="flex flex-wrap items-center gap-4 mt-4 pt-4" style={{ borderTop: '1px solid #E3E5EF' }}>
+          <span className="text-xs" style={{ color: '#6E7290' }}>
             Formato oficial ARCA (Libro IVA Digital · RG 4597):
           </span>
           <button
             onClick={() => window.open(`/api/reportes/libro-iva-digital?mes=${filters.dateFrom.slice(5, 7)}&anio=${filters.dateFrom.slice(0, 4)}&archivo=cbte`, '_blank')}
             disabled={loading}
-            style={{ ...btnBase, background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.25)' }}
+            style={{ ...btnBase, background: '#E6F4EE', color: '#15805A', border: '1px solid #C5E6D7' }}
           >
             Libro IVA Digital · CBTE
           </button>
           <button
             onClick={() => window.open(`/api/reportes/libro-iva-digital?mes=${filters.dateFrom.slice(5, 7)}&anio=${filters.dateFrom.slice(0, 4)}&archivo=alicuotas`, '_blank')}
             disabled={loading}
-            style={{ ...btnBase, background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.25)' }}
+            style={{ ...btnBase, background: '#E6F4EE', color: '#15805A', border: '1px solid #C5E6D7' }}
           >
             Libro IVA Digital · Alícuotas
           </button>

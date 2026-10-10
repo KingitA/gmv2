@@ -41,10 +41,10 @@ interface ApiResponse {
 }
 
 const TRAMO_COLORS = {
-  t0_30: '#10b981',
-  t31_60: '#f59e0b',
-  t61_90: '#f97316',
-  t90_mas: '#ef4444',
+  t0_30: '#15805A',
+  t31_60: '#CD9014',
+  t61_90: '#B8560F',
+  t90_mas: '#D2364B',
 }
 
 const MORA_OPTIONS = [
@@ -63,24 +63,24 @@ function pct(part: number, total: number) {
 }
 
 const inputStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: '#FFFFFF',
+  border: '1px solid #E3E5EF',
   borderRadius: 8,
   padding: '6px 12px',
-  color: '#fff',
+  color: '#20233A',
   fontSize: 13,
   outline: 'none',
 }
 
 function FilterBtn({ label, active, color, onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
-  const c = color ?? '#7c3aed'
+  const c = color ?? '#4549B5'
   return (
     <button
       onClick={onClick}
       className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
       style={active
         ? { background: `${c}25`, color: c, border: `1px solid ${c}45` }
-        : { color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)' }
+        : { color: '#545871', background: '#FFFFFF', border: '1px solid #E3E5EF' }
       }
     >
       {label}
@@ -95,46 +95,46 @@ const COLUMNS: Column<CCRow>[] = [
   {
     key: 't0_30', label: '0–30 d', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-emerald-400">{ars(v)}</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono text-exito-600">{ars(v)}</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 't31_60', label: '31–60 d', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-amber-400">{ars(v)}</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono text-ambar-700">{ars(v)}</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 't61_90', label: '61–90 d', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono" style={{ color: '#f97316' }}>{ars(v)}</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono" style={{ color: '#B8560F' }}>{ars(v)}</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 't90_mas', label: '+90 d', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-red-400 font-semibold">{ars(v)}</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono text-error-600 font-semibold">{ars(v)}</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
   {
     key: 'total_deuda', label: 'Por comprobante', sortable: true, align: 'right',
-    render: v => <span className="font-mono text-white/70">{ars(v)}</span>,
+    render: v => <span className="font-mono text-neutro-600">{ars(v)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'pagos_a_cuenta', label: 'A cuenta', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-emerald-400">−{ars(v)}</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono text-exito-600">−{ars(v)}</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v ?? 0),
   },
   {
     key: 'saldo_libro', label: 'Debe (libro)', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-bold text-white">{ars(v)}</span>,
+    render: v => <span className="font-mono font-bold text-azul-900">{ars(v)}</span>,
     exportValue: v => String(v ?? 0),
   },
   {
@@ -145,7 +145,7 @@ const COLUMNS: Column<CCRow>[] = [
   {
     key: 'dias_promedio_mora', label: 'Días mora prom.', sortable: true, align: 'right',
     render: v => (
-      <span className="font-mono" style={{ color: v > 60 ? '#ef4444' : v > 30 ? '#f59e0b' : 'rgba(255,255,255,0.6)' }}>
+      <span className="font-mono" style={{ color: v > 60 ? '#D2364B' : v > 30 ? '#CD9014' : '#31354A' }}>
         {v}d
       </span>
     ),
@@ -216,8 +216,8 @@ export default function CuentasCorrientes() {
   }, [filtered])
 
   if (error) return (
-    <div className="rounded-xl p-6" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-      <p className="text-red-400 text-sm">Error: {error}</p>
+    <div className="rounded-xl p-6" style={{ background: '#FBEBED', border: '1px solid #F6D0D5' }}>
+      <p className="text-error-600 text-sm">Error: {error}</p>
     </div>
   )
 
@@ -227,7 +227,7 @@ export default function CuentasCorrientes() {
       {/* Filtros */}
       <div
         className="flex flex-wrap items-center gap-3 p-4 rounded-xl"
-        style={{ background: 'rgba(17,24,39,0.6)', border: '1px solid rgba(255,255,255,0.06)' }}
+        style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}
       >
         <input
           type="text"
@@ -238,14 +238,14 @@ export default function CuentasCorrientes() {
         />
 
         <div className="flex items-center gap-2">
-          <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Antigüedad</label>
+          <label className="text-xs" style={{ color: '#6E7290' }}>Antigüedad</label>
           <div className="flex gap-1">
             {MORA_OPTIONS.map(o => (
               <FilterBtn
                 key={o.value}
                 label={o.label}
                 active={moraMin === o.value}
-                color={o.value === 0 ? '#7c3aed' : o.value === 30 ? '#f59e0b' : o.value === 60 ? '#f97316' : '#ef4444'}
+                color={o.value === 0 ? '#4549B5' : o.value === 30 ? '#CD9014' : o.value === 60 ? '#B8560F' : '#D2364B'}
                 onClick={() => setMoraMin(o.value)}
               />
             ))}
@@ -256,7 +256,7 @@ export default function CuentasCorrientes() {
           onClick={load}
           disabled={loading}
           className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
-          style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.2)' }}
+          style={{ background: '#EEEEF6', color: '#4549B5', border: '1px solid #CFD0E4' }}
         >
           <span className={loading ? 'animate-spin inline-block' : ''}>↻</span>
           {loading ? 'Cargando...' : 'Actualizar'}
@@ -311,8 +311,8 @@ export default function CuentasCorrientes() {
                 style={{ background: `${color}0a`, border: `1px solid ${color}25` }}
               >
                 <div className="text-lg font-bold font-mono" style={{ color }}>{ars(val)}</div>
-                <div className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>{label}</div>
-                <div className="text-[10px] mt-0.5" style={{ color: `${color}99` }}>
+                <div className="text-xs mt-1" style={{ color: '#6E7290' }}>{label}</div>
+                <div className="text-xs mt-0.5" style={{ color: `${color}99` }}>
                   {pct(val, summary.total_por_comprobante ?? summary.total)} del total
                 </div>
               </div>
@@ -323,8 +323,8 @@ export default function CuentasCorrientes() {
 
       {/* Chart: top 15 clientes stacked */}
       {!loading && chartData.length > 0 && (
-        <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-widest mb-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}>
+          <p className="text-xs font-semibold mb-4" style={{ color: '#545871' }}>
             Top {chartData.length} clientes — Antigüedad de saldos
           </p>
           <ResponsiveContainer width="100%" height={Math.max(260, chartData.length * 28)}>
@@ -332,15 +332,15 @@ export default function CuentasCorrientes() {
               <XAxis
                 type="number"
                 tickFormatter={v => `$${(v / 1000000).toFixed(1)}M`}
-                tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }}
-                axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
+                tick={{ fill: '#6E7290', fontSize: 11 }}
+                axisLine={{ stroke: '#E3E5EF' }}
                 tickLine={false}
               />
               <YAxis
                 type="category"
                 dataKey="name"
                 width={130}
-                tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }}
+                tick={{ fill: '#6E7290', fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
               />
@@ -349,12 +349,12 @@ export default function CuentasCorrientes() {
                   const labels: Record<string, string> = { t0_30: '0–30 días', t31_60: '31–60 días', t61_90: '61–90 días', t90_mas: '+90 días' }
                   return [ars(v), labels[name] ?? name]
                 }}
-                contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
+                contentStyle={{ background: '#FFFFFF', border: '1px solid #E3E5EF', borderRadius: 8, color: '#1E2030', fontSize: 12 }}
               />
               <Legend
                 formatter={(v: string) => {
                   const labels: Record<string, string> = { t0_30: '0–30 d', t31_60: '31–60 d', t61_90: '61–90 d', t90_mas: '+90 d' }
-                  return <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>{labels[v] ?? v}</span>
+                  return <span style={{ color: '#6E7290', fontSize: 11 }}>{labels[v] ?? v}</span>
                 }}
               />
               <Bar dataKey="t0_30" stackId="a" fill={TRAMO_COLORS.t0_30} fillOpacity={0.85} maxBarSize={20} />
