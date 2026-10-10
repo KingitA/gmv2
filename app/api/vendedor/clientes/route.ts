@@ -5,7 +5,9 @@ import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { getSaldosClientes } from "@/lib/cuenta-corriente/saldo"
 import { sanitizarOr } from "@/lib/search/hybrid"
 import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar"
-import { cuitDigitos, errorCuit, normalizarCuit } from "@/lib/formato"
+import { errorCuit, normalizarCuit } from "@/lib/formato"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { clientesConMismoCuit, avisoMismoCuit } from "@/lib/clientes/mismo-cuit"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -132,24 +134,12 @@ export async function POST(request: Request) {
     if (errCuit) {
       return NextResponse.json({ error: errCuit }, { status: 400 })
     }
-    // Se guarda "xx-xxxxxxxx-x" sin importar cómo se tipeó; el duplicado se busca
-    // igual (con y sin guiones, por si quedó algún dato viejo sin normalizar).
+    // Se guarda "xx-xxxxxxxx-x" sin importar cómo se tipeó.
+    // Mismo CUIT que otro cliente: se PERMITE (sucursales, mismo dueño con dos negocios)
+    // y se informa cuál es el otro (regla del dueño, 10/10/2026). Antes se rechazaba (409).
+    // Se busca en todos los clientes, también los de otros viajantes (cliente admin).
     const cuitLimpio = normalizarCuit(cuit)
-    if (cuitLimpio) {
-      const { data: dups } = await supabase
-        .from("clientes")
-        .select("id, nombre")
-        .in("cuit", [cuitLimpio, cuitDigitos(cuitLimpio)])
-        .eq("activo", true)
-        .limit(1)
-      const dup = dups?.[0]
-      if (dup) {
-        return NextResponse.json(
-          { error: `Ya existe un cliente con ese CUIT: ${dup.nombre}`, cliente_existente_id: dup.id },
-          { status: 409 }
-        )
-      }
-    }
+    const mismoCuit = await clientesConMismoCuit(createAdminClient(), cuitLimpio, esUuid(body.id) ? body.id : null)
 
     const { data: cliente, error } = await supabase
       .from("clientes")
@@ -185,7 +175,7 @@ export async function POST(request: Request) {
       .single()
     if (error) throw error
 
-    return NextResponse.json({ success: true, cliente }, { status: 201 })
+    return NextResponse.json({ success: true, cliente, mismo_cuit: mismoCuit, aviso: avisoMismoCuit(mismoCuit) }, { status: 201 })
   } catch (error: any) {
     console.error("[vendedor] Error en POST /api/vendedor/clientes:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })

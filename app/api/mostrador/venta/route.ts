@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/auth"
 import { createPedido } from "@/lib/actions/pedidos"
 import { determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
 import { esErrorReglaPedido } from "@/lib/pedidos/errores"
-import { errorCuit } from "@/lib/formato"
+import { errorCuit, normalizarCuit } from "@/lib/formato"
 
 /**
  * POST /api/mostrador/venta — venta de mostrador en UN paso (Fase D).
@@ -68,24 +68,27 @@ export async function POST(request: NextRequest) {
     // ── 0. Lo que la facturación exige, ANTES de crear el pedido ──
     const { data: cli } = await supabase
       .from("clientes")
-      .select("id, nombre_razon_social, cuit, condicion_iva")
+      .select("id, nombre_razon_social, cuit, condicion_iva, metodo_facturacion")
       .eq("id", cliente_id)
       .maybeSingle()
     if (!cli) return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 })
-    if (!cli.cuit || !String(cli.cuit).trim()) {
+    // Cliente que opera con presupuesto (muchos no tienen CUIT: vacío / 00-00000000-0):
+    // no se le exige CUIT ni condición de IVA. Si se factura, sí (lo vuelve a validar /generar).
+    const soloPresupuesto = cli.metodo_facturacion === "Presupuesto"
+    if (!soloPresupuesto && !normalizarCuit(cli.cuit)) {
       return NextResponse.json({
-        error: `El cliente "${cli.nombre_razon_social}" no tiene CUIT configurado. Cargalo en la ficha antes de vender: sin CUIT no se puede emitir el comprobante.`,
+        error: `El cliente "${cli.nombre_razon_social}" no tiene CUIT: solo se le pueden emitir presupuestos. Para facturarle, cargá el CUIT en la ficha.`,
         error_code: "CLIENTE_SIN_CUIT",
       }, { status: 422 })
     }
-    const errCuit = errorCuit(cli.cuit)
+    const errCuit = soloPresupuesto ? null : errorCuit(cli.cuit)
     if (errCuit) {
       return NextResponse.json({
         error: `El CUIT del cliente "${cli.nombre_razon_social}" no es válido (${cli.cuit}): corregilo en la ficha antes de vender. ${errCuit}.`,
         error_code: "CLIENTE_CUIT_INVALIDO",
       }, { status: 422 })
     }
-    if (!determinarTipoFactura(cli.condicion_iva)) {
+    if (!soloPresupuesto && !determinarTipoFactura(cli.condicion_iva)) {
       return NextResponse.json({ error: mensajeErrorCondicionIva(cli.nombre_razon_social), error_code: "CLIENTE_SIN_CONDICION_IVA" }, { status: 422 })
     }
 

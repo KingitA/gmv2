@@ -104,6 +104,11 @@ export default function VendedorClienteNuevoPage() {
     }
     setGuardando(true)
     try {
+      // Mismo CUIT que otro cliente: se permite, pero se avisa cuál es (puede ser sucursal o el mismo dueño)
+      if (normalizarCuit(f.cuit)) {
+        const chk = await fetch(`/api/clientes/mismo-cuit?cuit=${encodeURIComponent(normalizarCuit(f.cuit)!)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+        if (chk?.aviso && !confirm(`${chk.aviso}.\n\n¿Crear igual este cliente con el mismo CUIT?`)) return
+      }
       const res = await fetch("/api/vendedor/clientes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -115,10 +120,6 @@ export default function VendedorClienteNuevoPage() {
         }),
       })
       const d = await res.json()
-      if (res.status === 409 && d.cliente_existente_id) {
-        if (confirm(`${d.error}. ¿Abrir la ficha de ese cliente?`)) router.push(`/vendedor/clientes/${d.cliente_existente_id}`)
-        return
-      }
       if (!res.ok || d.error) {
         alert(d.error || "No se pudo crear el cliente.")
         return

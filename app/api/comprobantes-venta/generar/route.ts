@@ -24,7 +24,7 @@ import { generarRemitosParaPedido, type ResultadoRemitos } from "@/lib/remitos/g
 import { postearLibroConAviso } from "@/lib/cuenta-corriente/postear-libro"
 import { recalcularBonificadosPedido, cuposMercaderiaPedido, etiquetasCupos } from "@/lib/pedidos/mercaderia-bonificada"
 import { leerCondicionesCliente } from "@/lib/pedidos/condiciones-pedido"
-import { cuitDigitos, cuitValido } from "@/lib/formato"
+import { cuitDigitos, cuitValido, normalizarCuit } from "@/lib/formato"
 
 type CondicionSegmento = {
   lista_precio_id: string | null
@@ -99,14 +99,8 @@ export async function POST(request: Request) {
     }
 
     // ─── Validaciones del cliente antes de continuar ───
-    if (!pedido.cliente.cuit || pedido.cliente.cuit.trim() === "") {
-      return NextResponse.json({
-        error: `El cliente "${pedido.cliente.nombre_razon_social}" no tiene CUIT configurado. Sin CUIT no se puede emitir un comprobante fiscal.`,
-        error_code: "CLIENTE_SIN_CUIT",
-        cliente_id: pedido.cliente.id,
-        cliente_nombre: pedido.cliente.nombre_razon_social,
-      }, { status: 422 })
-    }
+    // El CUIT se exige más abajo, SOLO si algún comprobante del pedido es fiscal (pide
+    // CAE). Un cliente sin CUIT (vacío / 00-00000000-0) opera con presupuesto y reversa.
 
     // ─── Mercadería bonificada: unidades definitivas y cupos sin definir ───
     // Regla del dueño (06/10/2026): antes de facturar SÍ O SÍ tiene que estar
@@ -429,8 +423,16 @@ export async function POST(request: Request) {
       )
     }
 
-    // CUIT del cliente: validar (dígito verificador) ANTES de hablar con ARCA,
-    // en vez de mandarle basura y recibir un rechazo críptico.
+    // CUIT del cliente: obligatorio solo para comprobantes fiscales (los que piden CAE).
+    // Se valida (dígito verificador) ANTES de hablar con ARCA.
+    if (algunGrupoNecesitaCAE && !normalizarCuit(pedido.cliente.cuit)) {
+      return NextResponse.json({
+        error: `El cliente "${pedido.cliente.nombre_razon_social}" no tiene CUIT: solo se le pueden emitir presupuestos y reversas. Para facturarle, cargá el CUIT en la ficha.`,
+        error_code: "CLIENTE_SIN_CUIT",
+        cliente_id: pedido.cliente.id,
+        cliente_nombre: pedido.cliente.nombre_razon_social,
+      }, { status: 422 })
+    }
     if (algunGrupoNecesitaCAE && !cuitValido(pedido.cliente.cuit)) {
       return NextResponse.json({
         error: `El CUIT del cliente "${pedido.cliente.nombre_razon_social}" no es válido (${pedido.cliente.cuit}): corregilo en la ficha del cliente.`,

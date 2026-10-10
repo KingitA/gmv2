@@ -37,6 +37,16 @@
 | Comparar / buscar CUIT | `mismoCuit(a, b)` · `.eq("cuit", normalizarCuit(x))` | comparar strings crudos |
 | Mandar CUIT a ARCA / BCRA / QR | `cuitDigitos(x)` (y validar con `cuitValido` antes) | `replace(/-/g, "")` |
 
+### Reglas de negocio del CUIT
+
+- **Sin CUIT** (vacío, o `00-00000000-0` que se usaba para eso): válido. Esos clientes y
+  proveedores operan solo con comprobantes NO fiscales (presupuesto, reversa, débitos no
+  fiscales). El CUIT se exige únicamente para comprobantes con CAE (FA/FB/NC/ND).
+- **CUIT repetido:** distintos clientes PUEDEN compartir CUIT (sucursales, mismo dueño).
+  Al crear o editar, el sistema AVISA y dice cuál es el otro (`/api/clientes/mismo-cuit`,
+  `lib/clientes/mismo-cuit.ts`); no bloquea. En importaciones con el CUIT como conector,
+  un CUIT compartido sale como error ("usá el código como conector").
+
 ## Campos de carga (inputs)
 
 | Dato | ERP web | Apps |

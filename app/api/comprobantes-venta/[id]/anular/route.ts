@@ -15,7 +15,7 @@ import { registrarCAEObtenido, marcarComprobanteCreado, marcarHuerfano, mensajeH
 import { obtenerTAConCache } from '@/lib/arca/cache'
 import { ultimoAutorizado, solicitarCAE } from '@/lib/arca/wsfev1'
 import { postearLibroConAviso } from '@/lib/cuenta-corriente/postear-libro'
-import { cuitDigitos, cuitValido } from '@/lib/formato'
+import { cuitDigitos, cuitValido, normalizarCuit } from '@/lib/formato'
 
 function r2(n: number): number { return Math.round(n * 100) / 100 }
 
@@ -83,11 +83,8 @@ export async function POST(
       }, { status: 422 })
     }
 
-    if (!original.cliente?.cuit) {
-      return NextResponse.json({
-        error: 'El cliente no tiene CUIT registrado. No se puede generar el comprobante inverso.',
-      }, { status: 422 })
-    }
+    // El CUIT se exige más abajo solo si el inverso es fiscal (anular un presupuesto
+    // de un cliente sin CUIT genera una reversa, que no lo necesita).
 
     // ─── 3. Determinar punto de venta ───
     const esFiscal = REQUIERE_CAE.has(tipoInverso)
@@ -143,8 +140,14 @@ export async function POST(
       )
     }
 
-    // Inverso fiscal: validar el CUIT del cliente antes de hablar con ARCA.
-    if (esFiscal && !cuitValido(original.cliente.cuit)) {
+    // Inverso fiscal: CUIT obligatorio y válido antes de hablar con ARCA.
+    if (esFiscal && !normalizarCuit(original.cliente?.cuit)) {
+      return NextResponse.json({
+        error: 'El cliente no tiene CUIT registrado. No se puede generar el comprobante fiscal inverso.',
+        error_code: 'CLIENTE_SIN_CUIT',
+      }, { status: 422 })
+    }
+    if (esFiscal && !cuitValido(original.cliente?.cuit)) {
       return NextResponse.json({
         error: `El CUIT del cliente "${original.cliente.nombre_razon_social ?? ''}" no es válido (${original.cliente.cuit}): corregilo en la ficha del cliente.`,
         error_code: 'CLIENTE_CUIT_INVALIDO',

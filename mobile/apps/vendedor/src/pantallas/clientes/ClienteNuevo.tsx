@@ -226,7 +226,7 @@ export function ClienteNuevo() {
   const [guardando, setGuardando] = useState(false)
   /** Localidades dadas de alta recién (por si el refresco del catálogo todavía no llegó) */
   const [localidadesNuevas, setLocalidadesNuevas] = useState<LocalidadCreada[]>([])
-  const [duplicado, setDuplicado] = useState<{ id: string; nombre: string } | null>(null)
+  const [duplicado, setDuplicado] = useState<{ id: string; nombre: string; irAPedido: boolean } | null>(null)
 
   const vendedores = cat?.vendedores ?? []
   const unicoVendedor = vendedores.length === 1 ? vendedores[0]!.id : ""
@@ -247,25 +247,24 @@ export function ClienteNuevo() {
   const viajanteSel = vendedores.find((v) => v.id === f.vendedor_id) || (vendedores.length === 1 ? vendedores[0]! : null)
   const listaImpuesta = viajanteSel?.lista_nombre || null
 
-  const guardar = async (irAPedido: boolean) => {
+  const guardar = async (irAPedido: boolean, aceptarMismoCuit = false) => {
     if (guardando) return
     if (!f.razon_social.trim() && !f.nombre.trim()) {
       mostrar("Ingresá la razón social o el nombre de fantasía.", "err")
       return
     }
-    // Mismo control que el 409 del servidor, contra la cartera del equipo. El servidor
-    // vuelve a controlar contra TODOS los clientes (los de otros viajantes) al sincronizar.
     const errCuit = errorCuit(f.cuit)
     if (errCuit) {
       mostrar(errCuit, "err")
       return
     }
     const cuit = normalizarCuit(f.cuit)
-    if (cuit) {
-      // Mismo CUIT sin importar cómo se escribió (con o sin guiones)
+    if (cuit && !aceptarMismoCuit) {
+      // Mismo CUIT que otro cliente de la cartera (sin importar cómo se escribió): se
+      // PERMITE (sucursal, mismo dueño) pero se avisa cuál es y se pregunta.
       const dup = clientes.find((c) => mismoCuit(c.cuit, cuit))
       if (dup) {
-        setDuplicado({ id: dup.id, nombre: dup.nombre })
+        setDuplicado({ id: dup.id, nombre: dup.nombre, irAPedido })
         hojaDuplicado.abrir()
         return
       }
@@ -441,11 +440,24 @@ export function ClienteNuevo() {
       <HojaConfirmar
         abierta={hojaDuplicado.abierto && !!duplicado}
         onCerrar={hojaDuplicado.cerrar}
-        titulo="Cliente existente"
-        confirmar="Abrir la ficha"
-        onConfirmar={() => duplicado && navigate(`/clientes/${duplicado.id}`, { replace: true })}
+        titulo="Mismo CUIT que otro cliente"
+        confirmar="Crear igual"
+        onConfirmar={() => {
+          if (!duplicado) return
+          const ir = duplicado.irAPedido
+          hojaDuplicado.cerrar()
+          void guardar(ir, true)
+        }}
       >
-        Ya existe un cliente con ese CUIT: {duplicado?.nombre}. ¿Abrir la ficha de ese cliente?
+        Ya hay un cliente con este CUIT: <b>{duplicado?.nombre}</b>. Puede ser una sucursal o el mismo dueño con otro negocio.
+        ¿Crear igual el cliente nuevo?
+        <button
+          type="button"
+          className="mt-3 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold"
+          onClick={() => duplicado && navigate(`/clientes/${duplicado.id}`, { replace: true })}
+        >
+          Ver la ficha de {duplicado?.nombre}
+        </button>
       </HojaConfirmar>
     </Pantalla>
   )

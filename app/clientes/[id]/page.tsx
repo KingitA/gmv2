@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { formatDateAR } from "@/lib/utils"
@@ -15,7 +15,8 @@ import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { SegmentacionCondiciones, type SegmentacionValue, EMPTY_SEGMENTACION } from "@/components/pedidos/SegmentacionCondiciones"
 import { guardarFichaComercial, guardarSegmentacionCliente } from "@/lib/actions/condiciones-cliente"
 import Link from "next/link"
-import { moneda, redondear, formatCuit, errorCuit, normalizarCuit } from "@/lib/formato"
+import { moneda, redondear, formatCuit, errorCuit, normalizarCuit, cuitDigitos } from "@/lib/formato"
+import { describirCliente, type ClienteMismoCuit } from "@/lib/clientes/mismo-cuit"
 import { InputMonto } from "@/components/ui/input-monto"
 import { InputCUIT } from "@/components/ui/input-cuit"
 
@@ -93,6 +94,9 @@ export default function ClienteDetailPage() {
   // Segmentación por proveedor / marca (lista/facturación/descuentos propios → comprobante aparte)
   const [segmentacion, setSegmentacion] = useState<SegmentacionValue>(EMPTY_SEGMENTACION)
   const [savingSeg, setSavingSeg] = useState(false)
+  // Otros clientes con el mismo CUIT: se avisa cuáles (no se bloquea)
+  const cuitOriginal = useRef("")
+  const [mismoCuit, setMismoCuit] = useState<{ aviso: string | null; clientes: ClienteMismoCuit[] }>({ aviso: null, clientes: [] })
   const [formData, setFormData] = useState({
     codigo_cliente: "",
     // nombre = cómo lo conocemos (nombre de fantasía); nombre_razon_social = a quién se factura
@@ -128,6 +132,21 @@ export default function ClienteDetailPage() {
     loadAll()
   }, [id])
 
+  // Al completar un CUIT válido: ¿hay otros clientes con el mismo? (aviso, no bloqueo)
+  useEffect(() => {
+    const dig = cuitDigitos(formData.cuit)
+    if (dig.length !== 11 || errorCuit(formData.cuit)) { setMismoCuit({ aviso: null, clientes: [] }); return }
+    const ctrl = new AbortController()
+    const t = setTimeout(async () => {
+      try {
+        const qs = new URLSearchParams({ cuit: formData.cuit, ...(esNuevo ? {} : { excluir: id }) })
+        const r = await fetch(`/api/clientes/mismo-cuit?${qs}`, { signal: ctrl.signal })
+        if (r.ok) setMismoCuit(await r.json())
+      } catch { /* sin aviso si falla la consulta */ }
+    }, 300)
+    return () => { clearTimeout(t); ctrl.abort() }
+  }, [formData.cuit, esNuevo, id])
+
   async function loadAll() {
     setLoading(true)
     if (esNuevo) {
@@ -158,7 +177,7 @@ export default function ClienteDetailPage() {
         nombre: c.nombre || "",
         nombre_razon_social: c.nombre_razon_social || c.razon_social || "",
         direccion: c.direccion || "",
-        cuit: c.cuit || "",
+        cuit: (cuitOriginal.current = c.cuit || ""),
         condicion_iva: normalizeEnum(c.condicion_iva, IVA_MAP, "Consumidor Final"),
         metodo_facturacion: normalizeEnum(c.metodo_facturacion, FACTURACION_MAP, "Factura"),
         localidad_id: c.localidad_id || "",
@@ -311,6 +330,11 @@ export default function ClienteDetailPage() {
     const errCuit = errorCuit(formData.cuit)
     if (errCuit) {
       alert(errCuit)
+      return
+    }
+    // Mismo CUIT que otro cliente: se permite (sucursales, mismo dueño), pero se avisa cuál
+    const cuitCambio = esNuevo || cuitDigitos(formData.cuit) !== cuitDigitos(cuitOriginal.current)
+    if (cuitCambio && mismoCuit.aviso && !confirm(`${mismoCuit.aviso}.\n\n¿Guardar igual este cliente con el mismo CUIT?`)) {
       return
     }
     setSaving(true)
@@ -493,6 +517,21 @@ export default function ClienteDetailPage() {
             </Campo>
             <Campo label="CUIT">
               <InputCUIT value={formData.cuit} onChange={(v) => set("cuit", v)} />
+              {mismoCuit.aviso && (
+                <div className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                  {mismoCuit.aviso.split(":")[0]}:
+                  <ul className="mt-0.5 space-y-0.5">
+                    {mismoCuit.clientes.map((c) => (
+                      <li key={c.id}>
+                        <Link href={`/clientes/${c.id}`} target="_blank" className="font-medium underline underline-offset-2 hover:text-amber-950">
+                          {describirCliente(c)}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  <span className="text-amber-700">Se puede guardar igual (sucursal o mismo dueño).</span>
+                </div>
+              )}
             </Campo>
             <Campo label="Dirección" ancho={2}>
               <Input value={formData.direccion} onChange={(e) => set("direccion", e.target.value)} />

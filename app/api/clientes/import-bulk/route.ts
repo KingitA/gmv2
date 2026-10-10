@@ -133,6 +133,7 @@ export async function POST(req: NextRequest) {
     const selectCols = Array.from(usedFields).join(",")
 
     const existingMap = new Map<string, any>()
+    const compartidos = new Map<string, any[]>() // CUIT → clientes que lo comparten
     const queryArr = Array.from(queryValues)
     for (let i = 0; i < queryArr.length; i += CHUNK) {
       const chunk = queryArr.slice(i, i + CHUNK)
@@ -143,6 +144,10 @@ export async function POST(req: NextRequest) {
       for (const c of (data || []) as any[]) {
         const key = claveConector(String(c[connector] ?? "").trim())
         if (key) {
+          // Varios clientes pueden compartir CUIT: con el CUIT como conector no se sabe
+          // cuál actualizar → esa fila sale como error diciendo cuáles son
+          const previo = existingMap.get(key)
+          if (!esCodigo && previo && previo.id !== c.id) compartidos.set(key, [...(compartidos.get(key) ?? [previo]), c])
           existingMap.set(key, c)
           if (esCodigo) existingMap.set(stripLeadingZeros(key), c) // también por versión sin ceros
         }
@@ -165,6 +170,14 @@ export async function POST(req: NextRequest) {
         continue
       }
 
+      const varios = !esCodigo ? compartidos.get(claveConector(connVal)) : undefined
+      if (varios) {
+        filas.push({
+          clave: connVal, nombre: null, status: "error", cambios: [],
+          error: `El CUIT ${connVal} lo tienen ${varios.length} clientes (${varios.map((c: any) => `${c.codigo_cliente ?? "s/código"} ${c.nombre ?? c.nombre_razon_social ?? ""}`.trim()).join("; ")}): no se sabe cuál actualizar. Usá el código de cliente como columna conectora.`,
+        })
+        continue
+      }
       const existing = lookup(connVal)
       if (!existing) {
         filas.push({ clave: connVal, nombre: null, status: "no_encontrado", cambios: [] })

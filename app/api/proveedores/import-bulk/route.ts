@@ -118,6 +118,7 @@ export async function POST(req: NextRequest) {
     const selectCols = Array.from(usedFields).join(",")
 
     const existingMap = new Map<string, any>()
+    const compartidos = new Map<string, any[]>() // CUIT → proveedores que lo comparten
     const queryArr = Array.from(queryValues)
     for (let i = 0; i < queryArr.length; i += CHUNK) {
       const chunk = queryArr.slice(i, i + CHUNK)
@@ -126,6 +127,8 @@ export async function POST(req: NextRequest) {
       for (const p of (data || []) as any[]) {
         const key = claveConector(String(p[connector] ?? "").trim())
         if (key) {
+          const previo = existingMap.get(key)
+          if (!esCodigo && previo && previo.id !== p.id) compartidos.set(key, [...(compartidos.get(key) ?? [previo]), p])
           existingMap.set(key, p)
           if (esCodigo) existingMap.set(stripLeadingZeros(key), p)
         }
@@ -143,6 +146,14 @@ export async function POST(req: NextRequest) {
       const connVal = String(row[connector] ?? "").trim()
       if (!connVal) {
         filas.push({ clave: null, nombre: null, status: "error", cambios: [], error: "Fila sin valor en la columna conectora." })
+        continue
+      }
+      const varios = !esCodigo ? compartidos.get(claveConector(connVal)) : undefined
+      if (varios) {
+        filas.push({
+          clave: connVal, nombre: null, status: "error", cambios: [],
+          error: `El CUIT ${connVal} lo tienen ${varios.length} proveedores (${varios.map((p: any) => `${p.codigo_proveedor ?? "s/código"} ${p.nombre ?? ""}`.trim()).join("; ")}): no se sabe cuál actualizar. Usá el código de proveedor como columna conectora.`,
+        })
         continue
       }
       const existing = lookup(connVal)
