@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.0 (versionCode 7) — 2026-10-14
+
+- Lista y metodo por segmento a la vista; venta a cliente nuevo (comparar listas, datos al final, sin senal); ficha por segmento como el ERP; primer pedido de un cliente en revision de oficina; nunca un pedido sin lista o metodo; saldo de billetera unico; Precios agrega columnas; foto de cheques con lectura validada
+
 ## v0.2.3 (versionCode 6) — 2026-09-23
 
 - Colores nuevos (sistema Megasur): barra azul, fondos claros, ofertas en ámbar, pendientes de enviar en lavanda. Mismas pantallas y funciones
