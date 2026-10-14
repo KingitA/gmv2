@@ -4,7 +4,7 @@ import { revisionDiaria } from "@/lib/jarvis/resumen"
 
 // Revisión diaria de Jarvis (vercel.json → 5:00 hora argentina = 8:00 UTC, lunes a sábado):
 // vigías + foto de números + resumen del día. Exige CRON_SECRET siempre.
-export const maxDuration = 120
+export const maxDuration = 300
 
 export async function GET(request: Request) {
   if (!process.env.CRON_SECRET || request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {

@@ -125,6 +125,7 @@
     "components/playroom/jarvis-ajustes.tsx",
     "app/api/playroom/agenda/",
     "app/api/playroom/jarvis/",
-    "lib/viajes/retencion.ts"
+    "lib/viajes/retencion.ts",
+    "components/playroom/jarvis-exterior.tsx"
   ]
 }

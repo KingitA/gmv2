@@ -22,7 +22,7 @@ export async function GET() {
 }
 
 // "Revisar ahora": corre los vigías y el resumen a pedido. Máximo una vez cada 10 minutos.
-export const maxDuration = 120
+export const maxDuration = 300
 
 export async function POST(_req: NextRequest) {
   const auth = await requireJarvis()

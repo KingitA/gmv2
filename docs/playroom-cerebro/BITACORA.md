@@ -17,13 +17,15 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - **Etapa 1 (chat nuevo): lista, falta probarla con la IA** (en el preview, o el examen con la clave en `.env.local`). Migración aplicada; las 12 consultas responden contra la base real.
 - **Etapa 2 (vigías y resumen del día): lista.** Migración aplicada (14/10). Falta que exista `CRON_SECRET` en Vercel y probar "Revisar ahora" en el preview. **El reporte corre de lunes a sábado a las 5:00** (pedido de Juan; cron `0 8 * * 1-6` en hora UTC).
 - **Etapa 3 (decisiones, agenda, reglas): lista.** Migración aplicada; Juan la probó ("todo andando", 14/10).
-- **Etapa 4 (acciones conectadas + recordatorios por persona): código listo.** Falta aplicar `20261014e_jarvis_acciones.sql` y probar en el preview.
-- Etapa 5 (mundo exterior: materia prima por artículo y proveedor, precios de afuera, compra anticipada): sigue.
+- **Etapa 4 (acciones conectadas + recordatorios por persona): lista.** Juan la probó con Li Yutao (14/10). Se arreglaron dos errores: las paradas del viaje y el historial.
+- **Etapa 5 (mundo exterior): código listo.** Falta aplicar `20261014g_jarvis_mundo_exterior.sql` y, en el preview, apretar "Clasificar los que faltan" y "Actualizar ahora".
+- Después: examen con la IA (con la clave en `.env.local`), pulido y pase a main con el OK de Juan.
 
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261014f_jarvis_retencion_registro.sql` | Trigger: retener o liberar a un cliente queda SIEMPRE en la bitácora (quién y cuándo), venga de donde venga el cambio. | **NO** — la aplica Juan |
+| `20261014g_jarvis_mundo_exterior.sql` | `ai_insumos` (catálogo de materias primas y qué indicadores las mueven), `ai_articulo_insumos` (de qué depende cada artículo: IA o persona; las correcciones van a la bitácora), `ai_indicadores_externos` (dólar, inflación, petróleo…, con fuente), RPC `jarvis_proveedor_insumos` y 3 reglas nuevas. No toca `articulos`. | **NO** — la aplica Juan |
+| `20261014f_jarvis_retencion_registro.sql` | Trigger: retener o liberar a un cliente queda SIEMPRE en la bitácora (quién y cuándo), venga de donde venga el cambio. | Sí (14/10) |
 | `20261014e_jarvis_acciones.sql` | Recordatorios por persona (`para_usuario`; NULL = para todos). Clientes: `retener_entregas`, motivo, desde y quién. | Sí (14/10) |
 | `20261014d_jarvis_decisiones.sql` | Decisiones en la bandeja: qué se haría con el Sí, quién decidió, cuándo, nota, resultado, impacto estimado y real. Triggers: cada alta y cada decisión van a la bitácora. Reglas iniciales de los avisos en `ai_ajustes`. | Sí (14/10) |
 | `20261014c_jarvis_vigias.sql` | La agenda vieja (`ai_agenda_events`) pasa a ser la bandeja de Jarvis: clave, tono, acciones, severidad, quién y cuándo la cerró. Cada cierre hecho por una persona queda en la bitácora. | Sí (14/10) |
@@ -35,7 +37,8 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [x] Juan aplicó `20261014c_jarvis_vigias.sql` (14/10).
 - [x] Juan aplicó `20261014d_jarvis_decisiones.sql` (14/10).
 - [x] Juan aplicó `20261014e_jarvis_acciones.sql` y probó retener y liberar a Li Yutao (14/10).
-- [ ] Juan aplica `20261014f_jarvis_retencion_registro.sql`.
+- [x] Juan aplicó `20261014f_jarvis_retencion_registro.sql` (14/10).
+- [ ] Juan aplica `20261014g_jarvis_mundo_exterior.sql`.
 - [ ] Viaje ALTO VALLE 16/10: a la parada de Li Yutao le quedó "cobrar lo anterior" marcado (lo dejó la liberación vieja). Destildarlo en la hoja de ruta si no corresponde.
 - [ ] Verificar que `CRON_SECRET` exista en Vercel. Sin eso, la revisión de las 8:00 no corre y queda solo el botón "Revisar ahora".
 - [ ] Para probar el chat desde esta PC hace falta la clave de Anthropic en `.env.local` (`ANTHROPIC_API_KEY=...`). La pone Juan; Claude no maneja claves. En Vercel ya está (el chat viejo anda).
@@ -43,6 +46,30 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Etapa 5, mundo exterior
+- **Precios de afuera** (`lib/jarvis/exterior.ts`):
+  - **Dólar oficial, dólar blue e inflación:** fuente pública gratis (api.argentinadatos.com), con historia. Sin IA, todos los días.
+  - **Materias primas** (petróleo Brent, resina de polietileno, celulosa, aluminio, acero, algodón): Jarvis las busca en internet una vez por semana. Guarda el valor actual y el de hace unos 30 días, con fuente y link. No hay páginas fijas: si una deja de andar, la búsqueda encuentra otra.
+  - Solo se buscan las materias primas que usan los artículos clasificados.
+- **Clasificador** (`lib/jarvis/clasificador.ts`):
+  - La IA barata (modelo rápido) decide de qué depende el costo de cada artículo, en tandas de 80 y con una lista cerrada de 9 materias primas. Guarda confianza y motivo.
+  - Cada mañana clasifica hasta 400 artículos nuevos. El botón "Clasificar los que faltan" hace 400 más cada vez que se aprieta.
+  - Lo que confirma o corrige una persona (`fuente = persona`) **no lo pisa nunca**, y queda en la bitácora.
+  - Las dudas (confianza menor a 0,7) se listan para revisar.
+- **Perfil de proveedor** (RPC `jarvis_proveedor_insumos`): qué parte de lo que le vendemos depende de cada materia prima.
+- **Vigía "compra anticipada"** (el ejemplo del petróleo del plan): se activa cuando se cumplen las tres condiciones:
+  - una materia prima sube un 10 % o más en 30 días;
+  - un proveedor depende de ella en un 50 % o más;
+  - ese proveedor no aumenta hace 45 días o más (o no tiene aumentos desde el 18/09).
+
+  Con eso propone "¿Armamos un pedido antes?" con el ahorro estimado (lo que le compramos por mes por la suba). El Sí abre la orden de compra prellenada. No se propone si ya tiene una orden abierta. Los tres umbrales son reglas editables.
+- La revisión de las 5:00 hace, en orden: precios fijos, clasificación de los nuevos, materias primas (semanal), vigías y resumen. El resumen menciona lo de afuera solo si se movió fuerte. Tiempo máximo: 300 segundos.
+- Chat, 3 herramientas nuevas: `indicadores_externos`, `insumos_proveedor` y `clasificacion_articulos`.
+- Pantalla, en "Jarvis: reglas y decisiones" → "Materias primas y precios de afuera":
+  - tabla de indicadores con la variación en 30 días y la fuente;
+  - barra de cobertura de la clasificación;
+  - lista de dudas con Confirmar / Corregir.
 
 ### 14/10/2026 (noche) — Arreglo: "¿quién liberó a Li Yutao?"
 - Jarvis respondió que **nadie** la había liberado y supuso que había sido "por fuera". **Era falso:** la bitácora tenía `liberar_entregas_manual` de Juan Cruz a las 14:09.

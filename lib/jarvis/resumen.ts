@@ -12,6 +12,8 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { fecha, hoyISO } from "@/lib/formato"
 import { calcularIndicadores } from "@/lib/playroom/indicadores"
 import { detectar, sincronizar } from "./vigias"
+import { actualizarConIA, actualizarFuentesFijas, estadoIndicadores, iaDesactualizada, indicadoresNecesarios } from "./exterior"
+import { clasificarPendientes } from "./clasificador"
 import { anotar } from "./registro"
 import { elegirModelo, registrarUso } from "./uso"
 import type { UsoTokens } from "./modelos"
@@ -21,7 +23,7 @@ const INDICADORES_FOTO = ["ventas_mes", "ventas_hoy", "cobrado_mes", "deuda_clie
 const INSTRUCCIONES_RESUMEN = `Sos Jarvis, el analista de una distribuidora mayorista (perfumería, limpieza, bazar) de Bahía Blanca. Escribís el resumen de la mañana que se lee arriba de todo en la pantalla.
 Reglas:
 - Dos o tres oraciones, como lo contaría un buen gerente. Nada de saludos ni despedidas.
-- Lo que importa hoy: cómo vienen las ventas, la cobranza, pagos que se vienen y lo raro si lo hay.
+- Lo que importa hoy: cómo vienen las ventas, la cobranza, pagos que se vienen y lo raro si lo hay. Lo de afuera (dólar, petróleo…) solo si se movió fuerte.
 - Usá SOLO los números que te paso. Montos abreviados ($ 3,2 M), porcentajes con coma.
 - Negritas (**así**) en 2 o 3 datos clave, nada más.
 - Si un dato parece mal cargado, no lo destaques.
@@ -31,10 +33,31 @@ export interface ResultadoRevision {
   avisos: { nuevos: number; actualizados: number; cerrados: number }
   fallaron: string[]
   resumen: string | null
+  exterior?: { fijas: number; ia: number; clasificados: number; errores: string[] }
+}
+
+/**
+ * Antes de los vigías: precios de afuera y artículos nuevos.
+ * - dólar e inflación (fuente pública, sin IA): siempre;
+ * - artículos sin clasificar (IA barata): hasta 400 por corrida;
+ * - materias primas por internet (IA): una vez por semana.
+ * Si algo de esto falla, la revisión sigue igual.
+ */
+async function prepararExterior(db: SupabaseClient, usuarioId: string | null) {
+  const res = { fijas: 0, ia: 0, clasificados: 0, errores: [] as string[] }
+  try { const f = await actualizarFuentesFijas(db); res.fijas = f.guardados; res.errores.push(...f.errores) } catch (e) { res.errores.push(`fuentes fijas: ${e}`) }
+  try { res.clasificados = (await clasificarPendientes(db, 400, usuarioId)).clasificados } catch (e) { res.errores.push(`clasificador: ${e}`) }
+  try {
+    const faltan = await iaDesactualizada(db, await indicadoresNecesarios(db))
+    if (faltan.length) { const r = await actualizarConIA(db, faltan, usuarioId); res.ia = r.guardados; res.errores.push(...r.errores) }
+  } catch (e) { res.errores.push(`materias primas: ${e}`) }
+  if (res.errores.length) console.error("[jarvis] exterior", res.errores)
+  return res
 }
 
 export async function revisionDiaria(db: SupabaseClient, usuarioId: string | null): Promise<ResultadoRevision> {
   const hoy = hoyISO()
+  const exterior = await prepararExterior(db, usuarioId)
   const [{ candidatos, fallaron }, { bloques }] = await Promise.all([
     detectar(db, hoy),
     calcularIndicadores(db, INDICADORES_FOTO),
@@ -57,6 +80,7 @@ export async function revisionDiaria(db: SupabaseClient, usuarioId: string | nul
       hoy: fecha(hoy),
       numeros: foto,
       lo_raro: candidatos.sort((a, b) => b.severidad - a.severidad).slice(0, 5).map((c) => c.titulo),
+      afuera: (await estadoIndicadores(db)).filter((i) => i.valor != null).map((i) => ({ indicador: i.nombre, valor: i.valor, fecha: i.fecha, variacion_30d_pct: i.variacion_30d })),
     }
     const resp = await new Anthropic().messages.create({
       model: elegido.modelo,
@@ -71,7 +95,7 @@ export async function revisionDiaria(db: SupabaseClient, usuarioId: string | nul
   } catch (e) {
     console.error("[jarvis] resumen del día", e)
   }
-  return { avisos, fallaron, resumen }
+  return { avisos, fallaron, resumen, exterior }
 }
 
 /** Último resumen guardado (de hoy). */

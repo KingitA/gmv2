@@ -21,6 +21,7 @@ import { sumarDiasISO } from "@/lib/formato"
 import { pesosCorto } from "@/lib/playroom/bloques"
 import { leerReglas, type Reglas } from "./reglas"
 import { crearPropuesta } from "./agenda"
+import { estadoIndicadores } from "./exterior"
 
 const EMPEORA_PARA_REABRIR = 1.25 // un aviso descartado vuelve si empeora 25 %
 const DIAS_REVISION_TRABADA = 1
@@ -200,7 +201,59 @@ const retenidoAlDia: Vigia = async (db, _hoy, r) => {
     }))
 }
 
+/**
+ * Compra anticipada (PLAN.md §5, el ejemplo del petróleo): un insumo sube afuera,
+ * un proveedor que depende de ese insumo todavía no aumentó → proponer armar un
+ * pedido antes. El Sí abre la orden de compra prellenada; no compra nada solo.
+ */
+const HISTORIAL_PRECIOS_DESDE = "2026-09-18" // desde acá hay historial de precios de artículos
+const compraAnticipada: Vigia = async (db, hoy, r) => {
+  const [indicadores, { data: insumos }] = await Promise.all([
+    estadoIndicadores(db),
+    db.from("ai_insumos").select("insumo, nombre, indicadores").eq("activo", true),
+  ])
+  const suba = new Map(indicadores.filter((i) => i.clave !== "inflacion_mensual" && (i.variacion_30d ?? 0) >= r.regla_suba_insumo_pct).map((i) => [i.clave, i]))
+  if (!suba.size) return []
+  // insumo "en suba" = alguno de sus indicadores subió (el que más subió manda)
+  const enSuba = new Map<string, { nombre: string; ind: (typeof indicadores)[number] }>()
+  for (const ins of (insumos ?? []) as { insumo: string; nombre: string; indicadores: string[] }[]) {
+    const peor = ins.indicadores.map((c) => suba.get(c)).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => (b.variacion_30d ?? 0) - (a.variacion_30d ?? 0))[0]
+    if (peor) enSuba.set(ins.insumo, { nombre: ins.nombre, ind: peor })
+  }
+  if (!enSuba.size) return []
+  const [perfiles, resumen] = await Promise.all([
+    rpc(db, "jarvis_proveedor_insumos", { p_proveedor_id: null }),
+    rpc(db, "jarvis_proveedores_resumen", { p_proveedor_id: null }),
+  ])
+  const porProv = new Map(resumen.map((p) => [String(p.proveedor_id), p]))
+  const diasHistorial = Math.round((Date.parse(hoy) - Date.parse(HISTORIAL_PRECIOS_DESDE)) / 86_400_000)
+  const out: Candidato[] = []
+  for (const pf of perfiles) {
+    const s = enSuba.get(String(pf.insumo))
+    if (!s || n0(pf.participacion_pct) < r.regla_participacion_insumo) continue
+    const p = porProv.get(String(pf.proveedor_id))
+    if (!p || n0(p.venta_30d) <= 0 || n0(p.oc_abiertas) > 0) continue
+    const diasSin = p.dias_sin_aumento == null ? diasHistorial : n0(p.dias_sin_aumento)
+    if (diasSin < r.regla_dias_sin_aumento) continue
+    const var30 = s.ind.variacion_30d ?? 0
+    const costoMes = n0(p.costo_30d) > 0 ? n0(p.costo_30d) : n0(p.venta_30d) * 0.7
+    const ahorro = Math.round(costoMes * (var30 / 100))
+    const sinTxt = p.dias_sin_aumento == null ? "no tiene aumentos cargados desde que hay registro (18/09)" : `no aumenta hace ${diasSin} días`
+    out.push({
+      clave: `armar_orden_compra:${pf.proveedor_id}`, vigia: "compra_anticipada", tono: "oportunidad",
+      titulo: `${s.ind.nombre} subió ${var30} % en el mes y ${pf.proveedor} (${Math.round(n0(pf.participacion_pct))} % ${s.nombre.toLowerCase()}) ${sinTxt}. ¿Armamos un pedido antes?`,
+      detalle: `Le compramos unos ${pesosCorto(costoMes)} por mes. Si aumenta en línea con el insumo, comprar antes ahorraría cerca de ${pesosCorto(ahorro)}. Fuente del dato de afuera: ${s.ind.fuente ?? "búsqueda web"} (${s.ind.fecha}).`,
+      acciones: [{ texto: "Ver el proveedor", pregunta: `Contame de ${pf.proveedor}: qué le compramos, cuándo aumentó y de qué insumos depende` }],
+      severidad: ahorro, entidad: { tipo: "proveedor", id: String(pf.proveedor_id) },
+      datos: { insumo: pf.insumo, indicador: s.ind.clave, variacion_30d: var30, participacion: n0(pf.participacion_pct), dias_sin_aumento: diasSin, costo_mes: costoMes },
+      propuesta: { tipo: "armar_orden_compra", parametros: { proveedor_id: pf.proveedor_id, proveedor: pf.proveedor }, impacto: ahorro },
+    })
+  }
+  return out
+}
+
 export const VIGIAS: Record<string, Vigia> = {
+  compra_anticipada: compraAnticipada,
   retenido_al_dia: retenidoAlDia,
   deuda_y_compra: deudaYCompra,
   dejaron_de_comprar: dejaronDeComprar,

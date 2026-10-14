@@ -22,6 +22,8 @@ import { hoyISO, sumarDiasISO } from "@/lib/formato"
 import { PERIODOS, resolverPeriodo, type Rango } from "./periodos"
 import { ACCIONES, ACCION_PIDE } from "./acciones"
 import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones, usuariosOficina } from "./agenda"
+import { estadoIndicadores } from "./exterior"
+import { cobertura } from "./clasificador"
 
 export interface Contexto {
   db: SupabaseClient
@@ -839,11 +841,61 @@ const clientesRetenidos: Herramienta = {
   },
 }
 
+// ─── 18-20. Mundo exterior ─────────────────────────────────────────────────
+const indicadoresExternos: Herramienta = {
+  nombre: "indicadores_externos",
+  descripcion: "Precios de afuera que guarda el sistema: dólar oficial y blue, inflación mensual, petróleo Brent, resinas plásticas, celulosa, aluminio, acero, algodón. Último valor, fecha, variación en 30 días y fuente. Usala antes de buscar en internet; si un valor está viejo o falta, buscalo con la búsqueda web.",
+  esquema: { type: "object", properties: {} },
+  async ejecutar(ctx) {
+    const xs = await estadoIndicadores(ctx.db)
+    const filas = xs.map((x) => ({ indicador: x.nombre, valor: x.valor, unidad: x.unidad, fecha: x.fecha, variacion: x.variacion_30d, fuente: x.fuente }))
+    return {
+      consultado: "Precios de afuera guardados (dólar, inflación, materias primas)",
+      datos: xs,
+      bloques: [{ ...tabla("Precios de afuera", [{ clave: "indicador", titulo: "Indicador" }, { clave: "valor", titulo: "Valor", formato: "numero" }, { clave: "unidad", titulo: "Unidad" }, { clave: "fecha", titulo: "Fecha", formato: "fecha" }, { clave: "variacion", titulo: "30 días", formato: "porcentaje" }, { clave: "fuente", titulo: "Fuente" }], filas), recalcular: { herramienta: "indicadores_externos", parametros: {} } }],
+    }
+  },
+}
+
+const insumosProveedor: Herramienta = {
+  nombre: "insumos_proveedor",
+  descripcion: "De qué materias primas depende lo que le vendemos de un proveedor (ej. '80 % plástico'), según la clasificación de sus artículos y la venta de 90 días. Sin proveedor: todos.",
+  esquema: { type: "object", properties: { proveedor: { type: "string" }, ...P_LIMITE } },
+  async ejecutar(ctx, p) {
+    let pid: string | null = null
+    let nombre = ""
+    if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); pid = pr.id; nombre = pr.nombre }
+    const rows = await rpc(ctx.db, "jarvis_proveedor_insumos", { p_proveedor_id: pid })
+    const filas = rows.map((f) => ({ proveedor: String(f.proveedor), insumo: String(f.insumo).replace("_", " "), participacion: num(f.participacion_pct), articulos: n0(f.articulos), venta_90d: red(n0(f.venta_90d)) }))
+    const lim = limite(p.limite, pid ? 20 : 40)
+    return {
+      consultado: nombre ? `Artículos de ${nombre} y de qué dependen sus costos` : "Proveedores y de qué dependen sus costos",
+      datos: filas.slice(0, 120),
+      bloques: [{ ...tabla(nombre ? `${nombre}: de qué depende el costo` : "Proveedores por materia prima", [{ clave: "proveedor", titulo: "Proveedor" }, { clave: "insumo", titulo: "Materia prima" }, { clave: "participacion", titulo: "% de lo que le vendemos", formato: "porcentaje" }, { clave: "articulos", titulo: "Artículos", formato: "numero" }], filas.slice(0, lim), { nota: "Según la clasificación de cada artículo (la hace Jarvis y la corrige una persona)." }), recalcular: { herramienta: "insumos_proveedor", parametros: { ...p } } }],
+    }
+  },
+}
+
+const clasificacionArticulos: Herramienta = {
+  nombre: "clasificacion_articulos",
+  descripcion: "Cómo va la clasificación de artículos por materia prima: cuántos están clasificados, cuántos con duda, cuántos sin clasificar y cuántos revisó una persona.",
+  esquema: { type: "object", properties: {} },
+  async ejecutar(ctx) {
+    const c = await cobertura(ctx.db)
+    return {
+      consultado: "Clasificación de artículos por materia prima",
+      datos: c,
+      bloques: [{ ...tabla("Artículos por materia prima", [{ clave: "insumo", titulo: "Materia prima" }, { clave: "articulos", titulo: "Artículos", formato: "numero" }], Object.entries(c.por_insumo).sort((a, b) => b[1] - a[1]).map(([insumo, articulos]) => ({ insumo, articulos })), { nota: `${c.clasificados} de ${c.activos} clasificados · ${c.dudas} con duda · ${c.por_persona} revisados por una persona` }), recalcular: { herramienta: "clasificacion_articulos", parametros: {} } }],
+    }
+  },
+}
+
 // ─── Registro ──────────────────────────────────────────────────────────────
 export const HERRAMIENTAS: Herramienta[] = [
   indicadoresTablero, ventas, deudaClientes, clientesHabitos, fichaCliente, articulosVendidos,
   coberturaStock, proveedores, pagosProveedores, cheques, operacion, comisiones,
   agendarRecordatorio, proponerDecision, verAgenda, historialDecisionesH, clientesRetenidos,
+  indicadoresExternos, insumosProveedor, clasificacionArticulos,
 ]
 
 /** Las que escriben en la agenda: /recalcular NUNCA las corre. */

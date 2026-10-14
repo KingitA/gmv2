@@ -17,6 +17,9 @@ export const REGLAS_POR_DEFECTO = {
   regla_venta_diaria_minima: 2,
   regla_dias_cobro_sin_verificar: 2,
   regla_avisos: "todo" as "todo" | "urgentes",
+  regla_suba_insumo_pct: 10,
+  regla_dias_sin_aumento: 45,
+  regla_participacion_insumo: 50,
 }
 export type Reglas = typeof REGLAS_POR_DEFECTO
 
