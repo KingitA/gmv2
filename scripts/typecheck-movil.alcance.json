@@ -113,6 +113,8 @@
     "lib/playroom/bloques.ts",
     "lib/playroom/catalogo-tablero.ts",
     "app/api/playroom/preparacion/",
-    "components/playroom/reportes/PreparacionDeposito.tsx"
+    "components/playroom/reportes/PreparacionDeposito.tsx",
+    "lib/jarvis/",
+    "app/api/playroom/chat/"
   ]
 }
