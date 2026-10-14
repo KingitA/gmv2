@@ -108,13 +108,15 @@
     "app/playroom/loading.tsx",
     "app/api/playroom/tablero/",
     "components/playroom/tablero.tsx",
-    "components/playroom/megasur-panel.tsx",
+    "components/playroom/jarvis-panel.tsx",
     "components/playroom/bloque-vista.tsx",
     "lib/playroom/bloques.ts",
     "lib/playroom/catalogo-tablero.ts",
     "app/api/playroom/preparacion/",
     "components/playroom/reportes/PreparacionDeposito.tsx",
     "lib/jarvis/",
-    "app/api/playroom/chat/"
+    "app/api/playroom/chat/",
+    "lib/playroom/indicadores.ts",
+    "app/api/playroom/recalcular/"
   ]
 }
