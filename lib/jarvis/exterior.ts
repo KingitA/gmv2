@@ -75,52 +75,57 @@ export async function indicadoresNecesarios(db: SupabaseClient): Promise<string[
   return [...claves].filter((c) => DEF.get(c)?.fuente === "ia")
 }
 
-const INSTRUCCIONES_BUSQUEDA = `Buscás precios internacionales de materias primas para una distribuidora argentina.
-Para cada indicador que te pidan, buscá en internet:
+const INSTRUCCIONES_BUSQUEDA = `Buscás UN precio internacional de una materia prima para una distribuidora argentina.
+Buscá en internet:
 - el valor más reciente (y su fecha);
-- el valor de hace aproximadamente 30 días (y su fecha), para medir la variación.
-Usá fuentes confiables (bolsas, agencias de noticias, organismos, sitios de cotizaciones). No inventes: si no encontrás un valor, devolvelo en null.
-Al final devolvé SOLO un JSON (sin texto alrededor) con esta forma:
-{"indicadores":[{"clave":"…","valor_actual":123.4,"fecha_actual":"AAAA-MM-DD","valor_hace_30_dias":120.1,"fecha_hace_30_dias":"AAAA-MM-DD","fuente":"nombre","url":"https://…"}]}
+- el valor de hace aproximadamente 30 días (y su fecha), para medir la variación. Si solo encontrás la variación porcentual del mes, calculá el valor de hace 30 días y aclaralo en "fuente".
+Usá fuentes confiables (bolsas, agencias de noticias, organismos, sitios de cotizaciones). Si el indicador exacto no aparece, podés usar la referencia más cercana (ej. otro tipo de polietileno) y decilo en "fuente". No inventes: si no encontrás nada, devolvé null.
+Al final devolvé SOLO un JSON (sin texto alrededor):
+{"valor_actual":123.4,"fecha_actual":"AAAA-MM-DD","valor_hace_30_dias":120.1,"fecha_hace_30_dias":"AAAA-MM-DD","fuente":"nombre","url":"https://…"}
 Números con punto decimal, sin separador de miles.`
 
-/** Busca en internet los indicadores pedidos y los guarda. Devuelve qué guardó. */
+/**
+ * Busca en internet los indicadores pedidos y los guarda.
+ * Uno por uno y en paralelo (cada uno con sus propias búsquedas): así uno
+ * difícil no se come las búsquedas de los demás (pasó el 14/10: de 6 solo
+ * volvió el petróleo).
+ */
 export async function actualizarConIA(db: SupabaseClient, claves: string[], usuarioId: string | null) {
   const defs = claves.map((c) => DEF.get(c)).filter((d): d is DefIndicador => !!d && d.fuente === "ia")
   if (!defs.length) return { guardados: 0, errores: [] as string[] }
   const elegido = await elegirModelo(db, "pensador")
   const client = new Anthropic()
-  const messages: Anthropic.MessageParam[] = [{
-    role: "user",
-    content: `Hoy es ${hoyISO()}. Indicadores:\n${defs.map((d) => `- ${d.clave}: ${d.buscar} (unidad: ${d.unidad})`).join("\n")}`,
-  }]
-  let texto = ""
-  for (let vuelta = 0; vuelta < 4; vuelta++) {
-    const resp = await client.messages.create({
-      model: elegido.modelo, max_tokens: 8000, output_config: { effort: "low" },
-      system: INSTRUCCIONES_BUSQUEDA,
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: Math.min(12, defs.length * 2) }],
-      messages,
-    })
-    await registrarUso(db, { usuarioId, origen: "exterior", modelo: elegido.modelo, uso: resp.usage as UsoTokens })
-    messages.push({ role: "assistant", content: resp.content })
-    texto = resp.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("")
-    if (resp.stop_reason !== "pause_turn") break
-  }
   const errores: string[] = []
-  let parsed: { indicadores?: any[] } = {}
-  try { parsed = JSON.parse(texto.slice(texto.indexOf("{"), texto.lastIndexOf("}") + 1)) } catch { errores.push("La búsqueda no devolvió un resultado legible") }
   const filas: Fila[] = []
-  const fechaOk = (f: unknown) => typeof f === "string" && /^\d{4}-\d{2}-\d{2}$/.test(f) && f <= hoyISO()
-  for (const it of parsed.indicadores ?? []) {
-    const d = DEF.get(String(it?.clave))
-    if (!d) continue
-    const base = { indicador: d.clave, unidad: d.unidad, fuente: String(it.fuente ?? "búsqueda web").slice(0, 120), fuente_url: typeof it.url === "string" ? it.url.slice(0, 500) : null, obtenido_por: "ia" as const }
-    if (Number(it.valor_actual) > 0 && fechaOk(it.fecha_actual)) filas.push({ ...base, fecha: it.fecha_actual, valor: Number(it.valor_actual) })
-    else errores.push(`${d.clave}: sin valor actual`)
-    if (Number(it.valor_hace_30_dias) > 0 && fechaOk(it.fecha_hace_30_dias) && it.fecha_hace_30_dias !== it.fecha_actual)
-      filas.push({ ...base, fecha: it.fecha_hace_30_dias, valor: Number(it.valor_hace_30_dias) })
-  }
+  const fechaOk = (f: unknown) => typeof f === "string" && /^d{4}-d{2}-d{2}$/.test(f) && f <= hoyISO()
+
+  await Promise.all(defs.map(async (d) => {
+    try {
+      const messages: Anthropic.MessageParam[] = [{ role: "user", content: `Hoy es ${hoyISO()}. Indicador: ${d.buscar} (unidad: ${d.unidad}).` }]
+      let texto = ""
+      for (let vuelta = 0; vuelta < 3; vuelta++) {
+        const resp = await client.messages.create({
+          model: elegido.modelo, max_tokens: 4000, output_config: { effort: "low" },
+          system: INSTRUCCIONES_BUSQUEDA,
+          tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 4 }],
+          messages,
+        })
+        await registrarUso(db, { usuarioId, origen: "exterior", modelo: elegido.modelo, uso: resp.usage as UsoTokens })
+        messages.push({ role: "assistant", content: resp.content })
+        texto = resp.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("")
+        if (resp.stop_reason !== "pause_turn") break
+      }
+      const it = JSON.parse(texto.slice(texto.indexOf("{"), texto.lastIndexOf("}") + 1))
+      const base = { indicador: d.clave, unidad: d.unidad, fuente: String(it.fuente ?? "búsqueda web").slice(0, 160), fuente_url: typeof it.url === "string" ? it.url.slice(0, 500) : null, obtenido_por: "ia" as const }
+      if (Number(it.valor_actual) > 0 && fechaOk(it.fecha_actual)) filas.push({ ...base, fecha: it.fecha_actual, valor: Number(it.valor_actual) })
+      else { errores.push(`${d.nombre}: no se encontró`); return }
+      if (Number(it.valor_hace_30_dias) > 0 && fechaOk(it.fecha_hace_30_dias) && it.fecha_hace_30_dias !== it.fecha_actual)
+        filas.push({ ...base, fecha: it.fecha_hace_30_dias, valor: Number(it.valor_hace_30_dias) })
+    } catch (e) {
+      console.error(`[jarvis] exterior ${d.clave}`, e)
+      errores.push(`${d.nombre}: no se encontró`)
+    }
+  }))
   return { guardados: await guardar(db, filas), errores }
 }
 

@@ -38,7 +38,9 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [x] Juan aplicó `20261014d_jarvis_decisiones.sql` (14/10).
 - [x] Juan aplicó `20261014e_jarvis_acciones.sql` y probó retener y liberar a Li Yutao (14/10).
 - [x] Juan aplicó `20261014f_jarvis_retencion_registro.sql` (14/10).
-- [ ] Juan aplica `20261014g_jarvis_mundo_exterior.sql`.
+- [x] Juan aplicó `20261014g_jarvis_mundo_exterior.sql` (14/10). Primera prueba: dólar, inflación y petróleo OK; 400 artículos clasificados (39 dudas, USD 0,0025 cada 80).
+- [ ] Clasificar el resto del catálogo (botón, 400 por vez; unos USD 0,12 en total).
+- [ ] Clave de Anthropic en `.env.local` de gmv2-cerebro (la pone Juan) para correr el examen.
 - [ ] Viaje ALTO VALLE 16/10: a la parada de Li Yutao le quedó "cobrar lo anterior" marcado (lo dejó la liberación vieja). Destildarlo en la hoja de ruta si no corresponde.
 - [ ] Verificar que `CRON_SECRET` exista en Vercel. Sin eso, la revisión de las 8:00 no corre y queda solo el botón "Revisar ahora".
 - [ ] Para probar el chat desde esta PC hace falta la clave de Anthropic en `.env.local` (`ANTHROPIC_API_KEY=...`). La pone Juan; Claude no maneja claves. En Vercel ya está (el chat viejo anda).
@@ -46,6 +48,10 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Ajuste: materias primas
+- La primera búsqueda pidió las 6 materias primas juntas, con 12 búsquedas en total. Las gastó en el petróleo y volvió solo ese (USD 0,33).
+- Ahora busca **cada una por separado y en paralelo**, con hasta 4 búsquedas cada una. Si no encuentra el indicador exacto, puede usar la referencia más cercana y lo aclara en "fuente".
 
 ### 14/10/2026 (noche) — Etapa 5, mundo exterior
 - **Precios de afuera** (`lib/jarvis/exterior.ts`):
