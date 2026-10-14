@@ -111,6 +111,8 @@
     "components/playroom/megasur-panel.tsx",
     "components/playroom/bloque-vista.tsx",
     "lib/playroom/bloques.ts",
-    "lib/playroom/catalogo-tablero.ts"
+    "lib/playroom/catalogo-tablero.ts",
+    "app/api/playroom/preparacion/",
+    "components/playroom/reportes/PreparacionDeposito.tsx"
   ]
 }

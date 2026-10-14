@@ -5,7 +5,7 @@
 // informes de siempre. Nada de lo que se haga acá modifica datos del sistema.
 
 import { useEffect, useRef, useState, type ComponentType } from 'react'
-import { ArrowLeft, BarChart3, FileSpreadsheet, Lightbulb, Package, Receipt, Users, Wallet, Sparkles, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, BarChart3, ClipboardCheck, FileSpreadsheet, Lightbulb, Package, Receipt, Users, Wallet, Sparkles, type LucideIcon } from 'lucide-react'
 import { useUrlParams } from '@/lib/hooks/use-url-state'
 import { cn } from '@/lib/utils'
 import { TableroVista, useTablero } from '@/components/playroom/tablero'
@@ -16,6 +16,7 @@ import CuentasCorrientes from '@/components/playroom/reportes/CuentasCorrientes'
 import ArticulosVendidos from '@/components/playroom/reportes/ArticulosVendidos'
 import ComisionesViajantes from '@/components/playroom/reportes/ComisionesViajantes'
 import ComprobantesFiscal from '@/components/playroom/reportes/ComprobantesFiscal'
+import PreparacionDeposito from '@/components/playroom/reportes/PreparacionDeposito'
 
 const INFORMES: { id: string; titulo: string; descripcion: string; icono: LucideIcon; Componente: ComponentType }[] = [
   { id: 'articulos', titulo: 'Artículos vendidos', descripcion: 'Venta neta, márgenes y comparativos', icono: BarChart3, Componente: ArticulosVendidos },
@@ -23,6 +24,7 @@ const INFORMES: { id: string; titulo: string; descripcion: string; icono: Lucide
   { id: 'clientes-abc', titulo: 'Clientes ABC', descripcion: 'Ranking por facturación y variaciones', icono: Users, Componente: RankingClientesABC },
   { id: 'comisiones', titulo: 'Comisiones', descripcion: 'Devengadas y desempeño por viajante', icono: Receipt, Componente: ComisionesViajantes },
   { id: 'rotacion', titulo: 'Rotación y stock muerto', descripcion: 'Capital inmovilizado y qué liquidar', icono: Package, Componente: RotacionStockMuerto },
+  { id: 'preparacion', titulo: 'Preparación por empleado', descripcion: 'Pedidos, renglones, plata y tiempo de cada uno en el depósito', icono: ClipboardCheck, Componente: PreparacionDeposito },
   { id: 'fiscal', titulo: 'Fiscal ARCA', descripcion: 'Libro IVA ventas y exportación', icono: FileSpreadsheet, Componente: ComprobantesFiscal },
 ]
 
