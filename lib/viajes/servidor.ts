@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { requireAuth, getUserRoles } from "@/lib/auth"
 import { ERP_ROLES } from "@/lib/role-utils"
+import { PREFIJO_RETENCION, retenidosEntre } from "./retencion"
 
 // Helpers de servidor del módulo Viajes (API routes de oficina).
 
@@ -86,9 +87,21 @@ export async function sincronizarParadas(supabase: SupabaseClient, viajeId: stri
   const conParada = new Set((paradas || []).map((p: any) => p.cliente_id as string))
 
   let orden = Math.max(0, ...(paradas || []).map((p: any) => Number(p.orden) || 0))
-  const nuevas = [...conPedido]
-    .filter((c) => !conParada.has(c))
-    .map((cliente_id) => ({ viaje_id: viajeId, cliente_id, orden: ++orden }))
+  const sinParada = [...conPedido].filter((c) => !conParada.has(c))
+  // Cliente con entregas retenidas (decisión de oficina, lib/viajes/retencion.ts): su parada nace con candado
+  const retenidos = await retenidosEntre(supabase, sinParada)
+  // OJO: en un insert de varias filas, PostgREST manda NULL (no el default) a la columna que
+  // falta en alguna fila. Por eso TODAS las filas llevan los tres campos explícitos.
+  const nuevas = sinParada.map((cliente_id) => {
+    const motivo = retenidos.get(cliente_id)
+    return {
+      viaje_id: viajeId, cliente_id, orden: ++orden,
+      bloquear_entrega: motivo !== undefined,
+      exigir_cobro_anterior: motivo !== undefined,
+      retencion_puso_cobro: motivo !== undefined,
+      motivo_bloqueo: motivo !== undefined ? PREFIJO_RETENCION + motivo : null,
+    }
+  })
   if (nuevas.length) {
     const { error } = await supabase.from("viajes_paradas").insert(nuevas)
     if (error) throw error
@@ -115,4 +128,24 @@ export async function sincronizarParadas(supabase: SupabaseClient, viajeId: stri
 export function nombrePorDefecto(zonas: string[], fecha: string): string {
   const [, m, d] = fecha.split("-")
   return `${zonas.join(" + ") || "Viaje"} · ${d}/${m}`
+}
+
+/**
+ * Autorreparación: si un viaje de reparto que todavía se arma (programado) tiene
+ * pedidos de clientes sin parada (p. ej. porque un alta de paradas falló en el
+ * medio), las crea. Se llama al abrir la hoja de ruta. Nunca frena la lectura.
+ */
+export async function repararParadasFaltantes(supabase: SupabaseClient, viajeId: string) {
+  try {
+    const { data: v } = await supabase.from("viajes").select("estado, tipo").eq("id", viajeId).maybeSingle()
+    if (!v || v.tipo !== "reparto" || v.estado !== "programado") return
+    const [{ data: pedidos }, { data: paradas }] = await Promise.all([
+      supabase.from("pedidos").select("cliente_id").eq("viaje_id", viajeId).neq("estado", "eliminado"),
+      supabase.from("viajes_paradas").select("cliente_id").eq("viaje_id", viajeId),
+    ])
+    const conParada = new Set((paradas || []).map((p: any) => p.cliente_id))
+    if ((pedidos || []).some((p: any) => !conParada.has(p.cliente_id))) await sincronizarParadas(supabase, viajeId)
+  } catch (e) {
+    console.error("[viajes] reparar paradas", e)
+  }
 }

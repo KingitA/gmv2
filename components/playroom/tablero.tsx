@@ -133,7 +133,7 @@ export function TableroVista({ t, onPreguntar }: { t: Tablero; onPreguntar: (tex
       {estado.ids.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-neutro-300 bg-white px-6 py-10 text-center">
           <p className="font-semibold text-azul-900">El tablero está vacío</p>
-          <p className="mt-1 text-sm text-neutro-500">Agregá tarjetas del catálogo o fijá respuestas de Megasur.</p>
+          <p className="mt-1 text-sm text-neutro-500">Agregá tarjetas del catálogo o fijá respuestas de Jarvis.</p>
           <div className="mt-4 flex justify-center gap-2">
             <Button size="sm" onClick={() => setCatalogo(true)}><Plus className="mr-1 h-4 w-4" />Agregar tarjeta</Button>
             <Button size="sm" variant="outline" onClick={t.restablecer}><RotateCcw className="mr-1 h-4 w-4" />Tablero inicial</Button>
@@ -174,7 +174,7 @@ export function TableroVista({ t, onPreguntar }: { t: Tablero; onPreguntar: (tex
                 ) : "error" in b ? (
                   <p className="py-2 text-sm text-neutro-400">{b.error}</p>
                 ) : (
-                  <button type="button" className="block w-full text-left" onClick={() => onPreguntar(`Contame más sobre "${titulo}"`)} title="Preguntarle a Megasur sobre esto">
+                  <button type="button" className="block w-full text-left" onClick={() => onPreguntar(`Contame más sobre "${titulo}"`)} title="Preguntarle a Jarvis sobre esto">
                     <BloqueVista bloque={b} compacto />
                   </button>
                 )}

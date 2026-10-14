@@ -1,9 +1,10 @@
 "use client"
 
-// Chat con Megasur (el cerebro de Playroom). Siempre abierto al costado del tablero.
-// Habla el "idioma" acordado con la sesión del cerebro (lib/playroom/bloques.ts):
-// respuesta en texto + bloques (tablas, gráficos, números) + qué consultó + sugerencias.
-// Megasur solo LEE el sistema: nada de lo que se pregunte acá modifica datos.
+// Chat con Jarvis (el cerebro de Playroom, lib/jarvis/). Siempre abierto al costado del tablero.
+// Habla el "idioma" de lib/playroom/bloques.ts: respuesta en texto + bloques (tablas,
+// gráficos, números) + qué consultó + (rara vez) una sugerencia para seguir.
+// Jarvis solo LEE el sistema: nada de lo que se pregunte acá modifica datos.
+// La conversación se guarda en el servidor (quién preguntó qué): acá se guarda su id.
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from "react"
 import { ArrowUp, Pin, Search, Trash2 } from "lucide-react"
@@ -12,7 +13,7 @@ import type { Bloque, RespuestaChat } from "@/lib/playroom/bloques"
 import { BloqueVista, tablaDesdeFilas } from "./bloque-vista"
 
 interface Mensaje {
-  rol: "yo" | "megasur"
+  rol: "yo" | "jarvis"
   texto: string
   bloques?: Bloque[]
   consultado?: string[]
@@ -27,12 +28,15 @@ const SUGERENCIAS_INICIALES = [
   "¿Qué artículos no se mueven hace 60 días?",
 ]
 
-export interface MegasurPanelRef { preguntar: (texto: string) => void }
+const ESPERA = ["Jarvis está revisando los datos…", "Cruzando la información…", "Sacando las cuentas…", "Armando la respuesta…"]
 
-export const MegasurPanel = forwardRef<MegasurPanelRef, { onFijar: (b: Bloque) => void; className?: string }>(
-  function MegasurPanel({ onFijar, className }, ref) {
+export interface JarvisPanelRef { preguntar: (texto: string) => void }
+
+export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => void; className?: string }>(
+  function JarvisPanel({ onFijar, className }, ref) {
     const [mensajes, setMensajes] = useState<Mensaje[]>([])
-    const [historial, setHistorial] = useState<unknown[]>([])
+    const [conversacionId, setConversacionId] = useState<string | null>(null)
+    const [paso, setPaso] = useState(0)
     const [texto, setTexto] = useState("")
     const [pensando, setPensando] = useState(false)
     const [fijados, setFijados] = useState<Set<string>>(new Set())
@@ -40,6 +44,12 @@ export const MegasurPanel = forwardRef<MegasurPanelRef, { onFijar: (b: Bloque) =
     const inputRef = useRef<HTMLTextAreaElement>(null)
 
     useEffect(() => { finRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }) }, [mensajes, pensando])
+    // Mientras piensa, el mensaje va cambiando (las esperas nunca son un spinner mudo)
+    useEffect(() => {
+      if (!pensando) { setPaso(0); return }
+      const t = setInterval(() => setPaso(p => p + 1), 4000)
+      return () => clearInterval(t)
+    }, [pensando])
 
     async function enviar(pregunta?: string) {
       const msg = (pregunta ?? texto).trim()
@@ -51,16 +61,18 @@ export const MegasurPanel = forwardRef<MegasurPanelRef, { onFijar: (b: Bloque) =
         const res = await fetch("/api/playroom/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mensaje: msg, historial }),
+          body: JSON.stringify({ mensaje: msg, conversacion_id: conversacionId }),
         })
-        const json: RespuestaChat & { data?: any[] } = await res.json()
+        const json: RespuestaChat & { data?: any[]; conversacion_id?: string | null; aviso?: string; conversacion_nueva?: boolean } = await res.json()
+        if (json.conversacion_nueva) setConversacionId(null)
         if (!res.ok || json.error) throw new Error(json.error || `Error ${res.status}`)
         // Compatibilidad con el cerebro actual: si no manda bloques pero sí filas sueltas, se arma una tabla
         const bloques = json.bloques?.length ? json.bloques : (() => { const t = json.data ? tablaDesdeFilas(json.data) : null; return t ? [t] : [] })()
-        setMensajes(m => [...m, { rol: "megasur", texto: json.respuesta || "", bloques, consultado: json.consultado, sugerencias: json.sugerencias }])
-        setHistorial((json.historial ?? json.historial_actualizado ?? historial) as unknown[])
+        const texto = json.aviso ? `${json.respuesta || ""}\n\n*${json.aviso}*` : json.respuesta || ""
+        setMensajes(m => [...m, { rol: "jarvis", texto, bloques, consultado: json.consultado, sugerencias: json.sugerencias }])
+        if (json.conversacion_id) setConversacionId(json.conversacion_id)
       } catch (e: any) {
-        setMensajes(m => [...m, { rol: "megasur", texto: `No pude responder: ${e?.message || "error de conexión"}. Probá de nuevo en un momento.`, error: true }])
+        setMensajes(m => [...m, { rol: "jarvis", texto: `No pude responder: ${e?.message || "error de conexión"}. Probá de nuevo en un momento.`, error: true }])
       } finally {
         setPensando(false)
       }
@@ -70,19 +82,19 @@ export const MegasurPanel = forwardRef<MegasurPanelRef, { onFijar: (b: Bloque) =
       preguntar: (t: string) => { enviar(t); inputRef.current?.focus() },
     }))
 
-    const ultimas = [...mensajes].reverse().find(m => m.rol === "megasur" && m.sugerencias?.length)?.sugerencias
+    const ultimas = [...mensajes].reverse().find(m => m.rol === "jarvis" && m.sugerencias?.length)?.sugerencias
     const sugerencias = mensajes.length === 0 ? SUGERENCIAS_INICIALES : ultimas ?? []
 
     return (
       <aside className={cn("flex min-h-0 flex-col overflow-hidden rounded-2xl border border-neutro-200 bg-white", className)}>
         <header className="flex items-center gap-3 border-b border-neutro-100 px-4 py-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-azul-700 to-cian-500 text-sm font-extrabold text-white">M</div>
+          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-azul-700 to-cian-500 text-sm font-extrabold text-white">J</div>
           <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-bold leading-tight text-azul-900">Megasur</p>
+            <p className="text-[15px] font-bold leading-tight text-azul-900">Jarvis</p>
             <p className="text-xs font-semibold text-exito-600">● Lee todo el sistema · no modifica nada</p>
           </div>
           {mensajes.length > 0 && (
-            <button type="button" onClick={() => { setMensajes([]); setHistorial([]); setFijados(new Set()) }} title="Empezar una conversación nueva"
+            <button type="button" onClick={() => { setMensajes([]); setConversacionId(null); setFijados(new Set()) }} title="Empezar una conversación nueva"
               className="grid size-8 place-items-center rounded-lg text-neutro-400 hover:bg-neutro-100 hover:text-neutro-700">
               <Trash2 className="h-4 w-4" />
             </button>
@@ -136,7 +148,7 @@ export const MegasurPanel = forwardRef<MegasurPanelRef, { onFijar: (b: Bloque) =
               <span className="flex gap-1">
                 {[0, 1, 2].map(n => <span key={n} className="size-1.5 animate-bounce rounded-full bg-cian-500" style={{ animationDelay: `${n * 150}ms` }} />)}
               </span>
-              Megasur está revisando los datos…
+              {ESPERA[paso % ESPERA.length]}
             </div>
           )}
           <div ref={finRef} />
@@ -160,7 +172,7 @@ export const MegasurPanel = forwardRef<MegasurPanelRef, { onFijar: (b: Bloque) =
               onChange={e => setTexto(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar() } }}
               rows={1}
-              placeholder="Preguntale a Megasur…"
+              placeholder="Preguntale a Jarvis…"
               className="max-h-32 min-h-[36px] flex-1 resize-none bg-transparent py-2 text-sm text-neutro-800 outline-none placeholder:text-neutro-400"
             />
             <button type="submit" disabled={!texto.trim() || pensando} aria-label="Enviar"

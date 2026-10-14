@@ -108,11 +108,24 @@
     "app/playroom/loading.tsx",
     "app/api/playroom/tablero/",
     "components/playroom/tablero.tsx",
-    "components/playroom/megasur-panel.tsx",
+    "components/playroom/jarvis-panel.tsx",
     "components/playroom/bloque-vista.tsx",
     "lib/playroom/bloques.ts",
     "lib/playroom/catalogo-tablero.ts",
     "app/api/playroom/preparacion/",
-    "components/playroom/reportes/PreparacionDeposito.tsx"
+    "components/playroom/reportes/PreparacionDeposito.tsx",
+    "lib/jarvis/",
+    "app/api/playroom/chat/",
+    "lib/playroom/indicadores.ts",
+    "app/api/playroom/recalcular/",
+    "app/api/playroom/resumen-del-dia/",
+    "app/api/playroom/novedades/",
+    "app/api/cron/jarvis-revision/",
+    "components/playroom/jarvis-agenda.tsx",
+    "components/playroom/jarvis-ajustes.tsx",
+    "app/api/playroom/agenda/",
+    "app/api/playroom/jarvis/",
+    "lib/viajes/retencion.ts",
+    "components/playroom/jarvis-exterior.tsx"
   ]
 }

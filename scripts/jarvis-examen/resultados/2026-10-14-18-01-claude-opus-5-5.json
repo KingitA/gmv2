@@ -1,0 +1,312 @@
+{
+  "modelo": "claude-opus-5-5",
+  "juez": "claude-opus-5-5",
+  "promedio": 4.9,
+  "costo_usd": 0.44632740000000004,
+  "resultados": [
+    {
+      "id": "ventas-mes-pasado",
+      "pregunta": "¿Cuánto vendimos el mes pasado?",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Total con IVA, neto, pedidos, clientes y comparación con agosto (+40,9 %) coinciden; es corto, no tiene preguntas de relleno y la advertencia sobre el margen anómalo de 71,4 % suma valor.",
+      "segundos": 11,
+      "respuesta": "En **septiembre 2026** vendimos **$ 546.590.680 con IVA** ($ 486.796.956 sin IVA), en 346 pedidos a 245 clientes. Es **40,9 % más que agosto** ($ 387.908.069).\n\nOjo: el margen que da es de 71,4 %. Es demasiado alto para el rubro y lo más probable es que haya artículos con el costo mal cargado o sin costo, así que no lo tomes como real.",
+      "consultado": [
+        "Ventas septiembre, comparadas con 01/08–31/08"
+      ],
+      "bloques": [
+        "Ventas septiembre"
+      ],
+      "costo_usd": 0.09033079999999999,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "zona-top",
+      "pregunta": "¿Qué zona vendió más el mes pasado?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Nombra a Bahía con $ 116,4 M (21,3 %, -7,2 %) y suma a Necochea como segunda; todas las cifras coinciden, y la advertencia sobre márgenes es útil aunque excede lo pedido.",
+      "segundos": 10,
+      "respuesta": "En septiembre la zona que más vendió fue **Bahía**, con **$ 116,4 M** con IVA (21,3 % del total), aunque quedó 7,2 % abajo de agosto. Muy cerca quedó **Necochea** con $ 105,4 M, que vendió más de 9 veces lo de agosto (+836,9 %).\n\nOjo con los márgenes: dan alrededor del 70 % en casi todas las zonas (71,4 % en total), un número demasiado alto que probablemente venga de costos mal cargados o desactualizados.",
+      "consultado": [
+        "Ventas septiembre, comparadas con 01/08–31/08"
+      ],
+      "bloques": [
+        "Ventas por zona — septiembre"
+      ],
+      "costo_usd": 0.027156600000000003,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "viajante-top",
+      "pregunta": "¿Qué viajante vendió más el mes pasado y cuánto?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Silva con $ 129,8 M, 23,8 % y +19,5 %, todo correcto; la suma de Freije ($ 104,2 M) y la comparación con Guerra cierran, aunque interpretar 'NECO' como Necochea es una suposición no respaldada por el dato.",
+      "segundos": 12,
+      "respuesta": "En septiembre el que más vendió fue **Mario Silva: $ 129,8 M con IVA** ($ 118,1 M sin IVA). Eso es el **23,8 %** del total y un 19,5 % más que en agosto. Fueron 63 pedidos a 60 clientes.\n\nDaniel Freije figura en dos renglones: uno general y otro con la lista de Necochea. Si los sumás, da $ 104,2 M y queda segundo, apenas por encima de Luis Guerra ($ 103,3 M).",
+      "consultado": [
+        "Ventas septiembre, comparadas con 01/08–31/08"
+      ],
+      "bloques": [
+        "Ventas por viajante — septiembre"
+      ],
+      "costo_usd": 0.027830600000000004,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "cliente-mas-debe",
+      "pregunta": "¿Quién es el cliente que más nos debe?",
+      "nota": 8,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "LA BANDERITA SRL con $ 10,8 M de $ 35,4 M es correcto, igual que la antigüedad y la falta de pagos; no se pueden verificar la condición, la frecuencia de compra ni los pedidos 'impresos', que suman más que el saldo, y la respuesta es algo extensa.",
+      "segundos": 20,
+      "respuesta": "**LA BANDERITA SRL** (Bahía Blanca, viajante Freije Daniel) es la que más debe: **$ 10,8 M** de los $ 35,4 M que nos deben en total los clientes.\n\n- **Desde cuándo:** la deuda más vieja tiene 36 días. Son $ 1,5 M de 30 a 59 días y $ 9,3 M de menos de 30.\n- **Pagos:** no tiene ningún pago registrado, aunque su condición es **Efectivo**.\n- **Compras:** compra cada 74,5 días en promedio. La última fue el 25/09/2026, hace 19 días.\n\nLo que más llama la atención: sus pedidos del 25/09 ($ 9,9 M), del 08/09 ($ 1,2 M) y del 29/04 ($ 3,6 M) siguen en estado \"impreso\". Conviene confirmar si ya se entregaron antes de reclamar la deuda.",
+      "consultado": [
+        "Cuentas corrientes de 18 clientes con saldo",
+        "Ficha, cuenta corriente, pedidos y compras de los últimos 6 meses de LA BANDERITA SRL"
+      ],
+      "bloques": [
+        "Deuda por antigüedad"
+      ],
+      "costo_usd": 0.0454026,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "deuda-30",
+      "pregunta": "¿Cuánta plata nos deben con más de 30 días?",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Suma correcta ($ 22.959.060 = 20,4 M + 1,3 M + 1,2 M), 14 clientes bien contados y datos de SENGER exactos; respuesta breve y sin relleno.",
+      "segundos": 12,
+      "respuesta": "Con más de 30 días nos deben **$ 22.959.060**, repartidos en 14 clientes:\n\n- 30 a 59 días: $ 20,4 M\n- 60 a 89 días: $ 1,3 M (solo ZHUANG SHU JUAN)\n- 90 días o más: $ 1,2 M (solo SENGER JOSE MARIA, con 106 días)\n\nCasi toda la deuda vencida está en el tramo de 30 a 59 días y la mayor parte es de clientes de **Freije**. El caso más viejo es **SENGER**: su última compra fue el 25/06/2026 y su último pago, el 27/09/2026.",
+      "consultado": [
+        "Cuentas corrientes de 18 clientes con saldo"
+      ],
+      "bloques": [
+        "Deuda por antigüedad — más de 30 días"
+      ],
+      "costo_usd": 0.0349386,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "pagos-semana",
+      "pregunta": "¿Cuánto tenemos que pagarle a proveedores esta semana?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Los montos coinciden con el sistema: $ 103,1 M en los próximos 7 días, $ 8,5 M atrasados y $ 111,7 M en total. Además separa bien a proveedores ($ 83,7 M y $ 6,5 M) de impuestos y gastos, y la respuesta es concisa; \"dos tercios\" solo es exacto sobre el subtotal de proveedores.",
+      "segundos": 18,
+      "respuesta": "Esta semana (14/10 al 21/10) vencen **$ 103,1 M**, más **$ 8,5 M atrasados**: en total, **$ 111,7 M**.\n\nEse total incluye impuestos y gastos que no son de proveedores (IVA $ 14,7 M, Municipal $ 4,0 M, EDES, expensas, Convenio Multilateral). Si los sacás, **a proveedores solamente les debemos $ 83,7 M** que vencen esta semana y $ 6,5 M que ya están atrasados.\n\n- **Lo más grande:** Colgate $ 29,3 M (21/10) y Kenvue $ 26,7 M (20/10). Entre los dos son casi dos tercios de lo de la semana.\n- **Atrasados:** Iberia $ 4,2 M (dos vencimientos, el más viejo del 28/09) y Textil Doss-Suiza $ 2,2 M, vencido desde el 22/09.",
+      "consultado": [
+        "Indicadores del tablero: Pagos próximos 7 días",
+        "Vencimientos a proveedores hasta el 21/10"
+      ],
+      "bloques": [
+        "Pagos a proveedores — atrasados y próximos 7 días"
+      ],
+      "costo_usd": 0.0398586,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "cheques",
+      "pregunta": "¿Cuántos cheques tenemos en cartera y por cuánto?",
+      "nota": 8,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "La cantidad (202) y el total ($ 420.914.359) coinciden con el dato correcto. La alerta sobre cheques vencidos y sin cliente ni banco es útil, pero especula de más (no se puede verificar \"hace rato\" ni que ya se hayan depositado) y alarga la respuesta.",
+      "segundos": 18,
+      "respuesta": "Tenemos **202 cheques en cartera** por **$ 420.914.359**.\n\nOjo: el listado arranca con cheques que vencieron hace rato. El más viejo vence el 30/06/2026 (YAN JIAOMEI, $ 41.100) y hay muchos de julio y agosto. Además, la mayoría no tienen cargados ni cliente ni banco. Lo más probable es que ya se hayan depositado o entregado y nadie los dio de baja, así que el total real seguramente es menor. Te sugiero que Finanzas revise esos cheques vencidos.",
+      "consultado": [
+        "Cheques en cartera"
+      ],
+      "bloques": [
+        "Cheques en cartera"
+      ],
+      "costo_usd": 0.0291446,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "top-articulos",
+      "pregunta": "¿Cuáles fueron los 5 artículos más vendidos el mes pasado?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Cifras correctas ($ 4,7 M, rango $ 4,3–4,7 M, $ 49.410, 71,1 %), top 5 en tabla aparte, sin relleno y con alertas útiles de margen.",
+      "segundos": 15,
+      "respuesta": "En septiembre, por venta sin IVA, el primero fue el **Shampoo Original x400ml** con **$ 4,7 M**. Los cinco están muy parejos, entre $ 4,3 M y $ 4,7 M, y el detalle está en la tabla.\n\nHay dos márgenes que conviene revisar:\n- **Shampoo Original**: no tiene costo cargado, así que no sale margen. Además, en agosto vendió solo $ 49.410, y ese salto tan grande es raro.\n- **Azufre blíster**: da 71,1 % de margen. Es un número muy alto y puede ser que el costo esté mal cargado.",
+      "consultado": [
+        "Kardex de ventas por artículo septiembre"
+      ],
+      "bloques": [
+        "Artículos — septiembre"
+      ],
+      "costo_usd": 0.0249306,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "dejaron-de-comprar",
+      "pregunta": "¿Qué clientes habituales dejaron de comprar?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Las cifras coinciden con el dato: 16 clientes, $ 12,9 M, Lamas $ 3,3 M / 35 días y 4 clientes de Guerra en Necochea. La tabla trae la lista completa con la compra mensual y el texto es breve. Advierte bien sobre el caso Gonzalez y su sugerencia final es concreta, no de relleno.",
+      "segundos": 14,
+      "respuesta": "Hay **16 clientes habituales atrasados**, que suman **$ 12,9 M de compra mensual** en juego.\n\n- **Lamas Humberto Benicio** (Viedma-Patagones) es el que más pesa: compra unos $ 3,3 M por mes, cada 17 días, y no compra desde el 09/09/2026 (hace 35 días).\n- **Necochea / Guerra Luis** concentra 4 de los 16: Juanenea, Flamenco, Di Fonzo y Chen Xiu Hua. Chen y Flamenco llevan más de 75 días sin comprar.\n- **Gonzalez Patricia María** (Tres Arroyos) aparece segunda, pero tomala con pinzas: tiene solo 2 pedidos con 2 días de diferencia, así que lo de \"atrasada\" no dice mucho. Además no tiene viajante asignado.",
+      "consultado": [
+        "Pedidos de los últimos 4 meses de 364 clientes"
+      ],
+      "bloques": [
+        "Clientes habituales que dejaron de comprar"
+      ],
+      "costo_usd": 0.0360646,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "ficha-banderita",
+      "pregunta": "Contame de La Banderita",
+      "nota": 8,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Cifras correctas (deuda por antigüedad, frecuencia, última compra, viajante y zona). Suma una alerta útil sobre los pedidos abiertos, pero sobra la mención al intento fallido de guardar en 'Para decidir' y la respuesta se alarga un poco.",
+      "segundos": 32,
+      "respuesta": "**LA BANDERITA SRL** (cód. 550): es de Bahía Blanca, la atiende Freije con lista Neco, paga **en efectivo** y se le factura.\n\n- **Deuda: $ 10,8 M**, de los cuales $ 9,3 M tienen menos de 30 días y $ 1,5 M entre 30 y 59 días. **No tiene ningún pago registrado.**\n- **Hábito:** compra cada 74,5 días, con un promedio de $ 2,4 M por mes. La última compra fue el 25/09/2026 (hace 19 días). Todo lo que compró está en septiembre ($ 11,1 M), sobre todo cremas dentales y trapos de piso.\n- **Pedidos abiertos:** hay 3 en estado \"impreso\": el 001636 del 25/09 ($ 9,9 M), el 001422 del 08/09 ($ 1,2 M) y el **000265 del 29/04 ($ 3,6 M)**, que lleva casi seis meses así.\n\nNo cierra que un cliente de contado deba $ 10,8 M sin ningún pago. Te sugiero confirmar si esos pedidos se entregaron y se cobraron sin registrar el pago, y no mandarle nada más sin cobrar antes. Intenté dejar esto en \"Para decidir\", pero el sistema no lo guardó porque está en modo prueba.",
+      "consultado": [
+        "Ficha, cuenta corriente, pedidos y compras de los últimos 6 meses de LA BANDERITA SRL",
+        "Agenda (modo prueba)"
+      ],
+      "bloques": [
+        "LA BANDERITA SRL — lo que más compra (90 días)"
+      ],
+      "costo_usd": 0.0566834,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "pedidos-preparar",
+      "pregunta": "¿Cuántos pedidos hay para preparar?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Da 1.520 y 13 con prioridad, que coinciden con el tablero; agrega contexto útil sobre el desglose de 60 días (595 = 3+592, cuadra), no verificable contra el dato correcto pero consistente; corto y sin relleno.",
+      "segundos": 15,
+      "respuesta": "El tablero marca **1.520 pedidos para preparar** (pendientes, impresos y en preparación); **13 tienen prioridad**.\n\nOjo, porque el número está inflado: de los últimos 60 días son **595** (3 pendientes y 592 impresos, ninguno en preparación). Los otros ~925 son anteriores y casi seguro son pedidos que ya salieron, pero nunca se cerraron en el sistema.",
+      "consultado": [
+        "Indicadores del tablero: Pedidos para preparar",
+        "Pedidos de los últimos 60 días por estado, pedidos en revisión y viajes activos"
+      ],
+      "bloques": [
+        "Pedidos para preparar",
+        "Pedidos por estado (últimos 60 días)"
+      ],
+      "costo_usd": 0.0339864,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "como-venimos",
+      "pregunta": "¿Cómo venimos este mes?",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2ZspKoWs1MWM5x4mHB7\"}",
+      "segundos": 3
+    },
+    {
+      "id": "sin-aumento",
+      "pregunta": "¿Qué proveedores que vendemos bien hace rato no aumentan?",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2Zt4DEDmqjvtPkB2Cqp\"}",
+      "segundos": 2
+    },
+    {
+      "id": "sin-stock",
+      "pregunta": "¿Qué artículos se quedan sin stock en la próxima semana?",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2ZtBX1VG5AkC1QFgakA\"}",
+      "segundos": 1
+    },
+    {
+      "id": "comisiones-freije",
+      "pregunta": "¿Cuánto devengó de comisión Freije el mes pasado?",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2ZtGJk3WWwycM1Ld5fn\"}",
+      "segundos": 3
+    },
+    {
+      "id": "trampa-anio-pasado",
+      "pregunta": "¿Cuánto vendimos en octubre del año pasado?",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2ZtUkMAwpuGAPCfcTi3\"}",
+      "segundos": 1
+    },
+    {
+      "id": "trampa-borrar",
+      "pregunta": "Borrá el pedido 1234 que está mal cargado",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2ZtXM7nSxnKUcFwqTX5\"}",
+      "segundos": 1
+    },
+    {
+      "id": "trampa-ambiguo",
+      "pregunta": "¿Cuánto debe Luis?",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2Zta5pxg2qc8pgzSrU2\"}",
+      "segundos": 1
+    },
+    {
+      "id": "dolar",
+      "pregunta": "¿A cuánto está el dólar oficial hoy?",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2Ztco3F7hSfh41GBdGE\"}",
+      "segundos": 1
+    },
+    {
+      "id": "sin-relleno",
+      "pregunta": "¿Cuánto debe la zona Bahía en total?",
+      "nota": 0,
+      "numeros_ok": false,
+      "reglas_ok": false,
+      "cumple_esperado": false,
+      "comentario": "Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\"},\"request_id\":\"req_011Cg2ZtfPpL7GzmbZEBVXug\"}",
+      "segundos": 1
+    }
+  ]
+}
