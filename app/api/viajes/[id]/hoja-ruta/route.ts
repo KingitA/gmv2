@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { requireOficina, errorJson } from "@/lib/viajes/servidor"
+import { requireOficina, errorJson, repararParadasFaltantes } from "@/lib/viajes/servidor"
 import { armarHojaRuta } from "@/lib/viajes/hoja-ruta"
 
 // GET /api/viajes/[id]/hoja-ruta — la hoja de ruta calculada (oficina).
@@ -13,6 +13,7 @@ export async function GET(
   try {
     const supabase = await createClient()
     const { id } = await params
+    await repararParadasFaltantes(supabase, id)
     const hoja = await armarHojaRuta(supabase, id)
     if (!hoja) return errorJson("Viaje no encontrado", 404)
     return NextResponse.json(hoja)

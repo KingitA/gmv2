@@ -41,6 +41,13 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 
 ## Diario
 
+### 14/10/2026 (noche) — Arreglo: viaje con cliente retenido
+- **Error que encontró Juan en el preview:** al armar un viaje (ALTO VALLE 16/10) con Li Yutao retenido, falló el alta de las paradas (`exigir_cobro_anterior` llegaba vacío). Los 2 pedidos quedaron en el viaje, pero sin paradas, y la pantalla mostraba "no hay pedidos".
+- **Causa:** en un insert de varias filas, PostgREST manda NULL a una columna que falta en alguna fila (no usa el default). Las filas de clientes no retenidos no llevaban los campos del candado.
+- **Arreglo:** todas las filas llevan `bloquear_entrega`, `exigir_cobro_anterior` y `motivo_bloqueo` explícitos.
+- **Autorreparación:** se agregó `repararParadasFaltantes`. Al abrir la hoja de ruta de un viaje programado con pedidos sin parada, las crea. Así se arregla solo el viaje de Juan.
+- Producción (main) no estaba afectada: el cambio vive solo en la rama.
+
 ### 14/10/2026 (noche) — Etapa 4, acciones conectadas y recordatorios por persona
 - **Recordatorios por persona** (decisión de Juan):
   - las **propuestas** las ven todos, porque son decisiones de la empresa;
