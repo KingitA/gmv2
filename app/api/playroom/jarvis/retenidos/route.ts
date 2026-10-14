@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireJarvis } from "@/lib/jarvis/acceso"
 import { buscarHerramienta, contextoNuevo } from "@/lib/jarvis/herramientas"
-import { anotar } from "@/lib/jarvis/registro"
 import { liberarCliente } from "@/lib/viajes/retencion"
 
 // Clientes con entregas retenidas (Ajustes de Jarvis). GET: la lista. POST: liberar uno.
@@ -35,8 +34,7 @@ export async function POST(req: NextRequest) {
   const { data: c } = await db.from("clientes").select("nombre, retener_entregas, retener_motivo, retener_desde").eq("id", clienteId).maybeSingle()
   if (!c?.retener_entregas) return NextResponse.json({ error: "Ese cliente no está retenido." }, { status: 409 })
   try {
-    // Primero la bitácora: sin registro no se hace nada
-    await anotar(db, { usuarioId: auth.user.id, accion: "liberar_entregas_manual", entidadTipo: "cliente", entidadId: clienteId, detalle: { titulo: `Liberar entregas a ${c.nombre}`, motivo_que_tenia: c.retener_motivo, retenido_desde: c.retener_desde } })
+    // La bitácora la escribe la base (trigger clientes_registrar_retencion) en el mismo paso que el cambio
     const r = await liberarCliente(db, clienteId, auth.user.id)
     return NextResponse.json({ ok: true, detalle: `Entregas liberadas a ${c.nombre}.${r.paradasLiberadas ? ` Se destrabaron ${r.paradasLiberadas} parada(s).` : ""} Quedó a tu nombre.` })
   } catch (e) {

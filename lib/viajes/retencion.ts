@@ -12,6 +12,8 @@
  *   se pueden cambiar hasta que el chofer finaliza (puedeEditarInstrucciones).
  * - Al liberar, solo se destraban las paradas que bloqueó la retención
  *   (motivo "Retenido: …"); un candado puesto a mano por oficina se respeta.
+ * - Quién y cuándo lo anota la BASE (trigger clientes_registrar_retencion →
+ *   ai_registro), venga de donde venga el cambio.
  */
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { puedeEditarInstrucciones } from "./estados"
@@ -57,7 +59,8 @@ export async function liberarCliente(db: SupabaseClient, clienteId: string, usua
 
   const deRetencion = (await paradasAbiertas(db, clienteId)).filter((p) => p.bloquear_entrega && String(p.motivo_bloqueo ?? "").startsWith(PREFIJO_RETENCION))
   for (const p of deRetencion) {
-    const { error: e } = await db.from("viajes_paradas").update({ bloquear_entrega: false, motivo_bloqueo: null }).eq("id", p.id)
+    // La retención puso candado + "cobrar lo anterior": al liberar se sacan las dos cosas
+    const { error: e } = await db.from("viajes_paradas").update({ bloquear_entrega: false, exigir_cobro_anterior: false, motivo_bloqueo: null }).eq("id", p.id)
     if (e) throw new Error(`No se pudo destrabar la parada: ${e.message}`)
   }
   return { paradasLiberadas: deRetencion.length }

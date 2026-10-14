@@ -200,13 +200,15 @@ export async function nombresDeUsuarios(db: SupabaseClient, ids: (string | null 
   return new Map(((data ?? []) as { id: string; nombre: string | null; email: string | null }[]).map((u) => [u.id, u.nombre || u.email || "alguien"]))
 }
 
-const ACCIONES_HISTORIAL = ["decision_si", "decision_no", "decision_posponer", "ejecucion_ok", "ejecucion_error", "ejecucion_no_aplica",
-  "propuesta_creado", "recordatorio_creado", "agenda_cancelada", "ajuste_modificado", "ajuste_creado"]
+// El historial muestra TODO lo de la bitácora salvo lo rutinario de Jarvis (foto y resumen diario).
+// Antes era una lista de "lo que entra" y se escapó la liberación manual de un cliente (14/10):
+// Jarvis respondió que nadie lo había liberado. Con la lista al revés, lo nuevo aparece solo.
+const ACCIONES_RUTINA = ["foto_diaria", "resumen_del_dia"]
 
 /** Historial de decisiones (de la bitácora inborrable), con nombres. */
 export async function historialDecisiones(db: SupabaseClient, f: { texto?: string | null; entidadId?: string | null; desde?: string | null; limite?: number }) {
   let q = db.from("ai_registro").select("id, created_at, usuario_id, accion, entidad_tipo, entidad_id, detalle")
-    .in("accion", ACCIONES_HISTORIAL).order("created_at", { ascending: false }).limit(Math.min(f.limite ?? 50, 200))
+    .not("accion", "in", `(${ACCIONES_RUTINA.join(",")})`).order("created_at", { ascending: false }).limit(Math.min(f.limite ?? 50, 200))
   if (f.desde && ISO.test(f.desde)) q = q.gte("created_at", `${f.desde}T00:00:00-03:00`)
   if (f.entidadId) q = q.or(`entidad_id.eq.${f.entidadId},detalle->entidad->>id.eq.${f.entidadId}`)
   const { data, error } = await q
@@ -230,6 +232,8 @@ function describirAccion(a: string) {
     ejecucion_ok: "El sistema lo hizo", ejecucion_error: "Falló al hacerlo", ejecucion_no_aplica: "Quedó anotado",
     propuesta_creado: "Propuesta nueva", recordatorio_creado: "Recordatorio nuevo", agenda_cancelada: "Descartó un aviso",
     ajuste_modificado: "Cambió un ajuste", ajuste_creado: "Creó un ajuste",
+    agenda_completada: "Cerrado", cliente_retenido: "Retuvo las entregas", cliente_liberado: "Liberó las entregas",
+    liberar_entregas_manual: "Liberó las entregas (desde Ajustes)",
   }
   return m[a] ?? a
 }

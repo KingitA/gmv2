@@ -23,7 +23,8 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261014e_jarvis_acciones.sql` | Recordatorios por persona (`para_usuario`; NULL = para todos). Clientes: `retener_entregas`, motivo, desde y quién. | **NO** — la aplica Juan |
+| `20261014f_jarvis_retencion_registro.sql` | Trigger: retener o liberar a un cliente queda SIEMPRE en la bitácora (quién y cuándo), venga de donde venga el cambio. | **NO** — la aplica Juan |
+| `20261014e_jarvis_acciones.sql` | Recordatorios por persona (`para_usuario`; NULL = para todos). Clientes: `retener_entregas`, motivo, desde y quién. | Sí (14/10) |
 | `20261014d_jarvis_decisiones.sql` | Decisiones en la bandeja: qué se haría con el Sí, quién decidió, cuándo, nota, resultado, impacto estimado y real. Triggers: cada alta y cada decisión van a la bitácora. Reglas iniciales de los avisos en `ai_ajustes`. | Sí (14/10) |
 | `20261014c_jarvis_vigias.sql` | La agenda vieja (`ai_agenda_events`) pasa a ser la bandeja de Jarvis: clave, tono, acciones, severidad, quién y cuándo la cerró. Cada cierre hecho por una persona queda en la bitácora. | Sí (14/10) |
 | `20261014b_jarvis_consultas.sql` | Consultas de Jarvis (solo lectura): ventas agrupadas, deuda por antigüedad (libro mayor + FIFO), hábitos de compra, cobertura de stock, resumen por proveedor con último aumento. | Sí (14/10) |
@@ -33,13 +34,25 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [x] Juan aplicó `20261014_jarvis_cimientos.sql` y `20261014b_jarvis_consultas.sql` (14/10).
 - [x] Juan aplicó `20261014c_jarvis_vigias.sql` (14/10).
 - [x] Juan aplicó `20261014d_jarvis_decisiones.sql` (14/10).
-- [ ] Juan aplica `20261014e_jarvis_acciones.sql`.
+- [x] Juan aplicó `20261014e_jarvis_acciones.sql` y probó retener y liberar a Li Yutao (14/10).
+- [ ] Juan aplica `20261014f_jarvis_retencion_registro.sql`.
+- [ ] Viaje ALTO VALLE 16/10: a la parada de Li Yutao le quedó "cobrar lo anterior" marcado (lo dejó la liberación vieja). Destildarlo en la hoja de ruta si no corresponde.
 - [ ] Verificar que `CRON_SECRET` exista en Vercel. Sin eso, la revisión de las 8:00 no corre y queda solo el botón "Revisar ahora".
 - [ ] Para probar el chat desde esta PC hace falta la clave de Anthropic en `.env.local` (`ANTHROPIC_API_KEY=...`). La pone Juan; Claude no maneja claves. En Vercel ya está (el chat viejo anda).
 - [ ] Seguridad (fuera de Jarvis, avisar): `ai_emails`, `ai_email_attachments` y `ai_classifications` siguen con acceso público total. No se tocaron porque el lector de mails viejo las lee desde el navegador. Arreglarlas cuando se retome el lector.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Arreglo: "¿quién liberó a Li Yutao?"
+- Jarvis respondió que **nadie** la había liberado y supuso que había sido "por fuera". **Era falso:** la bitácora tenía `liberar_entregas_manual` de Juan Cruz a las 14:09.
+- **Causa:** el historial usaba una lista de acciones permitidas y esa no estaba.
+- **Arreglos:**
+  - el historial ahora muestra todo, salvo la foto y el resumen diario;
+  - las instrucciones dicen que, si no lo encuentra, lo diga y **no suponga**;
+  - al liberar, también se saca "cobrar lo anterior" que había puesto la retención;
+  - el registro de retener o liberar lo escribe la **base** (trigger `clientes_registrar_retencion`), en el mismo paso que el cambio, venga de donde venga. El botón Liberar ya no anota aparte, para no duplicar.
+- Verificado leyendo producción: `historial_decisiones` para Li Yutao devuelve "Juan Cruz · Liberó las entregas (desde Ajustes) · 14/10 14:09".
 
 ### 14/10/2026 (noche) — Arreglo: viaje con cliente retenido
 - **Error que encontró Juan en el preview:** al armar un viaje (ALTO VALLE 16/10) con Li Yutao retenido, falló el alta de las paradas (`exigir_cobro_anterior` llegaba vacío). Los 2 pedidos quedaron en el viaje, pero sin paradas, y la pantalla mostraba "no hay pedidos".
