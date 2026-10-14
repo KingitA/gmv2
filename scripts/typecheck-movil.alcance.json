@@ -117,6 +117,9 @@
     "lib/jarvis/",
     "app/api/playroom/chat/",
     "lib/playroom/indicadores.ts",
-    "app/api/playroom/recalcular/"
+    "app/api/playroom/recalcular/",
+    "app/api/playroom/resumen-del-dia/",
+    "app/api/playroom/novedades/",
+    "app/api/cron/jarvis-revision/"
   ]
 }

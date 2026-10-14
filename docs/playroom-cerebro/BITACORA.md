@@ -13,26 +13,48 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 3. Las migraciones de base (archivos `supabase/migrations/2026…_jarvis_*.sql`) **las aplica Juan a mano** en Supabase → SQL Editor. En "Migraciones" dice cuáles faltan.
 
 ## Estado actual
-- **Etapa 0 (cimientos): código listo.** Falta aplicar la migración.
-- **Etapa 1 (chat nuevo): código listo, sin probar con la IA.** Falta:
-  1. aplicar las dos migraciones;
-  2. probar en el preview de Vercel o con la clave en `.env.local`;
-  3. correr el examen.
-- Etapa 2 (vigías y resumen del día): sigue.
+- **Etapa 0 (cimientos): lista.** Migración aplicada (verificado 14/10).
+- **Etapa 1 (chat nuevo): lista, falta probarla con la IA** (en el preview, o el examen con la clave en `.env.local`). Migración aplicada; las 12 consultas responden contra la base real.
+- **Etapa 2 (vigías y resumen del día): código listo.** Falta:
+  - aplicar `20261014c_jarvis_vigias.sql`;
+  - que exista `CRON_SECRET` en Vercel;
+  - probar "Revisar ahora" en el preview.
+- Etapa 3 (decisiones y agenda): sigue.
 
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261014b_jarvis_consultas.sql` | Consultas de Jarvis (solo lectura): ventas agrupadas, deuda por antigüedad (libro mayor + FIFO), hábitos de compra, cobertura de stock, resumen por proveedor con último aumento. | **NO** — la aplica Juan **después** de la anterior |
-| `20261014_jarvis_cimientos.sql` | Bitácora inborrable (`ai_registro`), ajustes de modelo y tope (`ai_ajustes`), gasto (`ai_uso`), quién preguntó en conversaciones, **cierra un agujero de seguridad** (las conversaciones y la agenda de IA se podían leer y borrar con la clave pública), borra los 235 avisos viejos del lector de mails. | **NO** — la aplica Juan |
+| `20261014c_jarvis_vigias.sql` | La agenda vieja (`ai_agenda_events`) pasa a ser la bandeja de Jarvis: clave, tono, acciones, severidad, quién y cuándo la cerró. Cada cierre hecho por una persona queda en la bitácora. | **NO** — la aplica Juan |
+| `20261014b_jarvis_consultas.sql` | Consultas de Jarvis (solo lectura): ventas agrupadas, deuda por antigüedad (libro mayor + FIFO), hábitos de compra, cobertura de stock, resumen por proveedor con último aumento. | Sí (14/10) |
+| `20261014_jarvis_cimientos.sql` | Bitácora inborrable (`ai_registro`), ajustes de modelo y tope (`ai_ajustes`), gasto (`ai_uso`), quién preguntó en conversaciones, **cierra un agujero de seguridad** (las conversaciones y la agenda de IA se podían leer y borrar con la clave pública), borra los 235 avisos viejos del lector de mails. | Sí (14/10) |
 
 ## Pendientes
-- [ ] Juan aplica `20261014_jarvis_cimientos.sql`.
+- [x] Juan aplicó `20261014_jarvis_cimientos.sql` y `20261014b_jarvis_consultas.sql` (14/10).
+- [ ] Juan aplica `20261014c_jarvis_vigias.sql`.
+- [ ] Verificar que `CRON_SECRET` exista en Vercel. Sin eso, la revisión de las 8:00 no corre y queda solo el botón "Revisar ahora".
 - [ ] Para probar el chat desde esta PC hace falta la clave de Anthropic en `.env.local` (`ANTHROPIC_API_KEY=...`). La pone Juan; Claude no maneja claves. En Vercel ya está (el chat viejo anda).
 - [ ] Seguridad (fuera de Jarvis, avisar): `ai_emails`, `ai_email_attachments` y `ai_classifications` siguen con acceso público total. No se tocaron porque el lector de mails viejo las lee desde el navegador. Arreglarlas cuando se retome el lector.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Etapa 2, vigías y resumen del día
+- **No se creó ninguna tabla.** La agenda vieja `ai_agenda_events` pasa a ser la **bandeja de Jarvis** (`event_type = aviso`). El resumen del día y la "foto" diaria de los números van a la bitácora inborrable (`ai_registro`, acciones `resumen_del_dia` y `foto_diaria`).
+- `lib/jarvis/vigias.ts`: 7 vigías sin IA. Primera corrida contra la base real (solo lectura), 9 avisos en 4 segundos:
+  - 174 cheques en cartera vencidos o por vencer ($ 288 M; 150 con fecha de hace más de 30 días, o sea que nadie los está dando de baja);
+  - $ 8,5 M atrasados a proveedores y $ 95,8 M que vencen esta semana;
+  - 88 artículos con stock para menos de 7 días;
+  - 17 clientes habituales que dejaron de comprar ($ 15,3 M por mes);
+  - 3 cobros sin verificar en Caja ($ 7,5 M);
+  - **4 clientes que volvieron a pedir debiendo más de 30 días** (el caso del plan).
+- Un aviso descartado no vuelve, salvo que empeore un 25 % o más. Si deja de cumplirse, se cierra solo. Si un vigía falla, sus avisos no se cierran por error.
+- `lib/jarvis/resumen.ts`: corre la revisión diaria (vigías + foto + resumen escrito por la IA).
+- Rutas:
+  - `/api/cron/jarvis-revision`: lunes a sábado a las 8:00 (`vercel.json`). Exige `CRON_SECRET`.
+  - `/api/playroom/resumen-del-dia`: lee el resumen guardado.
+  - `/api/playroom/novedades`: GET lee los avisos; POST es "Revisar ahora", una vez cada 10 minutos como máximo.
+  - `/api/playroom/novedades/[id]/descartar`.
+- Pantalla: botón "Revisar ahora", hora de la última revisión, ✕ para descartar cada aviso y el avatar "J".
 
 ### 14/10/2026 (tarde) — Etapa 1, chat nuevo
 - **Hallazgo:** la vista `v_aging_clientes` NO coincide con la deuda oficial: da $ 47,8 M contra $ 35,4 M del libro mayor. Además, su zona sale de una tabla casi vacía. Jarvis no la usa: la antigüedad se calcula sobre el libro mayor (`jarvis_deuda_antiguedad`). Conviene revisar quién más usa esa vista (¿reporte de Cuentas corrientes de Playroom?).
