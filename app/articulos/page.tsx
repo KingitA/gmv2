@@ -380,6 +380,14 @@ export default function ArticulosPage() {
   const sfa=async()=>{
     if(!fa) return; setFs(true)
     const isNew=fa.id==="__new__"
+    // SKU: NUNCA repetido (índice único en la base). Se avisa qué artículo lo tiene, también dado de baja.
+    const skuN=String(ff.sku||"").trim()
+    if(skuN){
+      let q=sb.from("articulos").select("id,descripcion,activo").eq("sku",skuN)
+      if(!isNew) q=q.neq("id",fa.id)
+      const{data:otro}=await q.limit(1).maybeSingle()
+      if(otro){ toast.error(`El SKU ${skuN} ya lo tiene "${otro.descripcion}"${otro.activo?"":" (dado de baja)"}. Elegí otro.`); setFs(false); return }
+    }
     if(isNew){
       if(!ff.sku.trim()||!ff.descripcion.trim()){ toast.error("SKU y Descripción son obligatorios"); setFs(false); return }
       const{data:newArt,error}=await sb.from("articulos").insert({...sinVaciosFK(ff),activo:true}).select("id").single()

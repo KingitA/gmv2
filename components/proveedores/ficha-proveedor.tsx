@@ -6,7 +6,7 @@
 // guardado (onSubmit = handleSubmit de la página). La retención de Ganancias y el
 // acuerdo de pago siguen en la Ficha Fiscal (su propio modal y su propio guardado).
 
-import type { FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Building2, Landmark, Receipt, ShieldCheck, ShoppingCart } from 'lucide-react'
 import { DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { InputMonto } from '@/components/ui/input-monto'
 import { InputCUIT } from '@/components/ui/input-cuit'
 import { formatCuit } from '@/lib/formato'
+import { normalizarCodigo } from '@/lib/codigos'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Campo, Campos, ConUnidad, FichaCabecera, FichaCuerpo, FichaMeta, FichaPie, FichaSeccion } from '@/components/ficha/ficha'
 import { PROVINCIAS_ARGENTINA, TIPOS_IVA_DJ, CONDICIONES_PAGO } from '@/lib/constants'
@@ -28,12 +29,41 @@ interface Props {
   onCancelar: () => void
   /** Abre la Ficha Fiscal de siempre (solo al editar un proveedor existente). */
   onFichaFiscal?: () => void
+  /** Id del proveedor que se edita (para no contarlo como dueño de su propio código). */
+  proveedorId?: string | null
 }
+
+type InfoCodigo = { sugerido: string; codigo: string | null; disponible: boolean; ocupado_por: { id: string; nombre: string; activo: boolean } | null }
 
 const iniciales = (n: string) => n.trim().split(/\s+/).slice(0, 2).map(p => p[0]).join('').toUpperCase() || '?'
 
-export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCancelar, onFichaFiscal }: Props) {
+export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCancelar, onFichaFiscal, proveedorId }: Props) {
   const set = (campo: string, valor: any) => setFormData({ ...formData, [campo]: valor })
+
+  // Código de proveedor: NUNCA repetido. Se consulta mientras se escribe; si está tomado se
+  // muestra de quién es y se sugiere el primer número libre (en el alta se propone solo).
+  const [infoCodigo, setInfoCodigo] = useState<InfoCodigo | null>(null)
+  const propuesto = useRef(false)
+  useEffect(() => {
+    let vivo = true
+    const t = setTimeout(async () => {
+      try {
+        const codigo = normalizarCodigo(formData.codigo_proveedor)
+        const qs = new URLSearchParams({ entidad: 'proveedor', ...(codigo ? { codigo } : {}), ...(proveedorId ? { excluir: proveedorId } : {}) })
+        const r = await fetch(`/api/codigos?${qs}`)
+        if (!vivo || !r.ok) return
+        const info: InfoCodigo = await r.json()
+        setInfoCodigo(info)
+        if (!editando && !propuesto.current && !formData.codigo_proveedor) {
+          propuesto.current = true
+          setFormData((p: any) => (p.codigo_proveedor ? p : { ...p, codigo_proveedor: info.sugerido }))
+        }
+      } catch { /* sin aviso si falla la consulta */ }
+    }, 300)
+    return () => { vivo = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.codigo_proveedor, proveedorId, editando])
+  const codigoTomado = !!infoCodigo?.ocupado_por && normalizarCodigo(formData.codigo_proveedor) === infoCodigo.codigo
   const faltaProvincia = !formData.provincia
 
   return (
@@ -66,10 +96,16 @@ export function FichaProveedor({ formData, setFormData, editando, onSubmit, onCa
               <Input id="sigla" value={formData.sigla} onChange={e => set('sigla', e.target.value)} />
             </Campo>
             <Campo label="Código de proveedor">
-              <Input id="codigo_proveedor" className="tabular-nums" value={formData.codigo_proveedor} onChange={e => set('codigo_proveedor', e.target.value)} />
+              <Input id="codigo_proveedor" className={`tabular-nums ${codigoTomado ? 'border-red-400' : ''}`} value={formData.codigo_proveedor} onChange={e => set('codigo_proveedor', e.target.value)} placeholder={infoCodigo?.sugerido ? `${infoCodigo.sugerido} (primero libre)` : ''} />
+              {codigoTomado && infoCodigo?.ocupado_por && (
+                <div className="mt-1 text-xs text-red-600">
+                  El código {infoCodigo.codigo} ya lo tiene <b>{infoCodigo.ocupado_por.nombre}</b>{infoCodigo.ocupado_por.activo ? '' : ' (dado de baja)'}.{' '}
+                  <button type="button" className="font-semibold text-azul-700 underline" onClick={() => set('codigo_proveedor', infoCodigo.sugerido)}>Usar el {infoCodigo.sugerido}</button>
+                </div>
+              )}
             </Campo>
-            <Campo label="CUIT" nota="obligatorio">
-              <InputCUIT id="cuit" className="tabular-nums" value={formData.cuit} onChange={v => set('cuit', v)} placeholder="20-12345678-9" required />
+            <Campo label="CUIT" nota="vacío o 00-00000000-0 = sin CUIT (sin factura)">
+              <InputCUIT id="cuit" className="tabular-nums" value={formData.cuit} onChange={v => set('cuit', v)} placeholder="20-12345678-9" />
             </Campo>
             <Campo label="Tipo de proveedor">
               <Select value={formData.tipo_proveedor} onValueChange={v => set('tipo_proveedor', v)}>

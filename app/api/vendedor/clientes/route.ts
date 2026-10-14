@@ -8,6 +8,7 @@ import { normalizarCondicionIva, NIVEL_INICIAL } from "@/lib/clientes/normalizar
 import { errorCuit, normalizarCuit } from "@/lib/formato"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { clientesConMismoCuit, avisoMismoCuit } from "@/lib/clientes/mismo-cuit"
+import { siguienteCodigo, esCodigoDuplicado } from "@/lib/codigos"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -141,9 +142,17 @@ export async function POST(request: Request) {
     const cuitLimpio = normalizarCuit(cuit)
     const mismoCuit = await clientesConMismoCuit(createAdminClient(), cuitLimpio, esUuid(body.id) ? body.id : null)
 
-    const { data: cliente, error } = await supabase
+    // Código: el alta del viajante recibe el PRIMER número libre (1,2,3,5,8 → 4). Si otra
+    // alta simultánea lo toma, el índice único lo rechaza y se reintenta con el siguiente.
+    // (Con la migración 20261014 aplicada, el trigger de la base hace lo mismo.)
+    const admin = createAdminClient()
+    let cliente: any = null
+    for (let intento = 0; intento < 4 && !cliente; intento++) {
+    const codigo_cliente = await siguienteCodigo(admin, "cliente")
+    const { data, error } = await supabase
       .from("clientes")
       .insert({
+        codigo_cliente,
         // `id` opcional: la app Vendedor genera el UUID en el equipo (alta offline) para que
         // reenviar la operación no duplique y lo capturado después ya lo referencie (MOBILE.md → Vendedor)
         ...(esUuid(body.id) ? { id: body.id } : {}),
@@ -171,9 +180,13 @@ export async function POST(request: Request) {
         actualizado_por: session.user.id,
         actualizado_at: new Date().toISOString(),
       })
-      .select("id, nombre, localidad, metodo_facturacion")
+      .select("id, codigo_cliente, nombre, localidad, metodo_facturacion")
       .single()
+    if (error && esCodigoDuplicado(error)) continue
     if (error) throw error
+    cliente = data
+    }
+    if (!cliente) throw new Error("No se pudo asignar un código libre al cliente. Probá de nuevo.")
 
     return NextResponse.json({ success: true, cliente, mismo_cuit: mismoCuit, aviso: avisoMismoCuit(mismoCuit) }, { status: 201 })
   } catch (error: any) {

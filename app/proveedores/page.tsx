@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PROVINCIAS_ARGENTINA, TIPOS_IVA_DJ, CONDICIONES_PAGO } from "@/lib/constants"
 import { useRealtime } from "@/lib/hooks/use-realtime"
 import { errorCuit, formatCuit, normalizarCuit } from "@/lib/formato"
+import { normalizarCodigo, esCodigoDuplicado } from "@/lib/codigos"
 
 export default function ProveedoresPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
@@ -106,14 +107,27 @@ export default function ProveedoresPage() {
     e.preventDefault()
     const errCuit = errorCuit(formData.cuit)
     if (errCuit) { alert(errCuit); return }
-    const datos = { ...formData, cuit: normalizarCuit(formData.cuit) }
+    // Código de proveedor: NUNCA repetido (se vuelve a consultar al guardar)
+    const codigo = normalizarCodigo(formData.codigo_proveedor)
+    if (codigo) {
+      const qs = new URLSearchParams({ entidad: "proveedor", codigo, ...(editingProveedor ? { excluir: editingProveedor.id } : {}) })
+      const chk = await fetch(`/api/codigos?${qs}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      if (chk?.ocupado_por) {
+        alert(`El código ${codigo} ya lo tiene "${chk.ocupado_por.nombre}"${chk.ocupado_por.activo ? "" : " (dado de baja)"}. Elegí otro: el primero libre es el ${chk.sugerido}.`)
+        return
+      }
+    }
+    // Código vacío = la base asigna el primer número libre (trigger de 20261014_codigos_unicos)
+    const datos = { ...formData, codigo_proveedor: codigo, cuit: normalizarCuit(formData.cuit) }
     const supabase = createClient()
+    const avisarError = (error: any) => alert(esCodigoDuplicado(error) ? `El código ${codigo} ya lo tiene otro proveedor. Elegí otro.` : `Error al guardar: ${error.message}`)
 
     if (editingProveedor) {
       const { error } = await supabase.from("proveedores").update(datos).eq("id", editingProveedor.id)
 
       if (error) {
         console.error("[v0] Error updating proveedor:", error)
+        avisarError(error)
         return
       }
       fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: editingProveedor.id }) }).catch(() => {})
@@ -122,6 +136,7 @@ export default function ProveedoresPage() {
 
       if (error) {
         console.error("[v0] Error creating proveedor:", error)
+        avisarError(error)
         return
       }
       if (newProv?.id) fetch("/api/embed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity: "proveedores", id: newProv.id }) }).catch(() => {})
@@ -341,6 +356,7 @@ export default function ProveedoresPage() {
                       formData={formData}
                       setFormData={setFormData}
                       editando={!!editingProveedor}
+                      proveedorId={editingProveedor?.id ?? null}
                       onSubmit={handleSubmit}
                       onCancelar={() => setIsDialogOpen(false)}
                       onFichaFiscal={editingProveedor ? () => setFichaFiscal({ id: editingProveedor.id, nombre: editingProveedor.nombre }) : undefined}

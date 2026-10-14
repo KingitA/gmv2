@@ -17,6 +17,9 @@ import { guardarFichaComercial, guardarSegmentacionCliente } from "@/lib/actions
 import Link from "next/link"
 import { moneda, redondear, formatCuit, errorCuit, normalizarCuit, cuitDigitos } from "@/lib/formato"
 import { describirCliente, type ClienteMismoCuit } from "@/lib/clientes/mismo-cuit"
+import { normalizarCodigo, esCodigoDuplicado } from "@/lib/codigos"
+
+type InfoCodigo = { sugerido: string; codigo: string | null; disponible: boolean; ocupado_por: { id: string; nombre: string; activo: boolean } | null }
 import { InputMonto } from "@/components/ui/input-monto"
 import { InputCUIT } from "@/components/ui/input-cuit"
 
@@ -96,6 +99,8 @@ export default function ClienteDetailPage() {
   const [savingSeg, setSavingSeg] = useState(false)
   // Otros clientes con el mismo CUIT: se avisa cuáles (no se bloquea)
   const cuitOriginal = useRef("")
+  const [infoCodigo, setInfoCodigo] = useState<InfoCodigo | null>(null)
+  const codigoPropuesto = useRef(false)
   const [mismoCuit, setMismoCuit] = useState<{ aviso: string | null; clientes: ClienteMismoCuit[] }>({ aviso: null, clientes: [] })
   const [formData, setFormData] = useState({
     codigo_cliente: "",
@@ -131,6 +136,30 @@ export default function ClienteDetailPage() {
   useEffect(() => {
     loadAll()
   }, [id])
+
+  // Código de cliente: ¿está libre? (se bloquea si no) + primer número libre para sugerir
+  const consultarCodigo = async (codigo: string | null): Promise<InfoCodigo | null> => {
+    try {
+      const qs = new URLSearchParams({ entidad: "cliente", ...(codigo ? { codigo } : {}), ...(esNuevo ? {} : { excluir: id }) })
+      const r = await fetch(`/api/codigos?${qs}`)
+      return r.ok ? await r.json() : null
+    } catch { return null }
+  }
+  useEffect(() => {
+    let vivo = true
+    const t = setTimeout(async () => {
+      const info = await consultarCodigo(normalizarCodigo(formData.codigo_cliente))
+      if (!vivo || !info) return
+      setInfoCodigo(info)
+      // Alta: se propone el primer número libre (se puede cambiar)
+      if (esNuevo && !codigoPropuesto.current && !formData.codigo_cliente) {
+        codigoPropuesto.current = true
+        setFormData((p) => (p.codigo_cliente ? p : { ...p, codigo_cliente: info.sugerido }))
+      }
+    }, 300)
+    return () => { vivo = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.codigo_cliente, esNuevo, id])
 
   // Al completar un CUIT válido: ¿hay otros clientes con el mismo? (aviso, no bloqueo)
   useEffect(() => {
@@ -332,6 +361,15 @@ export default function ClienteDetailPage() {
       alert(errCuit)
       return
     }
+    // Código de cliente: NUNCA repetido. Se vuelve a consultar al guardar (lo pudo tomar otro recién).
+    const codigo = normalizarCodigo(formData.codigo_cliente)
+    if (codigo) {
+      const chk = await consultarCodigo(codigo)
+      if (chk?.ocupado_por) {
+        alert(`El código ${codigo} ya lo tiene "${chk.ocupado_por.nombre}"${chk.ocupado_por.activo ? "" : " (dado de baja)"}. Elegí otro: el primero libre es el ${chk.sugerido}.`)
+        return
+      }
+    }
     // Mismo CUIT que otro cliente: se permite (sucursales, mismo dueño), pero se avisa cuál
     const cuitCambio = esNuevo || cuitDigitos(formData.cuit) !== cuitDigitos(cuitOriginal.current)
     if (cuitCambio && mismoCuit.aviso && !confirm(`${mismoCuit.aviso}.\n\n¿Guardar igual este cliente con el mismo CUIT?`)) {
@@ -340,6 +378,8 @@ export default function ClienteDetailPage() {
     setSaving(true)
     const dataToSave = {
       ...formData,
+      // Vacío = la base asigna el primer número libre (trigger de 20261014_codigos_unicos)
+      codigo_cliente: codigo,
       cuit: normalizarCuit(formData.cuit),
       // Antes los dos campos se pisaban con la razón social y se perdía el nombre
       // de fantasía que carga el vendedor ("Súper Eco 17"). Vacío = igual a la razón social.
@@ -364,7 +404,9 @@ export default function ClienteDetailPage() {
       error = (await supabase.from("clientes").update(dataToSave).eq("id", id)).error
     }
     if (error) {
-      alert(`Error al guardar: ${error.message}`)
+      alert(esCodigoDuplicado(error)
+        ? `El código ${codigo} ya lo tiene otro cliente. Elegí otro (el primero libre es el ${(await consultarCodigo(null))?.sugerido ?? "?"}).`
+        : `Error al guardar: ${error.message}`)
     } else {
       // Sello de auditoría best-effort (requiere migración 20260707_clientes_auditoria;
       // va aparte para no voltear el guardado si la columna todavía no existe)
@@ -513,7 +555,22 @@ export default function ClienteDetailPage() {
               <Input value={formData.nombre} onChange={(e) => set("nombre", e.target.value)} placeholder={formData.nombre_razon_social || "Ej.: Súper Eco 17"} />
             </Campo>
             <Campo label="Código">
-              <Input className="tabular-nums" value={formData.codigo_cliente} onChange={(e) => set("codigo_cliente", e.target.value)} placeholder="CL-001" />
+              <Input
+                className={cn("tabular-nums", infoCodigo?.ocupado_por && normalizarCodigo(formData.codigo_cliente) === infoCodigo.codigo && "border-red-400")}
+                value={formData.codigo_cliente}
+                onChange={(e) => set("codigo_cliente", e.target.value)}
+                placeholder={infoCodigo?.sugerido ? `${infoCodigo.sugerido} (primero libre)` : ""}
+              />
+              {infoCodigo?.ocupado_por && normalizarCodigo(formData.codigo_cliente) === infoCodigo.codigo && (
+                <div className="mt-1 text-xs text-red-600">
+                  El código {infoCodigo.codigo} ya lo tiene{" "}
+                  <Link href={`/clientes/${infoCodigo.ocupado_por.id}`} target="_blank" className="font-semibold underline">{infoCodigo.ocupado_por.nombre}</Link>
+                  {infoCodigo.ocupado_por.activo ? "" : " (dado de baja)"}.{" "}
+                  <button type="button" className="font-semibold text-azul-700 underline" onClick={() => set("codigo_cliente", infoCodigo.sugerido)}>
+                    Usar el {infoCodigo.sugerido}
+                  </button>
+                </div>
+              )}
             </Campo>
             <Campo label="CUIT">
               <InputCUIT value={formData.cuit} onChange={(v) => set("cuit", v)} />
