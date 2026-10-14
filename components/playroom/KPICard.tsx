@@ -10,18 +10,11 @@ interface KPICardProps {
   loading?: boolean
 }
 
-const glowColors: Record<string, string> = {
-  default: '#7c3aed',
-  warning: '#f59e0b',
-  danger: '#ef4444',
-  success: '#10b981',
-}
-
-const borderColors: Record<string, string> = {
-  default: 'rgba(124,58,237,0.2)',
-  warning: 'rgba(245,158,11,0.2)',
-  danger: 'rgba(239,68,68,0.2)',
-  success: 'rgba(16,185,129,0.2)',
+const accentClasses: Record<string, string> = {
+  default: 'bg-transparent',
+  warning: 'bg-ambar-500',
+  danger: 'bg-error-500',
+  success: 'bg-exito-500',
 }
 
 export default function KPICard({
@@ -34,43 +27,27 @@ export default function KPICard({
   loading = false,
 }: KPICardProps) {
   return (
-    <div
-      className="relative rounded-2xl p-5 overflow-hidden"
-      style={{
-        background: 'rgba(17, 24, 39, 0.85)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        border: `1px solid ${borderColors[variant]}`,
-        boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
-      }}
-    >
-      {/* Glow accent */}
-      <div
-        className="absolute -top-8 -right-8 w-28 h-28 rounded-full pointer-events-none"
-        style={{
-          background: glowColors[variant],
-          filter: 'blur(24px)',
-          opacity: 0.08,
-        }}
-      />
+    <div className="relative rounded-2xl p-5 overflow-hidden bg-white border border-neutro-200 shadow-sm">
+      {/* Acento de variante */}
+      <div className={`absolute left-0 top-0 h-full w-1 pointer-events-none ${accentClasses[variant]}`} />
 
       <div className="relative">
         <div className="flex items-start justify-between gap-2 mb-3">
-          <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.45)' }}>
+          <p className="text-xs font-semibold text-neutro-500">
             {label}
           </p>
-          {icon && <span style={{ color: 'rgba(255,255,255,0.25)' }}>{icon}</span>}
+          {icon && <span className="text-neutro-400">{icon}</span>}
         </div>
 
         {loading ? (
-          <div className="h-8 w-28 rounded-lg animate-pulse" style={{ background: 'rgba(255,255,255,0.07)' }} />
+          <div className="h-8 w-28 rounded-lg animate-pulse bg-neutro-100" />
         ) : (
-          <p className="text-2xl font-bold text-white leading-none">{value}</p>
+          <p className="text-2xl font-bold text-azul-900 leading-none">{value}</p>
         )}
 
         <div className="flex items-center gap-2 mt-2 flex-wrap">
           {subLabel && (
-            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>{subLabel}</p>
+            <p className="text-xs text-neutro-500">{subLabel}</p>
           )}
           {badge && (
             <ComparativoBadge

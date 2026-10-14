@@ -71,31 +71,16 @@ export default function DataTable<T extends Record<string, any>>({
   }
 
   return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}
-    >
+    <div className="rounded-xl overflow-hidden bg-white border border-neutro-200">
       {/* Toolbar */}
-      <div
-        className="flex items-center justify-between px-4 py-3"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
-      >
-        <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-neutro-100">
+        <p className="text-xs text-neutro-500">
           {loading ? '...' : `${sorted.length.toLocaleString('es-AR')} registros`}
         </p>
         <button
           onClick={handleExport}
           disabled={loading || data.length === 0}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-30"
-          style={{ color: 'rgba(255,255,255,0.5)' }}
-          onMouseEnter={e => {
-            ;(e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)'
-            ;(e.currentTarget as HTMLButtonElement).style.color = '#fff'
-          }}
-          onMouseLeave={e => {
-            ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
-            ;(e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.5)'
-          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-30 text-neutro-600 hover:bg-neutro-50 hover:text-azul-700"
         >
           <Download className="h-3.5 w-3.5" />
           Exportar CSV
@@ -106,7 +91,7 @@ export default function DataTable<T extends Record<string, any>>({
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <tr className="border-b border-neutro-200 bg-neutro-50">
               {columns.map(col => (
                 <th
                   key={col.key}
@@ -117,8 +102,7 @@ export default function DataTable<T extends Record<string, any>>({
                       : col.align === 'center'
                       ? 'text-center'
                       : 'text-left'
-                  } ${col.sortable ? 'cursor-pointer select-none' : ''}`}
-                  style={{ color: 'rgba(255,255,255,0.3)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}
+                  } ${col.sortable ? 'cursor-pointer select-none hover:text-azul-700' : ''} text-xs font-semibold text-neutro-500`}
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.label}
@@ -140,12 +124,12 @@ export default function DataTable<T extends Record<string, any>>({
           <tbody>
             {loading ? (
               Array.from({ length: 6 }).map((_, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                <tr key={i} className="border-b border-neutro-100">
                   {columns.map(col => (
                     <td key={col.key} className="px-4 py-3">
                       <div
-                        className="h-4 rounded animate-pulse"
-                        style={{ background: 'rgba(255,255,255,0.05)', width: `${60 + Math.random() * 30}%` }}
+                        className="h-4 rounded animate-pulse bg-neutro-100"
+                        style={{ width: `${60 + Math.random() * 30}%` }}
                       />
                     </td>
                   ))}
@@ -155,8 +139,7 @@ export default function DataTable<T extends Record<string, any>>({
               <tr>
                 <td
                   colSpan={columns.length}
-                  className="px-4 py-16 text-center text-sm"
-                  style={{ color: 'rgba(255,255,255,0.2)' }}
+                  className="px-4 py-16 text-center text-sm text-neutro-400"
                 >
                   {emptyMessage}
                 </td>
@@ -165,10 +148,8 @@ export default function DataTable<T extends Record<string, any>>({
               paginated.map((row, i) => (
                 <tr
                   key={i}
-                  style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', cursor: onRowClick ? 'pointer' : 'default' }}
+                  className={`border-b border-neutro-100 transition-colors ${onRowClick ? 'cursor-pointer hover:bg-azul-50/40' : 'hover:bg-neutro-50'}`}
                   onClick={() => onRowClick?.(row)}
-                  onMouseEnter={e => ((e.currentTarget as HTMLTableRowElement).style.background = onRowClick ? 'rgba(124,58,237,0.06)' : 'rgba(255,255,255,0.02)')}
-                  onMouseLeave={e => ((e.currentTarget as HTMLTableRowElement).style.background = 'transparent')}
                 >
                   {columns.map(col => (
                     <td
@@ -179,8 +160,7 @@ export default function DataTable<T extends Record<string, any>>({
                           : col.align === 'center'
                           ? 'text-center'
                           : 'text-left'
-                      }`}
-                      style={{ color: 'rgba(255,255,255,0.75)' }}
+                      } text-neutro-700`}
                     >
                       {col.render ? col.render(row[col.key], row) : (row[col.key] ?? '—')}
                     </td>
@@ -194,19 +174,15 @@ export default function DataTable<T extends Record<string, any>>({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div
-          className="flex items-center justify-between px-4 py-3"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
-        >
-          <p className="text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>
+        <div className="flex items-center justify-between px-4 py-3 border-t border-neutro-100">
+          <p className="text-xs text-neutro-400">
             Pág. {page} de {totalPages} · {sorted.length.toLocaleString('es-AR')} registros
           </p>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="p-1.5 rounded-lg transition-colors disabled:opacity-20"
-              style={{ color: 'rgba(255,255,255,0.4)' }}
+              className="p-1.5 rounded-lg transition-colors disabled:opacity-30 text-neutro-500 hover:bg-neutro-50"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -216,12 +192,9 @@ export default function DataTable<T extends Record<string, any>>({
                 <button
                   key={p}
                   onClick={() => setPage(p)}
-                  className="w-7 h-7 rounded-lg text-xs font-medium transition-colors"
-                  style={
-                    p === page
-                      ? { background: 'rgba(124,58,237,0.3)', color: '#a78bfa' }
-                      : { color: 'rgba(255,255,255,0.35)' }
-                  }
+                  className={`w-7 h-7 rounded-lg text-xs font-medium transition-colors ${
+                    p === page ? 'bg-azul-600 text-white' : 'text-neutro-500 hover:bg-neutro-50'
+                  }`}
                 >
                   {p}
                 </button>
@@ -230,8 +203,7 @@ export default function DataTable<T extends Record<string, any>>({
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="p-1.5 rounded-lg transition-colors disabled:opacity-20"
-              style={{ color: 'rgba(255,255,255,0.4)' }}
+              className="p-1.5 rounded-lg transition-colors disabled:opacity-30 text-neutro-500 hover:bg-neutro-50"
             >
               <ChevronRight className="h-4 w-4" />
             </button>

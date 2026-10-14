@@ -29,9 +29,9 @@ interface RotacionRow {
 }
 
 const SUGERENCIA_COLOR: Record<Sugerencia, string> = {
-  OK: '#10b981',
-  Devolver: '#f59e0b',
-  Liquidar: '#ef4444',
+  OK: '#15805A',
+  Devolver: '#CD9014',
+  Liquidar: '#D2364B',
 }
 
 const DIAS_OPTIONS = [
@@ -54,11 +54,11 @@ function fmtDias(n: number | null) {
 }
 
 const inputStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: '#FFFFFF',
+  border: '1px solid #E3E5EF',
   borderRadius: 8,
   padding: '6px 12px',
-  color: '#fff',
+  color: '#20233A',
   fontSize: 13,
   outline: 'none',
 }
@@ -83,12 +83,12 @@ const COLUMNS: Column<RotacionRow>[] = [
   },
   {
     key: 'capital_inmovilizado', label: 'Capital $', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-semibold text-amber-400">{ars(v)}</span>,
+    render: v => <span className="font-mono font-semibold text-ambar-700">{ars(v)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'ultima_venta', label: 'Última venta', sortable: true,
-    render: v => v ? formatDateAR(v) : <span style={{ color: 'rgba(255,255,255,0.25)' }}>Sin ventas</span>,
+    render: v => v ? formatDateAR(v) : <span style={{ color: '#9295AE' }}>Sin ventas</span>,
     exportValue: v => v ?? '',
   },
   {
@@ -186,8 +186,8 @@ export default function RotacionStockMuerto() {
 
   if (error) {
     return (
-      <div className="rounded-xl p-6" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-        <p className="text-red-400 text-sm">Error cargando datos: {error}</p>
+      <div className="rounded-xl p-6" style={{ background: '#FBEBED', border: '1px solid #F6D0D5' }}>
+        <p className="text-error-600 text-sm">Error cargando datos: {error}</p>
       </div>
     )
   }
@@ -198,17 +198,17 @@ export default function RotacionStockMuerto() {
       {/* Filtros */}
       <div
         className="flex flex-wrap items-center gap-3 p-4 rounded-xl"
-        style={{ background: 'rgba(17,24,39,0.6)', border: '1px solid rgba(255,255,255,0.06)' }}
+        style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}
       >
         <div className="flex items-center gap-2">
-          <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Días sin venta</label>
+          <label className="text-xs" style={{ color: '#6E7290' }}>Días sin venta</label>
           <select value={diasMin} onChange={e => setDiasMin(Number(e.target.value))} style={inputStyle}>
             {DIAS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Capital mín. $</label>
+          <label className="text-xs" style={{ color: '#6E7290' }}>Capital mín. $</label>
           <input
             type="number"
             value={capitalMin || ''}
@@ -219,11 +219,11 @@ export default function RotacionStockMuerto() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Sugerencia</label>
+          <label className="text-xs" style={{ color: '#6E7290' }}>Sugerencia</label>
           <div className="flex gap-1">
             {(['Todas', 'OK', 'Devolver', 'Liquidar'] as const).map(s => {
               const active = sugerenciaFiltro === s
-              const color = s !== 'Todas' ? SUGERENCIA_COLOR[s as Sugerencia] : '#7c3aed'
+              const color = s !== 'Todas' ? SUGERENCIA_COLOR[s as Sugerencia] : '#4549B5'
               return (
                 <button
                   key={s}
@@ -231,7 +231,7 @@ export default function RotacionStockMuerto() {
                   className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
                   style={active
                     ? { background: `${color}25`, color, border: `1px solid ${color}45` }
-                    : { color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)' }
+                    : { color: '#545871', background: '#FFFFFF', border: '1px solid #E3E5EF' }
                   }
                 >
                   {s}
@@ -246,21 +246,21 @@ export default function RotacionStockMuerto() {
           <div
             onClick={() => setSoloConStock(s => !s)}
             className="relative cursor-pointer rounded-full transition-colors"
-            style={{ width: 36, height: 20, background: soloConStock ? '#7c3aed' : 'rgba(255,255,255,0.1)', flexShrink: 0 }}
+            style={{ width: 36, height: 20, background: soloConStock ? '#4549B5' : '#E3E5EF', flexShrink: 0 }}
           >
             <div
-              className="absolute top-0.5 rounded-full bg-white transition-transform"
+              className="absolute top-0.5 rounded-full bg-white shadow-sm transition-transform"
               style={{ width: 16, height: 16, transform: soloConStock ? 'translateX(18px)' : 'translateX(2px)' }}
             />
           </div>
-          <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Solo con stock</span>
+          <span className="text-xs" style={{ color: '#6E7290' }}>Solo con stock</span>
         </label>
 
         <button
           onClick={load}
           disabled={loading}
           className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
-          style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.2)' }}
+          style={{ background: '#EEEEF6', color: '#4549B5', border: '1px solid #CFD0E4' }}
         >
           <span className={loading ? 'animate-spin inline-block' : ''}>↻</span>
           {loading ? 'Cargando...' : 'Actualizar'}
@@ -277,8 +277,8 @@ export default function RotacionStockMuerto() {
 
       {/* Chart: top 20 por capital */}
       {!loading && chartData.length > 0 && (
-        <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-widest mb-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}>
+          <p className="text-xs font-semibold mb-4" style={{ color: '#545871' }}>
             Top {chartData.length} SKUs — Capital inmovilizado
           </p>
           <ResponsiveContainer width="100%" height={Math.max(220, chartData.length * 26)}>
@@ -286,15 +286,15 @@ export default function RotacionStockMuerto() {
               <XAxis
                 type="number"
                 tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
-                tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 11 }}
-                axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
+                tick={{ fill: '#6E7290', fontSize: 11 }}
+                axisLine={{ stroke: '#E3E5EF' }}
                 tickLine={false}
               />
               <YAxis
                 type="category"
                 dataKey="name"
                 width={64}
-                tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11, fontFamily: 'monospace' }}
+                tick={{ fill: '#6E7290', fontSize: 11, fontFamily: 'monospace' }}
                 axisLine={false}
                 tickLine={false}
               />
@@ -302,10 +302,10 @@ export default function RotacionStockMuerto() {
                 formatter={(v: number) => [ars(v), 'Capital']}
                 labelFormatter={(_l, p) => p?.[0]?.payload?.desc || _l}
                 contentStyle={{
-                  background: '#1f2937',
-                  border: '1px solid rgba(255,255,255,0.1)',
+                  background: '#FFFFFF',
+                  border: '1px solid #E3E5EF',
                   borderRadius: 8,
-                  color: '#fff',
+                  color: '#1E2030',
                   fontSize: 12,
                 }}
               />
@@ -320,7 +320,7 @@ export default function RotacionStockMuerto() {
             {(Object.entries(SUGERENCIA_COLOR) as [Sugerencia, string][]).map(([k, v]) => (
               <div key={k} className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm" style={{ background: v }} />
-                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{k}</span>
+                <span className="text-xs" style={{ color: '#6E7290' }}>{k}</span>
               </div>
             ))}
           </div>

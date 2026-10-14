@@ -19,7 +19,7 @@ interface MultiSelectProps {
 }
 
 /**
- * Dropdown multi-selección estilo Playroom (dark). Sin selección = "Todos".
+ * Dropdown multi-selección estilo Playroom (tema claro). Sin selección = "Todos".
  */
 export default function MultiSelect({
   options,
@@ -65,42 +65,34 @@ export default function MultiSelect({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="flex w-full items-center justify-between gap-1 rounded-lg px-2.5 py-1 text-xs transition-colors"
-        style={{
-          background: '#1f2937',
-          border: values.length > 0 ? '1px solid rgba(124,58,237,0.45)' : '1px solid rgba(255,255,255,0.08)',
-          color: values.length > 0 ? '#a78bfa' : '#fff',
-          minHeight: 26,
-        }}
+        className={`flex w-full items-center justify-between gap-1 rounded-lg px-2.5 py-1 text-xs transition-colors border ${
+          values.length > 0 ? 'border-azul-300 text-azul-700 bg-azul-50' : 'border-neutro-200 bg-white text-neutro-800'
+        }`}
+        style={{ minHeight: 26 }}
       >
         <span className="truncate text-left">{buttonText}</span>
         <span className="flex items-center gap-1 flex-shrink-0">
           {values.length > 0 && (
             <X
-              className="h-3 w-3"
-              style={{ color: 'rgba(255,255,255,0.4)' }}
+              className="h-3 w-3 text-neutro-400 hover:text-neutro-600"
               onClick={e => { e.stopPropagation(); onChange([]) }}
             />
           )}
-          <ChevronDown className="h-3 w-3" style={{ color: 'rgba(255,255,255,0.4)' }} />
+          <ChevronDown className="h-3 w-3 text-neutro-400" />
         </span>
       </button>
 
       {open && (
-        <div
-          className="absolute z-50 mt-1 w-full min-w-[180px] rounded-lg overflow-hidden shadow-xl"
-          style={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)' }}
-        >
+        <div className="absolute z-50 mt-1 w-full min-w-[180px] rounded-lg overflow-hidden shadow-lg bg-white border border-neutro-200">
           {searchable && (
-            <div className="p-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="p-1.5 border-b border-neutro-100">
               <input
                 autoFocus
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Buscar…"
-                className="w-full rounded px-2 py-1 text-xs"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', outline: 'none' }}
+                className="w-full rounded px-2 py-1 text-xs bg-white border border-neutro-200 text-neutro-800 outline-none focus:border-azul-400"
               />
             </div>
           )}
@@ -109,8 +101,9 @@ export default function MultiSelect({
             <button
               type="button"
               onClick={() => { onChange([]); setOpen(false) }}
-              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors hover:bg-white/5"
-              style={{ color: values.length === 0 ? '#a78bfa' : 'rgba(255,255,255,0.6)' }}
+              className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors hover:bg-neutro-50 ${
+                values.length === 0 ? 'text-azul-700 font-medium' : 'text-neutro-600'
+              }`}
             >
               <span className="w-3.5" />
               {placeholder} (limpiar)
@@ -122,15 +115,14 @@ export default function MultiSelect({
                   key={o.value}
                   type="button"
                   onClick={() => toggle(o.value)}
-                  className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors hover:bg-white/5"
-                  style={{ color: checked ? '#fff' : 'rgba(255,255,255,0.6)' }}
+                  className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-left transition-colors hover:bg-neutro-50 ${
+                    checked ? 'text-azul-900 font-medium' : 'text-neutro-600'
+                  }`}
                 >
                   <span
-                    className="flex h-3.5 w-3.5 items-center justify-center rounded flex-shrink-0"
-                    style={{
-                      background: checked ? '#7c3aed' : 'transparent',
-                      border: checked ? '1px solid #7c3aed' : '1px solid rgba(255,255,255,0.2)',
-                    }}
+                    className={`flex h-3.5 w-3.5 items-center justify-center rounded flex-shrink-0 border ${
+                      checked ? 'bg-azul-600 border-azul-600' : 'bg-white border-neutro-300'
+                    }`}
                   >
                     {checked && <Check className="h-2.5 w-2.5 text-white" />}
                   </span>
@@ -139,7 +131,7 @@ export default function MultiSelect({
               )
             })}
             {filtered.length === 0 && (
-              <p className="px-2.5 py-2 text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>Sin resultados</p>
+              <p className="px-2.5 py-2 text-xs text-neutro-400">Sin resultados</p>
             )}
           </div>
         </div>

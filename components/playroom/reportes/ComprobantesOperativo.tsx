@@ -38,7 +38,7 @@ interface ApiResponse {
 }
 
 const TIPO_COLORS: Record<string, string> = {
-  NCA: '#ef4444', NCB: '#f97316', NCC: '#f59e0b',
+  NCA: '#D2364B', NCB: '#B8560F', NCC: '#CD9014',
 }
 
 function ars(n: number) {
@@ -46,11 +46,11 @@ function ars(n: number) {
 }
 
 const inputStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: '#FFFFFF',
+  border: '1px solid #E3E5EF',
   borderRadius: 8,
   padding: '4px 10px',
-  color: '#fff',
+  color: '#20233A',
   fontSize: 12,
   outline: 'none',
 }
@@ -63,41 +63,41 @@ const COLUMNS: Column<NCRow>[] = [
   },
   {
     key: 'nc_monto', label: 'Monto NC', sortable: true, align: 'right',
-    render: v => <span className="font-mono font-semibold text-red-400">{ars(v)}</span>,
+    render: v => <span className="font-mono font-semibold text-error-600">{ars(v)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'nc_monto_anterior', label: 'NC anterior', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: '#6E7290' }}>{v > 0 ? ars(v) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'variacion_pct', label: 'Var. NC %', sortable: true, align: 'right',
     render: (v, row) => row.nc_monto_anterior > 0
       ? <ComparativoBadge pct={v} size="sm" invertColor />
-      : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      : <span className="text-xs" style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => `${Number(v).toFixed(1)}%`,
   },
   {
     key: 'fact_monto', label: 'Facturado', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.5)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: '#545871' }}>{v > 0 ? ars(v) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'ratio_nc_pct', label: '% NC/Fact.', sortable: true, align: 'right',
     render: v => v !== null
       ? (
-        <span className="font-mono font-semibold" style={{ color: Number(v) > 15 ? '#ef4444' : Number(v) > 5 ? '#f59e0b' : '#10b981' }}>
+        <span className="font-mono font-semibold" style={{ color: Number(v) > 15 ? '#D2364B' : Number(v) > 5 ? '#CD9014' : '#15805A' }}>
           {Number(v).toFixed(1)}%
         </span>
       )
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => v !== null ? `${Number(v).toFixed(1)}%` : '',
   },
   {
     key: 'tipo_mas_frecuente', label: 'Tipo NC', sortable: true,
     render: v => {
-      const color = TIPO_COLORS[v] ?? '#6b7280'
+      const color = TIPO_COLORS[v] ?? '#6E7290'
       return (
         <span
           className="px-2 py-0.5 rounded text-xs font-bold font-mono"
@@ -151,8 +151,8 @@ export default function ComprobantesOperativo() {
   }), [rows, searchText, ratioMin])
 
   if (error) return (
-    <div className="rounded-xl p-6" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-      <p className="text-red-400 text-sm">Error: {error}</p>
+    <div className="rounded-xl p-6" style={{ background: '#FBEBED', border: '1px solid #F6D0D5' }}>
+      <p className="text-error-600 text-sm">Error: {error}</p>
     </div>
   )
 
@@ -166,7 +166,7 @@ export default function ComprobantesOperativo() {
         style={{ ...inputStyle, width: 200 }}
       />
       <div className="flex items-center gap-2">
-        <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>% NC mín.</label>
+        <label className="text-xs" style={{ color: '#6E7290' }}>% NC mín.</label>
         <input
           type="number"
           value={ratioMin || ''}

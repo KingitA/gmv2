@@ -72,7 +72,7 @@ const CONDICIONES_IVA = [
   { value: 'Exento',                label: 'Exento' },
 ]
 
-const ABC_COLOR: Record<string, string> = { A: '#7c3aed', B: '#06b6d4', C: '#6b7280' }
+const ABC_COLOR: Record<string, string> = { A: '#4549B5', B: '#22A9C9', C: '#6E7290' }
 
 const PROVINCIAS_AR = [
   'Buenos Aires', 'CABA', 'Catamarca', 'Chaco', 'Chubut', 'Córdoba', 'Corrientes',
@@ -86,14 +86,14 @@ function ars(n: number) {
 }
 
 const sel: React.CSSProperties = {
-  background: '#1f2937',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: '#FFFFFF',
+  border: '1px solid #E3E5EF',
   borderRadius: 8,
   padding: '4px 10px',
-  color: '#fff',
+  color: '#20233A',
   fontSize: 12,
   outline: 'none',
-  colorScheme: 'dark',
+  colorScheme: 'light',
 }
 
 function Sel({ value, onChange, children }: { value: string; onChange: (v: string) => void; children: React.ReactNode }) {
@@ -105,14 +105,14 @@ function Sel({ value, onChange, children }: { value: string; onChange: (v: strin
 }
 
 function FilterBtn({ label, active, color, onClick }: { label: string; active: boolean; color?: string; onClick: () => void }) {
-  const c = color ?? '#7c3aed'
+  const c = color ?? '#4549B5'
   return (
     <button
       onClick={onClick}
       className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
       style={active
         ? { background: `${c}25`, color: c, border: `1px solid ${c}45` }
-        : { color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)' }
+        : { color: '#545871', background: '#FFFFFF', border: '1px solid #E3E5EF' }
       }
     >
       {label}
@@ -121,7 +121,7 @@ function FilterBtn({ label, active, color, onClick }: { label: string; active: b
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <label className="text-xs whitespace-nowrap" style={{ color: 'rgba(255,255,255,0.4)' }}>{children}</label>
+  return <label className="text-xs whitespace-nowrap" style={{ color: '#6E7290' }}>{children}</label>
 }
 
 function TextInput({ value, onChange, placeholder, width = 130 }: { value: string; onChange: (v: string) => void; placeholder?: string; width?: number }) {
@@ -155,7 +155,7 @@ const COLUMNS: Column<ArticuloRow>[] = [
   },
   {
     key: 'unidades_anterior', label: 'Ud. ant.', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? Number(v).toLocaleString('es-AR') : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: '#6E7290' }}>{v > 0 ? Number(v).toLocaleString('es-AR') : '—'}</span>,
     exportValue: v => String(v),
   },
   {
@@ -165,38 +165,38 @@ const COLUMNS: Column<ArticuloRow>[] = [
   },
   {
     key: 'iva', label: 'Impuestos', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.45)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: '#545871' }}>{v > 0 ? ars(v) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'revenue', label: 'Total', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.7)' }}>{ars(v)}</span>,
+    render: v => <span className="font-mono" style={{ color: '#31354A' }}>{ars(v)}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'neto_anterior', label: 'Período ant.', sortable: true, align: 'right',
-    render: v => <span className="font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>{v > 0 ? ars(v) : '—'}</span>,
+    render: v => <span className="font-mono" style={{ color: '#6E7290' }}>{v > 0 ? ars(v) : '—'}</span>,
     exportValue: v => String(v),
   },
   {
     key: 'variacion_pct', label: 'Var. %', sortable: true, align: 'right',
     render: (v, row) => row.neto_anterior > 0
       ? <ComparativoBadge pct={v} size="sm" />
-      : <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      : <span className="text-xs" style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => `${Number(v).toFixed(1)}%`,
   },
   {
     key: 'margen_bruto_pct', label: 'Margen %', sortable: true, align: 'right',
     render: v => v !== null
-      ? <span className="font-mono" style={{ color: Number(v) >= 30 ? '#10b981' : Number(v) >= 15 ? '#f59e0b' : '#ef4444' }}>{Number(v).toFixed(1)}%</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono" style={{ color: Number(v) >= 30 ? '#15805A' : Number(v) >= 15 ? '#CD9014' : '#D2364B' }}>{Number(v).toFixed(1)}%</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => v !== null ? `${Number(v).toFixed(1)}%` : '',
   },
   {
     key: 'bonificadas', label: 'Bonif.', sortable: true, align: 'right',
     render: v => v > 0
-      ? <span className="font-mono text-amber-400">{Number(v).toLocaleString('es-AR')}</span>
-      : <span style={{ color: 'rgba(255,255,255,0.2)' }}>—</span>,
+      ? <span className="font-mono text-ambar-700">{Number(v).toLocaleString('es-AR')}</span>
+      : <span style={{ color: '#9295AE' }}>—</span>,
     exportValue: v => String(v),
   },
 ]
@@ -356,8 +356,8 @@ export default function ArticulosVendidos() {
   const resetAdv = () => { setAdvFilters(ADV_EMPTY) }
 
   if (error) return (
-    <div className="rounded-xl p-6" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-      <p className="text-red-400 text-sm">Error: {error}</p>
+    <div className="rounded-xl p-6" style={{ background: '#FBEBED', border: '1px solid #F6D0D5' }}>
+      <p className="text-error-600 text-sm">Error: {error}</p>
     </div>
   )
 
@@ -400,7 +400,7 @@ export default function ArticulosVendidos() {
         </div>
 
         {/* Toggle vendida / facturada */}
-        <div className="flex items-center gap-1" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '3px' }}>
+        <div className="flex items-center gap-1" style={{ background: '#F0F1F7', border: '1px solid #E3E5EF', borderRadius: 10, padding: '3px' }}>
           {([
             { val: '' as const,            label: 'Vendida',   icon: '🛒' },
             { val: 'comprobante' as const, label: 'Facturada', icon: '🧾' },
@@ -410,8 +410,8 @@ export default function ArticulosVendidos() {
               onClick={() => { setFuente(opt.val); load(filters, advFilters, opt.val) }}
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
               style={fuente === opt.val
-                ? { background: 'linear-gradient(135deg, #7c3aed, #06b6d4)', color: '#fff', boxShadow: '0 1px 6px rgba(124,58,237,0.4)' }
-                : { color: 'rgba(255,255,255,0.35)' }
+                ? { background: '#33378E', color: '#fff', boxShadow: '0 1px 2px rgba(23,26,69,0.12)' }
+                : { color: '#545871' }
               }
             >
               <span style={{ fontSize: 11 }}>{opt.icon}</span>
@@ -421,7 +421,7 @@ export default function ArticulosVendidos() {
         </div>
 
         {/* Toggle monto / cantidad */}
-        <div className="flex items-center gap-1" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '3px' }}>
+        <div className="flex items-center gap-1" style={{ background: '#F0F1F7', border: '1px solid #E3E5EF', borderRadius: 10, padding: '3px' }}>
           {([
             { val: 'revenue' as const,  label: 'Monto',    icon: '$' },
             { val: 'unidades' as const, label: 'Cantidad',  icon: '#' },
@@ -431,8 +431,8 @@ export default function ArticulosVendidos() {
               onClick={() => setSortBy(opt.val)}
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
               style={sortBy === opt.val
-                ? { background: 'linear-gradient(135deg, #059669, #06b6d4)', color: '#fff', boxShadow: '0 1px 6px rgba(5,150,105,0.4)' }
-                : { color: 'rgba(255,255,255,0.35)' }
+                ? { background: '#33378E', color: '#fff', boxShadow: '0 1px 2px rgba(23,26,69,0.12)' }
+                : { color: '#545871' }
               }
             >
               <span style={{ fontSize: 11, fontWeight: 700 }}>{opt.icon}</span>
@@ -446,21 +446,20 @@ export default function ArticulosVendidos() {
           onClick={() => setShowAdv(v => !v)}
           className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors ml-auto"
           style={advCount > 0
-            ? { background: 'rgba(124,58,237,0.15)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.3)' }
-            : { color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }
+            ? { background: '#EEEEF6', color: '#4549B5', border: '1px solid #CFD0E4' }
+            : { color: '#545871', background: '#FFFFFF', border: '1px solid #E3E5EF' }
           }
         >
           {showAdv ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           Filtros avanzados
-          {advCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: '#7c3aed', color: '#fff' }}>{advCount}</span>}
+          {advCount > 0 && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: '#4549B5', color: '#fff' }}>{advCount}</span>}
         </button>
       </div>
 
       {/* Fila 2: filtros avanzados (backend) */}
       {showAdv && (
         <div
-          className="flex flex-wrap items-center gap-2 rounded-xl px-4 py-3"
-          style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.12)' }}
+          className="flex flex-wrap items-center gap-2 rounded-xl px-4 py-3 bg-neutro-50 border border-neutro-200"
         >
           <div className="flex items-center gap-1.5">
             <FieldLabel>Viajante</FieldLabel>
@@ -546,7 +545,7 @@ export default function ArticulosVendidos() {
               <button
                 onClick={resetAdv}
                 className="text-xs px-2.5 py-1 rounded-lg transition-colors"
-                style={{ color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}
+                style={{ color: '#6E7290', border: '1px solid #E3E5EF' }}
               >
                 Limpiar
               </button>
@@ -554,7 +553,7 @@ export default function ArticulosVendidos() {
             <button
               onClick={() => load(filters, advFilters)}
               className="text-xs px-3 py-1 rounded-lg font-medium transition-colors"
-              style={{ background: 'rgba(124,58,237,0.25)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.3)' }}
+              style={{ background: '#EEEEF6', color: '#4549B5', border: '1px solid #CFD0E4' }}
             >
               Aplicar
             </button>
@@ -590,23 +589,23 @@ export default function ArticulosVendidos() {
 
       {/* Chart top 15 */}
       {!loading && chartData.length > 0 && (
-        <div className="rounded-xl p-5" style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-widest mb-4" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1px solid #E3E5EF' }}>
+          <p className="text-xs font-semibold mb-4" style={{ color: '#545871' }}>
             Top {chartData.length} artículos — {sortBy === 'unidades' ? 'por Cantidad vendida' : `Venta neta · ${ars(kpis.totalNeto)} total`}
           </p>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData} margin={{ left: 10, right: 10, top: 0, bottom: 60 }}>
-              <XAxis dataKey="name" tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9 }} axisLine={{ stroke: 'rgba(255,255,255,0.05)' }} tickLine={false} angle={-45} textAnchor="end" interval={0} />
+              <XAxis dataKey="name" tick={{ fill: '#6E7290', fontSize: 10 }} axisLine={{ stroke: '#E3E5EF' }} tickLine={false} angle={-45} textAnchor="end" interval={0} />
               <YAxis
                 tickFormatter={sortBy === 'unidades' ? (v: number) => v.toLocaleString('es-AR') : (v: number) => `$${(v / 1000000).toFixed(1)}M`}
-                tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} axisLine={false} tickLine={false}
+                tick={{ fill: '#6E7290', fontSize: 11 }} axisLine={false} tickLine={false}
               />
               <Tooltip
                 formatter={(v: number) => sortBy === 'unidades' ? [v.toLocaleString('es-AR'), 'Unidades'] : [ars(v), 'Venta neta']}
                 labelFormatter={(_l, p) => p?.[0]?.payload?.desc || _l}
-                contentStyle={{ background: '#1f2937', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 12 }}
+                contentStyle={{ background: '#FFFFFF', border: '1px solid #E3E5EF', borderRadius: 8, color: '#1E2030', fontSize: 12 }}
               />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36}>
+              <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={24}>
                 {chartData.map((e, i) => <Cell key={i} fill={ABC_COLOR[e.clasificacion]} fillOpacity={0.85} />)}
               </Bar>
             </BarChart>
@@ -615,7 +614,7 @@ export default function ArticulosVendidos() {
             {(['A', 'B', 'C'] as const).map(k => (
               <div key={k} className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm" style={{ background: ABC_COLOR[k] }} />
-                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Clase {k} · {filtered.filter(r => r.clasificacion === k).length} SKUs</span>
+                <span className="text-xs" style={{ color: '#6E7290' }}>Clase {k} · {filtered.filter(r => r.clasificacion === k).length} SKUs</span>
               </div>
             ))}
           </div>
@@ -636,13 +635,13 @@ export default function ArticulosVendidos() {
       {selectedArticulo && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-end"
-          style={{ background: 'rgba(0,0,0,0.55)' }}
+          style={{ background: 'rgba(23,26,69,0.3)' }}
           onClick={() => setSelectedArticulo(null)}
         >
           <div
             ref={panelRef}
             className="h-full flex flex-col overflow-hidden relative"
-            style={{ width: panelWidth, minWidth: 340, maxWidth: '90vw', background: '#111827', borderLeft: '1px solid rgba(255,255,255,0.08)' }}
+            style={{ width: panelWidth, minWidth: 340, maxWidth: '90vw', background: '#FFFFFF', borderLeft: '1px solid #E3E5EF', boxShadow: '-8px 0 24px rgba(23,26,69,0.08)' }}
             onClick={e => e.stopPropagation()}
           >
             {/* Handle de resize — borde izquierdo */}
@@ -651,25 +650,25 @@ export default function ArticulosVendidos() {
               onMouseDown={handleResizeStart}
               style={{ background: 'transparent' }}
             >
-              <div className="w-1 h-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(124,58,237,0.6)' }} />
+              <div className="w-1 h-10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: '#CFD0E4' }} />
             </div>
 
             {/* Header */}
-            <div className="flex items-start justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="flex items-start justify-between px-5 py-4" style={{ borderBottom: '1px solid #E3E5EF' }}>
               <div>
-                <p className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>Clientes que compraron</p>
-                <p className="text-sm font-semibold text-white">{selectedArticulo.descripcion}</p>
-                <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                <p className="text-xs font-semibold mb-1" style={{ color: '#6E7290' }}>Clientes que compraron</p>
+                <p className="text-sm font-semibold text-azul-900">{selectedArticulo.descripcion}</p>
+                <p className="text-xs mt-0.5" style={{ color: '#9295AE' }}>
                   SKU {selectedArticulo.sku} · {filters.dateFrom} → {filters.dateTo}
                 </p>
               </div>
-              <button onClick={() => setSelectedArticulo(null)} className="p-1.5 rounded-lg mt-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>
+              <button onClick={() => setSelectedArticulo(null)} className="p-1.5 rounded-lg mt-0.5" style={{ color: '#6E7290' }}>
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Resumen del artículo */}
-            <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 py-3" style={{ borderBottom: '1px solid #F0F1F7' }}>
               {[
                 { label: 'Rubro', v: selectedArticulo.rubro },
                 { label: 'Marca', v: selectedArticulo.marca },
@@ -678,30 +677,30 @@ export default function ArticulosVendidos() {
                 { label: 'Margen', v: selectedArticulo.margen_bruto_pct !== null ? `${selectedArticulo.margen_bruto_pct.toFixed(1)}%` : '—' },
               ].map(({ label, v }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>{label}</p>
-                  <p className="text-xs font-medium text-white">{v}</p>
+                  <p className="text-xs" style={{ color: '#6E7290' }}>{label}</p>
+                  <p className="text-xs font-medium text-azul-900">{v}</p>
                 </div>
               ))}
             </div>
 
             {/* Totales */}
             {clienteDetalle && !clienteLoading && (
-              <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 py-3" style={{ borderBottom: '1px solid #F0F1F7' }}>
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Total unidades</p>
-                  <p className="text-base font-semibold text-white font-mono">{clienteDetalle.totales.unidades.toLocaleString('es-AR')}</p>
+                  <p className="text-xs" style={{ color: '#6E7290' }}>Total unidades</p>
+                  <p className="text-base font-semibold text-azul-900 font-mono">{clienteDetalle.totales.unidades.toLocaleString('es-AR')}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Venta neta</p>
-                  <p className="text-base font-semibold text-white font-mono">{ars(clienteDetalle.totales.neto ?? clienteDetalle.totales.revenue)}</p>
+                  <p className="text-xs" style={{ color: '#6E7290' }}>Venta neta</p>
+                  <p className="text-base font-semibold text-azul-900 font-mono">{ars(clienteDetalle.totales.neto ?? clienteDetalle.totales.revenue)}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Total c/imp.</p>
-                  <p className="text-base font-semibold font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>{ars(clienteDetalle.totales.revenue)}</p>
+                  <p className="text-xs" style={{ color: '#6E7290' }}>Total c/imp.</p>
+                  <p className="text-base font-semibold font-mono" style={{ color: '#31354A' }}>{ars(clienteDetalle.totales.revenue)}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>Clientes</p>
-                  <p className="text-base font-semibold text-white font-mono">{clienteDetalle.clientes.length}</p>
+                  <p className="text-xs" style={{ color: '#6E7290' }}>Clientes</p>
+                  <p className="text-base font-semibold text-azul-900 font-mono">{clienteDetalle.clientes.length}</p>
                 </div>
               </div>
             )}
@@ -711,19 +710,19 @@ export default function ArticulosVendidos() {
               {clienteLoading ? (
                 <div className="space-y-2 p-5">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="h-12 rounded-lg animate-pulse" style={{ background: 'rgba(255,255,255,0.04)' }} />
+                    <div key={i} className="h-12 rounded-lg animate-pulse" style={{ background: '#F0F1F7' }} />
                   ))}
                 </div>
               ) : clienteDetalle?.clientes.length === 0 ? (
-                <p className="px-5 py-10 text-center text-sm" style={{ color: 'rgba(255,255,255,0.25)' }}>Sin datos para el período</p>
+                <p className="px-5 py-10 text-center text-sm" style={{ color: '#9295AE' }}>Sin datos para el período</p>
               ) : (
                 <table className="w-full text-xs">
                   <thead>
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <tr style={{ borderBottom: '1px solid #F0F1F7' }}>
                       {['Cliente', 'Localidad', 'Ud.', 'P. Unit.', 'Venta', '%'].map(h => (
                         <th key={h}
                           className={`px-4 py-2.5 ${['Ud.', 'P. Unit.', 'Venta', '%'].includes(h) ? 'text-right' : 'text-left'}`}
-                          style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          style={{ color: '#9295AE', fontWeight: 600 }}>
                           {h}
                         </th>
                       ))}
@@ -731,29 +730,29 @@ export default function ArticulosVendidos() {
                   </thead>
                   <tbody>
                     {clienteDetalle?.clientes.map((c, i) => (
-                      <tr key={c.cliente_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}
-                        onMouseEnter={e => ((e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)')}
+                      <tr key={c.cliente_id} style={{ borderBottom: '1px solid #F0F1F7' }}
+                        onMouseEnter={e => ((e.currentTarget as HTMLTableRowElement).style.background = '#F7F8FC')}
                         onMouseLeave={e => ((e.currentTarget as HTMLTableRowElement).style.background = 'transparent')}
                       >
-                        <td className="px-4 py-2.5" style={{ color: 'rgba(255,255,255,0.8)', maxWidth: 160 }}>
+                        <td className="px-4 py-2.5" style={{ color: '#1B1D4E', maxWidth: 160 }}>
                           <span className="block truncate" title={c.nombre}>{c.nombre}</span>
                         </td>
-                        <td className="px-4 py-2.5" style={{ color: 'rgba(255,255,255,0.4)' }}>{c.localidad}</td>
-                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: 'rgba(255,255,255,0.75)' }}>
+                        <td className="px-4 py-2.5" style={{ color: '#6E7290' }}>{c.localidad}</td>
+                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: '#31354A' }}>
                           {c.unidades.toLocaleString('es-AR')}
                         </td>
-                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                        <td className="px-4 py-2.5 text-right font-mono" style={{ color: '#31354A' }}>
                           {c.precio_unitario > 0 ? ars(c.precio_unitario) : '—'}
                         </td>
-                        <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: '#a78bfa' }}>
+                        <td className="px-4 py-2.5 text-right font-mono font-semibold" style={{ color: '#4549B5' }}>
                           {ars(c.neto ?? c.revenue)}
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <div className="w-14 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                              <div className="h-full rounded-full" style={{ width: `${Math.min(100, c.porcentaje)}%`, background: i < 3 ? '#7c3aed' : 'rgba(124,58,237,0.4)' }} />
+                            <div className="w-14 h-1.5 rounded-full overflow-hidden" style={{ background: '#F0F1F7' }}>
+                              <div className="h-full rounded-full" style={{ width: `${Math.min(100, c.porcentaje)}%`, background: i < 3 ? '#4549B5' : '#9093C2' }} />
                             </div>
-                            <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.5)', minWidth: 32, textAlign: 'right' }}>
+                            <span className="font-mono text-xs" style={{ color: '#545871', minWidth: 32, textAlign: 'right' }}>
                               {c.porcentaje.toFixed(1)}%
                             </span>
                           </div>

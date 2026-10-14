@@ -117,41 +117,41 @@ export default function ComisionesDrawer({ open, onClose, viajante, tipo, dateFr
       <SheetContent
         side="right"
         className="w-full sm:max-w-4xl p-0 flex flex-col overflow-hidden"
-        style={{ background: '#0d1117', borderLeft: '1px solid rgba(255,255,255,0.08)', color: '#fff' }}
+        style={{ background: '#FFFFFF', borderLeft: '1px solid #E3E5EF', color: '#1B1D4E' }}
       >
         {/* Header / breadcrumb */}
         <div className="flex items-center gap-2 px-5 py-4 flex-shrink-0"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+          style={{ borderBottom: '1px solid #E3E5EF' }}>
           {selectedPedido ? (
             <button onClick={handleBack}
               className="flex items-center gap-0.5 text-xs font-semibold transition-colors"
-              style={{ color: 'rgba(255,255,255,0.4)' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#fff' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.4)' }}
+              style={{ color: '#6E7290' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#1B1D4E' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#6E7290' }}
             >
               <ChevronLeft className="h-3.5 w-3.5" />
               {viajante?.nombre}
             </button>
           ) : (
-            <span className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.35)' }}>Comisiones</span>
+            <span className="text-xs font-semibold" style={{ color: '#545871' }}>Comisiones</span>
           )}
 
-          <span style={{ color: 'rgba(255,255,255,0.2)' }}>/</span>
+          <span style={{ color: '#9295AE' }}>/</span>
 
           {selectedPedido ? (
             <>
-              <span className="text-sm font-bold text-white">Pedido {selectedPedido.numero_pedido}</span>
-              <span className="text-xs ml-1" style={{ color: 'rgba(255,255,255,0.35)' }}>{selectedPedido.cliente_nombre}</span>
+              <span className="text-sm font-bold text-azul-900">Pedido {selectedPedido.numero_pedido}</span>
+              <span className="text-xs ml-1" style={{ color: '#9295AE' }}>{selectedPedido.cliente_nombre}</span>
             </>
           ) : (
-            <span className="text-sm font-bold text-white">{viajante?.nombre}</span>
+            <span className="text-sm font-bold text-azul-900">{viajante?.nombre}</span>
           )}
 
           <div className="ml-auto">
-            <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase"
+            <span className="px-2 py-0.5 rounded text-xs font-semibold"
               style={{
-                background: tipo === 'cobrada' ? 'rgba(16,185,129,0.12)' : 'rgba(99,102,241,0.12)',
-                color: tipo === 'cobrada' ? '#10b981' : '#818cf8',
+                background: tipo === 'cobrada' ? '#E6F4EE' : '#EEEEF6',
+                color: tipo === 'cobrada' ? '#15805A' : '#4549B5',
               }}>
               {tipo === 'cobrada' ? 'Cobrada' : 'Vendida'}
             </span>
@@ -181,7 +181,7 @@ function PedidosList({ pedidos, loading, tipo, onSelect }: {
   if (loading) return <LoadingRows />
   if (!pedidos.length) return (
     <div className="flex items-center justify-center h-40">
-      <p className="text-sm" style={{ color: 'rgba(255,255,255,0.25)' }}>Sin pedidos en el período</p>
+      <p className="text-sm" style={{ color: '#9295AE' }}>Sin pedidos en el período</p>
     </div>
   )
 
@@ -198,10 +198,10 @@ function PedidosList({ pedidos, loading, tipo, onSelect }: {
 
       <table className="w-full text-sm">
         <thead>
-          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          <tr style={{ borderBottom: '1px solid #F0F1F7' }}>
             {['Pedido', 'Cliente', tipo === 'cobrada' ? 'F. Cobro' : 'Fecha', 'Monto', 'Comisión', 'SKUs', ''].map(h => (
-              <th key={h} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider"
-                style={{ color: 'rgba(255,255,255,0.3)' }}>{h}</th>
+              <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold"
+                style={{ color: '#9295AE' }}>{h}</th>
             ))}
           </tr>
         </thead>
@@ -209,32 +209,32 @@ function PedidosList({ pedidos, loading, tipo, onSelect }: {
           {pedidos.map(p => (
             <tr key={p.pedido_id} onClick={() => onSelect(p)}
               className="cursor-pointer transition-colors"
-              style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)' }}
+              style={{ borderBottom: '1px solid #F0F1F7' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#F7F8FC' }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
             >
               <td className="px-4 py-3">
-                <span className="font-mono text-xs font-semibold text-blue-400">{p.numero_pedido}</span>
+                <span className="font-mono text-xs font-semibold text-azul-600">{p.numero_pedido}</span>
               </td>
               <td className="px-4 py-3 max-w-[180px]">
-                <span className="text-xs truncate block" style={{ color: 'rgba(255,255,255,0.8)' }}>{p.cliente_nombre}</span>
+                <span className="text-xs truncate block" style={{ color: '#1B1D4E' }}>{p.cliente_nombre}</span>
               </td>
               <td className="px-4 py-3 whitespace-nowrap">
-                <span className="text-xs font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                <span className="text-xs font-mono" style={{ color: '#6E7290' }}>
                   {tipo === 'cobrada' ? (p.fecha_cobro ?? '—') : p.fecha}
                 </span>
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>{ars(p.total_monto)}</span>
+                <span className="font-mono text-xs" style={{ color: '#545871' }}>{ars(p.total_monto)}</span>
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="font-mono text-sm font-semibold text-emerald-400">{ars(p.total_comision)}</span>
+                <span className="font-mono text-sm font-semibold text-exito-600">{ars(p.total_comision)}</span>
               </td>
               <td className="px-4 py-3 text-right">
-                <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>{p.cantidad_skus}</span>
+                <span className="font-mono text-xs" style={{ color: '#9295AE' }}>{p.cantidad_skus}</span>
               </td>
               <td className="px-4 py-3 text-right">
-                <ChevronLeft className="h-3.5 w-3.5 rotate-180 inline" style={{ color: 'rgba(255,255,255,0.2)' }} />
+                <ChevronLeft className="h-3.5 w-3.5 rotate-180 inline" style={{ color: '#9295AE' }} />
               </td>
             </tr>
           ))}
@@ -269,55 +269,55 @@ function PedidoDetalle({ tipo, detalle, loading }: {
 
         <table className="w-full text-sm">
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <tr style={{ borderBottom: '1px solid #F0F1F7' }}>
               {['SKU', 'Descripción', 'Cat.', 'Cant.', 'P. Unit.', 'Subtotal', '% Com.', 'Comisión'].map((h, i) => (
-                <th key={h} className={`px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider ${i >= 3 ? 'text-right' : 'text-left'}`}
-                  style={{ color: 'rgba(255,255,255,0.3)' }}>{h}</th>
+                <th key={h} className={`px-3 py-2.5 text-xs font-semibold ${i >= 3 ? 'text-right' : 'text-left'}`}
+                  style={{ color: '#9295AE' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {arts.map(a => (
-              <tr key={a.kardex_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                <td className="px-3 py-2.5"><span className="font-mono text-xs text-blue-400">{a.sku}</span></td>
+              <tr key={a.kardex_id} style={{ borderBottom: '1px solid #F0F1F7' }}>
+                <td className="px-3 py-2.5"><span className="font-mono text-xs text-azul-600">{a.sku}</span></td>
                 <td className="px-3 py-2.5 max-w-[180px]">
-                  <span className="text-xs block truncate" style={{ color: 'rgba(255,255,255,0.85)' }}>{a.descripcion}</span>
+                  <span className="text-xs block truncate" style={{ color: '#1B1D4E' }}>{a.descripcion}</span>
                 </td>
                 <td className="px-3 py-2.5">
                   <span className="text-[10px] px-1.5 py-0.5 rounded"
-                    style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)' }}>
+                    style={{ background: '#F0F1F7', color: '#545871' }}>
                     {catLabel(a.categoria)}
                   </span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{a.cantidad}</span>
+                  <span className="font-mono text-xs" style={{ color: '#31354A' }}>{a.cantidad}</span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>{ars(a.precio_unitario)}</span>
+                  <span className="font-mono text-xs" style={{ color: '#545871' }}>{ars(a.precio_unitario)}</span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{ars(a.subtotal)}</span>
+                  <span className="font-mono text-xs" style={{ color: '#31354A' }}>{ars(a.subtotal)}</span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-xs text-amber-400">{pct(a.comision_pct)}</span>
+                  <span className="font-mono text-xs text-ambar-700">{pct(a.comision_pct)}</span>
                 </td>
                 <td className="px-3 py-2.5 text-right">
-                  <span className="font-mono text-sm font-semibold text-emerald-400">{ars(a.comision_monto)}</span>
+                  <span className="font-mono text-sm font-semibold text-exito-600">{ars(a.comision_monto)}</span>
                 </td>
               </tr>
             ))}
           </tbody>
           <tfoot>
-            <tr style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <tr style={{ borderTop: '1px solid #E3E5EF' }}>
               <td colSpan={5} className="px-3 py-3 text-right">
-                <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.22)' }}>Total</span>
+                <span className="text-xs font-semibold" style={{ color: '#545871' }}>Total</span>
               </td>
               <td className="px-3 py-3 text-right">
-                <span className="font-mono text-sm font-bold" style={{ color: 'rgba(255,255,255,0.65)' }}>{ars(totalMonto)}</span>
+                <span className="font-mono text-sm font-bold" style={{ color: '#31354A' }}>{ars(totalMonto)}</span>
               </td>
               <td />
               <td className="px-3 py-3 text-right">
-                <span className="font-mono text-sm font-bold text-emerald-400">{ars(totalComision)}</span>
+                <span className="font-mono text-sm font-bold text-exito-600">{ars(totalComision)}</span>
               </td>
             </tr>
           </tfoot>
@@ -338,67 +338,67 @@ function PedidoDetalle({ tipo, detalle, loading }: {
       ]} />
 
       {comps.map(comp => (
-        <div key={comp.comprobante_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div key={comp.comprobante_id} style={{ borderBottom: '1px solid #E3E5EF' }}>
           {/* Comprobante header bar */}
           <div className="px-5 py-3 flex items-center gap-4 flex-wrap"
-            style={{ background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-            <span className="font-mono text-xs font-bold text-blue-400">{comp.numero}</span>
-            <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.38)' }}>{comp.fecha_cobro}</span>
+            style={{ background: '#F7F8FC', borderBottom: '1px solid #F0F1F7' }}>
+            <span className="font-mono text-xs font-bold text-azul-600">{comp.numero}</span>
+            <span className="font-mono text-xs" style={{ color: '#6E7290' }}>{comp.fecha_cobro}</span>
             <span className="flex-1" />
             {comp.total_neto > 0 && (
-              <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.38)' }}>
+              <span className="text-xs" style={{ color: '#6E7290' }}>
                 Neto: <span className="font-mono">{ars(comp.total_neto)}</span>
               </span>
             )}
             {comp.total_iva > 0 && (
-              <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.38)' }}>
+              <span className="text-xs" style={{ color: '#6E7290' }}>
                 IVA: <span className="font-mono">{ars(comp.total_iva)}</span>
               </span>
             )}
             {comp.total > 0 && (
-              <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              <span className="text-xs" style={{ color: '#545871' }}>
                 Total: <span className="font-mono font-semibold">{ars(comp.total)}</span>
               </span>
             )}
-            <span className="text-xs font-bold text-emerald-400 font-mono">Com: {ars(comp.total_comision)}</span>
+            <span className="text-xs font-bold text-exito-600 font-mono">Com: {ars(comp.total_comision)}</span>
           </div>
 
           <table className="w-full text-sm">
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <tr style={{ borderBottom: '1px solid #F0F1F7' }}>
                 {['SKU', 'Descripción', 'Cat.', 'Cant.', 'P. Unit.', 'Subtotal', '% Com.', 'Comisión'].map((h, i) => (
-                  <th key={h} className={`px-3 py-2 text-[10px] font-semibold uppercase tracking-wider ${i >= 3 ? 'text-right' : 'text-left'}`}
-                    style={{ color: 'rgba(255,255,255,0.22)' }}>{h}</th>
+                  <th key={h} className={`px-3 py-2 text-xs font-semibold ${i >= 3 ? 'text-right' : 'text-left'}`}
+                    style={{ color: '#9295AE' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {comp.articulos.map(a => (
-                <tr key={a.kardex_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.025)' }}>
-                  <td className="px-3 py-2.5"><span className="font-mono text-xs text-blue-400">{a.sku}</span></td>
+                <tr key={a.kardex_id} style={{ borderBottom: '1px solid #F0F1F7' }}>
+                  <td className="px-3 py-2.5"><span className="font-mono text-xs text-azul-600">{a.sku}</span></td>
                   <td className="px-3 py-2.5 max-w-[160px]">
-                    <span className="text-xs block truncate" style={{ color: 'rgba(255,255,255,0.8)' }}>{a.descripcion}</span>
+                    <span className="text-xs block truncate" style={{ color: '#1B1D4E' }}>{a.descripcion}</span>
                   </td>
                   <td className="px-3 py-2.5">
                     <span className="text-[10px] px-1.5 py-0.5 rounded"
-                      style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.4)' }}>
+                      style={{ background: '#F0F1F7', color: '#6E7290' }}>
                       {catLabel(a.categoria)}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{a.cantidad}</span>
+                    <span className="font-mono text-xs" style={{ color: '#31354A' }}>{a.cantidad}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{ars(a.precio_unitario)}</span>
+                    <span className="font-mono text-xs" style={{ color: '#6E7290' }}>{ars(a.precio_unitario)}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>{ars(a.subtotal)}</span>
+                    <span className="font-mono text-xs" style={{ color: '#31354A' }}>{ars(a.subtotal)}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-xs text-amber-400">{pct(a.comision_pct)}</span>
+                    <span className="font-mono text-xs text-ambar-700">{pct(a.comision_pct)}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <span className="font-mono text-sm font-semibold text-emerald-400">{ars(a.comision_monto)}</span>
+                    <span className="font-mono text-sm font-semibold text-exito-600">{ars(a.comision_monto)}</span>
                   </td>
                 </tr>
               ))}
@@ -417,15 +417,15 @@ function SummaryBar({ items }: { items: { label: string; value: string }[] }) {
     <div className="grid gap-px flex-shrink-0"
       style={{
         gridTemplateColumns: `repeat(${items.length}, 1fr)`,
-        background: 'rgba(255,255,255,0.04)',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        background: '#F0F1F7',
+        borderBottom: '1px solid #E3E5EF',
       }}>
       {items.map(item => (
-        <div key={item.label} className="px-5 py-4" style={{ background: '#0d1117' }}>
-          <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'rgba(255,255,255,0.28)' }}>
+        <div key={item.label} className="px-5 py-4" style={{ background: '#FFFFFF' }}>
+          <p className="text-xs font-semibold mb-1" style={{ color: '#545871' }}>
             {item.label}
           </p>
-          <p className="text-lg font-bold text-white font-mono">{item.value}</p>
+          <p className="text-lg font-bold text-azul-900 font-mono">{item.value}</p>
         </div>
       ))}
     </div>
@@ -436,7 +436,7 @@ function LoadingRows() {
   return (
     <div className="p-5 space-y-2">
       {[...Array(6)].map((_, i) => (
-        <div key={i} className="h-10 rounded-lg animate-pulse" style={{ background: 'rgba(255,255,255,0.04)' }} />
+        <div key={i} className="h-10 rounded-lg animate-pulse" style={{ background: '#F0F1F7' }} />
       ))}
     </div>
   )
