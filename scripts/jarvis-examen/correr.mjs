@@ -4,6 +4,7 @@
 //   node scripts/jarvis-examen/correr.mjs                     ← con el modelo de los ajustes
 //   node scripts/jarvis-examen/correr.mjs claude-opus-5-5     ← probando otro modelo
 //   node scripts/jarvis-examen/correr.mjs claude-opus-5-5 dolar,zona-top   ← solo algunas
+//   ESFUERZO=high node scripts/jarvis-examen/correr.mjs                   ← probando más esfuerzo
 //
 // Necesita en .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY.
 // Cada pregunta: Jarvis responde → se calcula el dato correcto con la herramienta
@@ -55,7 +56,7 @@ for (const q of preguntas) {
   const t = Date.now()
   let r, verdad = null, error = null
   try {
-    r = await preguntar({ db, usuarioId: null, mensaje: q.pregunta, historial: [], modeloForzado: modelo, origen: "examen" })
+    r = await preguntar({ db, usuarioId: null, mensaje: q.pregunta, historial: [], modeloForzado: modelo, esfuerzoForzado: process.env.ESFUERZO || undefined, origen: "examen" })
     costoTotal += r.costoUsd
   } catch (e) { error = String(e?.message || e) }
   if (q.verdad) {
@@ -82,7 +83,7 @@ for (const q of preguntas) {
 }
 
 const promedio = resultados.reduce((s, x) => s + (Number(x.nota) || 0), 0) / Math.max(resultados.length, 1)
-const usado = resultados[0]?.modelo ?? modelo ?? "?"
+const usado = `${resultados[0]?.modelo ?? modelo ?? "?"}${process.env.ESFUERZO ? "-" + process.env.ESFUERZO : ""}`
 console.log(`\nModelo: ${usado} · Nota promedio: ${promedio.toFixed(1)}/10 · Reglas OK: ${resultados.filter((x) => x.reglas_ok).length}/${resultados.length} · Costo: USD ${costoTotal.toFixed(2)}`) // formato-ok: salida de consola del script
 const dir = path.join(AQUI, "resultados")
 fs.mkdirSync(dir, { recursive: true })

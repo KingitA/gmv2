@@ -22,9 +22,14 @@ const POR_DEFECTO: Record<RolModelo, string> = {
 
 const TOPE_POR_DEFECTO_USD = 150
 
+export type Esfuerzo = "low" | "medium" | "high" | "max"
+export const ESFUERZOS: Esfuerzo[] = ["low", "medium", "high", "max"]
+
 export interface AjustesJarvis {
   modelos: Record<RolModelo, string>
   topeMensualUsd: number
+  /** cuánto piensa Jarvis antes de responder en el chat (más = mejor y más caro/lento) */
+  esfuerzoChat: Esfuerzo
 }
 
 let cache: { valor: AjustesJarvis; vence: number } | null = null
@@ -34,7 +39,7 @@ const CACHE_MS = 60_000
 export async function leerAjustes(db: SupabaseClient): Promise<AjustesJarvis> {
   if (cache && cache.vence > Date.now()) return cache.valor
 
-  const valor: AjustesJarvis = { modelos: { ...POR_DEFECTO }, topeMensualUsd: TOPE_POR_DEFECTO_USD }
+  const valor: AjustesJarvis = { modelos: { ...POR_DEFECTO }, topeMensualUsd: TOPE_POR_DEFECTO_USD, esfuerzoChat: "medium" }
   try {
     const { data, error } = await db.from("ai_ajustes").select("clave, valor")
     if (!error && data) {
@@ -43,6 +48,7 @@ export async function leerAjustes(db: SupabaseClient): Promise<AjustesJarvis> {
         if (fila.clave === "modelo_rapido" && typeof fila.valor === "string") valor.modelos.rapido = fila.valor
         if (fila.clave === "modelo_respaldo" && typeof fila.valor === "string") valor.modelos.respaldo = fila.valor
         if (fila.clave === "tope_mensual_usd" && typeof fila.valor === "number") valor.topeMensualUsd = fila.valor
+        if (fila.clave === "esfuerzo_chat" && ESFUERZOS.includes(fila.valor as Esfuerzo)) valor.esfuerzoChat = fila.valor as Esfuerzo
       }
     }
   } catch {

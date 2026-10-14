@@ -15,7 +15,7 @@ import { JarvisExterior } from "./jarvis-exterior"
 
 interface Regla { clave: string; valor: number | string; descripcion?: string | null; por?: string; at?: string }
 interface Nota { clave: string; texto: string; por: string; at: string }
-interface Datos { reglas: Regla[]; notas: Nota[]; modelos: Record<"pensador" | "rapido" | "respaldo", string>; tope_mensual_usd: number; gasto_mes_usd: number; soy_admin: boolean }
+interface Datos { reglas: Regla[]; notas: Nota[]; modelos: Record<"pensador" | "rapido" | "respaldo", string>; esfuerzo_chat: string; tope_mensual_usd: number; gasto_mes_usd: number; soy_admin: boolean }
 interface FilaHistorial { cuando: string; quien: string; que: string; sobre: string; nota: string | null }
 interface Retenido { cliente_id: string; cliente: string; desde: string | null; motivo: string | null; decidio: string; debe: number; vencido_30: number }
 
@@ -129,6 +129,13 @@ export default function JarvisAjustes() {
           {([["modelo_pensador", "Pensador (chat y resumen)", d.modelos.pensador], ["modelo_rapido", "Rápido (tareas chicas y si se pasa el tope)", d.modelos.rapido], ["modelo_respaldo", "Respaldo (si el pensador falla)", d.modelos.respaldo]] as const).map(([k, t, v]) => (
             <FilaTexto key={k} etiqueta={t} valor={v} editable={d.soy_admin} onGuardar={x => cambiar(k, x)} />
           ))}
+          <li className="flex flex-wrap items-center gap-3 py-2">
+            <p className="min-w-[240px] flex-1 text-sm font-semibold text-azul-900">Cuánto piensa antes de responder en el chat <span className="block text-xs font-normal text-neutro-400">Más = respuestas más pensadas, un poco más lentas y caras. Examen 14/10: normal 8,8 · alto 8,7 (no mejoró).</span></p>
+            <select value={d.esfuerzo_chat} disabled={!d.soy_admin} onChange={e => cambiar("esfuerzo_chat", e.target.value)}
+              className="w-56 rounded-lg border border-neutro-200 px-2 py-1.5 text-sm disabled:bg-neutro-50">
+              <option value="low">Bajo</option><option value="medium">Normal</option><option value="high">Alto</option><option value="max">Máximo</option>
+            </select>
+          </li>
           <FilaTexto etiqueta="Tope mensual (USD)" valor={String(d.tope_mensual_usd)} editable={d.soy_admin} numerico onGuardar={x => cambiar("tope_mensual_usd", Number(x))} />
         </ul>
       </Caja>

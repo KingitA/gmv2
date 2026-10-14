@@ -41,8 +41,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [x] Juan aplicó `20261014g_jarvis_mundo_exterior.sql` (14/10). Primera prueba: dólar, inflación y petróleo OK; 400 artículos clasificados (39 dudas, USD 0,0025 cada 80).
 - [ ] Clasificar el resto del catálogo (botón, 400 por vez; unos USD 0,12 en total).
 - [x] Juan cargó la clave de Anthropic en `.env.local` (14/10).
-- [ ] Cargar saldo en la cuenta de Anthropic. Se agotó en la segunda corrida del examen; si es la misma cuenta que usa Vercel, Jarvis y la búsqueda de fotos del vendedor dejan de andar hasta que se cargue.
-- [ ] Terminar la segunda corrida del examen: faltaron 9 de 20 preguntas.
+- [x] Juan cargó saldo en Anthropic (14/10). Decisión de Juan: **la calidad manda sobre el costo** (USD 70 a 150 por mes está bien); se queda Opus.
 - [ ] Viaje ALTO VALLE 16/10: a la parada de Li Yutao le quedó "cobrar lo anterior" marcado (lo dejó la liberación vieja). Destildarlo en la hoja de ruta si no corresponde.
 - [ ] Verificar que `CRON_SECRET` exista en Vercel. Sin eso, la revisión de las 8:00 no corre y queda solo el botón "Revisar ahora".
 - [ ] Para probar el chat desde esta PC hace falta la clave de Anthropic en `.env.local` (`ANTHROPIC_API_KEY=...`). La pone Juan; Claude no maneja claves. En Vercel ya está (el chat viejo anda).
@@ -50,6 +49,12 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Examen completo y esfuerzo
+- **Opus 5.5 con esfuerzo normal y las instrucciones ajustadas: 8,8/10, reglas OK 19 de 20, USD 0,78.**
+- **Con esfuerzo alto: 8,7/10, el mismo costo.** No mejora, así que **queda en normal**. Igual quedó como ajuste `esfuerzo_chat` en la pantalla (solo admin), para probarlo de nuevo con modelos futuros.
+- Jarvis dejaba propuestas solo al responder preguntas comunes (ej. "contame de La Banderita" → proponía retenerle las entregas). Ahora **propone solo si se lo piden**; si ve algo, lo sugiere en una línea. Las propuestas automáticas las hacen los vigías.
+- Re-examen de las 3 más flojas: cliente que más debe 6 → 9, deuda +30 días 8 → 10, ficha de cliente 8 → 9 (promedio 9,3).
 
 ### 14/10/2026 (noche) — Primer examen de Jarvis
 - **Corrida 1 (Opus 5.5): nota 8,6/10, reglas OK 18 de 20, USD 0,74.** Números correctos en las 20 preguntas.

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireJarvis, esAdmin } from "@/lib/jarvis/acceso"
 import { leerReglas, REGLAS_POR_DEFECTO } from "@/lib/jarvis/reglas"
-import { leerAjustes, olvidarAjustes } from "@/lib/jarvis/modelos"
+import { ESFUERZOS, leerAjustes, olvidarAjustes } from "@/lib/jarvis/modelos"
 import { gastoDelMes } from "@/lib/jarvis/uso"
 import { nombresDeUsuarios } from "@/lib/jarvis/agenda"
 
@@ -10,7 +10,7 @@ import { nombresDeUsuarios } from "@/lib/jarvis/agenda"
 // Cada cambio queda en la bitácora (trigger de ai_ajustes: quién, cuándo, de qué a qué).
 // Reglas y notas: admin y administrativo. Modelo y tope: solo admin.
 
-const CLAVES_SOLO_ADMIN = new Set(["modelo_pensador", "modelo_rapido", "modelo_respaldo", "tope_mensual_usd"])
+const CLAVES_SOLO_ADMIN = new Set(["modelo_pensador", "modelo_rapido", "modelo_respaldo", "tope_mensual_usd", "esfuerzo_chat"])
 const MODELO_VALIDO = /^claude-[a-z0-9-]+$/
 
 export async function GET() {
@@ -31,6 +31,7 @@ export async function GET() {
     reglas: Object.keys(REGLAS_POR_DEFECTO).map((k) => ({ clave: k, valor: reglas[k as keyof typeof reglas], ...quien(k) })),
     notas: notas.map((n) => ({ clave: n.clave, texto: n.texto, por: n.actualizado_por ? nombres.get(n.actualizado_por) ?? "alguien" : "—", at: n.actualizado_at })),
     modelos: ajustes.modelos,
+    esfuerzo_chat: ajustes.esfuerzoChat,
     tope_mensual_usd: ajustes.topeMensualUsd,
     gasto_mes_usd: Math.round(gasto * 100) / 100,
     soy_admin: esAdmin(auth.roles),
@@ -47,7 +48,9 @@ export async function PUT(req: NextRequest) {
 
   if (CLAVES_SOLO_ADMIN.has(clave)) {
     if (!esAdmin(auth.roles)) return NextResponse.json({ error: "El modelo y el tope de gasto los cambia solo un admin." }, { status: 403 })
-    if (clave === "tope_mensual_usd") {
+    if (clave === "esfuerzo_chat") {
+      if (!ESFUERZOS.includes(valor as never)) return NextResponse.json({ error: "Esfuerzo inválido." }, { status: 400 })
+    } else if (clave === "tope_mensual_usd") {
       if (typeof valor !== "number" || !(valor >= 0 && valor <= 10_000)) return NextResponse.json({ error: "Tope inválido." }, { status: 400 })
     } else if (typeof valor !== "string" || !MODELO_VALIDO.test(valor)) {
       return NextResponse.json({ error: "Nombre de modelo inválido (ej. claude-opus-5-5)." }, { status: 400 })

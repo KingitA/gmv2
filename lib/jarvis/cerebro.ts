@@ -17,7 +17,7 @@ import { HERRAMIENTAS, buscarHerramienta, ErrorHerramienta, type Contexto } from
 import { INSTRUCCIONES_JARVIS } from "./instrucciones"
 import { leerReglas, notasComoTexto } from "./reglas"
 import { elegirModelo, registrarUso } from "./uso"
-import { costoUsd, type UsoTokens } from "./modelos"
+import { costoUsd, type Esfuerzo, type UsoTokens } from "./modelos"
 
 const MAX_VUELTAS = 10
 const MAX_CHARS_RESULTADO = 40_000
@@ -56,6 +56,7 @@ export interface PreguntaJarvis {
   conversacionId?: string | null
   /** para el examen: probar un modelo sin cambiar los ajustes */
   modeloForzado?: string
+  esfuerzoForzado?: Esfuerzo
   origen?: string
 }
 
@@ -77,7 +78,7 @@ function esErrorDeModelo(e: unknown) {
     (e instanceof Anthropic.APIError && (e.status === 529 || e.status === 503))
 }
 
-async function llamar(modelo: string, messages: Anthropic.MessageParam[], notas: string) {
+async function llamar(modelo: string, messages: Anthropic.MessageParam[], notas: string, esfuerzo: Esfuerzo) {
   // Instrucciones fijas + notas del negocio (cambian poco): las dos van a memoria rápida (cache)
   const system: Anthropic.TextBlockParam[] = [{ type: "text", text: INSTRUCCIONES_JARVIS, cache_control: { type: "ephemeral" } }]
   if (notas) system.push({ type: "text", text: notas, cache_control: { type: "ephemeral" } })
@@ -85,7 +86,7 @@ async function llamar(modelo: string, messages: Anthropic.MessageParam[], notas:
     model: modelo,
     max_tokens: 16000,
     thinking: { type: "adaptive" },
-    output_config: { effort: "medium" },
+    output_config: { effort: esfuerzo },
     system,
     tools: HERRAMIENTAS_API,
     messages,
@@ -111,6 +112,8 @@ export async function preguntar(q: PreguntaJarvis): Promise<RespuestaJarvis> {
   const notasTexto = notasComoTexto(notas)
   const elegido = await elegirModelo(q.db, "pensador")
   let modelo = q.modeloForzado ?? elegido.modelo
+  // si se pasó el tope y bajó al modelo rápido, también baja el esfuerzo
+  const esfuerzo: Esfuerzo = q.esfuerzoForzado ?? (elegido.porTope ? "low" : elegido.esfuerzoChat)
 
   const messages: Anthropic.MessageParam[] = [
     ...q.historial,
@@ -125,12 +128,12 @@ export async function preguntar(q: PreguntaJarvis): Promise<RespuestaJarvis> {
   for (let vuelta = 0; vuelta < MAX_VUELTAS && !final; vuelta++) {
     let resp: Anthropic.Message
     try {
-      resp = await llamar(modelo, conCache(messages), notasTexto)
+      resp = await llamar(modelo, conCache(messages), notasTexto, esfuerzo)
     } catch (e) {
       if (!esErrorDeModelo(e) || modelo === elegido.respaldo) throw e
       console.error(`[jarvis] ${modelo} falló, sigo con ${elegido.respaldo}`, e)
       modelo = elegido.respaldo
-      resp = await llamar(modelo, conCache(messages), notasTexto)
+      resp = await llamar(modelo, conCache(messages), notasTexto, esfuerzo)
     }
     // El examen no escribe en la base (se corre desde una PC contra producción): solo suma el costo.
     costo += q.origen === "examen"

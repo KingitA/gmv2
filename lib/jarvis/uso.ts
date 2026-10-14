@@ -4,7 +4,7 @@
  * rápido (barato) y avisa.
  */
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { costoUsd, leerAjustes, type RolModelo, type UsoTokens } from "./modelos"
+import { costoUsd, leerAjustes, type Esfuerzo, type RolModelo, type UsoTokens } from "./modelos"
 import { hoyISO } from "@/lib/formato"
 
 export interface RegistroUso {
@@ -53,6 +53,7 @@ export interface ModeloElegido {
   porTope: boolean
   gastoMes: number
   topeMes: number
+  esfuerzoChat: Esfuerzo
 }
 
 /** Elige el modelo para una tarea respetando el tope mensual. */
@@ -68,5 +69,6 @@ export async function elegirModelo(db: SupabaseClient, rol: RolModelo): Promise<
     porTope,
     gastoMes,
     topeMes: ajustes.topeMensualUsd,
+    esfuerzoChat: ajustes.esfuerzoChat,
   }
 }

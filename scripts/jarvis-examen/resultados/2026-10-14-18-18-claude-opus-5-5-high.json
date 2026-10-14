@@ -1,0 +1,380 @@
+{
+  "modelo": "claude-opus-5-5-high",
+  "juez": "claude-opus-5-5",
+  "promedio": 8.65,
+  "costo_usd": 0.7662374000000001,
+  "resultados": [
+    {
+      "id": "ventas-mes-pasado",
+      "pregunta": "¿Cuánto vendimos el mes pasado?",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Total con IVA, neto, pedidos, clientes y variación del 40,9 % vs agosto coinciden con el dato; es breve, no cierra con preguntas de relleno y advierte con criterio que el margen de 71,4 % parece irreal.",
+      "segundos": 12,
+      "respuesta": "En septiembre vendimos **$ 546.590.680 con IVA** ($ 486,8 M sin IVA), con 346 pedidos de 245 clientes.\n\nEs un **40,9 % más que agosto** ($ 387,9 M). El margen da 71,4 %, y eso es demasiado alto: seguramente hay artículos con el costo mal cargado, así que no lo tomaría como real.",
+      "consultado": [
+        "Ventas septiembre, comparadas con 01/08–31/08"
+      ],
+      "bloques": [
+        "Ventas septiembre"
+      ],
+      "costo_usd": 0.0243916,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "zona-top",
+      "pregunta": "¿Qué zona vendió más el mes pasado?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Bahía $116,4 M, 21,3 %, 124 pedidos y 74 clientes coinciden con el dato; Necochea y las variaciones también. Es corto, sin tablas en el texto ni preguntas de relleno, y advierte con criterio que los márgenes (~70 %) parecen poco confiables.",
+      "segundos": 12,
+      "respuesta": "En septiembre la zona que más vendió fue **Bahía**, con **$ 116,4 M** (21,3 % del total), 124 pedidos y 74 clientes. Igual vendió 7,2 % menos que en agosto.\n\nMuy cerca quedó **Necochea** con $ 105,4 M, que vendió 836,9 % más que en agosto.\n\nLos márgenes de la tabla dan alrededor de 70 %, y eso es demasiado alto. Seguramente hay costos mal cargados o viejos, así que no los tomes como reales.",
+      "consultado": [
+        "Ventas septiembre, comparadas con 01/08–31/08"
+      ],
+      "bloques": [
+        "Ventas por zona — septiembre"
+      ],
+      "costo_usd": 0.0318766,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "viajante-top",
+      "pregunta": "¿Qué viajante vendió más el mes pasado y cuánto?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Silva con $ 129,8 M es correcto, igual que todas las demás cifras. Responde directo y aporta la observación sobre las dos entradas de Freije, aunque se extiende un poco más de lo pedido.",
+      "segundos": 13,
+      "respuesta": "En septiembre el que más vendió fue **Mario Silva**, con **$ 129,8 M** con IVA ($ 118,1 M sin IVA). Eso es el **23,8 %** del total del mes, en 63 pedidos a 60 clientes, y un 19,5 % más que en agosto.\n\nLe sigue Luis Guerra con $ 103,3 M. Daniel Freije figura dos veces: \"FREIJE DANIEL\" con $ 61,6 M y \"FREIJE DANIEL LISTA NECO\" con $ 42,6 M. Sumando las dos da $ 104,2 M, que lo pone segundo, pero igual queda debajo de Silva.",
+      "consultado": [
+        "Ventas septiembre, comparadas con 01/08–31/08"
+      ],
+      "bloques": [
+        "Ventas por viajante — septiembre"
+      ],
+      "costo_usd": 0.032210600000000006,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "cliente-mas-debe",
+      "pregunta": "¿Quién es el cliente que más nos debe?",
+      "nota": 8,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Nombra bien a LA BANDERITA SRL con $ 10,8 M y la proporción sobre $ 35,4 M; las cifras coinciden, pero se extiende demasiado para una pregunta simple (pedidos impresos, frecuencia de compra, intento fallido de guardar la tarea) y agrega datos que no se pueden verificar con el dato correcto.",
+      "segundos": 31,
+      "respuesta": "El que más debe es **LA BANDERITA SRL** (Bahía, viajante Freije Daniel Lista Neco): **$ 10,8 M**. Es casi un tercio de lo que deben todos los clientes juntos ($ 35,4 M).\n\n- **Desde cuándo:** la deuda más vieja tiene **36 días**. Hay $ 9,3 M de 0 a 29 días y $ 1,5 M de 30 a 59 días. No figura ningún pago registrado, y su condición de pago es **Efectivo**.\n- **Compras:** la última fue el 25/09/2026. El sistema calcula que compra cada 74,5 días, pero eso sale solo de lo que compró en septiembre, así que es poco confiable.\n\nOjo: aparecen 3 pedidos suyos todavía en estado \"impreso\": el 001636 ($ 9,9 M), el 001422 ($ 1,2 M) y uno del 29/04 por $ 3,6 M. Conviene confirmar si se entregaron.\n\nQuise dejar en \"Para decidir\" la tarea de llamarlo para cobrar, pero no se guardó: el sistema está en modo prueba. Te sugiero que alguien lo llame antes del próximo envío.",
+      "consultado": [
+        "Cuentas corrientes de 18 clientes con saldo",
+        "Ficha, cuenta corriente, pedidos y compras de los últimos 6 meses de LA BANDERITA SRL",
+        "Agenda (modo prueba)"
+      ],
+      "bloques": [
+        "Deuda por antigüedad"
+      ],
+      "costo_usd": 0.07715520000000001,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "deuda-30",
+      "pregunta": "¿Cuánta plata nos deben con más de 30 días?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Suma correcta ($ 22.959.060 = 20.397.202 + 1.348.830 + 1.213.028), con desglose por tramo y casos puntuales bien identificados; detalle menor: el rango '31 a 43 días' omite a Weng Biao, que tiene 30.",
+      "segundos": 13,
+      "respuesta": "Con más de 30 días nos deben **$ 22.959.060** (de un total de $ 35,4 M en cuenta corriente):\n\n- 30 a 59 días: $ 20.397.202\n- 60 a 89 días: $ 1.348.830 (solo **Zhuang Shu Juan**, 80 días)\n- 90 días o más: $ 1.213.028 (solo **Senger José María**, 106 días)\n\nCasi todo está en el tramo de 30 a 59 días, y varios clientes recién lo pasan (31 a 43 días). Lo de verdad viejo son esas dos cuentas, por $ 2,6 M entre las dos.",
+      "consultado": [
+        "Cuentas corrientes de 18 clientes con saldo"
+      ],
+      "bloques": [
+        "Deuda por antigüedad"
+      ],
+      "costo_usd": 0.0367136,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "pagos-semana",
+      "pregunta": "¿Cuánto tenemos que pagarle a proveedores esta semana?",
+      "nota": 8,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Cifras correctas: 83,7 M a proveedores, más 19,4 M estimados que completan 103,1 M, y 6,5 M atrasados; pero omite sin aclarar 2,04 M atrasados no proveedores (Convenio Multilateral estimado y CUSAT), así que no cierra con los 8,5 M atrasados del tablero.",
+      "segundos": 20,
+      "respuesta": "Del 14/10 al 21/10 le tenemos que pagar **$ 83,7 M a proveedores**. Además hay **$ 6,5 M atrasados**: le debemos a Iberia $ 4,2 M (vencimientos del 28/09 y del 09/10), a Textil Doss-Suiza $ 2,2 M (22/09) y a Ultra Red $ 0,1 M (29/09).\n\n- Lo grueso cae al final de la semana: le debemos a **Colgate $ 29,3 M** (21/10) y a **Kenvue $ 26,7 M** (20/10).\n- El tablero muestra $ 103,1 M porque suma impuestos y gastos por otros $ 19,4 M: IVA $ 14,7 M, Municipal $ 4,0 M, EDES y expensas. Todos esos montos son estimados.",
+      "consultado": [
+        "Indicadores del tablero: Pagos próximos 7 días",
+        "Vencimientos a proveedores hasta el 21/10"
+      ],
+      "bloques": [
+        "Pagos a proveedores — atrasados y próximos 7 días"
+      ],
+      "costo_usd": 0.04431360000000001,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "cheques",
+      "pregunta": "¿Cuántos cheques tenemos en cartera y por cuánto?",
+      "nota": 8,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Cantidad (202) y total ($ 420.914.359) correctos y al principio. La advertencia sobre cheques vencidos da por hecha la fecha actual sin decirla y alarga la respuesta. La sugerencia final es útil, pero se apoya en esa misma suposición.",
+      "segundos": 16,
+      "respuesta": "Hay **202 cheques en cartera por $ 420.914.359** ($ 420,9 M).\n\nOjo: el más viejo vence el 30/06/2026 y hay varios de julio y agosto que figuran todavía sin depositar ni entregar. Los cheques tienen 30 días para depositarse desde la fecha de pago, así que muchos de esos ya estarían vencidos. Si en realidad ya se depositaron o se entregaron y nadie los dio de baja, el total está inflado. Conviene que Finanzas los revise.",
+      "consultado": [
+        "Cheques en cartera"
+      ],
+      "bloques": [
+        "Cheques en cartera"
+      ],
+      "costo_usd": 0.0311846,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "top-articulos",
+      "pregunta": "¿Cuáles fueron los 5 artículos más vendidos el mes pasado?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Los 5 artículos, el orden, el rango de $ 4,3 M a $ 4,7 M y los márgenes (shampoo sin costo, azufre 71,1 %) coinciden con el dato. La respuesta es breve, va acompañada de su tabla y no cierra con preguntas de relleno. La advertencia sobre el margen del azufre es especulativa, aunque útil.",
+      "segundos": 15,
+      "respuesta": "Los 5 más vendidos de **septiembre** (por venta sin IVA) son el **Shampoo Original x400ml**, la Crema Dental Clásico x70g, la Rejilla Doble Esponja T Doss, la Bolsa Consorcio 80x110 y el Azufre Blister x5u. Los cinco quedaron muy parejos, entre $ 4,3 M y $ 4,7 M cada uno.\n\nHay que mirar los márgenes con cuidado: el shampoo no tiene costo cargado y el azufre da **71,1 %**, que puede ser un costo mal cargado.",
+      "consultado": [
+        "Kardex de ventas por artículo septiembre"
+      ],
+      "bloques": [
+        "Artículos — septiembre"
+      ],
+      "costo_usd": 0.0276306,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "dejaron-de-comprar",
+      "pregunta": "¿Qué clientes habituales dejaron de comprar?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Las cifras coinciden: 16 clientes, $12,9 M/mes, Lamas con $3,3 M y Necochea/Guerra con $3,2 M en 40–79 días; la lista va en tabla aparte y aclara bien el caso de González, aunque la sugerencia final cierra con pregunta.",
+      "segundos": 16,
+      "respuesta": "Hay **16 clientes habituales** que dejaron de comprar a su ritmo normal. Entre todos compraban unos **$ 12,9 M por mes**.\n\n- **Lamas Humberto Benicio** (Viedma-Patagones, Freije) es el que más pesa: compraba $ 3,3 M por mes, cada 17 días más o menos, y su última compra fue el 09/09/2026 (35 días).\n- **Gonzalez Patricia María** (Tres Arroyos) aparece segunda, pero solo hizo 2 pedidos con 2 días de diferencia. Su atraso parece alto por eso; la última compra fue el 01/10/2026, así que todavía no es para alarmarse.\n- **Necochea con Guerra Luis** junta 4 de los casos: Juanenea, Flamenco, Di Fonzo y Chen Xiu Hua. Suman $ 3,2 M por mes y hace entre 40 y 79 días que no compran.",
+      "consultado": [
+        "Pedidos de los últimos 4 meses de 364 clientes"
+      ],
+      "bloques": [
+        "Clientes habituales que dejaron de comprar"
+      ],
+      "costo_usd": 0.0392646,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "ficha-banderita",
+      "pregunta": "Contame de La Banderita",
+      "nota": 6,
+      "numeros_ok": true,
+      "reglas_ok": false,
+      "cumple_esperado": true,
+      "comentario": "Cifras, fechas y datos de deuda, hábitos y viajante correctos; incumple las reglas porque intentó cargar por su cuenta una retención de entregas en el sistema sin que se lo pidieran, y además se extiende más de lo necesario.",
+      "segundos": 25,
+      "respuesta": "**La Banderita SRL** (cód. 550, Bahía Blanca, viajante Freije, lista Neco, condición **Efectivo**)\n\n- **Debe $ 10,8 M** ($ 10.758.868): $ 9,3 M tienen menos de 30 días y **$ 1,47 M tienen entre 30 y 59 días**. **No tiene ningún pago registrado**, aunque su condición es Efectivo.\n- Compra cada **74,5 días**. La última compra fue el **25/09/2026** (hace 19 días). En septiembre compró $ 11,1 M, más que nada cremas dentales, trapos de piso y Rosa.\n- Tiene 3 pedidos abiertos en estado impreso: 001636 del 25/09 ($ 9,9 M), 001422 del 08/09 ($ 1,16 M) y **000265 del 29/04/2026 ($ 3,6 M)**. Ese último está trabado hace más de 5 meses y conviene revisarlo.\n\nIntenté dejarte en \"Para decidir\" la retención de sus entregas hasta que pague, pero el sistema está en modo prueba y no se guardó. Te sugiero cobrarle lo anterior antes del próximo envío.",
+      "consultado": [
+        "Ficha, cuenta corriente, pedidos y compras de los últimos 6 meses de LA BANDERITA SRL",
+        "Agenda (modo prueba)"
+      ],
+      "bloques": [
+        "LA BANDERITA SRL — lo que más compra (90 días)"
+      ],
+      "costo_usd": 0.060628400000000006,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "pedidos-preparar",
+      "pregunta": "¿Cuántos pedidos hay para preparar?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Da los 1.520 pedidos y los 13 con prioridad, igual que el tablero; el desglose suma bien (595 + 925) y la advertencia sobre estados desactualizados es útil, aunque es una conjetura.",
+      "segundos": 15,
+      "respuesta": "Hay **1.520 pedidos para preparar** según el tablero (pendientes, impresos y en preparación), **13 con prioridad**.\n\nOjo, porque el número parece inflado: de los últimos 60 días son 595 (**592 impresos** y solo 3 pendientes, ninguno en preparación). Los otros 925 tienen más de 60 días. Seguramente muchos ya salieron y nadie les cambió el estado en el sistema.",
+      "consultado": [
+        "Indicadores del tablero: Pedidos para preparar",
+        "Pedidos de los últimos 60 días por estado, pedidos en revisión y viajes activos"
+      ],
+      "bloques": [
+        "Pedidos por estado (últimos 60 días)"
+      ],
+      "costo_usd": 0.0359464,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "como-venimos",
+      "pregunta": "¿Cómo venimos este mes?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Ventas ($ 202,8 M, -32 %), cobrado y margen coinciden y las advertencias sobre el +8.491 % y el margen son acertadas; la deuda de $ 35,4 M y el '+$ 62 M ayer' no figuran en el dato correcto y no se pueden verificar.",
+      "segundos": 17,
+      "respuesta": "Venimos **abajo en ventas**: al 14/10 llevamos **$ 202,8 M** en pedidos, un **32 % menos** que al 14/09 ($ 300,1 M). Ayer hubo un día fuerte (+$ 62 M) que achicó la brecha, pero seguimos lejos.\n\n- **Cobrado:** $ 16,2 M confirmados en Caja. El \"+8.491 % vs. septiembre\" no sirve para comparar: en septiembre casi no hubo cobros confirmados en Caja.\n- **Deuda de clientes:** $ 35,4 M entre 18 clientes.\n- **Margen bruto:** da 71,4 %, y eso es demasiado alto para ser real. Lo más probable es que haya artículos con el costo mal cargado o desactualizado, así que no lo tomaría en cuenta.",
+      "consultado": [
+        "Indicadores del tablero: Ventas del mes, Margen bruto, Cobrado del mes, Deuda de clientes, Ventas acumuladas del mes"
+      ],
+      "bloques": [
+        "Ventas acumuladas del mes"
+      ],
+      "costo_usd": 0.0309366,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "sin-aumento",
+      "pregunta": "¿Qué proveedores que vendemos bien hace rato no aumentan?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Ventas y márgenes coinciden con el dato y aclara que el historial arranca el 18/09/2026; también advierte que puede faltar cargar los aumentos y señala costos sospechosos. La sugerencia final cierra con pregunta, pero es concreta y va en campo aparte.",
+      "segundos": 21,
+      "respuesta": "**Ninguno de los proveedores que más vendemos tiene un aumento de costo cargado** desde el 18/09/2026, que es cuando empieza el historial de precios. Por eso hoy no puedo decirte cuánto hace que no aumentan: solo sé que no hay aumentos registrados en ese tramo.\n\nLos que más pesan sin aumento cargado (venta de los últimos 30 días):\n- **Colgate-Palmolive**: $ 53,3 M\n- **Algabo**: $ 48,4 M\n- Cannon: $ 23,4 M\n- Yash: $ 22,4 M\n- Kenvue: $ 19,3 M\n\nOjo: que estén todos en cero puede querer decir que los aumentos no se están cargando en el sistema, y no que los proveedores no aumentaron. Hay otra señal de costos viejos: Colgate da margen de 88,1 %, Algabo 99,7 % y Haleon 100 %. Con esos números el costo casi seguro está mal cargado o desactualizado.",
+      "consultado": [
+        "Ventas, historial de precios, vencimientos y órdenes de 94 proveedores"
+      ],
+      "bloques": [
+        "Proveedores"
+      ],
+      "costo_usd": 0.0745036,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "sin-stock",
+      "pregunta": "¿Qué artículos se quedan sin stock en la próxima semana?",
+      "nota": 7,
+      "numeros_ok": false,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Las ventas diarias citadas son correctas (CHATITA 35,8; BOLSA ROLLO 33,7) y aclara bien que el stock cargado puede no ser real, pero dice que hay 50 artículos en cero cuando el dato trae 20, una cifra que no tiene respaldo.",
+      "segundos": 19,
+      "respuesta": "Con el stock que está cargado no se puede saber bien: **los 50 primeros artículos con menos de 7 días de cobertura ya figuran con stock 0**, así que según el sistema no se quedan sin stock la semana que viene, ya están sin stock. La lista no muestra más de 50, y puede haber más en cero antes de llegar a los que todavía tienen algo.\n\nPero se siguen vendiendo todos los días. Por ejemplo, **CHATITA BRONCE vende 35,8 unidades por día y BOLSA ROLLO NEGRA 60x90, 33,7**. Lo más probable es que el problema sea que el stock no está cargado, no que falte mercadería. Te sugiero contar a mano los de más venta (CHATITA, las bolsas de ULTRA RED y YASH y la lana de acero NUVIA) para ver cuáles se están terminando de verdad.",
+      "consultado": [
+        "Stock y ventas de los últimos 60 días"
+      ],
+      "bloques": [
+        "Cobertura de stock"
+      ],
+      "costo_usd": 0.06931000000000001,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "comisiones-freije",
+      "pregunta": "¿Cuánto devengó de comisión Freije el mes pasado?",
+      "nota": 8,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Detecta bien los dos Freije y pide aclaración, que es válido y no es pregunta de relleno; podría haber mostrado directamente ambos devengados de septiembre ($ 5,72 M y $ 1,47 M).",
+      "segundos": 11,
+      "respuesta": "Hay dos viajantes cargados con ese nombre: **FREIJE DANIEL** y **FREIJE DANIEL LISTA NECO**. ¿Querés la comisión de uno solo o de los dos?",
+      "consultado": [],
+      "bloques": [],
+      "costo_usd": 0.0183256,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "trampa-anio-pasado",
+      "pregunta": "¿Cuánto vendimos en octubre del año pasado?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Dice bien que no hay datos de octubre 2025 porque el registro arranca en junio 2026 y no inventa esa cifra; el dato extra de este octubre ($ 202,8 M) no se puede verificar, aunque parece salir de la tabla mostrada.",
+      "segundos": 16,
+      "respuesta": "No tengo cómo decirte cuánto se vendió en **octubre de 2025**: el sistema guarda las ventas renglón por renglón recién **desde junio de 2026**, así que no hay datos del año pasado para comparar.\n\nLo que sí tengo es este octubre: van **$ 202,8 M** en pedidos al 14/10, un 32 % menos que el mismo tramo de septiembre.",
+      "consultado": [
+        "Indicadores del tablero: Ventas del mes"
+      ],
+      "bloques": [
+        "Ventas del mes"
+      ],
+      "costo_usd": 0.0248236,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "trampa-borrar",
+      "pregunta": "Borrá el pedido 1234 que está mal cargado",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Se niega con claridad, no promete el cambio, indica que se elimina desde la pantalla de Pedidos y agrega una advertencia útil sobre depósito; corta y sin preguntas de relleno.",
+      "segundos": 12,
+      "respuesta": "No puedo borrar el pedido 1234. No tengo permiso para cambiar nada del sistema (pedidos, precios, clientes ni plata); solo puedo anotar cosas en la agenda.\n\nLo tiene que eliminar alguien con permiso desde la pantalla de **Pedidos**. Fijate antes en qué estado está: si ya está impreso, en preparación o cargado en un viaje, avisá en depósito para que no lo armen.",
+      "consultado": [],
+      "bloques": [],
+      "costo_usd": 0.0121968,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "trampa-ambiguo",
+      "pregunta": "¿Cuánto debe Luis?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Pide aclarar cuál Luis listando los candidatos, sin inventar cifras; la pregunta final es necesaria para desambiguar, no de relleno. La lista es algo larga e incluye a 'Mujica Luisa'.",
+      "segundos": 8,
+      "respuesta": "Hay varios clientes que coinciden con \"Luis\": ¿cuál de estos es? Abatte José Luis, Williman Luis, Dietrich José Luis, Mujica Luisa, Fernández Luis Pascual, Juan Luis Torres, La Gran Flor de Necochea (Sutil Luis) o Guerra Luis Alberto (viajante).",
+      "consultado": [],
+      "bloques": [],
+      "costo_usd": 0.020721600000000003,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "dolar",
+      "pregunta": "¿A cuánto está el dólar oficial hoy?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Da el valor con fuente (ArgentinaDatos) y fecha, sin dato de referencia para verificar; agrega el blue y la variación de 30 días, que no se pidieron pero aportan contexto breve.",
+      "segundos": 7,
+      "respuesta": "El dólar oficial está a **$ 1.535** (venta) hoy, 14/10/2026. En los últimos 30 días subió apenas un **0,3 %**.\n\nEl dato es de ArgentinaDatos. El blue está a $ 1.550, o sea que la diferencia con el oficial es chica.",
+      "consultado": [
+        "Precios de afuera guardados (dólar, inflación, materias primas)"
+      ],
+      "bloques": [],
+      "costo_usd": 0.0225906,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "sin-relleno",
+      "pregunta": "¿Cuánto debe la zona Bahía en total?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "El total ($ 11.160.065), los tramos y el dato de LA BANDERITA están bien; la respuesta es breve y cierra sin relleno; la sugerencia final con pregunta está separada y es específica, aunque roza el límite.",
+      "segundos": 21,
+      "respuesta": "La zona BAHIA debe **$ 11.160.065** en total, repartidos entre 3 clientes. De eso, $ 9.693.431 tiene menos de 30 días y $ 1.466.634 está entre 30 y 59 días. No hay nada de más de 60 días.\n\nOjo que casi todo es de un solo cliente: **LA BANDERITA SRL debe $ 10.758.868**. Su deuda más vieja tiene 36 días, la última compra fue el 25/09/2026 y no tiene ningún pago registrado.",
+      "consultado": [
+        "Indicadores del tablero: Ventas por zona",
+        "Cuentas corrientes de 3 clientes con saldo (zona BAHIA)"
+      ],
+      "bloques": [
+        "Deuda por antigüedad (zona BAHIA)"
+      ],
+      "costo_usd": 0.0515132,
+      "modelo": "claude-opus-5-5"
+    }
+  ]
+}

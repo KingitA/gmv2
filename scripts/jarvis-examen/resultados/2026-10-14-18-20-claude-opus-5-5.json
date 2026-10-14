@@ -1,0 +1,67 @@
+{
+  "modelo": "claude-opus-5-5",
+  "juez": "claude-opus-5-5",
+  "promedio": 9.333333333333334,
+  "costo_usd": 0.1894344,
+  "resultados": [
+    {
+      "id": "cliente-mas-debe",
+      "pregunta": "¿Quién es el cliente que más nos debe?",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Nombra bien a LA BANDERITA SRL con $ 10.758.868, y el total, la antigüedad y las fechas coinciden; agrega datos extra (pedidos, frecuencia) que no se pueden verificar, pero responde corto y sin relleno.",
+      "segundos": 24,
+      "respuesta": "**LA BANDERITA SRL** (Bahía, viajante Freije Daniel Lista Neco) es el que más debe: **$ 10.758.868**, casi un tercio de los $ 35,4 M que suman todos los clientes.\n\n- **Desde cuándo:** la deuda más vieja tiene 36 días. Son $ 1,47 M de 30 a 59 días y $ 9,29 M de menos de 30 días.\n- **Pagos:** el sistema no tiene ningún pago registrado, aunque su condición es **Efectivo**.\n- **Compras:** según el sistema compra cada 74,5 días, pero en el gráfico solo aparecen compras en septiembre. La última fue el 25/09/2026, hace 19 días.\n\nTiene 3 pedidos abiertos que siguen en \"impreso\". Uno de $ 3,6 M es del 29/04/2026.",
+      "consultado": [
+        "Cuentas corrientes de 18 clientes con saldo",
+        "Ficha, cuenta corriente, pedidos y compras de los últimos 6 meses de LA BANDERITA SRL"
+      ],
+      "bloques": [
+        "Deuda por antigüedad",
+        "LA BANDERITA SRL — compras por mes"
+      ],
+      "costo_usd": 0.1098354,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "deuda-30",
+      "pregunta": "¿Cuánta plata nos deben con más de 30 días?",
+      "nota": 10,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Suma correcta de 30-59, 60-89 y 90+ ($ 22.959.060); conteo de 14 clientes, 13 de Freije, $ 32,3 M y clientes sin pagos verificados; corta y sin preguntas de relleno.",
+      "segundos": 16,
+      "respuesta": "Nos deben **$ 22.959.060 con más de 30 días**, repartidos entre 14 clientes:\n\n- 30 a 59 días: $ 20.397.202\n- 60 a 89 días: $ 1.348.830 (todo de Zhuang Shu Juan, Tres Arroyos)\n- 90 días o más: $ 1.213.028 (todo de Senger José María, Viedma-Patagones, con 106 días)\n\nCasi todo tiene entre 30 y 59 días, así que todavía no es deuda muy vieja. El problema es que **13 de los 14 clientes son de Freije**, y varios no hicieron ningún pago, como Huang Chao Yang, Gordon Erica, Neom y Chen Zhijie. Esos 14 clientes deben en total $ 32,3 M si se suma lo de menos de 30 días.",
+      "consultado": [
+        "Cuentas corrientes de 18 clientes con saldo"
+      ],
+      "bloques": [
+        "Deuda por antigüedad — más de 30 días"
+      ],
+      "costo_usd": 0.036901,
+      "modelo": "claude-opus-5-5"
+    },
+    {
+      "id": "ficha-banderita",
+      "pregunta": "Contame de La Banderita",
+      "nota": 9,
+      "numeros_ok": true,
+      "reglas_ok": true,
+      "cumple_esperado": true,
+      "comentario": "Las cifras de deuda, antigüedad, frecuencia, última compra y pedidos coinciden con el sistema, y los alertas sobre efectivo sin pagos y el pedido de abril son útiles. Es algo extenso para un resumen corto y menciona la localidad pero no la zona explícitamente.",
+      "segundos": 19,
+      "respuesta": "**La Banderita SRL** (cód. 550, Bahía Blanca) nos debe **$ 10.758.868** y no tiene ningún pago registrado.\n\n- **Deuda:** $ 9.292.234 tiene menos de 30 días y $ 1.466.634 tiene entre 30 y 59 días. No hay nada de más de 60 días.\n- **Compras:** compra **cada 74,5 días** en promedio. La última fue el **25/09/2026**, hace 19 días. Todo lo que figura comprado es de septiembre: $ 11.065.263.\n- **Datos:** el viajante es Freije Daniel, compra con lista Neco y paga en **efectivo**.\n- **Pedidos abiertos:** tiene 3 en estado \"impreso\": el 001636 (25/09, $ 9.906.034), el 001422 (08/09, $ 1.159.229) y el **000265 del 29/04/2026 ($ 3.617.006)**.\n\nOjo con dos cosas. Tiene condición de pago efectivo pero debe $ 10,8 M sin ningún pago. Y el pedido de abril sigue en \"impreso\" desde hace casi seis meses: conviene revisar si se entregó o hay que anularlo.",
+      "consultado": [
+        "Ficha, cuenta corriente, pedidos y compras de los últimos 6 meses de LA BANDERITA SRL"
+      ],
+      "bloques": [
+        "LA BANDERITA SRL — lo que más compra (90 días)"
+      ],
+      "costo_usd": 0.042698,
+      "modelo": "claude-opus-5-5"
+    }
+  ]
+}
