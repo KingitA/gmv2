@@ -40,7 +40,9 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [x] Juan aplicó `20261014f_jarvis_retencion_registro.sql` (14/10).
 - [x] Juan aplicó `20261014g_jarvis_mundo_exterior.sql` (14/10). Primera prueba: dólar, inflación y petróleo OK; 400 artículos clasificados (39 dudas, USD 0,0025 cada 80).
 - [ ] Clasificar el resto del catálogo (botón, 400 por vez; unos USD 0,12 en total).
-- [ ] Clave de Anthropic en `.env.local` de gmv2-cerebro (la pone Juan) para correr el examen.
+- [x] Juan cargó la clave de Anthropic en `.env.local` (14/10).
+- [ ] Cargar saldo en la cuenta de Anthropic. Se agotó en la segunda corrida del examen; si es la misma cuenta que usa Vercel, Jarvis y la búsqueda de fotos del vendedor dejan de andar hasta que se cargue.
+- [ ] Terminar la segunda corrida del examen: faltaron 9 de 20 preguntas.
 - [ ] Viaje ALTO VALLE 16/10: a la parada de Li Yutao le quedó "cobrar lo anterior" marcado (lo dejó la liberación vieja). Destildarlo en la hoja de ruta si no corresponde.
 - [ ] Verificar que `CRON_SECRET` exista en Vercel. Sin eso, la revisión de las 8:00 no corre y queda solo el botón "Revisar ahora".
 - [ ] Para probar el chat desde esta PC hace falta la clave de Anthropic en `.env.local` (`ANTHROPIC_API_KEY=...`). La pone Juan; Claude no maneja claves. En Vercel ya está (el chat viejo anda).
@@ -48,6 +50,23 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Primer examen de Jarvis
+- **Corrida 1 (Opus 5.5): nota 8,6/10, reglas OK 18 de 20, USD 0,74.** Números correctos en las 20 preguntas.
+- Fallas, todas de forma:
+  - "¿cómo venimos?" 6/10: se alargó con 5 viñetas y calculó un ticket propio que no cerraba;
+  - "¿cuántos pedidos para preparar?": demasiado análisis para una pregunta que pedía un número;
+  - "borrá el pedido": cerró con un ofrecimiento ("si querés…"), que también es relleno;
+  - ficha de cliente sin "cada cuánto compra";
+  - "Iberia debe" cuando somos nosotros los que le debemos.
+- Ajuste de instrucciones:
+  - responder exactamente lo pedido, con una sola observación como mucho;
+  - nada de ofrecimientos al final;
+  - nada de cuentas propias salvo sumas y restas;
+  - con los proveedores, decir "le debemos a";
+  - en la ficha de un cliente, siempre deuda y antigüedad, frecuencia de compra y última compra.
+- **Corrida 2:** 11 preguntas respondidas, promedio 8,9 (antes 8,6 en esas mismas). Ficha 7 → 8, pedidos para preparar 8 → 9, dejaron de comprar 8 → 9. Las otras 9 fallaron porque **se acabó el saldo de la cuenta de Anthropic**.
+- Los resultados quedan en `scripts/jarvis-examen/resultados/`, para comparar contra el próximo modelo.
 
 ### 14/10/2026 (noche) — Ajuste: materias primas
 - La primera búsqueda pidió las 6 materias primas juntas, con 12 búsquedas en total. Las gastó en el petróleo y volvió solo ese (USD 0,33).
