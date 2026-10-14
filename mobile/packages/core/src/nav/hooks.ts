@@ -65,7 +65,40 @@ export function useOverlay(valor: string, param = "ver") {
     }
   }, [abierto, location.pathname, location.search, location.state, navigate, param])
 
-  return { abierto, abrir, cerrar }
+  /**
+   * Cierra el overlay Y deja fijados parámetros de estado (filtros, columnas…) elegidos
+   * en él. No sirve hacer set del parámetro y después cerrar(): cerrar() vuelve atrás en
+   * el historial, a la entrada de ANTES de abrir el overlay, y el set se pierde (bug de
+   * Precios: "+ Comparar" no agregaba la columna, 09/10/2026). Acá se vuelve atrás y,
+   * apenas el historial llegó, se reemplaza esa entrada con los parámetros nuevos.
+   * `null` o "" borra el parámetro.
+   */
+  const cerrarCon = useCallback(
+    (cambios: Record<string, string | null>) => {
+      const aplicar = (search: string) => {
+        const n = new URLSearchParams(search)
+        n.delete(param)
+        for (const [k, v] of Object.entries(cambios)) {
+          if (v) n.set(k, v)
+          else n.delete(k)
+        }
+        return n.size ? `?${n}` : ""
+      }
+      if (abierto && (location.state as any)?.overlay) {
+        const alVolver = () => {
+          window.removeEventListener("popstate", alVolver)
+          navigate({ pathname: window.location.pathname, search: aplicar(window.location.search) }, { replace: true, preventScrollReset: true })
+        }
+        window.addEventListener("popstate", alVolver)
+        navigate(-1)
+      } else {
+        navigate({ pathname: location.pathname, search: aplicar(location.search) }, { replace: true, preventScrollReset: true })
+      }
+    },
+    [abierto, location.pathname, location.search, location.state, navigate, param],
+  )
+
+  return { abierto, abrir, cerrar, cerrarCon }
 }
 
 /** Paso de wizard en ?paso=N (1-based). ir(n) hace push: atrás vuelve al paso anterior. */

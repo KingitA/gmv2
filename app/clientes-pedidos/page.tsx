@@ -175,6 +175,7 @@ type Remito = {
 }
 
 const ESTADOS_PEDIDO = [
+  { value: "en_revision", label: "En Revisión", color: "bg-red-500" },
   { value: "en_venta", label: "En Venta", color: "bg-amber-500" },
   { value: "pendiente", label: "Pendiente", color: "bg-yellow-500" },
   { value: "en_preparacion", label: "En Preparación", color: "bg-blue-500" },

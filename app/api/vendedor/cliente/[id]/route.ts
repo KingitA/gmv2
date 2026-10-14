@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 import { requireVendedor, listaDelViajante } from "@/lib/vendedor/session"
 import { cargarFichaCliente } from "@/lib/vendedor/ficha-cliente"
+import { patchListasMetodos, validarListasMetodos } from "@/lib/vendedor/ficha-listas"
 
 // GET /api/vendedor/cliente/[id]
 // Ficha del cliente + cuenta corriente: comprobantes con saldo pendiente
@@ -39,10 +40,9 @@ const CAMPOS_EDITABLES = [
   "condicion_pago",
   "condicion_entrega",
   "condicion_iva",
-  "metodo_facturacion",
   "localidad_id",
-  "lista_precio_id",
 ] as const
+// Lista y método (general y por segmento) van aparte: lib/vendedor/ficha-listas.ts
 
 
 // PATCH /api/vendedor/cliente/[id]
@@ -70,29 +70,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const patch: Record<string, any> = {}
 
-    // La lista de precios solo la cambian los viajantes habilitados
-    // (vendedores.puede_cambiar_lista) — el resto ni la ve en la UI
-    if (body.lista_precio_id !== undefined && !session.puedeCambiarLista) {
-      return NextResponse.json({ error: "No tenés permiso para cambiar la lista de precios." }, { status: 403 })
-    }
-
-    // La lista "Especial" es de proveedores puntuales: como lista general del
-    // cliente dejaría el resto del catálogo sin precio coherente. Solo ERP.
-    if (body.lista_precio_id) {
-      const { data: listaSel } = await supabase
-        .from("listas_precio")
-        .select("codigo")
-        .eq("id", body.lista_precio_id)
-        .maybeSingle()
-      if (listaSel?.codigo === "especial") {
-        return NextResponse.json({ error: "La lista Especial se administra solo desde el ERP." }, { status: 403 })
-      }
-      // Desde la app solo las listas del vendedor (Neco + las de sus viajantes).
-      // Otra lista (ej. Bahía) se asigna desde el ERP.
-      if (!session.listasPermitidas.includes(body.lista_precio_id)) {
-        return NextResponse.json({ error: "Esa lista no está habilitada para vos: se asigna desde el ERP." }, { status: 403 })
-      }
-    }
+    // Lista y método, general o POR SEGMENTO (como la ficha del ERP). La lista solo la
+    // cambian los viajantes habilitados y solo a las listas del vendedor (Neco + las de
+    // sus viajantes; la Especial nunca): lib/vendedor/ficha-listas.ts
+    const errListas = validarListasMetodos(body, session)
+    if (errListas) return NextResponse.json({ error: errListas }, { status: 403 })
+    Object.assign(patch, patchListasMetodos(body))
 
     // Datos de la ficha (solo whitelist)
     for (const campo of CAMPOS_EDITABLES) {

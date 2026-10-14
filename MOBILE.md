@@ -1299,6 +1299,73 @@ Pedido del dueño: aplicar la paleta del PDF "Megasur · Sistema de color v1" **
 - Fuera de alcance (no son colores): tipografías del PDF, barra de navegación inferior (la app
   no tiene), radios y alturas. La barra de estado nativa de Android no se tocó.
 
+### Reclamos de la semana de prueba de Freije (09/10/2026)
+
+- **Lista y método POR SEGMENTO a la vista** (`datos/segmentos.ts`, `pantallas/segmentos-ui.tsx`).
+  Caso: cliente LIN XUEJUAN (Cipolletti) con ficha general Factura sin lista y por segmento
+  L/B y P0 Presupuesto, P+ Factura (Neco). La app mostraba solo lo general ("Factura",
+  "Estándar" → chip "STD C/IVA") y el vendedor creía "todo factura". Ahora la ficha, el chip
+  del pedido ("NECO C/IVA" o "NECO MIXTO" + detalle "L/B PRES · P0 PRES · P+ C/IVA"), la
+  hoja 👤 y la pantalla de confirmar muestran lo que resuelve el motor por segmento
+  (`resolverListaSegmentoDefinido`). Sin la réplica de precios la ficha NO muestra lo general.
+- **Bug "solo este pedido" descartado** (hoja 👤, `Marco.tsx`): si el vendedor elegía el
+  mismo método que la ficha GENERAL, no quedaba como override aunque la ficha por segmento
+  dijera otra cosa (por eso el "todo factura" de Freije no se aplicó). Ahora la selección
+  arranca en "Como la ficha (por segmento)" y queda como override salvo que los TRES
+  segmentos ya vayan así. "Guardar en la ficha" con "Como la ficha" ya no borra la lista.
+  La web `/vendedor` tiene el mismo patrón (pendiente aparte).
+- **Ningún pedido nuevo con lista o método en blanco** (regla del dueño): el motor marca
+  cada renglón `sinLista`/`sinMetodo` (antes el método vacío se cotizaba "Final" en silencio);
+  la app no deja confirmar (`faltaListaMetodo` + `mensajeFaltaListaMetodo`, mismo texto que el
+  servidor) y el handler `pedido.crear` lo rechaza como regla de negocio. Solo pedidos NUEVOS
+  (las ediciones siguen con las condiciones con que se tomaron). Datos al 09/10: 1 cliente
+  activo sin método en algún segmento y 206 sin lista en algún segmento (casi todos de
+  vendedores que no usan la app; Freije: 1).
+- **Saldo de billetera único** (`lib/vendedor/billetera-saldo.ts`): `/api/vendedor/me` tenía
+  su propia copia del cálculo (sin las compensaciones del arreglo del 05/10) y el inicio
+  mostraba −$674.500 con la billetera en $0. Los dos endpoints llaman a `resumenBilletera`;
+  el inicio además lee la MISMA fila de la réplica que la pantalla Billetera. Es de servidor:
+  corrige también la APK instalada apenas se despliega.
+- **Precios: "+ Comparar" no agregaba columnas** (ni se podía volver a agregar una borrada):
+  el set del parámetro `c` se hacía sobre la entrada del overlay y `cerrar()` (atrás) lo
+  perdía. Nuevo `useOverlay().cerrarCon(params)` en el core: vuelve atrás y fija los
+  parámetros en la entrada de destino. Una combinación repetida avisa en vez de no hacer nada.
+- Compatibilidad: `esApkVendedorVieja` trata como regla vieja solo ≤ 0.2.3; cualquier APK
+  nueva usa la precedencia nueva del resolver (la que lleva el motor empaquetado).
+
+### Venta a cliente nuevo, ficha por segmento y revisión de oficina (09/10/2026)
+
+Decisiones del dueño: (1) se puede cargar SIN señal; (2) la ficha asigna lista y método
+general o por segmento, tal cual el ERP; (3) los pedidos nuevos (de clientes nuevos) pasan
+por revisión de la oficina.
+
+- **Venta a cliente nuevo** (`pantallas/pedido-nuevo/VentaNueva.tsx`, entrada "🆕 Cliente
+  nuevo" en el inicio y en el selector de cliente del pedido): `/venta-nueva` crea un
+  borrador con un id de cliente que todavía no existe (`Borrador.prospecto`: ficha de
+  lista/método + columnas para comparar) y abre el catálogo de siempre. Debajo del
+  encabezado, columnas lista × método para comparar (como Precios) con el precio de cada
+  artículo; la hoja 👤 elige la lista/facturación del cliente, general o por segmento, y los
+  precios del pedido cambian al instante. "Siguiente: datos del cliente" →
+  `/pedido/nuevo/:id/cliente`: datos OBLIGATORIOS (razón social, IVA, CUIT salvo consumidor
+  final, dirección, localidad, teléfono, condición de pago) y se encolan `cliente.crear` y
+  detrás `pedido.crear` (FIFO). Si el CUIT ya está en la cartera, ofrece pasar los
+  artículos a un pedido de ese cliente.
+- **Ficha por segmento** (`clientes/EditorListaMetodo.tsx`, alta y edición): toggles
+  "General / Por segmento" para lista y para facturación (como `app/clientes/[id]`). Servidor:
+  `lib/vendedor/ficha-listas.ts` valida las 8 columnas (lista solo con permiso y solo listas
+  habilitadas; método Factura/Final/Presupuesto) en POST `/api/vendedor/clientes` y PATCH
+  `/api/vendedor/cliente/[id]`. Un cambio de ficha hecho en la app rige para los pedidos
+  desde que llega al sistema (la ficha en pantalla lo avisa mientras está sin enviar): así lo
+  que se ve coincide con lo que reconstruye el servidor a `precios_al`.
+- **Revisión de oficina**: estado nuevo `en_revision` (migración
+  `20261009c_pedidos_estado_en_revision.sql`). El handler `pedido.crear` lo pone cuando es el
+  PRIMER pedido del cliente (en la práctica, el cliente dado de alta en la calle; también un
+  cliente del ERP que nunca compró). Es editable, NO es preparable (depósito no lo ve) y la
+  oficina lo libera a "pendiente" con el cambio de estado de siempre en /clientes-pedidos
+  (filtro "En Revisión"). La app lo muestra "EN REVISIÓN" (pestaña propia en Mis pedidos).
+- `pedido.crear` de un cliente inexistente (alta rechazada, p. ej. CUIT repetido) es rechazo
+  definitivo con mensaje claro (no traba la cola).
+
 ### Resultados de las pruebas (21/09/2026)
 Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
 solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.

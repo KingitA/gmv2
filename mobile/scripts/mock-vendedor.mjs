@@ -151,7 +151,7 @@ const DATASETS = {
 const PARCIALES = new Set(["vendedor_clientes", "vendedor_cc", "vendedor_viajes"])
 
 // ─── Operaciones ─────────────────────────────────────────────────────────────
-const EDITABLES = ["en_venta", "pendiente", "impreso", "en_preparacion"]
+const EDITABLES = ["en_revision", "en_venta", "pendiente", "impreso", "en_preparacion"]
 // Rechazo de negocio a pedido, para probar el caso "la RPC rechazó el cobro" (POST /__mock/rechazar-cobros?on=1)
 let MODO_BCRA = "apto" // apto | riesgo | caido
 let MODO_OCR = "ok" // ok | caido | sin_datos | lento | sin_cuit
@@ -168,7 +168,9 @@ function aplicarPedido(p, capturadoAt) {
   if (ped && !EDITABLES.includes(ped.estado)) throw new Rechazo(`El pedido ya está ${ped.estado} y no se puede modificar.`)
   const creado = !ped
   if (!ped) {
-    ped = { id: randomUUID(), local_id: p.local_id, numero_pedido: String(++S.numero).padStart(6, "0"), cliente_id: p.cliente_id, fecha: capturadoAt.slice(0, 10), estado: "pendiente", created_at: new Date().toISOString(), detalle: [], creaciones: 0 }
+    // = lib/mobile/outbox/vendedor.ts: el PRIMER pedido de un cliente queda en revisión de oficina
+    const primero = !S.pedidos.some((x) => x.cliente_id === p.cliente_id && x.estado !== "eliminado")
+    ped = { id: randomUUID(), local_id: p.local_id, numero_pedido: String(++S.numero).padStart(6, "0"), cliente_id: p.cliente_id, fecha: capturadoAt.slice(0, 10), estado: primero ? "en_revision" : "pendiente", created_at: new Date().toISOString(), detalle: [], creaciones: 0 }
     S.pedidos.push(ped)
   }
   if (creado) ped.creaciones++
@@ -187,8 +189,10 @@ function aplicarPedido(p, capturadoAt) {
   // = lib/vendedor/vigencia-precios.ts: precios de más de 24 hs al capturar ⇒ no garantizados
   ped.precios_garantizados = !(p.precios_al && Date.parse(capturadoAt) - Date.parse(p.precios_al) > 24 * 3600e3)
   ped.capturado_at = capturadoAt
-  return { pedido_id: ped.id, numero_pedido: ped.numero_pedido, total: ped.total, creado, precios_verificados: true, replica: [parchePedido(ped.id), ...parcheCliente(p.cliente_id)] }
+  return { pedido_id: ped.id, numero_pedido: ped.numero_pedido, total: ped.total, creado, ...(creado ? { estado: ped.estado } : {}), precios_verificados: true, replica: [parchePedido(ped.id), ...parcheCliente(p.cliente_id)] }
 }
+
+const COLS_LISTAS = ["lista_precio_id", "metodo_facturacion", "lista_limpieza_id", "metodo_limpieza", "lista_perf0_id", "metodo_perf0", "lista_perf_plus_id", "metodo_perf_plus"]
 
 const HANDLERS = {
   "pedido.crear": (u, p, m) => aplicarPedido({ ...p, pedido_id: null }, m.capturado_at),
@@ -206,7 +210,7 @@ const HANDLERS = {
       const lista = S.f.ficha.listas_precio.find((l) => l.id === p.lista_precio_id)
       S.clientes.push({ id: p.id, nombre, razon_social: p.razon_social || null, cuit: p.cuit || null, codigo_cliente: null, direccion: p.direccion || null, localidad: p.localidad || null, localidad_id: p.localidad_id || null, provincia: null, telefono: p.telefono || null, mail: p.mail || null, condicion_iva: p.condicion_iva || null, condicion_pago: p.condicion_pago || null, condicion_entrega: p.condicion_entrega || null, metodo_facturacion: p.metodo_facturacion || null, vendedor_id: S.f.vendedor.id, lista_precio_id: p.lista_precio_id || null, lista: lista ? { nombre: lista.nombre } : null, saldo_actual: 0, saldo_proyectado: 0, pagos_sin_rendir: 0, bonificaciones: { viajante: {}, mercaderia: {} } })
       S.cc.set(p.id, { comprobantes: [], pagos: [], devoluciones: [], comprados: [], habituales: [] })
-      S.f.precios_clientes.push({ id: p.id, cliente: { id: p.id, vendedor_id: S.f.vendedor.id, metodo_facturacion: p.metodo_facturacion || null, lista_precio_id: p.lista_precio_id || null }, condicionesProveedor: [], condicionesMarca: [], bonificaciones: [] })
+      S.f.precios_clientes.push({ id: p.id, cliente: { id: p.id, vendedor_id: S.f.vendedor.id, ...Object.fromEntries(COLS_LISTAS.map((k) => [k, p[k] || null])) }, condicionesProveedor: [], condicionesMarca: [], bonificaciones: [] })
     }
     return { cliente_id: p.id, replica: parcheCliente(p.id) }
   },
@@ -215,13 +219,15 @@ const HANDLERS = {
     if (!c) throw new Rechazo("El cliente ya no existe o no está asignado a vos.")
     const igual = (a, b) => String(a ?? "").trim() === String(b ?? "").trim()
     const pisados = []
+    const pc = S.f.precios_clientes.find((x) => x.id === c.id)
     for (const [campo, v] of Object.entries(p.cambios)) {
-      if (igual(c[campo], v.despues)) continue
-      if (igual(c[campo], v.antes)) c[campo] = v.despues
+      // Lista/método por segmento viven en la ficha de PRECIOS (la cartera no los trae)
+      const fila = COLS_LISTAS.includes(campo) && pc ? pc.cliente : c
+      if (igual(fila[campo], v.despues)) continue
+      if (igual(fila[campo], v.antes)) { fila[campo] = v.despues || null; if (fila !== c && campo in c) c[campo] = v.despues || null }
       else pisados.push(campo)
     }
-    const pc = S.f.precios_clientes.find((x) => x.id === c.id)
-    if (pc) Object.assign(pc.cliente, { metodo_facturacion: c.metodo_facturacion, lista_precio_id: c.lista_precio_id })
+    if (pc) Object.assign(pc.cliente, { metodo_facturacion: pc.cliente.metodo_facturacion ?? c.metodo_facturacion, lista_precio_id: pc.cliente.lista_precio_id ?? c.lista_precio_id })
     c.lista = S.f.ficha.listas_precio.find((l) => l.id === c.lista_precio_id) ? { nombre: S.f.ficha.listas_precio.find((l) => l.id === c.lista_precio_id).nombre } : null
     if (pisados.length) throw new Rechazo(`Otra persona cambió ${pisados.join(", ")} mientras estabas sin señal: esos campos no se modificaron. Revisá la ficha.`)
     return { replica: parcheCliente(c.id) }

@@ -13,6 +13,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react"
 import { Emisor, useRuntime, useSesion, uuidv4, type Runtime } from "@gm/core"
 import { COND_VACIA, type CondPedido } from "../datasets"
+import type { FichaListas } from "./segmentos"
 
 export interface ItemBorrador {
   articuloId: string
@@ -26,6 +27,17 @@ export interface ItemBorrador {
   precioFijo?: { precio: number; precioNeto: number } | null
   /** Lo mínimo para mostrar la línea aunque el artículo salga del catálogo */
   art: { descripcion: string; sku: string | null; unidades_por_bulto: number | null; imagen_url: string | null }
+}
+
+/**
+ * Venta a cliente NUEVO (decisión del dueño, 09/10/2026): el vendedor arranca la venta
+ * antes de tener los datos. El borrador se crea con un id de cliente que todavía no
+ * existe; acá viven la lista/método que se van eligiendo (será la ficha) y las columnas
+ * para comparar listas. Al cerrar se cargan los datos y se encolan el alta y el pedido.
+ */
+export interface Prospecto {
+  ficha: FichaListas
+  combos: Array<{ lista_id: string; metodo: string }>
 }
 
 export interface Borrador {
@@ -43,6 +55,8 @@ export interface Borrador {
   condOriginal?: CondPedido | null
   obs: string
   actualizadoAt: string
+  /** Presente = venta a un cliente que todavía no existe (ver Prospecto) */
+  prospecto?: Prospecto | null
 }
 
 const PREFIJO = "borrador:"

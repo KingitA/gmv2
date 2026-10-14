@@ -30,6 +30,7 @@ import {
 import { esPedidoEditable, motivoBloqueo } from "@/lib/pedidos/estados"
 import { esErrorReglaPedido, MSG_SIN_LISTA } from "@/lib/pedidos/errores"
 import { limpiarCentinela } from "@/lib/pricing/resolver"
+import { faltaListaMetodo, mensajeFaltaListaMetodo, prepararMotorCliente } from "@/lib/pricing/motor"
 import { esApkVendedorVieja, compatOverridesApkVieja, SEGS_COMPAT } from "@/lib/vendedor/compat-apk"
 import { listasPermitidasDe } from "@/lib/vendedor/session"
 import type { BonifPedido } from "@/lib/pricing/segmento"
@@ -211,7 +212,8 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   const sesion = await sesionVendedor(ctx)
 
   const { data: cliente } = await ctx.supabase.from("clientes").select("id, nombre, activo, vendedor_id").eq("id", p.cliente_id).maybeSingle()
-  if (!cliente) throw new RechazoNegocio("El cliente ya no existe.")
+  // (Cliente dado de alta en la calle cuya alta se rechazó, p. ej. CUIT repetido: el pedido no tiene a quién ir)
+  if (!cliente) throw new RechazoNegocio("El cliente de este pedido no existe en el sistema (si lo diste de alta acá, revisá si el alta fue rechazada). El pedido no se cargó.")
   if (cliente.activo === false) throw new RechazoNegocio(`${cliente.nombre} fue dado de baja: el pedido no se puede tomar.`)
   if (!ctx.sesion.roles.includes("admin") && !sesion.vendedorIds.includes(cliente.vendedor_id)) {
     throw new RechazoNegocio(`${cliente.nombre} ya no está asignado a vos: el pedido no se puede tomar.`)
@@ -260,6 +262,18 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   if (!pedidoId && !tieneLista) throw new RechazoNegocio(MSG_SIN_LISTA)
   const apkVieja = esApkVendedorVieja(m.app_version)
   const overrides = apkVieja ? compatOverridesApkVieja(overridesDe(p.cond), cli) : overridesDe(p.cond)
+  // Regla del dueño (09/10/2026): ni lista ni método en blanco, en NINGÚN segmento del pedido.
+  // Antes el método vacío se cotizaba "Final" sin avisar. Mismo cálculo que hace la app
+  // antes de dejar confirmar (motor compartido): acá es la red de seguridad.
+  if (!pedidoId) {
+    const motor = prepararMotorCliente(reconstruido.insumos, overrides)
+    const arts = new Map<string, any>(reconstruido.articulos.map((a: any) => [a.id, a]))
+    const falta = faltaListaMetodo(p.items.map((i) => {
+      const a = arts.get(i.articulo_id)
+      try { return a ? motor.precio(a) : null } catch { return null }
+    }))
+    if (falta) throw new RechazoNegocio(mensajeFaltaListaMetodo(falta))
+  }
   const verificacion = !garantizada ? null : await verificarPreciosCapturados(ctx.admin, {
     clienteId: p.cliente_id,
     capturadoAt: vigenciaAt,
@@ -279,6 +293,20 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
   }
 
   const creado = !pedidoId
+  // Revisión de oficina (decisión del dueño, 09/10/2026): el PRIMER pedido de un cliente
+  // (en la práctica, el cliente que el vendedor dio de alta en la calle) nace "en_revision":
+  // depósito no lo ve hasta que la oficina revisa cliente y pedido y lo pasa a "pendiente".
+  let estadoInicial: "pendiente" | "en_revision" = "pendiente"
+  if (creado) {
+    const { count, error: eCount } = await ctx.admin
+      .from("pedidos")
+      .select("id", { count: "exact", head: true })
+      .eq("cliente_id", p.cliente_id)
+      .is("eliminado_at", null)
+      .neq("estado", "eliminado")
+    if (eCount) throw new Error(`pedidos previos del cliente: ${eCount.message}`)
+    if (!count) estadoInicial = "en_revision"
+  }
   const resultado = await conCaptura(captura, async () => {
    try {
     if (!pedidoId) {
@@ -286,7 +314,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
         cliente_id: p.cliente_id,
         items: p.items.map((i) => ({ producto_id: i.articulo_id, cantidad: Number(i.cantidad), precio_unitario: 0, descuento: 0 })),
         observaciones: p.observaciones || undefined,
-        estado_inicial: "pendiente",
+        estado_inicial: estadoInicial,
         ...overrides,
       })
       pedidoId = pedido.id as string
@@ -330,6 +358,7 @@ async function aplicarPedido(ctx: CtxOutbox, m: { payload: PayloadPedido; captur
     numero_pedido: resultado.numero_pedido,
     total: resultado.total,
     creado,
+    ...(creado ? { estado: estadoInicial } : {}),
     precios_garantizados: garantizada,
     precios_verificados: verificacion ? verificacion.ok : null,
     replica: await parches(

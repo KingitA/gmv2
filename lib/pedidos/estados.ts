@@ -17,10 +17,15 @@
  *   despacho del viaje, entregado el chofer / mostrador.
  */
 
-export const ESTADOS_EDITABLES = ["en_venta", "pendiente", "impreso", "en_preparacion"] as const
+// en_revision (09/10/2026): primer pedido de un cliente, tomado desde la app del
+// vendedor (típicamente un cliente dado de alta en la calle). Queda retenido para
+// que la oficina revise cliente y pedido: depósito NO lo ve (no es preparable) hasta
+// que la oficina lo pasa a "pendiente" con el cambio de estado de siempre.
+export const ESTADOS_EDITABLES = ["en_revision", "en_venta", "pendiente", "impreso", "en_preparacion"] as const
 export const ESTADOS_ENTREGA = ["listo_para_retirar", "listo_para_enviar"] as const
 
 export const ESTADO_LABEL: Record<string, string> = {
+  en_revision: "En Revisión",
   en_venta: "En Venta",
   pendiente: "Pendiente",
   impreso: "Impreso",
