@@ -6,7 +6,7 @@ import { errorCuit, mismoCuit, normalizarCuit } from "@gm/formato"
 import { DS } from "../../datasets"
 import { useCatalogosFicha, useClientes, useEncolar, uuidv4 } from "../../datos/hooks"
 import { CuitInput, HojaConfirmar, Pantalla, useToast } from "../../ui"
-import { CAMPOS_FICHA_LISTAS, type FichaListas } from "../../datos/segmentos"
+import { CAMPOS_FICHA_LISTAS, COLS_SEGMENTO, type FichaListas } from "../../datos/segmentos"
 import { EditorListaMetodo, fichaCompleta } from "./EditorListaMetodo"
 
 // Port de app/vendedor/clientes/nuevo/page.tsx + components/vendedor/NuevaLocalidadSheet.tsx.
@@ -216,10 +216,19 @@ export interface ModoProspecto {
 }
 
 /** Datos obligatorios del cliente nuevo de una venta (decisión del dueño, 09/10/2026). */
-function faltanDatos(f: Record<string, string>): string | null {
+/**
+ * ¿La venta va a emitir comprobantes con CAE? (MOBILE.md §20, regla 2 del CUIT: sin CUIT es
+ * válido y opera solo con no fiscales; el CUIT se exige únicamente si se va a facturar).
+ * Factura y Final (mixto) emiten fiscales; todo en Presupuesto, no.
+ */
+function vaAFacturar(ficha: FichaListas): boolean {
+  return COLS_SEGMENTO.some((c) => ["Factura", "Final"].includes(ficha[c.metodo] || ficha.metodo_facturacion))
+}
+
+function faltanDatos(f: Record<string, string>, ficha: FichaListas): string | null {
   if (!f.razon_social.trim() && !f.nombre.trim()) return "la razón social"
   if (!f.condicion_iva) return "la condición de IVA"
-  if (!/consumidor/i.test(f.condicion_iva) && !f.cuit.trim()) return "el CUIT"
+  if (vaAFacturar(ficha) && !/consumidor/i.test(f.condicion_iva) && !normalizarCuit(f.cuit)) return "el CUIT (la venta va con factura)"
   if (!f.direccion.trim()) return "la dirección"
   if (!f.localidad_id) return "la localidad"
   if (!f.telefono.trim()) return "el teléfono"
@@ -288,7 +297,7 @@ export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) 
       mostrar("Ingresá la razón social o el nombre de fantasía.", "err")
       return
     }
-    const falta = prospecto ? faltanDatos(f) : null
+    const falta = prospecto ? faltanDatos(f, ficha) : null
     if (falta) {
       mostrar(`Para cerrar la venta falta ${falta} del cliente.`, "err")
       return
@@ -392,7 +401,7 @@ export function ClienteNuevo({ prospecto }: { prospecto?: ModoProspecto } = {}) 
             <input value={f.nombre} onChange={set("nombre")} className={inputCls} placeholder="Cómo lo conocés (opcional)" />
           </Campo>
           <div className="grid grid-cols-2 gap-2">
-            <Campo label={prospecto ? "CUIT *" : "CUIT"}>
+            <Campo label={prospecto && vaAFacturar(ficha) ? "CUIT *" : "CUIT"}>
               <CuitInput value={f.cuit} onChange={(v) => setF((p) => ({ ...p, cuit: v }))} className={inputCls} placeholder="20-12345678-9" />
             </Campo>
             <Campo label={prospecto ? "Condición IVA *" : "Condición IVA"}>

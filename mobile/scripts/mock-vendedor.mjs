@@ -208,8 +208,7 @@ const HANDLERS = {
   },
   "cliente.crear": (u, p) => {
     if (!clienteDe(p.id)) {
-      const dup = p.cuit && S.clientes.find((c) => c.cuit === String(p.cuit).trim())
-      if (dup) throw new Rechazo(`Ya existe un cliente con ese CUIT: ${dup.nombre}. Buscalo en tu cartera o pedile a oficina que te lo asigne.`)
+      // = POST /api/vendedor/clientes (MOBILE.md §20 regla 4): CUIT repetido es válido, se crea igual
       const nombre = String(p.nombre || p.razon_social).trim()
       const lista = S.f.ficha.listas_precio.find((l) => l.id === p.lista_precio_id)
       S.clientes.push({ id: p.id, nombre, razon_social: p.razon_social || null, cuit: p.cuit || null, codigo_cliente: null, direccion: p.direccion || null, localidad: p.localidad || null, localidad_id: p.localidad_id || null, provincia: null, telefono: p.telefono || null, mail: p.mail || null, condicion_iva: p.condicion_iva || null, condicion_pago: p.condicion_pago || null, condicion_entrega: p.condicion_entrega || null, metodo_facturacion: p.metodo_facturacion || null, vendedor_id: S.f.vendedor.id, lista_precio_id: p.lista_precio_id || null, lista: lista ? { nombre: lista.nombre } : null, saldo_actual: 0, saldo_proyectado: 0, pagos_sin_rendir: 0, bonificaciones: { viajante: {}, mercaderia: {} } })
