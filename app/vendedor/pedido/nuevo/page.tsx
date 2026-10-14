@@ -3,6 +3,8 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { formatCurrency } from "@/lib/utils"
+import { resolverListaSegmentoDefinido } from "@/lib/pricing/resolver"
+import type { Segmento } from "@/lib/pricing/segmento"
 import { localMatch } from "@/lib/search/local-match"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { CatalogoArbol } from "@/components/vendedor/CatalogoArbol"
@@ -68,6 +70,13 @@ interface ClienteSel {
   lista?: { nombre: string } | null
   vendedor_id?: string | null
   saldo_actual?: number
+  // Lista/método por segmento de la ficha (los trae /api/vendedor/cliente/[id]; el listado no)
+  lista_limpieza_id?: string | null
+  metodo_limpieza?: string | null
+  lista_perf0_id?: string | null
+  metodo_perf0?: string | null
+  lista_perf_plus_id?: string | null
+  metodo_perf_plus?: string | null
 }
 
 // Condiciones comerciales "solo este pedido" (overrides guardados en pedidos.*)
@@ -91,6 +100,42 @@ const condToOverrides = (c: CondPedido) => ({
   ...(c.lista ? { lista_precio_pedido_id: c.lista } : {}),
   ...(!bonifVacia(c.bonif) ? { bonif_pedido: c.bonif } : {}),
 })
+// Lista y método POR SEGMENTO como los resuelve el motor (lo elegido "solo este pedido" →
+// ficha por segmento → ficha general). Caso Freije (09/10/2026): se mostraba solo lo general
+// ("STD C/IVA") y elegir el mismo método que la ficha general se descartaba aunque la ficha
+// por segmento dijera otra cosa — el "todo factura" no se aplicaba. Igual que la app.
+const SEGS_PRECIO: Array<{ seg: Segmento; label: string; corto: string }> = [
+  { seg: "limpieza", label: "Limpieza / Bazar", corto: "L/B" },
+  { seg: "perf0", label: "Perfumería 0", corto: "P0" },
+  { seg: "perf_plus", label: "Perfumería plus", corto: "P+" },
+]
+const METODO_NOMBRE: Record<string, string> = { Factura: "Factura", "Factura (21% IVA)": "Factura", Final: "Final", Presupuesto: "Presupuesto" }
+const metodoNombre = (m: string | null | undefined) => (m ? METODO_NOMBRE[m] || m : null)
+function porSegmento(cliente: ClienteSel, c: { metodo: string; lista: string }) {
+  return SEGS_PRECIO.map((s) => {
+    const r = resolverListaSegmentoDefinido(s.seg, { metodo_facturacion_pedido: c.metodo || null, lista_precio_pedido_id: c.lista || null }, cliente)
+    return { ...s, listaId: r.listaId, metodo: r.metodoRaw }
+  })
+}
+type FilaSeg = ReturnType<typeof porSegmento>[number]
+function CuadroSeg({ filas, nombreLista, titulo }: { filas: FilaSeg[]; nombreLista: (id: string) => string | null; titulo: string }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white">
+      <p className="border-b border-gray-100 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-gray-500">{titulo}</p>
+      {filas.map((f) => (
+        <div key={f.seg} className="flex items-center justify-between gap-2 border-b border-gray-50 px-3 py-2 last:border-0">
+          <span className="text-sm text-gray-600">{f.label}</span>
+          <span className="text-right text-sm font-bold">
+            {f.listaId ? <span className="text-gray-900">{nombreLista(f.listaId) || "—"}</span> : <span className="text-red-600">SIN LISTA</span>}
+            <span className="text-gray-400"> · </span>
+            {f.metodo ? <span className="text-gray-900">{metodoNombre(f.metodo)}</span> : <span className="text-red-600">SIN MÉTODO</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // Fila compacta del catálogo desplegable: miniatura (tap = foto grande) ·
 // sku · descripción · -oferta% · marca · x u/bulto · precio, y a la derecha
 // una casilla de cantidad con "bultos" (si no, unidades) + botón agregar.
@@ -563,6 +608,21 @@ function NuevoPedidoInner() {
       cancel = true
     }
   }, [cliente, router])
+
+  // El cliente elegido del listado no trae lista/método por segmento: se completa con la ficha
+  const sinSegmentos = !!cliente && !("metodo_limpieza" in cliente)
+  useEffect(() => {
+    if (!cliente || !sinSegmentos) return
+    let cancel = false
+    fetch(`/api/vendedor/cliente/${cliente.id}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancel || d.error || !d.cliente) return
+        setCliente((prev) => (prev && prev.id === d.cliente.id ? { ...prev, ...d.cliente } : prev))
+      })
+      .catch(() => {})
+    return () => { cancel = true }
+  }, [cliente?.id, sinSegmentos]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Selección de cliente ────────────────────────────────────────────
   useEffect(() => {
@@ -1137,7 +1197,8 @@ function NuevoPedidoInner() {
       try {
         const patch: Record<string, any> = {}
         if (sel.metodo) patch.metodo_facturacion = sel.metodo
-        if (sel.lista !== undefined && catFicha?.puede_cambiar_lista) patch.lista_precio_id = sel.lista || null
+        // ("" = "como la ficha": no se toca la lista; antes la borraba)
+        if (sel.lista && catFicha?.puede_cambiar_lista) patch.lista_precio_id = sel.lista
         if (Object.keys(patch).length) {
           const res = await fetch(`/api/vendedor/cliente/${cliente.id}`, {
             method: "PATCH",
@@ -1258,6 +1319,12 @@ function NuevoPedidoInner() {
 
   const confirmarPedido = async () => {
     if (!cliente || !pedidoIdRef.current || !cart.length || confirmando) return
+    // Regla del dueño (09/10/2026): ningún pedido se cierra con lista o método en blanco
+    const faltan = porSegmento(cliente, cond).filter((f) => !f.listaId || !f.metodo)
+    if (faltan.length) {
+      alert(`No se puede cerrar el pedido: falta lista o método de facturación en ${faltan.map((f) => f.label).join(", ")}. Elegilo para este pedido (👤) o pedí que completen la ficha del cliente.`)
+      return
+    }
     setConfirmando(true)
     try {
       // Descargar cambios de cantidad pendientes (debounce) antes de confirmar
@@ -1581,9 +1648,7 @@ function NuevoPedidoInner() {
       : nav.s === "home"
         ? numeroPedido
           ? `Pedido Nº ${numeroPedido}${editandoExistente ? " · editando" : " · guardado automático"}`
-          : cliente.metodo_facturacion
-            ? `Facturación: ${cliente.metodo_facturacion}`
-            : "Nuevo pedido"
+          : "Nuevo pedido"
         : nav.s === "provs" || nav.s === "cats"
           ? cliente.nombre
           : `${ctxLabel(nav.ctx)} · ${cliente.nombre}`
@@ -1592,16 +1657,26 @@ function NuevoPedidoInner() {
   // ── Chip lista + método del header (cortito: "NECO FINAL") ──────────
   const METODO_CORTO: Record<string, string> = { Factura: "C/IVA", Final: "FINAL", Presupuesto: "PRES" }
   const nombreListaPorId = (id: string | null | undefined) => catFicha?.listas_precio.find((l) => l.id === id)?.nombre
-  const listaChip =
-    (cond.lista ? nombreListaPorId(cond.lista) : cliente.lista?.nombre || nombreListaPorId(cliente.lista_precio_id)) || "STD"
-  const metodoRawChip = cond.metodo || cliente.metodo_facturacion || ""
-  const chipListaMetodo = `${listaChip.toUpperCase()} ${METODO_CORTO[metodoRawChip] || metodoRawChip.toUpperCase() || "—"}`
+  // Por segmento (nunca "STD"): uniforme → "NECO C/IVA"; si no → "NECO MIXTO" + detalle debajo
+  const nombreListaSeg = (id: string) => nombreListaPorId(id) || (id === cliente.lista_precio_id ? cliente.lista?.nombre : null) || null
+  const filasSeg = porSegmento(cliente, cond)
+  const listaTxt = (id: string | null) => (id ? (nombreListaSeg(id) || "LISTA").toUpperCase() : "SIN LISTA")
+  const metTxt = (m: string | null) => (m ? METODO_CORTO[metodoNombre(m)!] || m.toUpperCase() : "SIN MÉT.")
+  const segUniforme = filasSeg.every((f) => f.listaId === filasSeg[0]!.listaId && metodoNombre(f.metodo) === metodoNombre(filasSeg[0]!.metodo))
+  const segMismaLista = filasSeg.every((f) => f.listaId === filasSeg[0]!.listaId)
+  const segIncompleto = filasSeg.some((f) => !f.listaId || !f.metodo)
+  const chipListaMetodo = segUniforme
+    ? `${listaTxt(filasSeg[0]!.listaId)} ${metTxt(filasSeg[0]!.metodo)}`
+    : segMismaLista ? `${listaTxt(filasSeg[0]!.listaId)} MIXTO` : "MIXTO"
+  const detalleSeg = segUniforme ? null
+    : (segMismaLista ? `${listaTxt(filasSeg[0]!.listaId)} · ` : "") + filasSeg.map((f) => `${f.corto} ${segMismaLista ? "" : listaTxt(f.listaId) + " "}${metTxt(f.metodo)}`).join(" · ")
 
   // Abre el panel del cliente con los selectores en lo vigente (override del
   // pedido si hay, si no la ficha) — lo usan el chip y el botón 👤
   const abrirPanelCliente = () => {
-    setMetodoSel(cond.metodo || cliente.metodo_facturacion || "")
-    setListaSel(cond.lista || cliente.lista_precio_id || "")
+    // "" = como la ficha (por segmento): antes arrancaba en el método GENERAL de la ficha
+    setMetodoSel(cond.metodo || "")
+    setListaSel(cond.lista || "")
     const init: Record<string, string> = {}
     for (const tipo of ["viajante", "mercaderia"] as const)
       for (const s of SEGS) {
@@ -1641,6 +1716,9 @@ function NuevoPedidoInner() {
           <div className="min-w-0 flex-1">
             <h1 className="text-lg font-bold truncate">{tituloHeader}</h1>
             <p className="text-emerald-200 text-xs truncate">{subtituloHeader}</p>
+            {/* Por segmento siempre a la vista: qué lista y método lleva cada mercadería */}
+            {detalleSeg && <p className="text-white text-xs font-bold truncate">{detalleSeg}</p>}
+            {segIncompleto && <p className="text-xs font-bold text-red-200">Falta lista o método en algún segmento: elegilo en 👤</p>}
           </div>
           {(pedidoId || sync !== "idle") && (
             <span
@@ -2104,7 +2182,6 @@ function NuevoPedidoInner() {
               const puedeLista = !!catFicha?.puede_cambiar_lista
               const listaNombre = (id: string | null | undefined) =>
                 catFicha?.listas_precio.find((l) => l.id === id)?.nombre || null
-              const listaClienteNombre = cliente.lista?.nombre || listaNombre(cliente.lista_precio_id) || "Estándar"
               // Bonificaciones: parseo de la grilla (tipo × segmento) a BonifPedidoUI
               const parsePct = (s: string | undefined) => {
                 const t = (s ?? "").trim()
@@ -2125,15 +2202,17 @@ function NuevoPedidoInner() {
               const btnCliente = "bg-gray-900 disabled:opacity-40 text-white rounded-xl py-3 text-sm font-bold active:scale-[0.97]"
               const selCls = "w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
               // ── UN SOLO guardado para toda la condición del pedido (método + lista + descuentos) ──
-              // Lo que coincide con la ficha NO se guarda como override (queda "hereda de la ficha");
-              // así, para volver a lo del cliente alcanza con elegir de nuevo el valor de la ficha.
-              const fichaMetodo = cliente.metodo_facturacion || ""
-              const fichaLista = cliente.lista_precio_id || ""
+              // Lo que coincide con la ficha (en los TRES segmentos) no se guarda como override.
+              // Lo elegido queda "solo este pedido" salvo que los TRES segmentos ya vayan así por la ficha
+              const segFicha = porSegmento(cliente, { metodo: "", lista: "" })
+              const metodoOv = metodoSel && !segFicha.every((f) => metodoNombre(f.metodo) === metodoNombre(metodoSel)) ? metodoSel : ""
+              const listaOv = puedeLista ? (listaSel && !segFicha.every((f) => f.listaId === listaSel) ? listaSel : "") : cond.lista
+              const previewSeg = porSegmento(cliente, { metodo: metodoOv, lista: listaOv })
               const bonifIgualFicha = (["viajante", "mercaderia"] as const).every((t) =>
                 SEGS.every((s) => (bonifParsed[t]?.[s] ?? 0) === (bonifCliente?.[t]?.[s] ?? 0)))
               const nuevaCond: CondPedido = {
-                metodo: metodoSel && metodoSel !== fichaMetodo ? metodoSel : "",
-                lista: puedeLista ? (listaSel && listaSel !== fichaLista ? listaSel : "") : cond.lista,
+                metodo: metodoOv,
+                lista: listaOv,
                 bonif: bonifIgualFicha ? null : bonifParsed,
               }
               const hayCambios = JSON.stringify(nuevaCond) !== JSON.stringify({ ...cond, bonif: bonifVacia(cond.bonif) ? null : cond.bonif })
@@ -2144,15 +2223,13 @@ function NuevoPedidoInner() {
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                     <div>
                       <p className="text-gray-700 font-bold text-sm">Método de facturación</p>
-                      <p className="text-gray-400 text-xs">
-                        Actual: {cond.metodo ? `${cond.metodo} (solo este pedido)` : cliente.metodo_facturacion || "—"}
-                      </p>
+                      <p className="text-gray-400 text-xs">Elegido acá vale para TODO el pedido (los tres segmentos).</p>
                     </div>
                     <select value={metodoSel} onChange={(e) => setMetodoSel(e.target.value)} className={selCls}>
-                      <option value="">Elegir método...</option>
-                      <option value="Factura">Factura{fichaMetodo === "Factura" ? " (ficha)" : ""}</option>
-                      <option value="Final">Final (Mixto){fichaMetodo === "Final" ? " (ficha)" : ""}</option>
-                      <option value="Presupuesto">Presupuesto{fichaMetodo === "Presupuesto" ? " (ficha)" : ""}</option>
+                      <option value="">Como la ficha (por segmento)</option>
+                      <option value="Factura">Factura</option>
+                      <option value="Final">Final (Mixto)</option>
+                      <option value="Presupuesto">Presupuesto</option>
                     </select>
                   </div>
 
@@ -2160,17 +2237,14 @@ function NuevoPedidoInner() {
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
                     <div>
                       <p className="text-gray-700 font-bold text-sm">Lista de precios</p>
-                      <p className="text-gray-400 text-xs">
-                        Actual: {cond.lista ? `${listaNombre(cond.lista) || "—"} (solo este pedido)` : listaClienteNombre}
-                        {listaImpuesta && !cond.lista ? " (por viajante)" : ""}
-                      </p>
+                      <p className="text-gray-400 text-xs">Elegida acá vale para TODO el pedido (los tres segmentos).</p>
                     </div>
                     {puedeLista ? (
                       <>
                         <select value={listaSel} onChange={(e) => setListaSel(e.target.value)} className={selCls}>
-                          <option value="">Estándar (sin lista)</option>
+                          <option value="">Como la ficha (por segmento)</option>
                           {(catFicha?.listas_precio || []).map((l) => (
-                            <option key={l.id} value={l.id}>{l.nombre}{l.id === fichaLista ? " (ficha)" : ""}</option>
+                            <option key={l.id} value={l.id}>{l.nombre}</option>
                           ))}
                         </select>
                         {listaImpuesta && (
@@ -2183,6 +2257,8 @@ function NuevoPedidoInner() {
                       <p className="text-gray-400 text-xs">No tenés permiso para cambiar la lista de precios.</p>
                     )}
                   </div>
+
+                  <CuadroSeg filas={previewSeg} nombreLista={(id) => listaNombre(id) || (id === cliente.lista_precio_id ? cliente.lista?.nombre ?? null : null)} titulo="Así se factura este pedido" />
 
                   {/* ── Descuentos por segmento: viajante y mercadería ── */}
                   <div className="bg-gray-50 rounded-xl p-4 space-y-3">
@@ -2254,7 +2330,7 @@ function NuevoPedidoInner() {
                     </button>
                     <p className="text-gray-400 text-[11px] text-center">
                       Guarda método, lista y descuentos juntos y recalcula al instante todos los precios (de ahí sale la factura).
-                      Lo que coincide con la ficha no queda como "solo este pedido".
+                      Lo que ya coincide con la ficha en los tres segmentos no queda como "solo este pedido".
                     </p>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -2546,14 +2622,20 @@ function NuevoPedidoInner() {
                   onChange={(e) => cambiarMetodo(e.target.value)}
                   className="w-full rounded-xl border border-gray-300 px-4 py-3 bg-white"
                 >
-                  <option value="">Del cliente{cliente.metodo_facturacion ? ` (${cliente.metodo_facturacion})` : ""}</option>
+                  <option value="">Como la ficha (por segmento, ver abajo)</option>
                   <option value="Factura">Factura</option>
                   <option value="Final">Final (Mixto)</option>
                   <option value="Presupuesto">Presupuesto</option>
                 </select>
                 <p className="text-gray-400 text-xs mt-1">
-                  Al cambiar el método, todos los precios del pedido se recalculan al instante.
+                  Elegir un método acá lo aplica a TODO el pedido (todos los segmentos) y recalcula los precios al instante.
                 </p>
+                <div className="mt-2">
+                  <CuadroSeg filas={filasSeg} nombreLista={nombreListaSeg} titulo="Cómo se factura este pedido" />
+                </div>
+                {segIncompleto && (
+                  <p className="text-red-600 text-xs mt-2 font-bold">Falta lista o método en algún segmento: así no se puede confirmar.</p>
+                )}
                 {(cond.lista || !bonifVacia(cond.bonif)) && (
                   <p className="text-amber-700 text-xs mt-2 font-medium">
                     Solo este pedido:
