@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playroom · maqueta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --azul-900:#1B1D4E; --azul-700:#2B2E7A; --azul-600:#33369A; --azul-500:#4549B5; --azul-100:#CFD0E4; --azul-50:#EEEEF6;
+    --cian-500:#22A9C9; --cian-50:#E9F7FA; --ambar-500:#E6A418; --ambar-50:#FFF7E6;
+    --exito-600:#15805A; --exito-50:#E6F4EE; --alerta-600:#C8641A; --alerta-50:#FDF0E6; --error-600:#D2364B; --error-50:#FBEBED;
+    --n-900:#1E2030; --n-600:#545871; --n-500:#6E7290; --n-400:#9295AE; --n-200:#E3E5EF; --n-100:#F0F1F7; --n-50:#F7F8FC;
+    --fondo:#F4F5FA;
+  }
+  *{box-sizing:border-box} body{margin:0;font-family:Archivo,system-ui,sans-serif;background:var(--fondo);color:var(--n-900);font-feature-settings:"tnum" 1}
+  .nav{background:#16182B;color:#fff;display:flex;align-items:center;gap:6px;padding:0 16px;height:52px;font-size:14px;font-weight:600}
+  .nav .logo{font-weight:800;margin-right:14px;line-height:1}.nav .logo small{display:block;font-size:9px;color:#9295AE;letter-spacing:.1em}
+  .nav span{padding:8px 14px;border-radius:10px 10px 0 0;opacity:.75}.nav span.on{background:var(--fondo);color:var(--azul-900);opacity:1;margin-top:10px;padding-bottom:16px}
+  .sub{background:#fff;border-bottom:1px solid var(--n-200);padding:8px 16px;display:flex;gap:6px;font-size:13px}
+  .sub b{background:var(--azul-900);color:#fff;border-radius:99px;padding:3px 12px;font-weight:600}.sub i{font-style:normal;padding:3px 12px;color:var(--n-600)}
+  .wrap{max-width:1600px;margin:0 auto;padding:20px 24px;display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:20px}
+  @media (max-width:1100px){.wrap{grid-template-columns:1fr}}
+  h1{font-size:28px;margin:0;letter-spacing:-.02em;color:var(--azul-900)}
+  .hola p{margin:4px 0 0;color:var(--n-500);font-size:14px}
+  .pulso{margin-top:14px;background:linear-gradient(135deg,var(--azul-900),var(--azul-600));color:#fff;border-radius:16px;padding:16px 18px;display:flex;gap:14px;align-items:flex-start}
+  .pulso .av{width:38px;height:38px;border-radius:12px;background:rgba(255,255,255,.14);display:grid;place-items:center;flex:none;font-weight:800}
+  .pulso p{margin:0;font-size:15px;line-height:1.5}.pulso p b{color:#FFD881}
+  .pulso small{display:block;margin-top:6px;font-size:12px;opacity:.6}
+  .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
+  @media (min-width:1400px){.kpis{grid-template-columns:repeat(6,minmax(0,1fr))}}
+  .kpi{background:#fff;border:1px solid var(--n-200);border-radius:14px;padding:12px 14px;position:relative;overflow:hidden}
+  .kpi .t{font-size:12.5px;font-weight:600;color:var(--n-600)}
+  .kpi .v{font-size:22px;font-weight:800;color:var(--azul-900);margin-top:4px;letter-spacing:-.01em}
+  .kpi .d{font-size:12px;font-weight:700;margin-top:2px}.up{color:var(--exito-600)}.dn{color:var(--error-600)}.neu{color:var(--n-500)}
+  .kpi svg{position:absolute;right:10px;bottom:10px;opacity:.9}
+  .grid2{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px;margin-top:12px}
+  @media (max-width:1300px){.grid2{grid-template-columns:1fr}}
+  .card{background:#fff;border:1px solid var(--n-200);border-radius:14px;padding:14px 16px}
+  .card h3{margin:0;font-size:15px;color:var(--azul-900);display:flex;justify-content:space-between;align-items:center}
+  .card h3 small{font-weight:500;color:var(--n-400);font-size:12px}
+  .seg{display:inline-flex;background:var(--n-100);border-radius:8px;padding:2px;font-size:11.5px;font-weight:600}
+  .seg span{padding:3px 8px;border-radius:6px;color:var(--n-500)}.seg span.on{background:#fff;color:var(--azul-700);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .bars .row{display:grid;grid-template-columns:110px 1fr 90px;gap:8px;align-items:center;font-size:13px;margin-top:9px}
+  .bars .bar{height:10px;border-radius:6px;background:var(--azul-50);overflow:hidden}.bars .bar i{display:block;height:100%;background:var(--azul-500);border-radius:6px}
+  .bars .row b{text-align:right;font-weight:700}
+  .notas{margin-top:12px}
+  .nota{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--n-100)}
+  .nota:first-of-type{border-top:0}
+  .nota .ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;flex:none;font-weight:800;font-size:15px}
+  .nota p{margin:0;font-size:13.5px;line-height:1.45}.nota p b{color:var(--azul-900)}
+  .nota .acc{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font-size:12px;font-weight:600;border:1px solid var(--n-200);border-radius:99px;padding:3px 10px;color:var(--azul-600);background:#fff;white-space:nowrap}
+  .informes{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:10px}
+  .inf{border:1px solid var(--n-200);border-radius:12px;padding:12px;background:var(--n-50)}
+  .inf b{display:block;font-size:13.5px;color:var(--azul-900)}.inf span{font-size:12px;color:var(--n-500)}
+  /* Chat */
+  .chat{position:sticky;top:20px;height:calc(100vh - 150px);min-height:560px;background:#fff;border:1px solid var(--n-200);border-radius:18px;display:flex;flex-direction:column;overflow:hidden}
+  .chat header{padding:14px 16px;border-bottom:1px solid var(--n-100);display:flex;align-items:center;gap:10px}
+  .chat header .av{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,var(--azul-700),var(--cian-500));color:#fff;display:grid;place-items:center;font-weight:800}
+  .chat header b{display:block;font-size:15px;color:var(--azul-900)}.chat header small{font-size:12px;color:var(--exito-600);font-weight:600}
+  .msgs{flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px;background:var(--n-50)}
+  .yo{align-self:flex-end;background:var(--azul-600);color:#fff;border-radius:14px 14px 4px 14px;padding:9px 12px;font-size:13.5px;max-width:85%}
+  .ella{align-self:flex-start;background:#fff;border:1px solid var(--n-200);border-radius:14px 14px 14px 4px;padding:11px 13px;font-size:13.5px;line-height:1.5;max-width:94%}
+  .ella table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}
+  .ella td,.ella th{padding:5px 6px;border-bottom:1px solid var(--n-100);text-align:left}.ella th{color:var(--n-500);font-weight:600}
+  .ella td:last-child,.ella th:last-child{text-align:right}
+  .ella .tools{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+  .piensa{font-size:12px;color:var(--n-500);display:flex;gap:6px;align-items:center}
+  .piensa i{width:6px;height:6px;border-radius:50%;background:var(--cian-500);display:inline-block}
+  .sug{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px 0}
+  .caja{padding:12px 16px 14px}
+  .caja div{display:flex;gap:8px;border:1.5px solid var(--azul-100);border-radius:14px;padding:6px 6px 6px 12px;align-items:center}
+  .caja input{flex:1;border:0;outline:0;font:inherit;font-size:14px}
+  .caja button{background:var(--azul-600);color:#fff;border:0;border-radius:10px;padding:8px 12px;font-weight:700;font:inherit;font-weight:700}
+  .caja small{display:block;text-align:center;font-size:11px;color:var(--n-400);margin-top:6px}
+  .marca{font-size:11px;color:var(--n-400);text-align:center;padding:14px 0 24px;grid-column:1/-1}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:6px;vertical-align:middle}
+</style>
+</head>
+<body>
+  <div class="nav"><div class="logo">GM<small>ERP</small></div><span>Clientes</span><span>Proveedores</span><span>Artículos</span><span>Finanzas</span><span class="on">Playroom</span><span>Ajustes</span></div>
+  <div class="sub"><b>Tablero</b><i>Informes</i><i>Fijados</i></div>
+
+  <div class="wrap">
+    <!-- ═══ IZQUIERDA: tablero ═══ -->
+    <main>
+      <div class="hola">
+        <h1>Buen día, Juan</h1>
+        <p>Sábado 10 de octubre · Datos al minuto · Acá se mira y se pregunta: nada de lo que hagas cambia el sistema</p>
+      </div>
+
+      <!-- Resumen del día escrito por el cerebro -->
+      <div class="pulso">
+        <div class="av">M</div>
+        <div>
+          <p>Octubre viene <b>12% arriba</b> de septiembre a esta altura del mes. La cobranza va más lenta: <b>$ 18,4 M vencidos</b>, la mitad en 6 clientes. El jueves vencen <b>$ 9,2 M</b> a proveedores y hoy la caja cubre el 70%.</p>
+          <small>Resumen escrito por Megasur con los datos de hoy · tocá cualquier número para preguntar más</small>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div class="kpis">
+        <div class="kpi"><div class="t">Ventas del mes</div><div class="v">$ 84,6 M</div><div class="d up">▲ 12% vs. sept.</div>
+          <svg width="70" height="26"><polyline fill="none" stroke="#4549B5" stroke-width="2" points="0,22 10,18 20,20 30,14 40,15 50,9 60,10 70,4"/></svg></div>
+        <div class="kpi"><div class="t">Cobrado del mes</div><div class="v">$ 61,2 M</div><div class="d dn">▼ 4% vs. sept.</div>
+          <svg width="70" height="26"><polyline fill="none" stroke="#22A9C9" stroke-width="2" points="0,8 10,10 20,9 30,14 40,12 50,16 60,15 70,18"/></svg></div>
+        <div class="kpi"><div class="t">Deuda vencida</div><div class="v">$ 18,4 M</div><div class="d dn">▲ 9% en 30 días</div></div>
+        <div class="kpi"><div class="t">Margen bruto</div><div class="v">27,8%</div><div class="d neu">= igual que sept.</div></div>
+        <div class="kpi"><div class="t">Pedidos para preparar</div><div class="v">142</div><div class="d neu">38 con prioridad</div></div>
+        <div class="kpi"><div class="t">Pagos próximos 7 días</div><div class="v">$ 22,9 M</div><div class="d neu">14 vencimientos</div></div>
+      </div>
+
+      <div class="grid2">
+        <!-- Ventas por día -->
+        <div class="card">
+          <h3>Ventas por día <span class="seg"><span>Semana</span><span class="on">Mes</span><span>Año</span></span></h3>
+          <svg viewBox="0 0 600 190" width="100%" height="190" style="margin-top:8px">
+            <g stroke="#F0F1F7"><line x1="0" y1="40" x2="600" y2="40"/><line x1="0" y1="90" x2="600" y2="90"/><line x1="0" y1="140" x2="600" y2="140"/></g>
+            <polyline fill="none" stroke="#CFD0E4" stroke-width="2" stroke-dasharray="5 4" points="0,150 60,140 120,120 180,130 240,110 300,118 360,100 420,105 480,92 540,98 600,90"/>
+            <path d="M0,140 L60,128 120,100 180,112 240,86 300,92 360,70 420,76 480,58 540,62 600,48 L600,180 L0,180 Z" fill="#4549B5" opacity=".08"/>
+            <polyline fill="none" stroke="#4549B5" stroke-width="2.5" points="0,140 60,128 120,100 180,112 240,86 300,92 360,70 420,76 480,58 540,62 600,48"/>
+            <g font-size="11" fill="#9295AE"><text x="0" y="178">1</text><text x="290" y="178">15</text><text x="585" y="178">30</text></g>
+          </svg>
+          <div style="font-size:12px;color:var(--n-500);display:flex;gap:14px"><span><b style="color:#4549B5">━</b> Octubre</span><span><b style="color:#CFD0E4">┅</b> Septiembre</span></div>
+        </div>
+        <!-- Por zona -->
+        <div class="card bars">
+          <h3>Ventas por zona <span class="seg"><span class="on">Zona</span><span>Viajante</span><span>Rubro</span></span></h3>
+          <div class="row"><span>Bahía Blanca</span><div class="bar"><i style="width:92%"></i></div><b>$ 31,8 M</b></div>
+          <div class="row"><span>Tres Arroyos</span><div class="bar"><i style="width:48%"></i></div><b>$ 16,5 M</b></div>
+          <div class="row"><span>Pringles</span><div class="bar"><i style="width:34%"></i></div><b>$ 11,7 M</b></div>
+          <div class="row"><span>Punta Alta</span><div class="bar"><i style="width:27%"></i></div><b>$ 9,3 M</b></div>
+          <div class="row"><span>Carhué</span><div class="bar"><i style="width:19%"></i></div><b>$ 6,6 M</b></div>
+          <div class="row"><span>Resto</span><div class="bar"><i style="width:25%"></i></div><b>$ 8,7 M</b></div>
+        </div>
+      </div>
+
+      <!-- Lo que Megasur notó -->
+      <div class="card notas">
+        <h3>Lo que Megasur notó <small>se actualiza solo · nunca hace nada sin que vos lo decidas</small></h3>
+        <div class="nota"><div class="ic" style="background:var(--alerta-50);color:var(--alerta-600)">!</div>
+          <div><p><b>9 clientes que compraban todos los meses no compran hace 45 días</b>, entre ellos Distribuidora Urquiza y JDM Market. Juntos eran $ 6,1 M por mes.</p>
+          <div class="acc"><span class="chip">Ver la lista</span><span class="chip">¿Por qué pudo pasar?</span><span class="chip">Avisarle al viajante</span></div></div></div>
+        <div class="nota"><div class="ic" style="background:var(--ambar-50);color:var(--ambar-500)">$</div>
+          <div><p><b>El margen de Perfumería bajó de 31% a 26%</b> desde la última lista de Kenvue. Los precios de venta no se actualizaron.</p>
+          <div class="acc"><span class="chip">Ver artículos afectados</span><span class="chip">Simular aumento de 5%</span></div></div></div>
+        <div class="nota"><div class="ic" style="background:var(--exito-50);color:var(--exito-600)">↗</div>
+          <div><p><b>Pilas Energizer se vende 3 veces más</b> que el mes pasado y queda stock para 6 días.</p>
+          <div class="acc"><span class="chip">Armar orden de compra sugerida</span></div></div></div>
+      </div>
+
+      <!-- Informes de siempre -->
+      <div class="card" style="margin-top:12px">
+        <h3>Informes <small>los 6 de siempre, con el estilo nuevo</small></h3>
+        <div class="informes">
+          <div class="inf"><b>Artículos vendidos</b><span>Venta neta, márgenes y comparativos</span></div>
+          <div class="inf"><b>Cuentas corrientes</b><span>Antigüedad de saldos, mora y días de cobro</span></div>
+          <div class="inf"><b>Clientes ABC</b><span>Ranking por facturación y variaciones</span></div>
+          <div class="inf"><b>Comisiones</b><span>Devengadas y desempeño por viajante</span></div>
+          <div class="inf"><b>Rotación y stock muerto</b><span>Capital inmovilizado y qué liquidar</span></div>
+          <div class="inf"><b>Fiscal ARCA</b><span>Libro IVA ventas y exportación</span></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══ DERECHA: Megasur (el cerebro) ═══ -->
+    <aside class="chat">
+      <header><div class="av">M</div><div><b>Megasur</b><small>● Lee todo el sistema · no modifica nada</small></div></header>
+      <div class="msgs">
+        <div class="yo">¿Qué clientes de Tres Arroyos me deben más de 60 días?</div>
+        <div class="piensa"><i></i>Revisé cuentas corrientes y comprobantes de 41 clientes de Tres Arroyos</div>
+        <div class="ella">Son 4 clientes y suman <b>$ 3,2 M</b> con más de 60 días:
+          <table><tr><th>Cliente</th><th>Días</th><th>Debe</th></tr>
+            <tr><td>Grondona Enzo</td><td>94</td><td>$ 1.180.400</td></tr>
+            <tr><td>La Sirena SRL</td><td>71</td><td>$ 942.300</td></tr>
+            <tr><td>Wu Jinpeng</td><td>66</td><td>$ 610.900</td></tr>
+            <tr><td>Chen Ping</td><td>62</td><td>$ 488.100</td></tr></table>
+          <p style="margin:8px 0 0">Grondona sigue comprando: le entregamos 2 pedidos este mes. <b>Te sugiero</b> pedir el pago antes del próximo envío.</p>
+          <div class="tools"><span class="chip">📌 Fijar en el tablero</span><span class="chip">Ver como gráfico</span><span class="chip">Descargar Excel</span></div>
+        </div>
+        <div class="yo">Mostrámelo en un gráfico por antigüedad</div>
+        <div class="ella">Deuda de Tres Arroyos por antigüedad:
+          <svg viewBox="0 0 300 110" width="100%" height="110" style="margin-top:6px">
+            <g font-size="10" fill="#6E7290"><text x="0" y="104">0-30</text><text x="78" y="104">31-60</text><text x="156" y="104">61-90</text><text x="236" y="104">+90</text></g>
+            <rect x="0" y="20" width="56" height="70" rx="5" fill="#4549B5"/><rect x="78" y="44" width="56" height="46" rx="5" fill="#4549B5" opacity=".75"/>
+            <rect x="156" y="58" width="56" height="32" rx="5" fill="#C8641A"/><rect x="236" y="70" width="56" height="20" rx="5" fill="#D2364B"/>
+          </svg>
+          <div class="tools"><span class="chip">📌 Fijar en el tablero</span></div>
+        </div>
+      </div>
+      <div class="sug"><span class="chip">¿Cuánto vendimos hoy?</span><span class="chip">¿Qué conviene comprar?</span><span class="chip">Compará viajantes</span></div>
+      <div class="caja"><div><input placeholder="Preguntale a Megasur…"><button>Enviar</button></div><small>Respuestas con datos reales del sistema · siempre muestra de dónde salen</small></div>
+    </aside>
+
+    <div class="marca">Maqueta de diseño · los números son de ejemplo</div>
+  </div>
+</body>
+</html>

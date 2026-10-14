@@ -20,16 +20,8 @@ export const defaultFilters: PlayroomFiltersState = {
   comparePeriod: 'none',
 }
 
-const inputStyle: React.CSSProperties = {
-  background: '#1f2937',
-  border: '1px solid rgba(255,255,255,0.08)',
-  borderRadius: '8px',
-  padding: '6px 12px',
-  color: '#fff',
-  fontSize: '13px',
-  outline: 'none',
-  colorScheme: 'dark',
-}
+const selectClass =
+  'h-8 rounded-lg border border-neutro-200 bg-white px-3 text-[13px] text-neutro-800 outline-none focus:border-azul-400'
 
 export default function PlayroomFilters({
   filters,
@@ -42,41 +34,35 @@ export default function PlayroomFilters({
     onChange({ ...filters, [key]: value })
 
   return (
-    <div
-      className="flex flex-wrap items-center gap-3 p-4 rounded-xl mb-5"
-      style={{
-        background: 'rgba(17,24,39,0.6)',
-        border: '1px solid rgba(255,255,255,0.06)',
-      }}
-    >
-      <CalendarRange className="h-4 w-4 flex-shrink-0" style={{ color: '#7c3aed' }} />
+    <div className="flex flex-wrap items-center gap-3 p-4 rounded-xl mb-5 bg-white border border-neutro-200">
+      <CalendarRange className="h-4 w-4 flex-shrink-0 text-azul-600" />
 
       <div className="flex items-center gap-2">
-        <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Desde</label>
+        <label className="text-xs text-neutro-500">Desde</label>
         <FechaInput
           value={filters.dateFrom}
           onChange={iso => { if (iso) set('dateFrom', iso) }}
           containerClassName="w-[128px]"
-          className="h-8 border-white/10 bg-[#1f2937] text-[13px] text-white"
+          className="h-8 border-neutro-200 bg-white text-[13px] text-neutro-800"
         />
       </div>
 
       <div className="flex items-center gap-2">
-        <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Hasta</label>
+        <label className="text-xs text-neutro-500">Hasta</label>
         <FechaInput
           value={filters.dateTo}
           onChange={iso => { if (iso) set('dateTo', iso) }}
           containerClassName="w-[128px]"
-          className="h-8 border-white/10 bg-[#1f2937] text-[13px] text-white"
+          className="h-8 border-neutro-200 bg-white text-[13px] text-neutro-800"
         />
       </div>
 
       <div className="flex items-center gap-2">
-        <label className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Comparar vs</label>
+        <label className="text-xs text-neutro-500">Comparar vs</label>
         <select
           value={filters.comparePeriod}
           onChange={e => set('comparePeriod', e.target.value as PlayroomFiltersState['comparePeriod'])}
-          style={inputStyle}
+          className={selectClass}
         >
           <option value="previous">Período anterior</option>
           <option value="year_ago">Mismo período año anterior</option>
@@ -90,12 +76,7 @@ export default function PlayroomFilters({
         <button
           onClick={onRefresh}
           disabled={loading}
-          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
-          style={{
-            background: 'rgba(124,58,237,0.15)',
-            color: '#a78bfa',
-            border: '1px solid rgba(124,58,237,0.2)',
-          }}
+          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 bg-azul-50 text-azul-700 border border-azul-100 hover:bg-azul-100"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           Actualizar

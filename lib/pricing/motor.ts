@@ -11,10 +11,10 @@
 
 import { calcularPrecioPedido, type ArticuloPrecioInput } from "./calcular-precio-pedido"
 import type { DatosLista, DescuentoTipado } from "./calculator"
-import { detectarSegmento, type BonifPedido, type Segmento } from "./segmento"
+import { detectarSegmento, SEGMENTO_BONIF, SEGMENTO_LABEL, type BonifPedido, type Segmento } from "./segmento"
 import {
   toMetodoFacturacion,
-  resolverListaMetodoConCondicion,
+  resolverListaMetodoDefinido,
   resolverCondSegmento,
   resolverBonifItem,
   bonifGeneralViajanteDesdeFilas,
@@ -80,6 +80,12 @@ export interface PrecioArticuloCliente {
   metodoRaw: string
   segmento: Segmento
   vaEnComprobante: "factura" | "presupuesto"
+  /** Regla del dueño (09/10/2026): un pedido de vendedor no se cierra con lista o método
+   *  en blanco. true = ni el pedido ni la ficha (ni una condición) definen la lista/método
+   *  de este artículo; el precio de arriba es solo orientativo (sin lista = sin recargo,
+   *  sin método = "Final"). */
+  sinLista: boolean
+  sinMetodo: boolean
 }
 
 function round2(n: number) { return Math.round(n * 100) / 100 }
@@ -136,7 +142,9 @@ export function prepararMotorCliente(insumos: InsumosCliente, overrides: Overrid
     precio(articulo: ArticuloMotor): PrecioArticuloCliente {
       const segmento = detectarSegmento(articulo)
       const { cond } = resolverCondSegmento(articulo, condProv, condMarca)
-      const { listaId, metodoRaw } = resolverListaMetodoConCondicion(segmento, cond, overrides, insumos.cliente)
+      const definido = resolverListaMetodoDefinido(segmento, cond, overrides, insumos.cliente)
+      const listaId = definido.listaId
+      const metodoRaw = definido.metodoRaw || "Final"
       const bonif = resolverBonifItem(cond, general, viajante, segmento)
       const p = calcularPrecioPedido(articulo, datosLista(listaId), toMetodoFacturacion(metodoRaw), bonif)
       return {
@@ -154,9 +162,39 @@ export function prepararMotorCliente(insumos: InsumosCliente, overrides: Overrid
         metodoRaw,
         segmento,
         vaEnComprobante: p.vaEnComprobante,
+        sinLista: !listaId,
+        sinMetodo: !definido.metodoRaw,
       }
     },
   }
+}
+
+/** Segmentos del pedido a los que les falta lista y/o método (regla del dueño, 09/10/2026). */
+export interface FaltaListaMetodo {
+  sinLista: Segmento[]
+  sinMetodo: Segmento[]
+}
+
+/** Recorre los precios de los renglones y junta los segmentos sin lista / sin método. null = nada falta. */
+export function faltaListaMetodo(precios: Array<Pick<PrecioArticuloCliente, "segmento" | "sinLista" | "sinMetodo"> | null | undefined>): FaltaListaMetodo | null {
+  const sinLista = new Set<Segmento>()
+  const sinMetodo = new Set<Segmento>()
+  for (const p of precios) {
+    if (!p) continue
+    if (p.sinLista) sinLista.add(p.segmento)
+    if (p.sinMetodo) sinMetodo.add(p.segmento)
+  }
+  if (!sinLista.size && !sinMetodo.size) return null
+  return { sinLista: [...sinLista], sinMetodo: [...sinMetodo] }
+}
+
+/** Texto para el vendedor (app y rechazo del servidor dicen lo mismo). */
+export function mensajeFaltaListaMetodo(f: FaltaListaMetodo): string {
+  const nombres = (s: Segmento[]) => s.map((x) => SEGMENTO_LABEL[SEGMENTO_BONIF[x]]).join(", ")
+  const partes: string[] = []
+  if (f.sinLista.length) partes.push(`sin lista de precios (${nombres(f.sinLista)})`)
+  if (f.sinMetodo.length) partes.push(`sin método de facturación (${nombres(f.sinMetodo)})`)
+  return `No se puede cerrar el pedido: hay artículos ${partes.join(" y ")}. Elegí lista y método para este pedido o pedí que completen la ficha del cliente.`
 }
 
 /** Atajo para un solo artículo. */

@@ -58,10 +58,25 @@ export function resolverListaSegmento(
   overrides: OverridesListaPedido,
   cliente: ClienteListas,
 ): { listaId: string | null; metodoRaw: string } {
+  const r = resolverListaSegmentoDefinido(segmento, overrides, cliente)
+  return { listaId: r.listaId, metodoRaw: r.metodoRaw || "Final" }
+}
+
+/**
+ * Igual que resolverListaSegmento pero SIN el método por defecto: metodoRaw = null
+ * cuando ni el pedido ni la ficha (por segmento o general) lo definen. Sirve para la
+ * regla del dueño (09/10/2026): ningún pedido de vendedor se cierra con lista o método
+ * en blanco — el "Final" por defecto lo escondía.
+ */
+export function resolverListaSegmentoDefinido(
+  segmento: Segmento,
+  overrides: OverridesListaPedido,
+  cliente: ClienteListas,
+): { listaId: string | null; metodoRaw: string | null } {
   const lc = limpiarCentinela
   const general = {
     listaId: lc(overrides.lista_precio_pedido_id) || lc(cliente.lista_precio_id) || null,
-    metodoRaw: lc(overrides.metodo_facturacion_pedido) || lc(cliente.metodo_facturacion) || "Final",
+    metodoRaw: lc(overrides.metodo_facturacion_pedido) || lc(cliente.metodo_facturacion) || null,
   }
 
   const ovLista = lc(overrides.lista_precio_pedido_id)
@@ -93,7 +108,18 @@ export function resolverListaMetodoConCondicion(
   overrides: OverridesListaPedido,
   cliente: ClienteListas,
 ): { listaId: string | null; metodoRaw: string } {
-  const base = resolverListaSegmento(segmento, overrides, cliente)
+  const r = resolverListaMetodoDefinido(segmento, cond, overrides, cliente)
+  return { listaId: r.listaId, metodoRaw: r.metodoRaw || "Final" }
+}
+
+/** resolverListaMetodoConCondicion SIN método por defecto (null = nadie lo definió). */
+export function resolverListaMetodoDefinido(
+  segmento: Segmento,
+  cond: CondicionSegmento | null,
+  overrides: OverridesListaPedido,
+  cliente: ClienteListas,
+): { listaId: string | null; metodoRaw: string | null } {
+  const base = resolverListaSegmentoDefinido(segmento, overrides, cliente)
   if (!cond) return base
   return {
     listaId: limpiarCentinela(cond.lista_precio_id) || base.listaId,

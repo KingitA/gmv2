@@ -9,6 +9,7 @@ import { errorCuit, normalizarCuit } from "@/lib/formato"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { clientesConMismoCuit, avisoMismoCuit } from "@/lib/clientes/mismo-cuit"
 import { siguienteCodigo, esCodigoDuplicado } from "@/lib/codigos"
+import { patchListasMetodos, validarListasMetodos } from "@/lib/vendedor/ficha-listas"
 
 // GET /api/vendedor/clientes?q=&localidad=&filtro=todos|con_deuda|sin_rendir
 // Clientes asignados a los vendedores del usuario, con saldo real
@@ -135,6 +136,15 @@ export async function POST(request: Request) {
     if (errCuit) {
       return NextResponse.json({ error: errCuit }, { status: 400 })
     }
+    // Lista y método por segmento (como la ficha del ERP): mismas reglas que al editar.
+    // La lista GENERAL sigue la regla de siempre (la impone el viajante).
+    const segmentos = { ...body, lista_precio_id: undefined, metodo_facturacion: undefined }
+    const errListas = validarListasMetodos(segmentos, session)
+    if (errListas) return NextResponse.json({ error: errListas }, { status: 403 })
+    const metodoGeneral = metodo_facturacion ? String(metodo_facturacion) : null
+    if (metodoGeneral && !["Factura", "Final", "Presupuesto"].includes(metodoGeneral)) {
+      return NextResponse.json({ error: `Método de facturación inválido: ${metodoGeneral}` }, { status: 400 })
+    }
     // Se guarda "xx-xxxxxxxx-x" sin importar cómo se tipeó.
     // Mismo CUIT que otro cliente: se PERMITE (sucursales, mismo dueño con dos negocios)
     // y se informa cuál es el otro (regla del dueño, 10/10/2026). Antes se rechazaba (409).
@@ -161,7 +171,8 @@ export async function POST(request: Request) {
         nombre_razon_social: razon_social?.trim() || nombreFinal,
         cuit: cuitLimpio,
         condicion_iva: normalizarCondicionIva(condicion_iva),
-        metodo_facturacion: metodo_facturacion || null,
+        metodo_facturacion: metodoGeneral,
+        ...patchListasMetodos(segmentos, ["lista_limpieza_id", "lista_perf0_id", "lista_perf_plus_id", "metodo_limpieza", "metodo_perf0", "metodo_perf_plus"]),
         condicion_pago: condicion_pago || null,
         condicion_entrega: condicion_entrega || null,
         direccion: direccion?.trim() || null,

@@ -13,8 +13,8 @@ import { CatalogoArbol, OrdenSelector } from "./pedido-nuevo/piezas"
 // En la web los precios venían de previewPreciosListas (servidor); acá los da el MISMO
 // motor sobre la réplica, sin cliente (sin condiciones ni bonificaciones), al instante.
 
-interface Combo { lista_id: string; metodo: string }
-const comboKey = (c: Combo) => `${c.lista_id}|${c.metodo}`
+export interface Combo { lista_id: string; metodo: string }
+export const comboKey = (c: Combo) => `${c.lista_id}|${c.metodo}`
 const MAX_COMBOS = 4
 
 export function Precios() {
@@ -146,8 +146,13 @@ export function Precios() {
 
       {agregar.abierto && (
         <AgregarCombo
-          listas={listas} metodos={metodos} onCerrar={agregar.cerrar}
-          onAgregar={(c) => { if (!combos.some((x) => comboKey(x) === comboKey(c))) setCombos([...combos, c]); agregar.cerrar() }}
+          listas={listas} metodos={metodos} existentes={combos.map(comboKey)} onCerrar={agregar.cerrar}
+          onAgregar={(c) => {
+            // cerrarCon: cerrar la hoja vuelve atrás en el historial; un setCombos antes de
+            // cerrar se perdía con esa vuelta (la columna nunca aparecía).
+            const nuevos = combos.some((x) => comboKey(x) === comboKey(c)) ? combos : [...combos, c]
+            agregar.cerrarCon({ c: nuevos.map(comboKey).join(",") })
+          }}
         />
       )}
       {foto.src && <ZoomFoto src={foto.src} onCerrar={foto.cerrar} />}
@@ -155,7 +160,7 @@ export function Precios() {
   )
 }
 
-function AgregarCombo({ listas, metodos, onCerrar, onAgregar }: { listas: ListaPrecio[]; metodos: Array<{ key: string; label: string }>; onCerrar: () => void; onAgregar: (c: Combo) => void }) {
+export function AgregarCombo({ listas, metodos, existentes, onCerrar, onAgregar }: { listas: ListaPrecio[]; metodos: Array<{ key: string; label: string }>; existentes: string[]; onCerrar: () => void; onAgregar: (c: Combo) => void }) {
   const [listaId, setListaId] = useState(listas[0]?.id || "")
   const [metodo, setMetodo] = useState("Factura")
   return (
@@ -175,7 +180,10 @@ function AgregarCombo({ listas, metodos, onCerrar, onAgregar }: { listas: ListaP
             ))}
           </div>
         </div>
-        <button onClick={() => listaId && onAgregar({ lista_id: listaId, metodo })} className="w-full rounded-xl bg-emerald-600 py-4 font-bold text-white">Agregar columna</button>
+        {/* Una combinación que ya está como columna no se repite: se avisa en vez de no hacer nada */}
+        {existentes.includes(comboKey({ lista_id: listaId, metodo }))
+          ? <p className="rounded-xl bg-gray-100 py-4 text-center font-bold text-gray-500">Esa combinación ya está en la tabla</p>
+          : <button onClick={() => listaId && onAgregar({ lista_id: listaId, metodo })} className="w-full rounded-xl bg-emerald-600 py-4 font-bold text-white">Agregar columna</button>}
       </div>
     </Hoja>
   )

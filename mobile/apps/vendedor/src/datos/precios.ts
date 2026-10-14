@@ -12,6 +12,7 @@ import {
   proximaVigencia,
   type ArticuloMotor,
   type CambioProgramado,
+  type ClienteListas,
   type InsumosCliente,
   type ListaPrecioRow,
   type OverridesPedido,
@@ -147,7 +148,7 @@ function motorDe(base: ReturnType<typeof useInsumosBase>, insumosCliente: Omit<I
  * `fichaLocal`: cliente dado de alta en este equipo que todavía no está en la réplica
  * de precios (nace sin condiciones ni bonificaciones, con su lista y método).
  */
-export function useMotorCliente(clienteId: string | undefined, cond: CondPedido, fichaLocal?: { lista_precio_id: string | null; metodo_facturacion: string | null } | null): MotorLocal {
+export function useMotorCliente(clienteId: string | undefined, cond: CondPedido, fichaLocal?: ClienteListas | null): MotorLocal {
   const base = useInsumosBase()
   const clientes = useDataset<FilaClientePrecio>(DS.preciosClientes)
   const fila = useMemo(() => (clienteId ? clientes.filas.find((c) => c.id === clienteId) ?? null : null), [clientes.filas, clienteId])
@@ -156,11 +157,11 @@ export function useMotorCliente(clienteId: string | undefined, cond: CondPedido,
     const insumos = fila
       ? { cliente: fila.cliente, condicionesProveedor: fila.condicionesProveedor, condicionesMarca: fila.condicionesMarca, bonificaciones: fila.bonificaciones }
       : fichaLocal
-        ? { cliente: { ...fichaLocal }, condicionesProveedor: [], condicionesMarca: [], bonificaciones: [] }
+        ? { cliente: { ...fichaLocal } as InsumosCliente["cliente"], condicionesProveedor: [], condicionesMarca: [], bonificaciones: [] }
         : null
     return motorDe(base, insumos, overridesDe(cond))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, fila, fichaLocal?.lista_precio_id, fichaLocal?.metodo_facturacion, claveCond])
+  }, [base, fila, JSON.stringify(fichaLocal ?? null), claveCond])
 }
 
 /**

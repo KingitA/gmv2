@@ -1,13 +1,4 @@
+// Playroom usa el mismo estilo claro que el resto del sistema (dueño, 10/10/2026)
 export default function PlayroomLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: '#0a0f1e',
-        minHeight: '100vh',
-        fontFamily: "'Inter', 'Geist', sans-serif",
-      }}
-    >
-      {children}
-    </div>
-  )
+  return <div className="min-h-full bg-neutro-50">{children}</div>
 }

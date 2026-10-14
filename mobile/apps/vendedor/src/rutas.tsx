@@ -7,6 +7,7 @@ import { Precios } from "./pantallas/Precios"
 import { Pedidos } from "./pantallas/pedidos/Pedidos"
 import { PedidoDetalle } from "./pantallas/pedidos/PedidoDetalle"
 import { MarcoPedido } from "./pantallas/pedido-nuevo/Marco"
+import { DatosClienteNuevo, VentaNueva } from "./pantallas/pedido-nuevo/VentaNueva"
 import { Carrito, CatalogoHome, CategoriaArticulos, ElegirCliente, PedidoListo, Proveedores, RubroCategorias, VistaFiltro, VistaProveedor } from "./pantallas/pedido-nuevo/Pantallas"
 import { Clientes, Pago } from "./pantallas/clientes/Clientes"
 import { ClienteNuevo } from "./pantallas/clientes/ClienteNuevo"
@@ -39,6 +40,8 @@ export const rutas: RouteObject[] = [
   // Pedido en curso: el marco sostiene borrador + motor de precios + hojas comunes
   { path: "/pedido", loader: () => redirect("/pedido/nuevo") },
   { path: "/pedido/nuevo", element: <ElegirCliente /> },
+  // Venta a cliente NUEVO: arranca el pedido sin datos; los pide al cerrar (VentaNueva.tsx)
+  { path: "/venta-nueva", element: <VentaNueva /> },
   {
     path: "/pedido/nuevo/:clienteId",
     element: <MarcoPedido />,
@@ -53,6 +56,7 @@ export const rutas: RouteObject[] = [
       { path: "rubro/:rubroId", element: <RubroCategorias /> },
       { path: "rubro/:rubroId/:catId", element: <CategoriaArticulos /> },
       { path: "carrito", element: <Carrito /> },
+      { path: "cliente", element: <DatosClienteNuevo /> },
       { path: "listo", element: <PedidoListo /> },
     ],
   },
