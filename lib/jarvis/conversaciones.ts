@@ -19,6 +19,14 @@ export async function cargarHistorial(db: SupabaseClient, conversacionId: string
   return (data ?? []).flatMap((m: { metadata: { api?: Anthropic.MessageParam[] } | null }) => m.metadata?.api ?? [])
 }
 
+/** Las últimas 3 preguntas y respuestas en texto (para seguir en una charla nueva). */
+export async function repasoCorto(db: SupabaseClient, conversacionId: string): Promise<string> {
+  const { data } = await db.from("ai_messages").select("role, content").eq("conversation_id", conversacionId)
+    .order("created_at", { ascending: false }).limit(6)
+  return ((data ?? []) as { role: string; content: string }[]).reverse()
+    .map((m) => `${m.role === "user" ? "Pregunta" : "Jarvis"}: ${String(m.content).slice(0, 600)}`).join("\n")
+}
+
 /** Guarda la pregunta y la respuesta. Devuelve el id de la conversación (o null si no se pudo). */
 export async function guardarIntercambio(
   db: SupabaseClient,

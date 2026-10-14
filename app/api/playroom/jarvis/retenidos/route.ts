@@ -12,11 +12,8 @@ export async function GET() {
   if (auth.error) return auth.error
   const db = createAdminClient()
   try {
-    const r = await buscarHerramienta("clientes_retenidos")!.ejecutar(contextoNuevo(db), {})
-    // la herramienta no devuelve el id: se completa acá
-    const { data } = await db.from("clientes").select("id, nombre").eq("retener_entregas", true)
-    const ids = new Map(((data ?? []) as { id: string; nombre: string }[]).map((c) => [c.nombre, c.id]))
-    return NextResponse.json({ filas: (r.datos as Record<string, unknown>[]).map((f) => ({ ...f, cliente_id: ids.get(String(f.cliente)) })) })
+    const r = await buscarHerramienta("clientes_retenidos")!.ejecutar(contextoNuevo(db, auth.user.id), {})
+    return NextResponse.json({ filas: r.datos })
   } catch (e) {
     console.error("[jarvis] retenidos", e)
     return NextResponse.json({ filas: [] })

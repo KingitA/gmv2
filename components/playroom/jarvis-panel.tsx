@@ -35,7 +35,6 @@ export interface JarvisPanelRef { preguntar: (texto: string) => void }
 export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => void; className?: string }>(
   function JarvisPanel({ onFijar, className }, ref) {
     const [mensajes, setMensajes] = useState<Mensaje[]>([])
-    const [historial, setHistorial] = useState<unknown[]>([])
     const [conversacionId, setConversacionId] = useState<string | null>(null)
     const [paso, setPaso] = useState(0)
     const [texto, setTexto] = useState("")
@@ -62,16 +61,16 @@ export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => 
         const res = await fetch("/api/playroom/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mensaje: msg, conversacion_id: conversacionId, historial }),
+          body: JSON.stringify({ mensaje: msg, conversacion_id: conversacionId }),
         })
-        const json: RespuestaChat & { data?: any[]; conversacion_id?: string | null; aviso?: string } = await res.json()
+        const json: RespuestaChat & { data?: any[]; conversacion_id?: string | null; aviso?: string; conversacion_nueva?: boolean } = await res.json()
+        if (json.conversacion_nueva) setConversacionId(null)
         if (!res.ok || json.error) throw new Error(json.error || `Error ${res.status}`)
         // Compatibilidad con el cerebro actual: si no manda bloques pero sí filas sueltas, se arma una tabla
         const bloques = json.bloques?.length ? json.bloques : (() => { const t = json.data ? tablaDesdeFilas(json.data) : null; return t ? [t] : [] })()
         const texto = json.aviso ? `${json.respuesta || ""}\n\n*${json.aviso}*` : json.respuesta || ""
         setMensajes(m => [...m, { rol: "jarvis", texto, bloques, consultado: json.consultado, sugerencias: json.sugerencias }])
         if (json.conversacion_id) setConversacionId(json.conversacion_id)
-        setHistorial((json.historial ?? json.historial_actualizado ?? historial) as unknown[])
       } catch (e: any) {
         setMensajes(m => [...m, { rol: "jarvis", texto: `No pude responder: ${e?.message || "error de conexión"}. Probá de nuevo en un momento.`, error: true }])
       } finally {
@@ -95,7 +94,7 @@ export const JarvisPanel = forwardRef<JarvisPanelRef, { onFijar: (b: Bloque) => 
             <p className="text-xs font-semibold text-exito-600">● Lee todo el sistema · no modifica nada</p>
           </div>
           {mensajes.length > 0 && (
-            <button type="button" onClick={() => { setMensajes([]); setHistorial([]); setConversacionId(null); setFijados(new Set()) }} title="Empezar una conversación nueva"
+            <button type="button" onClick={() => { setMensajes([]); setConversacionId(null); setFijados(new Set()) }} title="Empezar una conversación nueva"
               className="grid size-8 place-items-center rounded-lg text-neutro-400 hover:bg-neutro-100 hover:text-neutro-700">
               <Trash2 className="h-4 w-4" />
             </button>

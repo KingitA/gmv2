@@ -41,10 +41,13 @@ export function resolverPeriodo(
   porDefecto: PeriodoNombre = "mes_actual",
   hoy = hoyISO(),
 ): Rango {
-  const iso = /^\d{4}-\d{2}-\d{2}$/
-  if (p.desde && iso.test(p.desde)) {
-    const hasta = p.hasta && iso.test(p.hasta) ? p.hasta : hoy
-    return { desde: p.desde, hasta, etiqueta: `del ${fecha(p.desde)} al ${fecha(hasta)}`, ...anterior(p.desde, hasta) }
+  const valida = (f: string | null | undefined): f is string =>
+    !!f && /^\d{4}-\d{2}-\d{2}$/.test(f) && new Date(f + "T12:00:00Z").toISOString().slice(0, 10) === f // formato-ok: valida que la fecha exista (no es "hoy")
+  if (valida(p.desde)) {
+    let desde = p.desde
+    let hasta = valida(p.hasta) ? p.hasta : hoy
+    if (desde > hasta) [desde, hasta] = [hasta, desde]
+    return { desde, hasta, etiqueta: `del ${fecha(desde)} al ${fecha(hasta)}`, ...anterior(desde, hasta) }
   }
   const nombre = (PERIODOS as readonly string[]).includes(p.periodo ?? "") ? (p.periodo as PeriodoNombre) : porDefecto
   const [a, m, d] = hoy.split("-").map(Number)
@@ -75,7 +78,7 @@ export function resolverPeriodo(
     }
     case "anio_actual": {
       const desde = `${a}-01-01`
-      return { desde, hasta: hoy, etiqueta: `${a} hasta hoy`, prevDesde: `${a - 1}-01-01`, prevHasta: `${a - 1}-${dosDig(m)}-${dosDig(d)}` }
+      return { desde, hasta: hoy, etiqueta: `${a} hasta hoy`, prevDesde: `${a - 1}-01-01`, prevHasta: `${a - 1}-${dosDig(m)}-${dosDig(Math.min(d, finDeMes(a - 1, m)))}` }
     }
     case "mes_actual":
     default: {

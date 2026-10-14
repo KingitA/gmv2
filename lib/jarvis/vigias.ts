@@ -22,6 +22,7 @@ import { pesosCorto } from "@/lib/playroom/bloques"
 import { leerReglas, type Reglas } from "./reglas"
 import { crearPropuesta } from "./agenda"
 import { estadoIndicadores } from "./exterior"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 const EMPEORA_PARA_REABRIR = 1.25 // un aviso descartado vuelve si empeora 25 %
 const DIAS_REVISION_TRABADA = 1
@@ -44,10 +45,17 @@ type Fila = Record<string, unknown>
 const n0 = (v: unknown) => Number(v) || 0
 const lista = (xs: string[], max = 3) => (xs.length <= max ? xs.join(", ") : `${xs.slice(0, max).join(", ")} y ${xs.length - max} más`)
 
+const CLAVE_RPC: Record<string, string> = { jarvis_deuda_antiguedad: "cliente_id", jarvis_clientes_habitos: "cliente_id", jarvis_proveedores_resumen: "proveedor_id" }
+/** Sin el corte de 1.000 filas de PostgREST (ver herramientas.ts). */
 async function rpc(db: SupabaseClient, fn: string, args: Fila): Promise<Fila[]> {
-  const { data, error } = await db.rpc(fn, args)
-  if (error) throw new Error(`${fn}: ${error.message}`)
-  return (data ?? []) as Fila[]
+  try {
+    if (CLAVE_RPC[fn]) return await fetchAllRows<Fila>(() => db.rpc(fn, args), CLAVE_RPC[fn])
+    const { data, error } = await db.rpc(fn, args)
+    if (error) throw error
+    return (data ?? []) as Fila[]
+  } catch (e) {
+    throw new Error(`${fn}: ${(e as { message?: string })?.message ?? e}`)
+  }
 }
 
 type Vigia = (db: SupabaseClient, hoy: string, r: Reglas) => Promise<Candidato[]>
@@ -274,6 +282,27 @@ export async function detectar(db: SupabaseClient, hoy: string): Promise<{ candi
   return { candidatos: res.flat(), fallaron }
 }
 
+type Ultimo = { id: string; clave: string; status: string; severidad: number; vigia: string }
+
+/**
+ * Lo último que hay en la bandeja para cada clave en juego, más todo lo que sigue
+ * pendiente de ese tipo (para poder cerrarlo si el vigía ya no lo ve). Sin
+ * ventanas fijas de filas: no se pierde un "No" viejo ni queda un pendiente huérfano.
+ */
+async function ultimoPorClave(db: SupabaseClient, tipo: "aviso" | "propuesta", claves: string[], soloDeVigias: boolean) {
+  const ultimo = new Map<string, Ultimo>()
+  const cols = "id, clave, status, severidad, vigia, created_at"
+  for (let i = 0; i < claves.length; i += 100) {
+    const { data } = await db.from("ai_agenda_events").select(cols).eq("event_type", tipo).in("clave", claves.slice(i, i + 100)).order("created_at", { ascending: false })
+    for (const e of (data ?? []) as Ultimo[]) if (!ultimo.has(e.clave)) ultimo.set(e.clave, e)
+  }
+  let q = db.from("ai_agenda_events").select(cols).eq("event_type", tipo).eq("status", "pendiente").not("clave", "is", null)
+  if (soloDeVigias) q = q.not("vigia", "is", null)
+  const { data: pend } = await q
+  for (const e of (pend ?? []) as Ultimo[]) if (!ultimo.has(e.clave)) ultimo.set(e.clave, e)
+  return ultimo
+}
+
 /** Pasa los candidatos a la bandeja (ai_agenda_events): avisos y propuestas. */
 export async function sincronizar(db: SupabaseClient, candidatos: Candidato[], fallaron: string[]) {
   const avisos = await sincronizarAvisos(db, candidatos.filter((c) => !c.propuesta), fallaron)
@@ -283,10 +312,7 @@ export async function sincronizar(db: SupabaseClient, candidatos: Candidato[], f
 
 async function sincronizarPropuestas(db: SupabaseClient, candidatos: Candidato[], fallaron: string[]) {
   const ahora = new Date().toISOString()
-  const { data } = await db.from("ai_agenda_events").select("id, clave, status, severidad, vigia, decision")
-    .eq("event_type", "propuesta").not("vigia", "is", null).order("created_at", { ascending: false }).limit(2000)
-  const ultimo = new Map<string, { id: string; clave: string; status: string; severidad: number; vigia: string; decision: string | null }>()
-  for (const e of (data ?? []) as any[]) if (e.clave && !ultimo.has(e.clave)) ultimo.set(e.clave, e)
+  const ultimo = await ultimoPorClave(db, "propuesta", candidatos.map((c) => c.clave), true)
 
   let nuevos = 0, actualizados = 0, cerrados = 0
   const vistos = new Set<string>()
@@ -294,7 +320,7 @@ async function sincronizarPropuestas(db: SupabaseClient, candidatos: Candidato[]
     vistos.add(c.clave)
     const prev = ultimo.get(c.clave)
     if (prev?.status === "pendiente" || prev?.status === "en_progreso") {
-      await db.from("ai_agenda_events").update({ title: c.titulo, description: c.detalle ?? null, severidad: Math.round(c.severidad), impacto_estimado: c.propuesta!.impacto || null, metadata: c.datos, updated_at: ahora }).eq("id", prev.id)
+      await db.from("ai_agenda_events").update({ title: c.titulo, description: c.detalle ?? null, severidad: Math.round(c.severidad), impacto_estimado: c.propuesta!.impacto || null, metadata: c.datos, updated_at: ahora }).eq("id", prev.id).eq("status", "pendiente")
       actualizados++
       continue
     }
@@ -310,7 +336,7 @@ async function sincronizarPropuestas(db: SupabaseClient, candidatos: Candidato[]
   // Propuestas de vigías que ya no hacen falta (ej. el cliente pagó antes de que alguien decida)
   for (const e of ultimo.values()) {
     if (e.status !== "pendiente" || vistos.has(e.clave) || fallaron.includes(e.vigia)) continue
-    await db.from("ai_agenda_events").update({ status: "completada", cerrado_at: ahora, cierre_nota: "Ya no hace falta (el vigía ya no lo ve)", updated_at: ahora }).eq("id", e.id)
+    await db.from("ai_agenda_events").update({ status: "completada", cerrado_at: ahora, cierre_nota: "Ya no hace falta (el vigía ya no lo ve)", updated_at: ahora }).eq("id", e.id).eq("status", "pendiente")
     cerrados++
   }
   return { nuevos, actualizados, cerrados }
@@ -318,11 +344,7 @@ async function sincronizarPropuestas(db: SupabaseClient, candidatos: Candidato[]
 
 async function sincronizarAvisos(db: SupabaseClient, candidatos: Candidato[], fallaron: string[]) {
   const ahora = new Date().toISOString()
-  const { data } = await db.from("ai_agenda_events").select("id, clave, status, severidad, vigia, created_at")
-    .eq("event_type", "aviso").order("created_at", { ascending: false }).limit(2000)
-  const existentes = (data ?? []) as { id: string; clave: string; status: string; severidad: number; vigia: string }[]
-  const ultimoPorClave = new Map<string, (typeof existentes)[number]>()
-  for (const e of existentes) if (!ultimoPorClave.has(e.clave)) ultimoPorClave.set(e.clave, e)
+  const ultimo = await ultimoPorClave(db, "aviso", candidatos.map((c) => c.clave), false)
 
   let nuevos = 0, actualizados = 0, cerrados = 0
   const vistos = new Set<string>()
@@ -332,23 +354,24 @@ async function sincronizarAvisos(db: SupabaseClient, candidatos: Candidato[], fa
       title: c.titulo, description: c.detalle ?? null, tono: c.tono, acciones: c.acciones, severidad: Math.round(c.severidad),
       metadata: c.datos, related_entity_type: c.entidad?.tipo ?? null, related_entity_id: c.entidad?.id ?? null, updated_at: ahora,
     }
-    const prev = ultimoPorClave.get(c.clave)
+    const prev = ultimo.get(c.clave)
     if (prev?.status === "pendiente") {
-      await db.from("ai_agenda_events").update(fila).eq("id", prev.id)
+      await db.from("ai_agenda_events").update(fila).eq("id", prev.id).eq("status", "pendiente")
       actualizados++
       continue
     }
     if (prev?.status === "cancelada" && c.severidad < Number(prev.severidad) * EMPEORA_PARA_REABRIR) continue // descartado y no empeoró
-    await db.from("ai_agenda_events").insert({
+    const { error } = await db.from("ai_agenda_events").insert({
       ...fila, clave: c.clave, vigia: c.vigia, event_type: "aviso", source: "jarvis", status: "pendiente",
       priority: c.tono === "alerta" ? "alta" : "media",
     })
-    nuevos++
+    if (!error) nuevos++
+    else if (error.code !== "23505") throw new Error(error.message) // 23505 = ya hay uno vivo (otra revisión en paralelo)
   }
   // Lo que ya no se cumple se cierra solo (salvo que el vigía que lo genera haya fallado hoy)
-  for (const e of ultimoPorClave.values()) {
+  for (const e of ultimo.values()) {
     if (e.status !== "pendiente" || vistos.has(e.clave) || fallaron.includes(e.vigia)) continue
-    await db.from("ai_agenda_events").update({ status: "completada", cerrado_at: ahora, cierre_nota: "Se resolvió (el vigía ya no lo ve)", updated_at: ahora }).eq("id", e.id)
+    await db.from("ai_agenda_events").update({ status: "completada", cerrado_at: ahora, cierre_nota: "Se resolvió (el vigía ya no lo ve)", updated_at: ahora }).eq("id", e.id).eq("status", "pendiente")
     cerrados++
   }
   return { nuevos, actualizados, cerrados }

@@ -62,9 +62,10 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Tiene que ser un número positivo." }, { status: 400 })
     }
   } else if (clave === "nota:nueva" || clave.startsWith("nota:")) {
-    // valor = texto (o null para borrarla; el borrado queda registrado)
-    if (valor !== null && (typeof valor !== "string" || !valor.trim())) return NextResponse.json({ error: "La nota está vacía." }, { status: 400 })
-    if (typeof valor === "string") valor = valor.trim().slice(0, 500)
+    // valor = texto, o null para borrarla: se guarda "" (la columna no acepta null) y el borrado queda registrado
+    if (valor === null) valor = ""
+    else if (typeof valor !== "string" || !valor.trim()) return NextResponse.json({ error: "La nota está vacía." }, { status: 400 })
+    else valor = valor.trim().slice(0, 500)
   } else {
     return NextResponse.json({ error: "Ajuste desconocido." }, { status: 400 })
   }

@@ -24,7 +24,8 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261014g_jarvis_mundo_exterior.sql` | `ai_insumos` (catálogo de materias primas y qué indicadores las mueven), `ai_articulo_insumos` (de qué depende cada artículo: IA o persona; las correcciones van a la bitácora), `ai_indicadores_externos` (dólar, inflación, petróleo…, con fuente), RPC `jarvis_proveedor_insumos` y 3 reglas nuevas. No toca `articulos`. | **NO** — la aplica Juan |
+| `20261014h_jarvis_revision.sql` | **Seguridad**: prende RLS en ai_agenda_events, ai_conversations y ai_messages (estaba apagada: la migración a no cerraba nada) y saca permisos a anon/authenticated. La bitácora pone siempre la hora real. Un solo aviso o propuesta vivo por clave. `viajes_paradas.retencion_puso_cobro`. Consultas corregidas. | **NO** — la aplica Juan |
+| `20261014g_jarvis_mundo_exterior.sql` | `ai_insumos` (catálogo de materias primas y qué indicadores las mueven), `ai_articulo_insumos` (de qué depende cada artículo: IA o persona; las correcciones van a la bitácora), `ai_indicadores_externos` (dólar, inflación, petróleo…, con fuente), RPC `jarvis_proveedor_insumos` y 3 reglas nuevas. No toca `articulos`. | Sí (14/10) |
 | `20261014f_jarvis_retencion_registro.sql` | Trigger: retener o liberar a un cliente queda SIEMPRE en la bitácora (quién y cuándo), venga de donde venga el cambio. | Sí (14/10) |
 | `20261014e_jarvis_acciones.sql` | Recordatorios por persona (`para_usuario`; NULL = para todos). Clientes: `retener_entregas`, motivo, desde y quién. | Sí (14/10) |
 | `20261014d_jarvis_decisiones.sql` | Decisiones en la bandeja: qué se haría con el Sí, quién decidió, cuándo, nota, resultado, impacto estimado y real. Triggers: cada alta y cada decisión van a la bitácora. Reglas iniciales de los avisos en `ai_ajustes`. | Sí (14/10) |
@@ -33,6 +34,8 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 | `20261014_jarvis_cimientos.sql` | Bitácora inborrable (`ai_registro`), ajustes de modelo y tope (`ai_ajustes`), gasto (`ai_uso`), quién preguntó en conversaciones, **cierra un agujero de seguridad** (las conversaciones y la agenda de IA se podían leer y borrar con la clave pública), borra los 235 avisos viejos del lector de mails. | Sí (14/10) |
 
 ## Pendientes
+- [ ] **Juan aplica `20261014h_jarvis_revision.sql`** (seguridad).
+- [ ] Probar en el preview según `PASE-A-MAIN.md` §3 y dar el OK para main.
 - [x] Juan aplicó `20261014_jarvis_cimientos.sql` y `20261014b_jarvis_consultas.sql` (14/10).
 - [x] Juan aplicó `20261014c_jarvis_vigias.sql` (14/10).
 - [x] Juan aplicó `20261014d_jarvis_decisiones.sql` (14/10).
@@ -49,6 +52,46 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Revisión general del código (3 revisores en paralelo)
+- **Chat e IA:**
+  - la fecha de las materias primas había perdido las barras al editarla, así que **no se guardaba nada** buscado en internet;
+  - un usuario podía escribir en la charla de otro, y la pantalla podía mandar un historial falso. Ahora **el historial sale solo de la base y es de quien pregunta**; la pantalla ya no lo manda;
+  - las charlas crecían sin límite: pasando ~500 mil caracteres siguen en una nueva, con un repaso de lo último;
+  - el gasto del mes se cortaba en 1.000 filas (el tope nunca saltaba);
+  - las consultas se cortaban en 1.000 filas (ahora van por páginas);
+  - pagos y cheques se cortaban en 500;
+  - si responde otro modelo (respaldo o el rápido), se le manda el historial sin el razonamiento de Opus;
+  - un turno cortado en una búsqueda en pausa ya no se guarda;
+  - `recalcular` ahora sabe quién mira;
+  - 29 de febrero y fechas inválidas.
+- **Agenda y decisiones:**
+  - **un doble clic podía ejecutar dos veces**: ahora la decisión se toma de forma atómica, solo si sigue pendiente;
+  - si se hace pero no se puede cerrar, se dice la verdad y el barrido diario destraba lo que quedó "en curso" más de 15 minutos;
+  - propuestas duplicadas: índice único y `limit(1)`;
+  - los vigías ya no pisan una decisión humana (filtran por "pendiente") y no usan ventanas fijas de 2.000 filas;
+  - **una propuesta del chat podía tener el id de otro cliente**: ahora los ids nunca vienen de la IA y la agenda muestra "Cliente: X";
+  - "Recordámelo" no escondía la propuesta;
+  - "Liberar" podía liberar a otro cliente con el mismo nombre;
+  - liberar borraba un "cobrar lo anterior" puesto por oficina: ahora existe `retencion_puso_cobro`;
+  - si falla la verificación de retenidos, el armado del viaje se frena; antes la parada salía sin candado;
+  - borrar una nota fallaba;
+  - la orden de compra de Jarvis cargaba unidades como bultos.
+- **Base:**
+  - **seguridad (lo más grave):** RLS apagada en 3 tablas, así que se podía falsificar un "Sí" a nombre de otro;
+  - la hora de la bitácora la ponía quien insertaba;
+  - deuda con proveedores inflada 2,4 veces por los vencimientos estimados (ahora van aparte);
+  - el costo no restaba las notas de crédito;
+  - las bajas de precio contaban como "aumentó";
+  - el registro de retención podía culpar a quien no fue;
+  - notas de débito;
+  - índice para el historial de precios;
+  - funciones jarvis_* solo para el servidor.
+- Todo verificado:
+  - tipos OK;
+  - las 14 herramientas y los vigías contra la base real, solo lectura;
+  - las funciones nuevas probadas como SELECT;
+  - 3 preguntas del examen con la IA: 9,7/10.
 
 ### 14/10/2026 (noche) — Examen completo y esfuerzo
 - **Opus 5.5 con esfuerzo normal y las instrucciones ajustadas: 8,8/10, reglas OK 19 de 20, USD 0,78.**

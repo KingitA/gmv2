@@ -97,7 +97,7 @@ export async function actualizarConIA(db: SupabaseClient, claves: string[], usua
   const client = new Anthropic()
   const errores: string[] = []
   const filas: Fila[] = []
-  const fechaOk = (f: unknown) => typeof f === "string" && /^d{4}-d{2}-d{2}$/.test(f) && f <= hoyISO()
+  const fechaOk = (f: unknown) => typeof f === "string" && /^\d{4}-\d{2}-\d{2}$/.test(f) && !Number.isNaN(Date.parse(f + "T12:00:00Z")) && f <= hoyISO()
 
   await Promise.all(defs.map(async (d) => {
     try {

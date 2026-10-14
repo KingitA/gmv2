@@ -6,6 +6,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { costoUsd, leerAjustes, type Esfuerzo, type RolModelo, type UsoTokens } from "./modelos"
 import { hoyISO } from "@/lib/formato"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 export interface RegistroUso {
   usuarioId: string | null
@@ -40,9 +41,13 @@ export async function registrarUso(db: SupabaseClient, r: RegistroUso): Promise<
 /** Gasto del mes calendario en curso (hora Argentina), en USD. */
 export async function gastoDelMes(db: SupabaseClient): Promise<number> {
   const desde = `${hoyISO().slice(0, 7)}-01T00:00:00-03:00`
-  const { data, error } = await db.from("ai_uso").select("costo_usd").gte("created_at", desde)
-  if (error || !data) return 0
-  return (data as { costo_usd: number | string }[]).reduce((s, f) => s + Number(f.costo_usd || 0), 0)
+  try {
+    // paginado: PostgREST corta en 1.000 filas y cada pregunta deja varias
+    const filas = await fetchAllRows<{ costo_usd: number | string }>(() => db.from("ai_uso").select("id, costo_usd").gte("created_at", desde))
+    return filas.reduce((s, f) => s + Number(f.costo_usd || 0), 0)
+  } catch {
+    return 0
+  }
 }
 
 export interface ModeloElegido {

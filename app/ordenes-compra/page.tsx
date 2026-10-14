@@ -441,7 +441,12 @@ export default function OrdenesCompraPage() {
         setSugerenciaData(data.items)
         const porId: Record<string, number> = {}
         for (const s of data.items) porId[s.articulo_id] = s.cantidad_sugerida
-        setArticulosTabla(prev => prev.map(a => ({ ...a, cantidad_sugerida: porId[a.articulo_id] ?? 0, ...(aplicar && porId[a.articulo_id] ? { cantidad_pedida: porId[a.articulo_id] } : {}) })))
+        // La sugerencia viene en UNIDADES: al aplicarla (Jarvis) se pasa a bultos si el artículo tiene bulto
+        const enBultos = (a: any, u: number) => {
+          const ub = Number(a.articulo?.unidades_por_bulto) || 0
+          return ub > 1 ? { cantidad_pedida: Math.ceil(u / ub), tipo_cantidad: "bulto" } : { cantidad_pedida: u, tipo_cantidad: "unidad" }
+        }
+        setArticulosTabla(prev => prev.map(a => ({ ...a, cantidad_sugerida: porId[a.articulo_id] ?? 0, ...(aplicar && porId[a.articulo_id] ? enBultos(a, porId[a.articulo_id]) : {}) })))
       }
     } finally {
       setLoadingSugerencia(false)

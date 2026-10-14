@@ -98,6 +98,7 @@ export async function sincronizarParadas(supabase: SupabaseClient, viajeId: stri
       viaje_id: viajeId, cliente_id, orden: ++orden,
       bloquear_entrega: motivo !== undefined,
       exigir_cobro_anterior: motivo !== undefined,
+      retencion_puso_cobro: motivo !== undefined,
       motivo_bloqueo: motivo !== undefined ? PREFIJO_RETENCION + motivo : null,
     }
   })

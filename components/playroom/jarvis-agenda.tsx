@@ -17,6 +17,7 @@ interface Item {
   fecha: string | null; accion: { tipo?: string; descripcion?: string } | null; impacto_estimado: number | null
   creado_por_nombre: string; creado_at: string; pospuesto_por_nombre?: string | null; vencido: boolean; puedo_decidir: boolean
   para_nombre: string | null
+  sobre: string | null
 }
 
 function proximoLunes() {
@@ -125,6 +126,7 @@ function Fila({ item, onListo, onPreguntar }: { item: Item; onListo: () => void;
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-azul-900">{item.titulo}</p>
+        {esPropuesta && item.sobre && <p className="text-xs font-semibold text-azul-600">{item.sobre}</p>}
         {item.detalle && <p className="text-[13px] text-neutro-600">{item.detalle}</p>}
         <p className="mt-0.5 text-xs text-neutro-400">
           {esPropuesta ? "Propuesto" : "Pedido"} por {item.creado_por_nombre} · {fmtFecha(item.creado_at)}

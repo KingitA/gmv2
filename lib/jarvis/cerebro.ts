@@ -17,7 +17,7 @@ import { HERRAMIENTAS, buscarHerramienta, ErrorHerramienta, type Contexto } from
 import { INSTRUCCIONES_JARVIS } from "./instrucciones"
 import { leerReglas, notasComoTexto } from "./reglas"
 import { elegirModelo, registrarUso } from "./uso"
-import { costoUsd, type Esfuerzo, type UsoTokens } from "./modelos"
+import { costoUsd, leerAjustes, type Esfuerzo, type UsoTokens } from "./modelos"
 
 const MAX_VUELTAS = 10
 const MAX_CHARS_RESULTADO = 40_000
@@ -43,7 +43,7 @@ const RESPONDER: Anthropic.Tool = {
 const HERRAMIENTAS_API: Anthropic.ToolUnion[] = [
   ...HERRAMIENTAS.map((h): Anthropic.Tool => ({ name: h.nombre, description: h.descripcion, input_schema: h.esquema })),
   { type: "web_search_20260209", name: "web_search", max_uses: 4 },
-  { type: "web_fetch_20260209", name: "web_fetch", max_uses: 3 },
+  { type: "web_fetch_20260209", name: "web_fetch", max_uses: 3, max_content_tokens: 8000 },
   RESPONDER,
 ]
 
@@ -94,6 +94,19 @@ async function llamar(modelo: string, messages: Anthropic.MessageParam[], notas:
   return stream.finalMessage()
 }
 
+/**
+ * Si responde un modelo distinto del principal (respaldo o el rápido por tope), se le
+ * mandan los turnos anteriores SIN los bloques de razonamiento: esos bloques están
+ * atados al modelo que los generó. El historial guardado no se toca.
+ */
+function sinRazonamiento(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  return messages.map((m) => {
+    if (m.role !== "assistant" || typeof m.content === "string") return m
+    const content = m.content.filter((b) => b.type !== "thinking" && b.type !== "redacted_thinking")
+    return { ...m, content: content.length ? content : [{ type: "text" as const, text: "…" }] }
+  })
+}
+
 /** Marca el último bloque del historial para que la IA lo reutilice en la próxima vuelta (más barato). */
 function conCache(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
   if (!messages.length) return messages
@@ -125,16 +138,20 @@ export async function preguntar(q: PreguntaJarvis): Promise<RespuestaJarvis> {
   let costo = 0
   let final: { respuesta: string; mostrar: string[]; seguir?: string } | null = null
 
+  const principal = (await leerAjustes(q.db)).modelos.pensador
+  const paraEnviar = () => conCache(modelo === principal ? messages : sinRazonamiento(messages))
+  let ultimoStop: string | null = null
   for (let vuelta = 0; vuelta < MAX_VUELTAS && !final; vuelta++) {
     let resp: Anthropic.Message
     try {
-      resp = await llamar(modelo, conCache(messages), notasTexto, esfuerzo)
+      resp = await llamar(modelo, paraEnviar(), notasTexto, esfuerzo)
     } catch (e) {
       if (!esErrorDeModelo(e) || modelo === elegido.respaldo) throw e
       console.error(`[jarvis] ${modelo} falló, sigo con ${elegido.respaldo}`, e)
       modelo = elegido.respaldo
-      resp = await llamar(modelo, conCache(messages), notasTexto, esfuerzo)
+      resp = await llamar(modelo, paraEnviar(), notasTexto, esfuerzo)
     }
+    ultimoStop = resp.stop_reason
     // El examen no escribe en la base (se corre desde una PC contra producción): solo suma el costo.
     costo += q.origen === "examen"
       ? costoUsd(modelo, resp.usage as UsoTokens)
@@ -197,6 +214,8 @@ export async function preguntar(q: PreguntaJarvis): Promise<RespuestaJarvis> {
     messages.push({ role: "user", content: resultados })
   }
 
+  // Si se cortó con una búsqueda en pausa, ese turno a medias no se guarda (rompería la próxima pregunta)
+  if (!final && ultimoStop === "pause_turn" && messages[messages.length - 1]?.role === "assistant") messages.pop()
   if (!final) final = { respuesta: "Me llevó demasiados pasos y corté. ¿Lo podés acotar un poco?", mostrar: [] }
 
   const elegidos = final.mostrar.map((id) => bloques.get(id)).filter((b): b is Bloque => !!b).slice(0, 3)

@@ -61,10 +61,25 @@ const fechaSola = (v: unknown) => (v == null ? null : String(v).slice(0, 10))
 const variacion = (a: number, b: number) => (b > 0 ? red(((a - b) / b) * 100, 1) : null)
 const margenPct = (neto: number, costo: number) => (neto > 0 && costo > 0 ? red(((neto - costo) / neto) * 100, 1) : null)
 
+/**
+ * Llamada a una función de la base, SIN el corte de 1.000 filas de PostgREST:
+ * las que pueden devolver muchas filas se piden por páginas, ordenadas por su
+ * clave (el orden "lindo" se arma después, en cada herramienta).
+ */
+const CLAVE_RPC: Record<string, string> = {
+  jarvis_deuda_antiguedad: "cliente_id", jarvis_clientes_habitos: "cliente_id", jarvis_ventas: "clave_id",
+  jarvis_proveedores_resumen: "proveedor_id", playroom_articulos_vendidos: "articulo_id", playroom_comisiones_viajantes: "vendedor_id",
+}
 async function rpc<T = Record<string, unknown>>(db: SupabaseClient, fn: string, args: Params): Promise<T[]> {
-  const { data, error } = await db.rpc(fn, args)
-  if (error) throw new Error(`${fn}: ${error.message}`)
-  return (data ?? []) as T[]
+  const clave = CLAVE_RPC[fn]
+  try {
+    if (clave) return await fetchAllRows<T>(() => db.rpc(fn, args), clave)
+    const { data, error } = await db.rpc(fn, args)
+    if (error) throw error
+    return (data ?? []) as T[]
+  } catch (e) {
+    throw new Error(`${fn}: ${e instanceof Error ? e.message : (e as { message?: string })?.message ?? e}`)
+  }
 }
 
 /** Busca por nombre en una tabla chica (zonas, vendedores, proveedores). */
@@ -173,6 +188,7 @@ const ventas: Herramienta = {
       rpc(ctx.db, "jarvis_ventas", { ...args, p_desde: r.desde, p_hasta: r.hasta }),
       esTiempo ? Promise.resolve([]) : rpc(ctx.db, "jarvis_ventas", { ...args, p_desde: r.prevDesde, p_hasta: r.prevHasta }),
     ])
+    act.sort((a, b) => n0(b.total) - n0(a.total))
     const prev = new Map(ant.map((f) => [String(f.clave_id), n0(f.total)]))
     const totAct = act.reduce((s, f) => s + n0(f.total), 0)
     const totAnt = ant.reduce((s, f) => s + n0(f.total), 0)
@@ -263,7 +279,7 @@ const deudaClientes: Herramienta = {
     if (str(p.vendedor)) { const v = await resolverNombre(ctx.db, "vendedores", str(p.vendedor)!, "el vendedor"); args.p_vendedor_id = v.id; filtros.push(`viajante ${v.nombre}`) }
     if (str(p.cliente)) { const c = await resolverCliente(ctx.db, str(p.cliente)!); args.p_cliente_id = c.id; filtros.push(`cliente ${c.nombre}`) }
     const minDias = Number(p.min_dias) || 0
-    const todas = await rpc(ctx.db, "jarvis_deuda_antiguedad", args)
+    const todas = (await rpc(ctx.db, "jarvis_deuda_antiguedad", args)).sort((a, b) => n0(b.saldo) - n0(a.saldo))
     const filas = todas
       .filter((f) => (num(f.dias_mas_vieja) ?? 0) >= minDias)
       .map((f) => ({
@@ -530,10 +546,11 @@ const proveedores: Herramienta = {
       margen_30d: margenPct(n0(f.venta_30d), n0(f.costo_30d)),
       ultimo_aumento: fechaSola(f.ultimo_aumento), dias_sin_aumento: num(f.dias_sin_aumento),
       aumento_prom_90d: num(f.aumento_promedio_pct_90d), articulos_aumentados_90d: n0(f.articulos_aumentados_90d),
-      deuda: red(n0(f.deuda_pendiente)), deuda_vencida: red(n0(f.deuda_vencida)),
+      deuda: red(n0(f.deuda_pendiente)), deuda_vencida: red(n0(f.deuda_vencida)), deuda_estimada: red(n0(f.deuda_estimada)),
       proximo_vencimiento: fechaSola(f.proximo_vencimiento), oc_abiertas: n0(f.oc_abiertas),
     }))
     const orden = String(p.orden || "venta")
+    if (orden === "venta") filas.sort((a, b) => b.venta_30d - a.venta_30d)
     if (orden === "deuda") filas.sort((a, b) => b.deuda - a.deuda)
     if (orden === "aumento") filas.sort((a, b) => (b.aumento_prom_90d ?? -1) - (a.aumento_prom_90d ?? -1))
     if (orden === "sin_aumento") filas = filas.filter((f) => f.venta_30d > 0).sort((a, b) => (b.dias_sin_aumento ?? 9999) - (a.dias_sin_aumento ?? 9999))
@@ -564,13 +581,16 @@ const pagosProveedores: Herramienta = {
   async ejecutar(ctx, p) {
     const dias = Math.max(1, Math.min(120, Number(p.dias) || 30))
     const hasta = sumarDiasISO(ctx.hoy, dias)
-    let q = ctx.db.from("vencimientos").select("id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)")
-      .eq("estado", "pendiente").lte("fecha_vencimiento", hasta)
     let nombre = ""
-    if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); q = q.eq("proveedor_id", pr.id); nombre = pr.nombre }
-    const { data, error } = await q.order("fecha_vencimiento").limit(500)
-    if (error) throw new Error(error.message)
-    const filas = (data ?? []).map((v: any) => ({
+    let provId: string | null = null
+    if (str(p.proveedor)) { const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor"); provId = pr.id; nombre = pr.nombre }
+    const data = await fetchAllRows<any>(() => {
+      const q = ctx.db.from("vencimientos").select("id, fecha_vencimiento, monto, concepto, tipo, es_estimado, proveedores(nombre)")
+        .eq("estado", "pendiente").lte("fecha_vencimiento", hasta)
+      return provId ? q.eq("proveedor_id", provId) : q
+    }, "id")
+    data.sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
+    const filas = data.map((v: any) => ({
       fecha: fechaSola(v.fecha_vencimiento), proveedor: v.proveedores?.nombre ?? "—", concepto: v.concepto ?? v.tipo ?? null,
       monto: red(n0(v.monto)), atrasado: String(v.fecha_vencimiento) < ctx.hoy ? "sí" : "", estimado: v.es_estimado ? "sí" : "",
     }))
@@ -601,11 +621,12 @@ const cheques: Herramienta = {
   descripcion: "Cheques de terceros en cartera (sin depositar ni entregar): cuánto hay, de quién y cuándo vencen. Opcional: solo los que vencen en los próximos N días.",
   esquema: { type: "object", properties: { vencen_en_dias: { type: "integer" }, ...P_LIMITE } },
   async ejecutar(ctx, p) {
-    let q = ctx.db.from("cheques").select("banco, numero, fecha_vencimiento, monto, es_echeq, cliente_origen_id").eq("estado", "EN_CARTERA")
     const dias = Number(p.vencen_en_dias) || 0
-    if (dias > 0) q = q.lte("fecha_vencimiento", sumarDiasISO(ctx.hoy, dias))
-    const { data, error } = await q.order("fecha_vencimiento").limit(500)
-    if (error) throw new Error(error.message)
+    const data = await fetchAllRows<any>(() => {
+      const q = ctx.db.from("cheques").select("id, banco, numero, fecha_vencimiento, monto, es_echeq, cliente_origen_id").eq("estado", "EN_CARTERA")
+      return dias > 0 ? q.lte("fecha_vencimiento", sumarDiasISO(ctx.hoy, dias)) : q
+    }, "id")
+    data.sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento)))
     // cheques.cliente_origen_id no tiene FK declarada: los nombres se buscan aparte
     const idsCli = [...new Set((data ?? []).map((c: any) => c.cliente_origen_id).filter(Boolean))]
     const { data: cs } = idsCli.length ? await ctx.db.from("clientes").select("id, nombre").in("id", idsCli) : { data: [] }
@@ -758,6 +779,8 @@ const proponerDecision: Herramienta = {
     if (!ctx.usuarioId) return { consultado: "Agenda (modo prueba)", datos: SIN_USUARIO, bloques: [] }
     const tipo = String(p.tipo_accion ?? "ninguna")
     const parametros: Record<string, unknown> = { ...((p.parametros as Record<string, unknown>) ?? {}) }
+    // Ningún id viene de la IA: se resuelven acá por nombre (si no, un Sí podría tocar a otro cliente)
+    for (const k of Object.keys(parametros)) if (k.endsWith("_id")) delete parametros[k]
     let entidad: { tipo: string; id: string } | null = null
     if (str(p.cliente)) {
       const c = await resolverCliente(ctx.db, str(p.cliente)!)
@@ -824,14 +847,14 @@ const clientesRetenidos: Herramienta = {
     const { data, error } = await ctx.db.from("clientes").select("id, nombre, retener_motivo, retener_desde, retener_por").eq("retener_entregas", true)
     if (error) throw new Error(error.message)
     const cs = (data ?? []) as { id: string; nombre: string; retener_motivo: string | null; retener_desde: string | null; retener_por: string | null }[]
-    const deuda = cs.length ? await rpc(ctx.db, "jarvis_deuda_antiguedad", { p_zona_id: null, p_vendedor_id: null, p_cliente_id: null }) : []
+    const deuda = (await Promise.all(cs.map((c) => rpc(ctx.db, "jarvis_deuda_antiguedad", { p_zona_id: null, p_vendedor_id: null, p_cliente_id: c.id })))).flat()
     const saldo = new Map(deuda.map((d) => [String(d.cliente_id), d]))
     const ids = cs.map((c) => c.retener_por).filter((x): x is string => !!x)
     const { data: us } = ids.length ? await ctx.db.from("usuarios").select("id, nombre").in("id", ids) : { data: [] }
     const nom = new Map(((us ?? []) as { id: string; nombre: string }[]).map((u) => [u.id, u.nombre]))
     const filas = cs.map((c) => {
       const d = saldo.get(c.id)
-      return { cliente: c.nombre, desde: fechaSola(c.retener_desde), motivo: c.retener_motivo, decidio: c.retener_por ? nom.get(c.retener_por) ?? "—" : "—", debe: red(n0(d?.saldo)), vencido_30: red(n0(d?.d30_59) + n0(d?.d60_89) + n0(d?.d90_mas)) }
+      return { cliente_id: c.id, cliente: c.nombre, desde: fechaSola(c.retener_desde), motivo: c.retener_motivo, decidio: c.retener_por ? nom.get(c.retener_por) ?? "—" : "—", debe: red(n0(d?.saldo)), vencido_30: red(n0(d?.d30_59) + n0(d?.d60_89) + n0(d?.d90_mas)) }
     })
     return {
       consultado: "Clientes con entregas retenidas y su deuda",

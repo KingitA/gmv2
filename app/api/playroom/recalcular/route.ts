@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   const parametros = (body.parametros && typeof body.parametros === "object" ? body.parametros : {}) as Record<string, unknown>
   const indice = Number(parametros._bloque) || 0
   try {
-    const r = await h.ejecutar(contextoNuevo(createAdminClient()), parametros)
+    const r = await h.ejecutar(contextoNuevo(createAdminClient(), auth.user.id), parametros)
     const bloque = r.bloques[indice] ?? r.bloques[0]
     if (!bloque) return NextResponse.json({ error: "Sin datos." }, { status: 404 })
     return NextResponse.json(bloque)

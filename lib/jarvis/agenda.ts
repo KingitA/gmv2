@@ -72,8 +72,8 @@ export async function crearPropuesta(db: SupabaseClient, p: NuevaPropuesta) {
   if (accion.tipo !== p.accion.tipo) throw new ErrorAgenda(`No existe la acción "${p.accion.tipo}".`)
   // misma propuesta ya pendiente → no se duplica
   if (p.clave) {
-    const { data: ya } = await db.from("ai_agenda_events").select("id").eq("clave", p.clave).eq("event_type", "propuesta").eq("status", "pendiente").maybeSingle()
-    if (ya) return (ya as { id: string }).id
+    const { data: ya } = await db.from("ai_agenda_events").select("id").eq("clave", p.clave).eq("event_type", "propuesta").in("status", ["pendiente", "en_progreso"]).limit(1)
+    if (ya?.length) return (ya[0] as { id: string }).id
   }
   const { data, error } = await db.from("ai_agenda_events").insert({
     event_type: "propuesta", source: p.conversacionId ? "chat" : "jarvis", status: "pendiente",
@@ -85,7 +85,14 @@ export async function crearPropuesta(db: SupabaseClient, p: NuevaPropuesta) {
     creado_por: p.usuarioId, conversacion_id: p.conversacionId ?? null, origen_id: p.origenId ?? null,
     related_entity_type: p.entidad?.tipo ?? null, related_entity_id: p.entidad?.id ?? null,
   }).select("id").single()
-  if (error) throw new Error(error.message)
+  if (error) {
+    // 23505: ya hay una propuesta viva con esa clave (otra revisión la creó en paralelo)
+    if (error.code === "23505" && p.clave) {
+      const { data: ya } = await db.from("ai_agenda_events").select("id").eq("clave", p.clave).in("status", ["pendiente", "en_progreso"]).limit(1)
+      if (ya?.length) return (ya[0] as { id: string }).id
+    }
+    throw new Error(error.message)
+  }
   return data.id as string
 }
 
@@ -123,16 +130,16 @@ export async function decidir(db: SupabaseClient, d: Decision) {
   if (d.decision === "posponer") {
     const fecha = d.fecha && ISO.test(d.fecha) ? d.fecha : sumarDiasISO(hoyISO(), 1)
     if (fecha <= hoyISO()) throw new ErrorAgenda("Elegí una fecha a partir de mañana.")
-    await actualizar(db, item.id, { ...base, due_date: fecha })
+    await tomar(db, item.id, { ...base, due_date: fecha })
     return { estado: "pospuesto", fecha }
   }
   if (d.decision === "no") {
-    await actualizar(db, item.id, { ...base, status: "cancelada", cerrado_por: d.usuarioId, cerrado_at: ahora, cierre_nota: nota ?? "Decidió que no" })
+    await tomar(db, item.id, { ...base, status: "cancelada", cerrado_por: d.usuarioId, cerrado_at: ahora, cierre_nota: nota ?? "Decidió que no" })
     return { estado: "rechazado" }
   }
 
-  // Sí: primero se anota la decisión (si no se puede anotar, no se ejecuta nada)
-  await actualizar(db, item.id, { ...base, status: "en_progreso" })
+  // Sí: primero se anota la decisión (si no se puede anotar, o ya la tomó otro, no se ejecuta nada)
+  await tomar(db, item.id, { ...base, status: "en_progreso" })
   let resultado
   try {
     resultado = item.event_type === "recordatorio"
@@ -142,13 +149,43 @@ export async function decidir(db: SupabaseClient, d: Decision) {
     resultado = { estado: "error" as const, detalle: e instanceof Error ? e.message : String(e) }
   }
   const terminado = resultado.estado !== "error"
-  await actualizar(db, item.id, {
-    ejecucion: { ...resultado, at: new Date().toISOString() },
-    status: terminado ? "completada" : "pendiente", // si falló, vuelve a la agenda
-    ...(terminado ? { cerrado_por: d.usuarioId, cerrado_at: new Date().toISOString(), cierre_nota: resultado.detalle } : {}),
-    updated_at: new Date().toISOString(),
-  })
+  try {
+    await actualizar(db, item.id, {
+      ejecucion: { ...resultado, at: new Date().toISOString() },
+      status: terminado ? "completada" : "pendiente", // si falló, vuelve a la agenda
+      ...(terminado ? { cerrado_por: d.usuarioId, cerrado_at: new Date().toISOString(), cierre_nota: resultado.detalle } : {}),
+      updated_at: new Date().toISOString(),
+    })
+  } catch (e) {
+    console.error("[jarvis] decisión hecha pero no cerrada", item.id, e)
+    return {
+      estado: terminado ? "hecho" : "error",
+      detalle: `${resultado.detalle} (Quedó hecho, pero no se pudo cerrar en la agenda: se ordena sola en la próxima revisión.)`,
+      abrir: "abrir" in resultado ? resultado.abrir : undefined,
+    }
+  }
   return { estado: terminado ? "hecho" : "error", detalle: resultado.detalle, abrir: "abrir" in resultado ? resultado.abrir : undefined }
+}
+
+/** Toma la decisión SOLO si sigue pendiente (atómico): si otro ya decidió, 409 y no se hace nada. */
+async function tomar(db: SupabaseClient, id: string, cambios: Record<string, unknown>) {
+  const { data, error } = await db.from("ai_agenda_events").update(cambios).eq("id", id).eq("status", "pendiente").select("id")
+  if (error) throw new Error(`No se pudo anotar la decisión: ${error.message}`)
+  if (!data?.length) throw new ErrorAgenda("Eso ya lo decidió otra persona (o vos, con otro clic).", 409)
+}
+
+/**
+ * Barrido (lo corre la revisión diaria): una decisión que quedó "en curso" más de
+ * 15 minutos (se cortó la conexión justo después de hacerla) vuelve a la agenda
+ * con una nota. Las acciones de hoy se pueden repetir sin daño (retener, liberar,
+ * abrir la orden), así que se puede volver a decidir.
+ */
+export async function destrabarEnCurso(db: SupabaseClient) {
+  const limite = new Date(Date.now() - 15 * 60_000).toISOString()
+  const { data } = await db.from("ai_agenda_events")
+    .update({ status: "pendiente", decision: null, cierre_nota: "Se cortó mientras se ejecutaba: revisá y volvé a decidir.", updated_at: new Date().toISOString() })
+    .eq("status", "en_progreso").lt("updated_at", limite).select("id")
+  return data?.length ?? 0
 }
 
 async function actualizar(db: SupabaseClient, id: string, cambios: Record<string, unknown>) {
@@ -157,6 +194,8 @@ async function actualizar(db: SupabaseClient, id: string, cambios: Record<string
 }
 
 export interface ItemAgenda {
+  /** cliente o proveedor sobre el que actúa el Sí (resuelto por el sistema) */
+  sobre: string | null
   id: string; tipo: "propuesta" | "recordatorio"; tono: string | null; titulo: string; detalle: string | null
   fecha: string | null; accion: { tipo?: string; descripcion?: string } | null; impacto_estimado: number | null
   creado_por: string | null; creado_por_nombre: string; creado_at: string
@@ -182,8 +221,10 @@ export async function agendaPendiente(db: SupabaseClient, usuarioId: string): Pr
   const filas = (data ?? []) as any[]
   const nombres = await nombresDeUsuarios(db, filas.flatMap((f) => [f.creado_por, f.decidido_por, f.para_usuario]))
   const hoy = hoyISO()
-  return filas.map((f) => ({
+  // Propuestas: solo las de hoy o antes (si la pospusieron, vuelve ese día). Recordatorios: también los de la semana.
+  return filas.filter((f) => f.event_type !== "propuesta" || !f.due_date || f.due_date <= hoy).map((f) => ({
     id: f.id, tipo: f.event_type, tono: f.tono, titulo: f.title, detalle: f.description, fecha: f.due_date,
+    sobre: f.accion?.parametros?.cliente ? `Cliente: ${f.accion.parametros.cliente}` : f.accion?.parametros?.proveedor ? `Proveedor: ${f.accion.parametros.proveedor}` : null,
     accion: f.accion, impacto_estimado: f.impacto_estimado == null ? null : Number(f.impacto_estimado),
     creado_por: f.creado_por, creado_por_nombre: f.creado_por ? nombres.get(f.creado_por) ?? "alguien" : "Jarvis", creado_at: f.created_at,
     pospuesto_por_nombre: f.decision === "posponer" && f.decidido_por ? nombres.get(f.decidido_por) ?? null : null,

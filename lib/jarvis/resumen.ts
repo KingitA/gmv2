@@ -14,6 +14,7 @@ import { calcularIndicadores } from "@/lib/playroom/indicadores"
 import { detectar, sincronizar } from "./vigias"
 import { actualizarConIA, actualizarFuentesFijas, estadoIndicadores, iaDesactualizada, indicadoresNecesarios } from "./exterior"
 import { clasificarPendientes } from "./clasificador"
+import { destrabarEnCurso } from "./agenda"
 import { anotar } from "./registro"
 import { elegirModelo, registrarUso } from "./uso"
 import type { UsoTokens } from "./modelos"
@@ -57,6 +58,7 @@ async function prepararExterior(db: SupabaseClient, usuarioId: string | null) {
 
 export async function revisionDiaria(db: SupabaseClient, usuarioId: string | null): Promise<ResultadoRevision> {
   const hoy = hoyISO()
+  try { await destrabarEnCurso(db) } catch (e) { console.error("[jarvis] destrabar", e) }
   const exterior = await prepararExterior(db, usuarioId)
   const [{ candidatos, fallaron }, { bloques }] = await Promise.all([
     detectar(db, hoy),
