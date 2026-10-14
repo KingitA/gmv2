@@ -30,6 +30,12 @@
    (raíz del repo). Si tocás un archivo del ERP, agregalo primero a
    `scripts/typecheck-movil.alcance.json` (§14). `next build` NO detecta errores de
    tipo: así llegó a producción el `ReferenceError` del 18/09.
+9. **Formatos, CUIT y códigos (LEER §20 antes de tocar cualquier pantalla)** ⇒ fecha
+   `dd/mm/aaaa` en hora argentina, moneda `$1.000,32`, CUIT `xx-xxxxxxxx-x`, solo con
+   `@gm/formato` y los inputs `MontoInput` / `FechaInput` / `CuitInput` de `ui.tsx`.
+   Nunca `<input type="number|date">`, `parseFloat`, `toFixed`/`toLocaleString` en
+   pantalla. Sin CUIT y CUIT repetido son VÁLIDOS (con reglas); el código de cliente lo
+   asigna el servidor. `npm run typecheck:movil` falla si aparece un patrón prohibido.
 
 ---
 
@@ -1873,3 +1879,86 @@ sin cobrar", dos con "cobrar sí o sí", una sin facturar), un cobro previo del 
 `/__mock/ocr?modo=`, `/__mock/rechazar-cobros?on=1`, `/__mock/anular-cobro?id=`, `/__mock/reset`.
 En el navegador el indicador dice "En línea" aunque el mock corte la red (Capacitor Network no
 existe ahí): las operaciones igual quedan en cola y salen al restaurarla.
+
+---
+
+## 20. Formatos, CUIT y códigos — reglas para las 3 apps (14/10/2026)
+
+> Reglas del dueño. Valen igual en el ERP web, vendedor, chofer y depósito. Detalle
+> completo en `docs/FORMATOS.md`. **Ya están en `main`** (merge 07c2752) y las
+> migraciones de base están aplicadas; lo que falta en el celular es **solo la APK**.
+
+### Formatos (fecha, moneda, CUIT)
+
+| Dato | Lo que ve y escribe el usuario | Lo que viaja / se guarda |
+|---|---|---|
+| Fecha | `09/10/2026`, hora argentina (GMT-3). Nunca mm/dd | `AAAA-MM-DD` (date) o ISO con zona (timestamptz) |
+| Moneda | `$1.000,32` ("1.500" = mil quinientos, "1,5" = uno y medio) | number |
+| CUIT | `20-12345678-9` | `20-12345678-9`; solo dígitos al mandarlo a ARCA/BCRA (`cuitDigitos`) |
+
+- Única fuente: `lib/formato/index.ts`, en las apps `import { … } from "@gm/formato"`
+  (alias en `vite.app.ts`, `tsconfig.base.json` y `vitest.config.ts`). Pruebas:
+  `packages/core/test/formato.test.ts`.
+- Mostrar: `fecha` / `fechaHora` / `fechaCorta` / `hora`, `moneda` / `numero` / `porcentaje`,
+  `formatCuit`. "Hoy" = `hoyISO()` (nunca `toISOString().slice(0,10)`: después de las 21 h da mañana).
+- Escribir: `MontoInput` (usa `parseMonto`), `FechaInput` (usa `parseFecha`), `CuitInput`
+  (máscara + `errorCuit`), todos en `ui.tsx` de cada app. **Prohibido** `<input type="number">`
+  (el WebView toma "1.500" como 1,5) y `<input type="date">`.
+- Control automático: `scripts/check-formatos.mjs` corre dentro de `npm run typecheck:movil`.
+  Falla ante cualquier `type="number"`, `toLocaleString`, `toFixed` en pantalla, `parseFloat`,
+  "hoy" en UTC, etc. Uso legítimo (formato de máquina): comentario `// formato-ok: <motivo>`.
+
+### CUIT: reglas de negocio
+
+1. **Siempre se guarda `xx-xxxxxxxx-x`.** Hay un trigger en la base (`trg_normalizar_cuit`)
+   en todas las columnas de CUIT, pero la app igual manda `normalizarCuit(x)`.
+2. **Sin CUIT es válido.** Vacío o `00-00000000-0` (se usaba para eso) = "no tiene CUIT" y
+   se guarda `null`. Esos clientes/proveedores operan SOLO con comprobantes no fiscales
+   (presupuesto, reversa, débitos no fiscales). El CUIT se exige únicamente para
+   comprobantes con CAE (FA/FB/NC/ND). **No** pedir CUIT obligatorio en un alta salvo que
+   el flujo vaya a facturar (ej. venta a cliente nuevo con factura: `faltanDatos`).
+3. **CUIT inválido se bloquea.** `errorCuit(x)`: 11 dígitos y dígito verificador (resto 1 → 9,
+   regla única de `lib/formato`). Mostrar el mensaje y no dejar guardar.
+4. **CUIT repetido es VÁLIDO, pero se AVISA y se dice cuál es el otro.** Distintos clientes
+   pueden compartir CUIT (sucursales, mismo dueño con dos negocios).
+   - App vendedor (`ClienteNuevo.tsx`): compara con `mismoCuit` contra la cartera replicada
+     y abre la hoja "Mismo CUIT que otro cliente" con **Crear igual** / **Ver la ficha**
+     (en venta a cliente nuevo: **Pasar el pedido a ese cliente** / **Crear igual**).
+   - Servidor: `POST /api/vendedor/clientes` YA NO rechaza con 409; crea el cliente y
+     devuelve `mismo_cuit` + `aviso`. `GET /api/clientes/mismo-cuit?cuit=&excluir=` busca
+     en TODOS los clientes (también los de otros viajantes) — usarlo cuando haya señal.
+   - Sin señal solo se puede comparar contra la cartera del viajante.
+5. **Comparar CUIT siempre con `mismoCuit` / `cuitDigitos`**, nunca string contra string
+   ("20123456789" y "20-12345678-9" son el mismo).
+6. **Compatibilidad con APKs viejas** (`lib/mobile/outbox/vendedor.ts`): un `cliente.crear`
+   con CUIT inválido se crea SIN CUIT (no se pierde el cliente ni se traba la cola); un
+   `cliente.editar` con CUIT inválido aplica el resto de los cambios y rechaza solo el CUIT.
+   No sacar esto mientras haya equipos con versiones anteriores a la que incluya §20.
+7. Cheques: el CUIT del librador también va con `CuitInput` (prop `sinError` para no
+   duplicar los avisos de BCRA) y se guarda con `normalizarCuit`.
+
+### Códigos de cliente / proveedor / SKU: nunca se repiten
+
+- Índices únicos en la base (`uq_clientes_codigo`, `uq_proveedores_codigo`; el SKU ya era único).
+- **Alta de cliente desde la app/web del vendedor: el código lo asigna el SERVIDOR** con el
+  primer número libre desde 1 (ocupados 1,2,3,5,8 → 4, después 6, 7…). La app NO pide ni
+  inventa código; un cliente recién creado offline no tiene código hasta sincronizar.
+  Si la app alguna vez muestra el código, tomarlo de la réplica después del sync.
+- Un código de un registro dado de baja sigue ocupado.
+- Trigger `trg_codigo_unico`: si un alta llega sin código, la base asigna el primer libre
+  (con lock para altas simultáneas). Lógica en `lib/codigos.ts` y `GET /api/codigos`.
+
+### Pendiente en los celulares
+
+- **Generar APK nueva de las 3 apps** (vendedor posterior a v0.3.0, chofer y depósito): hasta
+  entonces los equipos siguen con los formatos viejos, sin `CuitInput` ni el aviso de CUIT
+  repetido. No se traban: el servidor acepta lo que mandan (ver punto 6).
+- En la app vendedor, varios montos se confirman al salir del campo (`MontoInput`), no con
+  cada tecla: los totales en vivo se actualizan al dejar el campo.
+
+### Trampa del entorno (worktrees)
+
+Si `mobile/node_modules` de un worktree es un junction a `gmv2-nuevo/mobile/node_modules`,
+`@gm/core` resuelve al código de **gmv2-nuevo** (otra rama) y el typecheck/vitest de `mobile/`
+dan resultados falsos. Armar una carpeta real con junctions a cada paquete y `@gm/*`
+apuntando al propio worktree (quitar el junction con `cmd /c rmdir`, nunca borrado recursivo).
