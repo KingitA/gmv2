@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { revisionDiaria } from "@/lib/jarvis/resumen"
 
-// Revisión diaria de Jarvis (vercel.json → 8:00 hora argentina, lunes a sábado):
+// Revisión diaria de Jarvis (vercel.json → 5:00 hora argentina = 8:00 UTC, lunes a sábado):
 // vigías + foto de números + resumen del día. Exige CRON_SECRET siempre.
 export const maxDuration = 120
 

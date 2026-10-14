@@ -120,6 +120,10 @@
     "app/api/playroom/recalcular/",
     "app/api/playroom/resumen-del-dia/",
     "app/api/playroom/novedades/",
-    "app/api/cron/jarvis-revision/"
+    "app/api/cron/jarvis-revision/",
+    "components/playroom/jarvis-agenda.tsx",
+    "components/playroom/jarvis-ajustes.tsx",
+    "app/api/playroom/agenda/",
+    "app/api/playroom/jarvis/"
   ]
 }

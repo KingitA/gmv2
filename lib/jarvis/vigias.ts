@@ -9,23 +9,16 @@
  *     aviso que ya no está   → se cierra solo ("se resolvió")
  *     aviso descartado       → no vuelve, salvo que empeore 25 % o más
  *
- * Los umbrales están acá arriba. En la etapa 3 pasan a "Reglas de Jarvis"
- * (los carga una persona desde la pantalla).
+ * Los umbrales son "Reglas de Jarvis" (lib/jarvis/reglas.ts): los define una
+ * persona desde la pantalla y cada cambio queda en la bitácora.
  */
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { sumarDiasISO } from "@/lib/formato"
 import { pesosCorto } from "@/lib/playroom/bloques"
+import { leerReglas, type Reglas } from "./reglas"
 
-const UMBRAL = {
-  deudaVencidaMinima: 100_000,      // $ con 30+ días para avisar que volvió a comprar
-  diasCompraReciente: 3,            // "volvió a comprar" = pedido en los últimos N días
-  atrasoHabitual: 1.5,              // días sin comprar / días entre compras
-  coberturaMaxDias: 7,              // stock que alcanza para menos de N días
-  ventaDiariaMinima: 2,             // solo artículos que se venden de verdad
-  diasCobroSinVerificar: 2,
-  diasRevisionTrabada: 1,
-  empeoraParaReabrir: 1.25,
-}
+const EMPEORA_PARA_REABRIR = 1.25 // un aviso descartado vuelve si empeora 25 %
+const DIAS_REVISION_TRABADA = 1
 
 export interface Candidato {
   clave: string
@@ -49,15 +42,15 @@ async function rpc(db: SupabaseClient, fn: string, args: Fila): Promise<Fila[]> 
   return (data ?? []) as Fila[]
 }
 
-type Vigia = (db: SupabaseClient, hoy: string) => Promise<Candidato[]>
+type Vigia = (db: SupabaseClient, hoy: string, r: Reglas) => Promise<Candidato[]>
 
 /** Cliente con deuda vencida que volvió a comprar. */
-const deudaYCompra: Vigia = async (db, hoy) => {
+const deudaYCompra: Vigia = async (db, hoy, r) => {
   const deuda = (await rpc(db, "jarvis_deuda_antiguedad", { p_zona_id: null, p_vendedor_id: null, p_cliente_id: null }))
     .map((f): Fila & { vencida: number } => ({ ...f, vencida: n0(f.d30_59) + n0(f.d60_89) + n0(f.d90_mas) }))
-    .filter((f) => f.vencida >= UMBRAL.deudaVencidaMinima)
+    .filter((f) => f.vencida >= r.regla_deuda_vencida_minima)
   if (!deuda.length) return []
-  const desde = sumarDiasISO(hoy, -UMBRAL.diasCompraReciente)
+  const desde = sumarDiasISO(hoy, -r.regla_dias_compra_reciente)
   const { data } = await db.from("pedidos").select("cliente_id, numero_pedido, fecha, total, estado")
     .in("cliente_id", deuda.map((d) => d.cliente_id as string)).neq("estado", "eliminado").gte("fecha", desde)
   const pedidos = (data ?? []) as Fila[]
@@ -80,9 +73,9 @@ const deudaYCompra: Vigia = async (db, hoy) => {
 }
 
 /** Clientes habituales que dejaron de comprar (un solo aviso agrupado). */
-const dejaronDeComprar: Vigia = async (db) => {
+const dejaronDeComprar: Vigia = async (db, _hoy, r) => {
   const filas = (await rpc(db, "jarvis_clientes_habitos", { p_meses: 4, p_zona_id: null, p_vendedor_id: null, p_cliente_id: null }))
-    .filter((f) => n0(f.meses_con_compra) >= 2 && n0(f.dias_entre_compras) > 0 && n0(f.dias_sin_comprar) / n0(f.dias_entre_compras) > UMBRAL.atrasoHabitual)
+    .filter((f) => n0(f.meses_con_compra) >= 2 && n0(f.dias_entre_compras) > 0 && n0(f.dias_sin_comprar) / n0(f.dias_entre_compras) > r.regla_atraso_habitual)
     .sort((a, b) => n0(b.venta_mensual_promedio) - n0(a.venta_mensual_promedio))
   if (!filas.length) return []
   const enJuego = filas.reduce((s, f) => s + n0(f.venta_mensual_promedio), 0)
@@ -99,18 +92,18 @@ const dejaronDeComprar: Vigia = async (db) => {
 }
 
 /** Artículos que se venden bien y les queda stock para pocos días. */
-const sinStock: Vigia = async (db) => {
-  const filas = (await rpc(db, "jarvis_cobertura_stock", { p_proveedor_id: null, p_categoria: null, p_dias_base: 30, p_max_dias: UMBRAL.coberturaMaxDias, p_limite: 200 }))
-    .filter((f) => n0(f.dias_cobertura) > 0 && n0(f.venta_diaria) >= UMBRAL.ventaDiariaMinima)
+const sinStock: Vigia = async (db, _hoy, r) => {
+  const filas = (await rpc(db, "jarvis_cobertura_stock", { p_proveedor_id: null, p_categoria: null, p_dias_base: 30, p_max_dias: r.regla_cobertura_max_dias, p_limite: 200 }))
+    .filter((f) => n0(f.dias_cobertura) > 0 && n0(f.venta_diaria) >= r.regla_venta_diaria_minima)
   if (!filas.length) return []
   const valorDia = filas.reduce((s, f) => s + n0(f.venta_diaria) * n0(f.costo_unitario), 0)
   return [{
     clave: "sin-stock", vigia: "sin_stock", tono: "atencion",
-    titulo: `${filas.length} artículo${filas.length === 1 ? "" : "s"} que se venden bien tienen stock para menos de ${UMBRAL.coberturaMaxDias} días`,
+    titulo: `${filas.length} artículo${filas.length === 1 ? "" : "s"} que se venden bien tienen stock para menos de ${r.regla_cobertura_max_dias} días`,
     detalle: `Entre ellos ${lista(filas.map((f) => String(f.articulo)))}. Según el stock cargado en el sistema.`,
     acciones: [
-      { texto: "Ver cuáles", pregunta: `¿Qué artículos se quedan sin stock en menos de ${UMBRAL.coberturaMaxDias} días?` },
-      { texto: "¿De qué proveedores?", pregunta: `De los artículos que se quedan sin stock en menos de ${UMBRAL.coberturaMaxDias} días, agrupalos por proveedor` },
+      { texto: "Ver cuáles", pregunta: `¿Qué artículos se quedan sin stock en menos de ${r.regla_cobertura_max_dias} días?` },
+      { texto: "¿De qué proveedores?", pregunta: `De los artículos que se quedan sin stock en menos de ${r.regla_cobertura_max_dias} días, agrupalos por proveedor` },
     ],
     severidad: valorDia * 30, datos: { cantidad: filas.length, articulos: filas.slice(0, 15).map((f) => f.articulo) },
   }]
@@ -150,15 +143,15 @@ const chequesPorVencer: Vigia = async (db, hoy) => {
 }
 
 /** Cobros cargados que Finanzas todavía no verificó. */
-const cobrosSinVerificar: Vigia = async (db, hoy) => {
-  const limite = sumarDiasISO(hoy, -UMBRAL.diasCobroSinVerificar)
+const cobrosSinVerificar: Vigia = async (db, hoy, r) => {
+  const limite = sumarDiasISO(hoy, -r.regla_dias_cobro_sin_verificar)
   const { data } = await db.from("pagos_clientes").select("monto, created_at").in("estado", ["pendiente", "pendiente_rendicion"]).lt("created_at", `${limite}T23:59:59-03:00`)
   const ps = (data ?? []) as Fila[]
   if (!ps.length) return []
   const total = ps.reduce((s, p) => s + n0(p.monto), 0)
   return [{
     clave: "cobros-sin-verificar", vigia: "cobros_sin_verificar", tono: "atencion",
-    titulo: `${ps.length} cobro${ps.length === 1 ? "" : "s"} por ${pesosCorto(total)} llevan más de ${UMBRAL.diasCobroSinVerificar} días sin verificar en Caja`,
+    titulo: `${ps.length} cobro${ps.length === 1 ? "" : "s"} por ${pesosCorto(total)} llevan más de ${r.regla_dias_cobro_sin_verificar} días sin verificar en Caja`,
     acciones: [{ texto: "¿Cuáles son?", pregunta: "¿Qué cobros están pendientes de verificar en Caja y desde cuándo?" }],
     severidad: total, datos: { cantidad: ps.length, total },
   }]
@@ -166,13 +159,13 @@ const cobrosSinVerificar: Vigia = async (db, hoy) => {
 
 /** Pedidos de clientes nuevos esperando que la oficina los libere. */
 const revisionTrabada: Vigia = async (db, hoy) => {
-  const { data } = await db.from("pedidos").select("numero_pedido, total, fecha").eq("estado", "en_revision").lte("fecha", sumarDiasISO(hoy, -UMBRAL.diasRevisionTrabada))
+  const { data } = await db.from("pedidos").select("numero_pedido, total, fecha").eq("estado", "en_revision").lte("fecha", sumarDiasISO(hoy, -DIAS_REVISION_TRABADA))
   const ps = (data ?? []) as Fila[]
   if (!ps.length) return []
   const total = ps.reduce((s, p) => s + n0(p.total), 0)
   return [{
     clave: "revision-trabada", vigia: "revision_trabada", tono: "atencion",
-    titulo: `${ps.length} pedido${ps.length === 1 ? "" : "s"} de cliente nuevo esperan revisión hace más de ${UMBRAL.diasRevisionTrabada} día`,
+    titulo: `${ps.length} pedido${ps.length === 1 ? "" : "s"} de cliente nuevo esperan revisión hace más de ${DIAS_REVISION_TRABADA} día`,
     detalle: `Por ${pesosCorto(total)}. Hasta que la oficina los libere no se preparan.`,
     acciones: [{ texto: "Ver pedidos", pregunta: "¿Qué pedidos están en revisión y de qué clientes?" }],
     severidad: total, datos: { pedidos: ps.map((p) => p.numero_pedido), total },
@@ -192,8 +185,9 @@ export const VIGIAS: Record<string, Vigia> = {
 /** Corre todos los vigías. Si uno falla, los demás siguen (y se informa cuál falló). */
 export async function detectar(db: SupabaseClient, hoy: string): Promise<{ candidatos: Candidato[]; fallaron: string[] }> {
   const fallaron: string[] = []
+  const { reglas } = await leerReglas(db)
   const res = await Promise.all(Object.entries(VIGIAS).map(async ([nombre, v]) => {
-    try { return await v(db, hoy) } catch (e) { console.error(`[jarvis] vigía ${nombre}`, e); fallaron.push(nombre); return [] }
+    try { return await v(db, hoy, reglas) } catch (e) { console.error(`[jarvis] vigía ${nombre}`, e); fallaron.push(nombre); return [] }
   }))
   return { candidatos: res.flat(), fallaron }
 }
@@ -221,7 +215,7 @@ export async function sincronizar(db: SupabaseClient, candidatos: Candidato[], f
       actualizados++
       continue
     }
-    if (prev?.status === "cancelada" && c.severidad < Number(prev.severidad) * UMBRAL.empeoraParaReabrir) continue // descartado y no empeoró
+    if (prev?.status === "cancelada" && c.severidad < Number(prev.severidad) * EMPEORA_PARA_REABRIR) continue // descartado y no empeoró
     await db.from("ai_agenda_events").insert({
       ...fila, clave: c.clave, vigia: c.vigia, event_type: "aviso", source: "jarvis", status: "pendiente",
       priority: c.tono === "alerta" ? "alta" : "media",

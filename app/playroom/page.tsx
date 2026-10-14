@@ -5,12 +5,14 @@
 // informes de siempre. Nada de lo que se haga acá modifica datos del sistema.
 
 import { useEffect, useRef, useState, type ComponentType } from 'react'
-import { ArrowLeft, BarChart3, ClipboardCheck, FileSpreadsheet, Lightbulb, Package, Receipt, RefreshCw, Users, Wallet, Sparkles, X, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, BarChart3, Bot, ClipboardCheck, FileSpreadsheet, Lightbulb, Package, Receipt, RefreshCw, Users, Wallet, Sparkles, X, type LucideIcon } from 'lucide-react'
 import { useUrlParams } from '@/lib/hooks/use-url-state'
 import { cn } from '@/lib/utils'
 import { fecha as fmtFecha, hora, partesAR } from '@/lib/formato'
 import { TableroVista, useTablero } from '@/components/playroom/tablero'
 import { JarvisPanel, type JarvisPanelRef } from '@/components/playroom/jarvis-panel'
+import { JarvisAgenda } from '@/components/playroom/jarvis-agenda'
+import JarvisAjustes from '@/components/playroom/jarvis-ajustes'
 import RotacionStockMuerto from '@/components/playroom/reportes/RotacionStockMuerto'
 import RankingClientesABC from '@/components/playroom/reportes/RankingClientesABC'
 import CuentasCorrientes from '@/components/playroom/reportes/CuentasCorrientes'
@@ -27,6 +29,7 @@ const INFORMES: { id: string; titulo: string; descripcion: string; icono: Lucide
   { id: 'rotacion', titulo: 'Rotación y stock muerto', descripcion: 'Capital inmovilizado y qué liquidar', icono: Package, Componente: RotacionStockMuerto },
   { id: 'preparacion', titulo: 'Preparación por empleado', descripcion: 'Pedidos, renglones, plata y tiempo de cada uno en el depósito', icono: ClipboardCheck, Componente: PreparacionDeposito },
   { id: 'fiscal', titulo: 'Fiscal ARCA', descripcion: 'Libro IVA ventas y exportación', icono: FileSpreadsheet, Componente: ComprobantesFiscal },
+  { id: 'jarvis', titulo: 'Jarvis: reglas y decisiones', descripcion: 'Reglas de los avisos, lo que tiene que saber, modelo, gasto y quién decidió qué', icono: Bot, Componente: JarvisAjustes },
 ]
 
 interface Novedad { id: string; tono: 'alerta' | 'atencion' | 'oportunidad'; titulo: string; detalle?: string; acciones?: { texto: string; pregunta: string }[] }
@@ -136,6 +139,9 @@ export default function PlayroomPage() {
 
             {/* ── Tablero ── */}
             <TableroVista t={tablero} onPreguntar={preguntar} />
+
+            {/* ── Para decidir y recordar (agenda de Jarvis) ── */}
+            <JarvisAgenda onPreguntar={preguntar} />
 
             {/* ── Lo que Jarvis notó ── */}
             <section className="rounded-2xl border border-neutro-200 bg-white p-4 sm:p-5">

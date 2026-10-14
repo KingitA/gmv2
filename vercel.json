@@ -10,7 +10,7 @@
         },
         {
             "path": "/api/cron/jarvis-revision",
-            "schedule": "0 11 * * 1-6"
+            "schedule": "0 8 * * 1-6"
         }
     ]
 }

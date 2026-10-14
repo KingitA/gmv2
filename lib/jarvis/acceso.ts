@@ -13,8 +13,6 @@ import { requireAuth, getUserRoles } from "@/lib/auth"
 
 export const ROLES_JARVIS = ["admin", "administrativo"] as const
 
-/** Tipos de decisión que mueven plata: solo admin. */
-export const DECISIONES_SOLO_ADMIN = new Set<string>(["pago", "transferencia", "cobro", "movimiento_dinero"])
 
 type Resultado =
   | { user: User; roles: string[]; error: null }
@@ -34,8 +32,11 @@ export async function requireJarvis(): Promise<Resultado> {
   return { user: auth.user, roles, error: null }
 }
 
-export function puedeConfirmar(roles: string[], tipoDecision: string): boolean {
+/** Confirman admin y administrativo; lo que mueve plata, solo admin (lib/jarvis/acciones.ts → mueveDinero). */
+export function puedeConfirmar(roles: string[], mueveDinero: boolean): boolean {
   if (roles.includes("admin")) return true
-  if (DECISIONES_SOLO_ADMIN.has(tipoDecision)) return false
+  if (mueveDinero) return false
   return roles.includes("administrativo")
 }
+
+export const esAdmin = (roles: string[]) => roles.includes("admin")

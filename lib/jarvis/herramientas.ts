@@ -1,7 +1,9 @@
 /**
  * Herramientas de Jarvis: las "ventanillas" por donde pide datos al sistema.
  *
- * - Todas son de SOLO LECTURA. Ninguna escribe en la base.
+ * - Las de datos son de SOLO LECTURA. Las únicas que escriben son las de la
+ *   AGENDA de Jarvis (recordatorios y propuestas): anotan algo para que una
+ *   persona lo vea y decida; nunca cambian datos del negocio.
  * - Cada una es una consulta fija y probada: Jarvis no puede inventar SQL.
  * - Cada una devuelve:
  *     consultado → qué revisó, en palabras simples (se muestra "Revisé…")
@@ -18,10 +20,15 @@ import { CATALOGO_TABLERO } from "@/lib/playroom/catalogo-tablero"
 import { fetchAllRows } from "@/lib/playroom/queries"
 import { hoyISO, sumarDiasISO } from "@/lib/formato"
 import { PERIODOS, resolverPeriodo, type Rango } from "./periodos"
+import { ACCIONES } from "./acciones"
+import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones } from "./agenda"
 
 export interface Contexto {
   db: SupabaseClient
   hoy: string
+  /** quién pregunta (null = proceso automático o examen: no se agenda nada) */
+  usuarioId: string | null
+  conversacionId?: string | null
 }
 
 export interface Resultado {
@@ -685,11 +692,116 @@ const comisiones: Herramienta = {
   },
 }
 
+// ─── 13-16. Agenda de Jarvis ───────────────────────────────────────────────
+const SIN_USUARIO = "Modo prueba: no se agenda nada (no hay una persona detrás de esta pregunta)."
+
+const agendarRecordatorio: Herramienta = {
+  nombre: "agendar_recordatorio",
+  descripcion:
+    "Anota un recordatorio en la agenda para una fecha (ej. 'recordame el 1/11 revisar precios de Lanín'). Usala SOLO cuando el usuario lo pide. Queda con su nombre y la fecha. No cambia ningún dato del negocio.",
+  esquema: {
+    type: "object",
+    properties: {
+      titulo: { type: "string", description: "Qué hay que recordar, en una línea" },
+      fecha: { type: "string", description: "AAAA-MM-DD (hoy o después)" },
+      detalle: { type: "string", description: "Contexto útil para ese día (qué se habló, números)" },
+      cliente: { type: "string" }, proveedor: { type: "string" },
+    },
+    required: ["titulo", "fecha"],
+  },
+  async ejecutar(ctx, p) {
+    if (!ctx.usuarioId) return { consultado: "Agenda (modo prueba)", datos: SIN_USUARIO, bloques: [] }
+    let entidad: { tipo: string; id: string } | null = null
+    if (str(p.cliente)) entidad = { tipo: "cliente", id: (await resolverCliente(ctx.db, str(p.cliente)!)).id }
+    else if (str(p.proveedor)) entidad = { tipo: "proveedor", id: (await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor")).id }
+    try {
+      const id = await crearRecordatorio(ctx.db, { titulo: String(p.titulo ?? ""), detalle: str(p.detalle), fecha: String(p.fecha ?? ""), usuarioId: ctx.usuarioId, conversacionId: ctx.conversacionId, entidad })
+      return { consultado: "Agenda de Jarvis", datos: { agendado: true, id, fecha: p.fecha }, bloques: [] }
+    } catch (e) {
+      if (e instanceof ErrorAgenda) throw new ErrorHerramienta(e.message)
+      throw e
+    }
+  },
+}
+
+const proponerDecision: Herramienta = {
+  nombre: "proponer_decision",
+  descripcion:
+    "Deja una PROPUESTA en la agenda para que una persona con permiso apriete Sí / No / Recordámelo. Nada se hace hasta ese Sí. Usala cuando el usuario te pide 'proponelo' o 'dejalo para decidir', o cuando los datos muestran algo claro que alguien tiene que resolver. Explicá en el detalle por qué (con los números). Acciones posibles: " +
+    Object.values(ACCIONES).map((a) => `${a.tipo} (${a.descripcion})`).join("; "),
+  esquema: {
+    type: "object",
+    properties: {
+      titulo: { type: "string", description: "La propuesta en una línea, como pregunta o acción ('Llamar a X por la deuda de 45 días')" },
+      detalle: { type: "string", description: "Por qué, con los números que viste" },
+      tipo_accion: { type: "string", enum: Object.keys(ACCIONES) },
+      parametros: { type: "object", description: "Datos para la acción (ej. {responsable: 'Mario'})" },
+      impacto_estimado: { type: "number", description: "Plata que se estima cobrar, ganar o ahorrar si se hace (en $). Opcional." },
+      urgente: { type: "boolean" },
+      cliente: { type: "string" }, proveedor: { type: "string" },
+    },
+    required: ["titulo", "detalle", "tipo_accion"],
+  },
+  async ejecutar(ctx, p) {
+    if (!ctx.usuarioId) return { consultado: "Agenda (modo prueba)", datos: SIN_USUARIO, bloques: [] }
+    let entidad: { tipo: string; id: string } | null = null
+    if (str(p.cliente)) entidad = { tipo: "cliente", id: (await resolverCliente(ctx.db, str(p.cliente)!)).id }
+    else if (str(p.proveedor)) entidad = { tipo: "proveedor", id: (await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor")).id }
+    try {
+      const id = await crearPropuesta(ctx.db, {
+        titulo: String(p.titulo ?? ""), detalle: str(p.detalle), accion: { tipo: String(p.tipo_accion ?? "ninguna"), parametros: (p.parametros as Record<string, unknown>) ?? {} },
+        impactoEstimado: num(p.impacto_estimado), tono: p.urgente ? "alerta" : "atencion",
+        usuarioId: ctx.usuarioId, conversacionId: ctx.conversacionId, entidad,
+      })
+      return { consultado: "Agenda de Jarvis", datos: { propuesta_creada: true, id, nota: "Aparece en Playroom → 'Para decidir'. Nada se hace hasta que alguien apriete Sí." }, bloques: [] }
+    } catch (e) {
+      if (e instanceof ErrorAgenda) throw new ErrorHerramienta(e.message)
+      throw e
+    }
+  },
+}
+
+const verAgenda: Herramienta = {
+  nombre: "ver_agenda",
+  descripcion: "Lo pendiente de la agenda: propuestas sin decidir y recordatorios (vencidos, de hoy y de la semana), con quién los pidió.",
+  esquema: { type: "object", properties: {} },
+  async ejecutar(ctx) {
+    const items = await agendaPendiente(ctx.db)
+    const filas = items.map((i) => ({ fecha: i.fecha, tipo: i.tipo === "propuesta" ? "Para decidir" : "Recordatorio", que: i.titulo, pidio: i.creado_por_nombre }))
+    return {
+      consultado: "Agenda de Jarvis",
+      datos: items.map((i) => ({ tipo: i.tipo, titulo: i.titulo, fecha: i.fecha, vencido: i.vencido, pidio: i.creado_por_nombre, detalle: i.detalle })),
+      bloques: [{ ...tabla("Agenda pendiente", [{ clave: "fecha", titulo: "Fecha", formato: "fecha" }, { clave: "tipo", titulo: "Tipo" }, { clave: "que", titulo: "Qué" }, { clave: "pidio", titulo: "Lo pidió" }], filas), recalcular: { herramienta: "ver_agenda", parametros: {} } }],
+    }
+  },
+}
+
+const historialDecisionesH: Herramienta = {
+  nombre: "historial_decisiones",
+  descripcion: "Quién decidió qué y cuándo (bitácora que no se puede borrar): decisiones de la agenda, avisos descartados, cambios de reglas. Filtros: texto libre, cliente, desde (AAAA-MM-DD).",
+  esquema: { type: "object", properties: { texto: { type: "string" }, cliente: { type: "string" }, desde: { type: "string" }, ...P_LIMITE } },
+  async ejecutar(ctx, p) {
+    let entidadId: string | null = null
+    if (str(p.cliente)) entidadId = (await resolverCliente(ctx.db, str(p.cliente)!)).id
+    const filas = await historialDecisiones(ctx.db, { texto: str(p.texto), entidadId, desde: str(p.desde), limite: limite(p.limite, 30, 100) })
+    const vista = filas.map((f) => ({ cuando: f.cuando.slice(0, 10), quien: f.quien, que: f.que, sobre: String(f.sobre).slice(0, 120), nota: f.nota }))
+    return {
+      consultado: "Bitácora de decisiones de Jarvis",
+      datos: filas.map((f) => ({ cuando: f.cuando, quien: f.quien, que: f.que, sobre: f.sobre, nota: f.nota })),
+      bloques: [{ ...tabla("Historial de decisiones", [{ clave: "cuando", titulo: "Cuándo", formato: "fecha" }, { clave: "quien", titulo: "Quién" }, { clave: "que", titulo: "Qué hizo" }, { clave: "sobre", titulo: "Sobre" }, { clave: "nota", titulo: "Nota" }], vista), recalcular: { herramienta: "historial_decisiones", parametros: { ...p } } }],
+    }
+  },
+}
+
 // ─── Registro ──────────────────────────────────────────────────────────────
 export const HERRAMIENTAS: Herramienta[] = [
   indicadoresTablero, ventas, deudaClientes, clientesHabitos, fichaCliente, articulosVendidos,
   coberturaStock, proveedores, pagosProveedores, cheques, operacion, comisiones,
+  agendarRecordatorio, proponerDecision, verAgenda, historialDecisionesH,
 ]
+
+/** Las que escriben en la agenda: /recalcular NUNCA las corre. */
+export const HERRAMIENTAS_QUE_ESCRIBEN = new Set(["agendar_recordatorio", "proponer_decision"])
 
 const POR_NOMBRE = new Map(HERRAMIENTAS.map((h) => [h.nombre, h]))
 
@@ -697,6 +809,6 @@ export function buscarHerramienta(nombre: string): Herramienta | undefined {
   return POR_NOMBRE.get(nombre)
 }
 
-export function contextoNuevo(db: SupabaseClient): Contexto {
-  return { db, hoy: hoyISO() }
+export function contextoNuevo(db: SupabaseClient, usuarioId: string | null = null): Contexto {
+  return { db, hoy: hoyISO(), usuarioId }
 }

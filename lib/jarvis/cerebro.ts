@@ -15,6 +15,7 @@ import type { Bloque } from "@/lib/playroom/bloques"
 import { fecha, hoyISO } from "@/lib/formato"
 import { HERRAMIENTAS, buscarHerramienta, ErrorHerramienta, type Contexto } from "./herramientas"
 import { INSTRUCCIONES_JARVIS } from "./instrucciones"
+import { leerReglas, notasComoTexto } from "./reglas"
 import { elegirModelo, registrarUso } from "./uso"
 import { costoUsd, type UsoTokens } from "./modelos"
 
@@ -76,13 +77,16 @@ function esErrorDeModelo(e: unknown) {
     (e instanceof Anthropic.APIError && (e.status === 529 || e.status === 503))
 }
 
-async function llamar(modelo: string, messages: Anthropic.MessageParam[]) {
+async function llamar(modelo: string, messages: Anthropic.MessageParam[], notas: string) {
+  // Instrucciones fijas + notas del negocio (cambian poco): las dos van a memoria rápida (cache)
+  const system: Anthropic.TextBlockParam[] = [{ type: "text", text: INSTRUCCIONES_JARVIS, cache_control: { type: "ephemeral" } }]
+  if (notas) system.push({ type: "text", text: notas, cache_control: { type: "ephemeral" } })
   const stream = anthropic().messages.stream({
     model: modelo,
     max_tokens: 16000,
     thinking: { type: "adaptive" },
     output_config: { effort: "medium" },
-    system: [{ type: "text", text: INSTRUCCIONES_JARVIS, cache_control: { type: "ephemeral" } }],
+    system,
     tools: HERRAMIENTAS_API,
     messages,
   })
@@ -102,7 +106,9 @@ function conCache(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] 
 
 export async function preguntar(q: PreguntaJarvis): Promise<RespuestaJarvis> {
   const hoy = hoyISO()
-  const ctx: Contexto = { db: q.db, hoy }
+  const ctx: Contexto = { db: q.db, hoy, usuarioId: q.origen === "examen" ? null : q.usuarioId, conversacionId: q.conversacionId }
+  const { notas } = await leerReglas(q.db)
+  const notasTexto = notasComoTexto(notas)
   const elegido = await elegirModelo(q.db, "pensador")
   let modelo = q.modeloForzado ?? elegido.modelo
 
@@ -119,12 +125,12 @@ export async function preguntar(q: PreguntaJarvis): Promise<RespuestaJarvis> {
   for (let vuelta = 0; vuelta < MAX_VUELTAS && !final; vuelta++) {
     let resp: Anthropic.Message
     try {
-      resp = await llamar(modelo, conCache(messages))
+      resp = await llamar(modelo, conCache(messages), notasTexto)
     } catch (e) {
       if (!esErrorDeModelo(e) || modelo === elegido.respaldo) throw e
       console.error(`[jarvis] ${modelo} falló, sigo con ${elegido.respaldo}`, e)
       modelo = elegido.respaldo
-      resp = await llamar(modelo, conCache(messages))
+      resp = await llamar(modelo, conCache(messages), notasTexto)
     }
     // El examen no escribe en la base (se corre desde una PC contra producción): solo suma el costo.
     costo += q.origen === "examen"

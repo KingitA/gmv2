@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireJarvis } from "@/lib/jarvis/acceso"
-import { buscarHerramienta, contextoNuevo, ErrorHerramienta } from "@/lib/jarvis/herramientas"
+import { buscarHerramienta, contextoNuevo, ErrorHerramienta, HERRAMIENTAS_QUE_ESCRIBEN } from "@/lib/jarvis/herramientas"
 
 // Recalcular una tarjeta fijada desde el chat: corre la misma herramienta con los
 // mismos parámetros y devuelve UN bloque con los datos de hoy. Sin IA: solo la consulta.
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   let body: { herramienta?: unknown; parametros?: unknown }
   try { body = await req.json() } catch { return NextResponse.json({ error: "Pedido inválido" }, { status: 400 }) }
   const h = typeof body.herramienta === "string" ? buscarHerramienta(body.herramienta) : undefined
-  if (!h) return NextResponse.json({ error: "Este dato ya no se puede actualizar." }, { status: 404 })
+  if (!h || HERRAMIENTAS_QUE_ESCRIBEN.has(h.nombre)) return NextResponse.json({ error: "Este dato ya no se puede actualizar." }, { status: 404 })
 
   const parametros = (body.parametros && typeof body.parametros === "object" ? body.parametros : {}) as Record<string, unknown>
   const indice = Number(parametros._bloque) || 0

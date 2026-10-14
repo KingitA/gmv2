@@ -15,28 +15,55 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 ## Estado actual
 - **Etapa 0 (cimientos): lista.** Migración aplicada (verificado 14/10).
 - **Etapa 1 (chat nuevo): lista, falta probarla con la IA** (en el preview, o el examen con la clave en `.env.local`). Migración aplicada; las 12 consultas responden contra la base real.
-- **Etapa 2 (vigías y resumen del día): código listo.** Falta:
-  - aplicar `20261014c_jarvis_vigias.sql`;
-  - que exista `CRON_SECRET` en Vercel;
-  - probar "Revisar ahora" en el preview.
-- Etapa 3 (decisiones y agenda): sigue.
+- **Etapa 2 (vigías y resumen del día): lista.** Migración aplicada (14/10). Falta que exista `CRON_SECRET` en Vercel y probar "Revisar ahora" en el preview. **El reporte corre de lunes a sábado a las 5:00** (pedido de Juan; cron `0 8 * * 1-6` en hora UTC).
+- **Etapa 3 (decisiones, agenda, reglas): código listo.** Falta aplicar `20261014d_jarvis_decisiones.sql` y probar en el preview.
+- Etapa 4 (acciones conectadas: retener entregas, orden de compra prellenada): sigue.
 
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261014c_jarvis_vigias.sql` | La agenda vieja (`ai_agenda_events`) pasa a ser la bandeja de Jarvis: clave, tono, acciones, severidad, quién y cuándo la cerró. Cada cierre hecho por una persona queda en la bitácora. | **NO** — la aplica Juan |
+| `20261014d_jarvis_decisiones.sql` | Decisiones en la bandeja: qué se haría con el Sí, quién decidió, cuándo, nota, resultado, impacto estimado y real. Triggers: cada alta y cada decisión van a la bitácora. Reglas iniciales de los avisos en `ai_ajustes`. | **NO** — la aplica Juan |
+| `20261014c_jarvis_vigias.sql` | La agenda vieja (`ai_agenda_events`) pasa a ser la bandeja de Jarvis: clave, tono, acciones, severidad, quién y cuándo la cerró. Cada cierre hecho por una persona queda en la bitácora. | Sí (14/10) |
 | `20261014b_jarvis_consultas.sql` | Consultas de Jarvis (solo lectura): ventas agrupadas, deuda por antigüedad (libro mayor + FIFO), hábitos de compra, cobertura de stock, resumen por proveedor con último aumento. | Sí (14/10) |
 | `20261014_jarvis_cimientos.sql` | Bitácora inborrable (`ai_registro`), ajustes de modelo y tope (`ai_ajustes`), gasto (`ai_uso`), quién preguntó en conversaciones, **cierra un agujero de seguridad** (las conversaciones y la agenda de IA se podían leer y borrar con la clave pública), borra los 235 avisos viejos del lector de mails. | Sí (14/10) |
 
 ## Pendientes
 - [x] Juan aplicó `20261014_jarvis_cimientos.sql` y `20261014b_jarvis_consultas.sql` (14/10).
-- [ ] Juan aplica `20261014c_jarvis_vigias.sql`.
+- [x] Juan aplicó `20261014c_jarvis_vigias.sql` (14/10).
+- [ ] Juan aplica `20261014d_jarvis_decisiones.sql`.
 - [ ] Verificar que `CRON_SECRET` exista en Vercel. Sin eso, la revisión de las 8:00 no corre y queda solo el botón "Revisar ahora".
 - [ ] Para probar el chat desde esta PC hace falta la clave de Anthropic en `.env.local` (`ANTHROPIC_API_KEY=...`). La pone Juan; Claude no maneja claves. En Vercel ya está (el chat viejo anda).
 - [ ] Seguridad (fuera de Jarvis, avisar): `ai_emails`, `ai_email_attachments` y `ai_classifications` siguen con acceso público total. No se tocaron porque el lector de mails viejo las lee desde el navegador. Arreglarlas cuando se retome el lector.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Etapa 3, decisiones, agenda y reglas
+- Juan: el reporte va de lunes a sábado a las **5:00**. Cron cambiado a `0 8 * * 1-6` (Vercel usa hora UTC).
+- **Bandeja de Jarvis** (`ai_agenda_events`), con tres tipos:
+  - **aviso**: lo que nota un vigía;
+  - **propuesta**: Sí / No / Recordámelo;
+  - **recordatorio**: para una fecha.
+- **Cada alta y cada decisión pasan por trigger a la bitácora inborrable (`ai_registro`):** quién, cuándo, nota, qué se iba a hacer y el resultado.
+- `lib/jarvis/acciones.ts`: lo que pasa con un "Sí".
+  - Por ahora solo "ninguna" (anotar) y "tarea". En la etapa 4 se suman las acciones que tocan el sistema.
+  - Regla de oro: **la IA nunca ejecuta**. Ejecuta el sistema con el Sí de una persona, por el mismo camino de la pantalla.
+  - Lo que mueve plata (`mueveDinero`) lo confirma **solo un admin**.
+- `lib/jarvis/agenda.ts`: crear recordatorio o propuesta, decidir y ver lo pendiente con nombres.
+  - Un "No" a algo urgente exige nota.
+  - El "Sí" primero se anota y después se ejecuta: si no se puede anotar, no se hace nada; si la ejecución falla, vuelve a la agenda.
+- `lib/jarvis/reglas.ts`: los umbrales de los vigías y las **notas del negocio** se guardan en `ai_ajustes`, que registra quién y cuándo. Una nota borrada queda con valor vacío, así el borrado también se registra. Jarvis lee las notas antes de responder.
+- Chat, 4 herramientas nuevas: `agendar_recordatorio`, `proponer_decision`, `ver_agenda` y `historial_decisiones`. Las dos primeras **solo escriben en la agenda de Jarvis**, nunca en datos del negocio. `/recalcular` no las corre nunca y en el examen no escriben.
+- Rutas:
+  - `/api/playroom/agenda`: GET y POST.
+  - `/api/playroom/agenda/[id]/decidir`.
+  - `/api/playroom/jarvis`: reglas, notas, modelo y tope. Modelo y tope, solo admin.
+  - `/api/playroom/jarvis/historial`.
+- Pantallas:
+  - "Para decidir y recordar" en Playroom (`components/playroom/jarvis-agenda.tsx`). El Sí pide "¿Confirmás? Queda a tu nombre".
+  - Nuevo informe "Jarvis: reglas y decisiones" (`components/playroom/jarvis-ajustes.tsx`): reglas, notas, modelo y gasto del mes, historial.
+  - Si "solo urgentes" está elegido, "Lo que Jarvis notó" muestra solo los rojos.
+- No probado en pantalla: Claude no puede iniciar sesión. Se prueba en el preview.
 
 ### 14/10/2026 (noche) — Etapa 2, vigías y resumen del día
 - **No se creó ninguna tabla.** La agenda vieja `ai_agenda_events` pasa a ser la **bandeja de Jarvis** (`event_type = aviso`). El resumen del día y la "foto" diaria de los números van a la bitácora inborrable (`ai_registro`, acciones `resumen_del_dia` y `foto_diaria`).
