@@ -1973,7 +1973,7 @@ existe ahí): las operaciones igual quedan en cola y salen al restaurarla.
 
 ### Pendiente en los celulares
 
-- **Generar APK nueva de las 3 apps** (vendedor posterior a v0.3.0, chofer y depósito): hasta
+- **Vendedor: HECHO** en v0.3.1 (14/10/2026, instalada en el NuStar). Falta **chofer y depósito**: hasta
   entonces los equipos siguen con los formatos viejos, sin `CuitInput` ni el aviso de CUIT
   repetido. No se traban: el servidor acepta lo que mandan (ver punto 6).
 - En la app vendedor, varios montos se confirman al salir del campo (`MontoInput`), no con

@@ -3,6 +3,10 @@
 Formato: una sección por versión publicada (la agrega `npm run build:apks` con el
 texto de `--notas`). Más nueva arriba.
 
+## v0.3.1 (versionCode 8) — 2026-10-14
+
+- Resumen de cuenta en Cobrar (igual al ERP); tocar un comprobante abre su PDF para compartir y se pueden compartir varios; cartel Datos al solo si hace mas de 15 min; formatos nuevos de fecha, moneda y CUIT
+
 ## v0.3.0 (versionCode 7) — 2026-10-14
 
 - Lista y metodo por segmento a la vista; venta a cliente nuevo (comparar listas, datos al final, sin senal); ficha por segmento como el ERP; primer pedido de un cliente en revision de oficina; nunca un pedido sin lista o metodo; saldo de billetera unico; Precios agrega columnas; foto de cheques con lectura validada
