@@ -156,6 +156,9 @@ export interface Comprado {
 }
 
 /** = GET /api/vendedor/cliente/[id] + comprados + habituales. id = cliente.id */
+export type { MovimientoCC } from "@gm/vendedor"
+import type { MovimientoCC } from "@gm/vendedor"
+
 export interface CuentaCliente {
   id: string
   cliente: Cliente & { pendiente_verificacion?: number; devoluciones_en_proceso?: number; actualizado_at?: string | null; actualizado_por_nombre?: string | null }
@@ -168,6 +171,8 @@ export interface CuentaCliente {
   pagos_recientes: PagoReciente[]
   comprados: Comprado[]
   habituales: Array<{ articulo_id: string; veces_pedido: number; cantidad_habitual: number }>
+  /** Extracto del libro (= ERP, lib/cuenta-corriente/extracto.ts). null = no se pudo cargar; ausente = réplica vieja */
+  movimientos?: MovimientoCC[] | null
 }
 
 // ─── Pedidos ─────────────────────────────────────────────────────────────────

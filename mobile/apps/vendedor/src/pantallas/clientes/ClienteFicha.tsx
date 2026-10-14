@@ -8,6 +8,8 @@ import { AvisosBcra, CuitInput, HojaConfirmar, Pantalla, Rechazos, SinEnviar, fo
 import { HojaNuevaLocalidad, type LocalidadCreada } from "./ClienteNuevo"
 import { CAMPOS_FICHA_LISTAS, clienteListasDe, fichaListasDe, useFichaListas, useSegmentosCliente, type FichaListas } from "../../datos/segmentos"
 import { EditorListaMetodo, fichaCompleta } from "./EditorListaMetodo"
+import { usePdfComprobantes } from "../../datos/comprobantes-pdf"
+import { BarraCompartir, MarcaPdf, TituloCompartible, useSeleccionCompartir } from "./comprobantes-ui"
 import { CuadroSegmentos } from "../segmentos-ui"
 
 // Port de app/vendedor/clientes/[id]/page.tsx. Lee la cuenta del cliente de la réplica
@@ -94,6 +96,8 @@ export function ClienteFicha() {
   // los demás esperan esa réplica: mostrar lo general mientras tanto era justamente el error)
   const condSeg = useSegmentosCliente(id, {}, enCartera?.sinEnviar ? clienteListasDe(fichaListasDe(enCartera as unknown as Record<string, unknown>)) : null)
   // Lista/método de la ficha como están en el sistema (réplica de precios); un alta hecha acá, del payload
+  const pdf = usePdfComprobantes((m) => mostrar(m, "err"))
+  const selComp = useSeleccionCompartir()
   const fichaReplica = useFichaListas(id)
   const listasSinEnviar = ops.some((o) => o.tipo === "cliente.editar" && o.estado !== "enviado" && o.estado !== "rechazado" && (o.payload as OpClienteEditar)?.cliente_id === id
     && Object.keys((o.payload as OpClienteEditar)?.cambios || {}).some((k) => (CAMPOS_FICHA_LISTAS as readonly string[]).includes(k)))
@@ -288,6 +292,8 @@ export function ClienteFicha() {
     }
   }
 
+  // Comprobantes como PDF: tocar = ver/compartir; "Compartir varios" = elegir y mandar juntos
+  const pdfComps = comprobantes.map((cp) => ({ id: cp.id, tipo_comprobante: cp.tipo_comprobante, numero_comprobante: cp.numero_comprobante, fecha: cp.fecha }))
   const editando = edicion.abierto && !!form
   const editandoBonif = edicionBonif.abierto && !!bonifEdit
   const proy = cliente.saldo_proyectado ?? cliente.saldo_actual
@@ -336,13 +342,15 @@ export function ClienteFicha() {
 
         {/* Comprobantes con saldo */}
         <section>
-          <h2 className="mb-3 text-lg font-bold text-gray-700">Comprobantes pendientes</h2>
+          <TituloCompartible titulo="Comprobantes pendientes" sel={selComp} hayPdf={comprobantes.length > 0} />
           {comprobantes.length ? (
             <div className="space-y-3">
               {comprobantes.map((cp) => (
-                <div key={cp.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div>
+                <button key={cp.id} onClick={() => (selComp.activo ? selComp.toggle(cp.id) : void pdf.abrir(pdfComps.find((x) => x.id === cp.id)!))} disabled={pdf.ocupado}
+                  className={`block w-full rounded-2xl border bg-white p-4 text-left shadow-sm active:bg-gray-50 ${selComp.activo && selComp.sel.has(cp.id) ? "border-emerald-500 bg-emerald-50" : "border-gray-200"}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <MarcaPdf id={cp.id} sel={selComp} />
+                    <div className="min-w-0 flex-1">
                       <p className="font-bold text-gray-900">{cp.tipo_comprobante} {cp.numero_comprobante}</p>
                       <p className="text-sm text-gray-500">{fechaLocal(cp.fecha)} · Total {formatCurrency(cp.total_factura)}</p>
                     </div>
@@ -353,8 +361,9 @@ export function ClienteFicha() {
                       </span>
                     </div>
                   </div>
-                </div>
+                </button>
               ))}
+              <BarraCompartir sel={selComp} comprobantes={pdfComps} pdf={pdf} />
             </div>
           ) : (
             <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm">

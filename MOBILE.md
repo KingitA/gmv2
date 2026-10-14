@@ -1372,6 +1372,29 @@ por revisión de la oficina.
 - `pedido.crear` de un cliente inexistente (alta rechazada, p. ej. CUIT repetido) es rechazo
   definitivo con mensaje claro (no traba la cola).
 
+### Datos al…, resumen de cuenta y comprobantes en PDF (14/10/2026)
+
+- **Barra "Datos al …"**: en Vendedor aparece SOLO si el dato tiene más de 15 min (o falló
+  el último intento, o nunca se descargó). Core: `Frescura` acepta `soloSiViejo` (se
+  re-evalúa cada minuto); Depósito y Chofer siguen igual.
+- **Cobrar → pestaña "Resumen"** (entre Facturados y Pendientes): el EXTRACTO del ERP.
+  Lógica única en `lib/cuenta-corriente/extracto.ts` (etiquetas y saldo acumulado; lo usa
+  también `app/clientes/[id]/cuenta-corriente`) y carga única en
+  `lib/cuenta-corriente/extracto-servidor.ts` (lo usa `/api/clientes/[id]/cuenta-corriente`).
+  Viaja en la réplica `vendedor_cc` (`movimientos`, en LOTE para toda la cartera: por
+  cliente costaba ~4,5 s extra con 91 clientes), así se ve sin señal. Más nuevo arriba;
+  cobros en la calle sin verificar en gris (no suman) + saldo proyectado, igual que el ERP.
+- **Comprobantes = PDF**: tocar un comprobante (Resumen, comprobantes pendientes de la
+  ficha, 📄 en Facturados, detalle del pedido) baja su PDF (el mismo del ERP,
+  `/api/comprobantes-venta/:id/pdf` → URL firmada) y lo abre con el visor del equipo,
+  listo para compartir. "📤 Compartir varios" = elegir y mandar varios juntos por la hoja de
+  compartir de Android. Online-only. Plugin nativo propio `@gm/capacitor-archivos`
+  (`GmArchivos`: guardar en la caché de la app → abrir con ACTION_VIEW / compartir con
+  ACTION_SEND(_MULTIPLE), por el FileProvider que ya declara la app; borra lo de más de 1 día).
+  JS en `@gm/core` (`platform/archivos.ts`, en el navegador abre/descarga) y
+  `apps/vendedor/src/datos/comprobantes-pdf.ts`. Nombre del archivo:
+  "Presupuesto 0001-00001234 14-10-2026.pdf".
+
 ### Resultados de las pruebas (21/09/2026)
 Mock del ERP (`mobile/scripts/mock-vendedor.mjs`, idempotencia real) con el **catálogo real** de
 solo lectura (`fixture-vendedor.mjs`: 1.841 artículos, 86 clientes). Sin datos escritos en producción.

@@ -9,6 +9,7 @@ import { rechazosDe, useEncolar, usePedido } from "../../datos/hooks"
 import { preciosAl } from "../../datos/precios"
 import { useVer } from "../pedido-nuevo/contexto"
 import { BadgeEstado, fechaAR, formatCurrency, HojaConfirmar, Pantalla, Rechazos, SinDescargar, SinEnviar, useFotoZoom, useToast, useVolver, Vacio, ZoomFoto } from "../../ui"
+import { usePdfComprobantes } from "../../datos/comprobantes-pdf"
 
 // Detalle de un pedido (port de app/vendedor/pedidos/[id]/page.tsx).
 //  - Pedido del servidor: cantidades editables con guardado automático. En la web cada
@@ -202,21 +203,9 @@ function PedidoServidor({ vista }: { vista: Vista }) {
 
   const setCantidad = (r: Renglon, cantidad: number) => programar(new Map(local ?? []).set(r.detalleId, cantidad))
 
-  const abrirPdf = async (ruta: string) => {
-    // La web redirige a una URL firmada del bucket privado: se resuelve con la sesión
-    // del equipo y se abre FUERA de la app (el WebView no muestra PDF). Online-only.
-    try {
-      const token = await rt.auth.accessToken()
-      const ctrl = new AbortController()
-      const res = await fetch(`${rt.api.base}${ruta}`, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal })
-      const url = res.url
-      ctrl.abort()
-      if (!res.ok || !url || url.startsWith(rt.api.base)) throw new Error()
-      window.open(url, "_blank")
-    } catch {
-      mostrar("No se pudo abrir el PDF. Probá de nuevo con buena señal.", "err")
-    }
-  }
+  // PDF del comprobante/remito: se baja con la sesión del equipo y se abre con el visor
+  // (listo para compartir). Online-only. datos/comprobantes-pdf.ts
+  const pdf = usePdfComprobantes((m) => mostrar(m, "err"))
 
   return (
     <Pantalla
@@ -298,10 +287,10 @@ function PedidoServidor({ vista }: { vista: Vista }) {
             <p className="text-sm font-bold text-gray-700">Documentos</p>
             {!online && <p className="text-xs text-gray-500">Necesitás conexión para abrir los PDF.</p>}
             {fila.comprobantes.map((c) => (
-              <button key={c.id} disabled={!online || c.estado_pdf !== "generado"} onClick={() => void abrirPdf(`/api/comprobantes-venta/${c.id}/pdf`)} className="min-h-11 w-full rounded-xl border border-gray-300 px-3 text-left text-sm font-bold text-gray-800 disabled:opacity-40">📄 {c.tipo_comprobante} {c.numero_comprobante}</button>
+              <button key={c.id} disabled={!online || c.estado_pdf !== "generado"} onClick={() => void pdf.abrir({ id: c.id, tipo_comprobante: c.tipo_comprobante, numero_comprobante: c.numero_comprobante })} className="min-h-11 w-full rounded-xl border border-gray-300 px-3 text-left text-sm font-bold text-gray-800 disabled:opacity-40">📄 {c.tipo_comprobante} {c.numero_comprobante}</button>
             ))}
             {fila.remitos.map((r) => (
-              <button key={r.id} disabled={!online || r.estado_pdf !== "generado"} onClick={() => void abrirPdf(`/api/remitos/${r.id}/pdf`)} className="min-h-11 w-full rounded-xl border border-gray-300 px-3 text-left text-sm font-bold text-gray-800 disabled:opacity-40">🚚 Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}</button>
+              <button key={r.id} disabled={!online || r.estado_pdf !== "generado"} onClick={() => void pdf.abrir({ id: r.id, tipo_comprobante: "Remito", numero_comprobante: `${r.tipo_remito === "REM" ? "R" : "X"} ${r.numero_remito}`, ruta: `/api/remitos/${r.id}/pdf` })} className="min-h-11 w-full rounded-xl border border-gray-300 px-3 text-left text-sm font-bold text-gray-800 disabled:opacity-40">🚚 Remito {r.tipo_remito === "REM" ? "R" : "X"} {r.numero_remito}</button>
             ))}
           </div>
         )}

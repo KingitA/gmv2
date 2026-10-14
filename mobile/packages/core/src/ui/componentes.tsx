@@ -71,11 +71,23 @@ export function IndicadorPendientes() {
  * Frescura del dato mostrado desde la réplica: "Datos al 18/09 14:30".
  * La hora es la del SERVIDOR que generó los datos (no la del reloj del equipo).
  */
-export function Frescura({ dataset, etiqueta = "Datos al", viejoTrasMin = 60, compacto = false }: { dataset: string; etiqueta?: string; viejoTrasMin?: number; compacto?: boolean }) {
+export function Frescura({ dataset, etiqueta = "Datos al", viejoTrasMin = 60, compacto = false, soloSiViejo = false }: {
+  dataset: string; etiqueta?: string; viejoTrasMin?: number; compacto?: boolean
+  /** true = la barra NO se muestra mientras el dato está fresco (solo aparece si es viejo, si falló o si nunca se descargó) */
+  soloSiViejo?: boolean
+}) {
   const meta = useMetaDataset(dataset)
   const { sync } = useRuntime()
   const [sinc, setSinc] = useState(false)
+  // Re-evaluar cada minuto: la barra tiene que aparecer sola cuando el dato pasa a ser viejo
+  const [, setTic] = useState(0)
+  useEffect(() => {
+    if (!soloSiViejo) return
+    const t = setInterval(() => setTic((n) => n + 1), 60_000)
+    return () => clearInterval(t)
+  }, [soloSiViejo])
   const viejo = !meta?.generadoAt || Date.now() - Date.parse(meta.generadoAt) > viejoTrasMin * 60_000
+  if (soloSiViejo && !viejo && !meta?.error && !sinc) return null
   return (
     <div className={`flex items-center gap-2 px-3 text-xs ${compacto ? "py-0.5" : "py-1.5"} ${viejo ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600"}`}>
       <span className="flex-1">

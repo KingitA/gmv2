@@ -32,6 +32,7 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { FechaInput } from "@/components/finanzas/fecha-input";
 import { disponibleDePago } from "@/lib/cuenta-corriente/pago-disponible";
+import { armarExtracto, etiquetaMovimiento, type MovimientoCC } from "@/lib/cuenta-corriente/extracto";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { moneda, formatCuit } from "@/lib/formato"
@@ -64,18 +65,6 @@ interface Comprobante {
     anulado?: boolean;
 }
 
-interface MovimientoCC {
-    id?: string;
-    fecha: string;
-    tipo_movimiento: string;
-    debe: number;
-    haber: number;
-    numero_comprobante?: string | null;
-    observaciones?: string | null;
-    referencia_tipo?: string | null;
-    referencia_id?: string | null;
-    comprobante_tipo?: string | null;
-}
 
 interface PagoDetalle {
     tipo_pago: string;
@@ -390,45 +379,8 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
 
     // ── Extracto (libro mayor): cada fila que mueve el saldo, con acumulado ──
     // Es la fuente de verdad del Saldo Real: la última fila cierra exacto ahí.
-    const ETIQUETA_MOV: Record<string, string> = {
-        venta: "Factura / Venta",
-        factura: "Factura",
-        pago: "Pago",
-        nota_credito: "Nota de crédito",
-        nota_debito: "Nota de débito",
-        ajuste: "Ajuste manual",
-        debito: "Ajuste (débito)",
-        credito: "Ajuste (crédito)",
-        devolucion: "Devolución",
-        presupuesto: "Presupuesto",
-    };
-    // Con el tipo real del comprobante referenciado, la etiqueta es exacta
-    // (la REV interna no es lo mismo que una NC fiscal)
-    const ETIQUETA_TIPO: Record<string, string> = {
-        FA: "Factura A",
-        FB: "Factura B",
-        FC: "Factura C",
-        PRES: "Presupuesto",
-        REV: "Reversa",
-        NC: "Nota de crédito",
-        NCA: "Nota de crédito A",
-        NCB: "Nota de crédito B",
-        NCC: "Nota de crédito C",
-        NDA: "Nota de débito A",
-        NDB: "Nota de débito B",
-        NDC: "Nota de débito",
-        REM: "Remito",
-    };
-    const etiquetaMov = (m: MovimientoCC) => {
-        // La reversa de un pago anulado se postea como tipo 'ajuste' pero NO es
-        // un ajuste manual: rotularla por su referencia real.
-        if (m.referencia_tipo === "pago_anulacion") return "Anulación de pago";
-        return (
-            (m.comprobante_tipo && ETIQUETA_TIPO[m.comprobante_tipo]) ??
-            ETIQUETA_MOV[m.tipo_movimiento] ??
-            (m.tipo_movimiento || "Movimiento")
-        );
-    };
+    // Etiquetas: lib/cuenta-corriente/extracto.ts (las mismas que la app del vendedor)
+    const etiquetaMov = (m: MovimientoCC) => etiquetaMovimiento(m);
     // Filtro por fecha (vista detallada). El saldo acumulado se calcula sobre
     // TODOS los movimientos (si no, arrancaría de cero en la fecha filtrada).
     const enRango = (fecha: string) => {
@@ -437,18 +389,10 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         if (fechaHasta && f > fechaHasta) return false;
         return true;
     };
-    const extracto = (() => {
-        const movs = [...(data.movimientos ?? [])].sort(
-            (a, b) => String(a.fecha).localeCompare(String(b.fecha))
-        );
-        let acumulado = 0;
-        return movs
-            .map((m, i) => {
-                acumulado += Number(m.debe || 0) - Number(m.haber || 0);
-                return { ...m, saldo_acumulado: acumulado, key: i };
-            })
-            .filter((m) => enRango(m.fecha));
-    })();
+    // Saldo acumulado: lib/cuenta-corriente/extracto.ts (mismo cálculo que la app del vendedor)
+    const extracto = armarExtracto(data.movimientos ?? [])
+        .map((m, i) => ({ ...m, key: i }))
+        .filter((m) => enRango(m.fecha));
 
     // Cobros en la calle (pendientes de verificación): son PROMESAS, no tocan
     // el libro hasta que la oficina confirma. Se muestran en gris en el

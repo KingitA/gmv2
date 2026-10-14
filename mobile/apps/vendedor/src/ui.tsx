@@ -30,7 +30,10 @@ export function fechaConDia(f: string | null | undefined): string {
 }
 
 /** Marco de toda pantalla: encabezado del core + (opcional) frescura del dataset que se muestra. */
-export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = 60, pie, children, fondo = "bg-gray-50", preciosVencidos = false }: {
+/** Minutos sin actualizar a partir de los cuales se muestra la barra "Datos al …" */
+const MINUTOS_DATO_VIEJO = 15
+
+export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFrescura, viejoTrasMin = MINUTOS_DATO_VIEJO, pie, children, fondo = "bg-gray-50", preciosVencidos = false }: {
   titulo: string; atras?: boolean; derecha?: ReactNode; dataset?: string; etiquetaFrescura?: string; viejoTrasMin?: number; pie?: ReactNode; children: ReactNode; fondo?: string
   /** Pantallas que muestran PRECIOS: cartel fijo si hace más de 24 hs que no se actualizan */
   preciosVencidos?: boolean
@@ -39,7 +42,8 @@ export function Pantalla({ titulo, atras = true, derecha, dataset, etiquetaFresc
     <div className={`flex h-dvh flex-col ${fondo} text-gray-900`}>
       <Encabezado titulo={titulo} atras={atras} derecha={derecha} />
       <CartelPreciosVencidos visible={preciosVencidos} />
-      {dataset && <Frescura dataset={dataset} etiqueta={etiquetaFrescura} viejoTrasMin={viejoTrasMin} />}
+      {/* "Datos al …" solo cuando hace más de 15 min que no se actualiza (o falló / nunca bajó): pedido del dueño 14/10/2026 */}
+      {dataset && <Frescura dataset={dataset} etiqueta={etiquetaFrescura} viejoTrasMin={viejoTrasMin} soloSiViejo />}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
       {pie}
     </div>

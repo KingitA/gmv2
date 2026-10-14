@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { cargarMovimientosCliente } from "@/lib/cuenta-corriente/extracto-servidor";
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from '@/lib/auth';
@@ -152,24 +153,9 @@ export async function GET(
         const saldos = await getSaldosCliente(supabase, cliente_id);
         const saldo_total = saldos.saldo_real;
 
-        // Extracto (libro mayor) para la UI, enriquecido con el tipo real del
-        // comprobante referenciado (el libro postea NCA y REV igual como
-        // "nota_credito"; la UI necesita distinguir Reversa de NC fiscal).
-        const movimientosRaw = await fetchAllRows(() => supabase
-            .from("cuenta_corriente_clientes")
-            .select("id, fecha, tipo_movimiento, debe, haber, numero_comprobante, observaciones, referencia_tipo, referencia_id")
-            .eq("cliente_id", cliente_id)
-            .order("fecha", { ascending: false }));
-        const tipoComprobante = new Map(
-            (comprobantes || []).map((c: any) => [c.id, c.tipo_comprobante])
-        );
-        const movimientos = movimientosRaw.map((m: any) => ({
-            ...m,
-            comprobante_tipo:
-                m.referencia_tipo === "comprobante_venta" && m.referencia_id
-                    ? tipoComprobante.get(m.referencia_id) ?? null
-                    : null,
-        }));
+        // Extracto (libro mayor), enriquecido con el tipo real del comprobante: MISMA carga
+        // que la app del vendedor (Cobrar → Resumen). lib/cuenta-corriente/extracto-servidor.ts
+        const movimientos = await cargarMovimientosCliente(supabase, cliente_id);
 
         // 6. Format response
         const response = {

@@ -21,6 +21,8 @@ import {
 import { blobABase64, comprimirFoto, urlLocal } from "@gm/cheques/foto"
 import { DS, type ComprobanteCC, type DevolucionPendiente, type PedidoCobro } from "../../datasets"
 import { rechazosDe, useCuenta, useCuentasBancarias, useEncolar, uuidv4 } from "../../datos/hooks"
+import { usePdfComprobantes } from "../../datos/comprobantes-pdf"
+import { ResumenCuenta } from "./comprobantes-ui"
 import { fecha, normalizarCuit } from "@gm/formato"
 import { AvisosBcra, CuitInput, FechaInput, MontoInput, Pantalla, Rechazos, dejarAviso, dejarAvisoSinCuit, formatCurrency, round2, useToast } from "../../ui"
 
@@ -112,6 +114,8 @@ export function Cobrar() {
   const cuentas = useCuentasBancarias()
   const ops = useNoEnviados()
   const { toast, mostrar } = useToast()
+  // PDF de cada comprobante (📄): se baja con señal y se abre listo para compartir
+  const pdf = usePdfComprobantes((m) => mostrar(m, "err"))
 
   // ¿Qué lista se ve? Facturados (lo que existe de verdad) o pedidos en curso
   const [tab, setTab] = useParamEstado("tab", "fact")
@@ -509,6 +513,12 @@ export function Cobrar() {
             )}
           </div>
         </button>
+        <button
+          onClick={() => void pdf.abrir({ id: cp.id, tipo_comprobante: cp.tipo_comprobante, numero_comprobante: cp.numero_comprobante, fecha: cp.fecha })}
+          disabled={pdf.ocupado}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-lg disabled:opacity-40"
+          aria-label={`PDF de ${cp.tipo_comprobante} ${cp.numero_comprobante}`}
+        >📄</button>
         {activo && (
           <MontoInput
             valor={imputaciones[cp.id]!}
@@ -576,12 +586,16 @@ export function Cobrar() {
           <h2 className="mb-2 text-lg font-bold text-gray-700">¿Qué está pagando?</h2>
 
           {/* Facturados (lo que existe) / Pedidos pendientes (en desarrollo) */}
-          <div className="mb-2 grid grid-cols-2 gap-1 rounded-xl bg-gray-200/70 p-1">
+          <div className="mb-2 grid grid-cols-3 gap-1 rounded-xl bg-gray-200/70 p-1">
             <button onClick={() => setTab("fact")} className={`min-h-11 rounded-lg py-2 text-sm font-bold ${tab === "fact" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-500"}`}>
               Facturados{pedidosFacturados.length + compsSueltos.length > 0 ? ` · ${pedidosFacturados.length + compsSueltos.length}` : ""}
             </button>
+            {/* Resumen de cuenta = el extracto del ERP (pedido del dueño 14/10/2026) */}
+            <button onClick={() => setTab("resumen")} className={`min-h-11 rounded-lg py-2 text-sm font-bold ${tab === "resumen" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-500"}`}>
+              Resumen
+            </button>
             <button onClick={() => setTab("pend")} className={`min-h-11 rounded-lg py-2 text-sm font-bold ${tab === "pend" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-500"}`}>
-              Pedidos pendientes{pedidosSinFacturar.length > 0 ? ` · ${pedidosSinFacturar.length}` : ""}
+              Pendientes{pedidosSinFacturar.length > 0 ? ` · ${pedidosSinFacturar.length}` : ""}
             </button>
           </div>
           {tab === "pend" && (
@@ -590,7 +604,9 @@ export function Cobrar() {
             </p>
           )}
 
-          {listaVacia ? (
+          {tab === "resumen" ? (
+            <ResumenCuenta cuenta={cuenta!} avisar={(m) => mostrar(m, "err")} />
+          ) : listaVacia ? (
             <div className="rounded-xl border border-gray-200 bg-white p-4 text-center text-gray-500">
               {tab === "fact" ? "Sin comprobantes facturados pendientes. Lo que cobres queda como pago a cuenta." : "No hay pedidos sin facturar."}
             </div>

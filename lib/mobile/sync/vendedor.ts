@@ -36,6 +36,8 @@ import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 import { hoyISO, sumarDiasISO } from "@/lib/formato"
 import { ARTICULO_SELECT, mapArticuloVendedor } from "@/lib/vendedor/articulos-select"
 import { bonificacionesDesdeFilas } from "@/lib/vendedor/bonificaciones"
+import { cargarMovimientosCliente, cargarMovimientosClientes } from "@/lib/cuenta-corriente/extracto-servidor"
+import type { MovimientoCC } from "@/lib/cuenta-corriente/extracto"
 import { cargarComprados } from "@/lib/vendedor/comprados"
 import { agruparPorComprobante, KARDEX_COMISION_COLS, mapArticuloComision } from "@/lib/vendedor/comisiones-detalle"
 import { cargarDetallePedido } from "@/lib/vendedor/detalle-pedido"
@@ -188,14 +190,24 @@ const clientes: DatasetDef = {
 }
 
 /** Cuenta corriente de UN cliente (= GET cliente/[id]) + comprados + habituales. null = no es suyo. */
-export async function cargarCuentaCliente(supabase: any, sesion: { vendedorIds: string[]; user: { id: string } }, id: string): Promise<FilaReplica | null> {
+export async function cargarCuentaCliente(
+  supabase: any,
+  sesion: { vendedorIds: string[]; user: { id: string } },
+  id: string,
+  /** Extracto ya cargado en lote (réplica de toda la cartera); sin esto se carga el de este cliente */
+  movimientosPrecargados?: MovimientoCC[] | null,
+): Promise<FilaReplica | null> {
   const ficha = await cargarFichaCliente(supabase, sesion, id)
   if (!ficha) return null
   // Comprados y habituales son ACCESORIOS de la cuenta corriente: si una consulta falla, el
   // vendedor igual tiene que poder ver la deuda y cobrar (no tumban toda la fila).
-  const [comprados, frecuencia] = await Promise.all([
+  const [comprados, frecuencia, movimientos] = await Promise.all([
     cargarComprados(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] comprados:", e?.message || e); return [] as Awaited<ReturnType<typeof cargarComprados>> }),
     frecuenciaHabituales(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] habituales:", e?.message || e); return new Map<string, { veces: number; ultCantidad: number }>() }),
+    // Extracto (Cobrar → Resumen): el MISMO libro y la misma carga que el ERP. null = falló (la app lo dice)
+    movimientosPrecargados !== undefined
+      ? Promise.resolve(movimientosPrecargados)
+      : cargarMovimientosCliente(supabase, id).catch((e) => { console.error("[sync/vendedor_cc] movimientos:", e?.message || e); return null }),
   ])
   const habituales = [...frecuencia.entries()]
     .sort((a, b) => b[1].veces - a[1].veces)
@@ -206,8 +218,13 @@ export async function cargarCuentaCliente(supabase: any, sesion: { vendedorIds: 
     ...ficha,
     comprados: [...comprados].sort((a: any, b: any) => (b.ultima_fecha || "").localeCompare(a.ultima_fecha || "")).slice(0, 100),
     habituales,
+    movimientos,
   }
 }
+
+/** Extracto de muchos clientes en lote; null = falló (cada cuenta sale igual, sin extracto). */
+const movimientosEnLote = (supabase: any, ids: string[]) =>
+  cargarMovimientosClientes(supabase, ids).catch((e) => { console.error("[sync/vendedor_cc] movimientos:", e?.message || e); return null })
 
 const cuentas: DatasetDef = {
   nombre: "vendedor_cc",
@@ -217,12 +234,14 @@ const cuentas: DatasetDef = {
     if (!vendedorIds.length) return []
     const cli = await fetchAllRows<{ id: string }>(() => ctx.supabase.from("clientes").select("id").in("vendedor_id", vendedorIds).eq("activo", true))
     const sesion = { vendedorIds, user: { id: ctx.sesion.user.id } }
-    const filas = await enParalelo(cli, 8, (c) => cargarCuentaCliente(ctx.supabase, sesion, c.id))
+    const movs = await movimientosEnLote(ctx.supabase, cli.map((c) => c.id))
+    const filas = await enParalelo(cli, 8, (c) => cargarCuentaCliente(ctx.supabase, sesion, c.id, movs ? movs.get(c.id) ?? [] : null))
     return filas.filter((f): f is FilaReplica => !!f)
   },
   async porIds(ctx, ids) {
     const sesion = { vendedorIds: await vendedorIdsDe(ctx.supabase, ctx.sesion.user.id), user: { id: ctx.sesion.user.id } }
-    const filas = await enParalelo(ids, 8, (id) => cargarCuentaCliente(ctx.supabase, sesion, id))
+    const movs = await movimientosEnLote(ctx.supabase, ids)
+    const filas = await enParalelo(ids, 8, (id) => cargarCuentaCliente(ctx.supabase, sesion, id, movs ? movs.get(id) ?? [] : null))
     return filas.filter((f): f is FilaReplica => !!f)
   },
 }

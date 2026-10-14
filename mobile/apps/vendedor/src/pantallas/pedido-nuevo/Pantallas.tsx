@@ -88,7 +88,7 @@ function PantallaCatalogo({ titulo, subtitulo, children }: { titulo: string; sub
       titulo={titulo}
       dataset={DS.preciosArticulos}
       etiquetaFrescura="Precios al"
-      viejoTrasMin={30}
+      viejoTrasMin={15}
       preciosVencidos={vencidos}
       derecha={
         <>
@@ -479,7 +479,7 @@ export function Carrito() {
       preciosVencidos={vencidos}
       dataset={DS.preciosArticulos}
       etiquetaFrescura="Precios al"
-      viejoTrasMin={30}
+      viejoTrasMin={15}
       pie={
         <div className="border-t border-gray-200 bg-white p-4">
           <div className="mx-auto max-w-2xl space-y-2">

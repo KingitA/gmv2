@@ -11,5 +11,8 @@ project(':capacitor-app').projectDir = new File('../../../node_modules/@capacito
 include ':capacitor-network'
 project(':capacitor-network').projectDir = new File('../../../node_modules/@capacitor/network/android')
 
+include ':gm-capacitor-archivos'
+project(':gm-capacitor-archivos').projectDir = new File('../../../packages/capacitor-archivos/android')
+
 include ':gm-capacitor-lector'
 project(':gm-capacitor-lector').projectDir = new File('../../../packages/capacitor-lector/android')

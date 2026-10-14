@@ -93,6 +93,10 @@ function filaCC(id) {
     comprobantes: k.comprobantes.filter((x) => x.saldo_pendiente > 0), creditos: [], a_cuenta: [], total_a_favor: 0, pedidos_cobrables: [], pedidos_cobro: pedidosCobro,
     devoluciones_pendientes: k.devoluciones.map((d) => ({ ...d, descontado: r2(d.monto_total - d.restante) })),
     pagos_recientes: k.pagos.slice(0, 10), comprados: k.comprados, habituales: k.habituales,
+    movimientos: [
+      ...k.comprobantes.map((x) => ({ id: `m-${x.id}`, fecha: x.fecha, tipo_movimiento: x.tipo_comprobante === "PRES" ? "presupuesto" : "factura", debe: x.total_factura, haber: 0, numero_comprobante: x.numero_comprobante, observaciones: null, referencia_tipo: "comprobante_venta", referencia_id: x.id, comprobante_tipo: x.tipo_comprobante })),
+      ...k.pagos.filter((x) => x.estado === "confirmado").map((x) => ({ id: `m-${x.id}`, fecha: x.fecha_pago, tipo_movimiento: "pago", debe: 0, haber: x.monto, numero_comprobante: null, observaciones: x.forma_pago || null, referencia_tipo: "pago", referencia_id: x.id, comprobante_tipo: null })),
+    ],
   }
 }
 function filaPedido(p) {
@@ -353,6 +357,19 @@ createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end() }
   if (!S.red) return req.socket.destroy() // sin señal: la app ve un error de red
 
+  // = /api/comprobantes-venta/:id/pdf y /api/remitos/:id/pdf (en el ERP redirigen a la URL firmada del bucket)
+  const mPdf = /^\/api\/(comprobantes-venta|remitos)\/([^/]+)\/pdf$/.exec(url.pathname)
+  if (mPdf) {
+    const texto = `GM - ${mPdf[1] === "remitos" ? "Remito" : "Comprobante"} ${mPdf[2].slice(0, 8)} (mock)`
+    const cuerpo = `BT /F1 18 Tf 50 750 Td (${texto}) Tj ET`
+    const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>", `<< /Length ${cuerpo.length} >>\nstream\n${cuerpo}\nendstream`, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    let pdf = "%PDF-1.4\n"; const offs = []
+    objs.forEach((o, i) => { offs.push(pdf.length); pdf += `${i + 1} 0 obj\n${o}\nendobj\n` })
+    const xref = pdf.length
+    pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => String(o).padStart(10, "0") + " 00000 n \n").join("")}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
+    res.writeHead(200, { ...cors, "Content-Type": "application/pdf" })
+    return res.end(pdf)
+  }
   if (url.pathname === "/api/mobile/auth/login") return body?.email && body?.password ? json(200, sesion(String(body.email).toLowerCase())) : json(400, { error: "Faltan datos de ingreso." })
   if (url.pathname === "/api/mobile/auth/refresh") { const u = usuarioDe(body?.refresh_token); return u ? json(200, sesion(u.email)) : json(401, { error: "La sesión expiró." }) }
   if (url.pathname === "/api/mobile/auth/logout") return json(200, { ok: true })

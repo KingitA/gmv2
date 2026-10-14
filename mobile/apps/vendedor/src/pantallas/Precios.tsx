@@ -94,7 +94,7 @@ export function Precios() {
   )
 
   return (
-    <Pantalla titulo="💲 Precios" preciosVencidos={vencidos} dataset={DS.preciosArticulos} etiquetaFrescura="Precios al" viejoTrasMin={30}>
+    <Pantalla titulo="💲 Precios" preciosVencidos={vencidos} dataset={DS.preciosArticulos} etiquetaFrescura="Precios al" viejoTrasMin={15}>
       <div className="bg-slate-900 px-4 pb-3">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar artículo, SKU o código de barras..." inputMode="search" className="w-full rounded-xl border-0 bg-white px-4 py-2.5 text-gray-900 placeholder:text-gray-400" />
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
