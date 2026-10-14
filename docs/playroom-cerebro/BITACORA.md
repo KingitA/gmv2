@@ -16,13 +16,15 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - **Etapa 0 (cimientos): lista.** Migración aplicada (verificado 14/10).
 - **Etapa 1 (chat nuevo): lista, falta probarla con la IA** (en el preview, o el examen con la clave en `.env.local`). Migración aplicada; las 12 consultas responden contra la base real.
 - **Etapa 2 (vigías y resumen del día): lista.** Migración aplicada (14/10). Falta que exista `CRON_SECRET` en Vercel y probar "Revisar ahora" en el preview. **El reporte corre de lunes a sábado a las 5:00** (pedido de Juan; cron `0 8 * * 1-6` en hora UTC).
-- **Etapa 3 (decisiones, agenda, reglas): código listo.** Falta aplicar `20261014d_jarvis_decisiones.sql` y probar en el preview.
-- Etapa 4 (acciones conectadas: retener entregas, orden de compra prellenada): sigue.
+- **Etapa 3 (decisiones, agenda, reglas): lista.** Migración aplicada; Juan la probó ("todo andando", 14/10).
+- **Etapa 4 (acciones conectadas + recordatorios por persona): código listo.** Falta aplicar `20261014e_jarvis_acciones.sql` y probar en el preview.
+- Etapa 5 (mundo exterior: materia prima por artículo y proveedor, precios de afuera, compra anticipada): sigue.
 
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261014d_jarvis_decisiones.sql` | Decisiones en la bandeja: qué se haría con el Sí, quién decidió, cuándo, nota, resultado, impacto estimado y real. Triggers: cada alta y cada decisión van a la bitácora. Reglas iniciales de los avisos en `ai_ajustes`. | **NO** — la aplica Juan |
+| `20261014e_jarvis_acciones.sql` | Recordatorios por persona (`para_usuario`; NULL = para todos). Clientes: `retener_entregas`, motivo, desde y quién. | **NO** — la aplica Juan |
+| `20261014d_jarvis_decisiones.sql` | Decisiones en la bandeja: qué se haría con el Sí, quién decidió, cuándo, nota, resultado, impacto estimado y real. Triggers: cada alta y cada decisión van a la bitácora. Reglas iniciales de los avisos en `ai_ajustes`. | Sí (14/10) |
 | `20261014c_jarvis_vigias.sql` | La agenda vieja (`ai_agenda_events`) pasa a ser la bandeja de Jarvis: clave, tono, acciones, severidad, quién y cuándo la cerró. Cada cierre hecho por una persona queda en la bitácora. | Sí (14/10) |
 | `20261014b_jarvis_consultas.sql` | Consultas de Jarvis (solo lectura): ventas agrupadas, deuda por antigüedad (libro mayor + FIFO), hábitos de compra, cobertura de stock, resumen por proveedor con último aumento. | Sí (14/10) |
 | `20261014_jarvis_cimientos.sql` | Bitácora inborrable (`ai_registro`), ajustes de modelo y tope (`ai_ajustes`), gasto (`ai_uso`), quién preguntó en conversaciones, **cierra un agujero de seguridad** (las conversaciones y la agenda de IA se podían leer y borrar con la clave pública), borra los 235 avisos viejos del lector de mails. | Sí (14/10) |
@@ -30,13 +32,37 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 ## Pendientes
 - [x] Juan aplicó `20261014_jarvis_cimientos.sql` y `20261014b_jarvis_consultas.sql` (14/10).
 - [x] Juan aplicó `20261014c_jarvis_vigias.sql` (14/10).
-- [ ] Juan aplica `20261014d_jarvis_decisiones.sql`.
+- [x] Juan aplicó `20261014d_jarvis_decisiones.sql` (14/10).
+- [ ] Juan aplica `20261014e_jarvis_acciones.sql`.
 - [ ] Verificar que `CRON_SECRET` exista en Vercel. Sin eso, la revisión de las 8:00 no corre y queda solo el botón "Revisar ahora".
 - [ ] Para probar el chat desde esta PC hace falta la clave de Anthropic en `.env.local` (`ANTHROPIC_API_KEY=...`). La pone Juan; Claude no maneja claves. En Vercel ya está (el chat viejo anda).
 - [ ] Seguridad (fuera de Jarvis, avisar): `ai_emails`, `ai_email_attachments` y `ai_classifications` siguen con acceso público total. No se tocaron porque el lector de mails viejo las lee desde el navegador. Arreglarlas cuando se retome el lector.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 (noche) — Etapa 4, acciones conectadas y recordatorios por persona
+- **Recordatorios por persona** (decisión de Juan):
+  - las **propuestas** las ven todos, porque son decisiones de la empresa;
+  - los **recordatorios** son de quien los pide; también pueden ser "para todos" o "para otra persona" ("recordale a Mario…");
+  - un recordatorio personal lo cierra esa persona, quien lo pidió o un admin.
+- **Retener entregas** (`lib/viajes/retencion.ts`):
+  - Antes el candado existía solo por parada. Ahora hay `clientes.retener_entregas` (con motivo, desde y quién).
+  - `sincronizarParadas` (`lib/viajes/servidor.ts`) hace nacer la parada de un cliente retenido con "NO ENTREGAR SIN COBRAR" y "cobrar lo anterior".
+  - Al retener, también se bloquean las paradas pendientes de viajes ya armados, hasta que el chofer finaliza (misma regla que la pantalla de viajes).
+  - Al liberar, solo se destraban las paradas con motivo "Retenido: …". El candado que puso oficina a mano se respeta.
+  - La app del chofer y la hoja de ruta ya muestran `bloquear_entrega`: no hubo que tocarlas.
+- **Acciones del "Sí"** (`lib/jarvis/acciones.ts`): `retener_entregas`, `liberar_entregas` y `armar_orden_compra`.
+  - La orden de compra **no se crea sola**, porque crearla mueve la cuenta del proveedor y el kardex.
+  - El Sí abre `/ordenes-compra?nueva=1&proveedor=…&sugerir=1&origen=jarvis`: el formulario de siempre con la **sugerencia que ya existía** (`/api/ordenes-compra/sugerencia`) cargada como cantidad pedida y la observación "Sugerida por Jarvis". La guarda una persona.
+- **Vigías**:
+  - "Volvió a pedir debiendo" ahora es una **propuesta** "¿Le retengo las entregas hasta que pague?" en "Para decidir". Si ya está retenido, no se propone.
+  - Vigía nuevo "retenido al día": si un cliente retenido ya no tiene deuda vencida, propone "¿Le libero las entregas?".
+  - Si dicen que no, no se insiste salvo que la deuda crezca un 25 %. Si deja de hacer falta antes de que alguien decida, se cierra sola.
+- Chat: herramienta `clientes_retenidos`. `proponer_decision` resuelve el cliente o proveedor y arma los datos de la acción.
+- Ajustes de Jarvis: sección "Clientes con entregas retenidas" con el botón **Liberar**. Primero anota en la bitácora y después libera.
+- Prueba sin escribir (solo detección) contra la base real: 4 propuestas de retener (Li Yutao, Xiao Yu, Weng Biao, Lin Xuehua) y 5 avisos.
+- Los 9 avisos viejos "deuda-y-compra" que quedaron del test de Juan se van a cerrar solos en la próxima revisión, porque ahora son propuestas.
 
 ### 14/10/2026 (noche) — Etapa 3, decisiones, agenda y reglas
 - Juan: el reporte va de lunes a sábado a las **5:00**. Cron cambiado a `0 8 * * 1-6` (Vercel usa hora UTC).

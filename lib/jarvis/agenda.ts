@@ -16,6 +16,8 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/
 
 export interface NuevoRecordatorio {
   titulo: string
+  /** a quién le aparece: undefined = a quien lo pide; null = a todos; o el id de otra persona */
+  paraUsuario?: string | null
   detalle?: string | null
   fecha: string
   usuarioId: string | null
@@ -33,9 +35,18 @@ export async function crearRecordatorio(db: SupabaseClient, r: NuevoRecordatorio
     title: r.titulo.trim().slice(0, 200), description: r.detalle ?? null, due_date: r.fecha,
     creado_por: r.usuarioId, conversacion_id: r.conversacionId ?? null, origen_id: r.origenId ?? null,
     related_entity_type: r.entidad?.tipo ?? null, related_entity_id: r.entidad?.id ?? null,
+    para_usuario: r.paraUsuario === undefined ? r.usuarioId : r.paraUsuario,
   }).select("id").single()
   if (error) throw new Error(error.message)
   return data.id as string
+}
+
+/** Usuarios que usan Jarvis (para "recordale a Mario…"). */
+export async function usuariosOficina(db: SupabaseClient): Promise<{ id: string; nombre: string }[]> {
+  const { data } = await db.from("usuarios_roles").select("usuario_id, roles!inner(nombre)").in("roles.nombre", ["admin", "administrativo"])
+  const ids = [...new Set(((data ?? []) as { usuario_id: string }[]).map((r) => r.usuario_id))]
+  const nombres = await nombresDeUsuarios(db, ids)
+  return ids.map((id) => ({ id, nombre: nombres.get(id) ?? "alguien" })).sort((a, b) => a.nombre.localeCompare(b.nombre))
 }
 
 export interface NuevaPropuesta {
@@ -50,6 +61,10 @@ export interface NuevaPropuesta {
   entidad?: { tipo: string; id: string } | null
   origenId?: string | null
   clave?: string | null
+  /** si la propuso un vigía */
+  vigia?: string | null
+  severidad?: number | null
+  datos?: Record<string, unknown> | null
 }
 
 export async function crearPropuesta(db: SupabaseClient, p: NuevaPropuesta) {
@@ -66,6 +81,7 @@ export async function crearPropuesta(db: SupabaseClient, p: NuevaPropuesta) {
     title: p.titulo.trim().slice(0, 200), description: p.detalle ?? null, due_date: hoyISO(),
     accion: { tipo: accion.tipo, parametros: p.accion.parametros ?? {}, descripcion: p.accion.descripcion ?? accion.descripcion },
     impacto_estimado: p.impactoEstimado ?? null, clave: p.clave ?? null,
+    vigia: p.vigia ?? null, severidad: Math.round(p.severidad ?? p.impactoEstimado ?? 0), metadata: p.datos ?? {},
     creado_por: p.usuarioId, conversacion_id: p.conversacionId ?? null, origen_id: p.origenId ?? null,
     related_entity_type: p.entidad?.tipo ?? null, related_entity_id: p.entidad?.id ?? null,
   }).select("id").single()
@@ -85,12 +101,16 @@ export interface Decision {
 
 /** Una persona decide. Devuelve qué pasó (y, si corresponde, adónde ir a terminar). */
 export async function decidir(db: SupabaseClient, d: Decision) {
-  const { data, error } = await db.from("ai_agenda_events").select("id, event_type, status, priority, title, accion, due_date")
+  const { data, error } = await db.from("ai_agenda_events").select("id, event_type, status, priority, title, accion, due_date, para_usuario, creado_por")
     .eq("id", d.id).maybeSingle()
   if (error) throw new Error(error.message)
-  const item = data as { id: string; event_type: string; status: string; priority: string; title: string; accion: { tipo?: string; parametros?: Record<string, unknown> } | null; due_date: string | null } | null
+  const item = data as { id: string; event_type: string; status: string; priority: string; title: string; accion: { tipo?: string; parametros?: Record<string, unknown> } | null; due_date: string | null; para_usuario: string | null; creado_por: string | null } | null
   if (!item || !["propuesta", "recordatorio"].includes(item.event_type)) throw new ErrorAgenda("No encontré eso en la agenda.", 404)
   if (item.status !== "pendiente") throw new ErrorAgenda("Eso ya se decidió.", 409)
+  // Un recordatorio personal lo cierra esa persona (o quien lo pidió, o un admin)
+  if (item.event_type === "recordatorio" && item.para_usuario && ![item.para_usuario, item.creado_por].includes(d.usuarioId) && !d.roles.includes("admin")) {
+    throw new ErrorAgenda("Ese recordatorio es de otra persona.", 403)
+  }
 
   const accion = buscarAccion(item.accion?.tipo)
   if (!puedeConfirmar(d.roles, accion.mueveDinero)) throw new ErrorAgenda("Las decisiones que mueven plata las confirma solo un admin.", 403)
@@ -141,19 +161,26 @@ export interface ItemAgenda {
   fecha: string | null; accion: { tipo?: string; descripcion?: string } | null; impacto_estimado: number | null
   creado_por: string | null; creado_por_nombre: string; creado_at: string
   pospuesto_por_nombre?: string | null; vencido: boolean; mueve_dinero: boolean
+  /** null = para todos */
+  para_nombre: string | null
 }
 
-/** Lo pendiente de la agenda: propuestas y recordatorios (vencidos, de hoy y de los próximos 7 días). */
-export async function agendaPendiente(db: SupabaseClient): Promise<ItemAgenda[]> {
+/**
+ * Lo pendiente de la agenda que ve ESTA persona: todas las propuestas (son de la
+ * empresa) + sus recordatorios + los recordatorios "para todos". Vencidos, de
+ * hoy y de los próximos 7 días.
+ */
+export async function agendaPendiente(db: SupabaseClient, usuarioId: string): Promise<ItemAgenda[]> {
   const hasta = sumarDiasISO(hoyISO(), 7)
   const { data, error } = await db.from("ai_agenda_events")
-    .select("id, event_type, tono, title, description, due_date, accion, impacto_estimado, creado_por, created_at, decision, decidido_por")
+    .select("id, event_type, tono, title, description, due_date, accion, impacto_estimado, creado_por, created_at, decision, decidido_por, para_usuario")
     .in("event_type", ["propuesta", "recordatorio"]).eq("status", "pendiente")
     .or(`due_date.is.null,due_date.lte.${hasta}`)
+    .or(`event_type.eq.propuesta,para_usuario.is.null,para_usuario.eq.${usuarioId},creado_por.eq.${usuarioId}`)
     .order("due_date", { ascending: true, nullsFirst: true }).limit(100)
   if (error) throw new Error(error.message)
   const filas = (data ?? []) as any[]
-  const nombres = await nombresDeUsuarios(db, filas.flatMap((f) => [f.creado_por, f.decidido_por]))
+  const nombres = await nombresDeUsuarios(db, filas.flatMap((f) => [f.creado_por, f.decidido_por, f.para_usuario]))
   const hoy = hoyISO()
   return filas.map((f) => ({
     id: f.id, tipo: f.event_type, tono: f.tono, titulo: f.title, detalle: f.description, fecha: f.due_date,
@@ -162,6 +189,7 @@ export async function agendaPendiente(db: SupabaseClient): Promise<ItemAgenda[]>
     pospuesto_por_nombre: f.decision === "posponer" && f.decidido_por ? nombres.get(f.decidido_por) ?? null : null,
     vencido: !!f.due_date && f.due_date < hoy,
     mueve_dinero: buscarAccion(f.accion?.tipo).mueveDinero,
+    para_nombre: f.event_type === "propuesta" || !f.para_usuario ? null : f.para_usuario === usuarioId ? "vos" : nombres.get(f.para_usuario) ?? "alguien",
   }))
 }
 

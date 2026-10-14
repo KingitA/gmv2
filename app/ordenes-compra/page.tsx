@@ -333,7 +333,17 @@ export default function OrdenesCompraPage() {
   const [isCreating, setIsCreating] = useState(false)
   const busqueda = useSearchParams()
   useEffect(() => {
-    if (busqueda.get("nueva") === "1") setIsCreating(true)
+    if (busqueda.get("nueva") !== "1") return
+    setIsCreating(true)
+    // Desde Jarvis (Playroom → "Armar orden de compra"): ?proveedor=…&sugerir=1&origen=jarvis
+    // abre la orden con el proveedor elegido y la cantidad sugerida ya cargada. No guarda nada.
+    const prov = busqueda.get("proveedor")
+    if (!prov) return
+    ;(async () => {
+      await handleProveedorChange(prov)
+      if (busqueda.get("sugerir") === "1") await cargarSugerencia(prov, true)
+      if (busqueda.get("origen") === "jarvis") setObservaciones(o => o || "Sugerida por Jarvis (Playroom). Revisada antes de guardar.")
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [selectedProveedor, setSelectedProveedor] = useState<string>("")
@@ -419,18 +429,19 @@ export default function OrdenesCompraPage() {
     }
   }
 
-  const cargarSugerencia = async () => {
-    if (!selectedProveedor) return
+  /** aplicar = además de mostrar la sugerencia, cargarla como cantidad pedida (lo usa Jarvis) */
+  const cargarSugerencia = async (proveedorId: string = selectedProveedor, aplicar = false) => {
+    if (!proveedorId) return
     setLoadingSugerencia(true)
     try {
-      const params = new URLSearchParams({ proveedor_id: selectedProveedor, fecha_desde: fechaDesde, fecha_hasta: fechaHasta, tipo_venta: tipoVenta, dias_objetivo: '45' })
+      const params = new URLSearchParams({ proveedor_id: proveedorId, fecha_desde: fechaDesde, fecha_hasta: fechaHasta, tipo_venta: tipoVenta, dias_objetivo: '45' })
       const res = await fetch(`/api/ordenes-compra/sugerencia?${params}`)
       const data = await res.json()
       if (res.ok && data.items) {
         setSugerenciaData(data.items)
         const porId: Record<string, number> = {}
         for (const s of data.items) porId[s.articulo_id] = s.cantidad_sugerida
-        setArticulosTabla(prev => prev.map(a => ({ ...a, cantidad_sugerida: porId[a.articulo_id] ?? 0 })))
+        setArticulosTabla(prev => prev.map(a => ({ ...a, cantidad_sugerida: porId[a.articulo_id] ?? 0, ...(aplicar && porId[a.articulo_id] ? { cantidad_pedida: porId[a.articulo_id] } : {}) })))
       }
     } finally {
       setLoadingSugerencia(false)
@@ -817,7 +828,7 @@ export default function OrdenesCompraPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <Button variant="outline" size="sm" onClick={cargarSugerencia} disabled={loadingSugerencia}>
+                      <Button variant="outline" size="sm" onClick={() => cargarSugerencia()} disabled={loadingSugerencia}>
                         {loadingSugerencia ? 'Calculando...' : 'Cargar sugerencia'}
                       </Button>
                       {sugerenciaData.length > 0 && (

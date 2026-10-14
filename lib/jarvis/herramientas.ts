@@ -20,8 +20,8 @@ import { CATALOGO_TABLERO } from "@/lib/playroom/catalogo-tablero"
 import { fetchAllRows } from "@/lib/playroom/queries"
 import { hoyISO, sumarDiasISO } from "@/lib/formato"
 import { PERIODOS, resolverPeriodo, type Rango } from "./periodos"
-import { ACCIONES } from "./acciones"
-import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones } from "./agenda"
+import { ACCIONES, ACCION_PIDE } from "./acciones"
+import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones, usuariosOficina } from "./agenda"
 
 export interface Contexto {
   db: SupabaseClient
@@ -704,6 +704,7 @@ const agendarRecordatorio: Herramienta = {
     properties: {
       titulo: { type: "string", description: "Qué hay que recordar, en una línea" },
       fecha: { type: "string", description: "AAAA-MM-DD (hoy o después)" },
+      para: { type: "string", description: "A quién le aparece: vacío = a quien lo pide; \"todos\" = a toda la oficina; o el nombre de otra persona ('recordale a Mario…')" },
       detalle: { type: "string", description: "Contexto útil para ese día (qué se habló, números)" },
       cliente: { type: "string" }, proveedor: { type: "string" },
     },
@@ -714,9 +715,18 @@ const agendarRecordatorio: Herramienta = {
     let entidad: { tipo: string; id: string } | null = null
     if (str(p.cliente)) entidad = { tipo: "cliente", id: (await resolverCliente(ctx.db, str(p.cliente)!)).id }
     else if (str(p.proveedor)) entidad = { tipo: "proveedor", id: (await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor")).id }
+    let paraUsuario: string | null | undefined = undefined
+    let paraNombre = "vos"
+    const para = str(p.para)?.toLowerCase()
+    if (para && ["todos", "todas", "la oficina", "oficina"].includes(para)) { paraUsuario = null; paraNombre = "todos" }
+    else if (para && !["yo", "mi", "mí", "vos"].includes(para)) {
+      const us = (await usuariosOficina(ctx.db)).filter((u) => u.nombre.toLowerCase().includes(para))
+      if (us.length !== 1) throw new ErrorHerramienta(us.length ? `Hay varias personas que coinciden con "${p.para}": ${us.map((u) => u.nombre).join(", ")}.` : `No encontré a "${p.para}" entre los usuarios de la oficina.`)
+      paraUsuario = us[0].id; paraNombre = us[0].nombre
+    }
     try {
-      const id = await crearRecordatorio(ctx.db, { titulo: String(p.titulo ?? ""), detalle: str(p.detalle), fecha: String(p.fecha ?? ""), usuarioId: ctx.usuarioId, conversacionId: ctx.conversacionId, entidad })
-      return { consultado: "Agenda de Jarvis", datos: { agendado: true, id, fecha: p.fecha }, bloques: [] }
+      const id = await crearRecordatorio(ctx.db, { titulo: String(p.titulo ?? ""), detalle: str(p.detalle), fecha: String(p.fecha ?? ""), usuarioId: ctx.usuarioId, conversacionId: ctx.conversacionId, entidad, paraUsuario })
+      return { consultado: "Agenda de Jarvis", datos: { agendado: true, id, fecha: p.fecha, para: paraNombre }, bloques: [] }
     } catch (e) {
       if (e instanceof ErrorAgenda) throw new ErrorHerramienta(e.message)
       throw e
@@ -744,12 +754,22 @@ const proponerDecision: Herramienta = {
   },
   async ejecutar(ctx, p) {
     if (!ctx.usuarioId) return { consultado: "Agenda (modo prueba)", datos: SIN_USUARIO, bloques: [] }
+    const tipo = String(p.tipo_accion ?? "ninguna")
+    const parametros: Record<string, unknown> = { ...((p.parametros as Record<string, unknown>) ?? {}) }
     let entidad: { tipo: string; id: string } | null = null
-    if (str(p.cliente)) entidad = { tipo: "cliente", id: (await resolverCliente(ctx.db, str(p.cliente)!)).id }
-    else if (str(p.proveedor)) entidad = { tipo: "proveedor", id: (await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor")).id }
+    if (str(p.cliente)) {
+      const c = await resolverCliente(ctx.db, str(p.cliente)!)
+      entidad = { tipo: "cliente", id: c.id }; parametros.cliente_id = c.id; parametros.cliente = c.nombre
+    } else if (str(p.proveedor)) {
+      const pr = await resolverNombre(ctx.db, "proveedores", str(p.proveedor)!, "el proveedor")
+      entidad = { tipo: "proveedor", id: pr.id }; parametros.proveedor_id = pr.id; parametros.proveedor = pr.nombre
+    }
+    if (ACCION_PIDE[tipo] && !parametros[`${ACCION_PIDE[tipo]}_id`]) throw new ErrorHerramienta(`Para "${tipo}" decime de qué ${ACCION_PIDE[tipo]} se trata (campo ${ACCION_PIDE[tipo]}).`)
+    if (tipo === "retener_entregas" && !parametros.motivo) parametros.motivo = str(p.titulo) ?? "deuda vencida"
     try {
       const id = await crearPropuesta(ctx.db, {
-        titulo: String(p.titulo ?? ""), detalle: str(p.detalle), accion: { tipo: String(p.tipo_accion ?? "ninguna"), parametros: (p.parametros as Record<string, unknown>) ?? {} },
+        titulo: String(p.titulo ?? ""), detalle: str(p.detalle), accion: { tipo, parametros },
+        clave: ACCION_PIDE[tipo] ? `${tipo}:${parametros[`${ACCION_PIDE[tipo]}_id`]}` : null,
         impactoEstimado: num(p.impacto_estimado), tono: p.urgente ? "alerta" : "atencion",
         usuarioId: ctx.usuarioId, conversacionId: ctx.conversacionId, entidad,
       })
@@ -766,8 +786,9 @@ const verAgenda: Herramienta = {
   descripcion: "Lo pendiente de la agenda: propuestas sin decidir y recordatorios (vencidos, de hoy y de la semana), con quién los pidió.",
   esquema: { type: "object", properties: {} },
   async ejecutar(ctx) {
-    const items = await agendaPendiente(ctx.db)
-    const filas = items.map((i) => ({ fecha: i.fecha, tipo: i.tipo === "propuesta" ? "Para decidir" : "Recordatorio", que: i.titulo, pidio: i.creado_por_nombre }))
+    if (!ctx.usuarioId) return { consultado: "Agenda (modo prueba)", datos: SIN_USUARIO, bloques: [] }
+    const items = await agendaPendiente(ctx.db, ctx.usuarioId)
+    const filas = items.map((i) => ({ fecha: i.fecha, tipo: i.tipo === "propuesta" ? "Para decidir" : `Recordatorio${i.para_nombre ? ` (para ${i.para_nombre})` : " (para todos)"}`, que: i.titulo, pidio: i.creado_por_nombre }))
     return {
       consultado: "Agenda de Jarvis",
       datos: items.map((i) => ({ tipo: i.tipo, titulo: i.titulo, fecha: i.fecha, vencido: i.vencido, pidio: i.creado_por_nombre, detalle: i.detalle })),
@@ -793,11 +814,36 @@ const historialDecisionesH: Herramienta = {
   },
 }
 
+const clientesRetenidos: Herramienta = {
+  nombre: "clientes_retenidos",
+  descripcion: "Clientes con las entregas retenidas (el chofer no baja mercadería sin cobrar): desde cuándo, por qué, quién lo decidió y cuánto deben hoy.",
+  esquema: { type: "object", properties: {} },
+  async ejecutar(ctx) {
+    const { data, error } = await ctx.db.from("clientes").select("id, nombre, retener_motivo, retener_desde, retener_por").eq("retener_entregas", true)
+    if (error) throw new Error(error.message)
+    const cs = (data ?? []) as { id: string; nombre: string; retener_motivo: string | null; retener_desde: string | null; retener_por: string | null }[]
+    const deuda = cs.length ? await rpc(ctx.db, "jarvis_deuda_antiguedad", { p_zona_id: null, p_vendedor_id: null, p_cliente_id: null }) : []
+    const saldo = new Map(deuda.map((d) => [String(d.cliente_id), d]))
+    const ids = cs.map((c) => c.retener_por).filter((x): x is string => !!x)
+    const { data: us } = ids.length ? await ctx.db.from("usuarios").select("id, nombre").in("id", ids) : { data: [] }
+    const nom = new Map(((us ?? []) as { id: string; nombre: string }[]).map((u) => [u.id, u.nombre]))
+    const filas = cs.map((c) => {
+      const d = saldo.get(c.id)
+      return { cliente: c.nombre, desde: fechaSola(c.retener_desde), motivo: c.retener_motivo, decidio: c.retener_por ? nom.get(c.retener_por) ?? "—" : "—", debe: red(n0(d?.saldo)), vencido_30: red(n0(d?.d30_59) + n0(d?.d60_89) + n0(d?.d90_mas)) }
+    })
+    return {
+      consultado: "Clientes con entregas retenidas y su deuda",
+      datos: filas,
+      bloques: [{ ...tabla("Clientes con entregas retenidas", [{ clave: "cliente", titulo: "Cliente" }, { clave: "desde", titulo: "Desde", formato: "fecha" }, { clave: "decidio", titulo: "Lo decidió" }, { clave: "debe", titulo: "Debe hoy", formato: "pesos" }, { clave: "vencido_30", titulo: "Vencido +30 d", formato: "pesos" }], filas), recalcular: { herramienta: "clientes_retenidos", parametros: {} } }],
+    }
+  },
+}
+
 // ─── Registro ──────────────────────────────────────────────────────────────
 export const HERRAMIENTAS: Herramienta[] = [
   indicadoresTablero, ventas, deudaClientes, clientesHabitos, fichaCliente, articulosVendidos,
   coberturaStock, proveedores, pagosProveedores, cheques, operacion, comisiones,
-  agendarRecordatorio, proponerDecision, verAgenda, historialDecisionesH,
+  agendarRecordatorio, proponerDecision, verAgenda, historialDecisionesH, clientesRetenidos,
 ]
 
 /** Las que escriben en la agenda: /recalcular NUNCA las corre. */

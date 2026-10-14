@@ -16,6 +16,7 @@ interface Item {
   id: string; tipo: "propuesta" | "recordatorio"; tono: string | null; titulo: string; detalle: string | null
   fecha: string | null; accion: { tipo?: string; descripcion?: string } | null; impacto_estimado: number | null
   creado_por_nombre: string; creado_at: string; pospuesto_por_nombre?: string | null; vencido: boolean; puedo_decidir: boolean
+  para_nombre: string | null
 }
 
 function proximoLunes() {
@@ -26,10 +27,11 @@ function proximoLunes() {
 
 export function JarvisAgenda({ onPreguntar }: { onPreguntar: (t: string) => void }) {
   const [items, setItems] = useState<Item[] | null>(null)
-  const [nuevo, setNuevo] = useState<{ titulo: string; fecha: string } | null>(null)
+  const [personas, setPersonas] = useState<{ id: string; nombre: string }[]>([])
+  const [nuevo, setNuevo] = useState<{ titulo: string; fecha: string; para: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const cargar = () => fetch("/api/playroom/agenda").then(r => (r.ok ? r.json() : { items: [] })).then(j => setItems(j.items ?? [])).catch(() => setItems([]))
+  const cargar = () => fetch("/api/playroom/agenda").then(r => (r.ok ? r.json() : { items: [] })).then(j => { setItems(j.items ?? []); setPersonas(j.personas ?? []) }).catch(() => setItems([]))
   useEffect(() => { cargar() }, [])
 
   async function agregar() {
@@ -51,7 +53,7 @@ export function JarvisAgenda({ onPreguntar }: { onPreguntar: (t: string) => void
         <span className="flex items-center gap-3 text-xs text-neutro-400">
           <span>Cada decisión queda con tu nombre y la hora</span>
           {!nuevo && (
-            <button type="button" onClick={() => setNuevo({ titulo: "", fecha: sumarDiasISO(hoyISO(), 1) })}
+            <button type="button" onClick={() => setNuevo({ titulo: "", fecha: sumarDiasISO(hoyISO(), 1), para: "yo" })}
               className="inline-flex items-center gap-1 rounded-full border border-neutro-200 bg-white px-2.5 py-1 font-semibold text-azul-600 hover:bg-azul-50">
               <Plus className="h-3 w-3" />Recordatorio
             </button>
@@ -64,6 +66,12 @@ export function JarvisAgenda({ onPreguntar }: { onPreguntar: (t: string) => void
           <input autoFocus value={nuevo.titulo} onChange={e => setNuevo({ ...nuevo, titulo: e.target.value })} placeholder="¿Qué hay que recordar?"
             className="min-w-[220px] flex-1 rounded-lg border border-neutro-200 bg-white px-3 py-2 text-sm outline-none focus:border-azul-400" />
           <DateInputAR value={nuevo.fecha} onChange={v => setNuevo({ ...nuevo, fecha: v })} min={hoyISO()} className="w-36" />
+          <select value={nuevo.para} onChange={e => setNuevo({ ...nuevo, para: e.target.value })} title="A quién le aparece"
+            className="rounded-lg border border-neutro-200 bg-white px-2 py-2 text-sm">
+            <option value="yo">Para mí</option>
+            <option value="todos">Para todos</option>
+            {personas.map(p => <option key={p.id} value={p.id}>Para {p.nombre}</option>)}
+          </select>
           <button type="button" onClick={agregar} disabled={!nuevo.titulo.trim() || !nuevo.fecha}
             className="rounded-lg bg-azul-600 px-3 py-2 text-sm font-semibold text-white hover:bg-azul-700 disabled:bg-neutro-200">Agendar</button>
           <button type="button" onClick={() => { setNuevo(null); setError(null) }} className="rounded-lg px-2 py-2 text-sm text-neutro-500 hover:bg-neutro-100">Cancelar</button>
@@ -73,7 +81,7 @@ export function JarvisAgenda({ onPreguntar }: { onPreguntar: (t: string) => void
 
       {items === null ? null : items.length === 0 ? (
         <p className="rounded-xl bg-neutro-50 px-4 py-3 text-sm text-neutro-600">
-          No hay nada pendiente. Podés pedirle a Jarvis en el chat: <i>"recordame el lunes revisar la deuda de Necochea"</i> o <i>"dejalo para decidir"</i>.
+          No hay nada pendiente. Podés pedirle a Jarvis en el chat: <i>"recordame el lunes revisar la deuda de Necochea"</i>, <i>"recordale a Mario…"</i> o <i>"dejalo para decidir"</i>.
         </p>
       ) : (
         <ul className="divide-y divide-neutro-100">
@@ -120,6 +128,7 @@ function Fila({ item, onListo, onPreguntar }: { item: Item; onListo: () => void;
         {item.detalle && <p className="text-[13px] text-neutro-600">{item.detalle}</p>}
         <p className="mt-0.5 text-xs text-neutro-400">
           {esPropuesta ? "Propuesto" : "Pedido"} por {item.creado_por_nombre} · {fmtFecha(item.creado_at)}
+          {!esPropuesta && <> · {item.para_nombre ? `para ${item.para_nombre}` : "para todos"}</>}
           {!esPropuesta && item.fecha && <> · <span className={cn(item.vencido && "font-semibold text-alerta-600")}>{item.vencido ? "era para el" : "para el"} {fmtFecha(item.fecha)}</span></>}
           {item.pospuesto_por_nombre && <> · pospuesto por {item.pospuesto_por_nombre}</>}
           {item.impacto_estimado ? <> · en juego {pesosCorto(item.impacto_estimado)}</> : null}
@@ -130,7 +139,8 @@ function Fila({ item, onListo, onPreguntar }: { item: Item; onListo: () => void;
 
         {resultado ? (
           <p className={cn("mt-2 text-xs font-semibold", resultado.ok ? "text-exito-600" : "text-alerta-600")}>
-            {resultado.texto}{resultado.abrir && <> <a href={resultado.abrir} className="underline">Abrir</a></>}
+            {resultado.texto}
+            {resultado.abrir && <a href={resultado.abrir} className="ml-2 inline-flex rounded-full bg-azul-600 px-3 py-1 text-white hover:bg-azul-700">Abrir</a>}
           </p>
         ) : !item.puedo_decidir ? (
           <p className="mt-2 text-xs text-neutro-500">Esto mueve plata: lo decide un admin.</p>

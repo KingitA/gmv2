@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { requireAuth, getUserRoles } from "@/lib/auth"
 import { ERP_ROLES } from "@/lib/role-utils"
+import { PREFIJO_RETENCION, retenidosEntre } from "./retencion"
 
 // Helpers de servidor del módulo Viajes (API routes de oficina).
 
@@ -86,9 +87,15 @@ export async function sincronizarParadas(supabase: SupabaseClient, viajeId: stri
   const conParada = new Set((paradas || []).map((p: any) => p.cliente_id as string))
 
   let orden = Math.max(0, ...(paradas || []).map((p: any) => Number(p.orden) || 0))
-  const nuevas = [...conPedido]
-    .filter((c) => !conParada.has(c))
-    .map((cliente_id) => ({ viaje_id: viajeId, cliente_id, orden: ++orden }))
+  const sinParada = [...conPedido].filter((c) => !conParada.has(c))
+  // Cliente con entregas retenidas (decisión de oficina, lib/viajes/retencion.ts): su parada nace con candado
+  const retenidos = await retenidosEntre(supabase, sinParada)
+  const nuevas = sinParada.map((cliente_id) => ({
+    viaje_id: viajeId, cliente_id, orden: ++orden,
+    ...(retenidos.has(cliente_id)
+      ? { bloquear_entrega: true, exigir_cobro_anterior: true, motivo_bloqueo: PREFIJO_RETENCION + retenidos.get(cliente_id) }
+      : {}),
+  }))
   if (nuevas.length) {
     const { error } = await supabase.from("viajes_paradas").insert(nuevas)
     if (error) throw error

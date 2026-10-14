@@ -16,6 +16,7 @@ interface Regla { clave: string; valor: number | string; descripcion?: string | 
 interface Nota { clave: string; texto: string; por: string; at: string }
 interface Datos { reglas: Regla[]; notas: Nota[]; modelos: Record<"pensador" | "rapido" | "respaldo", string>; tope_mensual_usd: number; gasto_mes_usd: number; soy_admin: boolean }
 interface FilaHistorial { cuando: string; quien: string; que: string; sobre: string; nota: string | null }
+interface Retenido { cliente_id: string; cliente: string; desde: string | null; motivo: string | null; decidio: string; debe: number; vencido_30: number }
 
 const NOMBRE_REGLA: Record<string, string> = {
   regla_deuda_vencida_minima: "Deuda vencida mínima para avisar ($)",
@@ -36,12 +37,14 @@ async function guardar(clave: string, valor: unknown) {
 export default function JarvisAjustes() {
   const [d, setD] = useState<Datos | null>(null)
   const [historial, setHistorial] = useState<FilaHistorial[] | null>(null)
+  const [retenidos, setRetenidos] = useState<Retenido[] | null>(null)
   const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null)
   const [nota, setNota] = useState("")
 
   const cargar = () => {
     fetch("/api/playroom/jarvis").then(r => r.json()).then(setD).catch(() => setD(null))
     fetch("/api/playroom/jarvis/historial?limite=100").then(r => r.json()).then(j => setHistorial(j.filas ?? [])).catch(() => setHistorial([]))
+    fetch("/api/playroom/jarvis/retenidos").then(r => r.json()).then(j => setRetenidos(j.filas ?? [])).catch(() => setRetenidos([]))
   }
   useEffect(cargar, [])
 
@@ -55,6 +58,28 @@ export default function JarvisAjustes() {
   return (
     <div className="space-y-5">
       {msg && <p className={cn("rounded-xl px-4 py-2 text-sm font-semibold", msg.ok ? "bg-exito-50 text-exito-700" : "bg-alerta-50 text-alerta-700")}>{msg.t}</p>}
+
+      <Caja titulo="Clientes con entregas retenidas" sub="El chofer no les baja mercadería sin cobrar. Se retienen con un Sí en “Para decidir”; acá se liberan. Queda a tu nombre.">
+        {retenidos === null ? <p className="text-sm text-neutro-500">Cargando…</p> : retenidos.length === 0 ? <p className="text-sm text-neutro-500">Ningún cliente retenido.</p> : (
+          <ul className="divide-y divide-neutro-100">
+            {retenidos.map(r => (
+              <li key={r.cliente_id} className="flex flex-wrap items-center gap-3 py-2">
+                <div className="min-w-[240px] flex-1">
+                  <p className="text-sm font-semibold text-azul-900">{r.cliente}</p>
+                  <p className="text-xs text-neutro-400">Desde {r.desde ? fmtFecha(r.desde) : "—"} · lo decidió {r.decidio}{r.motivo ? ` · ${r.motivo}` : ""}</p>
+                </div>
+                <p className="text-sm text-neutro-600">Debe <b>$ {numero(r.debe, 0)}</b>{r.vencido_30 > 0 && <> · vencido <b className="text-alerta-600">$ {numero(r.vencido_30, 0)}</b></>}</p>
+                <button type="button" onClick={async () => {
+                  setMsg(null)
+                  const res = await fetch("/api/playroom/jarvis/retenidos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cliente_id: r.cliente_id }) })
+                  const j = await res.json().catch(() => ({}))
+                  setMsg({ ok: res.ok, t: res.ok ? j.detalle : j.error || "No se pudo liberar." }); cargar()
+                }} className="rounded-lg border border-neutro-200 px-3 py-1.5 text-xs font-semibold text-azul-600 hover:bg-azul-50">Liberar</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Caja>
 
       <Caja titulo="Reglas de los avisos" sub="A partir de cuánto Jarvis te avisa. Las define una persona; Jarvis propone los valores iniciales.">
         <ul className="divide-y divide-neutro-100">
