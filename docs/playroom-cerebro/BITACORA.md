@@ -3,7 +3,7 @@
 Acá se anota **todo lo que se va haciendo**, para retomar desde cualquier computadora o sesión.
 El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 
-**Rama:** `playroom-cerebro` (en GitHub). **No está en main.** Pasa a main solo con el OK de Juan.
+**EN MAIN desde el 14/10/2026** (merge `4f23a64`, con OK de Juan después de probar). Rollback: `git revert -m 1 4f23a64`. Para seguir trabajando: rama nueva desde main.
 
 ---
 
@@ -24,7 +24,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 ## Migraciones
 | Archivo | Qué hace | ¿Aplicada? |
 |---|---|---|
-| `20261014h_jarvis_revision.sql` | **Seguridad**: prende RLS en ai_agenda_events, ai_conversations y ai_messages (estaba apagada: la migración a no cerraba nada) y saca permisos a anon/authenticated. La bitácora pone siempre la hora real. Un solo aviso o propuesta vivo por clave. `viajes_paradas.retencion_puso_cobro`. Consultas corregidas. | **NO** — la aplica Juan |
+| `20261014h_jarvis_revision.sql` | **Seguridad**: prende RLS en ai_agenda_events, ai_conversations y ai_messages (estaba apagada: la migración a no cerraba nada) y saca permisos a anon/authenticated. La bitácora pone siempre la hora real. Un solo aviso o propuesta vivo por clave. `viajes_paradas.retencion_puso_cobro`. Consultas corregidas. | Sí (14/10) |
 | `20261014g_jarvis_mundo_exterior.sql` | `ai_insumos` (catálogo de materias primas y qué indicadores las mueven), `ai_articulo_insumos` (de qué depende cada artículo: IA o persona; las correcciones van a la bitácora), `ai_indicadores_externos` (dólar, inflación, petróleo…, con fuente), RPC `jarvis_proveedor_insumos` y 3 reglas nuevas. No toca `articulos`. | Sí (14/10) |
 | `20261014f_jarvis_retencion_registro.sql` | Trigger: retener o liberar a un cliente queda SIEMPRE en la bitácora (quién y cuándo), venga de donde venga el cambio. | Sí (14/10) |
 | `20261014e_jarvis_acciones.sql` | Recordatorios por persona (`para_usuario`; NULL = para todos). Clientes: `retener_entregas`, motivo, desde y quién. | Sí (14/10) |
@@ -34,8 +34,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 | `20261014_jarvis_cimientos.sql` | Bitácora inborrable (`ai_registro`), ajustes de modelo y tope (`ai_ajustes`), gasto (`ai_uso`), quién preguntó en conversaciones, **cierra un agujero de seguridad** (las conversaciones y la agenda de IA se podían leer y borrar con la clave pública), borra los 235 avisos viejos del lector de mails. | Sí (14/10) |
 
 ## Pendientes
-- [ ] **Juan aplica `20261014h_jarvis_revision.sql`** (seguridad).
-- [ ] Probar en el preview según `PASE-A-MAIN.md` §3 y dar el OK para main.
+- [x] Juan aplicó `20261014h_jarvis_revision.sql` (verificado: RLS prendida) y probó todo (14/10). **EN MAIN.**
 - [x] Juan aplicó `20261014_jarvis_cimientos.sql` y `20261014b_jarvis_consultas.sql` (14/10).
 - [x] Juan aplicó `20261014c_jarvis_vigias.sql` (14/10).
 - [x] Juan aplicó `20261014d_jarvis_decisiones.sql` (14/10).
@@ -52,6 +51,9 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 14/10/2026 — EN MAIN
+- Merge `4f23a64` (main no había cambiado desde 795089b: pase limpio). Las 8 migraciones están aplicadas. Pendientes de la primera semana en `PASE-A-MAIN.md` §6.
 
 ### 14/10/2026 (noche) — Revisión general del código (3 revisores en paralelo)
 - **Chat e IA:**
