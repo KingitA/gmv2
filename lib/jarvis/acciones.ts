@@ -15,6 +15,8 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { liberarCliente, retenerCliente } from "@/lib/viajes/retencion"
+import { decidirDia } from "@/lib/viajes/calendario-laboral"
+import { fecha } from "@/lib/formato"
 
 export interface ResultadoAccion { estado: "ok" | "error" | "no_aplica"; detalle: string; abrir?: string }
 
@@ -25,6 +27,10 @@ export interface Accion {
   /** mueve plata → solo admin (decisión de Juan, 14/10/2026) */
   mueveDinero: boolean
   ejecutar: (db: SupabaseClient, parametros: Record<string, unknown>, usuarioId: string) => Promise<ResultadoAccion>
+  /** para preguntas de dos caminos (ej. "¿Trabajamos?"): lo que hace el "No" (si no está, el No solo anota) */
+  alRechazar?: (db: SupabaseClient, parametros: Record<string, unknown>, usuarioId: string) => Promise<ResultadoAccion>
+  /** textos de los botones (por defecto "Sí" / "No") */
+  etiquetas?: { si: string; no: string }
 }
 
 const ninguna: Accion = {
@@ -80,7 +86,35 @@ const armarOrdenCompra: Accion = {
   },
 }
 
-export const ACCIONES: Record<string, Accion> = { ninguna, tarea, retener_entregas: retenerEntregas, liberar_entregas: liberarEntregas, armar_orden_compra: armarOrdenCompra }
+const diaLaboral: Accion = {
+  tipo: "dia_laboral",
+  descripcion: "Decidir si se trabaja un día (feriado). Queda marcado en el calendario de viajes y se puede cambiar después desde \"Armar mes\".",
+  mueveDinero: false,
+  etiquetas: { si: "Trabajamos", no: "No trabajamos" },
+  async ejecutar(db, p, usuarioId) {
+    await decidirDia(db, { fecha: String(p.fecha), trabajamos: true, usuarioId })
+    return { estado: "ok", detalle: `Anotado: el ${fecha(String(p.fecha))} se trabaja.` }
+  },
+  async alRechazar(db, p, usuarioId) {
+    await decidirDia(db, { fecha: String(p.fecha), trabajamos: false, usuarioId })
+    return { estado: "ok", detalle: `Anotado: el ${fecha(String(p.fecha))} no se trabaja.` }
+  },
+}
+
+const abrirPlanificador: Accion = {
+  tipo: "abrir_planificador",
+  descripcion: "Abrir \"Armar mes\" para programar los viajes del mes. Jarvis lo vuelve a recordar mientras falten zonas.",
+  mueveDinero: false,
+  etiquetas: { si: "Armar ahora", no: "No hace falta" },
+  async ejecutar(_db, p) {
+    const mes = String(p.mes ?? "")
+    return { estado: "ok", detalle: "Te abro el calendario para armarlo. Si quedan zonas sin viaje, mañana te lo vuelvo a recordar.", abrir: `/viajes/planificar?mes=${encodeURIComponent(mes)}` }
+  },
+}
+
+export const ACCIONES: Record<string, Accion> = {
+  dia_laboral: diaLaboral,
+  abrir_planificador: abrirPlanificador, ninguna, tarea, retener_entregas: retenerEntregas, liberar_entregas: liberarEntregas, armar_orden_compra: armarOrdenCompra }
 
 /** Acciones que necesitan saber de qué cliente o proveedor se trata. */
 export const ACCION_PIDE: Record<string, "cliente" | "proveedor"> = { retener_entregas: "cliente", liberar_entregas: "cliente", armar_orden_compra: "proveedor" }

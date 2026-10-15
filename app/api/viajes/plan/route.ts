@@ -2,12 +2,15 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireOficina, errorJson, crearViajeProgramado } from "@/lib/viajes/servidor"
 import { estadoPlanMes, propuestaDesdeMesAnterior } from "@/lib/viajes/plan-mes"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { hoyISO } from "@/lib/formato"
 
 // Plan mensual de viajes (pantalla /viajes/planificar).
 //
 // GET  ?mes=AAAA-MM → zonas (con su duración habitual y los viajes del mes que
 //      las cubren), viajes del mes, zonas faltantes y la propuesta armada con
-//      el mes anterior (misma semana y día de la semana). No guarda nada.
+//      el mes anterior (misma semana y día de la semana), feriados del mes,
+//      ausencias del personal y días hábiles. No guarda nada.
 // POST { viajes: [{ fecha, dias, zona_ids[] }] } → programa todos los
 //      borradores de una (mismo alta que "Programar viaje"). Si alguno falla,
 //      los demás quedan creados y se informa cuál falló.
@@ -18,8 +21,13 @@ export async function GET(request: NextRequest) {
   try {
     const mes = new URL(request.url).searchParams.get("mes") || ""
     if (!/^\d{4}-\d{2}$/.test(mes)) return errorJson("mes (AAAA-MM) es requerido")
-    const supabase = await createClient()
-    const [estado, propuesta] = await Promise.all([estadoPlanMes(supabase, mes), propuestaDesdeMesAnterior(supabase, mes)])
+    // service key: feriados y ausencias están en tablas protegidas (RLS). El permiso ya lo controló requireOficina.
+    const supabase = createAdminClient()
+    const hoy = hoyISO()
+    const [estado, propuesta] = await Promise.all([
+      estadoPlanMes(supabase, mes, { desdeDia: hoy.slice(0, 7) === mes ? hoy : undefined }),
+      propuestaDesdeMesAnterior(supabase, mes),
+    ])
     return NextResponse.json({ ...estado, propuesta })
   } catch (error: any) {
     console.error("[viajes/plan] GET:", error)

@@ -20,6 +20,7 @@ const GRUPOS: Grupo[] = [
     items: [
       { href: "/admin/usuarios", icon: ShieldCheck, title: "Usuarios y roles", desc: "Accesos al ERP y a las apps de depósito, chofer y vendedor", soloAdmin: true },
       { href: "/tablas/viajantes", icon: UserCheck, title: "Vendedores y viajantes", desc: "Datos, listas que pueden usar y comisiones" },
+      { href: "/tablas/ausencias", icon: CalendarClock, title: "Vacaciones y ausencias", desc: "Quién no viene y cuándo: se ve al armar el calendario de viajes" },
       { href: "/usuarios-crm", icon: Globe2, title: "Usuarios del portal", desc: "Clientes y vendedores del portal web: altas y aprobaciones" },
     ],
   },

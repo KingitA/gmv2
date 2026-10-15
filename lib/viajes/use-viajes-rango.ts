@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRealtime } from '@/lib/hooks/use-realtime'
+import { patchViajeConfirmando } from './use-calendario-laboral'
 import { sumarDiasISO } from '@/lib/formato'
 
 export type ViajeCal = {
@@ -67,9 +68,9 @@ export function useViajesRango(desde: string, hasta: string) {
     if (!viajeMovible(v.estado)) { toast.error('Ese viaje ya salió: no se cambia la fecha'); return }
     setViajes(prev => prev.map(x => (x.id === viajeId ? { ...x, fecha: nuevaFecha } : x)))
     try {
-      const res = await fetch(`/api/viajes/${viajeId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha: nuevaFecha }) })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      const r = await patchViajeConfirmando(viajeId, { fecha: nuevaFecha })
+      if (!r) { cargar(true); return } // canceló: alguien del equipo está de vacaciones ese día
+      if (!r.ok) throw new Error(r.data.error)
       toast.success(`${v.nombre} pasa al ${nuevaFecha.slice(8)}/${nuevaFecha.slice(5, 7)}`)
     } catch (e: any) {
       toast.error(e?.message || 'No se pudo mover el viaje')

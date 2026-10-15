@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
+import { anotar } from "@/lib/jarvis/registro"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAuth } from '@/lib/auth'
-import { requireOficina, errorJson, guardarChoferes, guardarZonas } from '@/lib/viajes/servidor'
+import { ausenciasDelEquipo, requireOficina, errorJson, guardarChoferes, guardarZonas } from '@/lib/viajes/servidor'
 import { viajeEditable } from '@/lib/viajes/estados'
 
 export async function GET(
@@ -178,11 +180,33 @@ export async function PATCH(
 
     const { data: viaje } = await supabase
       .from("viajes")
-      .select("id, estado, tipo, tipo_transporte, chofer_id")
+      .select("id, estado, tipo, tipo_transporte, chofer_id, fecha, dias, nombre")
       .eq("id", id)
       .single()
     if (!viaje) return errorJson("Viaje no encontrado", 404)
     if (viaje.tipo !== "reparto") return errorJson("Este viaje no es de reparto")
+
+    // Vacaciones del equipo: si cambia el chofer, los acompañantes, la fecha o los días
+    // y alguien va a estar de vacaciones, se frena y se pide confirmación (queda registrado).
+    let ausenciaConfirmada: string | null = null
+    if (body.accion !== "cancelar" && (body.chofer_id !== undefined || body.acompanante_ids !== undefined || body.fecha !== undefined || body.dias !== undefined)) {
+      const porTransporteFinal = (body.tipo_transporte ?? viaje.tipo_transporte) === "transporte"
+      if (!porTransporteFinal) {
+        let acomp: string[] = Array.isArray(body.acompanante_ids) ? body.acompanante_ids : []
+        if (!Array.isArray(body.acompanante_ids)) {
+          const { data: act } = await supabase.from("viajes_choferes").select("usuario_id").eq("viaje_id", id).eq("rol", "acompanante")
+          acomp = (act || []).map((a: any) => a.usuario_id)
+        }
+        const titular = body.chofer_id !== undefined ? body.chofer_id || null : viaje.chofer_id
+        const fechaFinal = typeof body.fecha === "string" ? body.fecha : String(viaje.fecha).slice(0, 10)
+        const diasFinal = body.dias !== undefined ? Math.min(15, Math.max(1, Math.round(Number(body.dias)) || 1)) : Number(viaje.dias) || 1
+        const { aviso } = await ausenciasDelEquipo([titular, ...acomp], fechaFinal, diasFinal)
+        if (aviso && !body.confirmar_ausencias) {
+          return NextResponse.json({ error: aviso, requiere_confirmacion: "ausencia" }, { status: 409 })
+        }
+        ausenciaConfirmada = aviso
+      }
+    }
 
     if (body.accion === "cancelar") {
       if (!viajeEditable(viaje.estado)) return errorJson("Solo se cancela un viaje programado")
@@ -213,6 +237,7 @@ export async function PATCH(
       if (Object.keys(cambios).length === 2) return errorJson("El viaje ya fue despachado: solo se editan la fecha y las observaciones")
       const { error } = await supabase.from("viajes").update(cambios).eq("id", id)
       if (error) throw error
+      if (ausenciaConfirmada) await registrarAusenciaConfirmada(id, viaje.nombre, ausenciaConfirmada, auth.user.id)
       return NextResponse.json({ success: true })
     }
 
@@ -270,9 +295,19 @@ export async function PATCH(
       await guardarChoferes(supabase, id, titular, acompanantes)
     }
 
+    if (ausenciaConfirmada) await registrarAusenciaConfirmada(id, viaje.nombre, ausenciaConfirmada, auth.user.id)
     return NextResponse.json({ success: true })
   } catch (error: any) {
     console.error("[viajes] Error en PATCH /api/viajes/[id]:", error)
     return NextResponse.json({ error: error.message || "Error al editar el viaje" }, { status: 500 })
+  }
+}
+
+/** Quien confirmó un viaje con alguien de vacaciones queda en la bitácora. */
+async function registrarAusenciaConfirmada(viajeId: string, nombre: string, aviso: string, usuarioId: string) {
+  try {
+    await anotar(createAdminClient(), { usuarioId, accion: "viaje_con_ausente_confirmado", entidadTipo: "viaje", entidadId: viajeId, detalle: { titulo: `Viaje ${nombre} con personal de vacaciones`, nota: aviso } })
+  } catch (e) {
+    console.error("[viajes] no se pudo registrar la confirmación de ausencia", e)
   }
 }

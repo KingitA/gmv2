@@ -133,18 +133,21 @@ export async function decidir(db: SupabaseClient, d: Decision) {
     await tomar(db, item.id, { ...base, due_date: fecha })
     return { estado: "pospuesto", fecha }
   }
-  if (d.decision === "no") {
+  if (d.decision === "no" && !accion.alRechazar) {
     await tomar(db, item.id, { ...base, status: "cancelada", cerrado_por: d.usuarioId, cerrado_at: ahora, cierre_nota: nota ?? "Decidió que no" })
     return { estado: "rechazado" }
   }
 
-  // Sí: primero se anota la decisión (si no se puede anotar, o ya la tomó otro, no se ejecuta nada)
+  // Sí (o el "No" de una pregunta de dos caminos): primero se anota la decisión
+  // (si no se puede anotar, o ya la tomó otro, no se ejecuta nada)
   await tomar(db, item.id, { ...base, status: "en_progreso" })
   let resultado
   try {
     resultado = item.event_type === "recordatorio"
       ? { estado: "no_aplica" as const, detalle: "Hecho." }
-      : await accion.ejecutar(db, item.accion?.parametros ?? {}, d.usuarioId)
+      : d.decision === "no" && accion.alRechazar
+        ? await accion.alRechazar(db, item.accion?.parametros ?? {}, d.usuarioId)
+        : await accion.ejecutar(db, item.accion?.parametros ?? {}, d.usuarioId)
   } catch (e) {
     resultado = { estado: "error" as const, detalle: e instanceof Error ? e.message : String(e) }
   }
@@ -200,6 +203,7 @@ export interface ItemAgenda {
   fecha: string | null; accion: { tipo?: string; descripcion?: string } | null; impacto_estimado: number | null
   creado_por: string | null; creado_por_nombre: string; creado_at: string
   pospuesto_por_nombre?: string | null; vencido: boolean; mueve_dinero: boolean
+  etiquetas: { si: string; no: string } | null
   /** null = para todos */
   para_nombre: string | null
 }
@@ -230,6 +234,7 @@ export async function agendaPendiente(db: SupabaseClient, usuarioId: string): Pr
     pospuesto_por_nombre: f.decision === "posponer" && f.decidido_por ? nombres.get(f.decidido_por) ?? null : null,
     vencido: !!f.due_date && f.due_date < hoy,
     mueve_dinero: buscarAccion(f.accion?.tipo).mueveDinero,
+    etiquetas: buscarAccion(f.accion?.tipo).etiquetas ?? null,
     para_nombre: f.event_type === "propuesta" || !f.para_usuario ? null : f.para_usuario === usuarioId ? "vos" : nombres.get(f.para_usuario) ?? "alguien",
   }))
 }

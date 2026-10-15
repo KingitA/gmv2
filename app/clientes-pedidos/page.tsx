@@ -11,6 +11,7 @@ import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { TablaPedidos, type Orden, type PedidoFila } from "@/components/clientes/tabla-pedidos"
 import { FiltrosPedidos, type Filtros } from "@/components/clientes/filtros-pedidos"
 import { CalendarioViajes, celdasMes, celdasSemana, type PedidoSuelto } from "@/components/viajes/calendario-viajes"
+import { useCalendarioLaboral } from "@/lib/viajes/use-calendario-laboral"
 import { ProgramarViajeDialog } from "@/components/viajes/programar-viaje-dialog"
 import { useViajesRango, sumarDias, viajeMovible, type ViajeCal } from "@/lib/viajes/use-viajes-rango"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
@@ -1070,6 +1071,7 @@ export default function ClientesPedidosPage() {
     : celdasMes(Number(calDia.slice(0, 4)), Number(calDia.slice(5, 7)) - 1)
   const diasCal = celdasCal.filter(Boolean) as string[]
   const { viajes: viajesCal, moverViaje, recargar: recargarViajesCal } = useViajesRango(diasCal[0], diasCal[diasCal.length - 1])
+  const { marcas: marcasCal } = useCalendarioLaboral(diasCal[0], diasCal[diasCal.length - 1])
   const moverCal = (delta: number) => {
     let nuevo: string
     if (calModo === "semana") nuevo = sumarDias(calDia, 7 * delta)
@@ -1459,6 +1461,7 @@ export default function ClientesPedidosPage() {
                 onAbrirSuelto={abrirSuelto}
                 onQuitarSuelto={(id) => setFechaEntrega([id], null)}
                 onArrastrarSuelto={(id) => { arrastreRef.current = [id] }}
+                marcas={marcasCal}
               />
             </div>
           </div>
