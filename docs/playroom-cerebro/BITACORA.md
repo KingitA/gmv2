@@ -13,10 +13,7 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 3. Las migraciones de base (archivos `supabase/migrations/2026…_jarvis_*.sql`) **las aplica Juan a mano** en Supabase → SQL Editor. En "Migraciones" dice cuáles faltan.
 
 ## Estado actual
-- **15/10: Jarvis + calendario de viajes** en la rama `jarvis-calendario` (desde main 6adbb34). Código listo. Falta:
-  - aplicar `20261015b_calendario_laboral.sql`;
-  - probar en el preview;
-  - OK de Juan para main.
+- **15/10: Jarvis + calendario de viajes — EN MAIN** (merge `e570a2c`, OK de Juan después de probar). Rollback: `git revert -m 1 e570a2c`.
 - **Etapa 0 (cimientos): lista.** Migración aplicada (verificado 14/10).
 - **Etapa 1 (chat nuevo): lista, falta probarla con la IA** (en el preview, o el examen con la clave en `.env.local`). Migración aplicada; las 12 consultas responden contra la base real.
 - **Etapa 2 (vigías y resumen del día): lista.** Migración aplicada (14/10). Falta que exista `CRON_SECRET` en Vercel y probar "Revisar ahora" en el preview. **El reporte corre de lunes a sábado a las 5:00** (pedido de Juan; cron `0 8 * * 1-6` en hora UTC).
@@ -55,6 +52,9 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 15/10/2026 — Calendario EN MAIN
+- Merge `e570a2c`, pase limpio (main no había cambiado). Deploy de producción OK. Migración `20261015b` aplicada.
 
 ### 15/10/2026 (tarde) — Arreglos después de la prueba de Juan
 - Juan aplicó `20261015b_calendario_laboral.sql` y probó.
