@@ -14,6 +14,7 @@ import { DIAS_SEMANA, celdasMes } from "@/components/viajes/calendario-viajes"
 import { cn } from "@/lib/utils"
 import type { EstadoPlanMes, PropuestaViaje, ViajePlan, ZonaPlan } from "@/lib/viajes/plan-mes"
 import type { DiaEspecial } from "@/lib/viajes/calendario-laboral"
+import { patchViajeConfirmando } from "@/lib/viajes/use-calendario-laboral"
 
 /** Frecuencias que se ofrecen (en días). 1 = todos los días hábiles; null = cuando haga falta. */
 const FRECUENCIAS: Array<{ valor: number | null; texto: string }> = [
@@ -205,9 +206,9 @@ function Planificador() {
 
   const patchViaje = async (id: string, body: Record<string, unknown>, ok: string) => {
     try {
-      const res = await fetch(`/api/viajes/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      const d = await res.json()
-      if (!res.ok) throw new Error(d.error)
+      const r = await patchViajeConfirmando(id, body)
+      if (!r) { cargar(); return } // canceló: alguien del equipo está de vacaciones
+      if (!r.ok) throw new Error(r.data.error)
       toast.success(ok)
     } catch (e: any) {
       toast.error(e?.message || "No se pudo modificar el viaje")

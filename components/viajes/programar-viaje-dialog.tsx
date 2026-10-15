@@ -15,6 +15,8 @@ import { DateInputAR } from '@/components/ui/date-input-ar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { InputMonto } from "@/components/ui/input-monto"
+import { sumarDiasISO } from '@/lib/formato'
+import { useCalendarioLaboral } from '@/lib/viajes/use-calendario-laboral'
 
 interface Props {
   open: boolean
@@ -40,6 +42,14 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
   const [choferes, setChoferes] = useState<{ id: string; nombre: string }[]>([])
   const [titularId, setTitularId] = useState('')
   const [acompananteIds, setAcompananteIds] = useState<string[]>([])
+  // Vacaciones: se avisa al elegir y antes de programar (Ajustes → Personas)
+  const hastaViaje = fecha ? sumarDiasISO(fecha, Math.max(1, Number(dias) || 1) - 1) : null
+  const { ausenciaDe } = useCalendarioLaboral(fecha || null, hastaViaje)
+  const deVacaciones = (id: string) => (fecha && hastaViaje ? ausenciaDe(id, fecha, hastaViaje) : null)
+  const etiquetaChofer = (c: { id: string; nombre: string }) => {
+    const a = deVacaciones(c.id)
+    return a ? `${c.nombre} · de ${a.tipo}` : c.nombre
+  }
 
   useEffect(() => {
     const sb = createClient()
@@ -72,6 +82,12 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
       toast.error('Elegí la fecha y al menos una zona')
       return
     }
+    const equipo = porTransporte ? [] : [titularId, ...acompananteIds].filter(Boolean)
+    const ausentes = equipo.map((id) => deVacaciones(id)).filter((a): a is NonNullable<typeof a> => !!a)
+    if (ausentes.length) {
+      const msg = ausentes.map((a) => `${a.nombre} está de ${a.tipo} del ${a.desde.slice(8, 10)}/${a.desde.slice(5, 7)} al ${a.hasta.slice(8, 10)}/${a.hasta.slice(5, 7)}`).join(". ")
+      if (!window.confirm(`${msg}.\n\n¿Programar el viaje igual con esa gente? (queda registrado que lo confirmaste)`)) return
+    }
     setGuardando(true)
     try {
       const res = await fetch('/api/viajes', {
@@ -92,7 +108,7 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
         const r2 = await fetch(`/api/viajes/${data.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chofer_id: titularId || null, acompanante_ids: acompananteIds }),
+          body: JSON.stringify({ chofer_id: titularId || null, acompanante_ids: acompananteIds, confirmar_ausencias: ausentes.length > 0 }),
         })
         if (!r2.ok) toast.error('El viaje se programó, pero no se pudo asignar el chofer: cargalo desde el viaje')
       }
@@ -153,7 +169,7 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
                   <SelectTrigger><SelectValue placeholder="Sin chofer por ahora" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ninguno">Sin chofer por ahora</SelectItem>
-                    {choferes.map(c => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
+                    {choferes.map(c => <SelectItem key={c.id} value={c.id}>{etiquetaChofer(c)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -165,11 +181,16 @@ export function ProgramarViajeDialog({ open, onOpenChange, fechaInicial = '', zo
                       <label key={c.id} className="flex cursor-pointer items-center gap-2 text-sm">
                         <Checkbox checked={acompananteIds.includes(c.id)}
                           onCheckedChange={(v) => setAcompananteIds(prev => (v ? [...prev, c.id] : prev.filter(x => x !== c.id)))} />
-                        {c.nombre}
+                        <span className={deVacaciones(c.id) ? 'text-error-700' : undefined}>{etiquetaChofer(c)}</span>
                       </label>
                     ))}
                   </div>
                 </div>
+              )}
+              {[titularId, ...acompananteIds].some((id) => id && deVacaciones(id)) && (
+                <p className="rounded-md bg-error-50 px-2 py-1 text-[12px] font-semibold text-error-700">
+                  Ojo: {[titularId, ...acompananteIds].filter((id) => id && deVacaciones(id)).map((id) => choferes.find((c) => c.id === id)?.nombre).join(", ")} va a estar de vacaciones o licencia en esa fecha.
+                </p>
               )}
               <p className="text-[12px] text-neutro-500">Después se cambia desde la edición del viaje.</p>
             </div>

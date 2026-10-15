@@ -12,6 +12,7 @@ import { useUrlParams } from "@/lib/hooks/use-url-state"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { quienLleva, sumarDias, useViajesRango } from "@/lib/viajes/use-viajes-rango"
 import { CalendarioViajes, celdasMes } from "@/components/viajes/calendario-viajes"
+import { useCalendarioLaboral } from "@/lib/viajes/use-calendario-laboral"
 import { ProgramarViajeDialog } from "@/components/viajes/programar-viaje-dialog"
 
 // Calendario de viajes de reparto. Los viajes se PROGRAMAN con anticipación
@@ -39,6 +40,8 @@ function ViajesCalendario() {
     url.set({ mes: `${a}-${String(m + 1).padStart(2, "0")}` }, "push", { mes: hoy.slice(0, 7) })
 
   const { viajes, cargando, moverViaje, recargar } = useViajesRango(iso(anio, mes, 1), iso(anio, mes, new Date(anio, mes + 1, 0).getDate()))
+  // Feriados y vacaciones del mes (Jarvis + Ajustes → Personas)
+  const { marcas } = useCalendarioLaboral(iso(anio, mes, 1), iso(anio, mes, new Date(anio, mes + 1, 0).getDate()))
   const celdas = useMemo(() => celdasMes(anio, mes), [anio, mes])
 
   const [dialogo, setDialogo] = useState(false)
@@ -82,6 +85,7 @@ function ViajesCalendario() {
         onAbrirViaje={(id) => router.push(`/viajes/${id}`)}
         onProgramar={abrirDialogo}
         onMoverViaje={moverViaje}
+        marcas={marcas}
       />
 
       {/* Lista del mes */}

@@ -133,6 +133,9 @@
     "app/api/viajes/plan/",
     "app/api/personal/",
     "app/tablas/ausencias/",
-    "app/viajes/planificar/"
+    "app/viajes/planificar/",
+    "lib/viajes/use-calendario-laboral.ts",
+    "app/api/viajes/calendario-laboral/",
+    "components/viajes/viaje-datos.tsx"
   ]
 }

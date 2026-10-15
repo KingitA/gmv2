@@ -12,6 +12,7 @@ import { Plus } from 'lucide-react'
 import { ESTADO_VIAJE_COLOR } from '@/lib/viajes/estados'
 import { quienLleva, sumarDias, viajeMovible, type ViajeCal } from '@/lib/viajes/use-viajes-rango'
 import { cn } from '@/lib/utils'
+import type { MarcaDia } from '@/lib/viajes/use-calendario-laboral'
 
 export const DIAS_SEMANA = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 /** Tipo de dato del arrastre de pedidos (lo pone la lista de pedidos). */
@@ -36,6 +37,27 @@ interface Props {
   onQuitarSuelto?: (id: string) => void
   /** Al empezar a arrastrar un suelto (para subirlo a un viaje o moverlo de día). */
   onArrastrarSuelto?: (id: string) => void
+  /** Feriados (y si se trabaja) y quién está de vacaciones, por día (useCalendarioLaboral). */
+  marcas?: Map<string, MarcaDia>
+}
+
+/** Línea chica con el feriado y quién falta ese día. */
+function MarcasDelDia({ m }: { m?: MarcaDia }) {
+  if (!m || (!m.feriado && !m.ausentes?.length)) return null
+  return (
+    <div className="mb-1 space-y-0.5">
+      {m.feriado && (
+        <p className={cn('truncate rounded px-1 py-0.5 text-[10px] font-semibold leading-tight',
+          m.feriado.tono === 'duda' ? 'bg-ambar-200 text-ambar-900' : m.feriado.tono === 'si' ? 'bg-exito-100 text-exito-800' : 'bg-neutro-200 text-neutro-700')}
+          title={m.feriado.texto}>{m.feriado.texto}</p>
+      )}
+      {!!m.ausentes?.length && (
+        <p className="truncate text-[10px] text-cian-800" title={`De vacaciones / licencia: ${m.ausentes.join(', ')}`}>
+          🏖 {m.ausentes.slice(0, 2).map((n) => n.split(' ')[0]).join(', ')}{m.ausentes.length > 2 ? ` +${m.ausentes.length - 2}` : ''}
+        </p>
+      )}
+    </div>
+  )
 }
 
 export type PedidoSuelto = { id: string; cliente: string; zona: string | null }
@@ -91,7 +113,7 @@ export function CalendarioViajes(p: Props) {
 
   // Celular: agenda vertical (un día por fila). En el mes, solo los días con viajes y hoy.
   const diasAgenda = (p.celdas.filter(Boolean) as string[])
-    .filter(d => p.modo === 'semana' || d === p.hoy || (porDia.get(d)?.length ?? 0) > 0 || (p.sueltos?.get(d)?.length ?? 0) > 0)
+    .filter(d => p.modo === 'semana' || d === p.hoy || (porDia.get(d)?.length ?? 0) > 0 || (p.sueltos?.get(d)?.length ?? 0) > 0 || !!p.marcas?.get(d)?.feriado)
   const nombreDia = (d: string) => DIAS_SEMANA[(new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7] // formato-ok: día de semana en UTC (cálculo, no se muestra la fecha)
 
   return (
@@ -107,6 +129,7 @@ export function CalendarioViajes(p: Props) {
               <div className={cn('mx-auto grid size-7 place-items-center rounded-full text-sm font-bold', d === p.hoy ? 'bg-azul-600 text-white' : 'text-azul-900')}>{Number(d.slice(8))}</div>
             </div>
             <div className="min-w-0 flex-1 space-y-1.5">
+              <MarcasDelDia m={p.marcas?.get(d)} />
               {vs.length === 0 && !(p.sueltos?.get(d)?.length) && <div className="pt-1.5 text-[13px] text-neutro-400">Sin viajes</div>}
               {(p.sueltos?.get(d) || []).map(x => <ChipSuelto key={x.id} s={x} onAbrir={() => p.onAbrirSuelto?.(x.id)} onQuitar={p.onQuitarSuelto ? () => p.onQuitarSuelto!(x.id) : undefined} />)}
               {vs.map(v => (
@@ -175,6 +198,7 @@ export function CalendarioViajes(p: Props) {
                       <Plus className="size-3.5" />
                     </button>
                   </div>
+                  <MarcasDelDia m={p.marcas?.get(dia)} />
                   <div className="space-y-1">
                     {viajesDia.map(v => {
                       const movible = viajeMovible(v.estado)

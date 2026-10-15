@@ -3,6 +3,9 @@ import type { SupabaseClient, User } from "@supabase/supabase-js"
 import { requireAuth, getUserRoles } from "@/lib/auth"
 import { ERP_ROLES } from "@/lib/role-utils"
 import { PREFIJO_RETENCION, retenidosEntre } from "./retencion"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { ausenciasEntre } from "./calendario-laboral"
+import { fecha as fmtFecha, sumarDiasISO as sumarDias } from "@/lib/formato"
 
 // Helpers de servidor del módulo Viajes (API routes de oficina).
 
@@ -206,4 +209,20 @@ export async function crearViajeProgramado(supabase: SupabaseClient, usuarioId: 
     await guardarChoferes(supabase, viaje.id, body.chofer_id || null, Array.isArray(body.acompanante_ids) ? body.acompanante_ids : [])
   }
   return viaje.id as string
+}
+
+/**
+ * Vacaciones del equipo de un viaje: si el titular o algún acompañante está de
+ * vacaciones / licencia en algún día del viaje, devuelve el aviso para mostrar.
+ * (Pedido de Juan, 15/10: "si programo un viaje con un chofer, que me indique que
+ * va a estar de vacaciones".) Usa la service key: personal_ausencias tiene RLS.
+ */
+export async function ausenciasDelEquipo(usuarioIds: (string | null | undefined)[], fecha: string, dias: number) {
+  const ids = [...new Set(usuarioIds.filter((x): x is string => !!x))]
+  if (!ids.length || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { aviso: null as string | null, ausencias: [] as Awaited<ReturnType<typeof ausenciasEntre>> }
+  const hasta = sumarDias(fecha, Math.max(1, dias) - 1)
+  const ausencias = (await ausenciasEntre(createAdminClient(), fecha, hasta)).filter((a) => ids.includes(a.usuario_id))
+  if (!ausencias.length) return { aviso: null, ausencias }
+  const aviso = ausencias.map((a) => `${a.nombre} está de ${a.tipo} del ${fmtFecha(a.desde)} al ${fmtFecha(a.hasta)}`).join(". ") + ` (el viaje es del ${fmtFecha(fecha)}${dias > 1 ? ` al ${fmtFecha(hasta)}` : ""}).`
+  return { aviso, ausencias }
 }

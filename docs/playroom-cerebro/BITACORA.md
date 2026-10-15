@@ -56,6 +56,16 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 
 ## Diario
 
+### 15/10/2026 (tarde) — Arreglos después de la prueba de Juan
+- Juan aplicó `20261015b_calendario_laboral.sql` y probó.
+- **No se veían las vacaciones en el calendario.** Solo estaban en "Armar mes", que abre el mes siguiente. Ahora el calendario principal de **Viajes** y el de **Clientes** muestran los feriados y 🏖 quién falta, por día. Va por `useCalendarioLaboral` y `GET /api/viajes/calendario-laboral`, en el componente compartido `calendario-viajes.tsx` (prop `marcas`).
+- **Se pudo asignar a Gabriel (de vacaciones del 15 al 21/10) al viaje del 16/10 sin aviso.** El aviso existía solo como vigía de la mañana. Ahora:
+  - el **servidor** frena (`PATCH /api/viajes/[id]` → 409 `requiere_confirmacion: "ausencia"`) cuando cambian el chofer, los acompañantes, la fecha o los días y alguien del equipo está ausente;
+  - con la confirmación sigue, y queda `viaje_con_ausente_confirmado` en la bitácora con quién confirmó;
+  - las pantallas piden confirmar (`patchViajeConfirmando`): "Programar viaje" (además avisa antes de crear el viaje), ficha del viaje, arrastrar en los calendarios y "Armar mes";
+  - en los selectores de chofer y acompañantes aparece "Nombre · de vacaciones" en rojo.
+- Probado con la base real, solo lectura: Gabriel el 16/10 se frena; el 22/10 pasa; un viaje de 3 días que arranca el 20/10 se frena.
+
 ### 15/10/2026 — Jarvis ayuda a armar el calendario de viajes
 Pedido de Juan, sobre "Armar mes" (`/viajes/planificar`, que hizo la sesión de viajes, commit ab96373).
 

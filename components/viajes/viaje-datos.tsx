@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner"
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { InputMonto } from "@/components/ui/input-monto"
+import { sumarDiasISO } from "@/lib/formato"
+import { patchViajeConfirmando, useCalendarioLaboral } from "@/lib/viajes/use-calendario-laboral"
 
 // Datos del viaje: se completan de a poco mientras está 'programado'
 // (primero fecha + zonas; más cerca de la fecha, quién lleva y en qué).
@@ -39,6 +41,11 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
   const [acompananteIds, setAcompananteIds] = useState<string[]>([])
   const [vehiculoId, setVehiculoId] = useState("")
   const [observaciones, setObservaciones] = useState("")
+  // Vacaciones del personal en las fechas del viaje (Ajustes → Personas)
+  const hastaViaje = fecha ? sumarDiasISO(fecha, Math.max(1, Number(dias) || 1) - 1) : null
+  const { ausenciaDe } = useCalendarioLaboral(fecha || null, hastaViaje)
+  const deVacaciones = (id: string) => (fecha && hastaViaje ? ausenciaDe(id, fecha, hastaViaje) : null)
+  const etiquetaChofer = (c: { id: string; nombre: string }) => { const a = deVacaciones(c.id); return a ? `${c.nombre} · de ${a.tipo}` : c.nombre }
 
   useEffect(() => {
     const cargar = async () => {
@@ -83,10 +90,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
   const guardar = async () => {
     setGuardando(true)
     try {
-      const res = await fetch(`/api/viajes/${viajeId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
+      const r = await patchViajeConfirmando(viajeId, (
           editable
             ? {
                 nombre,
@@ -100,11 +104,10 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
                 vehiculo_id: vehiculoId || null,
                 observaciones,
               }
-            : { observaciones, dias: Number(dias) || 1 },
-        ),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+            : { observaciones, dias: Number(dias) || 1 }
+      ))
+      if (!r) return // canceló: alguien del equipo está de vacaciones
+      if (!r.ok) throw new Error(r.data.error)
       toast.success("Viaje guardado")
       onGuardado()
     } catch (e: any) {
@@ -195,7 +198,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NINGUNO}>Sin definir</SelectItem>
-                  {choferes.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
+                  {choferes.map((c) => <SelectItem key={c.id} value={c.id}>{etiquetaChofer(c)}</SelectItem>)}
                 </SelectContent>
               </Select>
               <p className="mt-1 text-xs text-muted-foreground">Responsable de la plata: su billetera es la del viaje.</p>
@@ -210,7 +213,7 @@ export function ViajeDatos({ viajeId, editable, onGuardado }: { viajeId: string;
                       checked={acompananteIds.includes(c.id)}
                       onCheckedChange={(ch) => setAcompananteIds((prev) => (ch ? [...prev, c.id] : prev.filter((x) => x !== c.id)))}
                     />
-                    {c.nombre}
+                    <span className={deVacaciones(c.id) ? "text-error-700" : undefined}>{etiquetaChofer(c)}</span>
                   </label>
                 ))}
                 {choferes.length <= 1 && <p className="text-xs text-muted-foreground">No hay otros usuarios con rol chofer</p>}
