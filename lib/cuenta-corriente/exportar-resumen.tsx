@@ -37,6 +37,10 @@ export interface DatosResumen {
   extracto: FilaExtractoExport[]
   saldoFinal: number
   rango?: { desde?: string; hasta?: string }
+  /** true = exportar SOLO los comprobantes tildados (sin extracto) */
+  soloSeleccion?: boolean
+  /** total con signo de la selección (créditos restan) */
+  totalSeleccion?: number
 }
 
 const firmado = (f: FilaSaldoExport, v: number) => (f.es_credito ? -Math.abs(v) : Math.abs(v))
@@ -59,7 +63,7 @@ function descargar(blob: Blob, nombre: string) {
 export function exportarResumenExcel(d: DatosResumen) {
   const wb = XLSX.utils.book_new()
 
-  if (d.vista === "detallada") {
+  if (d.vista === "detallada" && !d.soloSeleccion) {
     const filas = d.extracto.map((m) => ({
       Fecha: fechaAR(m.fecha),
       Movimiento: m.movimiento,
@@ -85,7 +89,10 @@ export function exportarResumenExcel(d: DatosResumen) {
   }))
   const wsS = XLSX.utils.json_to_sheet(filasSaldos)
   wsS["!cols"] = [{ wch: 10 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 12 }]
-  XLSX.utils.book_append_sheet(wb, wsS, d.vista === "detallada" ? "Comprobantes" : "Saldos pendientes")
+  if (d.soloSeleccion) {
+    XLSX.utils.sheet_add_json(wsS, [{ Tipo: "", Número: "", Fecha: "", Pedido: "TOTAL SELECCIONADO", Total: "", Saldo: d.totalSeleccion ?? 0, Estado: "" }], { origin: -1, skipHeader: true })
+  }
+  XLSX.utils.book_append_sheet(wb, wsS, d.soloSeleccion ? "Selección" : d.vista === "detallada" ? "Comprobantes" : "Saldos pendientes")
 
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" })
   descargar(new Blob([out], { type: "application/octet-stream" }), nombreArchivo(d, "xlsx"))
@@ -127,7 +134,7 @@ export async function exportarResumenPdf(d: DatosResumen) {
           {rango} · Saldo actual: {moneda(d.saldoFinal)} {d.saldoFinal > 0 ? "(debe)" : d.saldoFinal < 0 ? "(a favor)" : ""}
         </Text>
 
-        {d.vista === "detallada" && (
+        {d.vista === "detallada" && !d.soloSeleccion && (
           <>
             <Text style={st.seccion}>Extracto (del más nuevo al más viejo)</Text>
             <View style={st.cab}>
@@ -155,7 +162,7 @@ export async function exportarResumenPdf(d: DatosResumen) {
           </>
         )}
 
-        <Text style={st.seccion}>{d.vista === "detallada" ? "Comprobantes" : "Saldos pendientes"}</Text>
+        <Text style={st.seccion}>{d.soloSeleccion ? `Comprobantes seleccionados (${d.saldos.length})` : d.vista === "detallada" ? "Comprobantes" : "Saldos pendientes"}</Text>
         <View style={st.cab}>
           <C w={colS[0]}>Tipo</C>
           <C w={colS[1]}>Número</C>
@@ -176,13 +183,19 @@ export async function exportarResumenPdf(d: DatosResumen) {
             <C w={colS[6]}>{f.estado}</C>
           </View>
         ))}
-        {d.vista === "saldos" && (
+        {d.soloSeleccion ? (
+          <View style={st.saldoFinal}>
+            <C w={colS[0] + colS[1] + colS[2] + colS[3] + colS[4]}>TOTAL SELECCIONADO</C>
+            <C w={colS[5]} num>{moneda(d.totalSeleccion ?? 0)}</C>
+            <C w={colS[6]} />
+          </View>
+        ) : d.vista === "saldos" ? (
           <View style={st.saldoFinal}>
             <C w={colS[0] + colS[1] + colS[2] + colS[3] + colS[4]}>SALDO ACTUAL</C>
             <C w={colS[5]} num>{moneda(d.saldoFinal)}</C>
             <C w={colS[6]} />
           </View>
-        )}
+        ) : null}
       </Page>
     </Document>
   )

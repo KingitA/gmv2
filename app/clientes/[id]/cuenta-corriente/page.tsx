@@ -157,6 +157,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
     const [selectedDocumentos, setSelectedDocumentos] = useState<string[]>([]);
     const [exportandoPdf, setExportandoPdf] = useState(false);
+    const [exportSoloSel, setExportSoloSel] = useState(false);
 
 
     // Adjustment form
@@ -431,11 +432,24 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         return doc.tipo !== "A CUENTA" && enRango(doc.fecha);
     });
 
+    // Seleccionar todo: los mismos documentos que tienen checkbox en la fila
+    const idsSeleccionables = documentosVisibles.filter((d) => d.tipo !== "A CUENTA").map((d) => d.id);
+    const todosSeleccionados = idsSeleccionables.length > 0 && idsSeleccionables.every((id) => selectedDocumentos.includes(id));
+    const toggleTodos = () => {
+        setSelectedDocumentos((prev) =>
+            todosSeleccionados
+                ? prev.filter((id) => !idsSeleccionables.includes(id))
+                : [...new Set([...prev, ...idsSeleccionables])]
+        );
+    };
+
     // Datos para exportar (Excel/PDF): exactamente lo que la vista activa muestra
-    const datosExport = (): DatosResumen => ({
+    const datosExport = (soloSeleccion = false): DatosResumen => ({
         cliente: { nombre: data.cliente.razon_social || data.cliente.nombre, cuit: data.cliente.cuit },
         vista,
-        saldos: documentosVisibles.map((f) => ({
+        soloSeleccion,
+        totalSeleccion: totalSeleccionado,
+        saldos: (soloSeleccion ? documentosVisibles.filter((d) => selectedDocumentos.includes(d.id)) : documentosVisibles).map((f) => ({
             tipo: f.tipo, numero: f.numero, fecha: f.fecha, pedido: f.pedido,
             total: Number(f.total) || 0, saldo: Number(f.saldo) || 0,
             estado: f.estado, es_credito: f.es_credito,
@@ -658,14 +672,20 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                         : "Estado de cada comprobante (saldos de imputación) — para seleccionar y pagar"}
                                 </CardDescription>
                             </div>
-                            {/* Export del resumen (lo mismo que muestra la vista activa) */}
-                            <div className="flex shrink-0 gap-2">
-                                <Button variant="outline" size="sm" onClick={() => exportarResumenExcel(datosExport())}>
+                            {/* Export del resumen: todo lo visible, o solo lo tildado */}
+                            <div className="flex shrink-0 items-center gap-2">
+                                {selectedDocumentos.length > 0 && (
+                                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                                        <Checkbox checked={exportSoloSel} onCheckedChange={(v) => setExportSoloSel(!!v)} />
+                                        Solo seleccionados ({selectedDocumentos.length})
+                                    </label>
+                                )}
+                                <Button variant="outline" size="sm" onClick={() => exportarResumenExcel(datosExport(exportSoloSel && selectedDocumentos.length > 0))}>
                                     ⬇ Excel
                                 </Button>
                                 <Button variant="outline" size="sm" disabled={exportandoPdf} onClick={async () => {
                                     setExportandoPdf(true)
-                                    try { await exportarResumenPdf(datosExport()) }
+                                    try { await exportarResumenPdf(datosExport(exportSoloSel && selectedDocumentos.length > 0)) }
                                     catch (e: any) { toast({ variant: "destructive", title: "Error exportando PDF", description: e.message }) }
                                     finally { setExportandoPdf(false) }
                                 }}>
@@ -679,7 +699,13 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead className="w-12"></TableHead>
+                                        <TableHead className="w-12">
+                                            <Checkbox
+                                                checked={todosSeleccionados ? true : selectedDocumentos.length > 0 && idsSeleccionables.some((id) => selectedDocumentos.includes(id)) ? "indeterminate" : false}
+                                                onCheckedChange={toggleTodos}
+                                                title="Seleccionar todo"
+                                            />
+                                        </TableHead>
                                         <TableHead>Tipo</TableHead>
                                         <TableHead>Número</TableHead>
                                         <TableHead>Fecha</TableHead>
