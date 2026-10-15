@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ChevronLeft, ChevronRight, Plus, Truck, User, Package } from "lucide-react"
+import { CalendarRange, ChevronLeft, ChevronRight, Plus, Truck, User, Package } from "lucide-react"
 import { formatCurrency, formatDateAR, todayArgentina } from "@/lib/utils"
 import { ESTADO_VIAJE_LABEL, ESTADO_VIAJE_COLOR } from "@/lib/viajes/estados"
 import { useUrlParams } from "@/lib/hooks/use-url-state"
@@ -21,6 +21,8 @@ import { ProgramarViajeDialog } from "@/components/viajes/programar-viaje-dialog
 // (components/viajes/calendario-viajes.tsx y programar-viaje-dialog.tsx).
 
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+/** "2026-11" a partir de "2026-10-15" (para Armar mes). */
+const mesSiguienteDe = (hoyIso: string) => { const [a, m] = hoyIso.split("-").map(Number); return m === 12 ? `${a + 1}-01` : `${a}-${String(m + 1).padStart(2, "0")}` }
 const iso = (y: number, m: number, d: number) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
 
 function ViajesCalendario() {
@@ -63,7 +65,10 @@ function ViajesCalendario() {
           <Button variant="outline" size="icon" onClick={() => moverMes(-1)} aria-label="Mes anterior"><ChevronLeft className="h-4 w-4" /></Button>
           <div className="w-40 text-center text-lg font-semibold">{MESES[mes]} {anio}</div>
           <Button variant="outline" size="icon" onClick={() => moverMes(1)} aria-label="Mes siguiente"><ChevronRight className="h-4 w-4" /></Button>
-          <Button className="ml-2" onClick={() => abrirDialogo("")}>
+          <Button variant="outline" className="ml-2" onClick={() => router.push(`/viajes/planificar?mes=${mesSiguienteDe(hoy)}`)} title="Ubicar todas las zonas en los días del mes que viene">
+            <CalendarRange className="h-4 w-4" /> Armar mes
+          </Button>
+          <Button onClick={() => abrirDialogo("")}>
             <Plus className="h-4 w-4" /> Programar viaje
           </Button>
         </div>

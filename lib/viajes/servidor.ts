@@ -149,3 +149,61 @@ export async function repararParadasFaltantes(supabase: SupabaseClient, viajeId:
     console.error("[viajes] reparar paradas", e)
   }
 }
+
+export interface NuevoViajeProgramado {
+  fecha: string
+  dias?: number
+  zona_ids: string[]
+  nombre?: string
+  tipo_transporte?: string
+  transporte_id?: string | null
+  vehiculo_id?: string | null
+  chofer_id?: string | null
+  acompanante_ids?: string[]
+  porcentaje_flete?: number
+  observaciones?: string | null
+}
+
+/**
+ * Crea un viaje de reparto 'programado' (calendario): valida fecha y zonas,
+ * nombre por defecto "ZONAS · dd/mm", zonas y choferes. Lo usan POST
+ * /api/viajes (modal "Programar viaje") y POST /api/viajes/plan (armar el mes).
+ * Devuelve el id o lanza Error con un mensaje para mostrar.
+ */
+export async function crearViajeProgramado(supabase: SupabaseClient, usuarioId: string, body: NuevoViajeProgramado): Promise<string> {
+  const zonaIds: string[] = Array.isArray(body.zona_ids) ? [...new Set(body.zona_ids.filter(Boolean))] : []
+  if (!body.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(body.fecha)) throw new Error("fecha (AAAA-MM-DD) es requerida")
+  if (!zonaIds.length) throw new Error("Elegí al menos una zona")
+
+  const { data: zonas } = await supabase.from("zonas").select("id, nombre").in("id", zonaIds)
+  if ((zonas || []).length !== zonaIds.length) throw new Error("Alguna zona no existe")
+
+  const porTransporte = body.tipo_transporte === "transporte"
+  const dias = Math.min(15, Math.max(1, Math.round(Number(body.dias)) || 1))
+
+  const { data: viaje, error } = await supabase
+    .from("viajes")
+    .insert({
+      nombre: (body.nombre || "").trim() || nombrePorDefecto(zonaIds.map((id) => zonas!.find((z: any) => z.id === id)!.nombre), body.fecha),
+      fecha: body.fecha,
+      dias,
+      tipo: "reparto",
+      estado: "programado",
+      zona_id: zonaIds[0], // principal (legado: remitos y flete la leen)
+      tipo_transporte: porTransporte ? "transporte" : "chofer_propio",
+      transporte_id: porTransporte ? body.transporte_id || null : null,
+      vehiculo_id: porTransporte ? null : body.vehiculo_id || null,
+      porcentaje_flete: Number(body.porcentaje_flete) || 0,
+      observaciones: body.observaciones || null,
+      creado_por: usuarioId,
+    })
+    .select("id")
+    .single()
+  if (error) throw error
+
+  await guardarZonas(supabase, viaje.id, zonaIds)
+  if (!porTransporte) {
+    await guardarChoferes(supabase, viaje.id, body.chofer_id || null, Array.isArray(body.acompanante_ids) ? body.acompanante_ids : [])
+  }
+  return viaje.id as string
+}

@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { requireOficina, errorJson, guardarChoferes, guardarZonas, nombrePorDefecto } from '@/lib/viajes/servidor'
+import { requireOficina, errorJson, guardarChoferes, guardarZonas, nombrePorDefecto, crearViajeProgramado } from '@/lib/viajes/servidor'
 import { sumarDiasISO } from '@/lib/formato'
 
 export async function GET(request: NextRequest) {
@@ -192,48 +192,16 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const body = await request.json()
-    const zonaIds: string[] = Array.isArray(body.zona_ids) ? body.zona_ids.filter(Boolean) : []
-
-    if (!body.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(body.fecha)) return errorJson("fecha (AAAA-MM-DD) es requerida")
-    if (!zonaIds.length) return errorJson("Elegí al menos una zona")
-
-    const { data: zonas } = await supabase.from("zonas").select("id, nombre").in("id", zonaIds)
-    if ((zonas || []).length !== new Set(zonaIds).size) return errorJson("Alguna zona no existe")
-
-    const porTransporte = body.tipo_transporte === "transporte"
-    const num = (v: any) => Number(v) || 0
-    const dias = Math.min(15, Math.max(1, Math.round(Number(body.dias)) || 1))
-
-    const { data: viaje, error } = await supabase
-      .from("viajes")
-      .insert({
-        nombre: (body.nombre || "").trim() || nombrePorDefecto(zonaIds.map((id) => zonas!.find((z) => z.id === id)!.nombre), body.fecha),
-        fecha: body.fecha,
-        dias,
-        tipo: "reparto",
-        estado: "programado",
-        zona_id: zonaIds[0], // principal (legado: remitos y flete la leen)
-        tipo_transporte: porTransporte ? "transporte" : "chofer_propio",
-        transporte_id: porTransporte ? body.transporte_id || null : null,
-        vehiculo_id: porTransporte ? null : body.vehiculo_id || null,
-        porcentaje_flete: num(body.porcentaje_flete),
-        dinero_nafta: num(body.dinero_nafta),
-        gastos_peon: num(body.gastos_peon),
-        gastos_hotel: num(body.gastos_hotel),
-        gastos_adicionales: num(body.gastos_adicionales),
-        observaciones: body.observaciones || null,
-        creado_por: auth.user.id,
-      })
-      .select("id")
-      .single()
-    if (error) throw error
-
-    await guardarZonas(supabase, viaje.id, zonaIds)
-    if (!porTransporte) {
-      await guardarChoferes(supabase, viaje.id, body.chofer_id || null, Array.isArray(body.acompanante_ids) ? body.acompanante_ids : [])
+    // Errores de validación (fecha, zonas) vuelven como 400 con su mensaje
+    let id: string
+    try {
+      id = await crearViajeProgramado(supabase, auth.user.id, body)
+    } catch (e: any) {
+      if (e?.code) throw e // error de la base → 500
+      return errorJson(e?.message || "No se pudo programar el viaje")
     }
 
-    return NextResponse.json({ success: true, id: viaje.id }, { status: 201 })
+    return NextResponse.json({ success: true, id }, { status: 201 })
   } catch (error: any) {
     console.error("[viajes] Error en POST /api/viajes:", error)
     return NextResponse.json({ error: error.message || "Error al crear el viaje" }, { status: 500 })
