@@ -32,7 +32,7 @@ const INFORMES: { id: string; titulo: string; descripcion: string; icono: Lucide
   { id: 'jarvis', titulo: 'Jarvis: reglas y decisiones', descripcion: 'Reglas de los avisos, lo que tiene que saber, modelo, gasto y quién decidió qué', icono: Bot, Componente: JarvisAjustes },
 ]
 
-interface Novedad { id: string; tono: 'alerta' | 'atencion' | 'oportunidad'; titulo: string; detalle?: string; acciones?: { texto: string; pregunta: string }[] }
+interface Novedad { id: string; tono: 'alerta' | 'atencion' | 'oportunidad'; titulo: string; detalle?: string; acciones?: { texto: string; pregunta: string; href?: string }[] }
 
 function saludo() {
   const h = Number(hora(new Date()).slice(0, 2))
@@ -170,7 +170,7 @@ export default function PlayroomPage() {
                         {!!n.acciones?.length && (
                           <div className="mt-1.5 flex flex-wrap gap-1.5">
                             {n.acciones.map(a => (
-                              <button key={a.texto} type="button" onClick={() => preguntar(a.pregunta)}
+                              <button key={a.texto} type="button" onClick={() => (a.href ? window.location.assign(a.href) : preguntar(a.pregunta))}
                                 className="rounded-full border border-neutro-200 bg-white px-2.5 py-1 text-xs font-semibold text-azul-600 hover:bg-azul-50">{a.texto}</button>
                             ))}
                           </div>

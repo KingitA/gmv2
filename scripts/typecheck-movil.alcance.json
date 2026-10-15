@@ -126,6 +126,13 @@
     "app/api/playroom/agenda/",
     "app/api/playroom/jarvis/",
     "lib/viajes/retencion.ts",
-    "components/playroom/jarvis-exterior.tsx"
+    "components/playroom/jarvis-exterior.tsx",
+    "lib/viajes/calendario-laboral.ts",
+    "lib/viajes/plan-mes.ts",
+    "lib/jarvis/vigias-calendario.ts",
+    "app/api/viajes/plan/",
+    "app/api/personal/",
+    "app/tablas/ausencias/",
+    "app/viajes/planificar/"
   ]
 }

@@ -18,6 +18,7 @@ interface Item {
   creado_por_nombre: string; creado_at: string; pospuesto_por_nombre?: string | null; vencido: boolean; puedo_decidir: boolean
   para_nombre: string | null
   sobre: string | null
+  etiquetas: { si: string; no: string } | null
 }
 
 function proximoLunes() {
@@ -110,7 +111,7 @@ function Fila({ item, onListo, onPreguntar }: { item: Item; onListo: () => void;
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) { setResultado({ ok: false, texto: j.error || "No se pudo." }); return }
-      const texto = decision === "posponer" ? `Pospuesto para el ${fmtFecha(j.fecha)}.` : decision === "no" ? "Anotado: no." : j.estado === "error" ? `Se anotó tu Sí, pero falló al hacerlo: ${j.detalle}. Quedó en la agenda.` : j.detalle || "Hecho."
+      const texto = decision === "posponer" ? `Pospuesto para el ${fmtFecha(j.fecha)}.` : decision === "no" && j.estado === "rechazado" ? "Anotado: no." : j.estado === "error" ? `Se anotó tu Sí, pero falló al hacerlo: ${j.detalle}. Quedó en la agenda.` : j.detalle || "Hecho."
       setResultado({ ok: j.estado !== "error", texto, abrir: j.abrir })
       setPaso("")
       setTimeout(onListo, j.abrir ? 6000 : 1800)
@@ -152,12 +153,12 @@ function Fila({ item, onListo, onPreguntar }: { item: Item; onListo: () => void;
               <>
                 <button type="button" disabled={enviando} onClick={() => (esPropuesta ? setPaso("confirmar-si") : enviar("si"))}
                   className="inline-flex items-center gap-1 rounded-full bg-azul-600 px-3 py-1 text-xs font-semibold text-white hover:bg-azul-700">
-                  <Check className="h-3 w-3" />{esPropuesta ? "Sí" : "Hecho"}
+                  <Check className="h-3 w-3" />{esPropuesta ? item.etiquetas?.si ?? "Sí" : "Hecho"}
                 </button>
                 {esPropuesta && (
                   <button type="button" disabled={enviando} onClick={() => setPaso("no")}
                     className="inline-flex items-center gap-1 rounded-full border border-neutro-200 bg-white px-3 py-1 text-xs font-semibold text-neutro-700 hover:bg-neutro-50">
-                    <X className="h-3 w-3" />No
+                    <X className="h-3 w-3" />{item.etiquetas?.no ?? "No"}
                   </button>
                 )}
                 <button type="button" disabled={enviando} onClick={() => setPaso("posponer")}
@@ -172,7 +173,7 @@ function Fila({ item, onListo, onPreguntar }: { item: Item; onListo: () => void;
             )}
             {paso === "confirmar-si" && (
               <>
-                <span className="text-xs text-neutro-600">¿Confirmás? Queda a tu nombre.</span>
+                <span className="text-xs text-neutro-600">{item.etiquetas ? `¿Confirmás "${item.etiquetas.si}"?` : "¿Confirmás?"} Queda a tu nombre.</span>
                 <button type="button" disabled={enviando} onClick={() => enviar("si")} className="rounded-full bg-azul-600 px-3 py-1 text-xs font-semibold text-white hover:bg-azul-700">{enviando ? "Anotando…" : "Sí, confirmo"}</button>
                 <button type="button" onClick={() => setPaso("")} className="rounded-full px-2 py-1 text-xs text-neutro-500 hover:bg-neutro-100">Volver</button>
               </>
@@ -181,8 +182,8 @@ function Fila({ item, onListo, onPreguntar }: { item: Item; onListo: () => void;
               <>
                 <input autoFocus value={nota} onChange={e => setNota(e.target.value)} placeholder={item.tono === "alerta" ? "¿Por qué no? (obligatorio)" : "¿Por qué no? (opcional)"}
                   className="min-w-[200px] flex-1 rounded-lg border border-neutro-200 px-2.5 py-1 text-xs outline-none focus:border-azul-400" />
-                <button type="button" disabled={enviando || (item.tono === "alerta" && !nota.trim())} onClick={() => enviar("no")}
-                  className="rounded-full bg-neutro-700 px-3 py-1 text-xs font-semibold text-white disabled:bg-neutro-200">Anotar que no</button>
+                <button type="button" disabled={enviando || (item.tono === "alerta" && !item.etiquetas && !nota.trim())} onClick={() => enviar("no")}
+                  className="rounded-full bg-neutro-700 px-3 py-1 text-xs font-semibold text-white disabled:bg-neutro-200">{item.etiquetas ? `Confirmar: ${item.etiquetas.no.toLowerCase()}` : "Anotar que no"}</button>
                 <button type="button" onClick={() => setPaso("")} className="rounded-full px-2 py-1 text-xs text-neutro-500 hover:bg-neutro-100">Volver</button>
               </>
             )}

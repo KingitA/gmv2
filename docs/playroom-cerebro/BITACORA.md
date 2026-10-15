@@ -13,6 +13,10 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 3. Las migraciones de base (archivos `supabase/migrations/2026…_jarvis_*.sql`) **las aplica Juan a mano** en Supabase → SQL Editor. En "Migraciones" dice cuáles faltan.
 
 ## Estado actual
+- **15/10: Jarvis + calendario de viajes** en la rama `jarvis-calendario` (desde main 6adbb34). Código listo. Falta:
+  - aplicar `20261015b_calendario_laboral.sql`;
+  - probar en el preview;
+  - OK de Juan para main.
 - **Etapa 0 (cimientos): lista.** Migración aplicada (verificado 14/10).
 - **Etapa 1 (chat nuevo): lista, falta probarla con la IA** (en el preview, o el examen con la clave en `.env.local`). Migración aplicada; las 12 consultas responden contra la base real.
 - **Etapa 2 (vigías y resumen del día): lista.** Migración aplicada (14/10). Falta que exista `CRON_SECRET` en Vercel y probar "Revisar ahora" en el preview. **El reporte corre de lunes a sábado a las 5:00** (pedido de Juan; cron `0 8 * * 1-6` en hora UTC).
@@ -51,6 +55,48 @@ El plan está en [PLAN.md](PLAN.md). Lo más nuevo va arriba.
 - [ ] Los otros usos de IA del sistema (lector de mails, analizador de Excel, búsqueda de fotos del vendedor) todavía tienen el modelo escrito a mano. Pasarlos a `lib/jarvis/modelos.ts` cuando se retome el lector de mails (probarlos uno por uno, los modelos nuevos cambian algunas reglas).
 
 ## Diario
+
+### 15/10/2026 — Jarvis ayuda a armar el calendario de viajes
+Pedido de Juan, sobre "Armar mes" (`/viajes/planificar`, que hizo la sesión de viajes, commit ab96373).
+
+**Decisiones de Juan:**
+- Se trabaja de **lunes a viernes**.
+- Importan las vacaciones de **todos**: choferes, depósito, vendedores y oficina.
+- La frecuencia de cada zona es libre (cada 1; 1,5; 2; 2,5; 3; 3,5 meses…).
+- Un feriado se puede marcar "trabajamos" **y cambiar después** (ej. el del Papa, en debate).
+- Las vacaciones se cargan en **Ajustes → Personas**.
+
+**Migración `20261015b_calendario_laboral.sql`:**
+- `calendario_dias`: feriados y días especiales. `trabajamos` es NULL hasta que una persona decide; cada cambio va a la bitácora.
+- `personal_ausencias`: no se borran, se anulan; alta y anulación van a la bitácora.
+- `zonas.frecuencia_dias`: 1 = días hábiles, N = cada N días, NULL = cuando haga falta. Queda sincronizada con `en_calendario`. BAHIA arranca en 1.
+- Regla `regla_dia_aviso_calendario` = 20.
+
+**Código:**
+- `lib/viajes/calendario-laboral.ts`: días hábiles, feriados de la fuente oficial (argentinadatos; lo decidido no se pisa; si un feriado desaparece de la fuente queda `en_fuente=false`), ausencias.
+- `lib/viajes/plan-mes.ts`: la frecuencia decide si a una zona le "toca" el mes (última visita + N). A las diarias les faltan días hábiles. El estado del mes trae feriados, ausencias y días hábiles.
+- Rutas:
+  - `/api/viajes/plan/dia`: trabajamos / no trabajamos / sin decidir. Cierra la pregunta de Jarvis si estaba pendiente.
+  - `/api/viajes/plan/zona`: ahora acepta `frecuencia_dias`.
+  - `/api/personal/ausencias` (GET, POST) y `/api/personal/ausencias/[id]/anular`.
+  - El GET del plan usa la service key, porque las tablas nuevas tienen RLS; el permiso lo controla `requireOficina`.
+- Pantallas:
+  - "Armar mes": feriado en el día (clic → Trabajamos / No trabajamos / Sin decidir, con quién decidió), fin de semana sombreado, 🏖 quién falta, selector de frecuencia por zona ("le toca desde…"), Bahía con "faltan N días hábiles", aviso de feriados sin decidir.
+  - Nueva `/tablas/ausencias` en Ajustes → Personas.
+- Jarvis:
+  - acciones `dia_laboral` (botones Trabajamos / No trabajamos; el "No" también ejecuta, con `alRechazar`) y `abrir_planificador` (Armar ahora / No hace falta);
+  - vigías (`lib/jarvis/vigias-calendario.ts`):
+    - **dia_laboral**: feriado de los próximos 60 días sin decidir; feriado que ya no figura en la fuente pero está como "no trabajamos";
+    - **armar_mes**: desde el día 20, "faltan N de M zonas", con feriados sin decidir y vacaciones del mes. Se repite hasta completar; cuando queda completo anota `calendario_completo` con quién armó los viajes;
+    - **viajes_afuera**: zonas a las que les toca y no tienen viaje, días de Bahía sin viaje en los próximos 14 días, viaje en un día que no se trabaja o en un feriado sin decidir, chofer asignado de vacaciones;
+  - la revisión diaria trae los feriados del año y del que viene;
+  - herramientas de chat `calendario_viajes` y `ausencias_personal`;
+  - los botones de los avisos pueden llevar a una pantalla (`href`).
+- Probado solo leyendo, sin la migración:
+  - octubre: 19 zonas sin viaje (hay 2 viajes cargados);
+  - noviembre: 21 zonas;
+  - los vigías corren.
+- Tipos y formatos OK.
 
 ### 14/10/2026 — EN MAIN
 - Merge `4f23a64` (main no había cambiado desde 795089b: pase limpio). Las 8 migraciones están aplicadas. Pendientes de la primera semana en `PASE-A-MAIN.md` §6.

@@ -15,6 +15,7 @@ import { detectar, sincronizar } from "./vigias"
 import { actualizarConIA, actualizarFuentesFijas, estadoIndicadores, iaDesactualizada, indicadoresNecesarios } from "./exterior"
 import { clasificarPendientes } from "./clasificador"
 import { destrabarEnCurso } from "./agenda"
+import { sincronizarFeriados } from "@/lib/viajes/calendario-laboral"
 import { anotar } from "./registro"
 import { elegirModelo, registrarUso } from "./uso"
 import type { UsoTokens } from "./modelos"
@@ -48,6 +49,8 @@ async function prepararExterior(db: SupabaseClient, usuarioId: string | null) {
   const res = { fijas: 0, ia: 0, clasificados: 0, errores: [] as string[] }
   try { const f = await actualizarFuentesFijas(db); res.fijas = f.guardados; res.errores.push(...f.errores) } catch (e) { res.errores.push(`fuentes fijas: ${e}`) }
   try { res.clasificados = (await clasificarPendientes(db, 400, usuarioId)).clasificados } catch (e) { res.errores.push(`clasificador: ${e}`) }
+  // feriados nacionales de este año y el que viene (fuente oficial, sin IA)
+  try { const anio = Number(hoyISO().slice(0, 4)); await sincronizarFeriados(db, anio); await sincronizarFeriados(db, anio + 1) } catch (e) { res.errores.push(`feriados: ${e}`) }
   try {
     const faltan = await iaDesactualizada(db, await indicadoresNecesarios(db))
     if (faltan.length) { const r = await actualizarConIA(db, faltan, usuarioId); res.ia = r.guardados; res.errores.push(...r.errores) }

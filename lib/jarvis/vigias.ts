@@ -22,6 +22,7 @@ import { pesosCorto } from "@/lib/playroom/bloques"
 import { leerReglas, type Reglas } from "./reglas"
 import { crearPropuesta } from "./agenda"
 import { estadoIndicadores } from "./exterior"
+import { armarMes, diaLaboral, viajesAfuera } from "./vigias-calendario"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 const EMPEORA_PARA_REABRIR = 1.25 // un aviso descartado vuelve si empeora 25 %
@@ -33,7 +34,8 @@ export interface Candidato {
   tono: "alerta" | "atencion" | "oportunidad"
   titulo: string
   detalle?: string
-  acciones: { texto: string; pregunta: string }[]
+  /** botones del aviso: pregunta = la manda al chat; href = abre esa pantalla */
+  acciones: { texto: string; pregunta: string; href?: string }[]
   severidad: number
   entidad?: { tipo: string; id: string }
   datos: Record<string, unknown>
@@ -58,7 +60,7 @@ async function rpc(db: SupabaseClient, fn: string, args: Fila): Promise<Fila[]> 
   }
 }
 
-type Vigia = (db: SupabaseClient, hoy: string, r: Reglas) => Promise<Candidato[]>
+export type Vigia = (db: SupabaseClient, hoy: string, r: Reglas) => Promise<Candidato[]>
 
 /** Cliente con deuda vencida que volvió a comprar. */
 const deudaYCompra: Vigia = async (db, hoy, r) => {
@@ -261,6 +263,9 @@ const compraAnticipada: Vigia = async (db, hoy, r) => {
 }
 
 export const VIGIAS: Record<string, Vigia> = {
+  dia_laboral: diaLaboral,
+  armar_mes: armarMes,
+  viajes_afuera: viajesAfuera,
   compra_anticipada: compraAnticipada,
   retenido_al_dia: retenidoAlDia,
   deuda_y_compra: deudaYCompra,

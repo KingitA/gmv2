@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { sumarDiasISO } from "@/lib/formato"
+import { ausenciasEntre, diasEspeciales, diasHabiles, type Ausencia, type DiaEspecial } from "./calendario-laboral"
 
 /**
  * PLAN MENSUAL DE VIAJES — qué zonas ya tienen viaje en un mes, cuáles faltan
@@ -12,6 +13,14 @@ import { sumarDiasISO } from "@/lib/formato"
  * Un viaje "cubre" una zona en el mes si la zona está en sus viaje_zonas y
  * alguno de sus días cae dentro del mes (los de varios días que arrancan el
  * mes anterior también cuentan). Cancelados no cuentan.
+ *
+ * Frecuencia de cada zona (zonas.frecuencia_dias):
+ *   1    = todos los días hábiles (BAHIA): falta cada día hábil sin viaje.
+ *   N    = cada N días (30 = mensual, 45 = 1,5 meses…): falta si le toca este
+ *          mes (última visita + N cae antes de fin de mes) y no tiene viaje.
+ *   NULL = cuando haga falta: nunca falta.
+ * Días hábiles = lunes a viernes, sin los feriados que se decidió no trabajar
+ * (lib/viajes/calendario-laboral.ts).
  */
 
 export interface ZonaPlan {
@@ -19,8 +28,18 @@ export interface ZonaPlan {
   nombre: string
   dias_viaje: number
   en_calendario: boolean
+  /** 1 = todos los días hábiles · N = cada N días · null = cuando haga falta */
+  frecuencia_dias: number | null
+  /** última visita ANTES de este mes */
+  ultima_visita: string | null
+  /** desde cuándo le toca (última visita + frecuencia); null si nunca se visitó o es diaria/ocasional */
+  le_toca_desde: string | null
+  /** ¿le toca un viaje en este mes? */
+  toca_este_mes: boolean
   /** Viajes del mes que la cubren */
   viajes: Array<{ id: string; fecha: string; dias: number }>
+  /** solo para las diarias: días hábiles del mes sin viaje */
+  dias_faltantes?: string[]
 }
 
 export interface ViajePlan {
@@ -46,7 +65,14 @@ export interface EstadoPlanMes {
   hasta: string
   zonas: ZonaPlan[]
   viajes: ViajePlan[]
-  faltantes: Array<{ id: string; nombre: string; dias_viaje: number }>
+  faltantes: Array<{ id: string; nombre: string; dias_viaje: number; dias_faltantes?: string[] }>
+  /** feriados y días especiales del mes */
+  especiales: DiaEspecial[]
+  /** vacaciones / licencias que tocan el mes */
+  ausencias: Ausencia[]
+  /** días hábiles del mes y feriados sin decidir */
+  habiles: string[]
+  sin_decidir: string[]
 }
 
 const MES_RE = /^\d{4}-\d{2}$/
@@ -87,23 +113,54 @@ async function viajesDelRango(db: SupabaseClient, desde: string, hasta: string):
     .filter((v) => sumarDiasISO(v.fecha, v.dias - 1) >= desde)
 }
 
-export async function estadoPlanMes(db: SupabaseClient, mes: string): Promise<EstadoPlanMes> {
+export async function estadoPlanMes(db: SupabaseClient, mes: string, opciones: { desdeDia?: string } = {}): Promise<EstadoPlanMes> {
   const { desde, hasta } = rangoMes(mes)
-  const [{ data: zonasRaw, error: zErr }, viajes] = await Promise.all([
-    db.from("zonas").select("id, nombre, dias_viaje, en_calendario").order("nombre"),
+  const [zonasRes, viajes, anteriores, especiales, ausencias] = await Promise.all([
+    db.from("zonas").select("id, nombre, dias_viaje, en_calendario, frecuencia_dias").order("nombre"),
     viajesDelRango(db, desde, hasta),
+    viajesDelRango(db, sumarDiasISO(desde, -400), sumarDiasISO(desde, -1)),
+    diasEspeciales(db, desde, hasta),
+    ausenciasEntre(db, desde, hasta),
   ])
-  if (zErr) throw zErr
+  // si la columna frecuencia_dias todavía no existe (migración sin aplicar), se sigue como antes
+  let zonasRaw: any[] = (zonasRes.data || []) as any[]
+  if (zonasRes.error) {
+    const viejo = await db.from("zonas").select("id, nombre, dias_viaje, en_calendario").order("nombre")
+    if (viejo.error) throw viejo.error
+    zonasRaw = ((viejo.data || []) as any[]).map((z) => ({ ...z, frecuencia_dias: z.en_calendario === false ? null : 30 }))
+  }
 
-  const zonas: ZonaPlan[] = ((zonasRaw || []) as any[]).map((z) => ({
-    id: z.id,
-    nombre: z.nombre,
-    dias_viaje: Math.max(1, Number(z.dias_viaje) || 1),
-    en_calendario: z.en_calendario !== false,
-    viajes: viajes
-      .filter((v) => v.zonas.some((x) => x.id === z.id))
-      .map((v) => ({ id: v.id, fecha: v.fecha, dias: v.dias })),
-  }))
+  const mapaEsp = new Map(especiales.map((e) => [e.fecha, e]))
+  const { habiles, sinDecidir } = diasHabiles(desde, hasta, mapaEsp)
+  // para el mes en curso, los días que ya pasaron no se reclaman
+  const desdeDia = opciones.desdeDia && opciones.desdeDia > desde ? opciones.desdeDia : desde
+
+  const zonas: ZonaPlan[] = zonasRaw.map((z) => {
+    const frecuencia = z.frecuencia_dias == null ? null : Math.max(1, Number(z.frecuencia_dias) || 30)
+    const delMes = viajes.filter((v) => v.zonas.some((x) => x.id === z.id))
+    const previos = anteriores.filter((v) => v.zonas.some((x) => x.id === z.id))
+    const ultima = previos.length ? previos.map((v) => sumarDiasISO(v.fecha, v.dias - 1)).sort().at(-1)! : null
+    const leTocaDesde = frecuencia && frecuencia > 1 && ultima ? sumarDiasISO(ultima, frecuencia) : null
+    const tocaEsteMes = frecuencia === null ? false : frecuencia === 1 ? true : !leTocaDesde || leTocaDesde <= hasta
+    let diasFaltantes: string[] | undefined
+    if (frecuencia === 1) {
+      const cubiertos = new Set<string>()
+      for (const v of delMes) for (let i = 0; i < v.dias; i++) cubiertos.add(sumarDiasISO(v.fecha, i))
+      diasFaltantes = habiles.filter((d) => d >= desdeDia && !cubiertos.has(d))
+    }
+    return {
+      id: z.id,
+      nombre: z.nombre,
+      dias_viaje: Math.max(1, Number(z.dias_viaje) || 1),
+      en_calendario: frecuencia !== null,
+      frecuencia_dias: frecuencia,
+      ultima_visita: ultima,
+      le_toca_desde: leTocaDesde,
+      toca_este_mes: tocaEsteMes,
+      viajes: delMes.map((v) => ({ id: v.id, fecha: v.fecha, dias: v.dias })),
+      ...(diasFaltantes ? { dias_faltantes: diasFaltantes } : {}),
+    }
+  })
 
   return {
     mes,
@@ -112,14 +169,18 @@ export async function estadoPlanMes(db: SupabaseClient, mes: string): Promise<Es
     zonas,
     viajes,
     faltantes: zonas
-      .filter((z) => z.en_calendario && z.viajes.length === 0)
-      .map((z) => ({ id: z.id, nombre: z.nombre, dias_viaje: z.dias_viaje })),
+      .filter((z) => z.toca_este_mes && (z.frecuencia_dias === 1 ? (z.dias_faltantes?.length ?? 0) > 0 : z.viajes.length === 0))
+      .map((z) => ({ id: z.id, nombre: z.nombre, dias_viaje: z.dias_viaje, ...(z.dias_faltantes ? { dias_faltantes: z.dias_faltantes } : {}) })),
+    especiales,
+    ausencias,
+    habiles,
+    sin_decidir: sinDecidir,
   }
 }
 
 /** Para Jarvis / recordatorios: zonas que deberían tener viaje en el mes y no lo tienen. */
-export async function zonasSinProgramar(db: SupabaseClient, mes: string) {
-  return (await estadoPlanMes(db, mes)).faltantes
+export async function zonasSinProgramar(db: SupabaseClient, mes: string, desdeDia?: string) {
+  return (await estadoPlanMes(db, mes, { desdeDia })).faltantes
 }
 
 /**

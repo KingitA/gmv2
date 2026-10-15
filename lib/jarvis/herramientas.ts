@@ -18,12 +18,14 @@ import type { Bloque, Formato } from "@/lib/playroom/bloques"
 import { calcularIndicadores } from "@/lib/playroom/indicadores"
 import { CATALOGO_TABLERO } from "@/lib/playroom/catalogo-tablero"
 import { fetchAllRows } from "@/lib/playroom/queries"
-import { hoyISO, sumarDiasISO } from "@/lib/formato"
+import { fecha, hoyISO, sumarDiasISO } from "@/lib/formato"
 import { PERIODOS, resolverPeriodo, type Rango } from "./periodos"
 import { ACCIONES, ACCION_PIDE } from "./acciones"
 import { agendaPendiente, crearPropuesta, crearRecordatorio, ErrorAgenda, historialDecisiones, usuariosOficina } from "./agenda"
 import { estadoIndicadores } from "./exterior"
 import { cobertura } from "./clasificador"
+import { estadoPlanMes, mesSiguiente } from "@/lib/viajes/plan-mes"
+import { ausenciasEntre } from "@/lib/viajes/calendario-laboral"
 
 export interface Contexto {
   db: SupabaseClient
@@ -913,12 +915,58 @@ const clasificacionArticulos: Herramienta = {
   },
 }
 
+// ─── 21-22. Calendario de viajes ───────────────────────────────────────────
+const calendarioViajes: Herramienta = {
+  nombre: "calendario_viajes",
+  descripcion:
+    "Calendario de viajes de un mes (AAAA-MM; por defecto el que viene): qué zonas tienen viaje, cuáles faltan según su frecuencia (todos los días hábiles / cada N días / cuando haga falta), días hábiles que le faltan a BAHIA, feriados (y si se decidió trabajar) y quién está de vacaciones. Se trabaja de lunes a viernes. Para armarlo se usa la pantalla /viajes/planificar.",
+  esquema: { type: "object", properties: { mes: { type: "string", description: "AAAA-MM" } } },
+  async ejecutar(ctx, p) {
+    const mes = /^\d{4}-\d{2}$/.test(String(p.mes ?? "")) ? String(p.mes) : mesSiguiente(ctx.hoy.slice(0, 7))
+    const e = await estadoPlanMes(ctx.db, mes, { desdeDia: mes === ctx.hoy.slice(0, 7) ? ctx.hoy : undefined })
+    const frec = (f: number | null) => (f === null ? "cuando haga falta" : f === 1 ? "todos los días hábiles" : `cada ${f} días`)
+    const filas = e.zonas.filter((z) => z.frecuencia_dias !== null).map((z) => ({
+      zona: z.nombre, frecuencia: frec(z.frecuencia_dias),
+      viajes: z.viajes.map((v) => v.fecha.slice(8, 10) + "/" + v.fecha.slice(5, 7)).join(", ") || null,
+      estado: !z.toca_este_mes ? `no le toca (desde ${z.le_toca_desde ? fecha(z.le_toca_desde) : "—"})` : e.faltantes.some((f) => f.id === z.id) ? (z.dias_faltantes ? `faltan ${z.dias_faltantes.length} días` : "FALTA") : "ok",
+    }))
+    return {
+      consultado: `Calendario de viajes de ${mes}, feriados y ausencias`,
+      datos: {
+        mes, zonas_que_tocan: e.zonas.filter((z) => z.toca_este_mes).length, faltan: e.faltantes.map((f) => ({ zona: f.nombre, dias_faltantes: f.dias_faltantes })),
+        feriados: e.especiales.map((d) => ({ fecha: d.fecha, nombre: d.nombre, trabajamos: d.trabajamos, decidio: d.decidido_por_nombre ?? null, sigue_en_fuente_oficial: d.en_fuente })),
+        feriados_sin_decidir: e.sin_decidir, dias_habiles: e.habiles.length,
+        ausencias: e.ausencias.map((a) => ({ quien: a.nombre, roles: a.roles, tipo: a.tipo, desde: a.desde, hasta: a.hasta })),
+        link: `/viajes/planificar?mes=${mes}`,
+      },
+      bloques: [{ ...tabla(`Calendario de viajes ${mes}`, [{ clave: "zona", titulo: "Zona" }, { clave: "frecuencia", titulo: "Frecuencia" }, { clave: "viajes", titulo: "Viajes" }, { clave: "estado", titulo: "Estado" }], filas), recalcular: { herramienta: "calendario_viajes", parametros: { ...p } } }],
+    }
+  },
+}
+
+const ausenciasPersonal: Herramienta = {
+  nombre: "ausencias_personal",
+  descripcion: "Quién está de vacaciones o con licencia entre dos fechas (por defecto, los próximos 30 días), con su rol (chofer, depósito, vendedor, oficina).",
+  esquema: { type: "object", properties: { desde: { type: "string" }, hasta: { type: "string" } } },
+  async ejecutar(ctx, p) {
+    const desde = /^\d{4}-\d{2}-\d{2}$/.test(String(p.desde ?? "")) ? String(p.desde) : ctx.hoy
+    const hasta = /^\d{4}-\d{2}-\d{2}$/.test(String(p.hasta ?? "")) ? String(p.hasta) : sumarDiasISO(desde, 30)
+    const xs = await ausenciasEntre(ctx.db, desde, hasta)
+    const filas = xs.map((a) => ({ persona: a.nombre, rol: a.roles.join(", "), tipo: a.tipo, desde: a.desde, hasta: a.hasta }))
+    return {
+      consultado: `Vacaciones y licencias del ${fecha(desde)} al ${fecha(hasta)}`,
+      datos: filas,
+      bloques: [{ ...tabla("Vacaciones y licencias", [{ clave: "persona", titulo: "Persona" }, { clave: "rol", titulo: "Rol" }, { clave: "tipo", titulo: "Tipo" }, { clave: "desde", titulo: "Desde", formato: "fecha" }, { clave: "hasta", titulo: "Hasta", formato: "fecha" }], filas), recalcular: { herramienta: "ausencias_personal", parametros: { ...p } } }],
+    }
+  },
+}
+
 // ─── Registro ──────────────────────────────────────────────────────────────
 export const HERRAMIENTAS: Herramienta[] = [
   indicadoresTablero, ventas, deudaClientes, clientesHabitos, fichaCliente, articulosVendidos,
   coberturaStock, proveedores, pagosProveedores, cheques, operacion, comisiones,
   agendarRecordatorio, proponerDecision, verAgenda, historialDecisionesH, clientesRetenidos,
-  indicadoresExternos, insumosProveedor, clasificacionArticulos,
+  indicadoresExternos, insumosProveedor, clasificacionArticulos, calendarioViajes, ausenciasPersonal,
 ]
 
 /** Las que escriben en la agenda: /recalcular NUNCA las corre. */

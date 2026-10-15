@@ -30,6 +30,7 @@ const NOMBRE_REGLA: Record<string, string> = {
   regla_suba_insumo_pct: "Suba de una materia prima afuera, en 30 días, para avisar (%)",
   regla_dias_sin_aumento: "Proveedor que no aumenta hace al menos (días)",
   regla_participacion_insumo: "Parte de lo que le vendemos que depende de esa materia prima (%)",
+  regla_dia_aviso_calendario: "Desde qué día del mes recuerda armar el calendario del mes siguiente",
 }
 
 async function guardar(clave: string, valor: unknown) {

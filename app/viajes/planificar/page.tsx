@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState, type DragEvent } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, ChevronLeft, ChevronRight, CopyPlus, EyeOff, Eye, Minus, Plus, Save, Trash2, X } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, CopyPlus, Eye, Minus, Plus, Save, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { DateInputAR } from "@/components/ui/date-input-ar"
@@ -13,6 +13,20 @@ import { ESTADO_VIAJE_COLOR } from "@/lib/viajes/estados"
 import { DIAS_SEMANA, celdasMes } from "@/components/viajes/calendario-viajes"
 import { cn } from "@/lib/utils"
 import type { EstadoPlanMes, PropuestaViaje, ViajePlan, ZonaPlan } from "@/lib/viajes/plan-mes"
+import type { DiaEspecial } from "@/lib/viajes/calendario-laboral"
+
+/** Frecuencias que se ofrecen (en días). 1 = todos los días hábiles; null = cuando haga falta. */
+const FRECUENCIAS: Array<{ valor: number | null; texto: string }> = [
+  { valor: 1, texto: "Todos los días hábiles" },
+  { valor: 30, texto: "Cada 1 mes" },
+  { valor: 45, texto: "Cada 1,5 meses" },
+  { valor: 60, texto: "Cada 2 meses" },
+  { valor: 75, texto: "Cada 2,5 meses" },
+  { valor: 90, texto: "Cada 3 meses" },
+  { valor: 105, texto: "Cada 3,5 meses" },
+  { valor: null, texto: "Cuando haga falta" },
+]
+const textoFrecuencia = (v: number | null) => FRECUENCIAS.find((x) => x.valor === v)?.texto ?? `Cada ${v} días`
 
 // ARMAR EL CALENDARIO DEL MES — se hace una vez por mes, 5 a 10 días antes de
 // que empiece. Todas las zonas a la izquierda; se arrastran a un día (o se les
@@ -21,6 +35,14 @@ import type { EstadoPlanMes, PropuestaViaje, ViajePlan, ZonaPlan } from "@/lib/v
 // hasta "Guardar": ahí cada borrador pasa a viaje programado. Arriba se ve qué
 // zonas siguen sin viaje, para que no quede ninguna afuera.
 // Los borradores se guardan en este navegador (localStorage) hasta confirmar.
+//
+// Calendario laboral (Jarvis, 15/10/2026): se trabaja de lunes a viernes. Los
+// feriados los trae Jarvis y se muestran en el día; NUNCA se asume que no se
+// trabaja: se decide con un clic en el día (Trabajamos / No trabajamos) y se
+// puede cambiar después. Cualquier día se puede marcar igual. Se ven también
+// las vacaciones/licencias del personal (Ajustes → Personas).
+// Cada zona tiene su frecuencia (todos los días hábiles / cada N días / cuando
+// haga falta): solo "faltan" las que les toca este mes.
 
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 const TIPO_DND = "application/x-gm-plan"
@@ -73,6 +95,7 @@ function Planificador() {
   const [guardando, setGuardando] = useState(false)
   const [fechaZona, setFechaZona] = useState<Record<string, string>>({})
   const [verOcultas, setVerOcultas] = useState(false)
+  const [diaAbierto, setDiaAbierto] = useState<string | null>(null)
 
   const setBorradores = useCallback(
     (fn: (prev: Borrador[]) => Borrador[]) =>
@@ -114,13 +137,41 @@ function Planificador() {
     return m
   }, [datos, borradores])
 
-  const visibles = (datos?.zonas || []).filter((z) => z.en_calendario)
-  const ocultas = (datos?.zonas || []).filter((z) => !z.en_calendario)
-  const faltan = visibles.filter((z) => {
+  const visibles = (datos?.zonas || []).filter((z) => z.frecuencia_dias !== null)
+  const ocultas = (datos?.zonas || []).filter((z) => z.frecuencia_dias === null)
+  const especiales = useMemo(() => new Map((datos?.especiales || []).map((e) => [e.fecha, e])), [datos])
+  const habiles = useMemo(() => new Set(datos?.habiles || []), [datos])
+  // Diarias (BAHIA): días hábiles sin viaje real ni borrador (del mes en curso, desde hoy)
+  const diasSinViaje = (z: ZonaPlan): string[] => {
+    const c = cobertura.get(z.id)
+    const cubiertos = new Set<string>()
+    for (const v of c?.reales || []) for (let i = 0; i < v.dias; i++) cubiertos.add(sumarDiasISO(v.fecha, i))
+    for (const b of c?.borradores || []) for (let i = 0; i < b.dias; i++) cubiertos.add(sumarDiasISO(b.fecha, i))
+    const desde = mes === mesDe(hoyISO()) ? hoyISO() : `${mes}-01`
+    return [...habiles].filter((d) => d >= desde && !cubiertos.has(d)).sort()
+  }
+  const noLeToca = visibles.filter((z) => !z.toca_este_mes)
+  const planificables = visibles.filter((z) => z.toca_este_mes)
+  const faltan = planificables.filter((z) => {
+    if (z.frecuencia_dias === 1) return diasSinViaje(z).length > 0
     const c = cobertura.get(z.id)
     return !c || (c.reales.length === 0 && c.borradores.length === 0)
   })
-  const cubiertas = visibles.length - faltan.length
+  const cubiertas = planificables.length - faltan.length
+  const sinDecidir = (datos?.sin_decidir || []).length
+
+  const decidirDia = async (fecha: string, trabajamos: boolean | null) => {
+    setDiaAbierto(null)
+    try {
+      const res = await fetch("/api/viajes/plan/dia", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fecha, trabajamos }) })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error)
+      toast.success(trabajamos === null ? "Quedó sin decidir" : trabajamos ? "Anotado: ese día se trabaja" : "Anotado: ese día no se trabaja")
+    } catch (e: any) {
+      toast.error(e?.message || "No se pudo guardar")
+    }
+    cargar()
+  }
 
   // Cada viaje / borrador aparece en todos sus días
   const porDia = useMemo(() => {
@@ -244,6 +295,7 @@ function Planificador() {
       const res = await fetch("/api/viajes/plan/zona", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ zona_id: zonaId, ...body }) })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error)
+      if (body.frecuencia_dias !== undefined) cargar() // recalcula a quién le toca este mes
     } catch (e: any) {
       toast.error(e?.message || "No se pudo guardar la zona")
       cargar()
@@ -286,7 +338,7 @@ function Planificador() {
           <div className="flex items-end gap-6">
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Zonas con viaje</p>
-              <p className="text-3xl font-bold tabular-nums">{cubiertas}/{visibles.length}</p>
+              <p className="text-3xl font-bold tabular-nums">{cubiertas}/{planificables.length}</p>
             </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Faltan</p>
@@ -309,11 +361,17 @@ function Planificador() {
         </div>
       </div>
 
+      {sinDecidir > 0 && (
+        <div className="rounded-lg border border-ambar-300 bg-ambar-50 px-3 py-2 text-sm text-ambar-900">
+          <b>{sinDecidir} feriado{sinDecidir === 1 ? "" : "s"} sin decidir</b> ({(datos?.sin_decidir || []).map(fechaCorta).join(", ")}): tocá el día en el calendario y elegí si se trabaja.
+        </div>
+      )}
       {faltan.length > 0 ? (
         <div className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-800">
-          <b>Sin viaje en {MESES[mesNum - 1].toLowerCase()}:</b> {faltan.map((z) => z.nombre).join(" · ")}
+          <b>Sin viaje en {MESES[mesNum - 1].toLowerCase()}:</b>{" "}
+          {faltan.map((z) => (z.frecuencia_dias === 1 ? `${z.nombre} (faltan ${diasSinViaje(z).length} días hábiles)` : z.nombre)).join(" · ")}
         </div>
-      ) : visibles.length > 0 ? (
+      ) : planificables.length > 0 ? (
         <div className="rounded-lg border border-exito-200 bg-exito-50 px-3 py-2 text-sm text-exito-800">
           Todas las zonas tienen viaje en {MESES[mesNum - 1].toLowerCase()}{borradores.length ? " (falta guardar los borradores)" : ""}.
         </div>
@@ -327,7 +385,7 @@ function Planificador() {
             <p className="text-xs text-muted-foreground">Arrastralas al día que se viaja, o poneles fecha. La duración es la habitual: se puede cambiar.</p>
           </div>
           <div className="max-h-[70vh] divide-y overflow-y-auto">
-            {[...faltan, ...visibles.filter((z) => !faltan.includes(z))].map((z) => {
+            {[...faltan, ...planificables.filter((z) => !faltan.includes(z)), ...noLeToca].map((z) => {
               const c = cobertura.get(z.id)!
               const falta = faltan.includes(z)
               return (
@@ -350,14 +408,26 @@ function Planificador() {
                       <span className="w-9 text-center text-xs tabular-nums">{z.dias_viaje} {z.dias_viaje === 1 ? "día" : "días"}</span>
                       <button className="px-1 py-1 text-neutro-500 hover:text-azul-700 disabled:opacity-30" disabled={z.dias_viaje >= 15} onClick={() => patchZona(z.id, { dias_viaje: z.dias_viaje + 1 })} aria-label="Un día más"><Plus className="size-3" /></button>
                     </div>
-                    <button className="text-neutro-400 hover:text-neutro-700" title="No se visita con viaje programado (sacar del calendario)" onClick={() => patchZona(z.id, { en_calendario: false })} aria-label={`Sacar ${z.nombre} del calendario`}>
-                      <EyeOff className="size-4" />
-                    </button>
+                  </div>
+                  <div className="mt-1 flex items-center gap-1.5 text-[11px] text-neutro-500">
+                    <select
+                      value={z.frecuencia_dias === null ? "" : String(z.frecuencia_dias)}
+                      onChange={(e) => patchZona(z.id, { frecuencia_dias: e.target.value === "" ? null : Number(e.target.value), en_calendario: e.target.value !== "" })}
+                      className="rounded border border-neutro-200 bg-white px-1 py-0.5 text-[11px]"
+                      title="Cada cuánto se visita esta zona"
+                      aria-label={`Frecuencia de ${z.nombre}`}
+                    >
+                      {FRECUENCIAS.map((o) => <option key={String(o.valor)} value={o.valor === null ? "" : String(o.valor)}>{o.texto}</option>)}
+                      {z.frecuencia_dias !== null && !FRECUENCIAS.some((o) => o.valor === z.frecuencia_dias) && <option value={String(z.frecuencia_dias)}>{textoFrecuencia(z.frecuencia_dias)}</option>}
+                    </select>
+                    {z.ultima_visita && z.frecuencia_dias !== 1 && <span>última: {fechaCorta(z.ultima_visita)}</span>}
+                    {!z.toca_este_mes && z.le_toca_desde && <span className="font-medium text-neutro-600">le toca desde el {fechaCorta(z.le_toca_desde)}</span>}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
                     {c.reales.map((v) => <span key={v.id} className="rounded bg-exito-100 px-1.5 py-0.5 font-medium text-exito-800">{fechaCorta(v.fecha)}{v.dias > 1 ? ` · ${v.dias} días` : ""}</span>)}
                     {c.borradores.map((b) => <span key={b.key} className="rounded border border-dashed border-ambar-400 bg-ambar-50 px-1.5 py-0.5 font-medium text-ambar-800">borrador {fechaCorta(b.fecha)}</span>)}
-                    {falta && <span className="font-semibold text-error-700">sin viaje</span>}
+                    {falta && z.frecuencia_dias === 1 && <span className="font-semibold text-error-700">faltan {diasSinViaje(z).length} días hábiles</span>}
+                    {falta && z.frecuencia_dias !== 1 && <span className="font-semibold text-error-700">sin viaje</span>}
                   </div>
                   {/* Sin arrastrar (celular): fecha a mano */}
                   <div className="mt-1 flex items-center gap-1">
@@ -373,15 +443,15 @@ function Planificador() {
             {ocultas.length > 0 && (
               <div className="px-3 py-2">
                 <button className="text-xs font-medium text-neutro-500 hover:text-azul-700" onClick={() => setVerOcultas((x) => !x)}>
-                  {verOcultas ? "Ocultar" : "Ver"} zonas fuera del calendario ({ocultas.length})
+                  {verOcultas ? "Ocultar" : "Ver"} zonas "cuando haga falta" ({ocultas.length})
                 </button>
                 {verOcultas && (
                   <div className="mt-1 space-y-1">
                     {ocultas.map((z) => (
                       <div key={z.id} className="flex items-center justify-between text-sm text-neutro-500">
                         <span>{z.nombre}</span>
-                        <button className="flex items-center gap-1 text-xs hover:text-azul-700" onClick={() => patchZona(z.id, { en_calendario: true })}>
-                          <Eye className="size-3.5" /> Volver a incluir
+                        <button className="flex items-center gap-1 text-xs hover:text-azul-700" onClick={() => patchZona(z.id, { frecuencia_dias: 30, en_calendario: true })}>
+                          <Eye className="size-3.5" /> Cada 1 mes
                         </button>
                       </div>
                     ))}
@@ -400,12 +470,18 @@ function Planificador() {
           <div className="grid grid-cols-7">
             {celdas.map((dia, i) => {
               const items = dia ? porDia.get(dia) || [] : []
+              const esp: DiaEspecial | undefined = dia ? especiales.get(dia) : undefined
+              const finde = dia ? [0, 6].includes(new Date(dia + "T12:00:00Z").getUTCDay()) : false // formato-ok: día de la semana (cálculo)
+              const noSeTrabaja = dia ? !habiles.has(dia) && !(esp && esp.trabajamos === null) : false
+              const ausentes = dia ? (datos?.ausencias || []).filter((a) => a.desde <= dia && a.hasta >= dia) : []
               return (
                 <div
                   key={dia ?? `x${i}`}
                   className={cn(
                     "min-h-28 border-b border-r p-1.5 transition-colors [&:nth-child(7n)]:border-r-0",
                     !dia && "bg-neutro-50/60",
+                    dia && noSeTrabaja && "bg-neutro-100/70",
+                    dia && esp && esp.trabajamos === null && "bg-ambar-50/60",
                     dia && sobre === dia && "bg-ambar-50 ring-2 ring-inset ring-ambar-400",
                   )}
                   onDragOver={(e) => dia && aceptar(e, dia)}
@@ -414,7 +490,37 @@ function Planificador() {
                 >
                   {dia && (
                     <>
-                      <span className="mb-1 grid size-6 place-items-center rounded-full text-xs font-semibold text-neutro-500">{Number(dia.slice(8))}</span>
+                      <div className="relative mb-1 flex items-start gap-1">
+                        <button type="button" onClick={() => setDiaAbierto(diaAbierto === dia ? null : dia)}
+                          className={cn("grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold hover:bg-azul-50", noSeTrabaja ? "text-neutro-400" : "text-neutro-500")}
+                          title="¿Se trabaja este día?">{Number(dia.slice(8))}</button>
+                        {esp && (
+                          <button type="button" onClick={() => setDiaAbierto(diaAbierto === dia ? null : dia)}
+                            className={cn("min-w-0 truncate rounded px-1 py-0.5 text-left text-[10px] font-semibold leading-tight",
+                              esp.trabajamos === null ? "bg-ambar-200 text-ambar-900" : esp.trabajamos ? "bg-exito-100 text-exito-800" : "bg-neutro-200 text-neutro-700")}
+                            title={`${esp.nombre}${esp.decidido_por_nombre ? ` · decidió ${esp.decidido_por_nombre}` : ""}${!esp.en_fuente ? " · ya no figura en la fuente oficial" : ""}`}>
+                            {esp.trabajamos === null ? "Feriado · ¿trabajamos?" : esp.trabajamos ? (esp.tipo === "empresa" ? "Se trabaja" : "Feriado · trabajamos") : esp.tipo === "empresa" ? "No trabajamos" : "Feriado · no trabajamos"}
+                          </button>
+                        )}
+                        {diaAbierto === dia && (
+                          <div className="absolute left-0 top-7 z-20 w-56 rounded-lg border bg-white p-2 text-xs shadow-lg">
+                            <p className="mb-1 font-semibold text-azul-900">{fechaCorta(dia)}{esp ? ` · ${esp.nombre}` : finde ? " · fin de semana" : ""}</p>
+                            {esp?.decidido_por_nombre && <p className="mb-1 text-neutro-500">Decidió {esp.decidido_por_nombre}</p>}
+                            {esp && !esp.en_fuente && <p className="mb-1 text-ambar-700">Ya no figura como feriado oficial.</p>}
+                            <div className="flex flex-wrap gap-1">
+                              <button className="rounded bg-exito-600 px-2 py-1 font-semibold text-white" onClick={() => decidirDia(dia, true)}>Trabajamos</button>
+                              <button className="rounded bg-neutro-700 px-2 py-1 font-semibold text-white" onClick={() => decidirDia(dia, false)}>No trabajamos</button>
+                              {esp && esp.tipo !== "empresa" && esp.trabajamos !== null && <button className="rounded border px-2 py-1" onClick={() => decidirDia(dia, null)}>Sin decidir</button>}
+                              <button className="rounded px-2 py-1 text-neutro-500" onClick={() => setDiaAbierto(null)}>Cerrar</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {ausentes.length > 0 && (
+                        <p className="mb-1 truncate text-[10px] text-cian-800" title={ausentes.map((a) => `${a.nombre} (${a.tipo})`).join(", ")}>
+                          🏖 {ausentes.slice(0, 2).map((a) => a.nombre.split(" ")[0]).join(", ")}{ausentes.length > 2 ? ` +${ausentes.length - 2}` : ""}
+                        </p>
+                      )}
                       <div className="space-y-1">
                         {items.map((it) =>
                           it.tipo === "viaje" ? (
@@ -487,6 +593,7 @@ function Planificador() {
 
       <p className="text-xs text-muted-foreground">
         Los borradores (punteados) se guardan en este navegador hasta que tocás "Guardar". Los viajes ya programados (con borde lleno) se cambian al instante.
+        Tocá el número de un día para marcar si se trabaja (queda registrado quién lo decidió). Las vacaciones se cargan en Ajustes → Personas.
       </p>
     </div>
   )
