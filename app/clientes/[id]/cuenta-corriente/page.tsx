@@ -36,6 +36,7 @@ import { armarExtracto, etiquetaMovimiento, type MovimientoCC } from "@/lib/cuen
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { CargaProgreso, MENSAJES } from "@/components/ui/carga-progreso"
 import { moneda, formatCuit } from "@/lib/formato"
+import { exportarResumenExcel, exportarResumenPdf, type DatosResumen } from "@/lib/cuenta-corriente/exportar-resumen"
 import { InputMonto } from "@/components/ui/input-monto"
 
 const ArrowLeftIcon = () => (
@@ -155,6 +156,8 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     // Modal states
     const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
     const [selectedDocumentos, setSelectedDocumentos] = useState<string[]>([]);
+    const [exportandoPdf, setExportandoPdf] = useState(false);
+    const [exportSoloSel, setExportSoloSel] = useState(false);
 
 
     // Adjustment form
@@ -372,9 +375,15 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     }
 
     const documentosUnificados = getDocumentosUnificados();
+    // Total de la selección CON SIGNO: un crédito (NC/REV/a cuenta) RESTA.
+    // El bug (15/10, caso SHI HONG): el saldo del crédito ya viene negativo y
+    // el "-doc.saldo" lo daba vuelta → PRES 743.172,79 + REV −78.545,92
+    // mostraba 821.718,71 en vez de 664.626,87. Math.abs + signo por es_credito
+    // deja el cálculo correcto sin depender de cómo venga guardado el saldo.
     const totalSeleccionado = selectedDocumentos.reduce((sum, id) => {
         const doc = documentosUnificados.find(d => d.id === id);
-        return sum + (doc?.es_credito ? -doc.saldo : doc?.saldo || 0);
+        if (!doc) return sum;
+        return sum + (doc.es_credito ? -Math.abs(doc.saldo) : Math.abs(doc.saldo));
     }, 0);
 
     // ── Extracto (libro mayor): cada fila que mueve el saldo, con acumulado ──
@@ -393,6 +402,10 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
     const extracto = armarExtracto(data.movimientos ?? [])
         .map((m, i) => ({ ...m, key: i }))
         .filter((m) => enRango(m.fecha));
+    // Vista tipo resumen bancario (dueño 15/10): del más nuevo al más viejo.
+    // El acumulado de cada fila es el saldo DESPUÉS de ese movimiento, así que
+    // leído de arriba hacia abajo la primera fila es el presente.
+    const extractoDesc = [...extracto].reverse();
 
     // Cobros en la calle (pendientes de verificación): son PROMESAS, no tocan
     // el libro hasta que la oficina confirma. Se muestran en gris en el
@@ -417,6 +430,40 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
         }
         // En detallada los pagos completos ya se ven — las filas "A CUENTA" duplicarían
         return doc.tipo !== "A CUENTA" && enRango(doc.fecha);
+    });
+
+    // Seleccionar todo: los mismos documentos que tienen checkbox en la fila
+    const idsSeleccionables = documentosVisibles.filter((d) => d.tipo !== "A CUENTA").map((d) => d.id);
+    const todosSeleccionados = idsSeleccionables.length > 0 && idsSeleccionables.every((id) => selectedDocumentos.includes(id));
+    const toggleTodos = () => {
+        setSelectedDocumentos((prev) =>
+            todosSeleccionados
+                ? prev.filter((id) => !idsSeleccionables.includes(id))
+                : [...new Set([...prev, ...idsSeleccionables])]
+        );
+    };
+
+    // Datos para exportar (Excel/PDF): exactamente lo que la vista activa muestra
+    const datosExport = (soloSeleccion = false): DatosResumen => ({
+        cliente: { nombre: data.cliente.razon_social || data.cliente.nombre, cuit: data.cliente.cuit },
+        vista,
+        soloSeleccion,
+        totalSeleccion: totalSeleccionado,
+        saldos: (soloSeleccion ? documentosVisibles.filter((d) => selectedDocumentos.includes(d.id)) : documentosVisibles).map((f) => ({
+            tipo: f.tipo, numero: f.numero, fecha: f.fecha, pedido: f.pedido,
+            total: Number(f.total) || 0, saldo: Number(f.saldo) || 0,
+            estado: f.estado, es_credito: f.es_credito,
+        })),
+        extracto: extractoDesc.map((m) => ({
+            fecha: m.fecha,
+            movimiento: `${etiquetaMov(m)}${m.numero_comprobante ? ` ${m.numero_comprobante}` : ""}`,
+            detalle: m.observaciones || "",
+            debe: Number(m.debe) || 0,
+            haber: Number(m.haber) || 0,
+            saldo_acumulado: m.saldo_acumulado,
+        })),
+        saldoFinal: data.cliente.saldo_total,
+        rango: vista === "detallada" ? { desde: fechaDesde || undefined, hasta: fechaHasta || undefined } : undefined,
     });
 
     return (
@@ -507,7 +554,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                     <CardHeader>
                         <CardTitle>Extracto de cuenta</CardTitle>
                         <CardDescription>
-                            Todos los movimientos que componen el saldo — facturas, pagos, notas de crédito y ajustes — con el saldo acumulado. La última fila cierra en el Saldo Real.
+                            Todos los movimientos que componen el saldo — facturas, pagos, notas de crédito y ajustes — con el saldo acumulado, del más nuevo al más viejo. La primera fila cierra en el Saldo Real.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -524,6 +571,38 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
+                                    {extracto.length > 0 && (
+                                        <TableRow className="bg-gray-50 border-t-2">
+                                            <TableCell colSpan={5} className="font-bold">Saldo actual</TableCell>
+                                            <TableCell className={`text-right font-bold text-base tabular-nums ${data.cliente.saldo_total > 0 ? "text-red-600" : "text-green-600"}`}>
+                                                {moneda(data.cliente.saldo_total)}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                    {/* Cobros en la calle: promesas sin verificar — en gris, no suman */}
+                                    {cobrosEnCalle.map((p) => (
+                                        <TableRow key={`calle-${p.id}`} className="bg-slate-50/70 text-gray-400 italic">
+                                            <TableCell className="whitespace-nowrap">{formatDateAR(p.fecha_pago)}</TableCell>
+                                            <TableCell className="whitespace-nowrap">Cobro en calle — sin verificar</TableCell>
+                                            <TableCell className="max-w-[340px] truncate" title={p.observaciones || ""}>
+                                                {p.estado === "pendiente_rendicion" ? "pendiente de rendición" : "pendiente de confirmación"}
+                                                {(p.observaciones || "").includes("[10% CONTADO]") ? " · con 10% contado" : ""}
+                                            </TableCell>
+                                            <TableCell />
+                                            <TableCell className="text-right tabular-nums">(−{moneda(Number(p.monto))})</TableCell>
+                                            <TableCell />
+                                        </TableRow>
+                                    ))}
+                                    {cobrosEnCalle.length > 0 && data.cliente.saldo_proyectado != null && (
+                                        <TableRow className="bg-slate-100">
+                                            <TableCell colSpan={5} className="font-semibold text-gray-600">
+                                                Saldo proyectado (si la oficina confirma lo cobrado en calle, con su 10%, créditos y ajustes)
+                                            </TableCell>
+                                            <TableCell className={`text-right font-bold tabular-nums ${data.cliente.saldo_proyectado > 0 ? "text-red-500" : "text-green-600"}`}>
+                                                {moneda(data.cliente.saldo_proyectado)}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                     {extracto.length === 0 ? (
                                         <TableRow>
                                             <TableCell colSpan={6} className="text-center text-gray-500 py-8">
@@ -531,7 +610,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                             </TableCell>
                                         </TableRow>
                                     ) : (
-                                        extracto.map((m) => (
+                                        extractoDesc.map((m) => (
                                             <TableRow key={m.key} className={m.tipo_movimiento?.includes("ajuste") || m.tipo_movimiento === "debito" || m.tipo_movimiento === "credito" ? "bg-amber-50/50" : ""}>
                                                 <TableCell className="whitespace-nowrap">{formatDateAR(m.fecha)}</TableCell>
                                                 <TableCell className="font-medium whitespace-nowrap">
@@ -574,39 +653,7 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                                             </TableRow>
                                         ))
                                     )}
-                                    {extracto.length > 0 && (
-                                        <TableRow className="bg-gray-50 border-t-2">
-                                            <TableCell colSpan={5} className="font-bold">Saldo actual</TableCell>
-                                            <TableCell className={`text-right font-bold text-base tabular-nums ${data.cliente.saldo_total > 0 ? "text-red-600" : "text-green-600"}`}>
-                                                {moneda(data.cliente.saldo_total)}
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                    {/* Cobros en la calle: promesas sin verificar — en gris, no suman */}
-                                    {cobrosEnCalle.map((p) => (
-                                        <TableRow key={`calle-${p.id}`} className="bg-slate-50/70 text-gray-400 italic">
-                                            <TableCell className="whitespace-nowrap">{formatDateAR(p.fecha_pago)}</TableCell>
-                                            <TableCell className="whitespace-nowrap">Cobro en calle — sin verificar</TableCell>
-                                            <TableCell className="max-w-[340px] truncate" title={p.observaciones || ""}>
-                                                {p.estado === "pendiente_rendicion" ? "pendiente de rendición" : "pendiente de confirmación"}
-                                                {(p.observaciones || "").includes("[10% CONTADO]") ? " · con 10% contado" : ""}
-                                            </TableCell>
-                                            <TableCell />
-                                            <TableCell className="text-right tabular-nums">(−{moneda(Number(p.monto))})</TableCell>
-                                            <TableCell />
-                                        </TableRow>
-                                    ))}
-                                    {cobrosEnCalle.length > 0 && data.cliente.saldo_proyectado != null && (
-                                        <TableRow className="bg-slate-100">
-                                            <TableCell colSpan={5} className="font-semibold text-gray-600">
-                                                Saldo proyectado (si la oficina confirma lo cobrado en calle, con su 10%, créditos y ajustes)
-                                            </TableCell>
-                                            <TableCell className={`text-right font-bold tabular-nums ${data.cliente.saldo_proyectado > 0 ? "text-red-500" : "text-green-600"}`}>
-                                                {moneda(data.cliente.saldo_proyectado)}
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
+                                    </TableBody>
                             </Table>
                         </div>
                     </CardContent>
@@ -616,19 +663,49 @@ function CuentaCorrientePage({ params }: { params: Promise<{ id: string }> }) {
                 {/* Unified Documents Table */}
                 <Card>
                     <CardHeader>
-                        <CardTitle>{vista === "saldos" ? "Saldos pendientes" : "Comprobantes"}</CardTitle>
-                        <CardDescription>
-                            {vista === "saldos"
-                                ? "Solo lo que tiene saldo: deuda del cliente o crédito a favor. Para el desglose completo, pasá a Cuenta detallada."
-                                : "Estado de cada comprobante (saldos de imputación) — para seleccionar y pagar"}
-                        </CardDescription>
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <CardTitle>{vista === "saldos" ? "Saldos pendientes" : "Comprobantes"}</CardTitle>
+                                <CardDescription>
+                                    {vista === "saldos"
+                                        ? "Solo lo que tiene saldo: deuda del cliente o crédito a favor. Para el desglose completo, pasá a Cuenta detallada."
+                                        : "Estado de cada comprobante (saldos de imputación) — para seleccionar y pagar"}
+                                </CardDescription>
+                            </div>
+                            {/* Export del resumen: todo lo visible, o solo lo tildado */}
+                            <div className="flex shrink-0 items-center gap-2">
+                                {selectedDocumentos.length > 0 && (
+                                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                                        <Checkbox checked={exportSoloSel} onCheckedChange={(v) => setExportSoloSel(!!v)} />
+                                        Solo seleccionados ({selectedDocumentos.length})
+                                    </label>
+                                )}
+                                <Button variant="outline" size="sm" onClick={() => exportarResumenExcel(datosExport(exportSoloSel && selectedDocumentos.length > 0))}>
+                                    ⬇ Excel
+                                </Button>
+                                <Button variant="outline" size="sm" disabled={exportandoPdf} onClick={async () => {
+                                    setExportandoPdf(true)
+                                    try { await exportarResumenPdf(datosExport(exportSoloSel && selectedDocumentos.length > 0)) }
+                                    catch (e: any) { toast({ variant: "destructive", title: "Error exportando PDF", description: e.message }) }
+                                    finally { setExportandoPdf(false) }
+                                }}>
+                                    {exportandoPdf ? "Generando…" : "⬇ PDF"}
+                                </Button>
+                            </div>
+                        </div>
                     </CardHeader>
                     <CardContent>
                         <div className="overflow-x-auto">
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead className="w-12"></TableHead>
+                                        <TableHead className="w-12">
+                                            <Checkbox
+                                                checked={todosSeleccionados ? true : selectedDocumentos.length > 0 && idsSeleccionables.some((id) => selectedDocumentos.includes(id)) ? "indeterminate" : false}
+                                                onCheckedChange={toggleTodos}
+                                                title="Seleccionar todo"
+                                            />
+                                        </TableHead>
                                         <TableHead>Tipo</TableHead>
                                         <TableHead>Número</TableHead>
                                         <TableHead>Fecha</TableHead>
