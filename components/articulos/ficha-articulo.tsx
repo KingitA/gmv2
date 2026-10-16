@@ -52,7 +52,11 @@ interface Props {
 }
 
 /** Opciones de un catálogo + el valor actual si ya no está activo (se muestra "(actual)" para no perderlo). */
-const conActual = (lista: string[], actual?: string) => (actual && !lista.includes(actual) ? [...lista, actual] : lista)
+// Sin vacíos: un nombre vacío en un catálogo rompía toda la ficha (Radix no acepta value="")
+const conActual = (lista: string[], actual?: string) => {
+  const limpia = lista.filter(x => x && x.trim() !== "")
+  return actual && actual.trim() !== "" && !limpia.includes(actual) ? [...limpia, actual] : limpia
+}
 
 export function FichaArticulo(p: Props) {
   const { fa, ff, setFf } = p
