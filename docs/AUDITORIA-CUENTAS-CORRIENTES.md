@@ -110,4 +110,4 @@ Verificado:
 Pendiente:
 - El dueño aplica la migración **antes** de desplegar el código: Playroom lee columnas nuevas de la vista.
 - APK nueva de vendedor y chofer.
-- Una hoja de ruta de un viaje ya rendido puede mover su saldo anterior cuando se confirman sus cobros o se emiten sus NC. Hay que decidir si se congela al despachar.
+- Una hoja de ruta de un viaje ya rendido puede mover su saldo anterior cuando se confirman sus cobros o se emiten sus NC. Decisión del dueño (16/10): durante el viaje la hoja queda **viva**, para que el chofer vea si el cliente transfirió mientras tanto. Recién se **congela al confirmar la rendición**, para que el registro histórico no cambie. Es un detalle menor, para más adelante.
