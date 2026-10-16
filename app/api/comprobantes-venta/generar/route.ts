@@ -1,7 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
+import { aplicarAnticipoAFactura } from "@/lib/cobranzas/aplicar-anticipo"
 import {
   calcularPrecioFinal,
   articuloToDatosArticulo,
@@ -42,7 +43,7 @@ const CONDICION_MARCA_COLS =
 
 export async function POST(request: Request) {
   try {
-    const auth = await requireAuth()
+    const auth = await requirePermiso("emitir_comprobantes")
     if (auth.error) return auth.error
 
     const supabase = createAdminClient()
@@ -565,6 +566,25 @@ export async function POST(request: Request) {
       }
     }
 
+    // ─── 7b. Anticipo del pedido → a SUS comprobantes (regla del dueño 16/10) ───
+    // Nunca a facturas viejas. Si el cobro todavía no se confirmó, la imputación
+    // queda pendiente y se aplica al confirmarlo. No voltea la facturación.
+    let anticipoAplicado = 0
+    let anticipoError: string | null = null
+    if ((pedido as any).anticipo_pago_id) {
+      try {
+        const r = await aplicarAnticipoAFactura(supabase, supabase, {
+          pagoId: (pedido as any).anticipo_pago_id,
+          comprobanteIds: comprobantesGenerados.map((c: any) => c.id).filter(Boolean),
+          usuarioId: auth.user.id,
+        })
+        anticipoAplicado = r.aplicado
+      } catch (antErr: any) {
+        console.error("[generar] aplicar anticipo:", antErr?.message)
+        anticipoError = antErr?.message || "No se pudo aplicar el anticipo a la factura"
+      }
+    }
+
     // ─── 8. Marcar el pedido como FACTURADO acá, en el servidor ───
     // Antes lo hacía la pantalla desde el navegador en un segundo paso; si ese paso
     // no llegaba (permisos, pestaña cerrada, red), el comprobante quedaba emitido
@@ -680,6 +700,8 @@ export async function POST(request: Request) {
       total_pedido: round2(totalPedido),
       bonificacion_contado: bonificacion,
       ...(bonificacionError ? { bonificacion_contado_error: bonificacionError } : {}),
+      ...(anticipoAplicado ? { anticipo_aplicado: anticipoAplicado } : {}),
+      ...(anticipoError ? { anticipo_error: anticipoError } : {}),
       remitos,
       ...(advertenciasLibro.length ? { advertencias_libro_mayor: advertenciasLibro } : {}),
     })

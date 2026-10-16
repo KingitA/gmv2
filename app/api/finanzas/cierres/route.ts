@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 
 /**
  * Cierre de caja / arqueo diario (Fase F1, migración 20260722).
@@ -20,7 +20,7 @@ import { requireAuth } from "@/lib/auth"
  */
 
 export async function GET(request: Request) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const { searchParams } = new URL(request.url)
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const body = await request.json()

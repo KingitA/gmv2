@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
 import { nowArgentina } from "@/lib/utils"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 
@@ -16,7 +16,7 @@ import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
  * de confirmación (alta en el acto, rendiciones) para que ninguno lo saltee.
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()

@@ -83,3 +83,53 @@ export async function getCurrentUserWithRoles() {
     roles
   }
 }
+
+// ─── Permisos por rol (regla del dueño, 16/10/2026) ─────────────────────
+// Quién puede hacer qué con la plata y las devoluciones. Una sola tabla para
+// que las pantallas y las APIs digan lo mismo. Roles reales de la base:
+// admin, administrativo, deposito, chofer, vendedor, mostrador.
+export const PERMISOS = {
+  /** Cargar cobros desde /pagos-clientes ("Cobros"): quedan pendientes */
+  cargar_cobros: ["admin", "administrativo", "mostrador"],
+  /** /caja: confirmar, imputar, dejar a cuenta, anular cobros, rendiciones */
+  caja: ["admin"],
+  /** Aceptar / rechazar / modificar devoluciones desde el ERP */
+  revisar_devoluciones: ["admin", "administrativo"],
+  /** Aceptar devoluciones desde depósito (app y pantalla de depósito) */
+  revisar_devoluciones_deposito: ["admin", "administrativo", "deposito"],
+  /** Emitir comprobantes (facturas, NC, reversas, ND) */
+  emitir_comprobantes: ["admin", "administrativo"],
+} as const satisfies Record<string, readonly string[]>
+
+export type Permiso = keyof typeof PERMISOS
+
+interface RolesSuccess { user: User; roles: string[]; error: null }
+type RolesResult = RolesSuccess | AuthFailure
+
+/**
+ * Como requireAuth, pero además exige uno de los roles del permiso.
+ *   const auth = await requirePermiso("caja")
+ *   if (auth.error) return auth.error
+ */
+export async function requirePermiso(permiso: Permiso): Promise<RolesResult> {
+  const auth = await requireAuth()
+  if (auth.error) return auth
+  const roles = await getUserRoles(auth.user.id)
+  const permitidos = PERMISOS[permiso] as readonly string[]
+  if (!roles.some((r) => permitidos.includes(r))) {
+    return {
+      user: null,
+      error: NextResponse.json(
+        { error: "No tenés permiso para esta operación.", error_code: "SIN_PERMISO", permiso },
+        { status: 403 },
+      ),
+    }
+  }
+  return { user: auth.user, roles, error: null }
+}
+
+/** ¿Estos roles alcanzan para el permiso? (para decidir sin cortar el request) */
+export function tienePermiso(roles: string[], permiso: Permiso): boolean {
+  const permitidos = PERMISOS[permiso] as readonly string[]
+  return roles.some((r) => permitidos.includes(r))
+}

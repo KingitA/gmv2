@@ -413,8 +413,9 @@ export default function RendicionPage() {
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-xl">
             <h3 className="text-xl font-bold text-center">Confirmar Rendición</h3>
             <p className="text-gray-600 text-center text-sm">
-              Al confirmar, se imputarán los pagos a las cuentas corrientes de los clientes
-              y se generarán las notas de crédito por las devoluciones.
+              Al confirmar, se imputarán los pagos a las cuentas corrientes de los clientes.
+              Las devoluciones quedan esperando que depósito revise la mercadería; la nota de crédito
+              la emite la oficina después.
             </p>
             <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
               <div className="flex justify-between">
@@ -422,7 +423,7 @@ export default function RendicionPage() {
                 <span className="font-bold">{seleccionados.size}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Devoluciones a confirmar</span>
+                <span className="text-gray-500">Devoluciones (van a depósito)</span>
                 <span className="font-bold">{resumen.devoluciones_pendientes}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-bold">

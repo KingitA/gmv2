@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from '@/lib/auth'
+import { valorarDevoluciones } from "@/lib/cobranzas/valorar-devoluciones"
+import { redondear } from "@/lib/formato"
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth()
@@ -60,7 +62,43 @@ export async function GET(request: NextRequest) {
       })
     )
 
-    return NextResponse.json(devolucionesConDetalle)
+    // Lo ya descontado dentro de cobros (devoluciones_descuentos) contra lo que
+    // vale hoy la devolución (solo lo aceptado, misma regla que el cobro y la
+    // NC). Si se aceptó menos de lo que ya se descontó, NO se tocan los pagos:
+    // se avisa con `descontado_de_mas` para que la oficina lo resuelva.
+    const ids = devolucionesConDetalle.map((d: any) => d.id)
+    const descontadoPor = new Map<string, number>()
+    if (ids.length) {
+      const { data: descs } = await supabase
+        .from("devoluciones_descuentos")
+        .select("devolucion_id, monto")
+        .in("devolucion_id", ids)
+      for (const x of descs || []) {
+        descontadoPor.set(x.devolucion_id, (descontadoPor.get(x.devolucion_id) || 0) + (Number(x.monto) || 0))
+      }
+    }
+    const valorPor = new Map<string, number>()
+    const porCliente = new Map<string, string[]>()
+    for (const d of devolucionesConDetalle as any[]) {
+      if (!descontadoPor.get(d.id) || !d.cliente_id || !["pendiente", "confirmado"].includes(d.estado)) continue
+      porCliente.set(d.cliente_id, [...(porCliente.get(d.cliente_id) || []), d.id])
+    }
+    for (const [clienteId, devIds] of porCliente) {
+      try {
+        const val = await valorarDevoluciones(supabase as any, { clienteId, devolucionIds: devIds })
+        for (const [devId, v] of val) valorPor.set(devId, v.total)
+      } catch (e) {
+        console.error("[devoluciones] valorando para descontado_de_mas:", e)
+      }
+    }
+    const conDescuentos = (devolucionesConDetalle as any[]).map((d) => {
+      const descontado = redondear(descontadoPor.get(d.id) || 0)
+      const valor = valorPor.get(d.id)
+      const deMas = valor != null ? redondear(Math.max(0, descontado - valor)) : 0
+      return { ...d, descontado, valor_actual: valor ?? null, descontado_de_mas: deMas }
+    })
+
+    return NextResponse.json(conDescuentos)
   } catch (error: any) {
     console.error("[v0] Error obteniendo devoluciones:", error)
     return NextResponse.json({ error: error.message || "Error obteniendo devoluciones" }, { status: 500 })

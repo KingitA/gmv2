@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 
@@ -12,7 +12,7 @@ import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 //  - pago_ids: confirma esos pagos.
 //  - vendedor_id: confirma todos los pendientes (pendiente | pendiente_rendicion) del vendedor.
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
 
   try {

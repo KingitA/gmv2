@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
+import { confirmaAlCargar } from "@/lib/cobranzas/reglas-confirmacion"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { crearCobranza, recortarImputaciones, repartirImputacionesContado, type DetalleInput } from "@/lib/cobranzas/crear"
@@ -17,7 +18,7 @@ import { normalizarCuit } from "@/lib/formato"
 
 // ─── GET: listar pagos con filtros ───────────────────────────
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("cargar_cobros")
   if (auth.error) return auth.error
 
   try {
@@ -118,7 +119,7 @@ export async function GET(request: NextRequest) {
 
 // ─── POST: crear pago completo ────────────────────────────────
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("cargar_cobros")
   if (auth.error) return auth.error
 
   try {
@@ -345,6 +346,22 @@ export async function POST(request: NextRequest) {
       if (pedErr) console.error("[pagos-clientes] marcar pedidos contado:", pedErr.message)
     }
 
+    // ── 1c. Vincular TODOS los pedidos anticipados a este pago (regla del dueño
+    // 16/10): al facturarse el pedido, el anticipo se aplica solo a esa factura
+    // (lib/cobranzas/aplicar-anticipo.ts) y nunca a facturas viejas. Antes solo
+    // se vinculaban los de 10% contado y el resto quedaba a cuenta para siempre.
+    const idsAnticipo = ((body.pedidos_anticipo as any[]) || [])
+      .map((p: any) => p?.pedido_id)
+      .filter((id: any) => id && !(pedidos_contado || []).includes(id))
+    if (idsAnticipo.length) {
+      const { error: antErr } = await supabase
+        .from("pedidos")
+        .update({ anticipo_pago_id: pago_id })
+        .in("id", idsAnticipo)
+        .is("anticipo_pago_id", null)
+      if (antErr) console.error("[pagos-clientes] vincular anticipos:", antErr.message)
+    }
+
     // ── 3. Crear retenciones ──
     if (retenciones?.length) {
       const retencionesData = (retenciones as any[]).map((r) => ({
@@ -369,8 +386,16 @@ export async function POST(request: NextRequest) {
     let numeroReciboFinal: string | null = null
     let bonificacion: { total: number } | null = null
     let bonificacion_error: string | null = null
-    const estadoFinal = confirmar === false ? "pendiente" : "confirmado"
-    if (confirmar !== false) {
+    // Regla única de la oficina (lib/cobranzas/reglas-confirmacion.ts): solo admin
+    // confirma, y transferencias/echeqs quedan pendientes aunque se pida confirmar.
+    const gate = confirmaAlCargar({
+      confirmar,
+      metodos,
+      roles: auth.roles,
+      chequeSinColor: detalles.some((d: any) => d.tipo_pago === "cheque" && d.color === COLOR_PENDIENTE),
+    })
+    const estadoFinal = gate.confirmar ? "confirmado" : "pendiente"
+    if (gate.confirmar) {
       const result = await confirmarCobranza(supabase, admin, {
         pagoId: pago_id,
         usuarioId: auth.user.id,
@@ -393,6 +418,7 @@ export async function POST(request: NextRequest) {
       success: true,
       pago,
       estado: estadoFinal,
+      aviso_pendiente: gate.motivo || undefined,
       numero_recibo: numeroReciboFinal,
       bonificacion,
       bonificacion_error,

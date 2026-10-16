@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { type NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
+import { confirmaAlCargar } from "@/lib/cobranzas/reglas-confirmacion"
 import { todayArgentina } from "@/lib/utils"
 import { confirmarCobranza } from "@/lib/actions/cobranzas"
 import { crearCobranza, recortarImputaciones, type DetalleInput } from "@/lib/cobranzas/crear"
@@ -30,7 +31,7 @@ import { normalizarCuit } from "@/lib/formato"
 //   }]
 // }
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("cargar_cobros")
   if (auth.error) return auth.error
 
   try {
@@ -52,6 +53,12 @@ export async function POST(request: NextRequest) {
     if (!Array.isArray(asignaciones) || asignaciones.length === 0) {
       return NextResponse.json({ error: "Se requiere al menos una asignación de cliente" }, { status: 400 })
     }
+    // Regla única de la oficina: solo admin confirma; transferencias/echeqs pendientes
+    const gate = confirmaAlCargar({
+      confirmar,
+      metodos: [...(asignaciones as any[]).flatMap((a: any) => a.metodos || []), ...(cheque_compartido ? [{ tipo: "cheque", ...cheque_compartido }] : [])],
+      roles: auth.roles,
+    })
 
     const montoMetodos = (ms: any[]) =>
       (ms || []).reduce((s: number, m: any) => s + (m.tipo === "deposito"
@@ -206,7 +213,7 @@ export async function POST(request: NextRequest) {
       // Confirmación en el acto (por defecto) + post-confirmación (comisiones,
       // billetera, bonificación 10% diferida)
       let numero_recibo: string | null = null
-      if (confirmar !== false) {
+      if (gate.confirmar) {
         const r = await confirmarCobranza(supabase, admin, { pagoId: pago_id, usuarioId: auth.user.id })
         numero_recibo = r.numero_recibo
         await procesarPostConfirmacion(supabase, admin, {
@@ -219,12 +226,12 @@ export async function POST(request: NextRequest) {
     }
 
     // ── 4. Estado de la cobranza ──
-    const estadoFinal = confirmar === false ? "pendiente" : "confirmada"
+    const estadoFinal = gate.confirmar ? "confirmada" : "pendiente"
     await supabase
       .from("cobranzas")
       .update({
         estado: estadoFinal,
-        ...(confirmar !== false ? { confirmado_por: auth.user.id, confirmado_at: new Date().toISOString() } : {}),
+        ...(gate.confirmar ? { confirmado_por: auth.user.id, confirmado_at: new Date().toISOString() } : {}),
       })
       .eq("id", cobranza.id)
 
@@ -232,6 +239,7 @@ export async function POST(request: NextRequest) {
       success: true,
       cobranza_id: cobranza.id,
       estado: estadoFinal,
+      aviso_pendiente: gate.motivo || undefined,
       total,
       clientes: resultados,
     })

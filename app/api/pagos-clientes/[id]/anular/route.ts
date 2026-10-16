@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { anularCobranza } from "@/lib/actions/cobranzas"
 
 /**
@@ -12,7 +12,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
 
   try {

@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { fetchAllRows, fetchByIds } from "@/lib/supabase/fetch-all"
 import { todayArgentina, startOfDayArgentina, endOfDayArgentina } from "@/lib/utils"
 import { fecha as fechaAR, moneda } from "@/lib/formato"
@@ -58,7 +58,7 @@ const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
 const num = (v: unknown) => Number(v ?? 0)
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()

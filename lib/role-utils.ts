@@ -29,6 +29,10 @@ export const ROUTE_RULES: [string, string[]][] = [
   ['/chofer',               ['admin', 'chofer']],
   ['/vendedor',             ['admin', 'vendedor']],
   ['/mostrador',            ['admin', 'administrativo', 'mostrador']],
+  // Plata (regla del dueño 16/10): Cobros lo cargan admin, administrativo y
+  // mostrador (queda pendiente); la Caja (confirmar, imputar) es solo admin.
+  ['/pagos-clientes',       ['admin', 'administrativo', 'mostrador']],
+  ['/caja',                 ['admin']],
   ['/seleccionar-modulo',   ['admin', 'deposito', 'chofer']],
   ['/viajantes',            ['admin']],
   ['/finanzas',             ['admin']],

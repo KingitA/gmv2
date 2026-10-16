@@ -8,6 +8,10 @@
 // Backend: PATCH /api/pagos/[id]/confirmar — cobranza_confirmar es idempotente
 // sobre confirmados y aplica solo las imputaciones nuevas. Lo que no se impute
 // queda a cuenta del cliente (su saldo ya bajó al confirmarse el cobro).
+// Regla del dueño (16/10): dos caminos explícitos — "Proponer lo más viejo"
+// (llena la selección con los comprobantes más viejos, se puede corregir antes
+// de imputar) y "Dejar a cuenta" (POST /api/pagos/[id]/a-cuenta: sale de la
+// bandeja de pendientes y queda registrado quién lo decidió).
 
 import { useEffect, useMemo, useState } from "react"
 import { traerSaldosCliente } from "@/lib/cuenta-corriente/saldos-cliente-fetch"
@@ -67,6 +71,44 @@ export function ImputarPago({
   )
   const totalImputado = imputaciones.reduce((s, i) => s + i.monto_imputado, 0)
   const restante = pago.disponible - totalImputado
+
+  // Propuesta "a lo más viejo": reparte lo disponible sobre los débitos con
+  // saldo, del más viejo al más nuevo. Solo llena la selección: nada se graba
+  // hasta tocar Imputar.
+  const DEBITOS = new Set(["FA", "FB", "FC", "PRES", "ND", "NDA", "NDB", "NDC"])
+  const proponerMasViejo = () => {
+    let queda = round2(pago.disponible)
+    const propuesta: Record<string, number> = {}
+    const ordenados = comprobantes
+      .filter((c) => DEBITOS.has(c.tipo_comprobante) && Number(c.saldo_pendiente) > 0.009)
+      .sort((a, b) => (a.fecha || "").localeCompare(b.fecha || "") || (a.numero_comprobante || "").localeCompare(b.numero_comprobante || ""))
+    for (const c of ordenados) {
+      if (queda <= 0.009) break
+      const monto = round2(Math.min(queda, Number(c.saldo_pendiente)))
+      propuesta[c.id] = monto
+      queda = round2(queda - monto)
+    }
+    if (!Object.keys(propuesta).length) {
+      toast({ title: "Sin comprobantes con saldo", description: "Este cliente no tiene facturas pendientes: el pago puede quedar a cuenta." })
+      return
+    }
+    setSeleccionados(propuesta)
+  }
+
+  const dejarACuenta = async () => {
+    setGuardando(true)
+    try {
+      const res = await fetch(`/api/pagos/${pago.pago_id}/a-cuenta`, { method: "POST" })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "No se pudo dejar a cuenta")
+      toast({ title: "Queda a cuenta", description: `${moneda(pago.disponible)} a cuenta del cliente. Sale de la bandeja de pendientes.` })
+      onListo()
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: e.message })
+    } finally {
+      setGuardando(false)
+    }
+  }
 
   const imputar = async (modoDiferencia?: "saldo" | "ajuste") => {
     setDialogoFalta(null)
@@ -166,6 +208,23 @@ export function ImputarPago({
             </>
           )}
         </p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={proponerMasViejo}
+            disabled={guardando}
+            className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+          >
+            Proponer lo más viejo
+          </button>
+          <button
+            onClick={dejarACuenta}
+            disabled={guardando}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Dejar a cuenta
+          </button>
+        </div>
 
         <div className="mt-3">
           <ComprobantesSelector

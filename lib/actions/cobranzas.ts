@@ -83,6 +83,14 @@ export async function anularCobranza(
   const { error: descErr } = await supabase.from("devoluciones_descuentos").delete().eq("pago_id", pagoId)
   if (descErr) console.error("[cobranzas] limpiar descuentos de devolución:", descErr.message)
 
+  // Los pedidos que este pago anticipaba vuelven a estar sin anticipo (si no,
+  // al facturarse buscarían aplicar un pago anulado). Best-effort.
+  const { error: antErr } = await supabase
+    .from("pedidos")
+    .update({ anticipo_pago_id: null, pago_contado_10: false })
+    .eq("anticipo_pago_id", pagoId)
+  if (antErr) console.error("[cobranzas] liberar anticipos:", antErr.message)
+
   return {
     yaAnulado: Boolean(data?.ya_anulado),
     estabaConfirmado: Boolean(data?.estaba_confirmado),

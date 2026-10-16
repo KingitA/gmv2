@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
 import { topeAjuste } from "@/lib/cobranzas/ajuste"
 import { moneda } from "@/lib/formato"
@@ -27,7 +27,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()
@@ -170,7 +170,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const { id: cliente_id } = await params

@@ -1,12 +1,13 @@
 import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
+import { redondear } from "@/lib/formato"
 
 // PUT /api/devoluciones/[id] — editar cantidades / quitar renglones ANTES de la NC.
 // Solo en estado "pendiente" (todavía no se controló en depósito ni se devolvió stock).
 // Body: { items: [{ id, cantidad }], eliminar: [detalleId] }
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("revisar_devoluciones")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()
@@ -31,11 +32,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       const cant = Number(it.cantidad)
       if (!it.id || !Number.isFinite(cant) || cant <= 0) continue
       const { data: det } = await supabase
-        .from("devoluciones_detalle").select("id, precio_venta_original").eq("id", it.id).eq("devolucion_id", id).single()
+        .from("devoluciones_detalle").select("id, cantidad, cantidad_original, precio_venta_original").eq("id", it.id).eq("devolucion_id", id).single()
       if (!det) continue
-      const subtotal = Math.round(cant * Number(det.precio_venta_original || 0) * 100) / 100
+      const subtotal = redondear(cant * Number(det.precio_venta_original || 0))
+      // La cantidad que cargó el vendedor/chofer queda para la auditoría
+      const original = det.cantidad_original ?? det.cantidad
       const { error } = await supabase.from("devoluciones_detalle")
-        .update({ cantidad: cant, subtotal }).eq("id", it.id)
+        .update({ cantidad: cant, subtotal, cantidad_original: original }).eq("id", it.id)
       if (error) throw error
     }
 
@@ -61,7 +64,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 // Pendiente: borra directo. Confirmada (depósito ya devolvió stock de los
 // vendibles): primero revierte ese stock para no dejarlo inflado.
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("revisar_devoluciones")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()

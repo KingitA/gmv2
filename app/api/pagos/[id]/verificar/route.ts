@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 
 /**
  * POST /api/pagos/[id]/verificar — segunda firma manual (arqueo/revisión).
@@ -11,7 +11,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()

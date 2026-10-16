@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { nowArgentina, todayArgentina } from "@/lib/utils"
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from '@/lib/auth'
 import { insertarKardex } from '@/lib/kardex/insertar-kardex'
 import { getComisionPorcentaje, getPrecioNeto } from "@/lib/comisiones/calcular"
 import { determinarTipoNCADesdeOriginal, determinarTipoFactura, mensajeErrorCondicionIva } from "@/lib/comprobantes/tipo-comprobante"
@@ -20,7 +20,7 @@ import { cuitDigitos, cuitValido, ahoraISO } from "@/lib/formato"
 
 export async function POST(request: Request) {
   try {
-    const auth = await requireAuth()
+    const auth = await requirePermiso("emitir_comprobantes")
     if (auth.error) return auth.error
     const cookieStore = await cookies()
     const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
@@ -93,6 +93,26 @@ export async function POST(request: Request) {
       return NextResponse.json({
         error: "Esta devolución fue rechazada. No se puede generar comprobante.",
         error_code: "DEVOLUCION_RECHAZADA",
+      }, { status: 422 })
+    }
+
+    // Regla del dueño (16/10/2026): la NC/REV sale solo de una devolución que
+    // depósito (u oficina) ya revisó y aceptó, y solo por lo aceptado.
+    if (devolucion.estado !== "confirmado") {
+      return NextResponse.json({
+        error: "La devolución todavía no fue aceptada por depósito. Primero hay que revisar la mercadería; recién después se emite la NC/Reversa.",
+        error_code: "DEVOLUCION_NO_ACEPTADA",
+        estado: devolucion.estado,
+      }, { status: 422 })
+    }
+
+    devolucion.detalle = (devolucion.detalle ?? []).filter(
+      (item: any) => item.estado_renglon !== "rechazado" && Number(item.cantidad) > 0,
+    )
+    if (devolucion.detalle.length === 0) {
+      return NextResponse.json({
+        error: "La devolución no tiene renglones aceptados: no hay nada para acreditar.",
+        error_code: "DEVOLUCION_SIN_ACEPTADOS",
       }, { status: 422 })
     }
 

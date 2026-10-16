@@ -8,9 +8,9 @@
 // más bonificación 10% por pago contado y fotos de comprobantes con carga,
 // cámara o PEGAR captura (Ctrl+V).
 // Backend: POST /api/pagos-clientes (metodos + imputaciones + pedidos_contado
-// + comprobante_urls + confirmar). El efectivo confirma en el acto (entra a la
-// caja elegida); transferencias/echeqs/cheques quedan pendientes hasta su
-// Confirmar/Aceptar en la fila.
+// + comprobante_urls + confirmar). Regla del dueño (16/10): efectivo y cheque
+// físico entran en el acto; transferencias y echeqs quedan pendientes hasta su
+// Confirmar en la fila. Lo decide el servidor (lib/cobranzas/reglas-confirmacion.ts).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { EntitySearchSelect } from "@/components/search/EntitySearchSelect"
@@ -408,9 +408,6 @@ export function RegistrarCobro({
       ? [obsAnticipo, MARCA_CONTADO].filter(Boolean).join(" ")
       : obsAnticipo
 
-    // Solo-efectivo confirma en el acto; si hay algún valor (transf/cheque/echeq)
-    // el cobro completo queda pendiente hasta su Confirmar (regla de Cobros).
-    const esEfectivo = metodosCobro.every((m) => m.payload.tipo === "efectivo")
     setGuardando(true)
     try {
       const res = await fetch("/api/pagos-clientes", {
@@ -428,7 +425,8 @@ export function RegistrarCobro({
             .map(([k, v]) => ({ pedido_id: k.replace(PEDIDO_PREFIX, ""), monto: Number(v) })),
           pedidos_contado: [...contadoPedidos],
           comprobante_urls: archivos,
-          confirmar: esEfectivo,
+          // El servidor decide (efectivo/cheque físico al acto; transferencia/echeq pendiente)
+          confirmar: true,
           idempotency_key: idemKeyRef.current,
           // Ajuste por redondeo: viaja adentro del cobro y se asienta al
           // confirmarse (en el acto si es efectivo). Tope 1% (server valida).
@@ -445,6 +443,8 @@ export function RegistrarCobro({
       if (!res.ok) throw new Error(data.error || "Error registrando el cobro")
       idemKeyRef.current = crypto.randomUUID()
       const pagoId = data.pago?.id ?? data.id
+      // ¿Entró en el acto? Lo decidió el servidor (regla única de la oficina)
+      const esEfectivo = data.estado === "confirmado"
 
       // Bonificación 10% contado: la resolvió el servidor en la confirmación
       let bonifMsg = ""
@@ -471,7 +471,7 @@ export function RegistrarCobro({
         title: esEfectivo ? "Cobro en caja" : "Cobro registrado",
         description: esEfectivo
           ? `${cliente.razon_social || cliente.nombre}: entró a la caja${imputaciones.length ? " e imputado" : ", pendiente de imputación"}.${recorteMsg}${ajusteMsg}${bonifMsg}`
-          : `${cliente.razon_social || cliente.nombre}: pendiente de confirmación en la lista.${recorteMsg}${ajusteMsg}${bonifMsg}`,
+          : `${cliente.razon_social || cliente.nombre}: ${data.aviso_pendiente || "pendiente de confirmación en la lista."}${recorteMsg}${ajusteMsg}${bonifMsg}`,
       })
       limpiar()
       onRegistrado()

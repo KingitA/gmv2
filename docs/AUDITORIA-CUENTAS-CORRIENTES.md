@@ -111,3 +111,33 @@ Pendiente:
 - El dueño aplica la migración **antes** de desplegar el código: Playroom lee columnas nuevas de la vista.
 - APK nueva de vendedor y chofer.
 - Una hoja de ruta de un viaje ya rendido puede mover su saldo anterior cuando se confirman sus cobros o se emiten sus NC. Decisión del dueño (16/10): durante el viaje la hoja queda **viva**, para que el chofer vea si el cliente transfirió mientras tanto. Recién se **congela al confirmar la rendición**, para que el registro histórico no cambie. Es un detalle menor, para más adelante.
+
+## Etapa 2 — Verificación (16/10, en la rama; faltan las migraciones del dueño y el OK para main)
+
+Reglas nuevas del dueño, del 16/10:
+
+20. Si un pago entra sin factura, aparecen dos opciones: "Imputar a lo más viejo" o "Dejar a cuenta". Un anticipo de un pedido sin facturar se aplica solo a la factura de ese pedido.
+21. En la oficina, el efectivo y el cheque físico entran en el acto. Las transferencias y los echeqs quedan pendientes hasta que se controla el banco.
+22. Depósito (o la oficina) puede aceptar algunos renglones de una devolución, rechazar otros y cambiar la cantidad y la condición.
+23. Roles:
+    - Cobros: admin, administrativo y mostrador (el cobro queda pendiente).
+    - Caja (confirmar, imputar, anular, rendiciones, ajustes): solo admin.
+    - Emitir comprobantes y aceptar devoluciones: admin y administrativo. Depósito también acepta devoluciones.
+    - Depósito, chofer y vendedor no entran al ERP.
+24. El mismo admin que carga un cobro puede confirmarlo. El control de otra persona es el arqueo al cierre.
+
+Lo que se hizo:
+
+- `lib/auth.ts`: la tabla `PERMISOS` y las funciones `requirePermiso` / `tienePermiso`. Las aplican las APIs de plata, devoluciones y emisión, y `ROUTE_RULES` (`/caja` solo admin; `/pagos-clientes` admin, administrativo y mostrador). El menú filtra por rol.
+- `lib/cobranzas/reglas-confirmacion.ts`: la regla única que decide si un cobro de la oficina se confirma al cargarlo (lo aplican `/api/pagos-clientes` y `/api/cobranzas`). Un cheque a cuenta sin color queda pendiente.
+- Botones "Proponer lo más viejo" y "Dejar a cuenta" (`/api/pagos/[id]/a-cuenta`, migración `20261016b`).
+- Los anticipos se vinculan siempre al pedido, en oficina y en chofer. `lib/cobranzas/aplicar-anticipo.ts` los aplica al facturar (`generar`, paso 7b). Al anular un cobro, el pedido queda libre.
+- Devoluciones (migración `20261016c`): `revisarDevolucion` revisa renglón por renglón, solo desde pendiente y sin duplicar stock. La NC solo sale de devoluciones aceptadas y solo por los renglones aceptados. Se sacó la auto-confirmación al rendir el viaje y se registra el usuario real.
+- Bandeja `/pendientes` (`/api/pendientes`): cobros sin confirmar, entregas a cuenta sin decidir, anticipos esperando factura, devoluciones esperando depósito, devoluciones aceptadas sin NC y rendiciones abiertas.
+
+Orden de despliegue: el dueño aplica `20261016b` y `20261016c` **antes** de pasar el código a main.
+
+Pendiente:
+- La app de depósito todavía acepta la devolución entera: falta adaptar su pantalla, con el OK del dueño.
+- Una devolución rechazada con plata ya descontada solo se avisa en el momento. Falta mostrarla en la bandeja.
+- El mostrador ahora carga cobros pendientes: hay que confirmarle al dueño que está bien.

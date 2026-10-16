@@ -5,11 +5,16 @@ import { articuloMarcaSuffix, articuloInfoLine } from "@/components/search/Artic
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { useBackTrap } from "@/lib/vendedor/use-back-trap"
 import { scanOk, scanError } from "@/lib/utils/scan-feedback"
+import { InputMonto } from "@/components/ui/input-monto"
+import { moneda, numero, redondear } from "@/lib/formato"
 
 interface DetalleDevolucion {
   id: string; cantidad: number; motivo?: string; es_vendible: boolean
+  precio_venta_original?: number; condicion?: string | null
   articulos: { id: string; sku: string; descripcion: string; ean13?: string }
 }
+/** Revisión de un renglón: aceptar o rechazar, cuánto llegó bien y en qué condición */
+interface RevRenglon { aceptar: boolean; cantidad: number | null; vendible: boolean; motivo: string }
 interface Devolucion {
   id: string; numero_devolucion?: string; estado: string; observaciones?: string; created_at: string
   clientes: { nombre: string; razon_social?: string } | null
@@ -38,7 +43,7 @@ export default function DevolucionesPage() {
   const [devConArticulo, setDevConArticulo] = useState<{dev:Devolucion;detalle:DetalleDevolucion}[]>([])
   const [articuloBuscado, setArticuloBuscado] = useState<ArticuloFound|null>(null)
   const [devSeleccionada, setDevSeleccionada] = useState<Devolucion|null>(null)
-  const [confirmados, setConfirmados] = useState<Record<string,boolean>>({})
+  const [rev, setRev] = useState<Record<string,RevRenglon>>({})
   const [guardando, setGuardando] = useState(false)
   const [toast, setToast] = useState<{msg:string;tipo:"ok"|"err"}|null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -107,28 +112,61 @@ export default function DevolucionesPage() {
 
   const abrirDevolucion = (dev:Devolucion) => {
     setDevSeleccionada(dev)
-    const init:Record<string,boolean> = {}
-    dev.devoluciones_detalle.forEach(d=>{ init[d.id]=d.es_vendible })
-    setConfirmados(init)
+    const init:Record<string,RevRenglon> = {}
+    dev.devoluciones_detalle.forEach(d=>{
+      const vendible = d.condicion==="no_vendible" ? false : d.condicion==="vendible" ? true : d.es_vendible!==false
+      init[d.id] = { aceptar:true, cantidad:Number(d.cantidad)||0, vendible, motivo:"" }
+    })
+    setRev(init)
     setVista("confirmar")
+  }
+
+  const setRenglon = (id:string, cambios:Partial<RevRenglon>) => setRev(p=>({ ...p, [id]:{ ...p[id], ...cambios } }))
+
+  // Totales antes / después de la revisión
+  const totales = (dev:Devolucion) => {
+    let antes = 0, despues = 0, aceptados = 0
+    for (const d of dev.devoluciones_detalle) {
+      const pu = Number(d.precio_venta_original||0)
+      antes += Number(d.cantidad||0)*pu
+      const r = rev[d.id]
+      if (r?.aceptar && (r.cantidad??0)>0) { despues += (r.cantidad??0)*pu; aceptados++ }
+    }
+    return { antes:redondear(antes), despues:redondear(despues), aceptados, total:dev.devoluciones_detalle.length }
   }
 
   const confirmarDevolucion = async () => {
     if (!devSeleccionada) return
+    for (const d of devSeleccionada.devoluciones_detalle) {
+      const r = rev[d.id]
+      if (!r?.aceptar) continue
+      const c = r.cantidad ?? 0
+      if (!(c>0)) { showToast("Cantidad en 0: rechazá el renglón","err"); return }
+      if (c>Number(d.cantidad)) { showToast(`${d.articulos.descripcion}: no se puede aceptar más de ${numero(Number(d.cantidad),0,3)}`,"err"); return }
+    }
+    const t = totales(devSeleccionada)
+    if (t.aceptados===0 && !devSeleccionada.devoluciones_detalle.some(d=>rev[d.id]?.motivo?.trim())) {
+      showToast("Para rechazar todo, escribí el motivo","err"); return
+    }
     setGuardando(true)
     try {
-      const items_confirmados = devSeleccionada.devoluciones_detalle.map(d=>({
-        detalle_id:d.id, articulo_id:d.articulos.id,
-        cantidad_recibida:d.cantidad,
-        es_vendible: confirmados[d.id]??d.es_vendible,
-      }))
+      const renglones = devSeleccionada.devoluciones_detalle.map(d=>{
+        const r = rev[d.id]
+        return {
+          id:d.id,
+          aceptar:!!r?.aceptar,
+          cantidad_aceptada: r?.aceptar ? r.cantidad : 0,
+          condicion: (r?.vendible ?? d.es_vendible) ? "vendible" : "no_vendible",
+          motivo: r?.motivo?.trim() || null,
+        }
+      })
       const r = await fetch("/api/deposito/devoluciones",{
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({devolucion_id:devSeleccionada.id,items_confirmados}),
+        body: JSON.stringify({devolucion_id:devSeleccionada.id,renglones}),
       })
       const data = await r.json()
       if (data.ok) {
-        showToast("✅ Devolución confirmada","ok")
+        showToast(data.estado==="rechazado" ? "Devolución rechazada" : "✅ Devolución aceptada","ok")
         setVista("home"); setDevSeleccionada(null)
         setTimeout(()=>cargar(),1000)
       } else { showToast(data.error||"Error","err") }
@@ -152,47 +190,80 @@ export default function DevolucionesPage() {
         {devSeleccionada.observaciones&&<div style={{ color:C.sub, fontSize:13, marginTop:4, fontStyle:"italic" }}>"{devSeleccionada.observaciones}"</div>}
       </div>
       <div style={{ background:C.purpleL, borderBottom:`1px solid ${C.purpleB}`, padding:"10px 18px" }}>
-        <div style={{ color:C.purple, fontSize:13, fontWeight:600 }}>⚠️ Confirmá el estado de cada artículo: ¿es vendible o no?</div>
+        <div style={{ color:C.purple, fontSize:13, fontWeight:600 }}>⚠️ Revisá cada artículo: ¿llegó? ¿cuántos están bien? ¿es vendible o no?</div>
       </div>
       <div style={{ flex:1, overflow:"auto", padding:"12px 14px 0" }}>
         <div style={{ display:"flex", flexDirection:"column", gap:10, paddingBottom:12 }}>
           {devSeleccionada.devoluciones_detalle.map(det => {
-            const esVendible = confirmados[det.id]??det.es_vendible
+            const r = rev[det.id]
+            const aceptar = r?.aceptar ?? true
+            const esVendible = r?.vendible ?? det.es_vendible
+            const fondo = !aceptar ? "#f3f4f6" : esVendible ? C.greenL : C.redL
+            const borde = !aceptar ? C.border : esVendible ? C.greenB : C.redB
             return (
-              <div key={det.id} style={{ background:esVendible?C.greenL:C.redL, border:`1.5px solid ${esVendible?C.greenB:C.redB}`, borderRadius:18, padding:16 }}>
+              <div key={det.id} style={{ background:fondo, border:`1.5px solid ${borde}`, borderRadius:18, padding:16 }}>
                 <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:14 }}>
-                  <span style={{ fontSize:24 }}>{esVendible?"✅":"🚫"}</span>
+                  <span style={{ fontSize:24 }}>{!aceptar?"⛔":esVendible?"✅":"🚫"}</span>
                   <div style={{ flex:1 }}>
-                    <div style={{ color:C.text, fontWeight:700, fontSize:20, lineHeight:1.3 }}>{det.articulos.descripcion}</div>
+                    <div style={{ color:aceptar?C.text:C.light, fontWeight:700, fontSize:20, lineHeight:1.3, textDecoration:aceptar?"none":"line-through" }}>{det.articulos.descripcion}</div>
                     <div style={{ color:C.light, fontSize:15, fontFamily:"monospace", marginTop:3 }}>{det.articulos.sku}</div>
                     {det.motivo&&<div style={{ color:C.sub, fontSize:14, marginTop:4, fontStyle:"italic" }}>{det.motivo}</div>}
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ color:C.text, fontWeight:800, fontSize:26 }}>{det.cantidad}</div>
-                    <div style={{ color:C.light, fontSize:15 }}>unidades</div>
+                    <div style={{ color:C.text, fontWeight:800, fontSize:26 }}>{numero(Number(det.cantidad),0,3)}</div>
+                    <div style={{ color:C.light, fontSize:15 }}>cargadas</div>
                   </div>
                 </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-                  <button onClick={()=>setConfirmados(p=>({...p,[det.id]:true}))}
-                    style={{ background:esVendible?C.green:"#f3f4f6", color:esVendible?"#fff":C.light, fontWeight:700, fontSize:15, padding:"13px", borderRadius:14, border:"none", cursor:"pointer" }}>
-                    ✓ Vendible
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:aceptar?10:8 }}>
+                  <button onClick={()=>setRenglon(det.id,{ aceptar:true, cantidad: r?.cantidad && r.cantidad>0 ? r.cantidad : Number(det.cantidad)||0 })}
+                    style={{ background:aceptar?C.purple:"#f3f4f6", color:aceptar?"#fff":C.light, fontWeight:700, fontSize:15, padding:"13px", borderRadius:14, border:"none", cursor:"pointer" }}>
+                    ✓ Aceptar
                   </button>
-                  <button onClick={()=>setConfirmados(p=>({...p,[det.id]:false}))}
-                    style={{ background:!esVendible?C.red:"#f3f4f6", color:!esVendible?"#fff":C.light, fontWeight:700, fontSize:15, padding:"13px", borderRadius:14, border:"none", cursor:"pointer" }}>
-                    ✕ No vendible
+                  <button onClick={()=>setRenglon(det.id,{ aceptar:false })}
+                    style={{ background:!aceptar?C.red:"#f3f4f6", color:!aceptar?"#fff":C.light, fontWeight:700, fontSize:15, padding:"13px", borderRadius:14, border:"none", cursor:"pointer" }}>
+                    ✕ Rechazar
                   </button>
                 </div>
+                {aceptar && (
+                  <>
+                    <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                      <div style={{ color:C.sub, fontSize:15, fontWeight:600, flex:1 }}>Cantidad aceptada</div>
+                      <InputMonto value={r?.cantidad ?? null} onChange={v=>setRenglon(det.id,{ cantidad:v })} decimales={3} soloPositivos placeholder="0"
+                        style={{ width:110, height:48, fontSize:22, fontWeight:800, textAlign:"right", borderRadius:12, background:C.white }} />
+                      <div style={{ color:C.light, fontSize:15 }}>de {numero(Number(det.cantidad),0,3)}</div>
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                      <button onClick={()=>setRenglon(det.id,{ vendible:true })}
+                        style={{ background:esVendible?C.green:"#f3f4f6", color:esVendible?"#fff":C.light, fontWeight:700, fontSize:15, padding:"13px", borderRadius:14, border:"none", cursor:"pointer" }}>
+                        ✓ Vendible
+                      </button>
+                      <button onClick={()=>setRenglon(det.id,{ vendible:false })}
+                        style={{ background:!esVendible?C.red:"#f3f4f6", color:!esVendible?"#fff":C.light, fontWeight:700, fontSize:15, padding:"13px", borderRadius:14, border:"none", cursor:"pointer" }}>
+                        ✕ No vendible
+                      </button>
+                    </div>
+                  </>
+                )}
+                <input value={r?.motivo ?? ""} onChange={e=>setRenglon(det.id,{ motivo:e.target.value })}
+                  placeholder={aceptar ? "Motivo (opcional, ej. 1 vencido)" : "Motivo del rechazo"}
+                  style={{ width:"100%", background:C.white, color:C.text, fontSize:15, borderRadius:12, padding:"11px 14px", border:`1.5px solid ${C.border}`, outline:"none", boxSizing:"border-box" }} />
               </div>
             )
           })}
         </div>
       </div>
+      {(()=>{ const t = totales(devSeleccionada); return (
+        <div style={{ background:C.purpleL, borderTop:`1px solid ${C.purpleB}`, padding:"10px 18px", display:"flex", justifyContent:"space-between", fontSize:14, color:C.sub }}>
+          <span>Cargado <b style={{ color:C.text }}>{moneda(t.antes)}</b></span>
+          <span>{t.aceptados}/{t.total} aceptados → <b style={{ color:C.purple }}>{moneda(t.despues)}</b></span>
+        </div>
+      )})()}
       <div style={{ background:C.white, borderTop:`1px solid ${C.border}`, padding:"14px 16px", display:"flex", gap:10 }}>
         <button onClick={()=>setVista("home")} style={{ flex:1, background:C.bg, color:C.text, fontWeight:700, fontSize:16, padding:"17px 0", borderRadius:16, border:`1.5px solid ${C.border}`, cursor:"pointer" }}>
           ← Volver
         </button>
         <button onClick={confirmarDevolucion} disabled={guardando} style={{ flex:2, background:C.purple, color:"#fff", fontWeight:800, fontSize:17, padding:"17px 0", borderRadius:16, border:"none", cursor:"pointer", opacity:guardando?0.6:1 }}>
-          {guardando?"Confirmando...":"✅ Confirmar recepción"}
+          {guardando?"Guardando...":totales(devSeleccionada).aceptados===0?"⛔ Rechazar devolución":"✅ Confirmar revisión"}
         </button>
       </div>
     </div>
@@ -227,7 +298,7 @@ export default function DevolucionesPage() {
                     <div style={{ color:C.purple, fontSize:14, marginTop:3 }}>{dev.clientes?.razon_social||dev.clientes?.nombre}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ color:C.text, fontWeight:800, fontSize:24 }}>{detalle.cantidad}</div>
+                    <div style={{ color:C.text, fontWeight:800, fontSize:24 }}>{numero(Number(detalle.cantidad),0,3)}</div>
                     <div style={{ color:C.light, fontSize:12 }}>unidades</div>
                   </div>
                 </div>
@@ -237,7 +308,7 @@ export default function DevolucionesPage() {
                   </span>
                   {detalle.motivo&&<span style={{ fontSize:13, color:C.sub, fontStyle:"italic" }}>{detalle.motivo}</span>}
                 </div>
-                <div style={{ color:C.purple, fontSize:14, marginTop:10, fontWeight:700 }}>Confirmar esta devolución →</div>
+                <div style={{ color:C.purple, fontSize:14, marginTop:10, fontWeight:700 }}>Revisar esta devolución →</div>
               </button>
             ))}
           </div>
@@ -334,7 +405,7 @@ export default function DevolucionesPage() {
                   {vendibles>0&&<span style={{ color:C.green, fontWeight:600 }}>✓ {vendibles} vendible{vendibles!==1?"s":""}</span>}
                   {noVendibles>0&&<span style={{ color:C.red, fontWeight:600 }}>✕ {noVendibles} no vendible{noVendibles!==1?"s":""}</span>}
                 </div>
-                <div style={{ color:C.purple, fontSize:14, fontWeight:700 }}>Confirmar recepción →</div>
+                <div style={{ color:C.purple, fontSize:14, fontWeight:700 }}>Revisar recepción →</div>
               </button>
             )
           })}

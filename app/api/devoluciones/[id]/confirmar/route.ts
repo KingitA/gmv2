@@ -1,93 +1,77 @@
 import { createClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
-import { nowArgentina, todayArgentina } from "@/lib/utils"
-import { requireAuth } from '@/lib/auth'
+import { requirePermiso } from "@/lib/auth"
+import { ErrorDeposito } from "@/lib/deposito/picking"
+import { revisarDevolucion, type RenglonRevision } from "@/lib/deposito/devoluciones"
+import { getUsuarioActual } from "@/lib/deposito/preparadores"
 
+/**
+ * PATCH /api/devoluciones/[id]/confirmar — revisión desde la oficina.
+ * Misma lógica que depósito (lib/deposito/devoluciones.ts → revisarDevolucion):
+ * solo desde "pendiente", stock solo de lo aceptado y vendible, montos con lo
+ * aceptado, quién y cuándo con el usuario real.
+ *
+ * Body:
+ *   { accion: "confirmar", renglones?: [{ id, aceptar, cantidad_aceptada?, es_vendible?, condicion?, motivo? }], motivo? }
+ *     (renglones que no vienen se aceptan tal cual)
+ *   { accion: "rechazar", motivo_rechazo }   → rechaza todos los renglones
+ *
+ * El crédito en cuenta corriente NO se postea acá: nace con la NC/REV que
+ * emite una persona (generar-nc-reversa), solo sobre una devolución aceptada.
+ */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("revisar_devoluciones")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()
     const body = await request.json()
     const { id } = await params
-    const { usuario_confirmador, accion } = body // accion: 'confirmar' | 'rechazar'
-
-    if (!usuario_confirmador || !accion) {
-      return NextResponse.json({ error: "usuario_confirmador y accion son requeridos" }, { status: 400 })
-    }
+    const { accion } = body // 'confirmar' | 'rechazar'
+    const usuario = await getUsuarioActual(supabase)
+    const usuarioId = usuario.id || auth.user.id
 
     if (accion === "confirmar") {
-      // Obtener detalle de la devolución
-      const { data: items, error: itemsError } = await supabase
-        .from("devoluciones_detalle")
-        .select("*")
-        .eq("devolucion_id", id)
-
-      if (itemsError) throw itemsError
-
-      // Confirmar devolución
-      const { data: devolucion, error: devolucionError } = await supabase
-        .from("devoluciones")
-        .update({
-          estado: "confirmado",
-          confirmado_por: usuario_confirmador,
-          fecha_confirmacion: nowArgentina(),
-        })
-        .eq("id", id)
-        .select()
-        .single()
-
-      if (devolucionError) throw devolucionError
-
-      // Devolver stock solo a artículos vendibles
-      for (const item of items) {
-        if (item.es_vendible === false) continue
-        const { error: stockError } = await supabase.rpc("incrementar_stock", {
-          p_articulo_id: item.articulo_id,
-          p_cantidad: item.cantidad,
-        })
-        if (stockError) {
-          console.error("[v0] Error devolviendo stock:", stockError)
-        }
-      }
-
-      // El crédito en cuenta corriente NO se postea acá: nace con el documento
-      // (NC/REV vía generar-nc-reversa, que postea al libro y se imputa a la
-      // factura de origen). Postearlo también al confirmar duplicaba el crédito
-      // del cliente. Mientras la NC no exista, la devolución se muestra como
-      // "estimado a descontar" (informativo) en cta cte / vendedor / chofer.
+      const resultado = await revisarDevolucion(supabase, {
+        devolucionId: id,
+        usuarioId,
+        usuarioNombre: usuario.nombre,
+        renglones: Array.isArray(body.renglones) ? (body.renglones as RenglonRevision[]) : [],
+        motivoGeneral: typeof body.motivo === "string" ? body.motivo : null,
+      })
       return NextResponse.json({
         success: true,
-        devolucion,
-        mensaje: "Devolución confirmada y stock actualizado. Generá la NC/Reversa para acreditar el crédito en la cuenta corriente.",
+        ...resultado,
+        mensaje:
+          resultado.estado === "rechazado"
+            ? "Se rechazaron todos los renglones: la devolución quedó rechazada."
+            : "Devolución aceptada y stock actualizado. Emití la NC/Reversa para acreditar el crédito en la cuenta corriente.",
       })
-    } else if (accion === "rechazar") {
-      const { motivo_rechazo } = body
-
-      const { data: devolucion, error: devolucionError } = await supabase
-        .from("devoluciones")
-        .update({
-          estado: "rechazado",
-          confirmado_por: usuario_confirmador,
-          fecha_confirmacion: nowArgentina(),
-          motivo_rechazo,
-        })
-        .eq("id", id)
-        .select()
-        .single()
-
-      if (devolucionError) throw devolucionError
-
-      return NextResponse.json({
-        success: true,
-        devolucion,
-        mensaje: "Devolución rechazada",
-      })
-    } else {
-      return NextResponse.json({ error: 'Acción inválida. Use "confirmar" o "rechazar"' }, { status: 400 })
     }
+
+    if (accion === "rechazar") {
+      const motivo = String(body.motivo_rechazo ?? body.motivo ?? "").trim()
+      if (!motivo) return NextResponse.json({ error: "El motivo del rechazo es obligatorio." }, { status: 400 })
+      const { data: detalle, error: detErr } = await supabase
+        .from("devoluciones_detalle")
+        .select("id")
+        .eq("devolucion_id", id)
+      if (detErr) throw detErr
+      const resultado = await revisarDevolucion(supabase, {
+        devolucionId: id,
+        usuarioId,
+        usuarioNombre: usuario.nombre,
+        renglones: (detalle || []).map((d: any) => ({ id: d.id, aceptar: false })),
+        motivoGeneral: motivo,
+      })
+      return NextResponse.json({ success: true, ...resultado, mensaje: "Devolución rechazada" })
+    }
+
+    return NextResponse.json({ error: 'Acción inválida. Usá "confirmar" o "rechazar".' }, { status: 400 })
   } catch (error: any) {
-    console.error("[v0] Error confirmando/rechazando devolución:", error)
+    if (error instanceof ErrorDeposito) {
+      return NextResponse.json({ error: error.message, ...error.extra }, { status: error.status })
+    }
+    console.error("[devoluciones] Error revisando devolución:", error)
     return NextResponse.json({ error: error.message || "Error procesando devolución" }, { status: 500 })
   }
 }

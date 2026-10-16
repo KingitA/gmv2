@@ -1,8 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
-import { nowArgentina } from "@/lib/utils"
+import { requireAuth, requirePermiso } from "@/lib/auth"
 import { moneda } from "@/lib/formato"
 import { colorOverride, resolverColorPendientes } from "@/lib/actions/color-cheque"
 import { procesarPostConfirmacion } from "@/lib/cobranzas/post-confirmacion"
@@ -30,7 +29,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAuth()
+  // Confirma plata del chofer: solo caja (regla del dueño, 16/10/2026)
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
 
   try {
@@ -174,31 +174,15 @@ export async function POST(
       if (post.bonificacion_error) bonifErrores.push(post.bonificacion_error)
     }
 
-    // ── 3. Confirmar devoluciones pendientes del viaje (stock) ──
-    let devolucionesConfirmadas = 0
-    const { data: devoluciones } = await supabase
+    // ── 3. Devoluciones del viaje: NO se tocan ──
+    // Regla del dueño (16/10/2026): quedan pendientes hasta que depósito revise
+    // la mercadería (lib/deposito/devoluciones.ts → revisarDevolucion). Acá
+    // solo se informa cuántas siguen esperando esa revisión.
+    const { count: devolucionesPendientes } = await supabase
       .from("devoluciones")
-      .select("id, devoluciones_detalle(articulo_id, cantidad, es_vendible)")
+      .select("id", { count: "exact", head: true })
       .eq("viaje_id", viajeId)
       .eq("estado", "pendiente")
-
-    for (const dev of devoluciones || []) {
-      await supabase
-        .from("devoluciones")
-        .update({ estado: "confirmado", confirmado_por: auth.user.id, fecha_confirmacion: nowArgentina() })
-        .eq("id", dev.id)
-      for (const item of (dev as any).devoluciones_detalle || []) {
-        if (item.es_vendible) {
-          await supabase.rpc("incrementar_stock", {
-            p_articulo_id: item.articulo_id,
-            p_cantidad: item.cantidad,
-          })
-        }
-      }
-      // El crédito al cliente lo postea la NC/Reversa (generar-nc-reversa),
-      // que además se imputa automáticamente contra la FA de origen (A3).
-      devolucionesConfirmadas++
-    }
 
     return NextResponse.json({
       success: true,
@@ -209,10 +193,11 @@ export async function POST(
       transferencias_a_conciliar: confirmada.a_conciliar,
       efectivo_a_caja: confirmada.efectivo_a_caja,
       diferencia: confirmada.diferencia,
-      devoluciones_confirmadas: devolucionesConfirmadas,
+      devoluciones_confirmadas: 0,
+      devoluciones_pendientes_deposito: devolucionesPendientes || 0,
       bonificacion_total: bonifTotal || undefined,
       bonificacion_errores: bonifErrores.length ? bonifErrores : undefined,
-      mensaje: `Rendición confirmada: ${confirmada.confirmados} pagos (${confirmada.a_conciliar} transferencias a conciliar), efectivo a caja ${moneda(Number(confirmada.efectivo_a_caja))}.`,
+      mensaje: `Rendición confirmada: ${confirmada.confirmados} pagos (${confirmada.a_conciliar} transferencias a conciliar), efectivo a caja ${moneda(Number(confirmada.efectivo_a_caja))}.${devolucionesPendientes ? ` ${devolucionesPendientes} devolución(es) quedan pendientes de revisión en depósito.` : ""}`,
     })
   } catch (error: any) {
     console.error("[viajes] Error en confirmar-rendicion:", error)

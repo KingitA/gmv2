@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
+import { requirePermiso } from "@/lib/auth"
 import { nowArgentina } from "@/lib/utils"
 
 /**
@@ -16,7 +16,7 @@ import { nowArgentina } from "@/lib/utils"
  * Body: { viajante_id, origen_tipo?="CAJA", origen_id, monto, concepto? }
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth()
+  const auth = await requirePermiso("caja")
   if (auth.error) return auth.error
   try {
     const supabase = await createClient()

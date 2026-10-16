@@ -25,16 +25,17 @@ export const SECCIONES: Seccion[] = [
     label: "Clientes",
     href: "/clientes-pedidos",
     prefijos: [
-      "/clientes-pedidos", "/clientes", "/viajes", "/comprobantes-venta", "/revision-devoluciones",
+      "/clientes-pedidos", "/clientes", "/viajes", "/comprobantes-venta", "/revision-devoluciones", "/pendientes",
       "/pagos-clientes", "/viajantes", "/transportes", "/mostrador", "/imports",
     ],
     accesos: [
       { label: "Pedidos y viajes", href: "/clientes-pedidos" },
+      { label: "Pendientes de revisar", href: "/pendientes", roles: ["admin", "administrativo"] },
       { label: "Viajes", href: "/viajes" },
       { label: "Fichas de clientes", href: "/clientes" },
       { label: "Comprobantes emitidos", href: "/comprobantes-venta" },
       { label: "Revisión de devoluciones", href: "/revision-devoluciones" },
-      { label: "Cobros", href: "/pagos-clientes" },
+      { label: "Cobros", href: "/pagos-clientes", roles: ["admin", "administrativo", "mostrador"] },
       { label: "Viajantes", href: "/viajantes", roles: ["admin"] },
       { label: "Transportes", href: "/transportes" },
     ],
@@ -65,9 +66,10 @@ export const SECCIONES: Seccion[] = [
     label: "Finanzas",
     href: "/finanzas",
     prefijos: ["/finanzas", "/caja"],
+    roles: ["admin"],
     accesos: [
       { label: "Panel", href: "/finanzas", roles: ["admin"] },
-      { label: "Caja del día", href: "/caja" },
+      { label: "Caja del día", href: "/caja", roles: ["admin"] },
     ],
   },
   {

@@ -357,6 +357,18 @@ async function cobrarUno(user: User, viajeId: string, body: any, interno: Opcion
         .eq("cliente_id", cliente_id)
     }
 
+    // Vincular TODOS los anticipos seleccionados a este pago (regla del dueño 16/10):
+    // al facturarse el pedido, el anticipo se aplica solo a esa factura.
+    const idsAnticipo = (anticipos || []).map((a) => a.pedido_id).filter((id) => !pedidosContado.includes(id))
+    if (idsAnticipo.length) {
+      await supabase
+        .from("pedidos")
+        .update({ anticipo_pago_id: pago.id })
+        .in("id", idsAnticipo)
+        .eq("cliente_id", cliente_id)
+        .is("anticipo_pago_id", null)
+    }
+
     // Fotos de comprobantes (cheque/transferencia) cargadas por el chofer
     if (Array.isArray(comprobante_urls) && comprobante_urls.length) {
       const fotos = comprobante_urls
