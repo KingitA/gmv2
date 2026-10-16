@@ -253,14 +253,16 @@ export default function ArticulosPage() {
         sb.from("subcategorias").select("id,categoria_id,nombre").order("orden"),
         cargarTiposArticulo(sb),
       ])
-      setTiposBulto(tipos.tiposBulto); setTiposFraccion(tipos.tiposFraccion)
+      // Un nombre vacío en un catálogo rompe los desplegables (Radix no acepta value=""): se descarta
+      const conNombre=(xs:any[])=>xs.filter((x:any)=>typeof x==="string"?x.trim()!=="":String(x?.nombre??"").trim()!=="")
+      setTiposBulto(conNombre(tipos.tiposBulto)); setTiposFraccion(conNombre(tipos.tiposFraccion))
       if(p) setProvs(p)
       if(m) setMarcas(m)
       if(l) setListas(l)
       if(r) setReglasFormulas(r as ReglaPrecioFila[])
-      if(rub) setRubrosData(rub)
-      if(cat) setCategoriasData(cat)
-      if(sub) setSubcategoriasData(sub)
+      if(rub) setRubrosData(conNombre(rub))
+      if(cat) setCategoriasData(conNombre(cat))
+      if(sub) setSubcategoriasData(conNombre(sub))
     })()
   },[])
   useEffect(()=>{ const t=setTimeout(()=>{setSd(st);setPg(0)},400); return()=>clearTimeout(t) },[st])
